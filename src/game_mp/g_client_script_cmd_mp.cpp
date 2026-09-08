@@ -2289,7 +2289,6 @@ void __cdecl PlayerCmd_DeactivateReverb(scr_entref_t e)
     double Float; // fp31
     uint NumParam; // r3
     int ConstString; // r10
-    const char *v6; // r3
 
     v1 = e.entnum;
     if (e.classnum)
@@ -2321,8 +2320,7 @@ LABEL_6:
     ConstString = Scr_GetConstString(0);
     if (ConstString != scr_const.snd_enveffectsprio_level && ConstString != scr_const.snd_enveffectsprio_shellshock)
         Scr_Error("priority must be 'snd_enveffectsprio_level' or 'snd_enveffectsprio_shellshock'\n");
-    v6 = va("%c %i \"%s\" %g %g %g", 68, Float);
-    SV_GameSendServerCommand(v1, SV_CMD_RELIABLE, v6);
+    SV_GameSendServerCommand(v1, SV_CMD_RELIABLE, va("%c %i \"%s\" %g %g %g", 68, Float));
 }
 
 void __cdecl PlayerCmd_SetChannelVolumes(scr_entref_t entref)
@@ -2660,7 +2658,7 @@ void __cdecl PlayerCmd_SetSpreadOverride(scr_entref_t entref)
             if (value < 64)
             {
                 pSelf->client->ps.spreadOverride = value;
-                pSelf->client->ps.spreadOverrideState = 2;
+                pSelf->client->ps.spreadOverrideState = PSOS_ENABLED;
             }
             else
             {
@@ -2699,7 +2697,7 @@ void __cdecl PlayerCmd_ResetSpreadOverride(scr_entref_t entref)
             Scr_ObjectError(v1);
         }
     }
-    pSelf->client->ps.spreadOverrideState = 1;
+    pSelf->client->ps.spreadOverrideState = PSOS_RESETTING;
     pSelf->client->ps.aimSpreadScale = 255.0;
     if (Scr_GetNumParam())
         Scr_Error("USAGE: <player> resetspreadoverride()\n");
@@ -3206,10 +3204,10 @@ void __cdecl PlayerCmd_UpdateScores(scr_entref_t entref)
             Scr_ObjectError(v1);
         }
     }
-    _snprintf(svcmd, 0x40u, "%c %i", 72, level.teamScores[2]);
+    _snprintf(svcmd, 0x40u, "%c %i", 72, level.teamScores[TEAM_ALLIES]);
     svcmd[63] = 0;
     SV_GameSendServerCommand(pSelf - g_entities, SV_CMD_CAN_IGNORE, svcmd);
-    _snprintf(svcmd, 0x40u, "%c %i", 71, level.teamScores[1]);
+    _snprintf(svcmd, 0x40u, "%c %i", 71, level.teamScores[TEAM_AXIS]);
     svcmd[63] = 0;
     SV_GameSendServerCommand(pSelf - g_entities, SV_CMD_CAN_IGNORE, svcmd);
 }

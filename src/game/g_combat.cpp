@@ -82,7 +82,7 @@ void __cdecl G_HitLocStrcpy(unsigned __int8 *pMember, const char *pszKeyValue)
 
 void __cdecl G_ParseHitLocDmgTable()
 {
-    const char *filename = "info/ai_lochit_dmgtable";
+    static const char *filename = "info/ai_lochit_dmgtable";
     cspField_t fields[ARRAY_COUNT(g_HitLocNames)];
     char buffer[8192];
 

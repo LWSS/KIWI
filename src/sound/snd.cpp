@@ -163,17 +163,17 @@ int __cdecl SND_GetEntChannelFromName(const char *channelName)
 
 char __cdecl SND_ValidateEnvEffectsPriorityValue(const char *priorityName, int *priority)
 {
-    const char *priorityStrings[3]; // [esp+0h] [ebp-10h]
+    const char *priorityStrings[SND_ENVEFFECTPRIO_COUNT]; // [esp+0h] [ebp-10h]
     int stringIndex; // [esp+Ch] [ebp-4h]
 
-    priorityStrings[0] = "none";
-    priorityStrings[1] = "level";
-    priorityStrings[2] = "shellshock";
+    priorityStrings[SND_ENVEFFECTPRIO_NONE] = "none";
+    priorityStrings[SND_ENVEFFECTPRIO_LEVEL] = "level";
+    priorityStrings[SND_ENVEFFECTPRIO_SHELLSHOCK] = "shellshock";
 
     iassert(priorityName);
     iassert(priority);
 
-    for (stringIndex = 1; stringIndex < 3; ++stringIndex)
+    for (stringIndex = SND_ENVEFFECTPRIO_LEVEL; stringIndex < SND_ENVEFFECTPRIO_COUNT; ++stringIndex)
     {
         if (!I_stricmp(priorityName, priorityStrings[stringIndex]))
         {
@@ -183,7 +183,7 @@ char __cdecl SND_ValidateEnvEffectsPriorityValue(const char *priorityName, int *
     }
 
     Com_Printf(CON_CHANNEL_SOUND, "invalid priority string '%s', it must be one of the following strings:\n", priorityName);
-    for (stringIndex = 1; stringIndex < 3; ++stringIndex)
+    for (stringIndex = SND_ENVEFFECTPRIO_LEVEL; stringIndex < SND_ENVEFFECTPRIO_COUNT; ++stringIndex)
         Com_Printf(CON_CHANNEL_SOUND, "  %s\n", priorityStrings[stringIndex]);
     return 0;
 }
@@ -2145,7 +2145,7 @@ void __cdecl SND_PlayMusicAlias(
     if (g_snd.Initialized2d && alias)
     {
         if (SND_IsStreamChannelFree(SND_FIRST_STREAM_CHANNEL))
-            SND_StartBackground(localClientNum, 0, alias, 0, 0.0, useTimescale, system);
+            SND_StartBackground(localClientNum, SND_TRACK_MUSIC, alias, 0, 0.0, useTimescale, system);
         else
             Com_PrintWarning(CON_CHANNEL_SOUND, "Unable to play music alias %s\n", alias->aliasName);
     }
@@ -2307,7 +2307,7 @@ void SND_UnpauseSounds()
 void __cdecl SND_StopMusic(int fadetime)
 {
     if (g_snd.Initialized2d)
-        SND_StopBackground(0, fadetime);
+        SND_StopBackground(SND_TRACK_MUSIC, fadetime);
 }
 
 void __cdecl SND_StopBackground(uint track, int fadetime)
@@ -2432,10 +2432,10 @@ void __cdecl SND_StopAmbient(int localClientNum, int fadetime)
     {
         iassert(fadetime >= 0);
 
-        SND_StopBackground(1u, fadetime);
-        SND_StopBackground(2u, fadetime);
-        SND_StopBackground(3u, fadetime);
-        SND_StopBackground(4u, fadetime);
+        SND_StopBackground(SND_TRACK_AMBIENT_PRIMARY_0, fadetime);
+        SND_StopBackground(SND_TRACK_AMBIENT_SECONDARY_0, fadetime);
+        SND_StopBackground(SND_TRACK_AMBIENT_PRIMARY_1, fadetime);
+        SND_StopBackground(SND_TRACK_AMBIENT_SECONDARY_1, fadetime);
     }
 }
 
@@ -2636,7 +2636,7 @@ void __cdecl SND_SetEnvironmentEffects(
         }
         else
         {
-            for (i = priority + 1; i < 3; ++i)
+            for (i = priority + 1; i < SND_ENVEFFECTPRIO_COUNT; ++i)
             {
                 if (g_snd.envEffects[i].active)
                     return;
@@ -2659,7 +2659,7 @@ void __cdecl SND_DeactivateEnvironmentEffects(int priority, int fademsec)
     effect->active = 0;
     if (effect == g_snd.effect)
     {
-        for (i = priority - 1; i >= 0 && !g_snd.envEffects[i].active; --i)
+        for (i = priority - 1; i >= SND_ENVEFFECTPRIO_NONE && !g_snd.envEffects[i].active; --i)
             ;
 
         iassert(i >= SND_ENVEFFECTPRIO_NONE);
@@ -3202,7 +3202,7 @@ void __cdecl SND_StopSounds(snd_stopsounds_arg_t which)
 
         if ((which & 1) == 0)
         {
-            for (int i = 1; i < 3; ++i)
+            for (int i = SND_ENVEFFECTPRIO_LEVEL; i < SND_ENVEFFECTPRIO_COUNT; ++i)
                 SND_DeactivateEnvironmentEffects(i, 0);
         }
 
@@ -3296,8 +3296,8 @@ void __cdecl SND_Init()
         "Check whether stream sound files exist while loading");
 
     g_snd.effect = g_snd.envEffects;
-    g_snd.envEffects[0].roomtype = 0;
-    g_snd.envEffects[0].drylevel = 1.0f;
+    g_snd.envEffects[SND_ENVEFFECTPRIO_NONE].roomtype = 0;
+    g_snd.envEffects[SND_ENVEFFECTPRIO_NONE].drylevel = 1.0f;
     g_snd.effect->drygoal = 1.0f;
     g_snd.effect->dryrate = 0.0f;
     g_snd.effect->wetlevel = 0.0f;
@@ -3631,7 +3631,7 @@ void __cdecl SND_Save(MemoryFile *memFile)
     for (int i = 1; i < SND_CHANNELVOLPRIO_COUNT; ++i)
         MemFile_WriteData(memFile, 772, &g_snd.channelVolGroups[i]);
 
-    for (int i = 1; i < 3; ++i)
+    for (int i = SND_ENVEFFECTPRIO_LEVEL; i < SND_ENVEFFECTPRIO_COUNT; ++i)
         MemFile_WriteData(memFile, 32, &g_snd.envEffects[i]);
 
     SND_SaveEq(memFile);
@@ -3837,12 +3837,12 @@ void __cdecl SND_Restore(MemoryFile *memFile)
                 g_snd.channelvol = &g_snd.channelVolGroups[i];
         }
 
-        for (int i = 1; i < 3; ++i)
+        for (int i = SND_ENVEFFECTPRIO_LEVEL; i < SND_ENVEFFECTPRIO_COUNT; ++i)
             MemFile_ReadData(memFile, 32, (uint8_t *)&g_snd.envEffects[i]);
 
         SND_RestoreEq(memFile);
 
-        for (int i = 0; i < 3; ++i)
+        for (int i = SND_ENVEFFECTPRIO_NONE; i < SND_ENVEFFECTPRIO_COUNT; ++i)
         {
             if (g_snd.envEffects[i].active)
                 g_snd.effect = &g_snd.envEffects[i];
@@ -3893,7 +3893,7 @@ char __cdecl SND_Restore3DChannel(MemoryFile *memFile)
 
     if (alias0->soundFile == alias1->soundFile
         && alias0->soundFile->exists
-        && alias0->soundFile->type == 1
+        && alias0->soundFile->type == SAT_LOADED
         && SND_ValidateSoundAliasBlend(alias0, alias1, 0))
     {
         iassert(SND_AnyActiveListeners());
@@ -4052,7 +4052,7 @@ char __cdecl SND_Restore2DChannel(MemoryFile *memFile)
 
     if (alias0->soundFile == alias1->soundFile
         && alias0->soundFile->exists
-        && alias0->soundFile->type == 1
+        && alias0->soundFile->type == SAT_LOADED
         && SND_ValidateSoundAliasBlend(alias0, alias1, 0))
     {
         if (!snd_enable2D->current.enabled)

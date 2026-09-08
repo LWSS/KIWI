@@ -82,7 +82,7 @@ void __cdecl UI_LoadArenas()
         map->mapLoadName = String_Alloc(Info_ValueForKey(ui_arenaInfos[n], "map"));
         map->mapName = String_Alloc(Info_ValueForKey(ui_arenaInfos[n], "longname"));
         map->imageName = String_Alloc(va("loadscreen_%s", map->mapLoadName));
-        map->levelShot = Material_RegisterHandle(map->imageName, 3);
+        map->levelShot = Material_RegisterHandle(map->imageName, IMAGE_TRACK_UI);
         const char *gameTypes = Info_ValueForKey(ui_arenaInfos[n], "gametype");
         map->typeBits = -1;
         if (gameTypes && *gameTypes)

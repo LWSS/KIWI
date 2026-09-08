@@ -2151,9 +2151,9 @@ void __cdecl CL_InitRenderer()
     ScrPlace_SetupViewport(&scrPlaceFull, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
     for (localClientNum = 0; localClientNum < 1; ++localClientNum)
         ScrPlace_SetupViewport(&scrPlaceView[localClientNum], 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
-    cls.whiteMaterial = Material_RegisterHandle("white", 3);
-    cls.consoleMaterial = Material_RegisterHandle("console", 3);
-    cls.consoleFont = R_RegisterFont("fonts/consoleFont", 3);
+    cls.whiteMaterial = Material_RegisterHandle("white", IMAGE_TRACK_UI);
+    cls.consoleMaterial = Material_RegisterHandle("console", IMAGE_TRACK_UI);
+    cls.consoleFont = R_RegisterFont("fonts/consoleFont", IMAGE_TRACK_UI);
     g_console_field_width = cls.vidConfig.displayWidth - 48;
     g_consoleField.widthInPixels = cls.vidConfig.displayWidth - 48;
     g_consoleField.charHeight = g_console_char_height;
@@ -2428,9 +2428,9 @@ void __cdecl CL_PlayLogo_f()
     cls.logo.fadeout = (int)(v5 * 1000.0f);
     cls.logo.duration += cls.logo.fadeout + cls.logo.fadein;
     v3 = va("%s1", name);
-    cls.logo.material[0] = Material_RegisterHandle(v3, 3);
+    cls.logo.material[0] = Material_RegisterHandle(v3, IMAGE_TRACK_UI);
     v4 = va("%s2", name);
-    cls.logo.material[1] = Material_RegisterHandle(v4, 3);
+    cls.logo.material[1] = Material_RegisterHandle(v4, IMAGE_TRACK_UI);
     cls.logo.startTime = cls.realtime + 100;
 }
 
@@ -2559,7 +2559,6 @@ void __cdecl CL_Record_f()
     connstate_t connstate; // [esp+1Ch] [ebp-2B0h]
     uint8_t (*bufData)[131072]; // [esp+20h] [ebp-2ACh]
     char demoName[64]; // [esp+24h] [ebp-2A8h] BYREF
-    entityState_s nullstate; // [esp+64h] [ebp-268h] BYREF
     uint8_t (*compressedBuf)[131072]; // [esp+15Ch] [ebp-170h]
     int localClientNum; // [esp+160h] [ebp-16Ch]
     msg_t buf; // [esp+164h] [ebp-168h] BYREF
@@ -2645,14 +2644,15 @@ void __cdecl CL_Record_f()
                 svsHeader.mapCenter[1] = cls.mapCenter[1];
                 svsHeader.mapCenter[2] = cls.mapCenter[2];
                 memset(&snapInfo, 0, sizeof(snapInfo));
-                memset((uint8_t *)&nullstate, 0, sizeof(nullstate));
                 for (i = 0; i < 1024; ++i)
                 {
                     ent = &LocalClientGlobals->entityBaselines[i];
                     if (ent->number)
                     {
                         MSG_WriteByte(&buf, 3u);
-                        MSG_WriteEntity(&snapInfo, &buf, -90000, &nullstate, ent, 1);
+
+                        static constexpr entityState_s dummy{};
+                        MSG_WriteEntity(&snapInfo, &buf, -90000, &dummy, ent, 1);
                     }
                 }
                 MSG_WriteByte(&buf, 7u);

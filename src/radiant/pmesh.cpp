@@ -10515,7 +10515,7 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     // grid below and the unselected grid pass) by reading the pref as "off".
     extern bool KiwiTerrain_HideWireframe();   // kiwi_terrain.cpp (Tab toggles)
     const int patchWireframe = KiwiTerrain_HideWireframe() ? 0 : g_PrefsDlg->patch_wireframe;
-    const bool drawFront = patchWireframe == 0 || ( patchWireframe == 2 && techType != 29 );
+    const bool drawFront = patchWireframe == 0 || ( patchWireframe == 2 && techType != TECHNIQUE_WIREFRAME_SHADED );
     if ( drawFront )
         Patch_Fill_Emit( inst, nullptr, PM_FRONT_FACE, techType );          // 0x44153E
 

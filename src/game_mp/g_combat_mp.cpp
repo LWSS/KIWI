@@ -243,7 +243,7 @@ void __cdecl DeathGrenadeDrop(gentity_s *self, int meansOfDeath)
                 self->client->ps.weaponmodels[grenadeWeaponIndexa],
                 1,
                 weapDef->fuseTime);
-            BG_SetConditionValue(self->client->ps.clientNum, 9u, 2u);
+            BG_SetConditionValue(self->client->ps.clientNum, ANIM_COND_PERK, ANIM_PERK_GRENADEDEATH);
         }
         else
         {

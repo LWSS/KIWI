@@ -179,13 +179,13 @@ void __cdecl Con_GetTextCopy(char *text, int maxSize)
 
 void __cdecl Con_TimeJumped(int localClientNum, int serverTime)
 {
-    uint gameWindowIndex; // [esp+0h] [ebp-4h]
-
     Con_ResetMessageWindowTimes(&con.consoleWindow, serverTime);
-    for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
-        Con_ResetMessageWindowTimes(
-            &con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex],
-            serverTime);
+
+    for (uint gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
+    {
+        Con_ResetMessageWindowTimes(&con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex], serverTime);
+    }
+
     Con_ResetMessageWindowTimes(&con.messageBuffer[localClientNum].miniconWindow, serverTime);
     Con_ResetMessageWindowTimes(&con.messageBuffer[localClientNum].errorWindow, serverTime);
 }
@@ -215,16 +215,14 @@ void __cdecl Con_ResetMessageWindowTimes(MessageWindow *msgwnd, int serverTime)
 #ifdef KISAK_MP
 void __cdecl Con_TimeNudged(int localClientNum, int serverTimeNudge)
 {
-    uint gameWindowIndex; // [esp+0h] [ebp-8h]
-    int serverTime; // [esp+4h] [ebp-4h]
-
-    serverTime = CL_GetLocalClientGlobals(localClientNum)->serverTime;
+    int serverTime = CL_GetLocalClientGlobals(localClientNum)->serverTime;
     Con_NudgeMessageWindowTimes(&con.consoleWindow, serverTimeNudge, serverTime);
-    for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
-        Con_NudgeMessageWindowTimes(
-            &con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex],
-            serverTimeNudge,
-            serverTime);
+
+    for (uint gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
+    {
+        Con_NudgeMessageWindowTimes(&con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex], serverTimeNudge, serverTime);
+    }
+
     Con_NudgeMessageWindowTimes(&con.messageBuffer[localClientNum].miniconWindow, serverTimeNudge, serverTime);
     Con_NudgeMessageWindowTimes(&con.messageBuffer[localClientNum].errorWindow, serverTimeNudge, serverTime);
 }
@@ -270,10 +268,10 @@ void __cdecl Con_NudgeMessageWindowTimes(MessageWindow *msgwnd, int serverTimeNu
 
 void __cdecl Con_ClearNotify(int localClientNum)
 {
-    uint gameWindowIndex; // [esp+0h] [ebp-4h]
-
-    for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
+    for (uint gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
+    {
         Con_ClearMessageWindow(&con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex]);
+    }
 }
 
 void __cdecl Con_ClearMessageWindow(MessageWindow *msgwnd)

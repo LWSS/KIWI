@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bg_public.h"
+
 #ifdef KISAK_MP
 #include <qcommon/msg_mp.h>
 #elif KISAK_SP
@@ -159,6 +161,13 @@ enum scriptAnimEventTypes_t : int
     ANIM_ET_KNIFE_MELEE_CHARGE = 0x13,
     ANIM_ET_SHELLSHOCK = 0x14,
     NUM_ANIM_EVENTTYPES = 0x15,
+};
+
+enum scriptAnimNoteType_t : int
+{
+    ANIM_NOTE_NONE = 0x0,
+    ANIM_NOTE_RELOAD = 0x1,
+    NUM_ANIM_NOTES = 0x2,
 };
 
 enum animScriptConditionTypes_t : int
@@ -383,7 +392,7 @@ struct __declspec(align(8)) animation_s // sizeof=0x68
     // padding byte
     // padding byte
     int64_t movetype;
-    int noteType;
+    scriptAnimNoteType_t noteType;
     // padding byte
     // padding byte
     // padding byte
@@ -421,7 +430,7 @@ enum animScriptParseMode_t : int
 struct animScriptItem_t // sizeof=0x100
 {                                       // ...
     int numConditions;
-    animScriptCondition_t conditions[10];
+    animScriptCondition_t conditions[NUM_ANIM_CONDITIONS];
     int numCommands;
     animScriptCommand_t commands[8];
 };
@@ -448,10 +457,10 @@ struct __declspec(align(8)) animScriptData_t // sizeof=0x9A9D0
 {                                       // ...
     animation_s animations[512];
     uint numAnimations;
-    animScript_t scriptAnims[1][43];
-    animScript_t scriptCannedAnims[1][43];
-    animScript_t scriptStateChange[1][1];
-    animScript_t scriptEvents[21];
+    animScript_t scriptAnims[MAX_AISTATES][NUM_ANIM_MOVETYPES];
+    animScript_t scriptCannedAnims[MAX_AISTATES][NUM_ANIM_MOVETYPES];
+    animScript_t scriptStateChange[MAX_AISTATES][MAX_AISTATES];
+    animScript_t scriptEvents[NUM_ANIM_EVENTTYPES];
     animScriptItem_t scriptItems[2048];
     int numScriptItems;
     scr_animtree_t animTree;            // ...
@@ -518,7 +527,7 @@ struct clientInfo_t // sizeof=0x4CC
     int leftHandGun;
     int dobjDirty;
     clientControllers_t control;
-    uint clientConditions[10][2];
+    uint clientConditions[NUM_ANIM_CONDITIONS][2];
     XAnimTree_s* pXAnimTree;            // ...
     int iDObjWeapon;
     uint8_t weaponModel;
@@ -610,6 +619,20 @@ enum he_type_t : int
     HE_TYPE_COUNT = 0xB,
 };
 #endif
+
+enum hintType_t : __int32
+{
+    HINT_NONE = 0x0,
+    HINT_NOICON = 0x1,
+    HINT_ACTIVATE = 0x2,
+    HINT_HEALTH = 0x3,
+    HINT_FRIENDLY = 0x4,
+    FIRST_WEAPON_HINT = 0x5,
+    LAST_WEAPON_HINT = 0x84,
+    HINT_NUM_HINTS = 0x85,
+};
+
+#define WEAPON_HINT_OFFSET HINT_FRIENDLY
 
 #ifdef KISAK_MP
 struct hudelem_s // sizeof=0xA0
@@ -713,6 +736,35 @@ struct MantleState // sizeof=0x10
     int flags;
 };
 static_assert(sizeof(MantleState) == 0x10);
+
+enum MantleAnims : __int32
+{
+    MANTLE_ROOT = 0x0,
+    MANTLE_UP_57 = 0x1,
+    MANTLE_UP_51 = 0x2,
+    MANTLE_UP_45 = 0x3,
+    MANTLE_UP_39 = 0x4,
+    MANTLE_UP_33 = 0x5,
+    MANTLE_UP_27 = 0x6,
+    MANTLE_UP_21 = 0x7,
+    MANTLE_OVER_HIGH = 0x8,
+    MANTLE_OVER_MID = 0x9,
+    MANTLE_OVER_LOW = 0xA,
+    MANTLE_ANIM_COUNT = 0xB,
+    MANTLE_UP_FIRST = 0x1,
+    MANTLE_UP_LAST = 0x7,
+    MANTLE_UP_COUNT = 0x7,
+    MANTLE_OVER_FIRST = 0x8,
+    MANTLE_OVER_LAST = 0xA,
+    MANTLE_OVER_COUNT = 0x3,
+};
+
+enum PlayerSpreadOverrideState : __int32
+{
+    PSOS_DISABLED = 0x0,
+    PSOS_RESETTING = 0x1,
+    PSOS_ENABLED = 0x2,
+};
 
 #ifdef KISAK_MP
 struct playerState_s_hud // sizeof=0x26C0

@@ -1034,7 +1034,7 @@ void __cdecl CL_DeltaClient(
     int time,
     clSnapshot_t *frame,
     uint newnum,
-    clientState_s *old,
+    const clientState_s *old,
     int unchanged);
 void __cdecl CL_SystemInfoChanged(int localClientNum);
 void __cdecl CL_ParseMapCenter(int localClientNum);
@@ -1052,8 +1052,8 @@ void __cdecl CL_DeltaEntity(
     int time,
     clSnapshot_t *frame,
     uint newnum,
-    entityState_s *old);
-void __cdecl CL_CopyOldEntity(clientActive_t *cl, clSnapshot_t *frame, entityState_s *old);
+    const entityState_s *old);
+void __cdecl CL_CopyOldEntity(clientActive_t *cl, clSnapshot_t *frame, const entityState_s *old);
 void __cdecl CL_ParsePacketClients(
     clientActive_t *cl,
     msg_t *msg,

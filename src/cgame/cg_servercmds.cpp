@@ -162,7 +162,7 @@ void __cdecl CG_RegisterServerMaterial(int localClientNum, int num)
     vassert((num >= CS_SERVER_MATERIALS && num < CS_SERVER_MATERIALS + 128), "(num) = %i", num);
     ConfigString = CL_GetConfigString(localClientNum, num);
     if (*ConfigString)
-        Material_RegisterHandle(ConfigString, 7);
+        Material_RegisterHandle(ConfigString, IMAGE_TRACK_HUD);
 }
 
 void __cdecl CG_RegisterServerMaterials(int localClientNum)
@@ -182,7 +182,7 @@ void __cdecl CG_RegisterServerMaterials(int localClientNum)
                 i);
         ConfigString = CL_GetConfigString(localClientNum, i);
         if (*ConfigString)
-            Material_RegisterHandle(ConfigString, 7);
+            Material_RegisterHandle(ConfigString, IMAGE_TRACK_HUD);
     }
 }
 

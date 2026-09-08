@@ -1381,7 +1381,7 @@ void __cdecl UI_ParseMenuMaterial(const char *key, char *value)
     Material *material; // [esp+0h] [ebp-4Ch]
     char name[68]; // [esp+4h] [ebp-48h] BYREF
 
-    material = Material_RegisterHandle(value, 3);
+    material = Material_RegisterHandle(value, IMAGE_TRACK_UI);
     Com_sprintf(name, 0x40u, "$%s", key);
     I_strlwr(name);
     Material_Duplicate(material, name);
@@ -1881,7 +1881,7 @@ void __cdecl UI_DrawLocalTalking(int localClientNum, const rectDef_s *rect, cons
 
     if (sv_voice->current.enabled && cl_voice->current.enabled && IN_IsTalkKeyHeld())
     {
-        material = Material_RegisterHandle("voice_on", 7);
+        material = Material_RegisterHandle("voice_on", IMAGE_TRACK_HUD);
         UI_DrawHandlePic(
             &scrPlaceView[localClientNum],
             rect->x,
@@ -1916,7 +1916,7 @@ void __cdecl UI_DrawTalkerNum(
     {
         if (CL_GetClientName(localClientNum, client, name, 38))
         {
-            material = Material_RegisterHandle("voice_on", 7);
+            material = Material_RegisterHandle("voice_on", IMAGE_TRACK_HUD);
             textHeight = UI_TextHeight(font, textScale);
             UI_DrawHandlePic(
                 &scrPlaceView[localClientNum],
@@ -2032,10 +2032,10 @@ int __cdecl UI_GameType_HandleKey(int flags, float *special, int key, int resetM
     int oldCount; // [esp+0h] [ebp-8h]
     int nextGameType; // [esp+4h] [ebp-4h]
 
-    if (key != 200 && key != 201 && key != 13 && key != 191)
+    if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
     oldCount = UI_MapCountByGameType();
-    if (key != 201)
+    if (key != K_MOUSE2)
     {
         nextGameType = ui_gametype->current.integer + 1;
         if (nextGameType >= sharedUiInfo.numGameTypes)
@@ -2069,9 +2069,9 @@ int __cdecl UI_NetSource_HandleKey(int flags, float *special, int key)
     int integer; // [esp+0h] [ebp-Ch]
     int nextNetSource; // [esp+8h] [ebp-4h]
 
-    if (key != 200 && key != 201 && key != 13 && key != 191)
+    if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
-    if (key == 201)
+    if (key == K_MOUSE2)
     {
         if (ui_netSource->current.integer)
             integer = ui_netSource->current.integer;
@@ -2094,9 +2094,9 @@ int __cdecl UI_NetSource_HandleKey(int flags, float *special, int key)
 
 int __cdecl UI_NetFilter_HandleKey(int flags, float *special, int key)
 {
-    if (key != 200 && key != 201 && key != 13 && key != 191)
+    if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
-    if (key == 201)
+    if (key == K_MOUSE2)
         --ui_serverFilterType;
     else
         ++ui_serverFilterType;
@@ -2182,9 +2182,9 @@ int __cdecl UI_NetGameType_HandleKey(int flags, float *special, int key)
     int integer; // [esp+0h] [ebp-8h]
     int nextNetGameType; // [esp+4h] [ebp-4h]
 
-    if (key != 200 && key != 201 && key != 13 && key != 191)
+    if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
-    if (key == 201)
+    if (key == K_MOUSE2)
     {
         if (ui_netGameType->current.integer)
             integer = ui_netGameType->current.integer;
@@ -2215,9 +2215,9 @@ int __cdecl UI_JoinGameType_HandleKey(int flags, float *special, int key)
     int integer; // [esp+0h] [ebp-8h]
     int nextJoinGameType; // [esp+4h] [ebp-4h]
 
-    if (key != 200 && key != 201 && key != 13 && key != 191)
+    if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
-    if (key == 201)
+    if (key == K_MOUSE2)
     {
         if (ui_joinGameType->current.integer)
             integer = ui_joinGameType->current.integer;
@@ -4185,7 +4185,7 @@ Material *__cdecl UI_GetLevelShot(int index)
     {
         sharedUiInfo.mapList[index].levelShot = Material_RegisterHandle(
             (char *)sharedUiInfo.mapList[index].imageName,
-            3);
+            IMAGE_TRACK_UI);
     }
     return sharedUiInfo.mapList[index].levelShot;
 }
@@ -4648,12 +4648,12 @@ void __cdecl UI_Init(int localClientNum)
     }
     UI_AssetCache();
     Menus_CloseAll(&uiInfoArray.uiDC);
-    sharedUiInfo.serverHardwareIconList[0] = Material_RegisterHandle("server_hardware_unknown", 3);
-    sharedUiInfo.serverHardwareIconList[1] = Material_RegisterHandle("server_hardware_linux_dedicated", 3);
-    sharedUiInfo.serverHardwareIconList[2] = Material_RegisterHandle("server_hardware_win_dedicated", 3);
-    sharedUiInfo.serverHardwareIconList[3] = Material_RegisterHandle("server_hardware_mac_dedicated", 3);
-    sharedUiInfo.serverHardwareIconList[6] = Material_RegisterHandle("server_hardware_win_listen", 3);
-    sharedUiInfo.serverHardwareIconList[7] = Material_RegisterHandle("server_hardware_mac_listen", 3);
+    sharedUiInfo.serverHardwareIconList[0] = Material_RegisterHandle("server_hardware_unknown", IMAGE_TRACK_UI);
+    sharedUiInfo.serverHardwareIconList[1] = Material_RegisterHandle("server_hardware_linux_dedicated", IMAGE_TRACK_UI);
+    sharedUiInfo.serverHardwareIconList[2] = Material_RegisterHandle("server_hardware_win_dedicated", IMAGE_TRACK_UI);
+    sharedUiInfo.serverHardwareIconList[3] = Material_RegisterHandle("server_hardware_mac_dedicated", IMAGE_TRACK_UI);
+    sharedUiInfo.serverHardwareIconList[6] = Material_RegisterHandle("server_hardware_win_listen", IMAGE_TRACK_UI);
+    sharedUiInfo.serverHardwareIconList[7] = Material_RegisterHandle("server_hardware_mac_listen", IMAGE_TRACK_UI);
     LAN_LoadCachedServers(); // cl_ui_xenon_mp.obj
     UI_ServersSort(10, 0);
     Dvar_SetBoolByName("ui_mousePitch", Dvar_GetFloat("m_pitch") < 0.0);
@@ -4850,23 +4850,23 @@ void UI_RegisterDvars()
 
 void UI_AssetCache()
 {
-    sharedUiInfo.assets.whiteMaterial = Material_RegisterHandle("white", 3);
-    sharedUiInfo.assets.scrollBar = Material_RegisterHandle("ui_scrollbar", 3);
-    sharedUiInfo.assets.scrollBarArrowDown = Material_RegisterHandle("ui_scrollbar_arrow_dwn_a", 3);
-    sharedUiInfo.assets.scrollBarArrowUp = Material_RegisterHandle("ui_scrollbar_arrow_up_a", 3);
-    sharedUiInfo.assets.scrollBarArrowLeft = Material_RegisterHandle("ui_scrollbar_arrow_left", 3);
-    sharedUiInfo.assets.scrollBarArrowRight = Material_RegisterHandle("ui_scrollbar_arrow_right", 3);
-    sharedUiInfo.assets.scrollBarThumb = Material_RegisterHandle("ui_scrollbar_thumb", 3);
-    sharedUiInfo.assets.sliderBar = Material_RegisterHandle("ui_slider2", 3);
-    sharedUiInfo.assets.sliderThumb = Material_RegisterHandle("ui_sliderbutt_1", 3);
-    sharedUiInfo.assets.cursor = Material_RegisterHandle("ui_cursor", 0);
-    sharedUiInfo.assets.bigFont = CL_RegisterFont("fonts/bigfont", 0);
-    sharedUiInfo.assets.smallFont = CL_RegisterFont("fonts/smallfont", 0);
-    sharedUiInfo.assets.consoleFont = CL_RegisterFont("fonts/consolefont", 0);
-    sharedUiInfo.assets.boldFont = CL_RegisterFont("fonts/boldfont", 0);
-    sharedUiInfo.assets.textFont = CL_RegisterFont("fonts/normalfont", 0);
-    sharedUiInfo.assets.extraBigFont = CL_RegisterFont("fonts/extrabigfont", 0);
-    sharedUiInfo.assets.objectiveFont = CL_RegisterFont("fonts/objectivefont", 0);
+    sharedUiInfo.assets.whiteMaterial = Material_RegisterHandle("white", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBar = Material_RegisterHandle("ui_scrollbar", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBarArrowDown = Material_RegisterHandle("ui_scrollbar_arrow_dwn_a", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBarArrowUp = Material_RegisterHandle("ui_scrollbar_arrow_up_a", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBarArrowLeft = Material_RegisterHandle("ui_scrollbar_arrow_left", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBarArrowRight = Material_RegisterHandle("ui_scrollbar_arrow_right", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.scrollBarThumb = Material_RegisterHandle("ui_scrollbar_thumb", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.sliderBar = Material_RegisterHandle("ui_slider2", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.sliderThumb = Material_RegisterHandle("ui_sliderbutt_1", IMAGE_TRACK_UI);
+    sharedUiInfo.assets.cursor = Material_RegisterHandle("ui_cursor", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.bigFont = CL_RegisterFont("fonts/bigfont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.smallFont = CL_RegisterFont("fonts/smallfont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.consoleFont = CL_RegisterFont("fonts/consolefont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.boldFont = CL_RegisterFont("fonts/boldfont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.textFont = CL_RegisterFont("fonts/normalfont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.extraBigFont = CL_RegisterFont("fonts/extrabigfont", IMAGE_TRACK_MISC);
+    sharedUiInfo.assets.objectiveFont = CL_RegisterFont("fonts/objectivefont", IMAGE_TRACK_MISC);
 }
 
 int bypassKeyClear;
@@ -4882,7 +4882,7 @@ void __cdecl UI_KeyEvent(int localClientNum, int key, int down)
             goto LABEL_25;
         if (Dvar_GetBool("cl_bypassMouseInput") || UI_GetActiveMenu(localClientNum) == UIMENU_SCOREBOARD)
             bypassKeyClear = 1;
-        if (key == 27 && down && !Menus_AnyFullScreenVisible(&uiInfoArray.uiDC) && !menu->onESC)
+        if (key == K_ESCAPE && down && !Menus_AnyFullScreenVisible(&uiInfoArray.uiDC) && !menu->onESC)
             Menus_CloseAll(&uiInfoArray.uiDC);
         if (Key_IsCatcherActive(uiInfoArray.uiDC.localClientNum, 16))
             Menu_HandleKey(&uiInfoArray.uiDC, menu, key, down);

@@ -3285,6 +3285,6 @@ void __cdecl RB_InitCodeImages()
 
 void __cdecl RB_RegisterBackendAssets()
 {
-    backEnd.debugFont = R_RegisterFont("fonts/smalldevfont", 1);
+    backEnd.debugFont = R_RegisterFont("fonts/smalldevfont", IMAGE_TRACK_DEBUG);
 }
 

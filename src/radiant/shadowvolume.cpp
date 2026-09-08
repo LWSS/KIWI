@@ -378,10 +378,10 @@ static void ShadVol_Init()
     s_silhouetteSign = -1;                                 // shadVol_silhouetteFacing = -1
     if ( !mat_stencilshadow )
         mat_stencilshadow = rgp.stencilShadowMaterial;     // "stencilshadow" builtin
-    if ( !mat_white_multiply )                             // IDB: Material_RegisterHandle("white_multiply",0)
+    if ( !mat_white_multiply )                             // IDB: Material_RegisterHandle("white_multiply",IMAGE_TRACK_MISC)
     {
         extern Material *__cdecl Material_RegisterHandle( const char *name, int imageTrack );
-        mat_white_multiply = Material_RegisterHandle( "white_multiply", 0 );
+        mat_white_multiply = Material_RegisterHandle( "white_multiply", IMAGE_TRACK_MISC );
     }
     memset( s_vertHashIdx, 0xFF, sizeof(s_vertHashIdx) );  // all slots empty
     for ( int i = 0; i < SHADVOL_EDGE_HASH_SIZE; ++i )
@@ -398,7 +398,7 @@ Material *Radiant_GetWhiteMultiplyMaterial()
     if ( !mat_white_multiply )
     {
         extern Material *__cdecl Material_RegisterHandle( const char *name, int imageTrack );
-        mat_white_multiply = Material_RegisterHandle( "white_multiply", 0 );
+        mat_white_multiply = Material_RegisterHandle( "white_multiply", IMAGE_TRACK_MISC );
     }
     return mat_white_multiply;
 }
@@ -512,8 +512,8 @@ static bool ShadVol_MaterialCasts( const Material *m )
         return true;
     if ( !s_allMtl )
         return false;
-    int bidx = ( m->techniqueSet && m->techniqueSet->techniques[5] )
-                 ? (byte)m->stateBitsEntry[4] : 0;
+    int bidx = ( m->techniqueSet && m->techniqueSet->techniques[TECHNIQUE_EMISSIVE] )
+                 ? (byte)m->stateBitsEntry[TECHNIQUE_UNLIT] : 0;
     return ( m->surfaceFlags & SURF_NOCASTSHADOW ) == 0 && m->stateBitsTable
            && ( m->stateBitsTable[bidx].loadBits[0] & 0x7000F00u ) == 0x800u
            && ( m->stateBitsTable[bidx].loadBits[1] & 1 ) != 0;
@@ -574,7 +574,7 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
         if ( !lm->next )
             continue;
         // ASSET-DRIVEN: Material_CastsStencilShadow's last clause compares
-        // material->techniqueSet->techniques[1] ("build floatz") against
+        // material->techniqueSet->techniques[TECHNIQUE_BUILD_FLOAT_Z] ("build floatz") against
         // rgp.shadowCasterMaterial's.  EVERY CoD4 shadowcaster techset variant omits
         // "build floatz" -> NULL, while every opaque world techset has it -> non-NULL, so
         // with CoD4 assets the clause rejects every solid world material and the RETAIL

@@ -1061,7 +1061,7 @@ bool __cdecl ParseConfigStringToStructCustomSize(
                     if (!com_dedicated->current.integer)
 #endif
                     {
-                        v10 = Material_RegisterHandle(src, 0);
+                        v10 = Material_RegisterHandle(src, IMAGE_TRACK_MISC);
                         *(Material **)&pStruct[v20->iOffset] = v10;
                     }
                     break;

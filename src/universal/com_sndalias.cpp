@@ -350,7 +350,7 @@ void __cdecl Com_GetSoundFileName(const snd_alias_t *alias, char *filename, int 
     iassert(alias);
     iassert(alias->soundFile);
     soundFile = alias->soundFile;
-    if (soundFile->type == 1)
+    if (soundFile->type == SAT_LOADED)
         I_strncpyz(filename, (char *)soundFile->u.loadSnd->name, size);
     else
         StreamFileNameGetName((const StreamFileName *)&soundFile->u, filename, size);

@@ -219,13 +219,13 @@ static void Editor_CheckSubmittedOpaqueDepth(const Material *material, int techT
 void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
                                int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable)
 {
-    iassert(techType >= 0);                               // 0x4fda66 (level 0)
+    iassert(techType >= TECHNIQUE_DEPTH_PREPASS);         // 0x4fda66 (level 0)
     const Material *material = Material_FromHandle(handle);
     iassert( material );   // r_ed_scene.cpp:224
 
     // KISAK: the IDB indexes techniques[techType+1] (its set reserves slot 0); kisak's
     // MaterialTechniqueSet is indexed directly by techType (r_material.cpp:753).
-    if (techType < 34 && !material->techniqueSet->techniques[techType])
+    if (techType < TECHNIQUE_COUNT && !material->techniqueSet->techniques[techType])
         return;
 
     if (edSceneGlobals.sceneMeshCount == ED_SCENE_MAX_MESHES) {
@@ -870,8 +870,8 @@ void __cdecl Editor_AddSurfCmd(int drawFlags, Material *material, model_inst *in
     iassert(material);
 
     // IDA gate (0x4fdff3): queue ONLY when the material carries the requested technique (or
-    // techType >= 34), else DROP it.  kisak indexes techniques[techType] with no +1.
-    if (techType >= 34 || material->techniqueSet->techniques[techType]) {
+    // techType >= TECHNIQUE_COUNT), else DROP it.  kisak indexes techniques[techType] with no +1.
+    if (techType >= TECHNIQUE_COUNT || material->techniqueSet->techniques[techType]) {
         if (radiant_surfCount == ED_SCENE_MAX_MODELSURFS) {
             R_WarnOncePerFrame((GfxWarningType)35, ED_SCENE_MAX_MODELSURFS);
         } else if (Editor_SurfFilter(drawFlags, material)) {

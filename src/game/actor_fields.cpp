@@ -316,21 +316,16 @@ void __cdecl ActorScr_GetTime(actor_s *pSelf, const actor_fields_s *pField)
 
 void __cdecl ActorScr_SetWeapon(actor_s *pSelf, const actor_fields_s *pField)
 {
-    const char *String; // r31
-    const char *v5; // r3
-    const char *v6; // r3
-
     iassert(pSelf);
     iassert(pField);
     iassert(pField->type == F_INT);
-    String = Scr_GetString(0);
+
+    const char *String = Scr_GetString(0);
     if (!G_GetWeaponIndexForName(String))
     {
-        v5 = va("Can't find weapon [%s].  It probably needs to be precached.", String);
-        Scr_ParamError(0, v5);
+        Scr_ParamError(0, va("Can't find weapon [%s].  It probably needs to be precached.", String));
     }
-    v6 = Scr_GetString(0);
-    *(int *)((char *)pSelf + pField->ofs) = G_GetWeaponIndexForName(v6);
+    *(int *)((char *)pSelf + pField->ofs) = G_GetWeaponIndexForName(Scr_GetString(0));
 }
 
 void __cdecl ActorScr_GetWeapon(actor_s *pSelf, const actor_fields_s *pField)
@@ -622,7 +617,6 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
     const char *v11; // r7
     gentity_s *v12;
     gentity_s *gentities; // r11
-    unsigned int v14; // r10
     unsigned int v15; // r29
     gentity_s *v16; // r11
     const char *v17; // r8

@@ -1618,7 +1618,7 @@ int __cdecl Com_LoadSoundAliasSounds(SoundFileInfo *soundFileInfo)
     for (soundIndex = 0; soundIndex < soundFileInfo->count; ++soundIndex)
     {
         soundFile = &soundFileInfo->files[soundIndex];
-        if (soundFile->type == 1)
+        if (soundFile->type == SAT_LOADED)
         {
             iassert(soundFile->u.loadSnd);
             if (!soundFile->exists)

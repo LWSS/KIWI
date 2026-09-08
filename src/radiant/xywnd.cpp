@@ -1121,7 +1121,7 @@ void XY_DrawBrushes(const XYViewState *v)
         XY_ModelTintNote( colRgba );
         if ( walkReplay )
             KiwiWalk_TopLevel( b );        // cursor lockstep
-        DrawBrush( b, ident, v->viewType, /*technique=wireframe*/ 29, &col, /*width*/ 1, /*drawFlags*/ 0,
+        DrawBrush( b, ident, v->viewType, /*technique=wireframe*/ TECHNIQUE_WIREFRAME_SHADED, &col, /*width*/ 1, /*drawFlags*/ 0,
                    /*layerPrefix (binary `zero`)*/ "" );
 
         // entity-name label (binary's DrawBrushEntityName at 0x46d0fe, right after DrawBrush);
@@ -1197,7 +1197,7 @@ void XY_DrawBrushes(const XYViewState *v)
             if ( !def )
                 continue;
             if ( !FilterBrush( b, 0 ) )
-                DrawBrush( b, ident, v->viewType, 29, &selCol, 2, 0,
+                DrawBrush( b, ident, v->viewType, TECHNIQUE_WIREFRAME_SHADED, &selCol, 2, 0,
                            /*layerPrefix (binary `zero`)*/ "" );
 
             // entity-name label (binary's DrawBrushEntityName at 0x46d2c9, in the SELECTED

@@ -709,10 +709,11 @@ int __cdecl Material_TechniqueTypeForName(const char *name)
 // the editor loads (e.g. l_sm_r0c0n0s0.techset) list "case texture" / "fakelight normal" /
 // "fakelight view" / "shaded wireframe", and the matching .tech + compiled shaders ship in
 // raw/techniques + raw/shader_bin. With these slots OFF the loader silently DROPS those
-// techniques (techniqueSet->techniques[0x18/0x19/0x1B/0x1D] = NULL) so the editor camera can
+// techniques (TECHNIQUE_FAKELIGHT_NORMAL, TECHNIQUE_FAKELIGHT_VIEW, TECHNIQUE_CASE_TEXTURE, and
+// TECHNIQUE_WIREFRAME_SHADED) so the editor camera can
 // only draw TECHNIQUE_UNLIT (the white-floor symptom). Enabling them lets the camera select
-// the binary's faithful draw_mode->technique (see camwnd.cpp Cam_TechForDrawMode). 0x1A
-// SUNLIGHT_PREVIEW stays OFF: it's a per-techset sunpre_* variant we don't drive (Stage 2
+// the binary's faithful draw_mode->technique (see camwnd.cpp Cam_TechForDrawMode).
+// TECHNIQUE_SUNLIGHT_PREVIEW stays OFF: it's a per-techset sunpre_* variant we don't drive (Stage 2
 // approximates the sun via MATERIAL_COLOR, default-off). SP/MP keep the table verbatim.
 // See PROGRESS "Session — matsys".
 #ifdef KISAK_RADIANT
@@ -4729,7 +4730,7 @@ Material *__cdecl R_GetBspMaterial(uint materialIndex)
         Com_sprintf(materialName, 0x100u, "%s%s", "", name->material);
     else
         Com_sprintf(materialName, 0x100u, "%s%s", "wc/", name->material);
-    return Material_Register(materialName, 9);
+    return Material_Register(materialName, IMAGE_TRACK_WORLD);
 }
 
 bool __cdecl Material_HasNormalMap(const Material *mtl)
@@ -5047,7 +5048,6 @@ Material *__cdecl Material_CreateLayered(
     uint layerCount,
     MaterialTechniqueSet *techSet)
 {
-    uint8_t *v4; // edi
     const MaterialTextureDef *v5; // eax
     char v7; // [esp+Bh] [ebp-1ADh]
     MaterialConstantDef *v8; // [esp+Ch] [ebp-1ACh]
@@ -5118,7 +5118,6 @@ Material *__cdecl Material_CreateLayered(
     newMtl->info.surfaceTypeBits = oredSurfaceTypeBits;
     newMtl->textureCount = textureCount;
     newMtl->constantCount = constantCount;
-    v4 = newMtl->stateBitsEntry;
     memcpy(newMtl->stateBitsEntry, stateBitsEntry, sizeof(newMtl->stateBitsEntry));
     Material_SetStateBits(newMtl, stateBitsTable, stateBitsCount);
     newTexEntry = newMtl->textureTable;
@@ -5639,9 +5638,9 @@ uint __cdecl Material_GetCullShadowFlags(Material *material)
 
     techniqueSet = material->techniqueSet;
     iassert( techniqueSet );
-    if (!techniqueSet->techniques[2])
+    if (!techniqueSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH])
         return 0;
-    cullBits = material->stateBitsTable[material->stateBitsEntry[2]].loadBits[0] & 0xC000;
+    cullBits = material->stateBitsTable[material->stateBitsEntry[TECHNIQUE_BUILD_SHADOWMAP_DEPTH]].loadBits[0] & 0xC000;
     if (cullBits == 0x8000)
         return 64;
     if (cullBits == 49152)
@@ -5658,8 +5657,8 @@ int __cdecl Material_GetDecalFlags(const Material *mtl)
         return 0;
     techniqueSet = mtl->techniqueSet;
     iassert( techniqueSet );
-    if (techniqueSet->techniques[4])
-        v2 = mtl->stateBitsEntry[4];
+    if (techniqueSet->techniques[TECHNIQUE_UNLIT])
+        v2 = mtl->stateBitsEntry[TECHNIQUE_UNLIT];
     else
         v2 = 0;
     return (mtl->stateBitsTable[v2].loadBits[1] & 0x30) != 0 ? 4 : 0;
@@ -5674,8 +5673,8 @@ int __cdecl Material_GetWritesDepthFlags(const Material *mtl)
         return 0;
     techniqueSet = mtl->techniqueSet;
     iassert( techniqueSet );
-    if (techniqueSet->techniques[4])
-        v2 = mtl->stateBitsEntry[4];
+    if (techniqueSet->techniques[TECHNIQUE_UNLIT])
+        v2 = mtl->stateBitsEntry[TECHNIQUE_UNLIT];
     else
         v2 = 0;
     return (mtl->stateBitsTable[v2].loadBits[1] & 1) != 0 ? 8 : 0;
@@ -5809,11 +5808,11 @@ uint __cdecl Material_GetTechniqueSetDrawRegion(MaterialTechniqueSet *techniqueS
     uint cameraRegion; // [esp+Ch] [ebp-4h]
 
     iassert( techniqueSet );
-    if (techniqueSet->techniques[7])
+    if (techniqueSet->techniques[TECHNIQUE_LIT])
     {
         cameraRegion = 0;
     }
-    else if (techniqueSet->techniques[5])
+    else if (techniqueSet->techniques[TECHNIQUE_EMISSIVE])
     {
         cameraRegion = 2;
     }
@@ -5821,7 +5820,7 @@ uint __cdecl Material_GetTechniqueSetDrawRegion(MaterialTechniqueSet *techniqueS
     {
         cameraRegion = 3;
     }
-    for (techTypeIter = 7; techTypeIter != 14; ++techTypeIter)
+    for (techTypeIter = TECHNIQUE_LIT_BEGIN; techTypeIter < TECHNIQUE_LIT_INSTANCED; ++techTypeIter)
     {
         if (g_useTechnique[techTypeIter] && (cameraRegion == 0) != (techniqueSet->techniques[techTypeIter] != 0))
             MyAssertHandler(
@@ -6174,7 +6173,7 @@ uint __cdecl R_DrawSurfStandardPrepassSortKey(const Material *material)
 
     techSet = material->techniqueSet;
     iassert( techSet );
-    prepassTech = techSet->techniques[0];
+    prepassTech = techSet->techniques[TECHNIQUE_DEPTH_PREPASS];
     if (prepassTech)
     {
         if ((material->stateFlags & 4) != 0)
@@ -6182,7 +6181,7 @@ uint __cdecl R_DrawSurfStandardPrepassSortKey(const Material *material)
         else
             return (prepassTech->flags & 4) == 0;
     }
-    else if (techSet->techniques[1])
+    else if (techSet->techniques[TECHNIQUE_BUILD_FLOAT_Z])
     {
         return 2;
     }

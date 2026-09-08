@@ -484,7 +484,7 @@ static MaterialTechniqueType Cam_TechForDrawMode( int mode )
 // The COLOUR mechanism is the binary's own and is left exactly as it is: at tech 29 an
 // entity wireframe is supposed to be its class/team colour.  What diverged is the
 // TECHNIQUE, and fixing that removes the tint by removing the arm that applies it
-// (colorPtr is NULL for any meshTech != 29) rather than by touching a colour constant.
+// (colorPtr is NULL for any meshTech != TECHNIQUE_WIREFRAME_SHADED) rather than by touching a colour constant.
 //
 // THE MODE BITS, from the six handlers' immediates (mainfrm.cpp:3290-3291):
 //   WIREFRAME 0x1  SKIN_MODEL 0x10  SELECTED_ONLY 0x100  BOXED 0x1000  SKINNED 0x10000
@@ -1838,7 +1838,7 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
                 // DrawModels 0x479735: SkinModelInst(inst, checkhandle, draw_meth2,
                 // draw_meth2 != 29 ? 0 : color, drawFlags) — the per-vert colour override
                 // only rides the WIREFRAME technique.
-                const int *colorPtr = ( meshTech != 29 ) ? nullptr : (const int *)col;
+                const int *colorPtr = ( meshTech != TECHNIQUE_WIREFRAME_SHADED ) ? nullptr : (const int *)col;
                 // KIWI-UX: SkinModelInst applies this only to materials that lack their
                 // native sunlight-preview receiver and use the N.L fallback.  Native-only
                 // instances remain read-only/static-cache eligible; native surfaces in a
@@ -3772,7 +3772,7 @@ void CamWnd_Draw( HWND hwnd )
                 // Model/prefab classes take the camera technique (meshes/contents render lit
                 // through the surf-cache); plain point entities keep the wireframe bbox.
                 const int entTech = ( ec && ( ec->classtype & 0x18 /*CLASS_MODEL|CLASS_PREFAB*/ ) )
-                                    ? (int)worldTech : 29;
+                                    ? (int)worldTech : TECHNIQUE_WIREFRAME_SHADED;
                 // KISAK drawFlags 0 = draw ALL layers in one pass.  The binary runs TWO passes,
                 // DrawGeneralWorld_(tech, 8=SKIP_MULTIPLY) @0x407f3b then (tech, 4=ONLY_MULTIPLY)
                 // @0x4082f3; this pass runs ONCE, so 8 would drop every additive/effect
@@ -3955,7 +3955,7 @@ void CamWnd_Draw( HWND hwnd )
             // xywnd.cpp:1164, which gates its selected loop the same way.
             if ( FilterBrush( b, 0 ) )
                 continue;
-            const int entTech = ( ec->classtype & 0x18 /*MODEL|PREFAB*/ ) ? (int)worldTech : 29;
+            const int entTech = ( ec->classtype & 0x18 /*MODEL|PREFAB*/ ) ? (int)worldTech : TECHNIQUE_WIREFRAME_SHADED;
             GfxColor ecol; Cam_BrushColor2d( b, &ecol );     // decoration/bbox colour (col arg)
             // 0x40809d: DrawBrush(b, world_orient, 0xFFFFFFFF, 0, tech_type, 0, tech_type, &col, w, 1, zero)
             DrawBrush( b, (orientation_t *)world_orient_matrix, /*viewType*/ -1,
@@ -4118,7 +4118,7 @@ void CamWnd_Draw( HWND hwnd )
             }
             // drawFlags=1 (force-draw) matches the binary's a10=1; viewType -1 = no 2D cull.
             DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
-                       /*technique*/ 29, &whiteCol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );
+                       /*technique*/ TECHNIQUE_WIREFRAME_SHADED, &whiteCol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );
         }
         R_AddEditorSurfsCmd();                              // 0x408535 — flush the model wireframe surfs
     }

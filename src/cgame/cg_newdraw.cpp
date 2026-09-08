@@ -802,7 +802,7 @@ Material *__cdecl CG_ObjectiveIcon(int icon, unsigned int type)
 
     bcassert(type, 2);
     if (icon && CG_ServerMaterialName(0, icon, v5, 0x40u))
-        return Material_RegisterHandle(v5, 7);
+        return Material_RegisterHandle(v5, IMAGE_TRACK_HUD);
     else
         return cgMedia.objectiveMaterials[type];
 }
@@ -831,7 +831,7 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     cursorHintIcon = cgArray[0].cursorHintIcon;
-    if (cgArray[0].cursorHintIcon < 5 || cgArray[0].cursorHintIcon > 132)
+    if (cgArray[0].cursorHintIcon < FIRST_WEAPON_HINT || cgArray[0].cursorHintIcon > LAST_WEAPON_HINT)
     {
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_newDraw.cpp",
@@ -841,8 +841,8 @@ char *__cdecl CG_GetWeaponUseString(int localClientNum, const char **secondarySt
             "(cgameGlob->cursorHintIcon >= FIRST_WEAPON_HINT) && (cgameGlob->cursorHintIcon <= LAST_WEAPON_HINT)");
         cursorHintIcon = cgArray[0].cursorHintIcon;
     }
-    v5 = cursorHintIcon - 4;
-    WeaponDef = BG_GetWeaponDef(cursorHintIcon - 4);
+    v5 = cursorHintIcon - WEAPON_HINT_OFFSET;
+    WeaponDef = BG_GetWeaponDef(cursorHintIcon - WEAPON_HINT_OFFSET);
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     weapInfo = &cg_weaponsArray[0][v5];
     if (WeaponDef->inventoryType)
@@ -1037,7 +1037,7 @@ void __cdecl CG_DrawCursorhint(
                 LocalClientGlobals->cursorHintFade,
                 100))
             {
-                LocalClientGlobals->cursorHintIcon = 0;
+                LocalClientGlobals->cursorHintIcon = HINT_NONE;
                 return;
             }
             displayString = 0;
@@ -1073,7 +1073,7 @@ void __cdecl CG_DrawCursorhint(
                 scale = 0.0;
             }
             cursorHintIcon = LocalClientGlobals->cursorHintIcon;
-            if (cursorHintIcon == 1)
+            if (cursorHintIcon == HINT_NOICON)
             {
                 if (LocalClientGlobals->cursorHintString >= 0)
                 {
@@ -1107,11 +1107,11 @@ void __cdecl CG_DrawCursorhint(
             }
             if (!cgMedia.hintMaterials[cursorHintIcon])
                 return;
-            if (cursorHintIcon < 5 || cursorHintIcon > 132)
+            if (cursorHintIcon < FIRST_WEAPON_HINT || cursorHintIcon > LAST_WEAPON_HINT)
             {
                 if (LocalClientGlobals->cursorHintString < 0)
                 {
-                    if (cursorHintIcon != 3)
+                    if (cursorHintIcon != HINT_HEALTH)
                     {
                     LABEL_39:
                         if (displayString && *displayString)
@@ -1216,8 +1216,8 @@ void __cdecl CG_DrawCursorhint(
             }
             else
             {
-                v40 = cursorHintIcon - 4;
-                weapDef = BG_GetWeaponDef(cursorHintIcon - 4);
+                v40 = cursorHintIcon - WEAPON_HINT_OFFSET;
+                weapDef = BG_GetWeaponDef(cursorHintIcon - WEAPON_HINT_OFFSET);
                 v42 = weapDef;
                 if (weapDef->hudIcon)
                 {
@@ -1382,7 +1382,7 @@ void __cdecl CG_DrawSaving(int localClientNum, const rectDef_s *rect, float *col
 		return;
 
 	if (!material)
-		material = Material_RegisterHandle("saving", 3);
+		material = Material_RegisterHandle("saving", IMAGE_TRACK_UI);
 
 	UI_DrawHandlePic(&scrPlaceView[localClientNum], rect->x, rect->y, rect->w, rect->h, rect->horzAlign, rect->vertAlign, color, material);
 }
@@ -2431,7 +2431,7 @@ void __cdecl CG_DrawPlayerWeaponNameBack(
     }
 
     if (!material)
-        material = Material_RegisterHandle("$default", 3);
+        material = Material_RegisterHandle("$default", IMAGE_TRACK_UI);
 
     const cg_s *cgameGlob;
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);

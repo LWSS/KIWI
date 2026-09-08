@@ -2140,16 +2140,16 @@ int __cdecl Actor_IsMoving(actor_s *self)
 
 unsigned int __cdecl G_GetActorFriendlyIndex(int iEntNum)
 {
-    gentity_s *v2; // r10
+    gentity_s *ent; // r10
     actor_s *actor; // r11
-    unsigned int v4; // r11
 
     if (!level.bDrawCompassFriendlies)
         return -1;
+
     iassert(iEntNum < MAX_GENTITIES);
-    v2 = &g_entities[iEntNum];
-    actor = v2->actor;
-    if (!actor || !actor->bDrawOnCompass || v2->sentient->eTeam != TEAM_ALLIES)
+    ent = &g_entities[iEntNum];
+    actor = ent->actor;
+    if (!actor || !actor->bDrawOnCompass || ent->sentient->eTeam != TEAM_ALLIES)
         return -1;
     return (int)(actor - level.actors);
 }

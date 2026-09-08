@@ -1134,7 +1134,7 @@ bool __cdecl ViewmodelKnifeShouldBeAttached(int localClientNum, WeaponDef* weapD
         return 0;
 
     anim = CG_GetLocalClientGlobals(localClientNum)->predictedPlayerState.weapAnim & 0xFFFFFDFF;
-    return anim == 8 || anim == 9;
+    return anim == WEAP_MELEE_ATTACK || anim == WEAP_MELEE_CHARGE;
 }
 
 void __cdecl ProcessWeaponNoteTracks(int localClientNum, const playerState_s *predictedPlayerState)

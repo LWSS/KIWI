@@ -607,9 +607,16 @@ void __cdecl Scr_Target_ClearLockOn()
 int __cdecl GetTargetIdx(const gentity_s *ent)
 {
     if (ent)
+    {
         for (int i = 0; i < ARRAY_COUNT(targGlob.targets); ++i)
+        {
             if (targGlob.targets[i].ent == ent)
+            {
                 return i;
+            }
+        }
+    }
+
     return ARRAY_COUNT(targGlob.targets);
 }
 

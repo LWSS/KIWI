@@ -56,12 +56,12 @@ void __cdecl CG_AddPlayerSpriteDrawSurfs(int localClientNum, const centity_s *ce
             iClientTeam = cgameGlob->bgs.clientinfo[ps->clientNum].team;
             secondaryHeight = 0;
             if (cent->nextState.iHeadIcon
-                && (!cent->nextState.iHeadIconTeam
+                && (cent->nextState.iHeadIconTeam == TEAM_FREE
                     || iClientTeam == TEAM_SPECTATOR
                     || cent->nextState.iHeadIconTeam == iClientTeam))
             {
                 pszIcon = CL_GetConfigString(localClientNum, cent->nextState.iHeadIcon + 2266);
-                hMaterial = Material_RegisterHandle(pszIcon, 7);
+                hMaterial = Material_RegisterHandle(pszIcon, IMAGE_TRACK_HUD);
                 if (hMaterial)
                 {
                     CG_AddPlayerSpriteDrawSurf(
