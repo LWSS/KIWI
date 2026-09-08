@@ -203,12 +203,21 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                 CG_StopWeaponSound(localClientNum, isPlayerView, weaponDef, ent->number, (weaponstate_t)eventParm);
                 return;
             case EV_SOUND_ALIAS:
+            {
+                int playbackId = -1;
+                ConfigString = "";
                 if (ent->eventParm)
                 {
                     ConfigString = CL_GetConfigString(localClientNum, CS_SOUNDALIASES + ent->eventParm);
-                    CG_PlaySoundAliasByName(localClientNum, ent->number, ent->lerp.pos.trBase, ConfigString);
+                    playbackId = CG_PlaySoundAliasByName(localClientNum, ent->number, ent->lerp.pos.trBase, ConfigString);
                 }
+                if (cg_debugEvents->current.enabled)
+                    Com_Printf(CON_CHANNEL_DONT_FILTER,
+                        "EV_SOUND_ALIAS: ent=%i index=%u alias='%s' origin=(%.1f %.1f %.1f) playbackId=%i\n",
+                        ent->number, ent->eventParm, ConfigString,
+                        ent->lerp.pos.trBase[0], ent->lerp.pos.trBase[1], ent->lerp.pos.trBase[2], playbackId);
                 return;
+            }
             case EV_SOUND_ALIAS_AS_MASTER:
                 if (ent->eventParm)
                 {

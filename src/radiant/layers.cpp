@@ -152,7 +152,7 @@ static void Layers_TagListLayers( selbrush_t *listHead, const char *prefix, char
 
         strncat( childPath, "/", sizeof( childPath ) - strlen( childPath ) - 1 );      // 0x4195d7
         // prefab_s + 0x0C is the content brush-list sentinel ({prev, next}).
-        Layers_TagListLayers( (selbrush_t *)( (char *)owner->prefab + 0x0C ), childPath, 1 );  // 0x4195ed
+        Layers_TagListLayers( &((prefab_s *)owner->prefab)->brushes, childPath, 1 );  // 0x4195ed
     }
 }
 

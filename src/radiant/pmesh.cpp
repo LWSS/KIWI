@@ -4206,9 +4206,9 @@ static void PMESH_56( patchMesh_t *p )
 
     // Working material slot ← current layer's material pair.  (&p->texture)[layer] is the
     // layer's {lyrMtl,radMtl}; the live pair lives at +0x30/+0x34 (pad_0x0030 + mat_unk).
-    patchMesh_material *live = (patchMesh_material *)( (char *)p + 0x30 );
+    patchMesh_material *live = &p->workingMaterial;
     *live = ( &p->texture )[layer];
-    *( (char *)p + 0x5044 ) = *( (char *)p + 0x5043 );   // xx21 ← bDirty (byte shadow)
+    p->xx21 = p->bDirty;
 
     for ( int row = 0; row < p->height; ++row )          // [ebx+4] = height (outer)
     {
@@ -4241,9 +4241,9 @@ static void PMESH_57( patchMesh_t *p )
 {
     const int layer = g_qeglobals.current_edit_layer;
 
-    const patchMesh_material *live = (const patchMesh_material *)( (char *)p + 0x30 );
+    const patchMesh_material *live = &p->workingMaterial;
     ( &p->texture )[layer] = *live;
-    *( (char *)p + 0x5043 ) = *( (char *)p + 0x5044 );   // bDirty ← xx21 (byte shadow)
+    p->bDirty = (p->xx21 & 0xFF) != 0;
 
     for ( int row = 0; row < p->height; ++row )          // [esi+4] = height
     {
@@ -6690,7 +6690,7 @@ static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *or
                     Entity_GetOrientation( ownerDef, orient, &composed );
                     // &prefab->active_brushlist (selbrush_t sentinel @ prefab_s+0x0C).
                     selbrush_t *prefabList =
-                        (selbrush_t *)( (char *)cur->owner->prefab + 0x0C );
+                        &((prefab_s *)cur->owner->prefab)->brushes;
                     VertSnapTo_ModelBrushPrefab( prefabList, &composed );
                 }
             }
@@ -10186,7 +10186,7 @@ static void Patch_BuildInstanceVisuals( patch_t *inst, const orientation_t *orie
                          + ( g_qeglobals.current_edit_layer == 0 ? KiwiTerrain_ExtraLayerCount( inst->def ) : 0 );
     inst->visCount = layerCount;
     if ( layerCount <= 0 ) { inst->visArray = nullptr; return; }
-    inst->visArray = (patchVisuals_s *)operator new( (size_t)( 8 * layerCount ) );
+    inst->visArray = (patchVisuals_s *)operator new( (size_t)layerCount * sizeof(patchVisuals_s) );
     if ( !inst->visArray )
         Error( "Out of memory on patch visuals array" );
     Patch_Fill_BuildIndices( inst );                     // PMESH_24

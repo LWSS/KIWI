@@ -499,7 +499,7 @@ void sub_4DAD20( rface_t **outList, const float *desc )
 // =============================================================================
 //  sub_4DA240 — free a region-face list (free each node's winding @+0x24 and node).
 // =============================================================================
-static void Region_FreeList( rface_t *list )
+void Region_FreeList( rface_t *list )
 {
     while ( list )
     {

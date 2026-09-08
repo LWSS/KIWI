@@ -526,7 +526,7 @@ void Texture_ForName( selbrush_t *list, int layer )
             // Point/bbox entity: descend into its prefab's brush list (if any).
             void *prefab = b->owner->prefab;        // entity_s.prefab @ 0x48
             if ( prefab )
-                Texture_ForName( (selbrush_t *)( (char *)prefab + 0x0C ), layer );
+                Texture_ForName( &((prefab_s *)prefab)->brushes, layer );
         }
         else if ( def->patch )
         {

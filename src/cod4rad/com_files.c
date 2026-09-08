@@ -1241,11 +1241,9 @@ int FS_FOpenFileRead(const char *filename, int *handleOut, int uniqueFILE, int s
                 I_strncpyz(fsh[f].name, sanitized, sizeof(fsh[f].name));
                 fsh[f].zipFile = pak;
                 {
-                    /* binary seeks on pak->handle, then copies 136 bytes of unz state */
-                    void *saved = *(void **)fsh[f].handleFile;
-                    unzSetOffset64(pak->handle, (unsigned long long)entry->pos);
-                    memmove(fsh[f].handleFile, pak->handle, 136);
-                    *(void **)fsh[f].handleFile = saved;
+                    /* Seek the selected handle through minizip. Its opaque native
+                     * state is not the binary's 136-byte ZIP record. */
+                    unzSetOffset64(fsh[f].handleFile, (unsigned long long)entry->pos);
                     unzOpenCurrentFile(fsh[f].handleFile);
                     fsh[f].zipFilePos = (intptr_t)entry->pos;
                 }

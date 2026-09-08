@@ -77,11 +77,11 @@ extern int      g_nUpdateBits;                                                  
 // g_windingAlloc (winding.cpp, IDB dword_24CE4FC) — live winding malloc/free count.
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Face by flat-array index; face_t stride is 232 (static_assert in qe3.h).
+//  Face by native array index; face_t contains pointers and grows on x64.
 // ─────────────────────────────────────────────────────────────────────────────
 static inline face_t *BrushFaceAt( brush_t *def, unsigned int idx )
 {
-    return (face_t *)( (char *)def->faces + idx * 232u );
+    return &def->faces[idx];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ static inline face_t *BrushFaceAt( brush_t *def, unsigned int idx )
 // ─────────────────────────────────────────────────────────────────────────────
 static inline face_t *FaceAt( face_t *base, unsigned int idx )
 {
-    return (face_t *)( (char *)base + idx * 232u );
+    return &base[idx];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -491,7 +491,7 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
     }
 
     // Phase 2: allocate the new brush DEF and collect the outer faces.
-    brush_t *newBrush = (brush_t *)operator new( 0x58u );
+    brush_t *newBrush = (brush_t *)operator new( sizeof(brush_t) );
     memset( newBrush, 0, sizeof(brush_t) );
 
     for ( selbrush_t *node1 = brushList; node1; node1 = node1->next )

@@ -8,6 +8,7 @@ struct winding_t;
 
 // The light's region face node (48 bytes; see primarylights_region.cpp banner).
 struct rface_t;
+void Region_FreeList( rface_t *list );
 
 // The light descriptor passed to the merge driver: { int class; float p[8] } where
 // p[0..2]=origin, p[3..5]=cone axis, p[6]=radius, p[7]=cosHalfFov.  Built by the

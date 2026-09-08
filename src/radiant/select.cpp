@@ -163,7 +163,7 @@ extern void        Sel_NoteLegacyDeselect();
 // &active_brushes / &selected_brushes sentinels. The binary takes &prefab->active_brushlist.
 static inline selbrush_t *Prefab_BrushListSentinel( void *prefab )
 {
-    return (selbrush_t *)( (char *)prefab + 0x0C );
+    return &((prefab_s *)prefab)->brushes;
 }
 
 // W_CAMERA bitmask (g_nUpdateBits flag for camera redraw)
@@ -1335,7 +1335,7 @@ void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
         selface_t selFace;
         selFace.brush = t.hit.brush;
         selFace.face  = face;
-        selFace.index = (int)( (char *)face - (char *)brush->faces ) / 12;
+        selFace.index = (int)( face - brush->faces );
         iassert( selFace.index >= 0 && selFace.index < t.hit.brush->faceCount );    // select.cpp:664
         iassert( selFace.brush->version == selFace.brush->def->version );           // select.cpp:665
         g_SelectedFaces.Add( selFace );

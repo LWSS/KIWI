@@ -172,7 +172,7 @@ void ScanPrefabBrushList( selbrush_t *sentinel, int depth )
         entity_s *owner = instance->owner;
         if ( owner && owner->prefab )
         {
-            ScanPrefabBrushList( (selbrush_t *)( (char *)owner->prefab + 0x0C ), depth + 1 );
+            ScanPrefabBrushList( &((prefab_s *)owner->prefab)->brushes, depth + 1 );
             continue;
         }
         ScanBrushDefinition( instance->def );
@@ -188,7 +188,7 @@ void ScanPrefabRoots( selbrush_t *sentinel )
     {
         entity_s *owner = instance->owner;           // Prefab identity is owner->prefab; see ScanPrefabBrushList.
         if ( owner && owner->prefab )
-            ScanPrefabBrushList( (selbrush_t *)( (char *)owner->prefab + 0x0C ), 1 );
+            ScanPrefabBrushList( &((prefab_s *)owner->prefab)->brushes, 1 );
     }
 }
 

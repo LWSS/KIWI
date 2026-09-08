@@ -610,6 +610,19 @@ void __cdecl SV_MapRotate_f()
     tokenb = SV_GetMapRotationToken();
     if (tokenb)
     {
+        // A failed map command leaves the completed match running. Consume
+        // unavailable entries so rotation can reach a map we can actually load.
+        char mapname[64];
+        I_strncpyz(mapname, SV_GetMapBaseName(tokenb->token), sizeof(mapname));
+        I_strlwr(mapname);
+        const bool mapExists = IsFastFileLoad()
+            ? (DB_FileSize(mapname, 0) || (*fs_gameDirVar->current.string && DB_FileSize(mapname, 1)))
+            : SV_MapExists(mapname);
+        if (!mapExists)
+        {
+            Com_PrintWarning(CON_CHANNEL_DONT_FILTER, "Skipping unavailable map '%s' in sv_mapRotation.\n", mapname);
+            goto LABEL_19;
+        }
         Com_Printf(CON_CHANNEL_DONT_FILTER, "Setting map: %s.\n", tokenb->token);
         v0 = va("map %s\n", tokenb->token);
         Cmd_ExecuteSingleCommand(0, 0, v0);

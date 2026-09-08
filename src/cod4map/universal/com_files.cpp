@@ -1276,7 +1276,7 @@ int FS_FOpenFileRead(const char *filename, int *handleOut, int thread)
           file_in_zip_read_info_s *readInfo = zip->pfile_in_zip_read;
 
           unzSetCurrentFileInfoPosition(pak->handle, entry->pos);
-          Com_Memcpy(zip, pak->handle, 128);
+          Com_Memcpy(zip, pak->handle, sizeof(unz_s));
           zip->file = file;
           zip->pfile_in_zip_read = readInfo;
         }

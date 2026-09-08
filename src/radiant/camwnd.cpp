@@ -5567,8 +5567,10 @@ static bool Cam_LightPreview_CompilerSpotForDualBits(
 // 0x47D180  recursive shadow-caster gatherer.  Each record = { orientation_t(0x30);
 // pad; selbrush_t*@+48 } = 52 bytes.
 static int Region_GatherShadowBrushes( const float *light, float radSq, selbrush_t *listHead,
-                                       const orientation_t *orient, char *out, int cap )
+                                       const orientation_t *orient, KiwiLightCasterRecord *out, int cap )
 {
+    if ( cap <= 0 )
+        return 0;
     int n = 0;
     for ( selbrush_t *b = listHead->next; b != listHead; b = b->next )
     {
@@ -5582,17 +5584,16 @@ static int Region_GatherShadowBrushes( const float *light, float radSq, selbrush
             // recurse into the prefab's active brush list.  The prefab sentinel head is
             // the prefab's embedded brush-list; reached by the binary as
             // &owner->prefab->active_brushlist (the v18->owner->prefab->active_brushlist).
-            selbrush_t *pfHead = (selbrush_t *)( (char *)owner->prefab );
-            n += Region_GatherShadowBrushes( light, radSq, pfHead, &childOr, out + 52 * n, cap - n );
+            selbrush_t *pfHead = &((prefab_s *)owner->prefab)->brushes;
+            n += Region_GatherShadowBrushes( light, radSq, pfHead, &childOr, out + n, cap - n );
             if ( n == cap )
                 return n;
             continue;
         }
         if ( radSq < Region_DistSqFromBox( light, b->def->mins, b->def->maxs ) )
             continue;
-        char *rec = out + 52 * n;
-        memcpy( rec, orient, 0x30 );
-        *(selbrush_t **)( rec + 48 ) = b;
+        out[n].orient = *orient;
+        out[n].brush = b;
         n++;
         if ( n == cap )
             return n;
@@ -5601,13 +5602,13 @@ static int Region_GatherShadowBrushes( const float *light, float radSq, selbrush
 }
 
 // 0x47D2A0  LightPreview_GatherShadowBrushes — active + selected lists.
-static int LightPreview_GatherShadowBrushes( char *out, const float *light, float radius )
+static int LightPreview_GatherShadowBrushes( KiwiLightCasterRecord *out, const float *light, float radius )
 {
     float radSq = radius * radius;
     int n = Region_GatherShadowBrushes( light, radSq, &active_brushes,
                                         (const orientation_t *)world_orient_matrix, out, 0x8000 );
     n += Region_GatherShadowBrushes( light, radSq, &selected_brushes,
-                                     (const orientation_t *)world_orient_matrix, out + 52 * n, 0x8000 - n );
+                                     (const orientation_t *)world_orient_matrix, out + n, 0x8000 - n );
     return n;
 }
 
@@ -5615,13 +5616,13 @@ static int LightPreview_GatherShadowBrushes( char *out, const float *light, floa
 static int __cdecl Cam_LightGatherCached( KiwiLightCasterRecord *out,
                                           const float *origin, float radius )
 {
-    return LightPreview_GatherShadowBrushes( (char *)out, origin, radius );
+    return LightPreview_GatherShadowBrushes( out, origin, radius );
 }
 
 // 0x406CE0  sub_406CE0 — submit the shadow-caster faces, add the light cube, run the
 // merge driver, append the produced hulls to the global array.
 static void Region_BuildForLight( int cls, const float *coneCenter, const float *coneDir,
-                                  float radius, float cosHalfFov, int casterCount, char *recs )
+                                  float radius, float cosHalfFov, int casterCount, const KiwiLightCasterRecord *recs )
 {
     lightDesc_t desc;
     desc.cls  = cls;
@@ -5634,23 +5635,14 @@ static void Region_BuildForLight( int cls, const float *coneCenter, const float 
     rface_t *faceList = 0;
     for ( int i = 0; i < casterCount; i++ )
     {
-        char *rec = recs + 52 * i;
-        Brush_DrawSubmitFaceWindings( *(selbrush_t **)( rec + 48 ),
-                                      (const orientation_t *)rec, a3, &faceList );
+        Brush_DrawSubmitFaceWindings( recs[i].brush, &recs[i].orient, a3, &faceList );
     }
     sub_4DAD20( &faceList, a3 );        // light-cube faces (reads a3[+28] = radius)
 
     void *hulls[35];
     unsigned int count = (unsigned int)sub_4DD260( &faceList, &desc, hulls );
 
-    while ( faceList )
-    {
-        rface_t *node = faceList;
-        winding_t *w = *(winding_t **)( (char *)faceList + 0x24 );
-        faceList = *(rface_t **)( (char *)faceList + 0x2C );
-        if ( w ) { --g_windingAlloc; free( w ); }
-        free( node );
-    }
+    Region_FreeList( faceList );
 
     if ( count > 8 )
         MessageBoxA( 0, va( "Cannot have more than %i regions for a light", 8 ),
@@ -5682,7 +5674,8 @@ static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
     if ( ( Entity_GetIntValueForKey( defPtr, "spawnflags" ) & 3 ) == 0 )
         return;
 
-    char *recs = (char *)operator new( 0x1A0000u );
+    KiwiLightCasterRecord *recs = (KiwiLightCasterRecord *)operator new(
+        0x8000u * sizeof(KiwiLightCasterRecord) );
     if ( !recs )
         return;
     int casterCount = LightPreview_GatherShadowBrushes( recs, coneCenter, radius );
@@ -5781,7 +5774,7 @@ void CamWnd_RegionsForSelected()
         camLightPreviewRec_t *r = &cam->light_preview_arr[i];
         selbrush_t *brush = (selbrush_t *)(intptr_t)r->inst;
         // 0x406f76: the signed-byte gate is brush+52, not preview-record+52.
-        if ( *( (char *)brush + 52 ) >= 0 )
+        if ( (brush->brushFlags & 0x80) == 0 )
             Region_ForOneLight( brush, (selbrush_t *)(intptr_t)r->arg2, &r->orient );
     }
 }

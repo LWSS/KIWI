@@ -1549,7 +1549,11 @@ int __cdecl CG_PlaySoundAliasByName(int localClientNum, int entitynum, const flo
         return -1;
     alias = CL_PickSoundAlias(aliasname);
     if (!alias)
+    {
+        if (!I_stricmp(snd_debugAlias->current.string, aliasname))
+            Com_Printf(CON_CHANNEL_DONT_FILTER, "SND_DEBUG_ALIAS (%s): Rejected: no loaded alias selected\n", aliasname);
         return -1;
+    }
     playbackId = SND_PlaySoundAlias(alias, (SndEntHandle)entitynum, origin, 0, SASYS_CGAME);
     SND_AddLengthNotify(playbackId, alias, SndLengthNotify_Subtitle);
     return playbackId;

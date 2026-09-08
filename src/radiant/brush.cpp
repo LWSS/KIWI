@@ -172,7 +172,7 @@ static void Brush_MakeFaceVisuals( selbrush_t *b, const float *orientArg )
     const bool gpu = Radiant_FaceVisGpuReady() && ( b->owner != nullptr );
     for ( int i = 0; i < b->faceCount; ++i )
     {
-        faceVis_s *fv = (faceVis_s *)((char *)b->faces + 12 * i);
+        faceVis_s *fv = &b->faces[i];
         Visuals_VisArray( fv );                     // 0x46f590 (free old visArray)
         if ( gpu )
             Visuals_InitFaceVis( fv, &b->def->faces[i], orient );   // 0x46f7a0 (build + upload)
@@ -2687,7 +2687,7 @@ int Visuals_InitFaceVis( faceVis_s *face, face_t *def, const orientation_t *orie
         return 0;
 
     face->visCount = layerCount;
-    face->visArray = (faceVisuals_s *)operator new( (size_t)( 8 * layerCount ) );
+    face->visArray = (faceVisuals_s *)operator new( (size_t)layerCount * sizeof(faceVisuals_s) );
     if ( !face->visArray )
         Error( "Out of memory allocating face visuals" );
     face->vertcount = w->numpoints;
@@ -5222,7 +5222,7 @@ extern "C++" {
 // come from Model_SetModel 0x478807/478846/4789e9/4789f2.
 static inline byte *Brush_ModelFailedByte( brush_t *def )
 {
-    return (byte *)def + 0x4C;   // brush_t.unk01 low byte = modelFailed
+    return &def->modelFailed;
 }
 
 // VecMultiplyAdd (0x40A5E0... 0x40A5A0) — vec3 multiply-add: out = a + scale*b.  (VectorMA is a
@@ -5819,7 +5819,7 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def )
     }
 
     // brush entity: clear the flag, then set it if any face's material is "special".
-    *( (byte *)def + 0x4D ) = 0;                    // HIBYTE(def->unk01) = 0
+    def->unk01 &= 0x00FF;                          // clear the special-material byte
     if ( !g_PrefsDlg->draw_toggle || def->faceCount <= 0 )
         return;
 
@@ -5831,7 +5831,7 @@ static void Brush_UpdateSpecialMaterialFlag( brush_t *def )
         MaterialDef_02( md, MaterialDef_06 );
         if ( dword_181F51C )                                 // a "special" flag survived
         {
-            *( (byte *)def + 0x4D ) = 1;            // HIBYTE(def->unk01) = 1
+            def->unk01 = (def->unk01 & 0x00FF) | 0x0100;
             break;
         }
     }
@@ -6582,7 +6582,7 @@ void DrawAngles( int drawType, const orientation_t *orient, GfxColor *col )
     // at (entity_s_def + 0x0C) — the embedded def-brush list head's first pointer, a
     // brush_t* (the def list, NOT the instance list `selbrush_t.ownerPrev`).  Read it raw
     // to match the binary's `cmp ecx, [ebx+0Ch]`.
-    brush_t *repBrush = *(brush_t **)( (char *)eDef + 0x0C );
+    brush_t *repBrush = (brush_t *)eDef->brushes.prev;
     bool isRep = ( b->def == repBrush );
     if ( ( !*(int *)&eclass->fixedsize && !isRep ) || ( eclass->classtype & 0x10 ) != 0 )
         return;
@@ -6762,7 +6762,7 @@ static void DrawOriginBox( const float *mins, const float *origin, char width,
         // v24 = b->owner->def->eclass; gate on the eclass-model-node flag bit 0x10
         // (the binary's `(*(_BYTE*)(eclass+0x180) & 0x10)==0` — draw unless that bit set).
         eclass_t *eclass = ( (entity_s_def *)b->owner->def )->eclass;
-        if ( ( *(byte *)( (char *)eclass + 0x180 ) & 0x10 ) == 0 )
+        if ( ( eclass->nShowFlags & 0x10 ) == 0 )
         {
             Byte4PackPixelColor( eclass->color, &col );
             // model bbox = the brush DEF's mins/maxs (brush_t +0x20 / +0x2C).
@@ -7606,12 +7606,11 @@ brush_t_with_custom_def *Brush_FullClone_sub475E80( entity_brush_s *a1 )
 static void Face_TexLock_Save( float *saveBuf, face_t *face )
 {
     float *chanBase = saveBuf + 2;                         // IDA: ecx + 8 (= 2 floats)
-    // td0 = &mtldef[0].mat_texDef.rotate  (face + 0x3C)
-    char  *chanTd   = (char *)face + 0x3C;                 // IDA: var_4 = edi + 0x3C
 
     for ( int ch = 0; ch < 3; ++ch )                       // var_14 = 3 channels
     {
-        MaterialDef *mtl = (MaterialDef *)( chanTd - 0x18 );   // IDA: var_4 - 0x18 = &mtldef[ch]
+        MaterialDef *mtl = &face->mtldef[ch];
+        char *chanTd = (char *)&mtl->mat_texDef.rotate;
         int layers = MaterialDef_04( mtl );
         if ( layers > 0 )
         {
@@ -7653,7 +7652,6 @@ static void Face_TexLock_Save( float *saveBuf, face_t *face )
                 out += 6;                                   // ebx += 0x18
             }
         }
-        chanTd   += 0x24;                                  // next MaterialDef
         chanBase += 6;                                     // var_10 += 0x18
     }
 }
@@ -7683,13 +7681,13 @@ static void Face_TexLock_Reproject( face_t *face, const float *saveBuf,
         return;
 
     const char *chanSave = (const char *)saveBuf + 8;      // IDA: a3 + 8
-    char       *chanTd   = (char *)face + 0x3C;            // var_1C: &mtldef[0].td.rotate
 
     for ( int ch = 0; ch < 3; ++ch )                       // var_14: 3 channels
     {
         if ( lockFlags[ch] )                               // [ebx + a4] != 0
         {
-            MaterialDef *mtl = (MaterialDef *)( chanTd - 0x18 );
+            MaterialDef *mtl = &face->mtldef[ch];
+            char *chanTd = (char *)&mtl->mat_texDef.rotate;
             int layers = MaterialDef_04( mtl );
             if ( layers > 0 )
             {
@@ -7728,7 +7726,6 @@ static void Face_TexLock_Reproject( face_t *face, const float *saveBuf,
             }
         }
         chanSave += 0x18;                                  // (channel base advances 6 floats)
-        chanTd   += 0x24;                                  // next MaterialDef
     }
 }
 
@@ -7871,7 +7868,8 @@ entity_s *Brush_Move( const float *move, brush_t *def, char snap )
         ent->origin[1] += move[1];
         ent->origin[2] += move[2];
         // IDA ++LOWORD(owner[1].xx9): the 16-bit render-version counter at entity+0x78.
-        ++*(unsigned __int16 *)( (char *)ent + 0x78 );
+        ent->version_prob_wrong = (ent->version_prob_wrong & ~0xFFFF)
+                                | ((ent->version_prob_wrong + 1u) & 0xFFFF);
     }
     return ent;
 }

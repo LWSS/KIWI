@@ -107,7 +107,7 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
         {
             // Prefab .map name = owner->def->modelClass->x02 ([modelClass + 4]).
             entity_s_def *def = (entity_s_def *)owner->def;
-            const char   *prefabMap = *(const char **)( (char *)def->modelClass + 4 );
+            const char   *prefabMap = def->modelClass->name;
 
             // g_findReplaceVisited.find(prefabMap) == end() → not yet visited.
             if ( g_findReplaceVisited.find( prefabMap ) == g_findReplaceVisited.end() )

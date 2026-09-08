@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "snd_local.h"
 #include "snd_public.h"
+#include "snd_miles_spatial.h"
 #include <qcommon/mem_track.h>
 #include <msslib/mss.h>
 #include <qcommon/qcommon.h>
@@ -19,6 +20,25 @@ MssLocal milesGlob;
 
 const dvar_t *snd_khz;
 const dvar_t *snd_outputConfiguration;
+
+static void SND_GetStreamMSPosition(HSTREAM stream, S32 *totalMsec, S32 *currentMsec)
+{
+    AIL_stream_ms_position(stream, totalMsec, currentMsec);
+    if (!totalMsec || *totalMsec != 0)
+        return;
+
+    // Miles 9 queries the sample buffer for preloaded streams, but that buffer
+    // is not attached until playback starts. PCM stream metadata is valid now.
+    S32 rate = 0, format = 0, byteCount = 0;
+    AIL_stream_info(stream, &rate, &format, &byteCount, 0);
+    if (rate <= 0 || byteCount <= 0 || (format & ~(DIG_F_16BITS_MASK | DIG_F_STEREO_MASK)))
+        return;
+
+    const uint channels = (format & DIG_F_STEREO_MASK) ? 2 : 1;
+    const uint bytesPerSample = (format & DIG_F_16BITS_MASK) ? 2 : 1;
+    const uint64 duration = (uint64)byteCount * 1000 / ((uint64)rate * channels * bytesPerSample);
+    *totalMsec = duration > 0x7FFFFFFF ? 0x7FFFFFFF : (duration ? (S32)duration : 1);
+}
 
 void __cdecl TRACK_snd_driver()
 {
@@ -92,11 +112,8 @@ void __cdecl SND_Set3DPosition(int index, const float *org)
     listenerIndex = SND_GetListenerIndexNearestToOrigin(org);
     Vec3Sub(org, g_snd.listeners[listenerIndex].orient.origin, delta);
     MatrixTransposeTransformVector(delta, g_snd.listeners[listenerIndex].orient.axis, transformed);
-    AIL_set_sample_3D_position(
-        milesGlob.handle_sample[index],
-        -transformed[1],
-        transformed[2],
-        transformed[0]);
+    const MSSVECTOR3D position = {-transformed[1], transformed[2], transformed[0]};
+    MSS_SetPointPosition(milesGlob.driver, milesGlob.handle_sample[index], position);
 }
 
 void __cdecl SND_Stop2DChannel(int index)
@@ -182,6 +199,26 @@ void __cdecl SND_StopStreamChannel(int index)
     iassert(milesGlob.handle_stream[index - SND_FIRST_STREAM_CHANNEL]);
     iassert(milesGlob.handle_stream[index - SND_FIRST_STREAM_CHANNEL]->samp);
 
+    if (!I_stricmp(snd_debugAlias->current.string, g_snd.chaninfo[index].alias0->aliasName))
+    {
+        S32 total = 0, position = 0;
+        float left = 0, right = 0;
+        HSTREAM stream = (HSTREAM)milesGlob.handle_sample[index];
+        SND_GetStreamMSPosition(stream, &total, &position);
+        AIL_sample_volume_levels(AIL_stream_sample_handle(stream), &left, &right);
+        SND_DebugAliasPrint(true, g_snd.chaninfo[index].alias0,
+            va("Closing stream: status=%i position=%i/%i ms volume=(%.3f %.3f) elapsed=%i ms",
+                AIL_stream_status(stream), position, total, left, right, g_snd.time - g_snd.chaninfo[index].startTime));
+        HSAMPLE sample = AIL_stream_sample_handle(stream);
+        const MSS_SPEAKER sources[] = { MSS_SPEAKER_FRONT_CENTER, MSS_SPEAKER_FRONT_CENTER, MSS_SPEAKER_FRONT_CENTER };
+        const MSS_SPEAKER destinations[] = { MSS_SPEAKER_FRONT_LEFT, MSS_SPEAKER_FRONT_RIGHT, MSS_SPEAKER_FRONT_CENTER };
+        float levels[3] = {}, dry = 0, wet = 0;
+        const float mixVolume = AIL_sample_output_levels(sample, sources, destinations, levels, 3);
+        AIL_sample_reverb_levels(sample, &dry, &wet);
+        SND_DebugAliasPrint(true, g_snd.chaninfo[index].alias0,
+            va("Miles output: mix=%.4f mono-to-L/R/C=(%.4f %.4f %.4f) dry=%.3f wet=%.3f multichannel=%i",
+                mixVolume, levels[0], levels[1], levels[2], dry, wet, milesGlob.isMultiChannel));
+    }
     AIL_close_stream((HSTREAM)milesGlob.handle_sample[index]);
     milesGlob.handle_sample[index] = 0;
     SND_ResetChannelInfo(index);
@@ -301,7 +338,10 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
 
     entchannel = SNDALIASFLAGS_GET_CHANNEL(startAliasInfo->alias0->flags);
     if (!SND_HasFreeVoice(entchannel))
+    {
+        SND_DebugAliasPrint(true, startAliasInfo->alias0, "Rejected: no free voice for 2D sample");
         return -1;
+    }
 
     index = SND_FindFree2DChannel(startAliasInfo, entchannel);
     if (pChannel)
@@ -634,7 +674,8 @@ void __cdecl SND_Set3DStreamPosition(int index, int listenerIndex, const float *
     MatrixTransposeTransformVector(delta, g_snd.listeners[listenerIndex].orient.axis, transformed);
     handle_sample = AIL_stream_sample_handle((HSTREAM)milesGlob.handle_sample[index]);
     v3 = -transformed[1];
-    AIL_set_sample_3D_position(handle_sample, v3, transformed[2], transformed[0]);
+    const MSSVECTOR3D position = { v3, transformed[2], transformed[0] };
+    MSS_SetPointPosition(milesGlob.driver, handle_sample, position);
 }
 
 float __cdecl SND_GetStream3DVolumeFallOff(int index, int listenerIndex)
@@ -693,7 +734,10 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
     entchannel = SNDALIASFLAGS_GET_CHANNEL(startAliasInfo->alias0->flags);
 
     if (!SND_HasFreeVoice(entchannel))
+    {
+        SND_DebugAliasPrint(true, startAliasInfo->alias0, "Rejected: no free voice when opening stream");
         return -1;
+    }
 
     if (startAliasInfo->alias0->soundFile->exists)
     {
@@ -735,7 +779,9 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
             AIL_set_stream_loop_count((HSTREAM)handle, (startAliasInfo->alias0->flags & 1) == 0);
             baseSlavePercentage = MSS_GetWetLevel(startAliasInfo->alias0);
             AIL_set_sample_reverb_levels(handle_sample, MSS_GetDryLevel(), baseSlavePercentage);
-            AIL_stream_ms_position((HSTREAM)handle, total_msec, 0);
+            SND_GetStreamMSPosition((HSTREAM)handle, total_msec, 0);
+            SND_DebugAliasPrint(true, startAliasInfo->alias0,
+                va("Stream '%s': duration=%i ms, timeshift=%i ms", realname, total_msec[0], startAliasInfo->timeshift));
             if (startAliasInfo->timeshift < total_msec[0])
             {
                 if (total_msec[0])
@@ -799,6 +845,14 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
                         SND_ApplyChannelMap(handle_sample, startAliasInfo->alias0, srcChannelCount);
                     }
                     SND_SetStreamChannelVolume(index, realVolume);
+                    if (!I_stricmp(snd_debugAlias->current.string, startAliasInfo->alias0->aliasName))
+                        SND_DebugAliasPrint(true, startAliasInfo->alias0,
+                            va("Stream state: volume=%.3f base=%.3f global=%.3f channel=%.3f rate=%i paused=%i delay=%i status=%i origin=(%.1f %.1f %.1f)",
+                                realVolume, startAliasInfo->volume, g_snd.volume,
+                                g_snd.channelvol->channelvol[entchannel].volume,
+                                AIL_sample_playback_rate(handle_sample), g_snd.chaninfo[index].paused,
+                                startAliasInfo->startDelay, AIL_stream_status((HSTREAM)handle),
+                                org[0], org[1], org[2]));
                     playbackId = SND_AcquirePlaybackId(index, total_msec[0]);
                     if (playbackId != -1)
                         SND_AddVoice(entchannel);
@@ -818,6 +872,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
         else
         {
             error = (const char *)AIL_last_error();
+            SND_DebugAliasPrint(true, startAliasInfo->alias0, va("Rejected: cannot open stream '%s': %s", realname, error));
             Com_PrintError(
                 CON_CHANNEL_SOUND,
                 "Couldn't play stream '%s' from alias '%s' - %s\n",
@@ -830,6 +885,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
     else
     {
         Com_GetSoundFileName(startAliasInfo->alias0, filename, 128);
+        SND_DebugAliasPrint(true, startAliasInfo->alias0, va("Rejected: stream '%s' was missing at load time", filename));
         Com_DPrintf(
             CON_CHANNEL_SOUND,
             "Tried to play streamed sound '%s' from alias '%s', but it was not found at load time.\n",
@@ -1194,7 +1250,7 @@ int __cdecl SND_GetStreamChannelLength(int index)
     iassert(index >= SND_FIRST_STREAM_CHANNEL && index < SND_FIRST_STREAM_CHANNEL + g_snd.max_stream_channels);
 
     int length;
-    AIL_stream_ms_position((HSTREAM)milesGlob.handle_sample[index], &length, 0);
+    SND_GetStreamMSPosition((HSTREAM)milesGlob.handle_sample[index], &length, 0);
     return length;
 }
 
@@ -1267,7 +1323,7 @@ void __cdecl SND_GetStreamChannelSaveInfo(int index, snd_save_stream_t *info)
     handle = (_STREAM *)milesGlob.handle_sample[index];
     iassert(handle);
     handle_sample = (_SAMPLE *)AIL_stream_sample_handle((HSTREAM)milesGlob.handle_sample[index]);
-    AIL_stream_ms_position(handle, &length, &offset);
+    SND_GetStreamMSPosition(handle, &length, &offset);
     info->fraction = (double)offset / (double)length;
     if (g_snd.chaninfo[index].timescale)
     {

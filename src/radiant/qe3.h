@@ -692,8 +692,7 @@ struct patchMesh_t
     patchMesh_material texture;     // 0x18
     patchMesh_material lightmap;    // 0x20
     patchMesh_material smoothing;   // 0x28
-    char               pad_0x0030[4]; // 0x30
-    texdef_t          *mat_unk;     // 0x34
+    patchMesh_material workingMaterial; // 0x30 (x86), texture-edit snapshot
     drawVert_t         ctrl[16][16];// 0x38  (0x5000 bytes)
     curvePatchDef_t   *curveDef;    // 0x5038  tessellated render mesh (Patch_GenericMesh2)
     union {                         // 0x503C

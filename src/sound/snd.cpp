@@ -58,7 +58,7 @@ void __cdecl TRACK_snd()
 void __cdecl SND_DebugAliasPrint(bool condition, const snd_alias_t *alias, const char *msg)
 {
     if (condition && !I_stricmp(snd_debugAlias->current.string, alias->aliasName))
-        Com_DPrintf(CON_CHANNEL_SOUND, "^5SND_DEBUG_ALIAS (%s): %s\n", alias->aliasName, msg);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "^5SND_DEBUG_ALIAS (%s): %s\n", alias->aliasName, msg);
 }
 
 int __cdecl SND_GetEntChannelCount()
@@ -1375,8 +1375,12 @@ int __cdecl SND_PlaySoundAlias_Internal(
     playbackId = SND_PLAYBACKID_NOTPLAYED;
     outOfRange = 0;
 
+    SND_DebugAliasPrint(true, alias0, "Playback requested");
     if (!g_snd.Initialized2d)
+    {
+        SND_DebugAliasPrint(true, alias0, "Rejected: sound system not initialized");
         return playbackId;
+    }
 
     if (pChannel)
         *pChannel = SND_PLAYBACKID_NOTPLAYED;
@@ -1424,7 +1428,10 @@ int __cdecl SND_PlaySoundAlias_Internal(
             SND_StopEntityChannel(sndEnt, alias0Channel);
 
         if (SND_IsNullSoundFile(alias0->soundFile))
+        {
+            SND_DebugAliasPrint(true, alias0, "Rejected: alias points to null.wav");
             return SND_PLAYBACKID_NOTPLAYED;
+        }
 
         SND_ChoosePitchAndVolume(alias0, alias1, lerp, volumeScale, &startAliasInfo.volume, &startAliasInfo.pitch);
         startAliasInfo.alias0 = alias0;
@@ -1630,7 +1637,10 @@ int __cdecl SND_StartAliasStream(SndStartAliasInfo *startAliasInfo, int *pChanne
     iassert(index >= ((0 + 8) + 32) && index < ((0 + 8) + 32) + g_snd.max_stream_channels);
 
     if (!snd_enableStream->current.enabled)
+    {
+        SND_DebugAliasPrint(true, startAliasInfo->alias0, "Rejected: snd_enableStream is disabled");
         return SND_PLAYBACKID_NOTPLAYED;
+    }
 
     if (SND_IsAliasChannel3D((startAliasInfo->alias0->flags & 0x3F00) >> 8) && !SND_AnyActiveListeners())
         Com_Error(
@@ -1665,7 +1675,13 @@ int __cdecl SND_FindFreeStreamChannel(SndStartAliasInfo *startAliasInfo, int ent
     int i; // [esp+6Ch] [ebp-4h]
 
     if (!SND_HasFreeVoice(entchannel))
+    {
+        SND_DebugAliasPrint(true, startAliasInfo->alias0,
+            va("Rejected: channel '%s' has no free voices (active=%i max=%i, including pending streams)",
+                g_snd.entchaninfo[entchannel].name, g_snd.entchaninfo[entchannel].voiceCount,
+                g_snd.entchaninfo[entchannel].maxVoices));
         return SND_PLAYBACKID_NOTPLAYED;
+    }
 
     for (i = 5; i < g_snd.max_stream_channels; ++i)
     {
