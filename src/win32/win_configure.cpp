@@ -38,114 +38,41 @@ uint __cdecl Sys_AddApicIdIfUnique(
     return existingCount + 1;
 }
 
-void __cdecl Sys_GetPhysicalCpuCount(SysInfo* sysInfo)
+void __cdecl Sys_GetPhysicalCpuCount(SysInfo *sysInfo)
 {
-    bool v1; // cf
-    DWORD v8; // eax
-    _DWORD v14[5]; // [esp+0h] [ebp-E8h] BYREF
-    int v15; // [esp+14h] [ebp-D4h]
-    unsigned __int8 v16; // [esp+1Ah] [ebp-CEh]
-    unsigned __int8 v17; // [esp+1Bh] [ebp-CDh]
-    char* cpuVendor; // [esp+1Ch] [ebp-CCh]
-    const char* v19; // [esp+20h] [ebp-C8h]
-    int v20; // [esp+28h] [ebp-C0h]
-    int v21; // [esp+2Ch] [ebp-BCh]
-    uint regEdx; // [esp+30h] [ebp-B8h]
-    uint regEax; // [esp+34h] [ebp-B4h]
-    uint regEbx; // [esp+38h] [ebp-B0h]
-    void* process; // [esp+3Ch] [ebp-ACh]
-    uint apicId; // [esp+40h] [ebp-A8h]
-    uint logicalPerPhysical; // [esp+44h] [ebp-A4h]
-    DWORD_PTR systemAffinityMask; // [esp+48h] [ebp-A0h] BYREF
-    uint logicalIdMask; // [esp+4Ch] [ebp-9Ch]
-    DWORD_PTR processAffinityMask; // [esp+50h] [ebp-98h] BYREF
-    uint testAffinityMask; // [esp+54h] [ebp-94h]
-    uint existingApicId[32]; // [esp+58h] [ebp-90h] BYREF
-    _DWORD* v33; // [esp+D8h] [ebp-10h]
-    int v34; // [esp+E4h] [ebp-4h]
-
-    v33 = v14;
+    DWORD bytes = 0;
+    DWORD_PTR processMask = 0, systemMask = 0;
     sysInfo->physicalCpuCount = sysInfo->logicalCpuCount;
-    v19 = "GenuineIntel";
-    cpuVendor = sysInfo->cpuVendor;
-    while (1)
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask))
     {
-        v17 = *cpuVendor;
-        v1 = v17 < (uint)*v19;
-        if (v17 != *v19)
-            break;
-        if (!v17)
-            goto LABEL_6;
-        v16 = cpuVendor[1];
-        v1 = v16 < (uint)v19[1];
-        if (v16 != v19[1])
-            break;
-        cpuVendor += 2;
-        v19 += 2;
-        if (!v16)
-        {
-        LABEL_6:
-            v15 = 0;
-            goto LABEL_8;
-        }
+        return;
     }
-    v15 = -v1 - (v1 - 1);
-LABEL_8:
-    v14[4] = v15;
-    if (!v15)
+    GetLogicalProcessorInformation(NULL, &bytes);
+    if (!bytes)
     {
-        int cpuinfo[4]{};
-
-        // TODO: ecx??
-        __cpuidex(cpuinfo, 1, 0);
-        regEax = cpuinfo[0];
-        regEbx = cpuinfo[1];
-        regEdx = cpuinfo[2];
-
-        v34 = -1;
-        if ((regEax & 0xF00) == 0xF00 || (regEax & 0xF00000) != 0)
+        return;
+    }
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION *info = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION *)malloc(bytes);
+    if (!info)
+    {
+        return;
+    }
+    if (GetLogicalProcessorInformation(info, &bytes))
+    {
+        int count = 0;
+        for (size_t i = 0; i < bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); ++i)
         {
-            logicalPerPhysical = BYTE2(regEbx);
-            if (BYTE2(regEbx))
+            if (info[i].Relationship == RelationProcessorCore && (info[i].ProcessorMask & processMask))
             {
-                if (logicalPerPhysical != 255)
-                {
-                    if (!_BitScanReverse(&v8, logicalPerPhysical))
-                        v8 = 63;// `CountLeadingZeros'::`2': : notFound;
-                    v21 = v8 ^ 0x1F;
-                    v20 = 1 << (32 - (v8 ^ 0x1F));
-                    logicalIdMask = v20 - 1;
-                    sysInfo->physicalCpuCount = 0;
-                    process = GetCurrentProcess();
-                    GetProcessAffinityMask(process, &processAffinityMask, &systemAffinityMask);
-                    iassert(processAffinityMask);
-                    iassert(systemAffinityMask);
-                    iassert(!(processAffinityMask & ~systemAffinityMask));
-                    for (testAffinityMask = 1; testAffinityMask && testAffinityMask <= processAffinityMask; testAffinityMask *= 2)
-                    {
-                        if (SetProcessAffinityMask(process, testAffinityMask))
-                        {
-                            Sleep(0);
-
-                            // TODO: ecx??
-                            __cpuidex(cpuinfo, 1, 0);
-                            regEbx = cpuinfo[1];
-
-                            apicId = ~logicalIdMask & HIBYTE(regEbx);
-                        }
-                        else
-                        {
-                            apicId = -1;
-                        }
-                        sysInfo->physicalCpuCount = Sys_AddApicIdIfUnique(apicId, existingApicId, sysInfo->physicalCpuCount);
-                    }
-                    SetProcessAffinityMask(process, processAffinityMask);
-                    Sleep(0);
-                    rangeassert(sysInfo->physicalCpuCount, 1, sysInfo->logicalCpuCount);
-                }
+                ++count;
             }
         }
+        if (count > 0)
+        {
+            sysInfo->physicalCpuCount = count;
+        }
     }
+    free(info);
 }
 
 long double __cdecl Sys_BenchmarkGHz()
@@ -218,8 +145,23 @@ void Sys_SetAutoConfigureGHz(SysInfo* sysInfo)
 
 void __cdecl Sys_DetectCpuVendorAndName(char *vendor, char *name)
 {
-    strcpy(vendor, "KisakTech");
-    strcpy(name, "KSK-2900x 5.0khz (No AMD PSP or Intel ME)");
+    int registers[4];
+    __cpuid(registers, 0);
+    memcpy(vendor, &registers[1], sizeof(int));
+    memcpy(vendor + 4, &registers[3], sizeof(int));
+    memcpy(vendor + 8, &registers[2], sizeof(int));
+    vendor[12] = 0;
+    strcpy(name, "Unknown CPU");
+    __cpuid(registers, 0x80000000);
+    if ((uint)registers[0] >= 0x80000004u)
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            __cpuid(registers, 0x80000002u + i);
+            memcpy(name + i * sizeof(int[4]), registers, sizeof(int[4]));
+        }
+        name[48] = 0;
+    }
 }
 #if 0 // KISAKTODO gotta do this ourselves
 void __cdecl Sys_DetectCpuVendorAndName(char* vendor, char* name)

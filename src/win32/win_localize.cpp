@@ -23,10 +23,10 @@ char* __cdecl Win_GetLanguage()
 int __cdecl Win_InitLocalization()
 {
     signed int size; // [esp+0h] [ebp-10h]
-    int sizea; // [esp+0h] [ebp-10h]
-    _iobuf* fp; // [esp+4h] [ebp-Ch]
-    int i; // [esp+8h] [ebp-8h]
-    int lang; // [esp+Ch] [ebp-4h] BYREF
+    int sizea;       // [esp+0h] [ebp-10h]
+    _iobuf *fp;      // [esp+4h] [ebp-Ch]
+    int i;           // [esp+8h] [ebp-8h]
+    int lang;        // [esp+Ch] [ebp-4h] BYREF
 
     localization.language = 0;
     localization.strings = 0;
@@ -41,11 +41,16 @@ int __cdecl Win_InitLocalization()
     size = FS_FileGetFileSize(fp);
 
     iassert(size < LANGUAGE_BUF_SIZE);
+    if (size < 0 || size >= LANGUAGE_BUF_SIZE)
+    {
+        FS_FileClose(fp);
+        return 0;
+    }
 
     localization.language = language_buffer;
     sizea = FS_FileRead(language_buffer, size, fp);
     FS_FileClose(fp);
-    if (sizea)
+    if (sizea > 0 && sizea < LANGUAGE_BUF_SIZE)
     {
         localization.language[sizea] = 0;
         lang = 0;

@@ -71,78 +71,82 @@ static void PrintWorkingDir()
 
 static void Win_RegisterClass()
 {
-	tagWNDCLASSEXA wce{};
+    tagWNDCLASSEXA wce{};
 
-	wce.cbSize = sizeof(wce);
-	wce.lpfnWndProc = MainWndProc;
-	wce.hInstance = g_wv.hInstance;
-	wce.hIcon = LoadIconA(g_wv.hInstance, (LPCSTR)1);
-	wce.hCursor = LoadCursorA(0, (LPCSTR)0x7F00); // KISAKTODO figure resources out
-	wce.hbrBackground = CreateSolidBrush(0);
-	wce.lpszClassName = "CoD4";
+    wce.cbSize = sizeof(WNDCLASSEXA);
+    wce.lpfnWndProc = MainWndProc;
+    wce.hInstance = g_wv.hInstance;
+    wce.hIcon = LoadIconA(g_wv.hInstance, (LPCSTR)1);
+    wce.hCursor = LoadCursorA(0, (LPCSTR)0x7F00); // KISAKTODO figure resources out
+    wce.hbrBackground = CreateSolidBrush(0);
+    wce.lpszClassName = "CoD4";
 
-	if (!RegisterClassExA(&wce))
-		Com_Error(ERR_FATAL, "EXE_ERR_COULDNT_REGISTER_WINDOW");
+    if (!RegisterClassExA(&wce))
+    {
+        Com_Error(ERR_FATAL, "EXE_ERR_COULDNT_REGISTER_WINDOW");
+    }
 }
 
-sysEvent_t* __cdecl Win_GetEvent(sysEvent_t* result)
+sysEvent_t *__cdecl Win_GetEvent(sysEvent_t *result)
 {
-	PROF_SCOPED("Win_GetEvent");
+    PROF_SCOPED("Win_GetEvent");
 
-	size_t v2; // [esp+0h] [ebp-50h]
-	char* b; // [esp+10h] [ebp-40h]
-	tagMSG msg; // [esp+18h] [ebp-38h] BYREF
-	char* s; // [esp+34h] [ebp-1Ch]
-	sysEvent_t ev; // [esp+38h] [ebp-18h] BYREF
+    size_t v2;     // [esp+0h] [ebp-50h]
+    char *b;       // [esp+10h] [ebp-40h]
+    tagMSG msg;    // [esp+18h] [ebp-38h] BYREF
+    char *s;       // [esp+34h] [ebp-1Ch]
+    sysEvent_t ev; // [esp+38h] [ebp-18h] BYREF
 
-	Sys_EnterCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
-	if (eventHead <= eventTail)
-	{
-		{
-			PROF_SCOPED("Message Pump");
+    Sys_EnterCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
+    if (eventHead <= eventTail)
+    {
+        {
+            PROF_SCOPED("Message Pump");
 
-			while (PeekMessageA(&msg, 0, 0, 0, 0))
-			{
-				if (!GetMessageA(&msg, 0, 0, 0))
-					Com_Quit_f();
-				g_wv.sysMsgTime = msg.time;
-				TranslateMessage(&msg);
-				DispatchMessageA(&msg);
-			}
-		}
+            while (PeekMessageA(&msg, 0, 0, 0, 0))
+            {
+                if (!GetMessageA(&msg, 0, 0, 0))
+                {
+                    Com_Quit_f();
+                }
+                g_wv.sysMsgTime = msg.time;
+                TranslateMessage(&msg);
+                DispatchMessageA(&msg);
+            }
+        }
 
-		{
-			PROF_SCOPED("Console Input");
-			s = Sys_ConsoleInput();
-			if (s)
-			{
-				v2 = strlen(s);
-				b = (char *)Com_AllocEvent(v2 + 1);
-				I_strncpyz(b, s, v2);
-				Sys_QueEvent(0, SE_CONSOLE, 0, 0, v2 + 1, b);
-			}
-		}
+        {
+            PROF_SCOPED("Console Input");
+            s = Sys_ConsoleInput();
+            if (s)
+            {
+                v2 = strlen(s);
+                b = (char *)Com_AllocEvent(v2 + 1);
+                I_strncpyz(b, s, v2 + 1);
+                Sys_QueEvent(0, SE_CONSOLE, 0, 0, v2 + 1, b);
+            }
+        }
 
-		if (eventHead <= eventTail)
-		{
-			memset(&ev, 0, sizeof(ev));
-			ev.evTime = Sys_Milliseconds();
-		}
-		else
-		{
-			ev = eventQue[(unsigned __int8)eventTail++];
-		}
-		Sys_LeaveCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
-		*result = ev;
-		return result;
-	}
-	else
-	{
-		ev = eventQue[(unsigned __int8)eventTail++];
-		Sys_LeaveCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
-		*result = ev;
-		return result;
-	}
+        if (eventHead <= eventTail)
+        {
+            memset(&ev, 0, sizeof(sysEvent_t));
+            ev.evTime = Sys_Milliseconds();
+        }
+        else
+        {
+            ev = eventQue[(unsigned __int8)eventTail++];
+        }
+        Sys_LeaveCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
+        *result = ev;
+        return result;
+    }
+    else
+    {
+        ev = eventQue[(unsigned __int8)eventTail++];
+        Sys_LeaveCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
+        *result = ev;
+        return result;
+    }
 }
 
 static int Sys_GetSemaphoreFileName()
@@ -203,43 +207,51 @@ void __cdecl Sys_OutOfMemErrorInternal(const char* filename, int line)
 
 int __cdecl Sys_IsGameProcess(DWORD id)
 {
-	tagMODULEENTRY32 me; // [esp+0h] [ebp-350h] BYREF
-	int isGame; // [esp+22Ch] [ebp-124h]
-	char* i; // [esp+230h] [ebp-120h]
-	char* moduleName; // [esp+234h] [ebp-11Ch]
-	char modulePath[268]; // [esp+238h] [ebp-118h] BYREF
-	void* snapshot; // [esp+348h] [ebp-8h]
-	void* process; // [esp+34Ch] [ebp-4h]
+    tagMODULEENTRY32 me;  // [esp+0h] [ebp-350h] BYREF
+    int isGame;           // [esp+22Ch] [ebp-124h]
+    char *i;              // [esp+230h] [ebp-120h]
+    char *moduleName;     // [esp+234h] [ebp-11Ch]
+    char modulePath[268]; // [esp+238h] [ebp-118h] BYREF
+    void *snapshot;       // [esp+348h] [ebp-8h]
+    void *process;        // [esp+34Ch] [ebp-4h]
 
-	process = OpenProcess(0x1F0FFFu, 0, id);
-	if (!process)
-		return 0;
-	CloseHandle(process);
-	snapshot = CreateToolhelp32Snapshot(8u, id);
-	if (snapshot == (void*)-1)
-		return 0;
-	isGame = 0;
-	me.dwSize = 548;
-	if (Module32First(snapshot, &me))
-	{
-		GetModuleFileNameA(0, modulePath, 0x104u);
-		modulePath[259] = 0;
-		moduleName = modulePath;
-		for (i = modulePath; *i; ++i)
-		{
-			if (*i == 92 || *i == 58)
-				moduleName = i + 1;
-		}
-		while (I_stricmp(me.szModule, moduleName))
-		{
-			if (!Module32Next(snapshot, &me))
-				goto LABEL_15;
-		}
-		isGame = 1;
-	}
+    process = OpenProcess(0x1F0FFFu, 0, id);
+    if (!process)
+    {
+        return 0;
+    }
+    CloseHandle(process);
+    snapshot = CreateToolhelp32Snapshot(8u, id);
+    if (snapshot == (void *)-1)
+    {
+        return 0;
+    }
+    isGame = 0;
+    me.dwSize = sizeof(MODULEENTRY32);
+    if (Module32First(snapshot, &me))
+    {
+        GetModuleFileNameA(0, modulePath, 0x104u);
+        modulePath[259] = 0;
+        moduleName = modulePath;
+        for (i = modulePath; *i; ++i)
+        {
+            if (*i == 92 || *i == 58)
+            {
+                moduleName = i + 1;
+            }
+        }
+        while (I_stricmp(me.szModule, moduleName))
+        {
+            if (!Module32Next(snapshot, &me))
+            {
+                goto LABEL_15;
+            }
+        }
+        isGame = 1;
+    }
 LABEL_15:
-	CloseHandle(snapshot);
-	return isGame;
+    CloseHandle(snapshot);
+    return isGame;
 }
 
 void Sys_NoFreeFilesError()
@@ -314,44 +326,45 @@ int __cdecl Sys_CheckCrashOrRerun()
 
 void Sys_Error(const char *error, ...)
 {
-	tagMSG Msg; // [esp+4h] [ebp-1024h] BYREF
-	char string[4100]; // [esp+20h] [ebp-1008h] BYREF
-	va_list va; // [esp+1034h] [ebp+Ch] BYREF
+    tagMSG Msg;        // [esp+4h] [ebp-1024h] BYREF
+    char string[4100]; // [esp+20h] [ebp-1008h] BYREF
+    va_list va;        // [esp+1034h] [ebp+Ch] BYREF
 
-	va_start(va, error);
-	Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
-	Com_PrintStackTrace();
-	com_errorEntered = 1;
-	Sys_SuspendOtherThreads();
-	vsnprintf_s(string, 0x1000u, error, va);
-	
-	// random gamma crap we don't care about
-	// FixWindowsDesktop();
+    va_start(va, error);
+    Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
+    Com_PrintStackTrace();
+    com_errorEntered = 1;
+    Sys_SuspendOtherThreads();
+    vsnprintf_s(string, sizeof(string), _TRUNCATE, error, va);
+    va_end(va);
+
+    // random gamma crap we don't care about
+    // FixWindowsDesktop();
 
 #ifdef KISAK_MP
-	if (com_dedicated->current.integer)
+    if (com_dedicated->current.integer)
 #endif
-	{
+    {
 #ifndef KISAK_SP
-		if (Sys_IsMainThread())
+        if (Sys_IsMainThread())
 #endif
-		{
-			Sys_ShowConsole();
-			Conbuf_AppendText("\n\n");
-			Conbuf_AppendText(string);
-			Conbuf_AppendText("\n");
-			Sys_SetErrorText(string);
-			while (GetMessageA(&Msg, 0, 0, 0))
-			{
-				TranslateMessage(&Msg);
-				DispatchMessageA(&Msg);
-			}
-			exit(0);
-		}
-	}
+        {
+            Sys_ShowConsole();
+            Conbuf_AppendText("\n\n");
+            Conbuf_AppendText(string);
+            Conbuf_AppendText("\n");
+            Sys_SetErrorText(string);
+            while (GetMessageA(&Msg, 0, 0, 0))
+            {
+                TranslateMessage(&Msg);
+                DispatchMessageA(&Msg);
+            }
+            exit(0);
+        }
+    }
 
-	Sys_SetErrorText(string);
-	exit(0);
+    Sys_SetErrorText(string);
+    exit(0);
 }
 
 void __cdecl Sys_OpenURL(const char *url, int doexit)
@@ -373,24 +386,24 @@ void __cdecl Sys_OpenURL(const char *url, int doexit)
 
 void Sys_SpawnQuitProcess()
 {
-	const char* v0; // eax
-	_STARTUPINFOA dst; // [esp+0h] [ebp-60h] BYREF
-	void* msgBuf; // [esp+48h] [ebp-18h] BYREF
-	_PROCESS_INFORMATION pi; // [esp+4Ch] [ebp-14h] BYREF
-	uint error; // [esp+5Ch] [ebp-4h]
+    const char *v0;          // eax
+    _STARTUPINFOA dst;       // [esp+0h] [ebp-60h] BYREF
+    void *msgBuf;            // [esp+48h] [ebp-18h] BYREF
+    _PROCESS_INFORMATION pi; // [esp+4Ch] [ebp-14h] BYREF
+    uint error;              // [esp+5Ch] [ebp-4h]
 
-	if (sys_exitCmdLine[0])
-	{
-		memset((unsigned __int8*)&dst, 0, sizeof(dst));
-		dst.cb = 68;
-		if (!CreateProcessA(0, sys_exitCmdLine, 0, 0, 0, 0, 0, 0, &dst, &pi))
-		{
-			error = GetLastError();
-			FormatMessageA(0x1300u, 0, error, 0x400u, (LPSTR)&msgBuf, 0, 0);
-			v0 = va("EXE_ERR_COULDNT_START_PROCESS", sys_exitCmdLine, msgBuf, error);
-			Com_Error(ERR_DROP, v0);
-		}
-	}
+    if (sys_exitCmdLine[0])
+    {
+        memset(&dst, 0, sizeof(STARTUPINFOA));
+        dst.cb = sizeof(STARTUPINFOA);
+        if (!CreateProcessA(0, sys_exitCmdLine, 0, 0, 0, 0, 0, 0, &dst, &pi))
+        {
+            error = GetLastError();
+            FormatMessageA(0x1300u, 0, error, 0x400u, (LPSTR)&msgBuf, 0, 0);
+            v0 = va("EXE_ERR_COULDNT_START_PROCESS", sys_exitCmdLine, msgBuf, error);
+            Com_Error(ERR_DROP, v0);
+        }
+    }
 }
 
 void __cdecl  Sys_Quit()
@@ -678,64 +691,68 @@ void __cdecl Sys_ShowSplashWindow()
 
 int __cdecl Sys_SystemMemoryMB()
 {
-	HWND ActiveWindow; // eax
-	HWND v2; // eax
-	char* v3; // [esp-Ch] [ebp-C8h]
-	char* v4; // [esp-Ch] [ebp-C8h]
-	char* v5; // [esp-8h] [ebp-C4h]
-	char* v6; // [esp-8h] [ebp-C4h]
-	float v7; // [esp+30h] [ebp-8Ch]
-	float v8; // [esp+40h] [ebp-7Ch]
-	int sysMB; // [esp+50h] [ebp-6Ch]
-	int sysMBa; // [esp+50h] [ebp-6Ch]
-	HINSTANCE__* hm; // [esp+54h] [ebp-68h]
-	_MEMORYSTATUS status; // [esp+58h] [ebp-64h] BYREF
-	int(__stdcall * MemStatEx)(_MEMORYSTATUSEX*); // [esp+78h] [ebp-44h]
-	_MEMORYSTATUSEX statusEx; // [esp+7Ch] [ebp-40h] BYREF
+    HWND ActiveWindow;                             // eax
+    HWND v2;                                       // eax
+    char *v3;                                      // [esp-Ch] [ebp-C8h]
+    char *v4;                                      // [esp-Ch] [ebp-C8h]
+    char *v5;                                      // [esp-8h] [ebp-C4h]
+    char *v6;                                      // [esp-8h] [ebp-C4h]
+    float v7;                                      // [esp+30h] [ebp-8Ch]
+    float v8;                                      // [esp+40h] [ebp-7Ch]
+    int sysMB;                                     // [esp+50h] [ebp-6Ch]
+    int sysMBa;                                    // [esp+50h] [ebp-6Ch]
+    HINSTANCE__ *hm;                               // [esp+54h] [ebp-68h]
+    _MEMORYSTATUS status;                          // [esp+58h] [ebp-64h] BYREF
+    int(__stdcall * MemStatEx)(_MEMORYSTATUSEX *); // [esp+78h] [ebp-44h]
+    _MEMORYSTATUSEX statusEx;                      // [esp+7Ch] [ebp-40h] BYREF
 
-	hm = GetModuleHandleA("kernel32.dll");
-	if (hm && (MemStatEx = (int(__stdcall*)(_MEMORYSTATUSEX*))GetProcAddress(hm, "GlobalMemoryStatusEx")) != 0)
-	{
-		statusEx.dwLength = 64;
-		MemStatEx(&statusEx);
-		if (statusEx.ullAvailVirtual < 0x8000000)
-		{
-			v5 = Win_LocalizeRef("WIN_LOW_MEMORY_TITLE");
-			v3 = Win_LocalizeRef("WIN_LOW_MEMORY_BODY");
-			ActiveWindow = GetActiveWindow();
-			if (MessageBoxA(ActiveWindow, v3, v5, 0x34u) != 6)
-			{
-				Sys_NormalExit();
-				exit(0);
-			}
-		}
-		v8 = (double)statusEx.ullTotalPhys * 0.00000095367431640625;
-		sysMB = (int)(v8 + 0.4999999990686774);
-		if ((double)statusEx.ullTotalPhys > (double)sysMB * 1048576.0 || sysMB > 1024)
-			return 1024;
-		return sysMB;
-	}
-	else
-	{
-		status.dwLength = 32;
-		GlobalMemoryStatus(&status);
-		if (status.dwAvailVirtual < 0x8000000)
-		{
-			v6 = Win_LocalizeRef("WIN_LOW_MEMORY_TITLE");
-			v4 = Win_LocalizeRef("WIN_LOW_MEMORY_BODY");
-			v2 = GetActiveWindow();
-			if (MessageBoxA(v2, v4, v6, 0x34u) != 6)
-			{
-				Sys_NormalExit();
-				exit(0);
-			}
-		}
-		v7 = (double)status.dwTotalPhys * 0.00000095367431640625;
-		sysMBa = (int)(v7 + 0.4999999990686774);
-		if ((double)status.dwTotalPhys > (double)sysMBa * 1048576.0 || sysMBa > 1024)
-			return 1024;
-		return sysMBa;
-	}
+    hm = GetModuleHandleA("kernel32.dll");
+    if (hm && (MemStatEx = (int(__stdcall *)(_MEMORYSTATUSEX *))GetProcAddress(hm, "GlobalMemoryStatusEx")) != 0)
+    {
+        statusEx.dwLength = sizeof(MEMORYSTATUSEX);
+        MemStatEx(&statusEx);
+        if (statusEx.ullAvailVirtual < 0x8000000)
+        {
+            v5 = Win_LocalizeRef("WIN_LOW_MEMORY_TITLE");
+            v3 = Win_LocalizeRef("WIN_LOW_MEMORY_BODY");
+            ActiveWindow = GetActiveWindow();
+            if (MessageBoxA(ActiveWindow, v3, v5, 0x34u) != 6)
+            {
+                Sys_NormalExit();
+                exit(0);
+            }
+        }
+        v8 = (double)statusEx.ullTotalPhys * 0.00000095367431640625;
+        sysMB = (int)(v8 + 0.4999999990686774);
+        if ((double)statusEx.ullTotalPhys > (double)sysMB * 1048576.0 || sysMB > 1024)
+        {
+            return 1024;
+        }
+        return sysMB;
+    }
+    else
+    {
+        status.dwLength = sizeof(MEMORYSTATUS);
+        GlobalMemoryStatus(&status);
+        if (status.dwAvailVirtual < 0x8000000)
+        {
+            v6 = Win_LocalizeRef("WIN_LOW_MEMORY_TITLE");
+            v4 = Win_LocalizeRef("WIN_LOW_MEMORY_BODY");
+            v2 = GetActiveWindow();
+            if (MessageBoxA(v2, v4, v6, 0x34u) != 6)
+            {
+                Sys_NormalExit();
+                exit(0);
+            }
+        }
+        v7 = (double)status.dwTotalPhys * 0.00000095367431640625;
+        sysMBa = (int)(v7 + 0.4999999990686774);
+        if ((double)status.dwTotalPhys > (double)sysMBa * 1048576.0 || sysMBa > 1024)
+        {
+            return 1024;
+        }
+        return sysMBa;
+    }
 }
 
 void Sys_FindInfo()

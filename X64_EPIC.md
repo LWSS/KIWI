@@ -18,7 +18,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 10 | ui | Complete |
 | 11 | ui_mp | Complete |
 | 12 | universal | Complete |
-| 13 | win32 | Pending |
+| 13 | win32 | Complete |
 | 14 | xanim | Pending |
 
 Validation distinguishes diagnostic compilation and isolated regression tests from a full native game link/run. Shared x86 layout assertions may require a test-only override until their owning part is ported. Production assertions are never globally disabled.
@@ -30,6 +30,17 @@ Part 8 checkpoint: `1883deb0`.
 Part 9 checkpoint: `18c58233`.
 Part 10 checkpoint: `778c83d8`.
 Part 11 checkpoint: `68c05ec8`.
+Part 12 checkpoint: `94fcc029`.
+
+## Part 13: win32
+
+Audited all 19 source/header files and the two resources. Native SOCKET values now survive UDP/TCP/debugger creation, selection, receiving and shutdown; invalid handles use INVALID_SOCKET consistently. Console subclassing uses SetWindowLongPtr and a true WPARAM callback. Mixer, module-enumeration, process-startup and memory-status structures use native sizes. Replaced the physical-CPU affinity mutation with Windows topology queries and the CPU-name placeholder with CPUID intrinsics. Stats access uses native dvar strings; stats files remain fixed-width.
+
+Corrected debugger byte counters, partial sends/acknowledgements and disconnect handling, SOCKS address/credential buffers and method negotiation, console width/input bounds, localization and voice input bounds. Selected independent fixes are exported outside the repository.
+
+Validation: all 44 configured x86/x64 MP/SP diagnostic compilation checks pass without local pointer-truncation warnings. `test_win32.py` passes actual UDP/TCP loopback, CPUID/topology and current-module enumeration, native callback forwarding, mixer API layout checks, short sends and four-byte acknowledgement wraparound. `test_win32_cmake.py` configures both Visual Studio architectures and verifies machine/DirectX/Miles/Steam selections. No microphone device, Steam login, interactive console or full game run was exercised.
+
+CMake exposes opt-in native game targets with `KIWI_BUILD_GAME=ON`; existing x64 tool-only builds retain their default. Radiant remains excluded from x64. The supplied SDK lacks `steam_api64.lib` and `steam_api64.dll`; supply matching binaries through `KIWI_STEAM_LIBRARY` and `KIWI_STEAM_RUNTIME` before linking. Database and remaining owner layouts still prevent claiming a complete native game build.
 
 ## Part 12: universal
 

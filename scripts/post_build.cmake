@@ -29,7 +29,7 @@ add_custom_command(
 add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${DEPS_DIR}/steamsdk/steam_api.dll
+        ${KIWI_STEAM_RUNTIME}
         ${BIN_DIR}/${CMAKE_BUILD_TYPE}
         COMMENT "COPYING STEAM DEPENDENCIES"
 )

@@ -21,13 +21,19 @@ endif()
 # Set Win32 compiler flag
 target_compile_definitions(${PROJECT_NAME} PUBLIC WIN32 _CONSOLE _MBCS)
 
-# Set the generator platform
-set(CMAKE_GENERATOR_PLATFORM "WIN32")
+# Match native dependencies to the selected generator architecture.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(KIWI_WINDOWS_ARCH x64)
+  set(KIWI_STEAM_LIBRARY "${DEPS_DIR}/steamsdk/steam_api64.lib" CACHE FILEPATH "Native Steam import library")
+  set(KIWI_STEAM_RUNTIME "${DEPS_DIR}/steamsdk/steam_api64.dll" CACHE FILEPATH "Native Steam runtime")
+else()
+  set(KIWI_WINDOWS_ARCH x86)
+  set(KIWI_STEAM_LIBRARY "${DEPS_DIR}/steamsdk/steam_api.lib" CACHE FILEPATH "Native Steam import library")
+  set(KIWI_STEAM_RUNTIME "${DEPS_DIR}/steamsdk/steam_api.dll" CACHE FILEPATH "Native Steam runtime")
+endif()
 
 # If we are building on windows
 if (WIN32)
-  # Set the generator platform
-  set(CMAKE_GENERATOR_PLATFORM "WIN32")
 
   # Check to see if we are running a github action
   if (DEFINED CICD)
@@ -42,13 +48,15 @@ if (WIN32)
 
     # Example: C:\Users\USERNAME\.nuget\packages\microsoft.dxsdk.d3dx\9.29.952.8\build\native
     set(DXSDK_INC_DIR ${DXSDK_DIR}/include)
-    set(DXSDK_LIB_DIR ${DXSDK_DIR}/${CMAKE_BUILD_TYPE}/lib/x86)
+    set(DXSDK_LIB_DIR ${DXSDK_DIR}/${CMAKE_BUILD_TYPE}/lib/${KIWI_WINDOWS_ARCH})
     message("DXSDK_LIB_DIR: ${DXSDK_LIB_DIR}")
   else()
     message("===== BUILDING FOR LOCAL DXSDK =====")
-    set(DXSDK_DIR $ENV{DXSDK_DIR})
+    if(NOT DEFINED DXSDK_DIR)
+      set(DXSDK_DIR $ENV{DXSDK_DIR})
+    endif()
     set(DXSDK_INC_DIR ${DXSDK_DIR}/include)
-    set(DXSDK_LIB_DIR ${DXSDK_DIR}/lib/x86)
+    set(DXSDK_LIB_DIR ${DXSDK_DIR}/lib/${KIWI_WINDOWS_ARCH})
   endif() # DEFINED CICD
   
   # Set the required library
@@ -75,7 +83,7 @@ target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/DEBUG>")
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:REF>")
 target_link_options(${PROJECT_NAME} PRIVATE "$<$<CONFIG:Release>:/OPT:ICF>")
 
-target_link_options(${PROJECT_NAME} PRIVATE /machine:x86)
+target_link_options(${PROJECT_NAME} PRIVATE /machine:${KIWI_WINDOWS_ARCH})
 set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -105,7 +113,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
         uuid.lib
         odbc32.lib
         odbccp32.lib
-        steam_api.lib
+        "${KIWI_STEAM_LIBRARY}"
         dxguid.lib
 )
 

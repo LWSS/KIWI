@@ -30,25 +30,36 @@ dsound_sample_t *s_clientSamples[64];
 
 static uint __cdecl mixerGetRecordLevel(char *SrcName)
 {
-    const char *v2; // eax
-    tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint jj; // [esp+98h] [ebp-F0h]
-    tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
-    HMIXER__ *phmx; // [esp+B8h] [ebp-D0h] BYREF
-    uint ii; // [esp+BCh] [ebp-CCh]
-    tagMIXERLINEA mixerline{ 0 }; // [esp+C0h] [ebp-C8h] BYREF
+    const char *v2;                           // eax
+    tagMIXERCONTROLA mxc;                     // [esp+0h] [ebp-188h] BYREF
+    uint jj;                                  // [esp+98h] [ebp-F0h]
+    tagMIXERLINECONTROLSA mxlc;               // [esp+9Ch] [ebp-ECh] BYREF
+    HMIXER__ *phmx;                           // [esp+B8h] [ebp-D0h] BYREF
+    uint ii;                                  // [esp+BCh] [ebp-CCh]
+    tagMIXERLINEA mixerline{0};               // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_UNSIGNED newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
-    tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
+    tMIXERCONTROLDETAILS mxcd;                // [esp+170h] [ebp-18h] BYREF
 
     if (!waveInGetNumDevs())
+    {
         return -1;
+    }
     if (!mixerGetNumDevs())
+    {
         return -1;
+    }
     if (mixerOpen(&phmx, 0, 0, 0, 0))
+    {
         return -1;
-    mixerline.cbStruct = 168;
+    }
+    mixerline.cbStruct = sizeof(tagMIXERLINEA);
     mixerline.dwComponentType = 7;
     MMRESULT res = mixerGetLineInfoA((HMIXEROBJ)phmx, &mixerline, 3u); // KISAKTODO: this fails with ret: 0x400 - idk why
+    if (res != MMSYSERR_NOERROR)
+    {
+        mixerClose(phmx);
+        return -1;
+    }
     jj = mixerline.cConnections;
     for (ii = 0; ii < jj; ++ii)
     {
@@ -57,15 +68,15 @@ static uint __cdecl mixerGetRecordLevel(char *SrcName)
         v2 = strstr(mixerline.szName, SrcName);
         if (v2)
         {
-            mxlc.cbStruct = 24;
+            mxlc.cbStruct = sizeof(tagMIXERLINECONTROLSA);
             mxlc.dwLineID = mixerline.dwLineID;
             mxlc.dwControlID = 1342373889;
             mxlc.cControls = 1;
-            mxlc.cbmxctrl = 148;
+            mxlc.cbmxctrl = sizeof(tagMIXERCONTROLA);
             mxlc.pamxctrl = &mxc;
             if (!mixerGetLineControlsA((HMIXEROBJ)phmx, &mxlc, 2u))
             {
-                mxcd.cbStruct = 24;
+                mxcd.cbStruct = sizeof(tMIXERCONTROLDETAILS);
                 mxcd.cChannels = 1;
                 mxcd.cbDetails = 4;
                 mxcd.paDetails = &newSetting;
@@ -93,26 +104,32 @@ bool __cdecl Voice_SendVoiceData()
 
 int __cdecl mixerSetRecordSource(char *SrcName)
 {
-    const char *v2; // eax
-    int jj; // [esp+0h] [ebp-100h]
-    tagMIXERLINECONTROLSA mxlc; // [esp+4h] [ebp-FCh] BYREF
-    uint err; // [esp+1Ch] [ebp-E4h]
-    int iNumChannels; // [esp+20h] [ebp-E0h]
-    int iMultipleItems; // [esp+24h] [ebp-DCh]
-    HMIXER mixerHandle; // [esp+28h] [ebp-D8h] BYREF
-    tMIXERCONTROLDETAILS_BOOLEAN *lpListBool; // [esp+2Ch] [ebp-D4h]
-    int ii; // [esp+30h] [ebp-D0h]
+    const char *v2;                               // eax
+    int jj;                                       // [esp+0h] [ebp-100h]
+    tagMIXERLINECONTROLSA mxlc;                   // [esp+4h] [ebp-FCh] BYREF
+    uint err;                                     // [esp+1Ch] [ebp-E4h]
+    int iNumChannels;                             // [esp+20h] [ebp-E0h]
+    int iMultipleItems;                           // [esp+24h] [ebp-DCh]
+    HMIXER mixerHandle;                           // [esp+28h] [ebp-D8h] BYREF
+    tMIXERCONTROLDETAILS_BOOLEAN *lpListBool;     // [esp+2Ch] [ebp-D4h]
+    int ii;                                       // [esp+30h] [ebp-D0h]
     tagMIXERCONTROLDETAILS_LISTTEXTA *lpListText; // [esp+34h] [ebp-CCh]
-    tagMIXERLINEA mixerline; // [esp+38h] [ebp-C8h] BYREF
-    tMIXERCONTROLDETAILS mxcd; // [esp+E4h] [ebp-1Ch] BYREF
-    tagMIXERCONTROLA *lpmxc; // [esp+FCh] [ebp-4h]
+    tagMIXERLINEA mixerline;                      // [esp+38h] [ebp-C8h] BYREF
+    tMIXERCONTROLDETAILS mxcd;                    // [esp+E4h] [ebp-1Ch] BYREF
+    tagMIXERCONTROLA *lpmxc;                      // [esp+FCh] [ebp-4h]
 
     if (!waveInGetNumDevs())
+    {
         return 0;
+    }
     if (!mixerGetNumDevs())
+    {
         return 0;
+    }
     if (mixerOpen(&mixerHandle, 0, 0, 0, 0))
+    {
         return 0;
+    }
 
     // LWSS: Winapi sucks
     HMIXEROBJ phmx = (HMIXEROBJ)mixerHandle;
@@ -120,19 +137,19 @@ int __cdecl mixerSetRecordSource(char *SrcName)
     lpmxc = 0;
     lpListText = 0;
     lpListBool = 0;
-    mixerline.cbStruct = 168;
+    mixerline.cbStruct = sizeof(tagMIXERLINEA);
     mixerline.dwComponentType = 7;
     if (mixerGetLineInfoA(phmx, &mixerline, 3u) != MMSYSERR_NOERROR)
     {
         mixerClose(mixerHandle); // KISAKTODO: this fails always for some reason.
         return 0;
     }
-    lpmxc = (tagMIXERCONTROLA*)calloc(148 * mixerline.cControls, 1u);
-    mxlc.cbStruct = 24;
+    lpmxc = (tagMIXERCONTROLA *)calloc(mixerline.cControls, sizeof(tagMIXERCONTROLA));
+    mxlc.cbStruct = sizeof(tagMIXERLINECONTROLSA);
     mxlc.dwLineID = mixerline.dwLineID;
     mxlc.dwControlID = 0;
     mxlc.cControls = mixerline.cControls;
-    mxlc.cbmxctrl = 148;
+    mxlc.cbmxctrl = sizeof(tagMIXERCONTROLA);
     mxlc.pamxctrl = lpmxc;
     err = mixerGetLineControlsA(phmx, &mxlc, 0);
     if (!err)
@@ -144,20 +161,24 @@ int __cdecl mixerSetRecordSource(char *SrcName)
                 iNumChannels = mixerline.cChannels;
                 iMultipleItems = 0;
                 if ((lpmxc[ii].fdwControl & 1) != 0)
+                {
                     iNumChannels = 1;
+                }
                 if ((lpmxc[ii].fdwControl & 2) != 0)
+                {
                     iMultipleItems = lpmxc[ii].cMultipleItems;
-                lpListText = (tagMIXERCONTROLDETAILS_LISTTEXTA*)calloc(72 * iMultipleItems * iNumChannels, 1u);
-                mxcd.cbStruct = 24;
+                }
+                lpListText = (tagMIXERCONTROLDETAILS_LISTTEXTA *)calloc((size_t)iMultipleItems * iNumChannels, sizeof(tagMIXERCONTROLDETAILS_LISTTEXTA));
+                mxcd.cbStruct = sizeof(tMIXERCONTROLDETAILS);
                 mxcd.dwControlID = lpmxc[ii].dwControlID;
                 mxcd.cChannels = iNumChannels;
                 mxcd.cMultipleItems = iMultipleItems;
-                mxcd.cbDetails = 72;
+                mxcd.cbDetails = sizeof(tagMIXERCONTROLDETAILS_LISTTEXTA);
                 mxcd.paDetails = lpListText;
                 err = mixerGetControlDetailsA(phmx, &mxcd, 1u);
                 if (!err)
                 {
-                    lpListBool = (tMIXERCONTROLDETAILS_BOOLEAN*)calloc(4 * iMultipleItems * iNumChannels, 1u);
+                    lpListBool = (tMIXERCONTROLDETAILS_BOOLEAN *)calloc((size_t)iMultipleItems * iNumChannels, sizeof(tMIXERCONTROLDETAILS_BOOLEAN));
                     mxcd.cbDetails = 4;
                     mxcd.paDetails = lpListBool;
                     err = mixerGetControlDetailsA(phmx, &mxcd, 0);
@@ -167,35 +188,53 @@ int __cdecl mixerSetRecordSource(char *SrcName)
                         {
                             v2 = strstr(lpListText[jj].szName, SrcName);
                             if (v2)
+                            {
                                 lpListBool[jj].fValue = 1;
+                            }
                             else
+                            {
                                 lpListBool[jj].fValue = 0;
+                            }
                         }
                         err = mixerSetControlDetails(phmx, &mxcd, 0);
                         if (lpmxc)
+                        {
                             free(lpmxc);
+                        }
                         lpmxc = 0;
                         if (lpListText)
+                        {
                             free(lpListText);
+                        }
                         lpListText = 0;
                         if (lpListBool)
+                        {
                             free(lpListBool);
+                        }
                         lpListBool = 0;
                         if (!err)
+                        {
                             return 1;
+                        }
                     }
                 }
             }
         }
     }
     if (lpmxc)
+    {
         free(lpmxc);
+    }
     lpmxc = 0;
     if (lpListText)
+    {
         free(lpListText);
+    }
     lpListText = 0;
     if (lpListBool)
+    {
         free(lpListBool);
+    }
 
     mixerClose(mixerHandle); // LWSS ADD
 
@@ -204,46 +243,52 @@ int __cdecl mixerSetRecordSource(char *SrcName)
 
 int __cdecl mixerGetRecordSource(char *srcName)
 {
-    int jj; // [esp+4h] [ebp-100h]
-    tagMIXERLINECONTROLSA mxlc; // [esp+8h] [ebp-FCh] BYREF
-    uint err; // [esp+20h] [ebp-E4h]
-    int iNumChannels; // [esp+24h] [ebp-E0h]
-    int iMultipleItems; // [esp+28h] [ebp-DCh]
-    tMIXERCONTROLDETAILS_BOOLEAN *lpListBool; // [esp+30h] [ebp-D4h]
-    int ii; // [esp+34h] [ebp-D0h]
+    int jj;                                       // [esp+4h] [ebp-100h]
+    tagMIXERLINECONTROLSA mxlc;                   // [esp+8h] [ebp-FCh] BYREF
+    uint err;                                     // [esp+20h] [ebp-E4h]
+    int iNumChannels;                             // [esp+24h] [ebp-E0h]
+    int iMultipleItems;                           // [esp+28h] [ebp-DCh]
+    tMIXERCONTROLDETAILS_BOOLEAN *lpListBool;     // [esp+30h] [ebp-D4h]
+    int ii;                                       // [esp+34h] [ebp-D0h]
     tagMIXERCONTROLDETAILS_LISTTEXTA *lpListText; // [esp+38h] [ebp-CCh]
-    tagMIXERLINEA mixerline; // [esp+3Ch] [ebp-C8h] BYREF
-    tMIXERCONTROLDETAILS mxcd; // [esp+E8h] [ebp-1Ch] BYREF
-    tagMIXERCONTROLA *lpmxc; // [esp+100h] [ebp-4h]
+    tagMIXERLINEA mixerline;                      // [esp+3Ch] [ebp-C8h] BYREF
+    tMIXERCONTROLDETAILS mxcd;                    // [esp+E8h] [ebp-1Ch] BYREF
+    tagMIXERCONTROLA *lpmxc;                      // [esp+100h] [ebp-4h]
 
     HMIXER mixerHandle; // [esp+2Ch] [ebp-D8h] BYREF
 
     if (!waveInGetNumDevs())
+    {
         return 0;
+    }
     if (!mixerGetNumDevs())
+    {
         return 0;
+    }
     if (mixerOpen(&mixerHandle, 0, 0, 0, 0))
+    {
         return 0;
-    
+    }
+
     // LWSS: Winapi sucks
     HMIXEROBJ phmx = (HMIXEROBJ)mixerHandle;
 
     lpmxc = 0;
     lpListText = 0;
     lpListBool = 0;
-    mixerline.cbStruct = sizeof(mixerline);
+    mixerline.cbStruct = sizeof(tagMIXERLINEA);
     mixerline.dwComponentType = MIXERLINE_COMPONENTTYPE_DST_WAVEIN;
     if (mixerGetLineInfoA(phmx, &mixerline, 3u) != MMSYSERR_NOERROR)
     {
         mixerClose(mixerHandle); // KISAKTODO: this fails always for some reason.
         return 0;
     }
-    lpmxc = (tagMIXERCONTROLA*)calloc(148 * mixerline.cControls, 1u);
-    mxlc.cbStruct = 24;
+    lpmxc = (tagMIXERCONTROLA *)calloc(mixerline.cControls, sizeof(tagMIXERCONTROLA));
+    mxlc.cbStruct = sizeof(tagMIXERLINECONTROLSA);
     mxlc.dwLineID = mixerline.dwLineID;
     mxlc.dwControlID = 0;
     mxlc.cControls = mixerline.cControls;
-    mxlc.cbmxctrl = 148;
+    mxlc.cbmxctrl = sizeof(tagMIXERCONTROLA);
     mxlc.pamxctrl = lpmxc;
     err = mixerGetLineControlsA(phmx, &mxlc, 0);
     if (!err)
@@ -255,20 +300,24 @@ int __cdecl mixerGetRecordSource(char *srcName)
                 iNumChannels = mixerline.cChannels;
                 iMultipleItems = 0;
                 if ((lpmxc[ii].fdwControl & 1) != 0)
+                {
                     iNumChannels = 1;
+                }
                 if ((lpmxc[ii].fdwControl & 2) != 0)
+                {
                     iMultipleItems = lpmxc[ii].cMultipleItems;
-                lpListText = (tagMIXERCONTROLDETAILS_LISTTEXTA*)calloc(72 * iMultipleItems * iNumChannels, 1u);
-                mxcd.cbStruct = 24;
+                }
+                lpListText = (tagMIXERCONTROLDETAILS_LISTTEXTA *)calloc((size_t)iMultipleItems * iNumChannels, sizeof(tagMIXERCONTROLDETAILS_LISTTEXTA));
+                mxcd.cbStruct = sizeof(tMIXERCONTROLDETAILS);
                 mxcd.dwControlID = lpmxc[ii].dwControlID;
                 mxcd.cChannels = iNumChannels;
                 mxcd.cMultipleItems = iMultipleItems;
-                mxcd.cbDetails = 72;
+                mxcd.cbDetails = sizeof(tagMIXERCONTROLDETAILS_LISTTEXTA);
                 mxcd.paDetails = lpListText;
                 err = mixerGetControlDetailsA(phmx, &mxcd, 1u);
                 if (!err)
                 {
-                    lpListBool = (tMIXERCONTROLDETAILS_BOOLEAN*)calloc(4 * iMultipleItems * iNumChannels, 1u);
+                    lpListBool = (tMIXERCONTROLDETAILS_BOOLEAN *)calloc((size_t)iMultipleItems * iNumChannels, sizeof(tMIXERCONTROLDETAILS_BOOLEAN));
                     mxcd.cbDetails = 4;
                     mxcd.paDetails = lpListBool;
                     err = mixerGetControlDetailsA(phmx, &mxcd, 0);
@@ -277,32 +326,48 @@ int __cdecl mixerGetRecordSource(char *srcName)
                         for (jj = 0; jj < iMultipleItems; ++jj)
                         {
                             if (lpListBool[jj].fValue == 1)
+                            {
                                 strncpy(srcName, lpListText[jj].szName, 0xFFu);
+                            }
                         }
                         if (lpmxc)
+                        {
                             free(lpmxc);
+                        }
                         lpmxc = 0;
                         if (lpListText)
+                        {
                             free(lpListText);
+                        }
                         lpListText = 0;
                         if (lpListBool)
+                        {
                             free(lpListBool);
+                        }
                         lpListBool = 0;
                         if (!err)
+                        {
                             return 1;
+                        }
                     }
                 }
             }
         }
     }
     if (lpmxc)
+    {
         free(lpmxc);
+    }
     lpmxc = 0;
     if (lpListText)
+    {
         free(lpListText);
+    }
     lpListText = 0;
     if (lpListBool)
+    {
         free(lpListBool);
+    }
 
     mixerClose(mixerHandle); // LWSS ADD
 
@@ -311,31 +376,39 @@ int __cdecl mixerGetRecordSource(char *srcName)
 
 int __cdecl mixerSetRecordLevel(char *SrcName, unsigned __int16 newLevel)
 {
-    const char *v3; // eax
-    tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint jj; // [esp+98h] [ebp-F0h]
-    tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
-    uint err; // [esp+B4h] [ebp-D4h]
-    HMIXER mixerHandle; // [esp+B8h] [ebp-D0h] BYREF
-    uint ii; // [esp+BCh] [ebp-CCh]
-    tagMIXERLINEA mixerline; // [esp+C0h] [ebp-C8h] BYREF
+    const char *v3;                           // eax
+    tagMIXERCONTROLA mxc;                     // [esp+0h] [ebp-188h] BYREF
+    uint jj;                                  // [esp+98h] [ebp-F0h]
+    tagMIXERLINECONTROLSA mxlc;               // [esp+9Ch] [ebp-ECh] BYREF
+    uint err;                                 // [esp+B4h] [ebp-D4h]
+    HMIXER mixerHandle;                       // [esp+B8h] [ebp-D0h] BYREF
+    uint ii;                                  // [esp+BCh] [ebp-CCh]
+    tagMIXERLINEA mixerline;                  // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_UNSIGNED newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
-    tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
+    tMIXERCONTROLDETAILS mxcd;                // [esp+170h] [ebp-18h] BYREF
 
     if (!waveInGetNumDevs())
+    {
         return 0;
+    }
     if (!mixerGetNumDevs())
+    {
         return 0;
+    }
     if (mixerOpen(&mixerHandle, 0, 0, 0, 0))
+    {
         return 0;
+    }
 
     // LWSS: Winapi sucks
     HMIXEROBJ phmx = (HMIXEROBJ)mixerHandle;
 
-    mixerline.cbStruct = 168;
+    mixerline.cbStruct = sizeof(tagMIXERLINEA);
     mixerline.dwComponentType = 7;
     if (mixerGetLineInfoA(phmx, &mixerline, 3u))
+    {
         return 0;
+    }
     jj = mixerline.cConnections;
     for (ii = 0; ii < jj; ++ii)
     {
@@ -345,16 +418,16 @@ int __cdecl mixerSetRecordLevel(char *SrcName, unsigned __int16 newLevel)
             v3 = strstr(mixerline.szName, SrcName);
             if (v3)
             {
-                mxlc.cbStruct = 24;
+                mxlc.cbStruct = sizeof(tagMIXERLINECONTROLSA);
                 mxlc.dwLineID = mixerline.dwLineID;
                 mxlc.dwControlID = 1342373889;
                 mxlc.cControls = 1;
-                mxlc.cbmxctrl = 148;
+                mxlc.cbmxctrl = sizeof(tagMIXERCONTROLA);
                 mxlc.pamxctrl = &mxc;
                 err = mixerGetLineControlsA(phmx, &mxlc, 2u);
                 if (!err)
                 {
-                    mxcd.cbStruct = 24;
+                    mxcd.cbStruct = sizeof(tMIXERCONTROLDETAILS);
                     mxcd.cChannels = 1;
                     mxcd.cbDetails = 4;
                     mxcd.paDetails = &newSetting;
@@ -377,28 +450,34 @@ int __cdecl mixerSetRecordLevel(char *SrcName, unsigned __int16 newLevel)
 
 int __cdecl mixerSetMicrophoneMute(unsigned __int8 bMute)
 {
-    const char *v2; // eax
-    tagMIXERCONTROLA mxc; // [esp+0h] [ebp-188h] BYREF
-    uint jj; // [esp+98h] [ebp-F0h]
-    tagMIXERLINECONTROLSA mxlc; // [esp+9Ch] [ebp-ECh] BYREF
-    uint err; // [esp+B4h] [ebp-D4h]
-    HMIXER mixerHandle; // [esp+B8h] [ebp-D0h] BYREF
-    uint ii; // [esp+BCh] [ebp-CCh]
-    tagMIXERLINEA mixerline; // [esp+C0h] [ebp-C8h] BYREF
+    const char *v2;                          // eax
+    tagMIXERCONTROLA mxc;                    // [esp+0h] [ebp-188h] BYREF
+    uint jj;                                 // [esp+98h] [ebp-F0h]
+    tagMIXERLINECONTROLSA mxlc;              // [esp+9Ch] [ebp-ECh] BYREF
+    uint err;                                // [esp+B4h] [ebp-D4h]
+    HMIXER mixerHandle;                      // [esp+B8h] [ebp-D0h] BYREF
+    uint ii;                                 // [esp+BCh] [ebp-CCh]
+    tagMIXERLINEA mixerline;                 // [esp+C0h] [ebp-C8h] BYREF
     tMIXERCONTROLDETAILS_BOOLEAN newSetting; // [esp+16Ch] [ebp-1Ch] BYREF
-    tMIXERCONTROLDETAILS mxcd; // [esp+170h] [ebp-18h] BYREF
+    tMIXERCONTROLDETAILS mxcd;               // [esp+170h] [ebp-18h] BYREF
 
     if (!waveInGetNumDevs())
+    {
         return 0;
+    }
     if (!mixerGetNumDevs())
+    {
         return 0;
+    }
     if (mixerOpen(&mixerHandle, 0, 0, 0, 0))
+    {
         return 0;
+    }
 
     // LWSS: Winapi sucks
     HMIXEROBJ phmx = (HMIXEROBJ)mixerHandle;
 
-    mixerline.cbStruct = 168;
+    mixerline.cbStruct = sizeof(tagMIXERLINEA);
     mixerline.dwComponentType = 4;
     err = mixerGetLineInfoA(phmx, &mixerline, 3u);
     if (!err)
@@ -411,16 +490,16 @@ int __cdecl mixerSetMicrophoneMute(unsigned __int8 bMute)
             v2 = strstr(mixerline.szName, "Mic");
             if (v2)
             {
-                mxlc.cbStruct = 24;
+                mxlc.cbStruct = sizeof(tagMIXERLINECONTROLSA);
                 mxlc.dwLineID = mixerline.dwLineID;
                 mxlc.dwControlID = 536936450;
                 mxlc.cControls = 1;
-                mxlc.cbmxctrl = 148;
+                mxlc.cbmxctrl = sizeof(tagMIXERCONTROLA);
                 mxlc.pamxctrl = &mxc;
                 err = mixerGetLineControlsA(phmx, &mxlc, 2u);
                 if (!err)
                 {
-                    mxcd.cbStruct = 24;
+                    mxcd.cbStruct = sizeof(tMIXERCONTROLDETAILS);
                     mxcd.cChannels = 1;
                     mxcd.cbDetails = 4;
                     mxcd.paDetails = &newSetting;
@@ -730,31 +809,41 @@ uint __cdecl Sound_UpdateSample(dsound_sample_t *sample, char *data, uint data_l
 
 void __cdecl Voice_IncomingVoiceData(unsigned __int8 talker, unsigned __int8 *data, int packetDataSize)
 {
-    int v3; // [esp+0h] [ebp-201Ch]
-    FILE *stream; // [esp+8h] [ebp-2014h]
-    int v5; // [esp+10h] [ebp-200Ch]
+    int v3;            // [esp+0h] [ebp-201Ch]
+    FILE *stream;      // [esp+8h] [ebp-2014h]
+    int v5;            // [esp+10h] [ebp-200Ch]
     __int16 out[4096]; // [esp+14h] [ebp-2008h] BYREF
-    uint data_len; // [esp+2018h] [ebp-4h]
+    uint data_len;     // [esp+2018h] [ebp-4h]
 
     if (!playing)
+    {
         playing = 1;
+    }
     data_len = 0;
     v5 = 0;
-    if (talker >= 0x40u)
-        MyAssertHandler(".\\win32\\win_voice.cpp", 207, 0, "%s\n\t(talker) = %i", "(talker >= 0 && talker < 64)", talker);
+    if (talker >= ARRAY_COUNT(s_clientTalkTime) || packetDataSize <= 0 || g_frame_size <= 0 || !data)
+    {
+        return;
+    }
     s_clientTalkTime[talker] = Sys_Milliseconds();
     while (v5 < packetDataSize)
     {
         if (packetDataSize - v5 < g_frame_size)
+        {
             v3 = packetDataSize - v5;
+        }
         else
+        {
             v3 = g_frame_size;
+        }
         data_len = Decode_Sample((char *)&data[v5], v3, out, g_frame_size);
         if ((int)data_len > 0)
+        {
             Sound_UpdateSample(s_clientSamples[talker], (char *)out, data_len);
+        }
         v5 += v3;
     }
-    if (winvoice_save_voice->current.enabled)
+    if (winvoice_save_voice->current.enabled && data_len > 0 && data_len <= sizeof(out))
     {
         stream = fopen("voice.wav", "ab");
         if (stream)
@@ -767,14 +856,10 @@ void __cdecl Voice_IncomingVoiceData(unsigned __int8 talker, unsigned __int8 *da
 
 bool __cdecl Voice_IsClientTalking(uint clientNum)
 {
-    if (clientNum >= 0x40)
-        MyAssertHandler(
-            ".\\win32\\win_voice.cpp",
-            236,
-            0,
-            "%s\n\t(clientNum) = %i",
-            "(clientNum >= 0 && clientNum < 64)",
-            clientNum);
+    if (clientNum >= ARRAY_COUNT(s_clientTalkTime))
+    {
+        return false;
+    }
     return (int)(Sys_Milliseconds() - s_clientTalkTime[clientNum]) < 300;
 }
 

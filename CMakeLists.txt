@@ -50,8 +50,21 @@ include(${SCRIPTS_DIR}/platform_override.cmake)
 # Log out the KISAK_PLATFORM
 message("Building KISAK_PLATFORM: ${KISAK_PLATFORM}")
 
-# The game and Radiant retain their Win32 ABI. Both offline compilers are
-# native x64 tools, exposed through bridge targets in a Win32 solution.
+# Keep existing x64 tool-only builds as the default while the game database
+# port is pending. Enable KIWI_BUILD_GAME explicitly for native x64 game work.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(_game_default OFF)
+else()
+    set(_game_default ON)
+endif()
+option(KIWI_BUILD_GAME "Expose game targets for the selected architecture" ${_game_default})
+if(KIWI_BUILD_GAME)
+    add_subdirectory(${SCRIPTS_DIR}/mp)
+    #add_subdirectory(${SCRIPTS_DIR}/sp) # Disabled SP in KIWI
+    add_subdirectory(${SCRIPTS_DIR}/dedi)
+endif()
+
+# Both offline compilers are native x64 tools. Radiant remains Win32.
 option(KIWI_BUILD_COD4MAP "Build or expose the CoD4Map tool target" ON)
 option(KIWI_BUILD_COD4RAD "Build or expose the CoD4Rad tool target" ON)
 option(KIWI_COD4RAD_WITH_EMBREE "Build the optional Embree 4 ray-tracing extension" OFF)
@@ -65,9 +78,6 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         add_subdirectory(${SCRIPTS_DIR}/cod4rad)
     endif()
 else()
-    add_subdirectory(${SCRIPTS_DIR}/mp)
-    #add_subdirectory(${SCRIPTS_DIR}/sp) # Disabled SP in KIWI
-    add_subdirectory(${SCRIPTS_DIR}/dedi)
     add_subdirectory(${SCRIPTS_DIR}/radiant)
 
     if(CMAKE_GENERATOR MATCHES "^Visual Studio")

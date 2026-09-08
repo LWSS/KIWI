@@ -193,14 +193,14 @@ void __cdecl LiveStorage_StatsInit(int controllerIndex)
     LiveStorage_UnlockClassHeavyGunner(controllerIndex);
     LiveStorage_UnlockClassSniper(controllerIndex);
     LiveStorage_UnlockClassSpecOps(controllerIndex);
-    if (!*(_BYTE *)fs_gameDirVar->current.integer)
+    if (!fs_gameDirVar->current.string[0])
     {
         Dvar_SetStringByName("clanName", (char *)"");
-        LiveStorage_SetFromLocString(controllerIndex, "customclass1", (char*)"CLASS_SLOT1");
-        LiveStorage_SetFromLocString(controllerIndex, "customclass2", (char*)"CLASS_SLOT2");
-        LiveStorage_SetFromLocString(controllerIndex, "customclass3", (char*)"CLASS_SLOT3");
-        LiveStorage_SetFromLocString(controllerIndex, "customclass4", (char*)"CLASS_SLOT4");
-        LiveStorage_SetFromLocString(controllerIndex, "customclass5", (char*)"CLASS_SLOT5");
+        LiveStorage_SetFromLocString(controllerIndex, "customclass1", (char *)"CLASS_SLOT1");
+        LiveStorage_SetFromLocString(controllerIndex, "customclass2", (char *)"CLASS_SLOT2");
+        LiveStorage_SetFromLocString(controllerIndex, "customclass3", (char *)"CLASS_SLOT3");
+        LiveStorage_SetFromLocString(controllerIndex, "customclass4", (char *)"CLASS_SLOT4");
+        LiveStorage_SetFromLocString(controllerIndex, "customclass5", (char *)"CLASS_SLOT5");
     }
     LiveStorage_TrySetStat(controllerIndex, 200, 0);
     LiveStorage_TrySetStat(controllerIndex, 210, 0);
@@ -550,24 +550,28 @@ void __cdecl LiveStorage_StatsWriteNeeded()
 
 void __cdecl LiveStorage_UploadStats()
 {
-    char path[264]; // [esp+0h] [ebp-2230h] BYREF
+    char path[264];      // [esp+0h] [ebp-2230h] BYREF
     StatsFile statsFile; // [esp+108h] [ebp-2128h] BYREF
-    int v2; // [esp+222Ch] [ebp-4h]
+    int v2;              // [esp+222Ch] [ebp-4h]
 
     if (statData.statsFetched && statData.statWriteNeeded)
     {
         LiveStorage_WriteChecksumToBuffer(statData.playerStats, 0x2000);
         if (Com_HasPlayerProfile())
         {
-            if (*(_BYTE *)fs_gameDirVar->current.integer)
+            if (fs_gameDirVar->current.string[0])
+            {
                 Com_BuildPlayerProfilePath(path, 260, "%s/%s", fs_gameDirVar->current.string, "mpdata");
+            }
             else
+            {
                 Com_BuildPlayerProfilePath(path, 260, "mpdata");
+            }
             memcpy(statsFile.body.statsData.stats, statData.playerStats, sizeof(statsFile.body.statsData.stats));
             I_strncpyz(statsFile.body.statsData.path, fs_gameDirVar->current.string, 260);
             LiveStorage_Encrypt(&statsFile);
             v2 = FS_WriteFileToDir(path, "players", (char *)&statsFile, 0x211Cu);
-            iassert(LiveStorage_DecryptAndCheck( &statsFile, fs_gameDirVar->current.string ));
+            iassert(LiveStorage_DecryptAndCheck(&statsFile, fs_gameDirVar->current.string));
             if (v2)
             {
                 statData.statWriteNeeded = 0;
@@ -600,14 +604,22 @@ int __cdecl LiveStorage_GetStat(int __formal, int index)
 {
     const char *v3; // eax
 
-    if ((uint)index > 0xDAA)
-        MyAssertHandler(".\\win32\\win_storage.cpp", 375, 0, "%s\n\t(index) = %i", "(index >= 0 && index < 3499)", index);
-    if (!statData.statsFetched)
+    if ((uint)index >= 3498)
+    {
         return 0;
+    }
+    if (!statData.statsFetched)
+    {
+        return 0;
+    }
     if (index < 2000)
+    {
         return statData.playerStats[index + 4];
+    }
     if (index < 3498)
+    {
         return *(uint *)&statData.playerStats[4 * index - 5996];
+    }
     if (!alwaysfails)
     {
         v3 = va("Unhandled stat index %i", index);
