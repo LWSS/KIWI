@@ -394,14 +394,16 @@ union operandInternalDataUnion // sizeof=0x4
 {                                       // ...
     operandInternalDataUnion()
     {
-        intVal = 0;
+        nativeValue = 0;
     }
     operandInternalDataUnion(int i)
     {
+        nativeValue = 0;
         intVal = i;
     }
     operandInternalDataUnion(float f)
     {
+        nativeValue = 0;
         floatVal = f;
     }
     operandInternalDataUnion(const char *str)
@@ -420,6 +422,7 @@ union operandInternalDataUnion // sizeof=0x4
     int intVal;
     float floatVal;
     const char *string;
+    uintptr_t nativeValue;
 };
 enum expDataType : int
 {                                       // ...
@@ -547,14 +550,16 @@ union UILocalVar_u // sizeof=0x4
 {                                       // ...
     UILocalVar_u()
     {
-        integer = 0;
+        nativeValue = 0;
     }
     UILocalVar_u(int i)
     {
+        nativeValue = 0;
         integer = i;
     }
     UILocalVar_u(float f)
     {
+        nativeValue = 0;
         value = f;
     }
     UILocalVar_u(const char *str)
@@ -564,6 +569,7 @@ union UILocalVar_u // sizeof=0x4
     int integer;
     float value;
     const char *string;
+    uintptr_t nativeValue;
 };
 struct UILocalVar // sizeof=0xC
 {                                       // ...
@@ -930,7 +936,7 @@ void __cdecl Script_ConditionalResponseHandler(
 void __cdecl Script_RespondOnDvarIntValue(UiContext *dc, itemDef_s *item, const char **args = NULL);
 void __cdecl Script_RespondOnDvarFloatValue(UiContext *dc, itemDef_s *item, const char **args = NULL);
 void __cdecl Script_SetLocalVarBool(UiContext *dc, itemDef_s *item, const char **args = NULL);
-UILocalVarContext *__cdecl Script_ParseLocalVar(UiContext *dc, const char **args = NULL);
+UILocalVar *__cdecl Script_ParseLocalVar(UiContext *dc, const char **args = NULL);
 void __cdecl Script_SetLocalVarInt(UiContext *dc, itemDef_s *item, const char **args = NULL);
 void __cdecl Script_SetLocalVarFloat(UiContext *dc, itemDef_s *item, const char **args = NULL);
 void __cdecl Script_SetLocalVarString(UiContext *dc, itemDef_s *item, const char **args = NULL);
@@ -1119,10 +1125,10 @@ MenuList *__cdecl UI_LoadMenus_FastFile(const char *menuFile);
 // ui_localvars
 void __cdecl UILocalVar_Init(UILocalVarContext *context);
 void __cdecl UILocalVar_Shutdown(UILocalVarContext *context);
-UILocalVarContext *__cdecl UILocalVar_Find(UILocalVarContext *context, const char *name);
+UILocalVar *__cdecl UILocalVar_Find(UILocalVarContext *context, const char *name);
 char __cdecl UILocalVar_FindLocation(UILocalVarContext *context, const char *name, uint *hashForName);
 uint __cdecl UILocalVar_HashName(const char *name);
-UILocalVarContext *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, char *name);
+UILocalVar *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, char *name);
 bool __cdecl UILocalVar_GetBool(const UILocalVar *var);
 UILocalVar_u __cdecl UILocalVar_GetInt(const UILocalVar *var);
 double __cdecl UILocalVar_GetFloat(const UILocalVar *var);
@@ -1216,7 +1222,7 @@ void __cdecl GetLocalVarStringValue(
     Operand *result,
     char *stringBuf,
     uint size);
-UILocalVarContext *__cdecl GetLocalVar(int localClientNum, Operand *source);
+UILocalVar *__cdecl GetLocalVar(int localClientNum, Operand *source);
 void __cdecl GetLocalVarBoolValue(int localClientNum, Operand *source, Operand *result);
 void __cdecl GetLocalVarIntValue(int localClientNum, Operand *source, Operand *result);
 void __cdecl GetLocalVarFloatValue(int localClientNum, Operand *source, Operand *result);

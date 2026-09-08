@@ -9,7 +9,7 @@ stringDef_s *g_strHandle[2048];
 
 void __cdecl TRACK_ui_utils()
 {
-    track_static_alloc_internal(g_strHandle, 0x2000, "g_strHandle", 34);
+    track_static_alloc_internal(g_strHandle, sizeof(g_strHandle), "g_strHandle", 34);
 }
 
 void __cdecl Window_SetDynamicFlags(int localClientNum, windowDef_t *w, int flags)
@@ -341,7 +341,7 @@ const char *__cdecl String_Alloc(const char *p)
         last = stra;
         stra = stra->next;
     }
-    strb = (stringDef_s *)UI_Alloc(8u, 4);
+    strb = (stringDef_s *)UI_Alloc(sizeof(stringDef_s), alignof(stringDef_s));
     strb->next = 0;
     strb->str = (const char *)s;
     if (last)

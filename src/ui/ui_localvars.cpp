@@ -24,14 +24,18 @@ void __cdecl UILocalVar_Shutdown(UILocalVarContext *context)
     memset((uint8_t *)context, 0, sizeof(UILocalVarContext));
 }
 
-UILocalVarContext *__cdecl UILocalVar_Find(UILocalVarContext *context, const char *name)
+UILocalVar *__cdecl UILocalVar_Find(UILocalVarContext *context, const char *name)
 {
     uint hash; // [esp+0h] [ebp-4h] BYREF
 
     if (UILocalVar_FindLocation(context, name, &hash))
-        return (UILocalVarContext *)((char *)context + 12 * hash);
+    {
+        return &context->table[hash];
+    }
     else
+    {
         return 0;
+    }
 }
 
 char __cdecl UILocalVar_FindLocation(UILocalVarContext *context, const char *name, uint *hashForName)
@@ -67,18 +71,25 @@ uint __cdecl UILocalVar_HashName(const char *name)
     return (uint8_t)(hash + HIBYTE(hash));
 }
 
-UILocalVarContext *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, char *name)
+UILocalVar *__cdecl UILocalVar_FindOrCreate(UILocalVarContext *context, char *name)
 {
     UILocalVar *var; // [esp+0h] [ebp-8h]
-    uint hash; // [esp+4h] [ebp-4h] BYREF
+    uint hash;       // [esp+4h] [ebp-4h] BYREF
 
     if (UILocalVar_FindLocation(context, name, &hash))
-        return (UILocalVarContext *)((char *)context + 12 * hash);
+    {
+        return &context->table[hash];
+    }
     var = &context->table[hash];
+    if (var->name)
+    {
+        Com_PrintError(CON_CHANNEL_UI, "UI local variable table is full\n");
+        return 0;
+    }
     var->name = CopyString(name);
     var->type = UILOCALVAR_INT;
     var->u.integer = 0;
-    return (UILocalVarContext *)var;
+    return var;
 }
 
 bool __cdecl UILocalVar_GetBool(const UILocalVar *var)
@@ -137,7 +148,7 @@ char *__cdecl UILocalVar_GetString(const UILocalVar *var, char *stringBuf, uint 
         else
         {
             vassert(var->type == UILOCALVAR_STRING, "%i, %i", var->type, 2);
-            return (char *)var->u.integer;
+            return (char *)var->u.string;
         }
     }
     else
@@ -174,8 +185,10 @@ void __cdecl UILocalVar_SetFloat(UILocalVar *var, float f)
 void __cdecl UILocalVar_SetString(UILocalVar *var, char *s)
 {
     if (var->type == UILOCALVAR_STRING)
+    {
         FreeString(var->u.string);
+    }
     var->type = UILOCALVAR_STRING;
-    var->u.integer = (int)CopyString(s);
+    var->u.string = CopyString(s);
 }
 

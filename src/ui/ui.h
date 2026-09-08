@@ -174,14 +174,7 @@ void __cdecl UI_SavegameSort(int column, int force);
 void __cdecl UI_DrawConnectScreen();
 char *__cdecl UI_ReplaceConversionString(const char *sourceString, const char *replaceString);
 char *__cdecl UI_ReplaceConversionInt(const char *sourceString, int replaceInt);
-char *__cdecl UI_ReplaceConversionInts(
-    const char *sourceString,
-    int numInts,
-    char *replaceInts,
-    int a4,
-    int a5,
-    int a6,
-    __int64 a7);
+char *__cdecl UI_ReplaceConversionInts(const char *sourceString, int numInts, const int *replaceInts);
 int __cdecl UI_Popup(int localClientNum, const char *menu);
 void __cdecl UI_DrawLoggedInUser(rectDef_s *rect, Font_s *font, double scale, float *color, int textStyle);
 void __cdecl UI_MouseEvent(int localClientNum, int x, int y);

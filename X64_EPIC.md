@@ -15,7 +15,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 7 | server_mp | Complete |
 | 8 | sound | Complete |
 | 9 | stringed | Complete |
-| 10 | ui | Pending |
+| 10 | ui | Complete |
 | 11 | ui_mp | Pending |
 | 12 | universal | Pending |
 | 13 | win32 | Pending |
@@ -27,6 +27,15 @@ Part 5 checkpoint: `510631ac`.
 Part 6 checkpoint: `91eb549f`.
 Part 7 checkpoint: `ec0f97bc`.
 Part 8 checkpoint: `1883deb0`.
+Part 9 checkpoint: `18c58233`.
+
+## Part 10: ui
+
+Audited all 13 files. Runtime operands and local-variable unions preserve native string pointers; local-variable lookup returns the actual table entry. Parser tokens, macros, scripts, pointer tables, expressions, menus, widgets, debugger windows and watch elements use native allocation/copy sizes and alignment. Parser allocation headers maintain eight-byte alignment on both architectures. Replaced debugger frame/AST offset tricks, enum-dvar pointer arithmetic, scroll-state aliasing and conversion-argument pointer strides with typed fields.
+
+The parser evaluator now accesses its actual value stack rather than indexing past the operator array. Full value copies preserve strings; ternary evaluation frees the unselected string at the correct index. Invalid expressions, division by zero and exhausted evaluator storage stop in release. Conversion substitution respects destination capacity and valid argument indexes; its integer-list helper has a typed array interface. Parser varargs are closed and output terminated. Independent fixes are exported outside the repository in `10-ui-correctness.patch`.
+
+Validation: all 36 configured x86/x64 MP/SP diagnostic checks pass. `test_ui.py` runs production functions on both architectures and passes aligned token/macro chain copies, native expression strings, a full 60-entry operand stack, all 256 local-variable slots plus overflow rejection, bounded substitutions, mixed integer/double precedence, string concatenation and both ternary branches, and invalid-expression handling. No complete menu load, debugger interaction or rendered UI session was run.
 
 ## Part 9: stringed
 

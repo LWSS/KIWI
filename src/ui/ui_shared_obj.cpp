@@ -178,9 +178,11 @@ void SourceError(source_s *source, const char *str, ...)
     va_list va; // [esp+41Ch] [ebp+10h] BYREF
 
     va_start(va, str);
-    _vsnprintf(text, 0x400u, str, va);
+    _vsnprintf(text, sizeof(text), str, va);
+    text[sizeof(text) - 1] = 0;
     Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "Error: file %s, line %d: %s\n", source->scriptstack->filename, source->scriptstack->line, text);
     PrintSourceStack(source->scriptstack);
+    va_end(va);
 }
 
 void __cdecl PC_PushScript(source_s *source, script_s *script)
@@ -199,33 +201,46 @@ void __cdecl PC_PushScript(source_s *source, script_s *script)
     source->scriptstack = script;
 }
 
+union UIParserAllocationHeader
+{
+    uintptr_t magic;
+    double alignment;
+};
+
 uint *__cdecl GetMemory(uint size)
 {
-    uint *ptr; // [esp+4h] [ebp-4h]
-
-    ptr = (uint *)Z_Malloc(size + 4, "GetMemory", 10);
+    if (size > INT_MAX - sizeof(UIParserAllocationHeader))
+    {
+        Com_Error(ERR_DROP, "UI parser allocation is too large");
+    }
+    UIParserAllocationHeader *ptr = (UIParserAllocationHeader *)Z_Malloc(size + sizeof(UIParserAllocationHeader), "GetMemory", 10);
     if (!ptr)
+    {
         return 0;
-    *ptr = 0x12345678;
-    return ptr + 1;
+    }
+    ptr->magic = 0x12345678;
+    return (uint *)(ptr + 1);
 }
 
 void __cdecl FreeMemory(char *ptr)
 {
-    if (*((_DWORD *)ptr - 1) == 0x12345678)
-        Z_Free(ptr - 4, 10);
+    UIParserAllocationHeader *header = (UIParserAllocationHeader *)ptr - 1;
+    if (header->magic == 0x12345678)
+    {
+        Z_Free(header, 10);
+    }
 }
 
 int numtokens;
 token_s *__cdecl PC_CopyToken(token_s *token)
 {
-    uint *t; // [esp+8h] [ebp-4h]
+    token_s *t;
 
-    t = GetMemory(0x430u);
+    t = (token_s *)GetMemory(sizeof(token_s));
     if (t)
     {
-        memcpy(t, token, 0x430u);
-        t[266] = 0;
+        memcpy(t, token, sizeof(token_s));
+        t->next = 0;
         ++numtokens;
         return (token_s *)t;
     }
@@ -292,27 +307,31 @@ int __cdecl PS_ReadWhiteSpace(script_s *script)
 void ScriptError(script_s *script, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
-    va_list va; // [esp+41Ch] [ebp+10h] BYREF
+    va_list va;      // [esp+41Ch] [ebp+10h] BYREF
 
     va_start(va, str);
     if ((script->flags & 1) == 0)
     {
-        _vsnprintf(text, 0x400u, str, va);
+        _vsnprintf(text, sizeof(text), str, va);
+        text[sizeof(text) - 1] = 0;
         Com_PrintError(CON_CHANNEL_PARSERSCRIPT, "Error: file %s, line %d: %s\n", script->filename, script->line, text);
     }
+    va_end(va);
 }
 
 void ScriptWarning(script_s *script, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
-    va_list va; // [esp+41Ch] [ebp+10h] BYREF
+    va_list va;      // [esp+41Ch] [ebp+10h] BYREF
 
     va_start(va, str);
     if ((script->flags & 2) == 0)
     {
-        _vsnprintf(text, 0x400u, str, va);
+        _vsnprintf(text, sizeof(text), str, va);
+        text[sizeof(text) - 1] = 0;
         Com_PrintWarning(CON_CHANNEL_PARSERSCRIPT, "Warning: file %s, line %d: %s\n", script->filename, script->line, text);
     }
+    va_end(va);
 }
 
 int __cdecl PS_ReadEscapeCharacter(script_s *script, char *ch)
@@ -804,7 +823,8 @@ void SourceWarning(source_s *source, const char *str, ...)
     va_list va; // [esp+41Ch] [ebp+10h] BYREF
 
     va_start(va, str);
-    _vsnprintf(text, 0x400u, str, va);
+    _vsnprintf(text, sizeof(text), str, va);
+    text[sizeof(text) - 1] = 0;
     Com_PrintWarning(
         CON_CHANNEL_PARSERSCRIPT,
         "Warning: file %s, line %d: %s\n",
@@ -812,6 +832,7 @@ void SourceWarning(source_s *source, const char *str, ...)
         source->scriptstack->line,
         text);
     PrintSourceStack(source->scriptstack);
+    va_end(va);
 }
 
 void __cdecl FreeScript(script_s *script)
@@ -1326,13 +1347,15 @@ uint8_t *__cdecl GetClearedMemory(uint size)
 void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuations)
 {
     punctuation_s *lastp; // [esp+20h] [ebp-10h]
-    int i; // [esp+24h] [ebp-Ch]
-    punctuation_s *newp; // [esp+28h] [ebp-8h]
-    punctuation_s *p; // [esp+2Ch] [ebp-4h]
+    int i;                // [esp+24h] [ebp-Ch]
+    punctuation_s *newp;  // [esp+28h] [ebp-8h]
+    punctuation_s *p;     // [esp+2Ch] [ebp-4h]
 
     if (!script->punctuationtable)
-        script->punctuationtable = (punctuation_s **)GetMemory(0x400u);
-    memset((uint8_t *)script->punctuationtable, 0, 0x400u);
+    {
+        script->punctuationtable = (punctuation_s **)GetMemory(256 * sizeof(punctuation_s *));
+    }
+    memset(script->punctuationtable, 0, 256 * sizeof(punctuation_s *));
     for (i = 0; punctuations[i].p; ++i)
     {
         newp = &punctuations[i];
@@ -1343,9 +1366,13 @@ void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuat
             {
                 newp->next = p;
                 if (lastp)
+                {
                     lastp->next = newp;
+                }
                 else
+                {
                     script->punctuationtable[*newp->p] = newp;
+                }
                 break;
             }
             lastp = p;
@@ -1354,9 +1381,13 @@ void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuat
         {
             newp->next = 0;
             if (lastp)
+            {
                 lastp->next = newp;
+            }
             else
+            {
                 script->punctuationtable[*newp->p] = newp;
+            }
         }
     }
 }
@@ -1369,19 +1400,21 @@ void __cdecl SetScriptPunctuations(script_s *script)
 
 script_s *__cdecl LoadScriptFile(const char *filename)
 {
-    char v2; // [esp+3h] [ebp-61h]
-    script_s *v3; // [esp+8h] [ebp-5Ch]
-    const char *v4; // [esp+Ch] [ebp-58h]
-    script_s *buffer; // [esp+10h] [ebp-54h]
-    int fp; // [esp+18h] [ebp-4Ch] BYREF
+    char v2;           // [esp+3h] [ebp-61h]
+    script_s *v3;      // [esp+8h] [ebp-5Ch]
+    const char *v4;    // [esp+Ch] [ebp-58h]
+    script_s *buffer;  // [esp+10h] [ebp-54h]
+    int fp;            // [esp+18h] [ebp-4Ch] BYREF
     char pathname[64]; // [esp+1Ch] [ebp-48h] BYREF
-    int length; // [esp+60h] [ebp-4h]
+    int length;        // [esp+60h] [ebp-4h]
 
     Com_sprintf(pathname, 0x40u, "%s", filename);
     length = FS_FOpenFileRead(pathname, &fp);
     if (!fp)
+    {
         return 0;
-    buffer = (script_s *)GetClearedMemory(length + 1201);
+    }
+    buffer = (script_s *)GetClearedMemory(sizeof(script_s) + length + 1);
     v4 = filename;
     v3 = buffer;
     do
@@ -1612,18 +1645,20 @@ int __cdecl PC_ExpandDefineIntoSource(source_s *source, token_s *deftoken, defin
 
 int __cdecl PC_Directive_define(source_s *source)
 {
-    char v2; // [esp+7Bh] [ebp-45Dh]
-    char *name; // [esp+80h] [ebp-458h]
-    token_s *p_token; // [esp+84h] [ebp-454h]
-    token_s *t; // [esp+98h] [ebp-440h]
-    token_s *ta; // [esp+98h] [ebp-440h]
-    define_s *define; // [esp+9Ch] [ebp-43Ch]
+    char v2;           // [esp+7Bh] [ebp-45Dh]
+    char *name;        // [esp+80h] [ebp-458h]
+    token_s *p_token;  // [esp+84h] [ebp-454h]
+    token_s *t;        // [esp+98h] [ebp-440h]
+    token_s *ta;       // [esp+98h] [ebp-440h]
+    define_s *define;  // [esp+9Ch] [ebp-43Ch]
     define_s *definea; // [esp+9Ch] [ebp-43Ch]
-    token_s token; // [esp+A0h] [ebp-438h] BYREF
-    token_s *last; // [esp+4D4h] [ebp-4h]
+    token_s token;     // [esp+A0h] [ebp-438h] BYREF
+    token_s *last;     // [esp+4D4h] [ebp-4h]
 
     if (source->skip > 0)
+    {
         return 1;
+    }
     if (!PC_ReadLine(source, &token, 0))
     {
         SourceError(source, "#define without name");
@@ -1646,10 +1681,12 @@ int __cdecl PC_Directive_define(source_s *source)
         SourceWarning(source, "redefinition of %s", token.string);
         PC_UnreadSourceToken(source, &token);
         if (!PC_Directive_undef(source))
+        {
             return 0;
+        }
         PC_FindHashedDefine(source->definehash, token.string);
     }
-    definea = (define_s *)GetMemory(&token.string[strlen(token.string) + 1] - &token.string[1] + 33);
+    definea = (define_s *)GetMemory(sizeof(define_s) + strlen(token.string) + 1);
     definea->name = 0;
     definea->flags = 0;
     definea->builtin = 0;
@@ -1670,7 +1707,9 @@ int __cdecl PC_Directive_define(source_s *source)
     } while (v2);
     PC_AddDefineToHash(definea, source->definehash);
     if (!PC_ReadLine(source, &token, 0))
+    {
         return 1;
+    }
     if (PC_WhiteSpaceBeforeToken(&token) || strcmp(token.string, "("))
     {
     LABEL_37:
@@ -1687,14 +1726,20 @@ int __cdecl PC_Directive_define(source_s *source)
                 PC_ClearTokenWhiteSpace(ta);
                 ta->next = 0;
                 if (last)
+                {
                     last->next = ta;
+                }
                 else
+                {
                     definea->tokens = ta;
+                }
                 last = ta;
             }
         } while (PC_ReadLine(source, &token, 0));
         if (!last || strcmp(definea->tokens->string, "##") && strcmp(last->string, "##"))
+        {
             return 1;
+        }
         SourceError(source, "define with misplaced ##");
         return 0;
     }
@@ -1703,7 +1748,9 @@ int __cdecl PC_Directive_define(source_s *source)
     {
     LABEL_35:
         if (!PC_ReadLine(source, &token, 0))
+        {
             return 1;
+        }
         goto LABEL_37;
     }
     do
@@ -1727,9 +1774,13 @@ int __cdecl PC_Directive_define(source_s *source)
         PC_ClearTokenWhiteSpace(t);
         t->next = 0;
         if (last)
+        {
             last->next = t;
+        }
         else
+        {
             definea->parms = t;
+        }
         last = t;
         ++definea->numparms;
         if (!PC_ReadLine(source, &token, 0))
@@ -1738,7 +1789,9 @@ int __cdecl PC_Directive_define(source_s *source)
             return 0;
         }
         if (!strcmp(token.string, ")"))
+        {
             goto LABEL_35;
+        }
     } while (!strcmp(token.string, ","));
     SourceError(source, "define not terminated");
     return 0;
@@ -1750,7 +1803,7 @@ script_s *__cdecl LoadScriptMemory(char *ptr, int length, const char *name)
     script_s *v5; // [esp+8h] [ebp-10h]
     script_s *buffer; // [esp+10h] [ebp-8h]
 
-    buffer = (script_s *)GetClearedMemory(length + 1201);
+    buffer = (script_s *)GetClearedMemory(sizeof(script_s) + length + 1);
     v5 = buffer;
     do
     {
@@ -1774,18 +1827,18 @@ script_s *__cdecl LoadScriptMemory(char *ptr, int length, const char *name)
 
 define_s *__cdecl PC_DefineFromString(char *string)
 {
-    source_s src; // [esp+10h] [ebp-4E8h] BYREF
-    token_s *t; // [esp+4E4h] [ebp-14h]
-    define_s *def; // [esp+4E8h] [ebp-10h]
+    source_s src;     // [esp+10h] [ebp-4E8h] BYREF
+    token_s *t;       // [esp+4E4h] [ebp-14h]
+    define_s *def;    // [esp+4E8h] [ebp-10h]
     script_s *script; // [esp+4ECh] [ebp-Ch]
-    int i; // [esp+4F0h] [ebp-8h]
-    int res; // [esp+4F4h] [ebp-4h]
+    int i;            // [esp+4F0h] [ebp-8h]
+    int res;          // [esp+4F4h] [ebp-4h]
 
     script = LoadScriptMemory(string, strlen(string), "*extern");
     memset((uint8_t *)&src, 0, sizeof(src));
     strncpy(src.filename, "*extern", 0x40u);
     src.scriptstack = script;
-    src.definehash = (define_s **)GetClearedMemory(0x1000u);
+    src.definehash = (define_s **)GetClearedMemory(1024 * sizeof(define_s *));
     res = PC_Directive_define(&src);
     for (t = src.tokens; t; t = src.tokens)
     {
@@ -1804,9 +1857,13 @@ define_s *__cdecl PC_DefineFromString(char *string)
     FreeMemory((char *)src.definehash);
     FreeScript(script);
     if (res > 0)
+    {
         return def;
+    }
     if (src.defines)
+    {
         PC_FreeDefine(def);
+    }
     return 0;
 }
 
@@ -1823,56 +1880,25 @@ int __cdecl PC_AddDefine(source_s *source, char *string)
 
 define_s *__cdecl PC_CopyDefine(source_s *source, define_s *define)
 {
-    char v2; // dl
-    _BYTE *v4; // [esp+8h] [ebp-28h]
-    char *name; // [esp+Ch] [ebp-24h]
-    uint *newdefine; // [esp+20h] [ebp-10h]
-    token_s *newtoken; // [esp+24h] [ebp-Ch]
-    token_s *newtokena; // [esp+24h] [ebp-Ch]
-    token_s *token; // [esp+28h] [ebp-8h]
-    token_s *tokena; // [esp+28h] [ebp-8h]
-    token_s *lasttoken; // [esp+2Ch] [ebp-4h]
-    token_s *lasttokena; // [esp+2Ch] [ebp-4h]
-
-    newdefine = GetMemory(strlen(define->name) + 33);
-    *newdefine = (uint)(newdefine + 8);
-    name = define->name;
-    v4 = (_BYTE *)*newdefine;
-    do
+    define_s *copy = (define_s *)GetClearedMemory(sizeof(define_s) + strlen(define->name) + 1);
+    copy->name = (char *)(copy + 1);
+    strcpy(copy->name, define->name);
+    copy->flags = define->flags;
+    copy->builtin = define->builtin;
+    copy->numparms = define->numparms;
+    token_s **tail = &copy->tokens;
+    for (token_s *token = define->tokens; token; token = token->next)
     {
-        v2 = *name;
-        *v4++ = *name++;
-    } while (v2);
-    newdefine[1] = define->flags;
-    newdefine[2] = define->builtin;
-    newdefine[3] = define->numparms;
-    newdefine[6] = 0;
-    newdefine[7] = 0;
-    newdefine[5] = 0;
-    lasttoken = 0;
-    for (token = define->tokens; token; token = token->next)
-    {
-        newtoken = PC_CopyToken(token);
-        newtoken->next = 0;
-        if (lasttoken)
-            lasttoken->next = newtoken;
-        else
-            newdefine[5] = (uint)newtoken;
-        lasttoken = newtoken;
+        *tail = PC_CopyToken(token);
+        tail = &(*tail)->next;
     }
-    newdefine[4] = 0;
-    lasttokena = 0;
-    for (tokena = define->parms; tokena; tokena = tokena->next)
+    tail = &copy->parms;
+    for (token_s *token = define->parms; token; token = token->next)
     {
-        newtokena = PC_CopyToken(tokena);
-        newtokena->next = 0;
-        if (lasttokena)
-            lasttokena->next = newtokena;
-        else
-            newdefine[4] = (uint)newtokena;
-        lasttokena = newtokena;
+        *tail = PC_CopyToken(token);
+        tail = &(*tail)->next;
     }
-    return (define_s *)newdefine;
+    return copy;
 }
 
 define_s *globaldefines;
@@ -1919,7 +1945,7 @@ void __cdecl PC_PushIndent(source_s *source, int type, parseSkip_t skip)
 {
     indent_s *indent; // [esp+0h] [ebp-4h]
 
-    indent = (indent_s *)GetMemory(0x10u);
+    indent = (indent_s *)GetMemory(sizeof(indent_s));
     indent->type = type;
     indent->script = source->scriptstack;
     indent->skip = skip;
@@ -3060,9 +3086,11 @@ source_s *__cdecl LoadSourceFile(char *filename)
 
     script = LoadScriptFile(filename);
     if (!script)
+    {
         return 0;
+    }
     script->next = 0;
-    source = (source_s *)GetMemory(0x4D0u);
+    source = (source_s *)GetMemory(sizeof(source_s));
     memset(source, 0, sizeof(source_s));
     strncpy(source->filename, filename, 0x40u);
     source->scriptstack = script;
@@ -3070,7 +3098,7 @@ source_s *__cdecl LoadSourceFile(char *filename)
     source->defines = 0;
     source->indentstack = 0;
     source->skip = 0;
-    source->definehash = (define_s **)GetClearedMemory(0x1000u);
+    source->definehash = (define_s **)GetClearedMemory(1024 * sizeof(define_s *));
     PC_AddGlobalDefinesToSource(source);
     return source;
 }
@@ -3306,11 +3334,13 @@ void PC_SourceError(int handle, char *format, ...)
 
     va_start(va, format);
     _vsnprintf(string_3, 0x1000u, format, va);
+        string_3[sizeof(string_3) - 1] = 0;
     argptr = 0;
     filename[0] = 0;
     line = 0;
     PC_SourceFileAndLine(handle, filename, &line);
     Com_PrintError(CON_CHANNEL_UI, "Menu load error: %s, line %d: %s\n", filename, line, string_3);
+    va_end(va);
 }
 
 bool __cdecl Eval_CanPushValue(const Eval *eval)
@@ -3318,12 +3348,14 @@ bool __cdecl Eval_CanPushValue(const Eval *eval)
     const char *pExceptionObject; // [esp+0h] [ebp-4h] BYREF
 
     if (!eval->valStackPos)
+    {
         return 1;
-    if (eval->valStackPos == 1024)
+    }
+    if ((unsigned int)eval->valStackPos >= ARRAY_COUNT(eval->valStack))
     {
         pExceptionObject = "evaluation stack overflow - expression is too complex";
-        //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
-        iassert(0);
+        // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", pExceptionObject);
     }
     return eval->pushedOp;
 }
@@ -3522,31 +3554,30 @@ bool __cdecl Eval_IsUnaryOp(const Eval *eval)
 
 void __cdecl Eval_PrepareBinaryOpSameTypes(Eval *eval)
 {
-    int v1; // eax
-    const char *v2; // [esp+4h] [ebp-8h] BYREF
+    int v1;                       // eax
+    const char *v2;               // [esp+4h] [ebp-8h] BYREF
     const char *pExceptionObject; // [esp+8h] [ebp-4h] BYREF
 
     if (eval->valStackPos < 2)
     {
         pExceptionObject = "missing operand (for example, 'a + ' or ' / b')";
-        iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "missing operand (for example, 'a + ' or ' / b')");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-        || eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+    if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING || eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
     {
         v2 = "operation not valid on strings";
-        iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v2, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "operation not valid on strings");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016] != eval->opStack[4 * eval->valStackPos + 1020])
+    if (eval->valStack[eval->valStackPos - 2].type != eval->valStack[eval->valStackPos - 1].type)
     {
-        if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_RPAREN)
+        if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_INT)
         {
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1018] = (double)(int)eval->opStack[4 * eval->valStackPos + 1018];
+            eval->valStack[eval->valStackPos - 2].u.d = (double)eval->valStack[eval->valStackPos - 2].u.i;
             v1 = eval->valStackPos - 2;
         }
         else
         {
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1022] = (double)(int)eval->opStack[4 * eval->valStackPos + 1022];
+            eval->valStack[eval->valStackPos - 1].u.d = (double)eval->valStack[eval->valStackPos - 1].u.i;
             v1 = eval->valStackPos - 1;
         }
         eval->valStack[v1].type = EVAL_VALUE_DOUBLE;
@@ -3555,106 +3586,107 @@ void __cdecl Eval_PrepareBinaryOpSameTypes(Eval *eval)
 
 void __cdecl Eval_PrepareBinaryOpIntegers(Eval *eval)
 {
-    const char *v1; // [esp+0h] [ebp-8h] BYREF
+    const char *v1;               // [esp+0h] [ebp-8h] BYREF
     const char *pExceptionObject; // [esp+4h] [ebp-4h] BYREF
 
     if (eval->valStackPos < 2)
     {
         pExceptionObject = "missing operand (for example, 'a + ' or ' / b')";
-        iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "missing operand (for example, 'a + ' or ' / b')");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-        || eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+    if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING || eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
     {
         v1 = "operation not valid on strings";
-        iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v1, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "operation not valid on strings");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_LPAREN)
+    if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_DOUBLE)
     {
-        eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)((int)*(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-        eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+        eval->valStack[eval->valStackPos - 2].u.i = ((int)eval->valStack[eval->valStackPos - 2].u.d);
+        eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
     }
-    if (eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_LPAREN)
+    if (eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_DOUBLE)
     {
-        eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)((int)*(double *)&eval->opStack[4 * eval->valStackPos + 1022]);
-        eval->opStack[4 * eval->valStackPos + 1020] = EVAL_OP_RPAREN;
+        eval->valStack[eval->valStackPos - 1].u.i = ((int)eval->valStack[eval->valStackPos - 1].u.d);
+        eval->valStack[eval->valStackPos - 1].type = EVAL_VALUE_INT;
     }
 }
 
 void __cdecl Eval_PrepareBinaryOpBoolean(Eval *eval)
 {
-    const char *v1; // [esp+8h] [ebp-8h] BYREF
+    const char *v1;               // [esp+8h] [ebp-8h] BYREF
     const char *pExceptionObject; // [esp+Ch] [ebp-4h] BYREF
 
     if (eval->valStackPos < 2)
     {
         pExceptionObject = "missing operand (for example, 'a + ' or ' / b')";
-        iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "missing operand (for example, 'a + ' or ' / b')");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-        || eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+    if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING || eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
     {
         v1 = "operation not valid on strings";
-        iassert(0); //iassert(0); //_CxxThrowException(&v1, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "operation not valid on strings");
     }
-    if (eval->opStack[4 * eval->valStackPos + 1016])
+    if (eval->valStack[eval->valStackPos - 2].type)
     {
-        eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] != EVAL_OP_LPAREN);
-    }
-    else
-    {
-        eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(0.0 != *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-        eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
-    }
-    if (eval->opStack[4 * eval->valStackPos + 1020])
-    {
-        eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1022] != EVAL_OP_LPAREN);
+        eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i != EVAL_OP_LPAREN);
     }
     else
     {
-        eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(0.0 != *(double *)&eval->opStack[4 * eval->valStackPos + 1022]);
-        eval->opStack[4 * eval->valStackPos + 1020] = EVAL_OP_RPAREN;
+        eval->valStack[eval->valStackPos - 2].u.i = (0.0 != eval->valStack[eval->valStackPos - 2].u.d);
+        eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
+    }
+    if (eval->valStack[eval->valStackPos - 1].type)
+    {
+        eval->valStack[eval->valStackPos - 1].u.i = (eval->valStack[eval->valStackPos - 1].u.i != EVAL_OP_LPAREN);
+    }
+    else
+    {
+        eval->valStack[eval->valStackPos - 1].u.i = (0.0 != eval->valStack[eval->valStackPos - 1].u.d);
+        eval->valStack[eval->valStackPos - 1].type = EVAL_VALUE_INT;
     }
 }
 
 bool __cdecl Eval_EvaluationStep(Eval *eval)
 {
-    bool result; // al
-    EvalValue *v2; // edx
-    EvalOperatorType *v3; // ecx
-    int v4; // [esp+10h] [ebp-94h]
-    const char *v5; // [esp+5Ch] [ebp-48h] BYREF
-    const char *v6; // [esp+60h] [ebp-44h] BYREF
-    const char *v7; // [esp+64h] [ebp-40h] BYREF
-    const char *v8; // [esp+68h] [ebp-3Ch] BYREF
-    const char *v9; // [esp+6Ch] [ebp-38h] BYREF
-    const char *v10; // [esp+70h] [ebp-34h] BYREF
-    const char *v11; // [esp+74h] [ebp-30h] BYREF
-    const char *v12; // [esp+78h] [ebp-2Ch] BYREF
-    const char *v13; // [esp+7Ch] [ebp-28h] BYREF
-    const char *v14; // [esp+80h] [ebp-24h] BYREF
+    bool result;                  // al
+    EvalValue *v2;                // edx
+    int v4;                       // [esp+10h] [ebp-94h]
+    const char *v5;               // [esp+5Ch] [ebp-48h] BYREF
+    const char *v6;               // [esp+60h] [ebp-44h] BYREF
+    const char *v7;               // [esp+64h] [ebp-40h] BYREF
+    const char *v8;               // [esp+68h] [ebp-3Ch] BYREF
+    const char *v9;               // [esp+6Ch] [ebp-38h] BYREF
+    const char *v10;              // [esp+70h] [ebp-34h] BYREF
+    const char *v11;              // [esp+74h] [ebp-30h] BYREF
+    const char *v12;              // [esp+78h] [ebp-2Ch] BYREF
+    const char *v13;              // [esp+7Ch] [ebp-28h] BYREF
+    const char *v14;              // [esp+80h] [ebp-24h] BYREF
     const char *pExceptionObject; // [esp+84h] [ebp-20h] BYREF
-    bool v16; // [esp+8Ah] [ebp-1Ah]
-    bool same; // [esp+8Bh] [ebp-19h]
-    long double dQuotientFloor; // [esp+8Ch] [ebp-18h]
-    char *s; // [esp+94h] [ebp-10h]
-    int length[2]; // [esp+98h] [ebp-Ch]
-    int i; // [esp+A0h] [ebp-4h]
+    bool v16;                     // [esp+8Ah] [ebp-1Ah]
+    bool same;                    // [esp+8Bh] [ebp-19h]
+    long double dQuotientFloor;   // [esp+8Ch] [ebp-18h]
+    char *s;                      // [esp+94h] [ebp-10h]
+    size_t length[2];             // [esp+98h] [ebp-Ch]
+    int i;                        // [esp+A0h] [ebp-4h]
 
     if (!eval->opStackPos)
+    {
         return 0;
+    }
     if (eval->opStack[--eval->opStackPos] == EVAL_OP_LPAREN)
+    {
         return 1;
+    }
     if (eval->opStack[eval->opStackPos] == EVAL_OP_QUESTION)
     {
         pExceptionObject = "found '?' with no following ':' in expression of type 'a ? b : c'";
-        //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
-        iassert(0);
+        // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "found '?' with no following ':' in expression of type 'a ? b : c'");
     }
     if (!eval->valStackPos)
     {
         v14 = "missing operand (for example, 'a + ' or ' / b')";
-        iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v14, &PA.deinit);
+        Com_Error(ERR_DROP, "%s", "missing operand (for example, 'a + ' or ' / b')");
     }
     switch (eval->opStack[eval->opStackPos])
     {
@@ -3662,353 +3694,351 @@ bool __cdecl Eval_EvaluationStep(Eval *eval)
         if (eval->valStackPos < 3)
         {
             v6 = "missing operand (for example, 'a + ' or ' / b')";
-            iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v6, &PA.deinit);
+            Com_Error(ERR_DROP, "%s", "missing operand (for example, 'a + ' or ' / b')");
         }
-        if (eval->opStack[4 * eval->valStackPos + 1012])
+        if (eval->valStack[eval->valStackPos - 3].type)
         {
-            if (eval->opStack[4 * eval->valStackPos + 1012] != EVAL_OP_RPAREN)
+            if (eval->valStack[eval->valStackPos - 3].type != EVAL_VALUE_INT)
             {
                 v5 = "can only switch on numbers";
-                iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v5, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "can only switch on numbers");
             }
-            i = -(eval->opStack[4 * eval->valStackPos + 1014] != EVAL_OP_LPAREN) - 1;
+            i = -(eval->valStack[eval->valStackPos - 3].u.i != EVAL_OP_LPAREN) - 1;
         }
         else
         {
-            if (0.0 == *(double *)&eval->opStack[4 * eval->valStackPos + 1014])
+            if (0.0 == eval->valStack[eval->valStackPos - 3].u.d)
+            {
                 v4 = -1;
+            }
             else
+            {
                 v4 = -2;
+            }
             i = v4;
         }
-        if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-            && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+        if (eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING && eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
         {
-            free(eval->valStack[1 - i + eval->valStackPos].u.s);
+            free(eval->valStack[eval->valStackPos - 3 - i].u.s);
         }
         else
         {
             Eval_PrepareBinaryOpSameTypes(eval);
         }
         v2 = &eval->valStack[i + eval->valStackPos];
-        v3 = &eval->opStack[4 * eval->valStackPos + 1012];
-        *v3 = (EvalOperatorType)v2->type;
-        v3[1] = *((EvalOperatorType *)&v2->type + 1);
-        v3[2] = (EvalOperatorType)v2->u.i;
-        v3[3] = *((EvalOperatorType *)&v2->u.s + 1);
+        eval->valStack[eval->valStackPos - 3] = *v2;
         eval->valStackPos -= 2;
         --eval->opStackPos;
         goto LABEL_121;
     case EVAL_OP_PLUS:
-        if (eval->valStackPos >= 2
-            && eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-            && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+        if (eval->valStackPos >= 2 && eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING && eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
         {
-            length[0] = strlen((const char *)eval->opStack[4 * eval->valStackPos + 1018]);
-            length[1] = strlen((const char *)eval->opStack[4 * eval->valStackPos + 1022]);
+            length[0] = strlen((const char *)eval->valStack[eval->valStackPos - 2].u.s);
+            length[1] = strlen((const char *)eval->valStack[eval->valStackPos - 1].u.s);
             s = (char *)malloc(length[0] + length[1] + 1);
-            memcpy((uint8_t *)s, (uint8_t *)eval->opStack[4 * eval->valStackPos + 1018], length[0]);
+            memcpy((uint8_t *)s, (uint8_t *)eval->valStack[eval->valStackPos - 2].u.s, length[0]);
             memcpy(
                 (uint8_t *)&s[length[0]],
-                (uint8_t *)eval->opStack[4 * eval->valStackPos + 1022],
+                (uint8_t *)eval->valStack[eval->valStackPos - 1].u.s,
                 length[1] + 1);
-            free((void *)eval->opStack[4 * eval->valStackPos + 1018]);
-            free((void *)eval->opStack[4 * eval->valStackPos + 1022]);
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)((uintptr_t)s);
+            free((void *)eval->valStack[eval->valStackPos - 2].u.s);
+            free((void *)eval->valStack[eval->valStackPos - 1].u.s);
+            eval->valStack[eval->valStackPos - 2].u.s = s;
         }
         else
         {
             Eval_PrepareBinaryOpSameTypes(eval);
-            if (eval->opStack[4 * eval->valStackPos + 1016])
-                eval->opStack[4 * eval->valStackPos + 1018] += eval->opStack[4 * eval->valStackPos + 1022];
+            if (eval->valStack[eval->valStackPos - 2].type)
+            {
+                eval->valStack[eval->valStackPos - 2].u.i += eval->valStack[eval->valStackPos - 1].u.i;
+            }
             else
-                *(double *)&eval->opStack[4 * eval->valStackPos + 1018] = *(double *)&eval->opStack[4 * eval->valStackPos
-                + 1018]
-                + *(double *)&eval->opStack[4 * eval->valStackPos
-                + 1022];
+            {
+                eval->valStack[eval->valStackPos - 2].u.d = eval->valStack[eval->valStackPos - 2].u.d + eval->valStack[eval->valStackPos - 1].u.d;
+            }
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_MINUS:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
-            eval->opStack[4 * eval->valStackPos + 1018] -= eval->opStack[4 * eval->valStackPos + 1022];
+        if (eval->valStack[eval->valStackPos - 2].type)
+        {
+            eval->valStack[eval->valStackPos - 2].u.i -= eval->valStack[eval->valStackPos - 1].u.i;
+        }
         else
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1018] = *(double *)&eval->opStack[4 * eval->valStackPos + 1018]
-            - *(double *)&eval->opStack[4 * eval->valStackPos + 1022];
+        {
+            eval->valStack[eval->valStackPos - 2].u.d = eval->valStack[eval->valStackPos - 2].u.d - eval->valStack[eval->valStackPos - 1].u.d;
+        }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_UNARY_PLUS:
         goto LABEL_121;
     case EVAL_OP_UNARY_MINUS:
-        if (eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_RPAREN)
+        if (eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_INT)
         {
-            eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(-eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 1].u.i = (-eval->valStack[eval->valStackPos - 1].u.i);
         }
         else
         {
-            if (eval->opStack[4 * eval->valStackPos + 1020])
+            if (eval->valStack[eval->valStackPos - 1].type)
             {
                 v13 = "cannot negate strings";
-                //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v13, &PA.deinit);
-                iassert(0);
+                // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v13, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "cannot negate strings");
             }
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1022] = -*(double *)&eval->opStack[4 * eval->valStackPos
-                + 1022];
+            eval->valStack[eval->valStackPos - 1].u.d = -eval->valStack[eval->valStackPos - 1].u.d;
         }
         goto LABEL_121;
     case EVAL_OP_MULTIPLY:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
-            eval->opStack[4 * eval->valStackPos + 1018] *= eval->opStack[4 * eval->valStackPos + 1022];
+        if (eval->valStack[eval->valStackPos - 2].type)
+        {
+            eval->valStack[eval->valStackPos - 2].u.i *= eval->valStack[eval->valStackPos - 1].u.i;
+        }
         else
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1018] = *(double *)&eval->opStack[4 * eval->valStackPos + 1018]
-            * *(double *)&eval->opStack[4 * eval->valStackPos + 1022];
+        {
+            eval->valStack[eval->valStackPos - 2].u.d = eval->valStack[eval->valStackPos - 2].u.d * eval->valStack[eval->valStackPos - 1].u.d;
+        }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_DIVIDE:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            if (eval->opStack[4 * eval->valStackPos + 1022] == EVAL_OP_LPAREN)
+            if (eval->valStack[eval->valStackPos - 1].u.i == EVAL_OP_LPAREN)
             {
                 v9 = "divide by zero";
-                //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v9, &PA.deinit);
-                iassert(0);
+                // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v9, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "divide by zero");
             }
-            eval->opStack[4 * eval->valStackPos + 1018] /= eval->opStack[4 * eval->valStackPos + 1022];
+            eval->valStack[eval->valStackPos - 2].u.i /= eval->valStack[eval->valStackPos - 1].u.i;
         }
         else
         {
-            if (0.0 == *(double *)&eval->opStack[4 * eval->valStackPos + 1022])
+            if (0.0 == eval->valStack[eval->valStackPos - 1].u.d)
             {
                 v10 = "divide by zero";
-                //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v10, &PA.deinit);
-                iassert(0);
+                // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v10, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "divide by zero");
             }
-            *(double *)&eval->opStack[4 * eval->valStackPos + 1018] = *(double *)&eval->opStack[4 * eval->valStackPos + 1018]
-                / *(double *)&eval->opStack[4 * eval->valStackPos + 1022];
+            eval->valStack[eval->valStackPos - 2].u.d = eval->valStack[eval->valStackPos - 2].u.d / eval->valStack[eval->valStackPos - 1].u.d;
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_MODULUS:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            if (eval->opStack[4 * eval->valStackPos + 1022] == EVAL_OP_LPAREN)
+            if (eval->valStack[eval->valStackPos - 1].u.i == EVAL_OP_LPAREN)
             {
                 v7 = "divide by zero";
-                //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v7, &PA.deinit);
-                iassert(0);
+                // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v7, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "divide by zero");
             }
-            eval->opStack[4 * eval->valStackPos + 1018] %= eval->opStack[4 * eval->valStackPos + 1022];
+            eval->valStack[eval->valStackPos - 2].u.i %= eval->valStack[eval->valStackPos - 1].u.i;
         }
         else
         {
-            if (0.0 == *(double *)&eval->opStack[4 * eval->valStackPos + 1022])
+            if (0.0 == eval->valStack[eval->valStackPos - 1].u.d)
             {
                 v8 = "divide by zero";
-                //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v8, &PA.deinit);
-                iassert(0);
+                // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v8, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "divide by zero");
             }
             dQuotientFloor = floor(
-                *(double *)&eval->opStack[4 * eval->valStackPos + 1018]
-                / *(double *)&eval->opStack[4 * eval->valStackPos + 1022]);
-            *(long double *)&eval->opStack[4 * eval->valStackPos + 1018] = *(double *)&eval->opStack[4 * eval->valStackPos
-                + 1018]
-                - *(double *)&eval->opStack[4 * eval->valStackPos
-                + 1022]
-                * dQuotientFloor;
+                eval->valStack[eval->valStackPos - 2].u.d / eval->valStack[eval->valStackPos - 1].u.d);
+            eval->valStack[eval->valStackPos - 2].u.d = eval->valStack[eval->valStackPos - 2].u.d - eval->valStack[eval->valStackPos - 1].u.d * dQuotientFloor;
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_LSHIFT:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
-            eval->opStack[4 * eval->valStackPos + 1018] <<= eval->opStack[4 * eval->valStackPos + 1022];
+        if (eval->valStack[eval->valStackPos - 2].type)
+        {
+            eval->valStack[eval->valStackPos - 2].u.i <<= eval->valStack[eval->valStackPos - 1].u.i;
+        }
         else
-            *(long double *)&eval->opStack[4 * eval->valStackPos + 1018] = pow(
-                2.0,
-                *(double *)&eval->opStack[4 * eval->valStackPos
-                + 1022])
-            * *(double *)&eval->opStack[4 * eval->valStackPos
-            + 1018];
+        {
+            eval->valStack[eval->valStackPos - 2].u.d = pow(
+                                                            2.0,
+                                                            eval->valStack[eval->valStackPos - 1].u.d) *
+                                                        eval->valStack[eval->valStackPos - 2].u.d;
+        }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_RSHIFT:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
-            eval->opStack[4 * eval->valStackPos + 1018] >>= eval->opStack[4 * eval->valStackPos + 1022];
+        if (eval->valStack[eval->valStackPos - 2].type)
+        {
+            eval->valStack[eval->valStackPos - 2].u.i >>= eval->valStack[eval->valStackPos - 1].u.i;
+        }
         else
-            *(long double *)&eval->opStack[4 * eval->valStackPos + 1018] = pow(
-                2.0,
-                -*(double *)&eval->opStack[4 * eval->valStackPos + 1022])
-            * *(double *)&eval->opStack[4 * eval->valStackPos
-            + 1018];
+        {
+            eval->valStack[eval->valStackPos - 2].u.d = pow(
+                                                            2.0,
+                                                            -eval->valStack[eval->valStackPos - 1].u.d) *
+                                                        eval->valStack[eval->valStackPos - 2].u.d;
+        }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_BITWISE_NOT:
-        if (eval->opStack[4 * eval->valStackPos + 1020])
+        if (eval->valStack[eval->valStackPos - 1].type)
         {
-            if (eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON)
+            if (eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
             {
                 v11 = "cannot bitwise invert strings";
-                iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v11, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "cannot bitwise invert strings");
             }
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)((int)*(double *)&eval->opStack[4 * eval->valStackPos + 1022]);
-            eval->opStack[4 * eval->valStackPos + 1020] = EVAL_OP_RPAREN;
+            eval->valStack[eval->valStackPos - 1].u.i = ((int)eval->valStack[eval->valStackPos - 1].u.d);
+            eval->valStack[eval->valStackPos - 1].type = EVAL_VALUE_INT;
         }
-        eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(~eval->opStack[4 * eval->valStackPos + 1022]);
+        eval->valStack[eval->valStackPos - 1].u.i = (~eval->valStack[eval->valStackPos - 1].u.i);
         goto LABEL_121;
     case EVAL_OP_BITWISE_AND:
         Eval_PrepareBinaryOpIntegers(eval);
-        eval->opStack[4 * eval->valStackPos + 1018] &= eval->opStack[4 * eval->valStackPos + 1022];
+        eval->valStack[eval->valStackPos - 2].u.i &= eval->valStack[eval->valStackPos - 1].u.i;
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_BITWISE_OR:
         Eval_PrepareBinaryOpIntegers(eval);
-        eval->opStack[4 * eval->valStackPos + 1018] |= eval->opStack[4 * eval->valStackPos + 1022];
+        eval->valStack[eval->valStackPos - 2].u.i |= eval->valStack[eval->valStackPos - 1].u.i;
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_BITWISE_XOR:
         Eval_PrepareBinaryOpIntegers(eval);
-        eval->opStack[4 * eval->valStackPos + 1018] ^= eval->opStack[4 * eval->valStackPos + 1022];
+        eval->valStack[eval->valStackPos - 2].u.i ^= eval->valStack[eval->valStackPos - 1].u.i;
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_LOGICAL_NOT:
-        if (eval->opStack[4 * eval->valStackPos + 1020])
+        if (eval->valStack[eval->valStackPos - 1].type)
         {
-            if (eval->opStack[4 * eval->valStackPos + 1020] != EVAL_OP_RPAREN)
+            if (eval->valStack[eval->valStackPos - 1].type != EVAL_VALUE_INT)
             {
                 v12 = "cannot logical invert strings";
-                iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v12, &PA.deinit);
+                Com_Error(ERR_DROP, "%s", "cannot logical invert strings");
             }
-            eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1022] == EVAL_OP_LPAREN);
+            eval->valStack[eval->valStackPos - 1].u.i = (eval->valStack[eval->valStackPos - 1].u.i == EVAL_OP_LPAREN);
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1022] = (EvalOperatorType)(0.0 == *(double *)&eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 1].u.i = (0.0 == eval->valStack[eval->valStackPos - 1].u.d);
         }
-        eval->opStack[4 * eval->valStackPos + 1020] = EVAL_OP_RPAREN;
+        eval->valStack[eval->valStackPos - 1].type = EVAL_VALUE_INT;
         goto LABEL_121;
     case EVAL_OP_LOGICAL_AND:
         Eval_PrepareBinaryOpBoolean(eval);
-        eval->opStack[4 * eval->valStackPos + 1018] &= eval->opStack[4 * eval->valStackPos + 1022];
+        eval->valStack[eval->valStackPos - 2].u.i &= eval->valStack[eval->valStackPos - 1].u.i;
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_LOGICAL_OR:
         Eval_PrepareBinaryOpBoolean(eval);
-        eval->opStack[4 * eval->valStackPos + 1018] |= eval->opStack[4 * eval->valStackPos + 1022];
+        eval->valStack[eval->valStackPos - 2].u.i |= eval->valStack[eval->valStackPos - 1].u.i;
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_EQUALS:
-        if (eval->valStackPos >= 2
-            && eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-            && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+        if (eval->valStackPos >= 2 && eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING && eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
         {
             same = _stricmp(
-                (const char *)eval->opStack[4 * eval->valStackPos + 1018],
-                (const char *)eval->opStack[4 * eval->valStackPos + 1022]) == 0;
-            free((void *)eval->opStack[4 * eval->valStackPos + 1018]);
-            free((void *)eval->opStack[4 * eval->valStackPos + 1022]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)same;
+                       (const char *)eval->valStack[eval->valStackPos - 2].u.s,
+                       (const char *)eval->valStack[eval->valStackPos - 1].u.s) == 0;
+            free((void *)eval->valStack[eval->valStackPos - 2].u.s);
+            free((void *)eval->valStack[eval->valStackPos - 1].u.s);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
+            eval->valStack[eval->valStackPos - 2].u.i = same;
         }
         else
         {
             Eval_PrepareBinaryOpSameTypes(eval);
-            if (eval->opStack[4 * eval->valStackPos + 1016])
+            if (eval->valStack[eval->valStackPos - 2].type)
             {
-                eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] == eval->opStack[4 * eval->valStackPos + 1022]);
+                eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i == eval->valStack[eval->valStackPos - 1].u.i);
             }
             else
             {
-                eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] == *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-                eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+                eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d == eval->valStack[eval->valStackPos - 2].u.d);
+                eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
             }
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_NOT_EQUAL:
-        if (eval->valStackPos >= 2
-            && eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
-            && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
+        if (eval->valStackPos >= 2 && eval->valStack[eval->valStackPos - 2].type == EVAL_VALUE_STRING && eval->valStack[eval->valStackPos - 1].type == EVAL_VALUE_STRING)
         {
             v16 = _stricmp(
-                (const char *)eval->opStack[4 * eval->valStackPos + 1018],
-                (const char *)eval->opStack[4 * eval->valStackPos + 1022]) == 0;
-            free((void *)eval->opStack[4 * eval->valStackPos + 1018]);
-            free((void *)eval->opStack[4 * eval->valStackPos + 1022]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)!v16;
+                      (const char *)eval->valStack[eval->valStackPos - 2].u.s,
+                      (const char *)eval->valStack[eval->valStackPos - 1].u.s) == 0;
+            free((void *)eval->valStack[eval->valStackPos - 2].u.s);
+            free((void *)eval->valStack[eval->valStackPos - 1].u.s);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
+            eval->valStack[eval->valStackPos - 2].u.i = !v16;
         }
         else
         {
             Eval_PrepareBinaryOpSameTypes(eval);
-            if (eval->opStack[4 * eval->valStackPos + 1016])
+            if (eval->valStack[eval->valStackPos - 2].type)
             {
-                eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] != eval->opStack[4 * eval->valStackPos + 1022]);
+                eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i != eval->valStack[eval->valStackPos - 1].u.i);
             }
             else
             {
-                eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] != *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-                eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+                eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d != eval->valStack[eval->valStackPos - 2].u.d);
+                eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
             }
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_LESS:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] < eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i < eval->valStack[eval->valStackPos - 1].u.i);
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] > *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d > eval->valStack[eval->valStackPos - 2].u.d);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_LESS_EQUAL:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] <= eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i <= eval->valStack[eval->valStackPos - 1].u.i);
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] >= *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d >= eval->valStack[eval->valStackPos - 2].u.d);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_GREATER:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] > eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i > eval->valStack[eval->valStackPos - 1].u.i);
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] < *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d < eval->valStack[eval->valStackPos - 2].u.d);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
         }
         --eval->valStackPos;
         goto LABEL_121;
     case EVAL_OP_GREATER_EQUAL:
         Eval_PrepareBinaryOpSameTypes(eval);
-        if (eval->opStack[4 * eval->valStackPos + 1016])
+        if (eval->valStack[eval->valStackPos - 2].type)
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(eval->opStack[4 * eval->valStackPos + 1018] >= eval->opStack[4 * eval->valStackPos + 1022]);
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 2].u.i >= eval->valStack[eval->valStackPos - 1].u.i);
         }
         else
         {
-            eval->opStack[4 * eval->valStackPos + 1018] = (EvalOperatorType)(*(double *)&eval->opStack[4 * eval->valStackPos + 1022] <= *(double *)&eval->opStack[4 * eval->valStackPos + 1018]);
-            eval->opStack[4 * eval->valStackPos + 1016] = EVAL_OP_RPAREN;
+            eval->valStack[eval->valStackPos - 2].u.i = (eval->valStack[eval->valStackPos - 1].u.d <= eval->valStack[eval->valStackPos - 2].u.d);
+            eval->valStack[eval->valStackPos - 2].type = EVAL_VALUE_INT;
         }
         --eval->valStackPos;
     LABEL_121:
@@ -4016,7 +4046,9 @@ bool __cdecl Eval_EvaluationStep(Eval *eval)
         break;
     default:
         if (!alwaysfails)
+        {
             MyAssertHandler(".\\universal\\eval.cpp", 488, 0, "unknown operator type");
+        }
         result = 0;
         break;
     }
@@ -4025,43 +4057,54 @@ bool __cdecl Eval_EvaluationStep(Eval *eval)
 
 char __cdecl Eval_PushOperator(Eval *eval, EvalOperatorType op)
 {
-    bool v3; // [esp+0h] [ebp-10h]
-    const char *v4; // [esp+4h] [ebp-Ch] BYREF
+    bool v3;                      // [esp+0h] [ebp-10h]
+    const char *v4;               // [esp+4h] [ebp-Ch] BYREF
     const char *pExceptionObject; // [esp+8h] [ebp-8h] BYREF
-    bool leftToRight; // [esp+Dh] [ebp-3h]
-    char precedence; // [esp+Eh] [ebp-2h]
-    bool higherPrecedence; // [esp+Fh] [ebp-1h]
+    bool leftToRight;             // [esp+Dh] [ebp-3h]
+    char precedence;              // [esp+Eh] [ebp-2h]
+    bool higherPrecedence;        // [esp+Fh] [ebp-1h]
 
-    if (s_precedence[op] < 0)
+    if ((unsigned int)op >= EVAL_OP_COUNT || s_precedence[op] < 0)
+    {
         return 0;
+    }
     if (op == EVAL_OP_RPAREN && !eval->parenCount)
+    {
         return 0;
+    }
     if (op == EVAL_OP_LPAREN)
     {
         if (eval->valStackPos && !eval->pushedOp)
+        {
             return 0;
+        }
         ++eval->parenCount;
     }
     if (op == EVAL_OP_PLUS)
     {
         if (Eval_IsUnaryOp(eval))
+        {
             op = EVAL_OP_UNARY_PLUS;
+        }
     }
     else if (op == EVAL_OP_MINUS && Eval_IsUnaryOp(eval))
     {
         op = EVAL_OP_UNARY_MINUS;
     }
     if ((uint)op >= EVAL_OP_COUNT)
+    {
         MyAssertHandler(".\\universal\\eval.cpp", 549, 0, "%s", "op >= 0 && op < ARRAY_COUNT( s_precedence )");
+    }
     precedence = s_precedence[op];
     while (eval->opStackPos > 0)
     {
         higherPrecedence = s_precedence[eval->opStack[eval->opStackPos - 1]] > precedence;
-        v3 = s_precedence[eval->opStack[eval->opStackPos - 1]] == precedence
-            && !s_rightToLeft[eval->opStack[eval->opStackPos - 1]];
+        v3 = s_precedence[eval->opStack[eval->opStackPos - 1]] == precedence && !s_rightToLeft[eval->opStack[eval->opStackPos - 1]];
         leftToRight = v3;
         if (!higherPrecedence && !leftToRight)
+        {
             break;
+        }
         if (eval->opStack[eval->opStackPos - 1] == EVAL_OP_LPAREN)
         {
             if (op == EVAL_OP_RPAREN)
@@ -4074,15 +4117,17 @@ char __cdecl Eval_PushOperator(Eval *eval, EvalOperatorType op)
             break;
         }
         if (!Eval_EvaluationStep(eval))
+        {
             return 0;
+        }
     }
     if (op != EVAL_OP_COLON || eval->opStackPos && eval->opStack[eval->opStackPos - 1] == EVAL_OP_QUESTION)
     {
         if (eval->opStackPos == 1024)
         {
             v4 = "evaluation stack overflow - expression is too complex";
-            //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v4, &PA.deinit);
-            iassert(0);
+            // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&v4, &PA.deinit);
+            Com_Error(ERR_DROP, "%s", "evaluation stack overflow - expression is too complex");
         }
         eval->opStack[eval->opStackPos++] = op;
         eval->pushedOp = 1;
@@ -4093,8 +4138,8 @@ char __cdecl Eval_PushOperator(Eval *eval, EvalOperatorType op)
         if (eval->parenCount)
         {
             pExceptionObject = "found ':' without preceding '?' in expression of type 'a ? b : c'";
-            //iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
-            iassert(0);
+            // iassert(0); //iassert(0); //iassert(0); //iassert(0); //iassert(0); //_CxxThrowException(&pExceptionObject, &PA.deinit);
+            Com_Error(ERR_DROP, "%s", "found ':' without preceding '?' in expression of type 'a ? b : c'");
         }
         return 0;
     }
@@ -4228,22 +4273,20 @@ bool __cdecl Eval_AnyMissingOperands(const Eval *eval)
 EvalValue *__cdecl Eval_Solve(EvalValue *result, Eval *eval)
 {
     const char *v5; // [esp+14h] [ebp-18h] BYREF
-   // _DWORD pExceptionObject[5]; // [esp+18h] [ebp-14h] BYREF
+                    // _DWORD pExceptionObject[5]; // [esp+18h] [ebp-14h] BYREF
 
-    //pExceptionObject[1] = &v3;
-    //pExceptionObject[4] = 0;
+    // pExceptionObject[1] = &v3;
+    // pExceptionObject[4] = 0;
     if (eval->parenCount)
     {
-        //pExceptionObject[0] = "missing ')'";
-        iassert(0); //_CxxThrowException(pExceptionObject, &PA.deinit);
+        Com_Error(ERR_DROP, "missing ')'");
     }
     while (Eval_EvaluationStep(eval))
         ;
     iassert(eval->opStackPos == 0);
-    if (eval->valStackPos > 1)
+    if (eval->valStackPos != 1)
     {
-        v5 = "extra operand (for example, 'a b +')";
-        iassert(0); //_CxxThrowException(&v5, &PA.deinit);
+        Com_Error(ERR_DROP, "expression must produce exactly one value");
     }
     *result = eval->valStack[0];
     return result;
@@ -4423,15 +4466,17 @@ int __cdecl MenuParse_rect(menuDef_t *menu, int handle)
 void __cdecl free_expression(statement_s *statement)
 {
     expressionEntry *entry; // [esp+0h] [ebp-8h]
-    int entryNum; // [esp+4h] [ebp-4h]
+    int entryNum;           // [esp+4h] [ebp-4h]
 
     if (statement->numEntries)
     {
         for (entryNum = 0; entryNum < statement->numEntries; ++entryNum)
         {
             entry = statement->entries[entryNum];
-            if (entry->type == 1 && entry->data.op == OP_MULTIPLY)
-                Z_Free((char *)entry->data.operand.internals.intVal, 34);
+            if (entry->type == 1 && entry->data.operand.dataType == VAL_STRING)
+            {
+                Z_Free((char *)entry->data.operand.internals.string, 34);
+            }
             Z_Free((char *)entry, 34);
             statement->entries[entryNum] = 0;
         }
@@ -4488,65 +4533,60 @@ void __cdecl Statement_AddEntry(statement_s *statement, expressionEntry *entry)
 
 void __cdecl Statement_AddOperator(statement_s *statement, operationEnum op)
 {
-    uint *v2; // eax
-
-    v2 = (uint*)Z_Malloc(12, "Statement_AddOperator", 34);
-    *v2 = 0;
-    v2[1] = op;
-    Statement_AddEntry(statement, (expressionEntry *)v2);
+    expressionEntry *entry = (expressionEntry *)Z_Malloc(sizeof(expressionEntry), "Statement_AddOperator", 34);
+    entry->type = 0;
+    entry->data.op = op;
+    Statement_AddEntry(statement, entry);
 }
 
 void __cdecl Statement_AddIntOperand(statement_s *statement, int val)
 {
-    uint *v2; // eax
-
-    v2 = (uint*)Z_Malloc(12, "Statement_AddIntOperand", 34);
-    *v2 = 1;
-    v2[1] = 0;
-    v2[2] = val;
-    Statement_AddEntry(statement, (expressionEntry *)v2);
+    expressionEntry *entry = (expressionEntry *)Z_Malloc(sizeof(expressionEntry), "Statement_AddIntOperand", 34);
+    entry->type = 1;
+    entry->data.operand.dataType = VAL_INT;
+    entry->data.operand.internals = operandInternalDataUnion(val);
+    Statement_AddEntry(statement, entry);
 }
 
 void __cdecl Statement_AddFloatOperand(statement_s *statement, float val)
 {
-    uint *v2; // eax
-
-    v2 = (uint*)Z_Malloc(12, "Statement_AddFloatOperand", 34);
-    *v2 = 1;
-    v2[1] = 1;
-    *((float *)v2 + 2) = val;
-    Statement_AddEntry(statement, (expressionEntry *)v2);
+    expressionEntry *entry = (expressionEntry *)Z_Malloc(sizeof(expressionEntry), "Statement_AddFloatOperand", 34);
+    entry->type = 1;
+    entry->data.operand.dataType = VAL_FLOAT;
+    entry->data.operand.internals = operandInternalDataUnion(val);
+    Statement_AddEntry(statement, entry);
 }
 
 void __cdecl Statement_AddStringOperand(statement_s *statement, char *str)
 {
-    expressionEntry *entry; // [esp+20h] [ebp-4h]
-
-    entry = (expressionEntry *)Z_Malloc(12, "Statement_AddStringOperand", 34);
+    expressionEntry *entry = (expressionEntry *)Z_Malloc(sizeof(expressionEntry), "Statement_AddStringOperand", 34);
     entry->type = 1;
-    entry->data.op = OP_MULTIPLY;
-    entry->data.operand.internals.intVal = (int)Z_Malloc(strlen(str) + 1, "Statement_AddStringOperand", 34);
-    I_strncpyz((char *)entry->data.operand.internals.intVal, str, strlen(str) + 1);
+    entry->data.operand.dataType = VAL_STRING;
+    char *copy = (char *)Z_Malloc(strlen(str) + 1, "Statement_AddStringOperand", 34);
+    strcpy(copy, str);
+    entry->data.operand.internals.string = copy;
     Statement_AddEntry(statement, entry);
 }
 
 char __cdecl parse_expression_internal(int handle, statement_s *statement, int maxEntries)
 {
-    expressionEntry *v4; // edx
+    expressionEntry *v4;         // edx
     operandInternalDataUnion v5; // ecx
-    char *ValueAsString; // eax
-    int type; // [esp+8h] [ebp-42Ch]
-    operationEnum op; // [esp+Ch] [ebp-428h]
-    operationEnum lastOp; // [esp+10h] [ebp-424h]
-    pc_token_s token; // [esp+14h] [ebp-420h] BYREF
-    Operand lastOperand; // [esp+428h] [ebp-Ch]
-    int numOpenLeftParens; // [esp+430h] [ebp-4h]
+    char *ValueAsString;         // eax
+    int type;                    // [esp+8h] [ebp-42Ch]
+    operationEnum op;            // [esp+Ch] [ebp-428h]
+    operationEnum lastOp;        // [esp+10h] [ebp-424h]
+    pc_token_s token;            // [esp+14h] [ebp-420h] BYREF
+    Operand lastOperand;         // [esp+428h] [ebp-Ch]
+    int numOpenLeftParens;       // [esp+430h] [ebp-4h]
 
     numOpenLeftParens = 0;
     while (PC_ReadTokenHandle(handle, &token))
     {
         if (!I_stricmp(token.string, ";"))
+        {
             return 1;
+        }
         if (statement->numEntries == maxEntries)
         {
             Com_PrintError(
@@ -4557,9 +4597,13 @@ char __cdecl parse_expression_internal(int handle, statement_s *statement, int m
             return 0;
         }
         if (token.type == 1)
+        {
             op = OP_NOOP;
+        }
         else
+        {
             op = (operationEnum)parse_operatorToken(token.string);
+        }
         if (op)
         {
             if (op != OP_LEFTPAREN)
@@ -4574,23 +4618,27 @@ char __cdecl parse_expression_internal(int handle, statement_s *statement, int m
                         return 1;
                     }
                     if (!numOpenLeftParens)
+                    {
                         return 1;
+                    }
                 }
                 goto LABEL_28;
             }
             ++numOpenLeftParens;
             if (!statement->numEntries)
+            {
                 goto LABEL_28;
+            }
             type = statement->entries[statement->numEntries - 1]->type;
             if (type)
             {
                 if (type == 1)
                 {
                     v4 = statement->entries[statement->numEntries - 1];
-                    v5.intVal = (int)v4->data.operand.internals;
+                    v5 = v4->data.operand.internals;
                     lastOperand.dataType = v4->data.operand.dataType;
                     lastOperand.internals = v5;
-                    //ValueAsString = GetValueAsString((Operand)__PAIR64__(v5.intVal, lastOperand.dataType));
+                    // ValueAsString = GetValueAsString((Operand)__PAIR64__(v5.intVal, lastOperand.dataType));
                     ValueAsString = GetValueAsString(lastOperand);
                     Com_PrintError(CON_CHANNEL_SYSTEM, "Probably UI Expression error: %s(...\n", ValueAsString);
                 }
@@ -4598,8 +4646,10 @@ char __cdecl parse_expression_internal(int handle, statement_s *statement, int m
             }
             lastOp = statement->entries[statement->numEntries - 1]->data.op;
             if (lastOp != OP_NOT && (lastOp < OP_SIN || lastOp >= NUM_OPERATORS))
-                LABEL_28:
-            Statement_AddOperator(statement, op);
+            {
+            LABEL_28:
+                Statement_AddOperator(statement, op);
+            }
         }
         else
         {
@@ -4609,9 +4659,13 @@ char __cdecl parse_expression_internal(int handle, statement_s *statement, int m
                 goto LABEL_32;
             case 3:
                 if (token.floatvalue == (double)token.intvalue)
+                {
                     Statement_AddIntOperand(statement, token.intvalue);
+                }
                 else
+                {
                     Statement_AddFloatOperand(statement, token.floatvalue);
+                }
                 break;
             case 4:
             LABEL_32:
@@ -4636,17 +4690,21 @@ char __cdecl parse_expression(int handle, statement_s *statement, int maxEntries
 int __cdecl MenuParse_visible(menuDef_t *menu, int handle)
 {
     const char *string; // [esp+0h] [ebp-Ch] BYREF
-    int flags; // [esp+8h] [ebp-4h]
+    int flags;          // [esp+8h] [ebp-4h]
 
     if (!PC_String_Parse(handle, &string))
+    {
         return 0;
+    }
     if (!I_stricmp(string, "when") || !I_stricmp(string, "if"))
     {
         flags = menu->window.dynamicFlags[0];
         Window_SetDynamicFlags(0, &menu->window, flags | 4);
-        menu->visibleExp.entries = (expressionEntry **)Z_Malloc(2400, "Statement_AddOperator", 34);
+        menu->visibleExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "Statement_AddOperator", 34);
         if (parse_expression(handle, &menu->visibleExp, 200))
+        {
             return 1;
+        }
     }
     if (atoi(string))
     {
@@ -4674,11 +4732,13 @@ int __cdecl MenuParse_onESC(menuDef_t *menu, int handle)
 int __cdecl MenuParse_execExp(menuDef_t *menu, int handle)
 {
     const char *expressionType; // [esp+0h] [ebp-41Ch] BYREF
-    pc_token_s token; // [esp+4h] [ebp-418h] BYREF
-    int flags; // [esp+418h] [ebp-4h]
+    pc_token_s token;           // [esp+4h] [ebp-418h] BYREF
+    int flags;                  // [esp+418h] [ebp-4h]
 
     if (!PC_String_Parse(handle, &expressionType))
+    {
         return 0;
+    }
     if (I_stricmp(expressionType, "visible"))
     {
         if (!I_stricmp(expressionType, "rect"))
@@ -4695,15 +4755,19 @@ int __cdecl MenuParse_execExp(menuDef_t *menu, int handle)
                     Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: Expected 'X' or 'Y' after \"exp rect\" but found \"%s\"\n", token.string);
                     return 0;
                 }
-                menu->rectYExp.entries = (expressionEntry **)Z_Malloc(2400, "MenuParse_execExp", 34);
+                menu->rectYExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "MenuParse_execExp", 34);
                 if (parse_expression(handle, &menu->rectYExp, 200))
+                {
                     return 1;
+                }
             }
             else
             {
-                menu->rectXExp.entries = (expressionEntry **)Z_Malloc(2400, "MenuParse_execExp", 34);
+                menu->rectXExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "MenuParse_execExp", 34);
                 if (parse_expression(handle, &menu->rectXExp, 200))
+                {
                     return 1;
+                }
             }
         }
     }
@@ -4721,9 +4785,11 @@ int __cdecl MenuParse_execExp(menuDef_t *menu, int handle)
         }
         flags = menu->window.dynamicFlags[0];
         Window_SetDynamicFlags(0, &menu->window, flags | 4);
-        menu->visibleExp.entries = (expressionEntry **)Z_Malloc(2400, "MenuParse_execExp", 34);
+        menu->visibleExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "MenuParse_execExp", 34);
         if (parse_expression(handle, &menu->visibleExp, 200))
+        {
             return 1;
+        }
     }
     return 0;
 }
@@ -4942,7 +5008,7 @@ int __cdecl MenuParse_itemDef(menuDef_t *menu, int handle)
 
     if (menu->itemCount < 256)
     {
-        item = (itemDef_s *)UI_Alloc(0x174u, 4);
+        item = (itemDef_s *)UI_Alloc(sizeof(itemDef_s), alignof(itemDef_s));
         Item_Init(item, menu->imageTrack);
         if (!Item_Parse(handle, item))
         {
@@ -4958,17 +5024,21 @@ int __cdecl MenuParse_itemDef(menuDef_t *menu, int handle)
 
 int __cdecl MenuParse_execKey(menuDef_t *menu, int handle)
 {
-    const char *action; // [esp+0h] [ebp-10h] BYREF
-    __int16 keyindex; // [esp+4h] [ebp-Ch]
-    char keyname; // [esp+Bh] [ebp-5h] BYREF
+    const char *action;      // [esp+0h] [ebp-10h] BYREF
+    __int16 keyindex;        // [esp+4h] [ebp-Ch]
+    char keyname;            // [esp+Bh] [ebp-5h] BYREF
     ItemKeyHandler *handler; // [esp+Ch] [ebp-4h]
 
     if (!PC_Char_Parse(handle, &keyname))
+    {
         return 0;
+    }
     keyindex = (uint8_t)keyname;
     if (!PC_Script_Parse(handle, &action))
+    {
         return 0;
-    handler = (ItemKeyHandler *)UI_Alloc(0xCu, 4);
+    }
+    handler = (ItemKeyHandler *)UI_Alloc(sizeof(ItemKeyHandler), alignof(ItemKeyHandler));
     handler->key = keyindex;
     handler->action = action;
     handler->next = menu->onKey;
@@ -4978,15 +5048,19 @@ int __cdecl MenuParse_execKey(menuDef_t *menu, int handle)
 
 int __cdecl MenuParse_execKeyInt(menuDef_t *menu, int handle)
 {
-    const char *action; // [esp+0h] [ebp-Ch] BYREF
-    int keyname; // [esp+4h] [ebp-8h] BYREF
+    const char *action;      // [esp+0h] [ebp-Ch] BYREF
+    int keyname;             // [esp+4h] [ebp-8h] BYREF
     ItemKeyHandler *handler; // [esp+8h] [ebp-4h]
 
     if (!PC_Int_Parse(handle, &keyname))
+    {
         return 0;
+    }
     if (!PC_Script_Parse(handle, &action))
+    {
         return 0;
-    handler = (ItemKeyHandler *)UI_Alloc(0xCu, 4);
+    }
+    handler = (ItemKeyHandler *)UI_Alloc(sizeof(ItemKeyHandler), alignof(ItemKeyHandler));
     handler->key = keyname;
     handler->action = action;
     handler->next = menu->onKey;
@@ -5160,11 +5234,13 @@ void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
     if (item->typeData.listBox)
     {
         if (item->dataType != item->type)
+        {
             PC_SourceError(
                 handle,
-                (char*)"Attempting to change type from %d to %d.\nMove the type definition higher up in the itemDef.\n",
+                (char *)"Attempting to change type from %d to %d.\nMove the type definition higher up in the itemDef.\n",
                 item->dataType,
                 item->type);
+        }
     }
     else
     {
@@ -5172,7 +5248,7 @@ void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
         switch (item->type)
         {
         case 6:
-            item->typeData.listBox = (listBoxDef_s *)UI_Alloc(0x154u, 4);
+            item->typeData.listBox = (listBoxDef_s *)UI_Alloc(sizeof(listBoxDef_s), alignof(listBoxDef_s));
             break;
         case 4:
         case 9:
@@ -5183,17 +5259,19 @@ void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
         case 0xA:
         case 0:
         case 0x11:
-            item->typeData.listBox = (listBoxDef_s *)UI_Alloc(0x20u, 4);
+            item->typeData.editField = (editFieldDef_s *)UI_Alloc(sizeof(editFieldDef_s), alignof(editFieldDef_s));
             if (item->type == 4 || item->type == 16 || item->type == 9 || item->type == 18 || item->type == 17)
             {
                 editDef = Item_GetEditFieldDef(item);
                 iassert(editDef);
                 if (!editDef->maxPaintChars)
+                {
                     editDef->maxPaintChars = 256;
+                }
             }
             break;
         case 0xC:
-            item->typeData.listBox = (listBoxDef_s *)UI_Alloc(0x188u, 4);
+            item->typeData.multi = (multiDef_s *)UI_Alloc(sizeof(multiDef_s), alignof(multiDef_s));
             break;
         }
     }
@@ -5341,17 +5419,21 @@ int __cdecl ItemParse_bordersize(itemDef_s *item, int handle)
 int __cdecl ItemParse_visible(itemDef_s *item, int handle)
 {
     const char *string; // [esp+0h] [ebp-Ch] BYREF
-    int flags; // [esp+8h] [ebp-4h]
+    int flags;          // [esp+8h] [ebp-4h]
 
     if (!PC_String_Parse(handle, &string))
+    {
         return 0;
+    }
     if (!I_stricmp(string, "when") || !I_stricmp(string, "if"))
     {
         flags = item->window.dynamicFlags[0];
         Window_SetDynamicFlags(0, &item->window, flags | 4);
-        item->visibleExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_visible", 34);
+        item->visibleExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_visible", 34);
         if (parse_expression(handle, &item->visibleExp, 200))
+        {
             return 1;
+        }
     }
     if (atoi(string))
     {
@@ -5740,17 +5822,21 @@ int __cdecl ItemParse_focusDvar(itemDef_s *item, int handle)
 
 int __cdecl ItemParse_execKey(itemDef_s *item, int handle)
 {
-    const char *action; // [esp+0h] [ebp-10h] BYREF
-    __int16 keyindex; // [esp+4h] [ebp-Ch]
-    char keyname; // [esp+Bh] [ebp-5h] BYREF
+    const char *action;      // [esp+0h] [ebp-10h] BYREF
+    __int16 keyindex;        // [esp+4h] [ebp-Ch]
+    char keyname;            // [esp+Bh] [ebp-5h] BYREF
     ItemKeyHandler *handler; // [esp+Ch] [ebp-4h]
 
     if (!PC_Char_Parse(handle, &keyname))
+    {
         return 0;
+    }
     keyindex = (uint8_t)keyname;
     if (!PC_Script_Parse(handle, &action))
+    {
         return 0;
-    handler = (ItemKeyHandler *)UI_Alloc(0xCu, 4);
+    }
+    handler = (ItemKeyHandler *)UI_Alloc(sizeof(ItemKeyHandler), alignof(ItemKeyHandler));
     handler->key = keyindex;
     handler->action = action;
     handler->next = item->onKey;
@@ -5760,15 +5846,19 @@ int __cdecl ItemParse_execKey(itemDef_s *item, int handle)
 
 int __cdecl ItemParse_execKeyInt(itemDef_s *item, int handle)
 {
-    const char *action; // [esp+0h] [ebp-Ch] BYREF
-    int keyname; // [esp+4h] [ebp-8h] BYREF
+    const char *action;      // [esp+0h] [ebp-Ch] BYREF
+    int keyname;             // [esp+4h] [ebp-8h] BYREF
     ItemKeyHandler *handler; // [esp+8h] [ebp-4h]
 
     if (!PC_Int_Parse(handle, &keyname))
+    {
         return 0;
+    }
     if (!PC_Script_Parse(handle, &action))
+    {
         return 0;
-    handler = (ItemKeyHandler *)UI_Alloc(0xCu, 4);
+    }
+    handler = (ItemKeyHandler *)UI_Alloc(sizeof(ItemKeyHandler), alignof(ItemKeyHandler));
     handler->key = keyname;
     handler->action = action;
     handler->next = item->onKey;
@@ -5779,10 +5869,12 @@ int __cdecl ItemParse_execKeyInt(itemDef_s *item, int handle)
 int __cdecl ItemParse_execExp(itemDef_s *item, int handle)
 {
     const char *expressionType; // [esp+0h] [ebp-8h] BYREF
-    int flags; // [esp+4h] [ebp-4h]
+    int flags;                  // [esp+4h] [ebp-4h]
 
     if (!PC_String_Parse(handle, &expressionType))
+    {
         return 0;
+    }
     if (I_stricmp(expressionType, "visible"))
     {
         if (I_stricmp(expressionType, "text"))
@@ -5803,9 +5895,11 @@ int __cdecl ItemParse_execExp(itemDef_s *item, int handle)
                             Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: Expected 'A' after \"exp forecolor\" but found \"%s\"\n", expressionType);
                             return 0;
                         }
-                        item->forecolorAExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                        item->forecolorAExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                         if (parse_expression(handle, &item->forecolorAExp, 200))
+                        {
                             return 1;
+                        }
                     }
                 }
                 else
@@ -5819,16 +5913,20 @@ int __cdecl ItemParse_execExp(itemDef_s *item, int handle)
                     {
                         if (!I_stricmp(expressionType, "Y"))
                         {
-                            item->rectYExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                            item->rectYExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                             if (parse_expression(handle, &item->rectYExp, 200))
+                            {
                                 return 1;
+                            }
                         }
                     }
                     else
                     {
-                        item->rectXExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                        item->rectXExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                         if (parse_expression(handle, &item->rectXExp, 200))
+                        {
                             return 1;
+                        }
                     }
                     if (I_stricmp(expressionType, "W"))
                     {
@@ -5840,39 +5938,49 @@ int __cdecl ItemParse_execExp(itemDef_s *item, int handle)
                                 expressionType);
                             return 0;
                         }
-                        item->rectHExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                        item->rectHExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                         if (parse_expression(handle, &item->rectHExp, 200))
+                        {
                             return 1;
+                        }
                     }
                     else
                     {
-                        item->rectWExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                        item->rectWExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                         if (parse_expression(handle, &item->rectWExp, 200))
+                        {
                             return 1;
+                        }
                     }
                 }
             }
             else
             {
-                item->materialExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+                item->materialExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
                 if (parse_expression(handle, &item->materialExp, 200))
+                {
                     return 1;
+                }
             }
         }
         else
         {
-            item->textExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+            item->textExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
             if (parse_expression(handle, &item->textExp, 200))
+            {
                 return 1;
+            }
         }
     }
     else
     {
         flags = item->window.dynamicFlags[0];
         Window_SetDynamicFlags(0, &item->window, flags | 4);
-        item->visibleExp.entries = (expressionEntry **)Z_Malloc(2400, "ItemParse_execExp", 34);
+        item->visibleExp.entries = (expressionEntry **)Z_Malloc(600 * sizeof(expressionEntry *), "ItemParse_execExp", 34);
         if (parse_expression(handle, &item->visibleExp, 200))
+        {
             return 1;
+        }
     }
     return 0;
 }
@@ -6282,8 +6390,8 @@ void __cdecl Menu_PostParse(menuDef_t *menu)
     uint size; // [esp+0h] [ebp-4h]
 
     iassert(menu);
-    size = 4 * menu->itemCount;
-    menu->items = (itemDef_s **)UI_Alloc(size, 4);
+    size = sizeof(itemDef_s *) * menu->itemCount;
+    menu->items = (itemDef_s **)UI_Alloc(size, alignof(itemDef_s *));
     memcpy((uint8_t *)menu->items, (uint8_t *)g_load_0.items, size);
     if (menu->fullScreen)
     {
@@ -6299,7 +6407,7 @@ char __cdecl Menu_New(int handle, int imageTrack)
 {
     menuDef_t *menu; // [esp+0h] [ebp-4h]
 
-    menu = (menuDef_t *)UI_Alloc(0x11Cu, 4);
+    menu = (menuDef_t *)UI_Alloc(sizeof(menuDef_t), alignof(menuDef_t));
     Menu_Init(menu, imageTrack);
     if (Menu_Parse(handle, menu))
     {
@@ -6307,13 +6415,15 @@ char __cdecl Menu_New(int handle, int imageTrack)
         {
             Menu_PostParse(menu);
             if (g_load_0.menuList.menuCount >= 512)
+            {
                 Com_Error(ERR_DROP, "Menu_New: (Kisak) Out of memory"); // KISAKTODO: proper err msg... IDA shows it as hex and cba
+            }
             g_load_0.menuList.menus[g_load_0.menuList.menuCount++] = menu;
             return 1;
         }
         else
         {
-            PC_SourceError(handle, (char*)"menu has no name");
+            PC_SourceError(handle, (char *)"menu has no name");
             Menu_FreeMemory(menu);
             return 0;
         }

@@ -119,7 +119,7 @@ void UI_RegisterDvars()
 
 void __cdecl TRACK_ui_main()
 {
-    track_static_alloc_internal(&uiInfo, 37664, "uiInfo", 34);
+    track_static_alloc_internal(&uiInfo, sizeof(uiInfo), "uiInfo", 34);
 }
 
 void UI_AssetCache()
@@ -1459,93 +1459,37 @@ void __cdecl UI_ReplaceConversions(
     char *outputString,
     size_t outputStringSize)
 {
-    const char *v8; // r11
-    int v10; // r11
-    int v11; // r20
-    int v12; // r29
-    int v13; // r28
-    char *v14; // r30
-    int v15; // r31
-    int v16; // r31
-    unsigned __int8 *v17; // r11
-    unsigned __int8 *v19; // r10
-    int v20; // r11
-    int v21; // r10
-    char v22; // r9
-
     iassert(sourceString);
-    if (strstr(sourceString, "&&"))
+    if (!outputStringSize)
     {
-        iassert(arguments);
-        vassert((arguments->argCount <= 9), "(arguments->argCount) = %i", arguments->argCount);
-        v8 = sourceString;
-        while (*(unsigned __int8 *)v8++)
-            ;
-        v10 = v8 - sourceString - 1;
-        v11 = v10;
-        if (v10 <= 0)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                2714,
-                0,
-                "%s\n\t(sourceStringLength) = %i",
-                "(sourceStringLength > 0)",
-                v10);
-        memset(outputString, 0, outputStringSize);
-        v12 = 0;
-        v13 = 0;
-        while (v13 < v11)
-        {
-            v14 = (char *)&sourceString[v13];
-            if (strncmp(&sourceString[v13], "&&", 2u) || !isdigit(sourceString[v13 + 2]))
-            {
-                ++v13;
-                outputString[v12++] = *v14;
-            }
-            else
-            {
-                v15 = sourceString[v13 + 2] - 49;
-                if (v15 < 0 || v15 >= arguments->argCount)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                        2728,
-                        0,
-                        "%s\n\t(argIndex) = %i",
-                        "(argIndex >= 0 && argIndex < arguments->argCount)",
-                        v15);
-                if (v15 >= 9)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp",
-                        2729,
-                        0,
-                        "%s\n\t(argIndex) = %i",
-                        "(argIndex < 9)",
-                        v15);
-                v16 = 4 * (v15 + 1);
-                if (!*(int *)((char *)&arguments->argCount + v16))
-                    MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\ui\\ui_main.cpp", 2731, 0, "%s", "arguments->args[argIndex]");
-                v17 = *(unsigned __int8 **)((char *)&arguments->argCount + v16);
-                while (*v17++)
-                    ;
-                v19 = &v17[-*(int *)((char *)&arguments->argCount + v16)];
-                v20 = 0;
-                v21 = (int)(v19 - 1);
-                if (v21 > 0)
-                {
-                    do
-                    {
-                        v22 = *(_BYTE *)(*(int *)((char *)&arguments->argCount + v16) + v20++);
-                        outputString[v12++] = v22;
-                    } while (v20 < v21);
-                }
-                v13 += 3;
-            }
-        }
-        UI_FilterStringForButtonAnimation(outputString, outputStringSize);
+        return;
     }
-    else
+    bool hasConversions = strstr(sourceString, "&&") != 0;
+    size_t written = 0;
+    for (const char *source = sourceString; *source && written + 1 < outputStringSize;)
     {
-        I_strncpyz(outputString, sourceString, outputStringSize);
+        if (source[0] == '&' && source[1] == '&' && source[2] >= '1' && source[2] <= '9'
+            && arguments && source[2] - '1' < arguments->argCount)
+        {
+            const char *replacement = arguments->args[source[2] - '1'];
+            if (replacement)
+            {
+                while (*replacement && written + 1 < outputStringSize)
+                {
+                    outputString[written++] = *replacement++;
+                }
+            }
+            source += 3;
+        }
+        else
+        {
+            outputString[written++] = *source++;
+        }
+    }
+    outputString[written] = 0;
+    if (hasConversions)
+    {
+        UI_FilterStringForButtonAnimation(outputString, outputStringSize);
     }
 }
 
@@ -2075,7 +2019,7 @@ void UI_CreatePlayerProfile()
 
     if (strlen(ui_playerProfileNameNew->current.string))
     {
-        I_strncpyz(name, (char *)ui_playerProfileNameNew->current.integer, 32);
+        I_strncpyz(name, ui_playerProfileNameNew->current.string, 32);
         Dvar_SetString((dvar_s *)ui_playerProfileNameNew, (char *)"");
 
         uiInfo_s *uiInfo = &::uiInfo;
@@ -2567,83 +2511,39 @@ void __cdecl UI_DrawConnectScreen()
 
 char *__cdecl UI_ReplaceConversionString(const char *sourceString, const char *replaceString)
 {
-    int v2[2]; // r10
-    ConversionArguments v4; // [sp+50h] [-440h] BYREF
-    char v5[1032]; // [sp+80h] [-410h] BYREF
-
-    v2[1] = 0;
-    v2[0] = (int)replaceString;
-    *(_QWORD *)&v4.args[1] = *(_QWORD *)v2;
-    *(_QWORD *)&v4.args[3] = *(_QWORD *)v2;
-    *(_QWORD *)&v4.args[5] = *(_QWORD *)v2;
-    *(_QWORD *)&v4.args[7] = *(_QWORD *)v2;
-    v4.args[0] = replaceString;
-    v4.argCount = 1;
-    UI_ReplaceConversions(sourceString, &v4, v5, 1024);
-    return va(v5);
+    ConversionArguments arguments = {};
+    char result[1024];
+    arguments.argCount = 1;
+    arguments.args[0] = replaceString;
+    UI_ReplaceConversions(sourceString, &arguments, result, sizeof(result));
+    return va("%s", result);
 }
 
 char *__cdecl UI_ReplaceConversionInt(const char *sourceString, int replaceInt)
 {
-    __int64 v2; // r10
-    ConversionArguments v5; // [sp+50h] [-460h] BYREF
-    char v6[32]; // [sp+80h] [-430h] BYREF
-    char v7[1024]; // [sp+A0h] [-410h] BYREF
-
-    LODWORD(v2) = 0;
-    HIDWORD(v2) = 0x82000000;
-    *(_QWORD *)&v5.args[1] = v2;
-    *(_QWORD *)&v5.args[3] = v2;
-    *(_QWORD *)&v5.args[5] = v2;
-    *(_QWORD *)&v5.args[7] = v2;
-    snprintf(v6, ARRAYSIZE(v6), "%d", replaceInt);
-    v5.argCount = 1;
-    v5.args[0] = v6;
-    UI_ReplaceConversions(sourceString, &v5, v7, 0x400u);
-    return va(v7);
+    char number[32];
+    snprintf(number, sizeof(number), "%d", replaceInt);
+    return UI_ReplaceConversionString(sourceString, number);
 }
 
-char *__cdecl UI_ReplaceConversionInts(
-    const char *sourceString,
-    int numInts,
-    char *replaceInts,
-    int a4,
-    int a5,
-    int a6,
-    __int64 a7)
+char *__cdecl UI_ReplaceConversionInts(const char *sourceString, int numInts, const int *replaceInts)
 {
-    const char **args; // r30
-    int v9; // r28
-    char *v10; // r31
-    int v11; // r29
-    ConversionArguments v13; // [sp+50h] [-670h] BYREF
-    char v14; // [sp+80h] [-640h] BYREF
-    char v15[1088]; // [sp+280h] [-440h] BYREF
-
-    LODWORD(a7) = 0;
-    v13.args[0] = 0;
-    *(_QWORD *)&v13.args[1] = a7;
-    *(_QWORD *)&v13.args[3] = a7;
-    *(_QWORD *)&v13.args[5] = a7;
-    *(_QWORD *)&v13.args[7] = a7;
-    v13.argCount = numInts;
-    if (numInts > 0)
+    ConversionArguments arguments = {};
+    char numbers[9][32];
+    char result[1024];
+    if ((unsigned int)numInts > ARRAY_COUNT(arguments.args))
     {
-        args = v13.args;
-        v9 = replaceInts - (char *)v13.args;
-        v10 = &v14;
-        v11 = numInts;
-        do
-        {
-            sprintf(v10, "%d", *(const char **)((char *)args + v9)); // TODO: Fix this
-            --v11;
-            *args = v10;
-            v10 += 32;
-            ++args;
-        } while (v11);
+        Com_Error(ERR_DROP, "Too many UI conversion arguments");
+        return 0;
     }
-    UI_ReplaceConversions(sourceString, &v13, v15, 0x400u);
-    return va(v15);
+    arguments.argCount = numInts;
+    for (int i = 0; i < numInts; ++i)
+    {
+        snprintf(numbers[i], sizeof(numbers[i]), "%d", replaceInts[i]);
+        arguments.args[i] = numbers[i];
+    }
+    UI_ReplaceConversions(sourceString, &arguments, result, sizeof(result));
+    return va("%s", result);
 }
 
 int __cdecl UI_Popup(int localClientNum, const char *menu)

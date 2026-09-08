@@ -572,28 +572,28 @@ void __cdecl Script_SetItemColor(UiContext *dc, itemDef_s *item, const char **ar
 
 int __cdecl Menu_ItemsMatchingGroup(menuDef_t *menu, char *name)
 {
-    int v2; // eax
+    const char *v2;
     int wildcard; // [esp+4h] [ebp-Ch]
-    int i; // [esp+8h] [ebp-8h]
-    int count; // [esp+Ch] [ebp-4h]
+    int i;        // [esp+8h] [ebp-8h]
+    int count;    // [esp+Ch] [ebp-4h]
 
     count = 0;
     wildcard = -1;
-    v2 = (int)strstr(name, "*");
+    v2 = strchr(name, '*');
     if (v2)
-        wildcard = v2 - (uint)name;
+    {
+        wildcard = v2 - name;
+    }
     for (i = 0; i < menu->itemCount; ++i)
     {
         if (wildcard == -1)
         {
-            if (menu->items[i]->window.name && !I_stricmp(menu->items[i]->window.name, name)
-                || menu->items[i]->window.group && !I_stricmp(menu->items[i]->window.group, name))
+            if (menu->items[i]->window.name && !I_stricmp(menu->items[i]->window.name, name) || menu->items[i]->window.group && !I_stricmp(menu->items[i]->window.group, name))
             {
                 ++count;
             }
         }
-        else if (menu->items[i]->window.name && !I_strncmp(menu->items[i]->window.name, name, wildcard)
-            || menu->items[i]->window.group && !I_strncmp(menu->items[i]->window.group, name, wildcard))
+        else if (menu->items[i]->window.name && !I_strncmp(menu->items[i]->window.name, name, wildcard) || menu->items[i]->window.group && !I_strncmp(menu->items[i]->window.group, name, wildcard))
         {
             ++count;
         }
@@ -603,33 +603,37 @@ int __cdecl Menu_ItemsMatchingGroup(menuDef_t *menu, char *name)
 
 itemDef_s *__cdecl Menu_GetMatchingItemByNumber(menuDef_t *menu, int index, char *name)
 {
-    int v3; // eax
+    const char *v3;
     int wildcard; // [esp+4h] [ebp-Ch]
-    int i; // [esp+8h] [ebp-8h]
-    int count; // [esp+Ch] [ebp-4h]
+    int i;        // [esp+8h] [ebp-8h]
+    int count;    // [esp+Ch] [ebp-4h]
 
     count = 0;
     wildcard = -1;
-    v3 = (int)strstr(name, "*");
+    v3 = strchr(name, '*');
     if (v3)
-        wildcard = v3 - (uint)name;
+    {
+        wildcard = v3 - name;
+    }
     for (i = 0; i < menu->itemCount; ++i)
     {
         if (wildcard == -1)
         {
-            if (menu->items[i]->window.name && !I_stricmp(menu->items[i]->window.name, name)
-                || menu->items[i]->window.group && !I_stricmp(menu->items[i]->window.group, name))
+            if (menu->items[i]->window.name && !I_stricmp(menu->items[i]->window.name, name) || menu->items[i]->window.group && !I_stricmp(menu->items[i]->window.group, name))
             {
                 if (count == index)
+                {
                     return menu->items[i];
+                }
                 ++count;
             }
         }
-        else if (menu->items[i]->window.name && !I_strncmp(menu->items[i]->window.name, name, wildcard)
-            || menu->items[i]->window.group && !I_strncmp(menu->items[i]->window.group, name, wildcard))
+        else if (menu->items[i]->window.name && !I_strncmp(menu->items[i]->window.name, name, wildcard) || menu->items[i]->window.group && !I_strncmp(menu->items[i]->window.group, name, wildcard))
         {
             if (count == index)
+            {
                 return menu->items[i];
+            }
             ++count;
         }
     }
@@ -1772,8 +1776,8 @@ void __cdecl Script_RespondOnDvarFloatValue(UiContext *dc, itemDef_s *item, cons
 
 void __cdecl Script_SetLocalVarBool(UiContext *dc, itemDef_s *item, const char **args)
 {
-    int v3; // eax
-    UILocalVarContext *var; // [esp+0h] [ebp-10Ch]
+    int v3;           // eax
+    UILocalVar *var;  // [esp+0h] [ebp-10Ch]
     char string[260]; // [esp+4h] [ebp-108h] BYREF
 
     var = Script_ParseLocalVar(dc, args);
@@ -1782,25 +1786,29 @@ void __cdecl Script_SetLocalVarBool(UiContext *dc, itemDef_s *item, const char *
         if (var)
         {
             v3 = atoi(string);
-            UILocalVar_SetBool(var->table, v3 != 0);
+            UILocalVar_SetBool(var, v3 != 0);
         }
     }
 }
 
-UILocalVarContext *__cdecl Script_ParseLocalVar(UiContext *dc, const char **args)
+UILocalVar *__cdecl Script_ParseLocalVar(UiContext *dc, const char **args)
 {
     char varName[260]; // [esp+0h] [ebp-108h] BYREF
 
     if (String_Parse(args, varName, 256))
+    {
         return UILocalVar_FindOrCreate(&dc->localVars, varName);
+    }
     else
+    {
         return 0;
+    }
 }
 
 void __cdecl Script_SetLocalVarInt(UiContext *dc, itemDef_s *item, const char **args)
 {
-    int v3; // eax
-    UILocalVarContext *var; // [esp+0h] [ebp-10Ch]
+    int v3;           // eax
+    UILocalVar *var;  // [esp+0h] [ebp-10Ch]
     char string[260]; // [esp+4h] [ebp-108h] BYREF
 
     var = Script_ParseLocalVar(dc, args);
@@ -1809,15 +1817,15 @@ void __cdecl Script_SetLocalVarInt(UiContext *dc, itemDef_s *item, const char **
         if (var)
         {
             v3 = atoi(string);
-            UILocalVar_SetInt(var->table, v3);
+            UILocalVar_SetInt(var, v3);
         }
     }
 }
 
 void __cdecl Script_SetLocalVarFloat(UiContext *dc, itemDef_s *item, const char **args)
 {
-    float f; // [esp+4h] [ebp-110h]
-    UILocalVarContext *var; // [esp+8h] [ebp-10Ch]
+    float f;          // [esp+4h] [ebp-110h]
+    UILocalVar *var;  // [esp+8h] [ebp-10Ch]
     char string[260]; // [esp+Ch] [ebp-108h] BYREF
 
     var = Script_ParseLocalVar(dc, args);
@@ -1826,21 +1834,23 @@ void __cdecl Script_SetLocalVarFloat(UiContext *dc, itemDef_s *item, const char 
         if (var)
         {
             f = atof(string);
-            UILocalVar_SetFloat(var->table, f);
+            UILocalVar_SetFloat(var, f);
         }
     }
 }
 
 void __cdecl Script_SetLocalVarString(UiContext *dc, itemDef_s *item, const char **args)
 {
-    UILocalVarContext *var; // [esp+0h] [ebp-10Ch]
+    UILocalVar *var;  // [esp+0h] [ebp-10Ch]
     char string[260]; // [esp+4h] [ebp-108h] BYREF
 
     var = Script_ParseLocalVar(dc, args);
     if (String_Parse(args, string, 256))
     {
         if (var)
-            UILocalVar_SetString(var->table, string);
+        {
+            UILocalVar_SetString(var, string);
+        }
     }
 }
 
@@ -2836,101 +2846,81 @@ void __cdecl Item_TextField_EnsureCursorVisible(int localClientNum, itemDef_s *i
     }
 }
 
+struct scrollInfo_s // sizeof=0x20
+{                                       // ...
+    int nextScrollTime;                 // ...
+    int nextAdjustTime;                 // ...
+    int adjustValue;                    // ...
+    int scrollKey;                      // ...
+    float xStart;                       // ...
+    float yStart;                       // ...
+    itemDef_s *item;                    // ...
+    int scrollDir;                      // ...
+};
+
 void __cdecl Scroll_ListBox_AutoFunc(UiContext *dc, void *p)
 {
-    if (dc->realTime > *(_DWORD *)p)
+    scrollInfo_s *info = (scrollInfo_s *)p;
+    if (dc->realTime > info->nextScrollTime)
     {
-        Item_ListBox_HandleKey(dc, *((itemDef_s **)p + 6), *((_DWORD *)p + 3), 1, 0);
-        *(_DWORD *)p = *((_DWORD *)p + 2) + dc->realTime;
+        Item_ListBox_HandleKey(dc, info->item, info->scrollKey, 1, 0);
+        info->nextScrollTime = info->adjustValue + dc->realTime;
     }
-    if (dc->realTime > *((_DWORD *)p + 1))
+    if (dc->realTime > info->nextAdjustTime)
     {
-        *((_DWORD *)p + 1) = dc->realTime + 150;
-        if (*((int *)p + 2) > 20)
-            *((_DWORD *)p + 2) -= 40;
+        info->nextAdjustTime = dc->realTime + 150;
+        if (info->adjustValue > 20)
+        {
+            info->adjustValue -= 40;
+        }
     }
 }
 
 void __cdecl Scroll_ListBox_ThumbFunc(UiContext *dc, void *p)
 {
-    int v2; // [esp+0h] [ebp-3Ch]
-    int v3; // [esp+4h] [ebp-38h]
-    int v4; // [esp+8h] [ebp-34h]
-    int pos; // [esp+10h] [ebp-2Ch]
-    int posa; // [esp+10h] [ebp-2Ch]
-    int max; // [esp+14h] [ebp-28h]
-    int maxa; // [esp+14h] [ebp-28h]
-    float r; // [esp+18h] [ebp-24h]
-    float r_4; // [esp+1Ch] [ebp-20h]
-    float r_8; // [esp+20h] [ebp-1Ch]
-    float r_12; // [esp+24h] [ebp-18h]
-    listBoxDef_s *listPtr; // [esp+34h] [ebp-8h]
-
-    if (dc->isCursorVisible)
+    scrollInfo_s *info = (scrollInfo_s *)p;
+    if (!dc->isCursorVisible)
     {
-        listPtr = Item_GetListBoxDef(*((itemDef_s **)p + 6));
-        if (listPtr)
+        return;
+    }
+    itemDef_s *item = info->item;
+    listBoxDef_s *list = Item_GetListBoxDef(item);
+    if (!list)
+    {
+        return;
+    }
+    bool horizontal = (item->window.staticFlags & 0x200000) != 0;
+    float cursor = horizontal ? dc->cursor.x : dc->cursor.y;
+    float previous = horizontal ? info->xStart : info->yStart;
+    if (horizontal && cursor == previous)
+    {
+        return;
+    }
+    if (cursor != previous)
+    {
+        float start = horizontal ? item->window.rect.x : item->window.rect.y;
+        float length = horizontal ? item->window.rect.w : item->window.rect.h;
+        int maximum = Item_ListBox_MaxScroll(dc->localClientNum, item);
+        int position = length > 50.0f ? (int)((cursor - start - 25.0f) * maximum / (length - 50.0f)) : 0;
+        if (position < 0)
         {
-            v4 = *((_DWORD *)p + 6);
-            if (!v4)
-                MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 53, 0, "%s", "w");
-            if ((*(_DWORD *)(v4 + 76) & 0x200000) != 0)
-            {
-                if (*((float *)p + 4) == dc->cursor.x)
-                    return;
-                v3 = *((_DWORD *)p + 6);
-                if (!v3)
-                    MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
-                r = *(float *)(v3 + 4) + 16.0 + 1.0;
-                r_8 = *(float *)(v3 + 12) - 32.0 - 2.0;
-                max = Item_ListBox_MaxScroll(dc->localClientNum, *((itemDef_s **)p + 6));
-                pos = (int)((dc->cursor.x - r - 8.0) * (double)max / (r_8 - 16.0));
-                if (pos >= 0)
-                {
-                    if (pos > max)
-                        pos = max;
-                }
-                else
-                {
-                    pos = 0;
-                }
-                listPtr->startPos[dc->localClientNum] = pos;
-                *((float *)p + 4) = dc->cursor.x;
-            }
-            else if (*((float *)p + 5) != dc->cursor.y)
-            {
-                v2 = *((_DWORD *)p + 6);
-                if (!v2)
-                    MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
-                r_4 = *(float *)(v2 + 8) + 16.0 + 1.0;
-                r_12 = *(float *)(v2 + 16) - 32.0 - 2.0;
-                maxa = Item_ListBox_MaxScroll(dc->localClientNum, *((itemDef_s **)p + 6));
-                posa = (int)((dc->cursor.y - r_4 - 8.0) * (double)maxa / (r_12 - 16.0));
-                if (posa >= 0)
-                {
-                    if (posa > maxa)
-                        posa = maxa;
-                }
-                else
-                {
-                    posa = 0;
-                }
-                listPtr->startPos[dc->localClientNum] = posa;
-                *((float *)p + 5) = dc->cursor.y;
-            }
-            if (dc->realTime > *(_DWORD *)p)
-            {
-                Item_ListBox_HandleKey(dc, *((itemDef_s **)p + 6), *((_DWORD *)p + 3), 1, 0);
-                *(_DWORD *)p = *((_DWORD *)p + 2) + dc->realTime;
-            }
-            if (dc->realTime > *((_DWORD *)p + 1))
-            {
-                *((_DWORD *)p + 1) = dc->realTime + 150;
-                if (*((int *)p + 2) > 20)
-                    *((_DWORD *)p + 2) -= 40;
-            }
+            position = 0;
+        }
+        if (position > maximum)
+        {
+            position = maximum;
+        }
+        list->startPos[dc->localClientNum] = position;
+        if (horizontal)
+        {
+            info->xStart = cursor;
+        }
+        else
+        {
+            info->yStart = cursor;
         }
     }
+    Scroll_ListBox_AutoFunc(dc, p);
 }
 
 int __cdecl Item_Slider_OverSlider(int localClientNum, itemDef_s *item, float x, float y)
@@ -2960,17 +2950,6 @@ void __cdecl Scroll_Slider_ThumbFunc(UiContext *dc, itemDef_s **p)
     Scroll_Slider_SetThumbPos(dc, p[6]);
 }
 
-struct scrollInfo_s // sizeof=0x20
-{                                       // ...
-    int nextScrollTime;                 // ...
-    int nextAdjustTime;                 // ...
-    int adjustValue;                    // ...
-    int scrollKey;                      // ...
-    float xStart;                       // ...
-    float yStart;                       // ...
-    itemDef_s *item;                    // ...
-    int scrollDir;                      // ...
-};
 scrollInfo_s scrollInfo;
 void __cdecl Item_StartCapture(UiContext *dc, itemDef_s *item, int key)
 {
@@ -3534,22 +3513,28 @@ int __cdecl Item_DvarEnum_CountSettings(itemDef_s *item)
 
 int __cdecl Item_DvarEnum_EnumIndex(itemDef_s *item)
 {
-    int enumIndex; // [esp+0h] [ebp-Ch]
-    int enumIndexa; // [esp+0h] [ebp-Ch]
+    int enumIndex;          // [esp+0h] [ebp-Ch]
+    int enumIndexa;         // [esp+0h] [ebp-Ch]
     const dvar_s *enumDvar; // [esp+4h] [ebp-8h]
     const char *enumString; // [esp+8h] [ebp-4h]
 
     enumDvar = Dvar_FindVar(item->typeData.enumDvarName);
     if (enumDvar->type != 6)
+    {
         return 0;
+    }
     enumString = Dvar_GetVariantString(item->dvar);
     enumIndex = atoi(enumString);
     if (enumIndex >= 0 && enumIndex < enumDvar->domain.enumeration.stringCount)
+    {
         return enumIndex;
+    }
     for (enumIndexa = 0; enumIndexa < enumDvar->domain.enumeration.stringCount; ++enumIndexa)
     {
-        if (!I_stricmp(enumString, *(const char **)(enumDvar->domain.integer.max + 4 * enumIndexa)))
+        if (!I_stricmp(enumString, enumDvar->domain.enumeration.strings[enumIndexa]))
+        {
             return enumIndexa;
+        }
     }
     return 0;
 }
@@ -4358,9 +4343,9 @@ char __cdecl Menu_IsVisible(UiContext *dc, menuDef_t *menu)
 char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
 {
     float fadeCycle; // [esp+1Ch] [ebp-14h]
-    float v4; // [esp+20h] [ebp-10h]
-    float v5; // [esp+24h] [ebp-Ch]
-    int i; // [esp+28h] [ebp-8h]
+    float v4;        // [esp+20h] [ebp-10h]
+    float v5;        // [esp+24h] [ebp-Ch]
+    int i;           // [esp+28h] [ebp-8h]
 
     PROF_SCOPED("Menu_Paint");
 
@@ -4368,18 +4353,20 @@ char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
 
     iassert(menu);
 
-    if (*(_BYTE *)ui_showMenuOnly->current.integer
-        && menu->window.name
-        && I_stricmp(menu->window.name, ui_showMenuOnly->current.string))
+    if (*ui_showMenuOnly->current.string && menu->window.name && I_stricmp(menu->window.name, ui_showMenuOnly->current.string))
     {
         return 0;
     }
 
     if (!Menu_IsVisible(dc, menu))
+    {
         return 0;
+    }
 
     if (menu->soundName)
+    {
         UI_PlayLocalSoundAliasByName(dc->localClientNum, menu->soundName);
+    }
 
     if (menu->blurRadius != 0.0)
     {
@@ -4389,16 +4376,22 @@ char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
     }
 
     if (menu->rectXExp.numEntries)
+    {
         menu->window.rect.x = GetExpressionFloat(dc->localClientNum, &menu->rectXExp);
+    }
 
     if (menu->rectYExp.numEntries)
+    {
         menu->window.rect.y = GetExpressionFloat(dc->localClientNum, &menu->rectYExp);
+    }
 
     Menu_UpdatePosition(dc->localClientNum, menu);
     if (menu->fullScreen && menu->window.background)
     {
         if (!menu)
+        {
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
+        }
         UI_DrawHandlePic(
             &scrPlaceView[dc->localClientNum],
             0.0,
@@ -4414,12 +4407,16 @@ char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
     Window_Paint(dc, &menu->window, menu->fadeAmount, menu->fadeInAmount, menu->fadeClamp, fadeCycle);
 
     for (i = 0; i < menu->itemCount; ++i)
+    {
         Item_Paint(dc, menu->items[i]);
+    }
 
     if (g_debugMode)
     {
         if (!menu)
+        {
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
+        }
         UI_DrawRect(
             &scrPlaceView[dc->localClientNum],
             menu->window.rect.x,
@@ -5394,19 +5391,25 @@ void __cdecl Item_DvarEnum_Paint(UiContext *dc, itemDef_s *item)
 
 const char *__cdecl Item_DvarEnum_Setting(itemDef_s *item)
 {
-    const char *v2; // eax
-    int enumIndex; // [esp+0h] [ebp-8h]
+    const char *v2;         // eax
+    int enumIndex;          // [esp+0h] [ebp-8h]
     const dvar_s *enumDvar; // [esp+4h] [ebp-4h]
 
     iassert(item);
     vassert((item->type == 13), "(item->type) = %i", item->type);
     if (!item->typeData.listBox)
+    {
         return "<dvarEnumList not set>";
+    }
     enumDvar = Dvar_FindVar(item->typeData.enumDvarName);
     if (enumDvar->type != 6)
+    {
         return "<not an enum dvar>";
+    }
     if (!enumDvar->domain.enumeration.stringCount)
+    {
         return "";
+    }
     enumIndex = Item_DvarEnum_EnumIndex(item);
     if (enumIndex < 0 || enumIndex >= enumDvar->domain.enumeration.stringCount)
     {
@@ -5419,7 +5422,7 @@ const char *__cdecl Item_DvarEnum_Setting(itemDef_s *item)
             "enumIndex >= 0 && enumIndex < enumDvar->domain.enumeration.stringCount",
             v2);
     }
-    return *(const char **)(enumDvar->domain.integer.max + 4 * enumIndex);
+    return enumDvar->domain.enumeration.strings[enumIndex];
 }
 
 void __cdecl Item_Slider_Paint(UiContext *dc, itemDef_s *item)
@@ -6479,8 +6482,8 @@ void __cdecl Menu_PaintAll(UiContext *dc)
 
 void __cdecl TRACK_ui_shared()
 {
-    track_static_alloc_internal(&scrollInfo, 32, "scrollInfo", 34);
-    track_static_alloc_internal((void *)commandList, 336, "commandList", 34);
+    track_static_alloc_internal(&scrollInfo, sizeof(scrollInfo), "scrollInfo", 34);
+    track_static_alloc_internal((void *)commandList, sizeof(commandList), "commandList", 34);
 }
 
 void __cdecl UI_AddMenuList(UiContext *dc, MenuList *menuList)
@@ -6557,4 +6560,3 @@ MenuList *__cdecl UI_LoadMenus_FastFile(const char *menuFile)
 {
     return DB_FindXAssetHeader(ASSET_TYPE_MENULIST, menuFile).menuList;
 }
-

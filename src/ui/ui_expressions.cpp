@@ -316,14 +316,18 @@ char *__cdecl GetSourceString(Operand operand)
     char *result; // [esp+8h] [ebp-4h]
 
     if (operand.dataType == VAL_STRING)
-        return (char *)operand.internals.intVal;
+    {
+        return (char *)operand.internals.string;
+    }
     bcassert((uint)currentTempOperand, 0x10);
     result = s_tempOperandValueAsString[currentTempOperand];
     currentTempOperand = (currentTempOperand + 1) % 16;
     if (operand.dataType)
     {
         if (operand.dataType == VAL_FLOAT)
+        {
             Com_sprintf(result, 0x100u, "%f", operand.internals.floatVal);
+        }
     }
     else
     {
@@ -511,16 +515,18 @@ const char *__cdecl GetNameForValueType(expDataType valType)
 void __cdecl AddOperandToStack(OperandStack *dataStack, Operand *data)
 {
     operandInternalDataUnion v2; // ecx
-    int numOperandLists; // edx
+    int numOperandLists;         // edx
 
-    if (data->dataType == VAL_STRING && !data->internals.intVal)
+    if (data->dataType == VAL_STRING && !data->internals.string)
+    {
         MyAssertHandler(
             ".\\ui\\ui_expressions.cpp",
             1605,
             0,
             "%s",
             "data->dataType != VAL_STRING || data->internals.string");
-    v2.intVal = (int)data->internals;
+    }
+    v2 = data->internals;
     numOperandLists = dataStack->numOperandLists;
     dataStack->stack[numOperandLists].operands[0].dataType = data->dataType;
     dataStack->stack[numOperandLists].operands[0].internals = v2;
@@ -531,24 +537,26 @@ char __cdecl GetOperand(OperandStack *dataStack, Operand *data)
 {
     operandInternalDataUnion v2; // edx
     operandInternalDataUnion v4; // eax
-    OperandList *list; // [esp+0h] [ebp-4h]
+    OperandList *list;           // [esp+0h] [ebp-4h]
 
     if (dataStack->numOperandLists >= 1)
     {
         list = &dataStack->stack[dataStack->numOperandLists - 1];
         if (list->operandCount == 1)
         {
-            v4.intVal = (int)list->operands[0].internals;
+            v4 = list->operands[0].internals;
             data->dataType = list->operands[0].dataType;
             data->internals = v4;
             --dataStack->numOperandLists;
-            if (data->dataType == VAL_STRING && !data->internals.intVal)
+            if (data->dataType == VAL_STRING && !data->internals.string)
+            {
                 MyAssertHandler(
                     ".\\ui\\ui_expressions.cpp",
                     1796,
                     0,
                     "%s",
                     "data->dataType != VAL_STRING || data->internals.string");
+            }
             return 1;
         }
         else
@@ -567,7 +575,7 @@ char __cdecl GetOperand(OperandStack *dataStack, Operand *data)
         Com_PrintError(CON_CHANNEL_UI, "Error: Invalid operation - missing parameter inside function or parenthesis\n");
         dataStack->numOperandLists = 1;
         dataStack->stack[0].operandCount = 1;
-        v2.intVal = (int)dataStack->stack[0].operands[0].internals;
+        v2 = dataStack->stack[0].operands[0].internals;
         data->dataType = dataStack->stack[0].operands[0].dataType;
         data->internals = v2;
         data->dataType = VAL_INT;
@@ -621,39 +629,47 @@ void __cdecl GetIsIntermission(int localClientNum, Operand *result)
 void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dataStack)
 {
     operandInternalDataUnion v3; // eax
-    const char *v4; // eax
+    const char *v4;              // eax
     char localVarStrings[4][32]; // [esp+4h] [ebp-160h] BYREF
-    OperandList list2; // [esp+8Ch] [ebp-D8h] BYREF
-    operationEnum op; // [esp+E8h] [ebp-7Ch]
-    OperandList list1; // [esp+ECh] [ebp-78h] BYREF
-    Operand data2; // [esp+148h] [ebp-1Ch] BYREF
-    Operand operandResult; // [esp+150h] [ebp-14h] BYREF
-    int localVarStringIndex; // [esp+158h] [ebp-Ch]
-    Operand data1; // [esp+15Ch] [ebp-8h] BYREF
+    OperandList list2;           // [esp+8Ch] [ebp-D8h] BYREF
+    operationEnum op;            // [esp+E8h] [ebp-7Ch]
+    OperandList list1;           // [esp+ECh] [ebp-78h] BYREF
+    Operand data2;               // [esp+148h] [ebp-1Ch] BYREF
+    Operand operandResult;       // [esp+150h] [ebp-14h] BYREF
+    int localVarStringIndex;     // [esp+158h] [ebp-Ch]
+    Operand data1;               // [esp+15Ch] [ebp-8h] BYREF
 
     localVarStringIndex = 0;
     vassert((opStack->numOperators > 0), "(opStack->numOperators) = %i", opStack->numOperators);
     op = opStack->stack[--opStack->numOperators];
     opStack->stack[opStack->numOperators] = OP_NOOP;
     if (uiscript_debug->current.integer > 1)
+    {
         Com_Printf(CON_CHANNEL_UI, "evaluating %s\n", g_expOperatorNames[op]);
+    }
     switch (op)
     {
     case OP_NOOP:
         if (!alwaysfails)
+        {
             MyAssertHandler(".\\ui\\ui_expressions.cpp", 1985, 0, "Invalid operator NOOP made it into the stack!\n");
+        }
         return;
     case OP_RIGHTPAREN:
         op = OP_NOOP;
         do
         {
             if (!opStack->numOperators)
+            {
                 break;
+            }
             op = opStack->stack[opStack->numOperators - 1];
             RunOp(localClientNum, opStack, dataStack);
         } while (!OpPairsWithRightParen(op));
         if (!OpPairsWithRightParen(op))
+        {
             Com_PrintError(CON_CHANNEL_UI, "Error: found ')' but couldn't find what it was closing\n");
+        }
         return;
     case OP_MULTIPLY:
     case OP_DIVIDE:
@@ -670,11 +686,15 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
     case OP_BITWISEAND:
     case OP_BITWISEOR:
         if (GetTwoOperands(dataStack, &data1, &data2))
+        {
             RunLogicOp(localClientNum, op, dataStack, data1, data2, g_expOperatorNames[op]);
+        }
         return;
     case OP_SUBTRACT:
         if (!GetOperand(dataStack, &data2))
+        {
             return;
+        }
         if (dataStack->numOperandLists >= 1)
         {
             GetOperand(dataStack, &data1);
@@ -707,7 +727,9 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
         return;
     case OP_COMMA:
         if (GetOperandList(dataStack, &list2) && GetOperandList(dataStack, &list1))
+        {
             RunCommaOp(localClientNum, dataStack, &list1, &list2);
+        }
         return;
     case OP_BITWISENOT:
         GetOperand(dataStack, &data1);
@@ -899,7 +921,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
         return;
     case OP_LOCALVARFLOAT:
         GetOperand(dataStack, &data1);
-        GetLocalVarFloatValue(localClientNum , &data1, &operandResult);
+        GetLocalVarFloatValue(localClientNum, &data1, &operandResult);
         AddOperandToStack(dataStack, &operandResult);
         return;
     case OP_LOCALVARSTRING:
@@ -932,7 +954,7 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
     case OP_TOSTRING:
         GetOperand(dataStack, &data1);
         operandResult.dataType = VAL_STRING;
-        operandResult.internals.intVal = (int)GetSourceString(data1);
+        operandResult.internals.string = GetSourceString(data1);
         AddOperandToStack(dataStack, &operandResult);
         return;
     case OP_TOFLOAT:
@@ -1007,8 +1029,8 @@ void __cdecl RunOp(int localClientNum, OperatorStack *opStack, OperandStack *dat
 void __cdecl GetDvarStringValue(Operand *source, Operand *result)
 {
     const char *NameForValueType; // eax
-    char *VariantString; // eax
-    const dvar_s *dvar; // [esp+0h] [ebp-4h]
+    char *VariantString;          // eax
+    const dvar_s *dvar;           // [esp+0h] [ebp-4h]
 
     if (source->dataType == VAL_STRING)
     {
@@ -1017,24 +1039,30 @@ void __cdecl GetDvarStringValue(Operand *source, Operand *result)
         if (dvar)
         {
             if (dvar->type == DVAR_TYPE_STRING)
+            {
                 VariantString = CopyDvarString(dvar->current.string);
+            }
             else
+            {
                 VariantString = (char *)Dvar_GetVariantString(source->internals.string);
-            result->internals.intVal = (int)VariantString;
+            }
+            result->internals.string = VariantString;
         }
         else
         {
-            result->internals.intVal = (int)"";
+            result->internals.string = "";
         }
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "dvarstring( %s ) = %s\n", source->internals.string, result->internals.string);
+        }
     }
     else
     {
         NameForValueType = GetNameForValueType(source->dataType);
         Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a dvar, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 }
 
@@ -1122,15 +1150,17 @@ void __cdecl GetLocalVarStringValue(
     char *stringBuf,
     uint size)
 {
-    UILocalVarContext *var; // [esp+0h] [ebp-4h]
+    UILocalVar *var; // [esp+0h] [ebp-4h]
 
     var = GetLocalVar(localClientNum, source);
     if (var)
     {
         result->dataType = VAL_STRING;
-        result->internals.string = UILocalVar_GetString(var->table, stringBuf, size);
+        result->internals.string = UILocalVar_GetString(var, stringBuf, size);
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "localVarString( %s ) = %s\n", source->internals.string, result->internals.string);
+        }
     }
     else
     {
@@ -1139,11 +1169,11 @@ void __cdecl GetLocalVarStringValue(
     }
 }
 
-UILocalVarContext *__cdecl GetLocalVar(int localClientNum, Operand *source)
+UILocalVar *__cdecl GetLocalVar(int localClientNum, Operand *source)
 {
-    const char *NameForValueType; // eax
+    const char *NameForValueType;        // eax
     UILocalVarContext *LocalVarsContext; // eax
-    const char *string; // [esp-4h] [ebp-4h]
+    const char *string;                  // [esp-4h] [ebp-4h]
 
     if (source->dataType == VAL_STRING)
     {
@@ -1161,15 +1191,17 @@ UILocalVarContext *__cdecl GetLocalVar(int localClientNum, Operand *source)
 
 void __cdecl GetLocalVarBoolValue(int localClientNum, Operand *source, Operand *result)
 {
-    UILocalVarContext *var; // [esp+0h] [ebp-4h]
+    UILocalVar *var; // [esp+0h] [ebp-4h]
 
     var = GetLocalVar(localClientNum, source);
     if (var)
     {
         result->dataType = VAL_INT;
-        result->internals.intVal = UILocalVar_GetBool(var->table);
+        result->internals.intVal = UILocalVar_GetBool(var);
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "localVarBool( %s ) = %i\n", source->internals.string, result->internals.intVal);
+        }
     }
     else
     {
@@ -1180,15 +1212,17 @@ void __cdecl GetLocalVarBoolValue(int localClientNum, Operand *source, Operand *
 
 void __cdecl GetLocalVarIntValue(int localClientNum, Operand *source, Operand *result)
 {
-    UILocalVarContext *var; // [esp+0h] [ebp-4h]
+    UILocalVar *var; // [esp+0h] [ebp-4h]
 
     var = GetLocalVar(localClientNum, source);
     if (var)
     {
         result->dataType = VAL_INT;
-        result->internals.intVal = UILocalVar_GetInt(var->table).integer;
+        result->internals.intVal = UILocalVar_GetInt(var).integer;
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "localVarInt( %s ) = %i\n", source->internals.string, result->internals.intVal);
+        }
     }
     else
     {
@@ -1199,15 +1233,17 @@ void __cdecl GetLocalVarIntValue(int localClientNum, Operand *source, Operand *r
 
 void __cdecl GetLocalVarFloatValue(int localClientNum, Operand *source, Operand *result)
 {
-    UILocalVarContext *var; // [esp+8h] [ebp-4h]
+    UILocalVar *var; // [esp+8h] [ebp-4h]
 
     var = GetLocalVar(localClientNum, source);
     if (var)
     {
         result->dataType = VAL_FLOAT;
-        result->internals.floatVal = UILocalVar_GetFloat(var->table);
+        result->internals.floatVal = UILocalVar_GetFloat(var);
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "localVarFloat( %s ) = %f\n", source->internals.string, result->internals.floatVal);
+        }
     }
     else
     {
@@ -1250,10 +1286,10 @@ void __cdecl GetMilliseconds(Operand *result)
 
 void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result)
 {
-    const char *NameForValueType; // eax
+    const char *NameForValueType;             // eax
     operandInternalDataUnion *OurClientScore; // [esp+0h] [ebp-10h]
-    operandInternalDataUnion *v5; // [esp+4h] [ebp-Ch]
-    operandInternalDataUnion *v6; // [esp+8h] [ebp-8h]
+    operandInternalDataUnion *v5;             // [esp+4h] [ebp-Ch]
+    operandInternalDataUnion *v6;             // [esp+8h] [ebp-8h]
 #ifdef KISAK_MP
     const score_t *score; // [esp+Ch] [ebp-4h]
 #endif
@@ -1287,7 +1323,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
 #ifdef KISAK_MP
                                             OurClientScore = (operandInternalDataUnion *)UI_GetOurClientScore(localClientNum);
                                             if (OurClientScore)
+                                            {
                                                 result->internals = OurClientScore[2];
+                                            }
                                             else
 #endif
                                             {
@@ -1295,7 +1333,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                             }
                                             result->dataType = VAL_INT;
                                             if (uiscript_debug->current.integer)
+                                            {
                                                 Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                            }
                                         }
                                     }
                                     else
@@ -1313,7 +1353,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                         }
                                         result->dataType = VAL_INT;
                                         if (uiscript_debug->current.integer)
+                                        {
                                             Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                        }
                                     }
                                 }
                                 else
@@ -1331,7 +1373,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                     }
                                     result->dataType = VAL_INT;
                                     if (uiscript_debug->current.integer)
+                                    {
                                         Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                    }
                                 }
                             }
                             else
@@ -1349,7 +1393,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                                 }
                                 result->dataType = VAL_INT;
                                 if (uiscript_debug->current.integer)
+                                {
                                     Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                                }
                             }
                         }
                         else
@@ -1357,7 +1403,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                             result->dataType = VAL_INT;
                             result->internals.intVal = (uint8_t)CG_LookingThroughNightVision(localClientNum);
                             if (uiscript_debug->current.integer)
+                            {
                                 Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                            }
                         }
                     }
                     else
@@ -1365,7 +1413,9 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                         result->dataType = VAL_INT;
                         result->internals.intVal = CG_GetPlayerClipAmmoCount(localClientNum);
                         if (uiscript_debug->current.integer)
+                        {
                             Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+                        }
                     }
                 }
                 else
@@ -1373,23 +1423,29 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
                     result->dataType = VAL_INT;
                     result->internals.intVal = CG_IsPlayerDead(localClientNum);
                     if (uiscript_debug->current.integer)
+                    {
                         Com_Printf(CON_CHANNEL_UI, "player( %s ) = %i\n", source->internals.string, result->internals.intVal);
+                    }
                 }
             }
             else
             {
                 result->dataType = VAL_STRING;
-                result->internals.intVal = (int)CG_GetPlayerOpposingTeamName(localClientNum);
+                result->internals.string = CG_GetPlayerOpposingTeamName(localClientNum);
                 if (uiscript_debug->current.integer)
+                {
                     Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+                }
             }
         }
         else
         {
             result->dataType = VAL_STRING;
-            result->internals.intVal = (int)CG_GetPlayerTeamName(localClientNum);
+            result->internals.string = CG_GetPlayerTeamName(localClientNum);
             if (uiscript_debug->current.integer)
+            {
                 Com_Printf(CON_CHANNEL_UI, "player( %s ) = %s\n", source->internals.string, result->internals.string);
+            }
         }
     }
     else
@@ -1397,7 +1453,7 @@ void __cdecl GetPlayerField(int localClientNum, Operand *source, Operand *result
         NameForValueType = GetNameForValueType(source->dataType);
         Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a player field, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 }
 
@@ -1451,9 +1507,11 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
             else
             {
                 result->dataType = VAL_STRING;
-                result->internals.intVal = (int)CG_GetTeamName(team);
+                result->internals.string = CG_GetTeamName(team);
                 if (uiscript_debug->current.integer)
+                {
                     Com_Printf(CON_CHANNEL_UI, "team(%i)( %s ) = %s\n", team, fieldName->internals.string, result->internals.string);
+                }
             }
         }
         else
@@ -1465,7 +1523,9 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
             result->internals.intVal = 0;
 #endif
             if (uiscript_debug->current.integer)
+            {
                 Com_Printf(CON_CHANNEL_UI, "team(%i)( %s ) = %i\n", team, fieldName->internals.string, result->internals.intVal);
+            }
         }
     }
     else
@@ -1473,7 +1533,7 @@ void __cdecl GetFieldForTeam(int localClientNum, team_t team, Operand *fieldName
         NameForValueType = GetNameForValueType(fieldName->dataType);
         Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as the name of a team parameter, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 }
 
@@ -1743,14 +1803,14 @@ void __cdecl GetKeyBinding(int localClientNum, Operand *fieldName, Operand *resu
     {
         UI_GetKeyBindingLocalizedStringSingle(localClientNum, fieldName->internals.string, resultString);
         result->dataType = VAL_STRING;
-        result->internals.intVal = (int)resultString;
+        result->internals.string = resultString;
     }
     else
     {
         NameForValueType = GetNameForValueType(fieldName->dataType);
         Com_PrintError(CON_CHANNEL_UI, "Error: Must use a string as KeyBinding() parameter, not a %s\n", NameForValueType);
         result->dataType = VAL_STRING;
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 }
 
@@ -2027,7 +2087,7 @@ void __cdecl SecondsToTimeDisplay(int localClientNum, Operand *source, Operand *
     static char resultString_0[128];
     int v3; // [esp+4h] [ebp-14h]
 
-    v3 = SnapFloatToInt((float)GetSourceInt(source).intVal / 60.0f);    
+    v3 = SnapFloatToInt((float)GetSourceInt(source).intVal / 60.0f);
     _snprintf(
         resultString_0,
         0x80u,
@@ -2036,9 +2096,11 @@ void __cdecl SecondsToTimeDisplay(int localClientNum, Operand *source, Operand *
         v3 % 1440 / 60,
         v3 % 60);
     result->dataType = VAL_STRING;
-    result->internals.intVal = (int)resultString_0;
+    result->internals.string = resultString_0;
     if (uiscript_debug->current.integer)
+    {
         Com_Printf(CON_CHANNEL_UI, "secondsToTime() = %s\n", resultString_0);
+    }
 }
 
 void __cdecl SecondsToCountdownDisplay(int localClientNum, int seconds, Operand *result)
@@ -2046,16 +2108,18 @@ void __cdecl SecondsToCountdownDisplay(int localClientNum, int seconds, Operand 
     static char resultString_1[128];
 
     result->dataType = VAL_STRING;
-    result->internals.intVal = (int)resultString_1;
+    result->internals.string = resultString_1;
     if (seconds >= 0)
     {
         _snprintf(resultString_1, 0x80u, "%2i:%02i", seconds / 60, seconds % 60);
         if (uiscript_debug->current.integer)
+        {
             Com_Printf(CON_CHANNEL_UI, "secondsToCountdown() = %s\n", resultString_1);
+        }
     }
     else
     {
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 }
 
@@ -2094,17 +2158,19 @@ void __cdecl GetGametypeObjective(int localClientNum, Operand *result)
     if (clientUIActives[0].connectionState >= CA_LOADING)
     {
         vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
-        result->internals.intVal = (int)CG_GetGametypeDescription(localClientNum);
-        if (!result->internals.intVal)
-            result->internals.intVal = (int)"";
+        result->internals.string = CG_GetGametypeDescription(localClientNum);
+        if (!result->internals.string)
+        {
+            result->internals.string = "";
+        }
     }
     else
     {
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
 #elif KISAK_SP
     result->dataType = VAL_STRING;
-    result->internals.intVal = (int)"";
+    result->internals.string = "";
 #endif
 }
 
@@ -2118,22 +2184,24 @@ void __cdecl GetGametypeName(int localClientNum, Operand *result)
     if (clientUIActives[0].connectionState >= CA_LOADING)
     {
         cgs = CG_GetLocalClientStaticGlobals(localClientNum);
-        result->internals.intVal = (int)UI_GetGameTypeDisplayName(cgs->gametype);
+        result->internals.string = UI_GetGameTypeDisplayName(cgs->gametype);
     }
     else if (g_gametype)
     {
-        result->internals.intVal = (int)UI_GetGameTypeDisplayName(g_gametype->current.string);
+        result->internals.string = UI_GetGameTypeDisplayName(g_gametype->current.string);
     }
     else
     {
-        result->internals.intVal = (int)"";
+        result->internals.string = "";
     }
-    if (!result->internals.intVal)
-        result->internals.intVal = (int)"";
+    if (!result->internals.string)
+    {
+        result->internals.string = "";
+    }
 
 #elif KISAK_SP
     result->dataType = VAL_STRING;
-    result->internals.intVal = (int)"";
+    result->internals.string = "";
 #endif
 }
 
@@ -2145,15 +2213,21 @@ void __cdecl GetGametypeInternal(int localClientNum, Operand *result)
     result->dataType = VAL_STRING;
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState >= CA_LOADING)
-        result->internals.intVal = (int)cgs->gametype;
+    {
+        result->internals.string = cgs->gametype;
+    }
     else
-        result->internals.intVal = g_gametype->current.integer;
-    if (!result->internals.intVal)
-        result->internals.intVal = (int)"";
+    {
+        result->internals.string = g_gametype->current.string;
+    }
+    if (!result->internals.string)
+    {
+        result->internals.string = "";
+    }
 
 #elif KISAK_SP
     result->dataType = VAL_STRING;
-    result->internals.intVal = (int)"";
+    result->internals.string = "";
 #endif
 }
 
@@ -2213,11 +2287,11 @@ void __cdecl RunCommaOp(int localClientNum, OperandStack *dataStack, OperandList
 {
     operandInternalDataUnion v4; // edx
     operandInternalDataUnion v5; // eax
-    int list1Operand; // [esp+4h] [ebp-18h]
-    Operand *finalList; // [esp+8h] [ebp-14h]
-    int operand; // [esp+Ch] [ebp-10h]
-    Operand operandResult; // [esp+10h] [ebp-Ch] BYREF
-    int list2Operand; // [esp+18h] [ebp-4h]
+    int list1Operand;            // [esp+4h] [ebp-18h]
+    Operand *finalList;          // [esp+8h] [ebp-14h]
+    int operand;                 // [esp+Ch] [ebp-10h]
+    Operand operandResult;       // [esp+10h] [ebp-Ch] BYREF
+    int list2Operand;            // [esp+18h] [ebp-4h]
 
     if (list2->operandCount + list1->operandCount <= 10)
     {
@@ -2226,30 +2300,34 @@ void __cdecl RunCommaOp(int localClientNum, OperandStack *dataStack, OperandList
         operand = 0;
         for (list1Operand = 0; list1Operand < list1->operandCount; ++list1Operand)
         {
-            v4.intVal = (int)list1->operands[list1Operand].internals;
+            v4 = list1->operands[list1Operand].internals;
             finalList[operand].dataType = list1->operands[list1Operand].dataType;
             finalList[operand].internals = v4;
-            if (finalList[operand].dataType == VAL_STRING && !finalList[operand].internals.intVal)
+            if (finalList[operand].dataType == VAL_STRING && !finalList[operand].internals.string)
+            {
                 MyAssertHandler(
                     ".\\ui\\ui_expressions.cpp",
                     1637,
                     0,
                     "%s",
                     "finalList[operand].dataType != VAL_STRING || finalList[operand].internals.string");
+            }
             ++operand;
         }
         for (list2Operand = 0; list2Operand < list2->operandCount; ++list2Operand)
         {
-            v5.intVal = (int)list2->operands[list2Operand].internals;
+            v5 = list2->operands[list2Operand].internals;
             finalList[operand].dataType = list2->operands[list2Operand].dataType;
             finalList[operand].internals = v5;
-            if (finalList[operand].dataType == VAL_STRING && !finalList[operand].internals.intVal)
+            if (finalList[operand].dataType == VAL_STRING && !finalList[operand].internals.string)
+            {
                 MyAssertHandler(
                     ".\\ui\\ui_expressions.cpp",
                     1643,
                     0,
                     "%s",
                     "finalList[operand].dataType != VAL_STRING || finalList[operand].internals.string");
+            }
             ++operand;
         }
         ++dataStack->numOperandLists;
@@ -2265,16 +2343,16 @@ void __cdecl RunCommaOp(int localClientNum, OperandStack *dataStack, OperandList
 
 void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operandResult)
 {
-    char *SourceString; // eax
+    char *SourceString;          // eax
     operandInternalDataUnion v4; // eax
-    char *v5; // eax
+    char *v5;                    // eax
     operandInternalDataUnion v6; // [esp-10h] [ebp-14h]
-    char *v7; // [esp-Ch] [ebp-10h]
-    char *v8; // [esp-8h] [ebp-Ch]
+    char *v7;                    // [esp-Ch] [ebp-10h]
+    char *v8;                    // [esp-8h] [ebp-Ch]
     operandInternalDataUnion v9; // [esp-8h] [ebp-Ch]
-    int intVal; // [esp-4h] [ebp-8h]
-    const char *string; // [esp-4h] [ebp-8h]
-    StringTable *table; // [esp+0h] [ebp-4h] BYREF
+    int intVal;                  // [esp-4h] [ebp-8h]
+    const char *string;          // [esp-4h] [ebp-8h]
+    StringTable *table;          // [esp+0h] [ebp-4h] BYREF
 
     // KIWI: StringTable_GetAsset handles both fastfile and loose CSV loading, so this
     // no longer needs the fastfile-only guard.
@@ -2287,7 +2365,7 @@ void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operand
             intVal = GetSourceInt(&list->operands[3]).intVal;
             v8 = GetSourceString(list->operands[2]);
             v4.intVal = GetSourceInt(&list->operands[1]).intVal;
-            operandResult->internals.intVal = (int)StringTable_Lookup(table, v4.intVal, v8, intVal);
+            operandResult->internals.string = StringTable_Lookup(table, v4.intVal, v8, intVal);
             if (uiscript_debug->current.integer)
             {
                 string = operandResult->internals.string;
@@ -2305,7 +2383,7 @@ void __cdecl TableLookup(int localClientNum, OperandList *list, Operand *operand
                 "UI Expression Error: Expected 4 params to function StringTableLookup, found %i\n",
                 list->operandCount);
             operandResult->dataType = VAL_STRING;
-            operandResult->internals.intVal = (int)"";
+            operandResult->internals.string = "";
         }
     }
 }
@@ -2364,17 +2442,17 @@ void __cdecl MaxValue(OperandList *list, Operand *operandResult)
 
 void __cdecl LocalizeString(OperandList *list, Operand *operandResult)
 {
-    const char *v2; // eax
-    char string[1024]; // [esp+20h] [ebp-428h] BYREF
-    bool useLocalization; // [esp+427h] [ebp-21h]
-    Operand *operand; // [esp+428h] [ebp-20h]
-    uint charIndex; // [esp+42Ch] [ebp-1Ch]
-    uint tokenLen; // [esp+430h] [ebp-18h]
+    const char *v2;          // eax
+    char string[1024];       // [esp+20h] [ebp-428h] BYREF
+    bool useLocalization;    // [esp+427h] [ebp-21h]
+    Operand *operand;        // [esp+428h] [ebp-20h]
+    uint charIndex;          // [esp+42Ch] [ebp-1Ch]
+    uint tokenLen;           // [esp+430h] [ebp-18h]
     bool enableLocalization; // [esp+437h] [ebp-11h]
-    expDataType type; // [esp+438h] [ebp-10h]
-    int parmIndex; // [esp+43Ch] [ebp-Ch]
-    const char *token; // [esp+440h] [ebp-8h]
-    uint stringLen; // [esp+444h] [ebp-4h]
+    expDataType type;        // [esp+438h] [ebp-10h]
+    int parmIndex;           // [esp+43Ch] [ebp-Ch]
+    const char *token;       // [esp+440h] [ebp-8h]
+    uint stringLen;          // [esp+444h] [ebp-4h]
 
     useLocalization = 1;
     stringLen = 0;
@@ -2388,12 +2466,18 @@ void __cdecl LocalizeString(OperandList *list, Operand *operandResult)
             token = GetSourceString(*operand);
             tokenLen = strlen(token);
             if (tokenLen <= 1)
+            {
                 continue;
+            }
             ValidateLocalizedStringRef(token++, tokenLen--);
             if (stringLen + tokenLen + 1 >= 0x400)
+            {
                 Com_Error(ERR_LOCALIZATION, "Error: %s is too long. Max length is %i\n", token, 1024);
+            }
             if (stringLen)
+            {
                 string[stringLen++] = 20;
+            }
             useLocalization = 1;
         }
         else
@@ -2403,7 +2487,9 @@ void __cdecl LocalizeString(OperandList *list, Operand *operandResult)
             for (charIndex = 0; charIndex < tokenLen; ++charIndex)
             {
                 if (token[charIndex] == 20 || token[charIndex] == 21 || token[charIndex] == 22)
+                {
                     Com_PrintError(CON_CHANNEL_UI, "Error: bad escape character (%i) present in string", token[charIndex]);
+                }
                 if (isalpha(token[charIndex]))
                 {
                     v2 = va("Non-localized UI strings are not allowed to have letters in them: \"%s\"", token);
@@ -2412,25 +2498,35 @@ void __cdecl LocalizeString(OperandList *list, Operand *operandResult)
                 }
             }
             if (stringLen + tokenLen + 1 >= 0x400)
+            {
                 Com_Error(ERR_LOCALIZATION, "Error: %s is too long. Max length is %i\n", token, 1024);
+            }
             if (tokenLen)
+            {
                 string[stringLen++] = 21;
+            }
             useLocalization = 0;
         }
         for (charIndex = 0; charIndex < tokenLen; ++charIndex)
         {
             if (token[charIndex] == 20 || token[charIndex] == 21 || token[charIndex] == 22)
+            {
                 string[stringLen] = 46;
+            }
             else
+            {
                 string[stringLen] = token[charIndex];
+            }
             ++stringLen;
         }
     }
     string[stringLen] = 0;
     operandResult->dataType = VAL_STRING;
-    operandResult->internals.intVal = (int)SEH_LocalizeTextMessage(string, "ui string", LOCMSG_NOERR);
-    if (!operandResult->internals.intVal)
-        operandResult->internals.intVal = (int)"";
+    operandResult->internals.string = SEH_LocalizeTextMessage(string, "ui string", LOCMSG_NOERR);
+    if (!operandResult->internals.string)
+    {
+        operandResult->internals.string = "";
+    }
 }
 
 void __cdecl LocalizationError(const char *errorMessage)
