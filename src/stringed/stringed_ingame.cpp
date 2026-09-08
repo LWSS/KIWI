@@ -45,7 +45,7 @@ char *__cdecl SE_Load(char *psFileName, bool forceEnglish)
     psParsePos = (char *)psLoadedFile;
     TheStringPackage->SetupNewFileParse(psFileName);
 
-    while (!errorMsg && TheStringPackage->ReadLine(&psParsePos, psDest))
+    while (!errorMsg && TheStringPackage->ReadLine(&psParsePos, psDest, sizeof(psDest)))
     {
         if (&psDest[strlen(psDest) + 1] != &psDest[1])
             errorMsg = TheStringPackage->ParseLine(psDest, forceEnglish);

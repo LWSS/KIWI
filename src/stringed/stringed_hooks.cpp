@@ -46,7 +46,7 @@ char szErrorString[1024];
 
 void __cdecl TRACK_stringed_hooks()
 {
-    track_static_alloc_internal(g_languages, 120, "g_languages", 33);
+    track_static_alloc_internal(g_languages, sizeof(g_languages), "g_languages", 33);
 }
 
 int __cdecl SEH_GetCurrentLanguage()
@@ -82,6 +82,10 @@ const dvar_s *SEH_UpdateCurrentLanguage()
 int __cdecl SEH_VerifyLanguageSelection(int iLanguageSelection)
 {
     int i; // [esp+0h] [ebp-4h]
+    if ((unsigned int)iLanguageSelection >= ARRAY_COUNT(g_languages))
+    {
+        iLanguageSelection = 0;
+    }
 
     if (g_languages[iLanguageSelection].bPresent)
         return iLanguageSelection;
@@ -177,12 +181,20 @@ char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *ps
         {
             if (pszIn > pszTokenStart)
             {
-                iTokenLen = pszIn - pszTokenStart;
+                size_t tokenLength = pszIn - pszTokenStart;
+                if (tokenLength >= sizeof(szTokenBuf))
+                {
+                    Com_Printf(CON_CHANNEL_SYSTEM, "%s token too long\n", pszMessageType);
+                    return 0;
+                }
+                iTokenLen = (int)tokenLength;
                 I_strncpyz(szTokenBuf, (char *)pszTokenStart, pszIn - pszTokenStart + 1);
                 if (bLocOn)
                 {
-                    if (!SEH_GetLocalizedTokenReference(szTokenBuf, szTokenBuf, pszMessageType, errType))
+                    if (!SEH_GetLocalizedTokenReference(szTokenBuf, sizeof(szTokenBuf), szTokenBuf, pszMessageType, errType))
+                    {
                         return 0;
+                    }
                     iTokenLen = &szTokenBuf[strlen(szTokenBuf) + 1] - &szTokenBuf[1];
                 }
                 if (iTokenLen + iLen >= 1024)
@@ -196,6 +208,7 @@ char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *ps
                         Com_Error(ERR_DROP, "%s too long when translated: \"%s\"", pszMessageType, pszInputBuffer);
                     }
                     Com_Printf(CON_CHANNEL_SYSTEM, "%s too long when translated: \"%s\"\n", pszMessageType, pszInputBuffer);
+                    return 0;
                 }
                 for (i = 0; i < iTokenLen - 2; ++i)
                 {
@@ -247,6 +260,10 @@ char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *ps
                         }
                     }
                     iassert(i >= 0);
+                    if (i >= iLen - 2)
+                    {
+                        return 0;
+                    }
                     v12 = szTokenBuf;
                     v11 = &pszString[i];
                     do
@@ -302,6 +319,7 @@ char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *ps
 
 int __cdecl SEH_GetLocalizedTokenReference(
     char *token,
+    size_t capacity,
     const char *reference,
     const char *messageType,
     msgLocErrType_t errType)
@@ -327,7 +345,13 @@ int __cdecl SEH_GetLocalizedTokenReference(
             return 0;
     }
 
-    strcpy(token, translation);
+    size_t length = strlen(translation);
+    if (length >= capacity)
+    {
+        Com_Printf(CON_CHANNEL_SYSTEM, "%s translation too long\n", messageType);
+        return 0;
+    }
+    memmove(token, translation, length + 1);
     
     return 1;
 }

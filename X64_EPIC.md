@@ -14,7 +14,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 6 | server | Complete |
 | 7 | server_mp | Complete |
 | 8 | sound | Complete |
-| 9 | stringed | Pending |
+| 9 | stringed | Complete |
 | 10 | ui | Pending |
 | 11 | ui_mp | Pending |
 | 12 | universal | Pending |
@@ -26,6 +26,15 @@ Validation distinguishes diagnostic compilation and isolated regression tests fr
 Part 5 checkpoint: `510631ac`.
 Part 6 checkpoint: `91eb549f`.
 Part 7 checkpoint: `ec0f97bc`.
+Part 8 checkpoint: `1883deb0`.
+
+## Part 9: stringed
+
+Audited both source files and both headers, including the existing native STL storage. Line parsing now uses pointers/size_t lengths and an explicit destination capacity; language tracking uses its native array size. Removed pointer-to-int casts from newline handling.
+
+Independent parser fixes: preserve the last character of LF-only lines; reject oversized source lines and localized tokens/results before copying; use overlap-safe token copying; reject &&0 before it indexes before the format-argument array; handle whitespace-only quoted text without indexing an empty string; reject missing insertion placeholders; bound invalid language selections. The caller passes the actual line/token buffer capacity.
+
+Validation: eight configured x86/x64 MP/SP diagnostic checks pass. `test_stringed.py` runs actual inline package methods and localization functions on both architectures, covering LF/CRLF/final lines, overflow canaries, empty quotes, valid/invalid/duplicate placeholders, insertion, token/result bounds, and invalid language fallback. No full language-asset/game load was performed.
 
 ## Part 8: sound
 

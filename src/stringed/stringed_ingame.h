@@ -103,7 +103,7 @@ struct CStringEdPackage // sizeof=0x78
 
         if (*psLine)
         {
-            while (1)
+            while (!str.empty())
             {
                 if (str[str.size() - 1] != ' ')
                 {
@@ -116,7 +116,7 @@ struct CStringEdPackage // sizeof=0x78
                 str.erase(str.size() - 1, 1);
             }
 
-            if (str[str.size() - 1] == '"')
+            if (!str.empty() && str[str.size() - 1] == '"')
             {
                 str.erase(str.size() - 1, 1);
             }
@@ -214,12 +214,14 @@ struct CStringEdPackage // sizeof=0x78
         bool args[12]; // [esp+Ch] [ebp-10h] BYREF
 
         thisa = this;
-        memset(args, 0, 9);
+        memset(args, 0, sizeof(args));
         for (convString = strstr(string, "&&"); convString; convString = v4)
         {
             convString += 2;
-            if (!isdigit(*convString))
+            if (*convString < '1' || *convString > '9')
+            {
                 return 0;
+            }
             argIndex = *convString - 48;
             if (args[--argIndex])
                 return 0;
@@ -358,53 +360,36 @@ struct CStringEdPackage // sizeof=0x78
         return psErrorMessage;
     }
 
-    int ReadLine(char **psParsePos, char *psDest)
+    int ReadLine(char **psParsePos, char *psDest, size_t capacity)
     {
-        int v3; // eax
-        int v4; // eax
-        char v5; // cl
-        char *v7; // [esp+28h] [ebp-18h]
-        char *v8; // [esp+2Ch] [ebp-14h]
-        int iWhiteSpaceScanPos; // [esp+34h] [ebp-Ch]
-        uint iCharsToCopy; // [esp+38h] [ebp-8h]
-
-        if (!**psParsePos)
+        const char *start = *psParsePos;
+        if (!*start)
+        {
             return 0;
-        v3 = (int)strchr(*psParsePos, '\n');
-        if (v3)
-        {
-            iCharsToCopy = v3 - (_DWORD)*psParsePos;
-            I_strncpyz(psDest, *psParsePos, iCharsToCopy);
-            //strncpy(psDest, *psParsePos, iCharsToCopy);
-            psDest[iCharsToCopy] = 0;
-            for (*psParsePos += iCharsToCopy; **psParsePos; ++*psParsePos)
-            {
-                v4 = (int)strchr("\r\n", **psParsePos);
-                if (!v4)
-                    break;
-            }
         }
-        else
+        const char *end = strchr(start, '\n');
+        if (!end)
         {
-            v8 = *psParsePos;
-            v7 = psDest;
-            do
-            {
-                v5 = *v8;
-                *v7++ = *v8++;
-            } while (v5);
-            *psParsePos += strlen(*psParsePos);
+            end = start + strlen(start);
         }
-        if (*psDest)
+        size_t length = end - start;
+        if (length >= capacity)
         {
-            for (iWhiteSpaceScanPos = strlen(psDest) - 1;
-                iWhiteSpaceScanPos >= 0 && isspace(psDest[iWhiteSpaceScanPos]);
-                --iWhiteSpaceScanPos)
-            {
-                psDest[iWhiteSpaceScanPos] = 0;
-            }
-            REMKill(psDest);
+            Com_Error(ERR_DROP, "Localization source line exceeds buffer capacity");
+            return 0;
         }
+        memcpy(psDest, start, length);
+        psDest[length] = 0;
+        *psParsePos = (char *)end;
+        while (**psParsePos == '\r' || **psParsePos == '\n')
+        {
+            ++*psParsePos;
+        }
+        while (length && isspace((unsigned char)psDest[length - 1]))
+        {
+            psDest[--length] = 0;
+        }
+        REMKill(psDest);
         return 1;
     }
     char * Filename_WithoutExt(const char *psFilename)

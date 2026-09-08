@@ -24,6 +24,7 @@ char *__cdecl SEH_SafeTranslateString(char *pszReference);
 char *__cdecl SEH_LocalizeTextMessage(const char *pszInputBuffer, const char *pszMessageType, msgLocErrType_t errType);
 int __cdecl SEH_GetLocalizedTokenReference(
     char *token,
+    size_t capacity,
     const char *reference,
     const char *messageType,
     msgLocErrType_t errType);
