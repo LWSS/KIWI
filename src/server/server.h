@@ -225,7 +225,7 @@ int SV_ClearHistoryMarkCache();
 void __cdecl SV_TruncateHistoryCache(int maxTime);
 int SV_SetAutoSaveHistoryTime();
 void __cdecl SV_ResetDemo();
-_iobuf *SV_ClearHistoryCache();
+void SV_ClearHistoryCache();
 void __cdecl SV_FreeDemoSaveBuf(server_demo_save_t *save);
 void __cdecl SV_FreeHistoryData(server_demo_history_t *history);
 void __cdecl SV_FreeHistory(server_demo_history_t **history);

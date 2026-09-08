@@ -11,7 +11,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 3 | qcommon | Complete |
 | 4 | ragdoll | Complete |
 | 5 | script | Complete |
-| 6 | server | Pending |
+| 6 | server | Complete |
 | 7 | server_mp | Pending |
 | 8 | sound | Pending |
 | 9 | stringed | Pending |
@@ -22,6 +22,18 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 14 | xanim | Pending |
 
 Validation distinguishes diagnostic compilation and isolated regression tests from a full native game link/run. Shared x86 layout assertions may require a test-only override until their owning part is ported. Production assertions are never globally disabled.
+
+Part 5 checkpoint: `510631ac`.
+
+## Part 6: server
+
+Audited all 13 files. Fixed native `jmp_buf` use, skeleton pointer alignment, all three command-argument pointer strides, the gametype dvar string, full server-static clearing, configstring array traversal, native tracking sizes, and snapshot indexing through the actual entity array. Added a release snapshot-capacity return and terminated formatted server commands after `va_end`.
+
+Demo history uses an explicit 172-byte record with zeroed legacy pointer slots, preserving its x86 cache format on x64. Reads never restore saved pointers. Replaced hard-coded server offsets with message fields; an x86 layout probe confirmed offsets 60052/60060 correspond to `cursize`/`readcount`. History allocation checks avoid signed addition overflow, and segment totals are bounded before narrowing. Native buffer membership uses integer address ranges rather than forming out-of-array pointers. Removed an unused integer-to-FILE-pointer return from cache clearing.
+
+Validation: all 20 configured x86/x64 MP/SP diagnostic checks pass. `test_server.py` passes on both architectures with assertions enabled: high-address buffer membership, negative/oversized allocations, exact capacity and exhaustion, 199-byte history header/payload roundtrip, native destination pointers, and all 2048 snapshot entries plus overflow rejection. No live server/demo playback was run.
+
+Integration follow-up for universal: `MemFile_CopySegments` still returns a count disguised as a pointer and truncates an address internally; reconcile its interface and implementation in that part. `SaveImmediate.f` was traced to an integer FS handle encoded by `savedevice_pc.cpp`, so the existing intptr_t bridge does not truncate a native FILE pointer. The XModel allocator callback signature is shared with server_mp/xanim and will be reconciled with its owner.
 
 ## Part 1: groupvoice
 

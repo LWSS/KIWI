@@ -28,7 +28,7 @@ client_t g_sv_clients[1];
 
 void __cdecl TRACK_sv_init()
 {
-    track_static_alloc_internal(g_sv_clients, 55080, "g_sv_clients", 9);
+    track_static_alloc_internal(g_sv_clients, sizeof(g_sv_clients), "g_sv_clients", 9);
 }
 
 void __cdecl SV_GetConfigstring(unsigned int index, char *buffer, int bufferSize)
@@ -104,19 +104,21 @@ void __cdecl SV_Startup()
 
 void __cdecl SV_ClearServer()
 {
-    unsigned __int16 *configstrings; // r31
-
     if (svs.clients)
-        Com_Memset(&svs.clients->reliableCommands, 0, 12);
-    configstrings = sv.configstrings;
-    do
     {
-        if (*configstrings)
-            SL_RemoveRefToString(*configstrings);
-        ++configstrings;
-    } while ((int)configstrings < (int)&sv.svEntities[0].worldSector);
+        Com_Memset(&svs.clients->reliableCommands.header, 0, sizeof(serverCommandsHeader_t));
+    }
+    for (unsigned int i = 0; i < ARRAY_COUNT(sv.configstrings); ++i)
+    {
+        if (sv.configstrings[i])
+        {
+            SL_RemoveRefToString(sv.configstrings[i]);
+        }
+    }
     if (sv.emptyConfigString)
+    {
         SL_RemoveRefToString(sv.emptyConfigString);
+    }
     Com_Memset(&sv, 0, sizeof(server_t));
     SV_ClearPendingSaves();
     com_inServerFrame = 0;
@@ -254,9 +256,6 @@ void __cdecl SV_Init()
 
 void __cdecl SV_Shutdown(const char *finalmsg)
 {
-    serverStatic_t *v1; // r11
-    int v2; // ctr
-
     if (com_sv_running && com_sv_running->current.enabled)
     {
         //LSP_LogStringEvenIfControllerIsInactive("server shutdown");
@@ -267,14 +266,7 @@ void __cdecl SV_Shutdown(const char *finalmsg)
         SaveMemory_CleanupSaveMemory();
         SaveMemory_ShutdownSaveSystem();
         SV_ClearServer();
-        v1 = &svs;
-        v2 = 10;
-        do
-        {
-            v1->initialized = 0;
-            v1 = (serverStatic_t *)((char *)v1 + 4);
-            --v2;
-        } while (v2);
+        Com_Memset(&svs, 0, sizeof(serverStatic_t));
         Dvar_SetBool(com_sv_running, 0);
         Dvar_SetFloat(com_timescale, 1.0);
         Com_Printf(CON_CHANNEL_SERVER, "---------------------------\n");

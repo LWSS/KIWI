@@ -41,7 +41,7 @@ void __cdecl TRACK_sv_demo()
     track_static_alloc_internal(g_msgBuf, 10485760, "g_msgBuf", 0);
     track_static_alloc_internal(g_fileSkips, 28800, "g_fileSkips", 0);
     track_static_alloc_internal(g_fileMarkSkips, 3400, "g_fileMarkSkips", 0);
-    track_static_alloc_internal(g_historyBuffers, 344, "g_historyBuffers", 0);
+    track_static_alloc_internal(g_historyBuffers, sizeof(g_historyBuffers), "g_historyBuffers", 0);
 }
 
 unsigned int __cdecl SV_GetHistoryIndex(server_demo_history_t *history)
@@ -55,27 +55,16 @@ unsigned int __cdecl SV_GetHistoryIndex(server_demo_history_t *history)
 
 int __cdecl SV_GetBufferIndex(unsigned __int8 *ptr)
 {
-    int v1; // r8
-    int v2; // r10
-    unsigned __int8 *v3; // r11
-    const char *v4; // r3
-
-    v1 = 0;
-    v2 = 0;
-    v3 = g_buf[1];
-    do
+    uintptr_t address = (uintptr_t)ptr;
+    for (unsigned int i = 0; i < ARRAY_COUNT(g_buf); ++i)
     {
-        if (ptr >= v3 - 3145728 && ptr < v3)
-            return v1;
-        v2 += 3145728;
-        ++v1;
-        v3 += 3145728;
-    } while (v2 < 6291456);
-    if (!alwaysfails)
-    {
-        v4 = va("SV_GetBufferIndex: ptr 0x%x isn't in either of the history buffers.\n", ptr);
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 178, 0, v4);
+        uintptr_t base = (uintptr_t)g_buf[i];
+        if (address >= base && address - base < sizeof(g_buf[i]))
+        {
+            return i;
+        }
     }
+    MyAssertHandler(__FILE__, __LINE__, 0, "SV_GetBufferIndex: pointer %p is outside the history buffers", ptr);
     return 0;
 }
 
@@ -110,14 +99,14 @@ int __cdecl SV_HistoryAlloc(server_demo_history_t *history, unsigned __int8 **pD
     HistoryIndex = SV_GetHistoryIndex(history);
     v7 = HistoryIndex;
     v8 = g_bufSize[HistoryIndex];
-    v9 = v8 + size;
-    if ((unsigned int)(v8 + size) > 0x300000)
+    if (size <= 0 || (unsigned int)v8 > sizeof(g_buf[0]) || (unsigned int)size > sizeof(g_buf[0]) - v8)
     {
-        Com_PrintError(CON_CHANNEL_ERROR, "SV_HistoryAlloc failed. Needed %d more memory\n", v9 - 3145728);
+        Com_PrintError(CON_CHANNEL_ERROR, "SV_HistoryAlloc failed for %d bytes\n", size);
         return 0;
     }
     else
     {
+        v9 = v8 + size;
         v10 = &g_buf[HistoryIndex][v8];
         *pData = v10;
         memset(v10, 0, size);
@@ -262,18 +251,18 @@ void __cdecl SV_ResetDemo()
     sv.demo.startLive = 0;
 }
 
-_iobuf *SV_ClearHistoryCache()
+void SV_ClearHistoryCache()
 {
-    _iobuf *result; // r3
-
     g_numFileSkips = 0;
     if (g_fileTimeHistory)
+    {
         FS_FileSeek(g_fileTimeHistory, 0, 2);
-    result = g_fileMarkHistory;
+    }
     g_numFileMarkSkips = 0;
     if (g_fileMarkHistory)
-        return (_iobuf *)FS_FileSeek(g_fileMarkHistory, 0, 2);
-    return result;
+    {
+        FS_FileSeek(g_fileMarkHistory, 0, 2);
+    }
 }
 
 void __cdecl SV_FreeDemoSaveBuf(server_demo_save_t *save)
@@ -412,14 +401,15 @@ int __cdecl SV_AddDemoSave(SaveGame *savehandle, server_demo_save_t *save, int c
             SaveMemory_FinalizeSave(demohandle);
             return 0;
         }
-        byte *seg0Size = MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, 0);
-        byte *totalSize = &MemFile_CopySegments(SaveMemory_GetMemoryFile(savehandle), 1, 0)[(uintptr_t)seg0Size];
-        if (SV_HistoryAlloc(history, &save->buf, (int)(uintptr_t)totalSize) == 0)
+        size_t seg0Size = (size_t)MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, 0);
+        size_t seg1Size = (size_t)MemFile_CopySegments(SaveMemory_GetMemoryFile(savehandle), 1, 0);
+        if (seg0Size > sizeof(g_buf[0]) || seg1Size > sizeof(g_buf[0]) - seg0Size
+            || SV_HistoryAlloc(history, &save->buf, (int)(seg0Size + seg1Size)) == 0)
         {
             SaveMemory_FinalizeSave(demohandle);
             return 0;
         }
-        save->bufLen = (int)(uintptr_t)totalSize;
+        save->bufLen = (int)(seg0Size + seg1Size);
         MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, save->buf);
         MemFile_CopySegments(SaveMemory_GetMemoryFile(savehandle), 1, &save->buf[(uintptr_t)seg0Size]);
         SaveMemory_FinalizeSave(demohandle);
@@ -434,13 +424,13 @@ int __cdecl SV_AddDemoSave(SaveGame *savehandle, server_demo_save_t *save, int c
         SaveMemory_FinalizeSave(demohandle);
         return 0;
     }
-    byte *seg0Size = MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, 0);
-    if (SV_HistoryAlloc(history, &save->buf, (int)(uintptr_t)seg0Size) == 0)
+    size_t seg0Size = (size_t)MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, 0);
+    if (seg0Size > sizeof(g_buf[0]) || SV_HistoryAlloc(history, &save->buf, (int)seg0Size) == 0)
     {
         SaveMemory_FinalizeSave(demohandle);
         return 0;
     }
-    save->bufLen = (int)(uintptr_t)seg0Size;
+    save->bufLen = (int)seg0Size;
     MemFile_CopySegments(SaveMemory_GetMemoryFile(demohandle), 0, save->buf);
     SaveMemory_FinalizeSave(demohandle);
     return 1;
@@ -1013,6 +1003,28 @@ int __cdecl SV_WriteDemoSaveBuf(server_demo_save_t *save)
     return SV_AddDemoSave(0, save, 1);
 }
 
+// Keep the original 32-bit cache layout; pointer slots are unused on disk.
+struct ServerDemoHistoryRecord
+{
+    unsigned char manual;
+    unsigned char padding[3];
+    int time;
+    char name[64];
+    unsigned int saveBuffer;
+    int saveBufferLength;
+    unsigned int collisionBuffer;
+    int collisionBufferLength;
+    unsigned int freeEntityBuffer;
+    int freeEntityBufferLength;
+    int randomSeed;
+    int nextFramePos;
+    usercmd_s lastUsercmd;
+    int msgBit;
+    int msgReadcount;
+    int readType;
+};
+static_assert(sizeof(ServerDemoHistoryRecord) == 172);
+
 bool __cdecl SV_WriteHistory(_iobuf *fileHistory, const server_demo_history_t *history)
 {
     unsigned int bufLen; // r30
@@ -1021,8 +1033,23 @@ bool __cdecl SV_WriteHistory(_iobuf *fileHistory, const server_demo_history_t *h
 
     iassert(history);
     FS_FileSeek(fileHistory, 0, 0);
-    if (FS_FileWrite(history, 0xACu, fileHistory) != 172)
+    ServerDemoHistoryRecord record = {};
+    record.manual = history->manual;
+    record.time = history->time;
+    record.saveBufferLength = history->save.bufLen;
+    record.collisionBufferLength = history->cmBufLen;
+    record.freeEntityBufferLength = history->freeEntBufLen;
+    record.randomSeed = history->randomSeed;
+    record.nextFramePos = history->nextFramePos;
+    record.lastUsercmd = history->lastUsercmd;
+    record.msgBit = history->msgBit;
+    record.msgReadcount = history->msgReadcount;
+    record.readType = history->readType;
+    memcpy(record.name, history->name, sizeof(record.name));
+    if (FS_FileWrite(&record, sizeof(ServerDemoHistoryRecord), fileHistory) != sizeof(ServerDemoHistoryRecord))
+    {
         return 0;
+    }
     bufLen = history->save.bufLen;
     if (bufLen != FS_FileWrite(history->save.buf, bufLen, fileHistory))
         return 0;
@@ -1317,7 +1344,7 @@ int __cdecl SV_DemoSaveHistory(server_demo_history_t *history)
         iassert(!sv.demo.recording);
         history->nextFramePos = sv.demo.nextFramePos;
         history->readType = sv.demo.readType;
-        v4 = 60060;
+        v4 = sv.demo.msg.readcount;
     }
     else
     {
@@ -1330,12 +1357,12 @@ int __cdecl SV_DemoSaveHistory(server_demo_history_t *history)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2299, 0, "%s", "!sv.demo.playing");
         history->nextFramePos = G_GetFramePos();
         history->readType = 9;
-        v4 = 60052;
+        v4 = sv.demo.msg.cursize;
     }
-    history->msgReadcount = *(serverState_t *)((char *)&sv.state + v4);
+    history->msgReadcount = v4;
     history->msgBit = sv.demo.msg.bit;
     history->randomSeed = G_GetRandomSeed();
-    memcpy(&history->lastUsercmd, &svs.clients->lastUsercmd, sizeof(history->lastUsercmd));
+    memcpy(&history->lastUsercmd, &svs.clients->lastUsercmd, sizeof(usercmd_s));
     if (SV_WriteDemoSaveBuf(p_save)
         && (v5 = CM_SaveWorld(0), history->cmBufLen = v5, SV_HistoryAlloc(history, &history->cmBuf, v5))
         && (CM_SaveWorld(history->cmBuf),
@@ -1431,8 +1458,24 @@ bool __cdecl SV_ReadHistory(_iobuf *fileHistory, server_demo_history_t *history)
 
     iassert(fileHistory);
     iassert(history);
-    if (FS_FileRead(history, 0xACu, fileHistory) != 172)
+    ServerDemoHistoryRecord record;
+    memset(history, 0, sizeof(server_demo_history_t));
+    if (FS_FileRead(&record, sizeof(ServerDemoHistoryRecord), fileHistory) != sizeof(ServerDemoHistoryRecord))
+    {
         return 0;
+    }
+    history->manual = record.manual != 0;
+    history->time = record.time;
+    history->save.bufLen = record.saveBufferLength;
+    history->cmBufLen = record.collisionBufferLength;
+    history->freeEntBufLen = record.freeEntityBufferLength;
+    history->randomSeed = record.randomSeed;
+    history->nextFramePos = record.nextFramePos;
+    history->lastUsercmd = record.lastUsercmd;
+    history->msgBit = record.msgBit;
+    history->msgReadcount = record.msgReadcount;
+    history->readType = record.readType;
+    memcpy(history->name, record.name, sizeof(history->name));
     bufLen = history->save.bufLen;
     if (!SV_HistoryAlloc(history, &history->save.buf, bufLen)
         || FS_FileRead(history->save.buf, bufLen, fileHistory) != bufLen)
@@ -2181,4 +2224,3 @@ int __cdecl SV_DemoButtonPressed()
         return 0;
     }
 }
-

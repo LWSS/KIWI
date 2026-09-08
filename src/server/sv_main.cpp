@@ -55,9 +55,9 @@ PendingSaveList pendingSaveGlob;
 
 void __cdecl TRACK_sv_main()
 {
-    track_static_alloc_internal(&svs, 40, "svs", 9);
-    track_static_alloc_internal(&sv, 72480, "sv", 9);
-    track_static_alloc_internal(&pendingSaveGlob, 1208, "pendingSaveGlob", 10);
+    track_static_alloc_internal(&svs, sizeof(serverStatic_t), "svs", 9);
+    track_static_alloc_internal(&sv, sizeof(server_t), "sv", 9);
+    track_static_alloc_internal(&pendingSaveGlob, sizeof(pendingSaveGlob), "pendingSaveGlob", 10);
 }
 
 char string_2[1024];
@@ -308,6 +308,8 @@ void SV_SendServerCommand(client_t *cl, const char *fmt, ...)
     va_start(va, fmt);
 
     _vsnprintf((char *)tempServerCommandBuf, 0x20000u, fmt, va);
+    va_end(va);
+    tempServerCommandBuf[sizeof(tempServerCommandBuf) - 1] = 0;
 
     if (cl)
     {
@@ -486,22 +488,22 @@ int __cdecl SV_WaitStartServer()
 
 void __cdecl  SV_ServerThread(unsigned int threadContext)
 {
-    void *Value; // r3
-    void *v2; // r3
+    jmp_buf *Value;
+    jmp_buf *v2;
     int v3; // r28
     bool v4; // r29
     int v5; // r28
     int v6; // r29
 
     iassert(threadContext == THREAD_CONTEXT_SERVER);
-    Value = Sys_GetValue(2);
-    if (setjmp((int*)Value))
+    Value = (jmp_buf *)Sys_GetValue(2);
+    if (setjmp(*Value))
     {
         do
         {
             Profile_Recover(1);
-            v2 = Sys_GetValue(2);
-        } while (setjmp((int *)v2));
+            v2 = (jmp_buf *)Sys_GetValue(2);
+        } while (setjmp(*v2));
     }
     Profile_Guard(1);
     Sys_InitServerEvents();

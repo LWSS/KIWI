@@ -228,6 +228,11 @@ char *__cdecl SV_AllocSkelMemory(uint size)
     uint sizea; // [esp+Ch] [ebp+8h]
 
     iassert(size);
+    if (!size || size > sizeof(g_sv_skel_memory) - SKEL_MEM_ALIGNMENT)
+    {
+        Com_Error(ERR_DROP, "SV_AllocSkelMemory: invalid allocation size %u", size);
+        return 0;
+    }
     sizea = (size + 15) & 0xFFFFFFF0;
     iassert(size <= sizeof(g_sv_skel_memory) - SKEL_MEM_ALIGNMENT);
     iassert(g_sv_skel_memory_start);
@@ -567,7 +572,7 @@ void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame 
     if (!++sv.skelTimeStamp)
         sv.skelTimeStamp = 1;
     sv.skelMemPos = 0;
-    g_sv_skel_memory_start = (char *)((uint)&g_sv_skel_memory[15] & 0xFFFFFFF0);
+    g_sv_skel_memory_start = (char *)(((uintptr_t)g_sv_skel_memory + SKEL_MEM_ALIGNMENT - 1) & ~(uintptr_t)(SKEL_MEM_ALIGNMENT - 1));
     SND_ErrorCleanup();
 
     {
@@ -822,7 +827,7 @@ void __cdecl SV_SetGametype()
     if (com_sv_running->current.enabled && G_GetSavePersist())
         I_strncpyz(gametype, sv.gametype, 64);
     else
-        I_strncpyz(gametype, (char *)sv_gametype->current.integer, 64);
+        I_strncpyz(gametype, sv_gametype->current.string, 64);
     for (s = gametype; *s; ++s)
         *s = tolower(*s);
     if (!Scr_IsValidGameType(gametype))

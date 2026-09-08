@@ -73,7 +73,7 @@ void __cdecl SV_AddEntToSnapshot(int entnum)
     int numSnapshotEntities; // r11
 
     numSnapshotEntities = sv.entityNumbers.numSnapshotEntities;
-    if (sv.entityNumbers.numSnapshotEntities == 2048)
+    if ((unsigned int)numSnapshotEntities >= ARRAY_COUNT(sv.entityNumbers.snapshotEntities))
     {
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\server\\sv_snapshot.cpp",
@@ -81,9 +81,9 @@ void __cdecl SV_AddEntToSnapshot(int entnum)
             0,
             "%s",
             "sv.entityNumbers.numSnapshotEntities != MAX_SNAPSHOT_ENTITIES");
-        numSnapshotEntities = sv.entityNumbers.numSnapshotEntities;
+        return;
     }
-    *(unsigned int *)&sv.cmd[4 * numSnapshotEntities - 0x2000] = entnum;
+    sv.entityNumbers.snapshotEntities[numSnapshotEntities] = entnum;
     ++sv.entityNumbers.numSnapshotEntities;
 }
 
