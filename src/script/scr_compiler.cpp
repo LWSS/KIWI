@@ -299,8 +299,8 @@ void __cdecl EmitGetIString(unsigned int value, sval_u sourcePos)
 
 void __cdecl EmitFloat(float value)
 {
-    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(4u);
-    *scrCompileGlob.codePos = value;
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(sizeof(float));
+    memcpy(scrCompileGlob.codePos, &value, sizeof(float));
 }
 
 void __cdecl EmitGetVector(const float *value, sval_u sourcePos)
@@ -323,8 +323,8 @@ void __cdecl EmitGetFloat(float value, sval_u sourcePos)
 
 void __cdecl EmitCodepos(const char *pos)
 {
-    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(4u);
-    *(unsigned int*)scrCompileGlob.codePos = (unsigned int)pos;
+    scrCompileGlob.codePos = (byte*)TempMallocAlignStrict(sizeof(const char *));
+    memcpy(scrCompileGlob.codePos, &pos, sizeof(const char *));
 }
 
 void __cdecl EmitGetInteger(int value, sval_u sourcePos)
@@ -506,7 +506,7 @@ void __cdecl EmitCallBuiltinOpcode(int param_count, sval_u sourcePos)
         EmitByte(param_count);
 }
 
-int __cdecl AddFunction(int func, const char *name)
+int __cdecl AddFunction(uintptr_t func, const char *name)
 {
     int i; // [esp+0h] [ebp-4h]
 
@@ -654,7 +654,7 @@ void __cdecl EmitFunction(sval_u func, sval_u sourcePos)
             count.u.intValue = 0;
         }
         valueId = GetNewVariable(threadId, count.u.intValue + 2);
-        value.u.intValue = (int)scrCompileGlob.codePos;
+        value.u.codePosValue = (const char *)scrCompileGlob.codePos;
         if (scrCompilePub.developer_statement)
         {
             iassert(scrVarPub.developer_script);
@@ -819,7 +819,7 @@ void __cdecl EmitCall(sval_u func_name, sval_u params, bool bStatement, scr_bloc
         {
             value = Scr_EvalVariable(funcId);
             type = Scr_GetUncacheType(value.type);
-            func = (void(*)())value.u.intValue;
+            func = (void(*)())value.u.nativeValue;
         }
         else
         {
@@ -827,7 +827,7 @@ void __cdecl EmitCall(sval_u func_name, sval_u params, bool bStatement, scr_bloc
             func = Scr_GetFunction(&pName, &type);
             funcId = GetNewVariable(scrCompilePub.builtinFunc, name);
             value.type = Scr_GetCacheType(type);
-            value.u.intValue = (int)func;
+            value.u.nativeValue = (uintptr_t)func;
             SetVariableValue(funcId, &value);
         }
     }
@@ -846,7 +846,7 @@ void __cdecl EmitCall(sval_u func_name, sval_u params, bool bStatement, scr_bloc
             {
                 Scr_CompileRemoveRefToString(name);
                 EmitCallBuiltinOpcode(param_count, sourcePos);
-                v4 = AddFunction((int)func, pName);
+                v4 = AddFunction((uintptr_t)func, pName);
                 EmitShort(v4);
                 AddExpressionListOpcodePos(params);
                 if (bStatement)
@@ -948,7 +948,7 @@ void __cdecl EmitMethod(
         {
             value = Scr_EvalVariable(methId);
             type = Scr_GetUncacheType(value.type);
-            meth = (void(*)(scr_entref_t))value.u.intValue;
+            meth = (void(*)(scr_entref_t))value.u.nativeValue;
         }
         else
         {
@@ -956,7 +956,7 @@ void __cdecl EmitMethod(
             meth = Scr_GetMethod(&pName, &type);
             methId = GetNewVariable(scrCompilePub.builtinMeth, name);
             value.type = Scr_GetCacheType(type);
-            value.u.intValue = (int)meth;
+            value.u.nativeValue = (uintptr_t)meth;
             SetVariableValue(methId, &value);
         }
     }
@@ -976,7 +976,7 @@ void __cdecl EmitMethod(
             {
                 Scr_CompileRemoveRefToString(name);
                 EmitCallBuiltinMethodOpcode(param_count, sourcePos);
-                v6 = AddFunction((int)meth, pName);
+                v6 = AddFunction((uintptr_t)meth, pName);
                 EmitShort(v6);
                 AddOpcodePos(methodSourcePos.stringValue, 0);
                 AddExpressionListOpcodePos(params);
@@ -1277,7 +1277,7 @@ void __cdecl Scr_CreateVector(VariableCompileValue *constValue, VariableValue *v
         }
     }
     value->type = VAR_VECTOR;
-    value->u.intValue = (int)Scr_AllocVector(vec);
+    value->u.vectorValue = Scr_AllocVector(vec);
 }
 
 void __cdecl Scr_PushValue(VariableCompileValue *constValue)
@@ -1447,7 +1447,7 @@ char __cdecl EvalBinaryOperatorExpression(
     }
     else
     {
-        constValue->value.u.intValue = constValue1.value.u.intValue;
+        constValue->value.u = constValue1.value.u;
         constValue->value.type = constValue1.value.type;
         constValue->sourcePos = sourcePos;
         return 1;
@@ -1700,7 +1700,7 @@ char __cdecl EmitOrEvalBinaryOperatorExpression(
     }
     else
     {
-        constValue->value.u.intValue = constValue1.value.u.intValue;
+        constValue->value.u = constValue1.value.u;
         constValue->value.type = constValue1.value.type;
         constValue->sourcePos = sourcePos;
         return 1;
@@ -4068,7 +4068,7 @@ void __cdecl SetThreadPosition(unsigned int threadId)
 
     v1 = TempMalloc(0);
     Variable = FindVariable(threadId, 1u);
-    GetVariableValueAddress(Variable)->u.intValue = (int)v1;
+    GetVariableValueAddress(Variable)->u.codePosValue = v1;
 }
 
 void __cdecl InitThread(int type)

@@ -37,7 +37,7 @@ struct CaseStatementInfo // sizeof=0x10
     uint sourcePos;
     CaseStatementInfo *next;
 };
-static_assert(sizeof(CaseStatementInfo) == 0x10);
+static_assert(sizeof(CaseStatementInfo) == (sizeof(void *) == 8 ? 32 : 0x10));
 
 struct BreakStatementInfo // sizeof=0xC
 {
@@ -45,7 +45,7 @@ struct BreakStatementInfo // sizeof=0xC
     const char *nextCodePos;
     BreakStatementInfo *next;
 };
-static_assert(sizeof(BreakStatementInfo) == 0xC);
+static_assert(sizeof(BreakStatementInfo) == (sizeof(void *) == 8 ? 24 : 0xC));
 
 struct ContinueStatementInfo // sizeof=0xC
 {
@@ -53,14 +53,14 @@ struct ContinueStatementInfo // sizeof=0xC
     const char *nextCodePos;
     ContinueStatementInfo *next;
 };
-static_assert(sizeof(ContinueStatementInfo) == 0xC);
+static_assert(sizeof(ContinueStatementInfo) == (sizeof(void *) == 8 ? 24 : 0xC));
 
 struct VariableCompileValue // sizeof=0xC
 {                                       // ...
     VariableValue value;                // ...
     sval_u sourcePos;
 };
-static_assert(sizeof(VariableCompileValue) == 0xC);
+static_assert(sizeof(VariableCompileValue) == (sizeof(void *) == 8 ? 24 : 0xC));
 
 #define VALUE_STACK_SIZE 32
 
@@ -104,7 +104,7 @@ struct scrCompileGlob_t // sizeof=0x1D8
     struct PrecacheEntry *precachescriptList;  // ...
     VariableCompileValue value_start[VALUE_STACK_SIZE]; // ...
 };
-static_assert(sizeof(scrCompileGlob_t) == 0x1D8);
+static_assert(sizeof(scrCompileGlob_t) == (sizeof(void *) == 8 ? 912 : 0x1D8));
 
 #define SCR_FUNC_TABLE_SIZE 1024
 
@@ -125,7 +125,7 @@ struct scrCompilePub_t
     byte *opcodePos;
     uint programLen;
     int func_table_size;
-    int func_table[SCR_FUNC_TABLE_SIZE];
+    uintptr_t func_table[SCR_FUNC_TABLE_SIZE];
 };
 
 void __cdecl Scr_CompileStatement(sval_u parseData);

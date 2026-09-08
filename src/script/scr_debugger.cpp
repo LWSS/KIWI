@@ -35,8 +35,8 @@ Scr_Breakpoint *g_breakpointsHead;
 
 void __cdecl TRACK_scr_debugger()
 {
-    track_static_alloc_internal(&scrDebuggerGlob, 696, "scrDebuggerGlob", 0);
-    track_static_alloc_internal(g_breakpoints, 3584, "g_breakpoints", 0);
+    track_static_alloc_internal(&scrDebuggerGlob, sizeof(scrDebuggerGlob_t), "scrDebuggerGlob", 0);
+    track_static_alloc_internal(g_breakpoints, sizeof(g_breakpoints), "g_breakpoints", 0);
 }
 
 void __cdecl Scr_AddDebugText(char *text)
@@ -1096,53 +1096,50 @@ void __cdecl Scr_ConnectElementChildren(Scr_WatchElement_s *parentElement)
 
 void __cdecl Scr_SortElementChildren(Scr_WatchElement_s *parentElement)
 {
-    uint v1; // [esp+0h] [ebp-14h]
-    int newIndex; // [esp+4h] [ebp-10h]
-    int newIndexa; // [esp+4h] [ebp-10h]
-    Scr_WatchElement_s *newElements; // [esp+8h] [ebp-Ch]
-    uint *elementList; // [esp+Ch] [ebp-8h]
-    int count; // [esp+10h] [ebp-4h]
-
     iassert(scrDebuggerGlob.debugger_inited_system);
-    iassert(Scr_IsSortWatchElement( parentElement ));
-    count = parentElement->childCount;
-    newElements = parentElement->childArrayHead;
-    elementList = Scr_AllocDebugMem(4 * count, "Scr_SortElementChildren");
-    for (newIndex = 0; newIndex < count; ++newIndex)
-        elementList[newIndex] = (uint)&newElements[newIndex];
-    qsort(elementList, count, 4u, (int(__cdecl *)(const void *, const void *))CompareThreadElements);
-    for (newIndexa = 0; newIndexa < count; ++newIndexa)
+    iassert(Scr_IsSortWatchElement(parentElement));
+    int count = parentElement->childCount;
+    if (!count)
     {
-        if (newIndexa >= count - 1)
-            v1 = 0;
-        else
-            v1 = elementList[newIndexa + 1];
-        *(uint *)(elementList[newIndexa] + 96) = v1;
+        parentElement->childHead = NULL;
+        return;
     }
-    parentElement->childHead = (Scr_WatchElement_s *)*elementList;
-    Scr_FreeDebugMem(elementList);
+    Scr_WatchElement_s **elements = (Scr_WatchElement_s **)Scr_AllocDebugMem(sizeof(Scr_WatchElement_s *) * count, "Scr_SortElementChildren");
+    for (int i = 0; i < count; ++i)
+    {
+        elements[i] = &parentElement->childArrayHead[i];
+    }
+    qsort(elements, count, sizeof(Scr_WatchElement_s *), CompareThreadElements);
+    for (int i = 0; i < count; ++i)
+    {
+        elements[i]->next = i + 1 < count ? elements[i + 1] : NULL;
+    }
+    parentElement->childHead = elements[0];
+    Scr_FreeDebugMem(elements);
 }
 
-int __cdecl CompareThreadElements(int *arg1, int *arg2)
+int __cdecl CompareThreadElements(const void *arg1, const void *arg2)
 {
-    int elements; // [esp+8h] [ebp-8h]
-    int elements_4; // [esp+Ch] [ebp-4h]
-
-    elements = *arg1;
-    elements_4 = *arg2;
-    if (scrParserPub.sourceBufferLookup[*(uint *)(*arg1 + 72)].sortedIndex != scrParserPub.sourceBufferLookup[*(uint *)(*arg2 + 72)].sortedIndex)
-        return scrParserPub.sourceBufferLookup[*(uint *)(*arg1 + 72)].sortedIndex
-        - scrParserPub.sourceBufferLookup[*(uint *)(*arg2 + 72)].sortedIndex;
-    if (*(uint *)(elements + 76) == *(uint *)(elements_4 + 76))
-        return *(uint *)(elements + 48) - *(uint *)(elements_4 + 48);
-    return *(uint *)(elements + 76) - *(uint *)(elements_4 + 76);
+    const Scr_WatchElement_s *left = *(const Scr_WatchElement_s *const *)arg1;
+    const Scr_WatchElement_s *right = *(const Scr_WatchElement_s *const *)arg2;
+    int leftIndex = scrParserPub.sourceBufferLookup[left->bufferIndex].sortedIndex;
+    int rightIndex = scrParserPub.sourceBufferLookup[right->bufferIndex].sortedIndex;
+    if (leftIndex != rightIndex)
+    {
+        return (leftIndex > rightIndex) - (leftIndex < rightIndex);
+    }
+    if (left->sourcePos != right->sourcePos)
+    {
+        return (left->sourcePos > right->sourcePos) - (left->sourcePos < right->sourcePos);
+    }
+    return (left->fieldName > right->fieldName) - (left->fieldName < right->fieldName);
 }
 
 Scr_WatchElement_s *__cdecl Scr_CreateWatchElement(char *text, Scr_WatchElement_s **prevElem, const char *name)
 {
     Scr_WatchElement_s *element; // [esp+0h] [ebp-4h]
 
-    element = (Scr_WatchElement_s *)Scr_AllocDebugMem(100, name);
+    element = (Scr_WatchElement_s *)Scr_AllocDebugMem(sizeof(Scr_WatchElement_s), name);
     memset((uint8_t *)element, 0, sizeof(Scr_WatchElement_s));
     element->valueText = CopyString((char *)"");
     element->refText = CopyString(text);
@@ -1306,7 +1303,7 @@ bool __cdecl Scr_RefToVariable(uint id, int isObject)
     Scr_WatchElementNode_s **pElementNode; // [esp+0h] [ebp-1Ch]
     Scr_WatchElementNode_s *elementNodeNext; // [esp+4h] [ebp-18h]
     Scr_WatchElementDoubleNode_t *breakpoints; // [esp+8h] [ebp-14h]
-    uint *elementNodec; // [esp+Ch] [ebp-10h]
+    Scr_WatchElementNode_s *elementNodec;
     Scr_WatchElementNode_s *elementNode; // [esp+Ch] [ebp-10h]
     Scr_WatchElementNode_s *elementNodea; // [esp+Ch] [ebp-10h]
     Scr_WatchElementNode_s *elementNodeb; // [esp+Ch] [ebp-10h]
@@ -1330,7 +1327,7 @@ bool __cdecl Scr_RefToVariable(uint id, int isObject)
     {
         if (!scrDebuggerGlob.add)
             return 0;
-        breakpoints = (Scr_WatchElementDoubleNode_t *)Scr_AllocDebugMem(8, "Scr_RefToVariable1");
+        breakpoints = (Scr_WatchElementDoubleNode_t *)Scr_AllocDebugMem(sizeof(Scr_WatchElementDoubleNode_t), "Scr_RefToVariable1");
         breakpoints->list = 0;
         breakpoints->removedList = 0;
         scrDebuggerGlob.variableBreakpoints[ida] = breakpoints;
@@ -1347,10 +1344,10 @@ bool __cdecl Scr_RefToVariable(uint id, int isObject)
     {
         if (*pElementNode)
             return 0;
-        elementNodec = Scr_AllocDebugMem(8, "Scr_RefToVariable2");
-        *elementNodec = (uint)scrDebuggerGlob.currentElement;
-        elementNodec[1] = (uint)breakpoints->list;
-        breakpoints->list = (Scr_WatchElementNode_s *)elementNodec;
+        elementNodec = (Scr_WatchElementNode_s *)Scr_AllocDebugMem(sizeof(Scr_WatchElementNode_s), "Scr_RefToVariable2");
+        elementNodec->element = scrDebuggerGlob.currentElement;
+        elementNodec->next = breakpoints->list;
+        breakpoints->list = elementNodec;
     }
     else
     {
@@ -1475,8 +1472,8 @@ void __cdecl Scr_InitDebuggerMain()
         iassert(!scrDebuggerGlob.debugger_inited_main);
         if (!Sys_IsRemoteDebugClient())
         {
-            scrDebuggerGlob.variableBreakpoints = (Scr_WatchElementDoubleNode_t **)Hunk_AllocDebugMem(393216);// , "scrDebuggerGlob.variableBreakpoints");
-            memset((uint8_t *)scrDebuggerGlob.variableBreakpoints, 0, 0x60000u);
+            scrDebuggerGlob.variableBreakpoints = (Scr_WatchElementDoubleNode_t **)Hunk_AllocDebugMem(0x18000 * sizeof(Scr_WatchElementDoubleNode_t *));
+            memset(scrDebuggerGlob.variableBreakpoints, 0, 0x18000 * sizeof(Scr_WatchElementDoubleNode_t *));
             scrDebuggerGlob.assignHead = 0;
             scrDebuggerGlob.assignHeadCodePos = 0;
             scrDebuggerGlob.disableBreakpoints = 0;
@@ -1677,7 +1674,7 @@ void __cdecl Scr_AddAssignmentPos(char *codePos)
     if (scrCompilePub.developer_statement != 2 && scrDebuggerGlob.assignHeadCodePos != codePos)
     {
         scrDebuggerGlob.assignHeadCodePos = codePos;
-        v1 = (Scr_OpcodeList_s *)Hunk_AllocDebugMem(8);
+        v1 = (Scr_OpcodeList_s *)Hunk_AllocDebugMem(sizeof(Scr_OpcodeList_s));
         v1->codePos = codePos;
         v1->next = scrDebuggerGlob.assignHead;
         scrDebuggerGlob.assignHead = v1;
@@ -2135,7 +2132,7 @@ void __cdecl Scr_DebugTerminateThread(int topThread)
 {
     Scr_DebugKillThread(
         scrVmPub.function_frame_start[topThread].fs.localId,
-        scrVmPub.stack[3 * topThread - 96].u.codePosValue);
+        scrVmPub.function_frame_start[topThread].fs.pos);
     if (topThread == scrVmPub.function_count)
     {
         if (!scrDebuggerGlob.kill_thread)
@@ -2151,7 +2148,7 @@ void __cdecl Scr_DebugTerminateThread(int topThread)
     }
     else
     {
-        scrVmPub.stack[3 * topThread - 96].u.intValue = (int)&g_EndPos;
+        scrVmPub.function_frame_start[topThread].fs.pos = &g_EndPos;
     }
 }
 
@@ -2559,8 +2556,8 @@ void Scr_SetChildCountRemote()
     sameType = Sys_ReadDebugSocketInt() != 0;
     oldElements = parentElement->childArrayHead;
     oldChildCount = parentElement->childCount;
-    newElements = (Scr_WatchElement_s *)Scr_AllocDebugMem(100 * count, "Scr_SetChildCountRemote");
-    memset((uint8_t *)newElements, 0, 100 * count);
+    newElements = (Scr_WatchElement_s *)Scr_AllocDebugMem(sizeof(Scr_WatchElement_s) * count, "Scr_SetChildCountRemote");
+    memset(newElements, 0, sizeof(Scr_WatchElement_s) * count);
     oldIndex = 0;
     newIndex = 0;
     for (nameIndex = 0; nameIndex < count; ++nameIndex)

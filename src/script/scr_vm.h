@@ -169,7 +169,7 @@ struct Scr_StringNode_s // sizeof=0x8
     const char *text;
     Scr_StringNode_s *next;
 };
-static_assert(sizeof(Scr_StringNode_s) == 0x8);
+static_assert(sizeof(Scr_StringNode_s) == (sizeof(void *) == 8 ? 16 : 0x8));
 
 struct function_stack_t // sizeof=0x14
 {                                       // ...
@@ -179,14 +179,14 @@ struct function_stack_t // sizeof=0x14
     VariableValue *top;                 // ...
     VariableValue *startTop;            // ...
 };
-static_assert(sizeof(function_stack_t) == 0x14);
+static_assert(sizeof(function_stack_t) == (sizeof(void *) == 8 ? 32 : 0x14));
 
 struct function_frame_t // sizeof=0x18
 {                                       // ...
     function_stack_t fs;                // ...
     Vartype_t topType;
 };
-static_assert(sizeof(function_frame_t) == 0x18);
+static_assert(sizeof(function_frame_t) == (sizeof(void *) == 8 ? 40 : 0x18));
 
 struct scrVmPub_t // sizeof=0x4328
 {                                       // ...
@@ -209,7 +209,7 @@ struct scrVmPub_t // sizeof=0x4328
     function_frame_t function_frame_start[32]; // ...
     VariableValue stack[2048];          // ...
 };
-static_assert(sizeof(scrVmPub_t) == 0x4328);
+static_assert(sizeof(scrVmPub_t) == (sizeof(void *) == 8 ? 34112 : 0x4328));
 
 struct FuncDebugData // sizeof=0x10
 {                                       // ...
@@ -218,7 +218,7 @@ struct FuncDebugData // sizeof=0x10
     int prof;                           // ...
     int usage;                          // ...
 };
-static_assert(sizeof(FuncDebugData) == 0x10);
+static_assert(sizeof(FuncDebugData) == (sizeof(void *) == 8 ? 24 : 0x10));
 
 struct scrVmDebugPub_t // sizeof=0x24210
 {                                       // ...
@@ -230,7 +230,7 @@ struct scrVmDebugPub_t // sizeof=0x24210
     int jumpbackHistoryIndex;           // ...
     int dummy;
 };
-static_assert(sizeof(scrVmDebugPub_t) == 0x24210);
+static_assert(sizeof(scrVmDebugPub_t) == (sizeof(void *) == 8 ? 156688 : 0x24210));
 
 struct scrVmGlob_t // sizeof=0x2028
 {                                       // ...
@@ -246,7 +246,7 @@ struct scrVmGlob_t // sizeof=0x2028
     char *lastFileName;                 // ...
     int lastLine;                       // ...
 };
-static_assert(sizeof(scrVmGlob_t) == 0x2028);
+static_assert(sizeof(scrVmGlob_t) == (sizeof(void *) == 8 ? 8264 : 0x2028));
 
 void Scr_Error(const char* error);
 void Scr_ErrorWithDialogMessage(const char *error, const char *dialog_error);

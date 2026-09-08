@@ -10,7 +10,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 2 | physics | Complete |
 | 3 | qcommon | Complete |
 | 4 | ragdoll | Complete |
-| 5 | script | Pending |
+| 5 | script | Complete |
 | 6 | server | Pending |
 | 7 | server_mp | Pending |
 | 8 | sound | Pending |
@@ -60,3 +60,13 @@ Part 3 checkpoint: `652ab0aa`.
 Audited all five files, including definition parsing, native body/joint arrays, controller and state callback traversal, physics handoff, and quaternion routines. Initialization and allocation tracking now cover the complete native arrays. No raw archive implementation exists in this folder. Corrected the second bone endpoint's invalid-index check and the timeout diagnostic's swapped pointer/handle arguments; these are exported separately for upstream.
 
 Validation: all 16 x86/x64 MP/SP diagnostic compilation checks passed. Production-function regression executables passed on both architectures: complete array initialization from poisoned memory, 32-slot exhaustion, all 28 joint pairs and 14 body pointers through destruction callbacks, both orientation buffers, and rejection of an invalid second bone endpoint. Native Joint/Bone/StateEnt layouts were asserted. Reproduce with `scripts/x64_audit/test_ragdoll.py` and `compile_part.py ragdoll --configured`. Physics calls are boundary stubs in these tests; full animated simulation remains an integration check.
+
+Part 4 checkpoint: `00bec97f`.
+
+## Part 5: script
+
+Audited 31 source/header files. Ported native union copies, parse-node storage, builtin addresses, suspended-stack strides/readers/writers, native layout assertions, watch sorting/allocation, vector accesses, save union interfaces, class traversal, compiler case/child storage, source-buffer copies, and reference/debug reporting. The MT allocator keeps its 12-byte node IDs but reserves at least two buckets on x64 to align allocations to eight bytes. The program arena doubles on x64 to accommodate wider operands. Active compiler is scr_compiler2.cpp; scr_compiler.cpp and scr_yacc.cpp are excluded by CMake and remain legacy alternatives requiring reconciliation if restored. Runtime bytecode uses native-width address/count operands where emitted by EmitCodepos/EmitNativeValue; ordinary integer/float operands remain four bytes. Animation and jump readers and the debugger walker now match the active compiler. Saved values retain type-specific scalar/code-offset encoding.
+
+Validation: all 54 configured x86/x64 MP/SP diagnostic checks pass, without script pointer-truncation warnings. Assertion-enabled `test_script.py` executables pass on both architectures for parse-node pointer copies, operand emit/read pairs and debugger traversal, large integer width, builtin registration/calls, native switch-record sorting, MT bucket alignment, vector arithmetic, nested suspended-stack roundtrips/canaries, and production save/load helpers. Saved stack bytes match across architectures. `script_layout.py` reports every declared layout on both architectures; pointer-bearing assertions were reconciled against these results. This does not constitute a full linked game, arbitrary GSC execution, or remote-debugger session. SaveImmediate's legacy integer-file-handle bridge is revisited with server; shared Hunk/Z allocators are revisited with universal.
+
+Independent fixes include preserving the stack timestamp when growing a notified stack, passing the complete entity reference to evaluated builtin methods, and treating script log text as data. The upstream patch is outside the repository.

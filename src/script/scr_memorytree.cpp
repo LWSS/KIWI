@@ -335,6 +335,12 @@ int MT_GetSize(int numBytes)
 
     iassert(numBytes > 0);
 
+    // Two 12-byte buckets provide eight-byte alignment without changing IDs.
+    if (sizeof(void *) == 8 && numBytes <= sizeof(MemoryNode))
+    {
+        numBytes = sizeof(MemoryNode) + 1;
+    }
+
     if (numBytes >= MEMORY_NODE_COUNT)
     {
         MT_Error("MT_GetSize: max allocation exceeded", numBytes);

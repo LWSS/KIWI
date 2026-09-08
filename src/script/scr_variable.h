@@ -94,16 +94,18 @@ struct VariableStackBuffer // sizeof=0xC
     uint8_t time;
     char buf[1];
 };
-static_assert(sizeof(VariableStackBuffer) == 0xC);
+static_assert(sizeof(VariableStackBuffer) == (sizeof(void *) == 8 ? 16 : 0xC));
 
 union VariableUnion // sizeof=0x4
 {                                       // ...
     VariableUnion(float f)
     {
+        nativeValue = 0;
         floatValue = f;
     }
     VariableUnion(int i)
     {
+        nativeValue = 0;
         intValue = i;
     }
     VariableUnion(char *str)
@@ -116,10 +118,11 @@ union VariableUnion // sizeof=0x4
     }
     VariableUnion()
     {
-        intValue = 0;
+        nativeValue = 0;
     }
 
     int intValue;
+    uintptr_t nativeValue;
     float floatValue;
     uint stringValue;
     const float *vectorValue;
@@ -128,7 +131,23 @@ union VariableUnion // sizeof=0x4
     VariableStackBuffer *stackValue;
     uint entityOffset;
 };
-static_assert(sizeof(VariableUnion) == 0x4);
+static_assert(sizeof(VariableUnion) == (sizeof(void *) == 8 ? 8 : 0x4));
+
+// Suspended stacks are native runtime storage, not the save-file format.
+#define SCR_STACK_VALUE_SIZE (1 + sizeof(VariableUnion))
+#define SCR_STACK_HEADER_SIZE offsetof(VariableStackBuffer, buf)
+
+inline VariableUnion Scr_ReadStackValue(const char *data)
+{
+    VariableUnion value;
+    memcpy(&value, data, sizeof(VariableUnion));
+    return value;
+}
+
+inline void Scr_WriteStackValue(char *data, VariableUnion value)
+{
+    memcpy(data, &value, sizeof(VariableUnion));
+}
 
 struct VariableValue // sizeof=0x8
 {   
@@ -136,7 +155,7 @@ struct VariableValue // sizeof=0x8
     VariableUnion u;                    // ...
     Vartype_t type;                           // ...
 };
-static_assert(sizeof(VariableValue) == 0x8);
+static_assert(sizeof(VariableValue) == (sizeof(void *) == 8 ? 16 : 0x8));
 
 union ObjectInfo_u // sizeof=0x2
 {                                       // ...
@@ -176,18 +195,19 @@ union VariableValueInternal_u // sizeof=0x4
     }
     VariableValueInternal_u(int i)
     {
+        u.nativeValue = 0;
         u.intValue = i;
     }
     VariableValueInternal_u()
     {
-        u.intValue = 0;
+        u.nativeValue = 0;
     }
 
     uint16_t next;
     VariableUnion u;
     ObjectInfo o;
 };
-static_assert(sizeof(VariableValueInternal_u) == 0x4);
+static_assert(sizeof(VariableValueInternal_u) == (sizeof(void *) == 8 ? 8 : 0x4));
 
 union VariableValueInternal_w // sizeof=0x4
 {                                       // ...
@@ -216,7 +236,7 @@ struct VariableValueInternal // sizeof=0x10
     VariableValueInternal_v v;          // ...
     uint16_t nextSibling;       // ...
 };
-static_assert(sizeof(VariableValueInternal) == 0x10);
+static_assert(sizeof(VariableValueInternal) == (sizeof(void *) == 8 ? 24 : 0x10));
 
 struct scrVarDebugPub_t // sizeof=0xE0004
 {                                       // ...
@@ -229,13 +249,13 @@ struct scrVarDebugPub_t // sizeof=0xE0004
     // padding byte
     // padding byte
 };
-static_assert(sizeof(scrVarDebugPub_t) == 0xE0004);
+static_assert(sizeof(scrVarDebugPub_t) == (sizeof(void *) == 8 ? 1310728 : 0xE0004));
 
 struct scrVarGlob_t // sizeof=0x180000
 {                                       // ...
     VariableValueInternal variableList[0x18000]; // ...
 };
-static_assert(sizeof(scrVarGlob_t) == 0x180000);
+static_assert(sizeof(scrVarGlob_t) == (sizeof(void *) == 8 ? 2359296 : 0x180000));
 
 struct scr_entref_t // sizeof=0x4
 {                                       // ...
@@ -271,7 +291,7 @@ struct scr_classStruct_t // sizeof=0xC
     // padding byte
     const char *name;
 };
-static_assert(sizeof(scr_classStruct_t) == 0xC);
+static_assert(sizeof(scr_classStruct_t) == (sizeof(void *) == 8 ? 16 : 0xC));
 
 struct VariableDebugInfo // sizeof=0x10
 {
@@ -280,7 +300,7 @@ struct VariableDebugInfo // sizeof=0x10
     const char *functionName;
     int varUsage;
 };
-static_assert(sizeof(VariableDebugInfo) == 0x10);
+static_assert(sizeof(VariableDebugInfo) == (sizeof(void *) == 8 ? 32 : 0x10));
 
 //void  TRACK_scr_variable(void);
 void __cdecl Scr_Cleanup();
@@ -436,7 +456,7 @@ struct ThreadDebugInfo // sizeof=0x8C
     float varUsage;                     // ...
     float endonUsage;                   // ...
 };
-static_assert(sizeof(ThreadDebugInfo) == 0x8C);
+static_assert(sizeof(ThreadDebugInfo) == (sizeof(void *) == 8 ? 272 : 0x8C));
 
 void  Scr_DumpScriptThreads(void);
 void  Scr_ShutdownVariables(void);
@@ -462,11 +482,11 @@ void  Scr_KillThread(uint parentId);
 void  Scr_CheckLeakRange(uint begin, uint end);
 void  Scr_CheckLeaks(void);
 
-int  ThreadInfoCompare(_DWORD* info1, _DWORD* info2);
+int ThreadInfoCompare(const void *info1, const void *info2);
 //int  VariableInfoCompare(void const*, void const*);
-int VariableInfoFileNameCompare(_DWORD* info1, _DWORD* info2);
-int VariableInfoCountCompare(_DWORD* info1, _DWORD* info2);
-int VariableInfoFileLineCompare(_DWORD* info1, _DWORD* info2);
+int VariableInfoFileNameCompare(const void *info1, const void *info2);
+int VariableInfoCountCompare(const void *info1, const void *info2);
+int VariableInfoFileLineCompare(const void *info1, const void *info2);
 uint  FindVariableIndexInternal2(uint name, uint index);
 uint FindVariableIndexInternal(uint parentId, uint name);
 ushort  AllocVariable(void);

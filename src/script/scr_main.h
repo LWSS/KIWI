@@ -70,7 +70,7 @@ struct scrVarPub_t // sizeof=0x2007C
     int totalObjectRefCount;
     volatile uint totalVectorRefCount;
 };
-static_assert(sizeof(scrVarPub_t) == 0x2007C);
+static_assert(sizeof(scrVarPub_t) == (sizeof(void *) == 8 ? 131232 : 0x2007C));
 
 struct PrecacheEntry // sizeof=0x8
 {                                       // ...

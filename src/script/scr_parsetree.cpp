@@ -27,7 +27,7 @@ void __cdecl Scr_ShutdownAllocNode()
 sval_u *__cdecl Scr_AllocNode(int size)
 {
     iassert(g_allocNodeUser);
-    return (sval_u *)Hunk_UserAlloc(g_allocNodeUser, 4 * size, 4);
+    return (sval_u *)Hunk_UserAlloc(g_allocNodeUser, sizeof(sval_u) * size, alignof(sval_u));
 }
 
 sval_u __cdecl node0(Enum_t type)
@@ -324,7 +324,7 @@ sval_u __cdecl debugger_buffer(Enum_t type, char *buf, uint size, int alignment)
     sval_u *result = Scr_AllocDebugExpr(type, size + alignMask + 2 * sizeof(sval_u), "debugger_buffer");
     uint8_t *bufCopy = (uint8_t *)(((uintptr_t)&result[2] + alignMask) & ~(uintptr_t)alignMask);
     memcpy(bufCopy, buf, size);
-    result[1].intValue = (int)bufCopy;
+    result[1].debugString = (const char *)bufCopy;
     return result[0];
 }
 

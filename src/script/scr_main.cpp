@@ -127,17 +127,10 @@ void __cdecl Scr_BeginLoadScripts()
         scrCompilePub.builtinMeth = Scr_AllocArray();
         if (scrVarDebugPub)
             ++scrVarDebugPub->extRefCount[scrCompilePub.builtinMeth];
-        scrVarPub.programHunkUser = Hunk_UserCreate(0x100000, "Scr_BeginLoadScripts", 1, 0, 7);
+        scrVarPub.programHunkUser = Hunk_UserCreate(0x100000 * sizeof(void *) / sizeof(uint32_t), "Scr_BeginLoadScripts", 1, 0, 7);
         TempMemoryReset(scrVarPub.programHunkUser);
         scrVarPub.programBuffer = TempMalloc(0);
-        if (((int)scrVarPub.programBuffer & 0x1F) != 0)
-            MyAssertHandler(
-                ".\\script\\scr_main.cpp",
-                209,
-                0,
-                "%s\n\t((int)scrVarPub.programBuffer) = %i",
-                "(!((int)scrVarPub.programBuffer & 31))",
-                scrVarPub.programBuffer);
+        iassert(((uintptr_t)scrVarPub.programBuffer & 31) == 0);
         scrCompilePub.programLen = 0;
         scrVarPub.endScriptBuffer = 0;
         SL_BeginLoadScripts();

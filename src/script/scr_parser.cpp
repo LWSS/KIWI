@@ -25,8 +25,8 @@ bool g_loadedImpureScript;
 
 void __cdecl TRACK_scr_parser()
 {
-    track_static_alloc_internal(&scrParserGlob, 52, "scrParserGlob", 7);
-    track_static_alloc_internal(&scrParserPub, 16, "scrParserPub", 7);
+    track_static_alloc_internal(&scrParserGlob, sizeof(scrParserGlob_t), "scrParserGlob", 7);
+    track_static_alloc_internal(&scrParserPub, sizeof(scrParserPub_t), "scrParserPub", 7);
 }
 
 void __cdecl Scr_InitOpcodeLookup()
@@ -610,7 +610,7 @@ SourceBufferInfo *__cdecl Scr_GetNewSourceBuffer()
         iassert(scrParserPub.sourceBufferLookupLen < scrParserGlob.sourceBufferLookupMaxLen);
 
         newSourceBufferInfo = (char *)Hunk_AllocDebugMem(sizeof(SourceBufferInfo) * scrParserGlob.sourceBufferLookupMaxLen);
-        Com_Memcpy(newSourceBufferInfo, (char *)scrParserPub.sourceBufferLookup, 44 * scrParserPub.sourceBufferLookupLen);
+        Com_Memcpy(newSourceBufferInfo, scrParserPub.sourceBufferLookup, sizeof(SourceBufferInfo) * scrParserPub.sourceBufferLookupLen);
         Hunk_FreeDebugMem();
         scrParserPub.sourceBufferLookup = (SourceBufferInfo *)newSourceBufferInfo;
     }
@@ -691,7 +691,7 @@ char *__cdecl Scr_ReadFile(const char *filename, char *extFilename, const char *
 {
     int file; // [esp+24h] [ebp-4h] BYREF
 
-    if (*(_BYTE *)fs_gameDirVar->current.integer)
+    if (fs_gameDirVar->current.string[0])
     {
         if ((FS_FOpenFileRead(extFilename, &file) & 0x80000000) != 0)
         {
@@ -1232,8 +1232,6 @@ char __cdecl Scr_PrintProfileTimes(float minTime)
 {
     //OpcodeLookup *v2; // ecx
     //const char **v3; // edx
-    int v4; // [esp+34h] [ebp-A0h]
-    uint v5; // [esp+38h] [ebp-9Ch]
     float v6; // [esp+3Ch] [ebp-98h]
     float v7; // [esp+44h] [ebp-90h]
     float v8; // [esp+4Ch] [ebp-88h]
@@ -1273,7 +1271,7 @@ char __cdecl Scr_PrintProfileTimes(float minTime)
                 MyAssertHandler(".\\script\\scr_parser.cpp", 1469, 0, "%s", "!scrParserGlob.opcodeLookup[i].profileTime");
             }
         }
-        sortedOpcodeLookup = (OpcodeLookup*)Z_VirtualAlloc(sizeof(*sortedOpcodeLookup) * profileCount, "Scr_PrintProfileTimes", 0);
+        sortedOpcodeLookup = (OpcodeLookup*)Z_VirtualAlloc(sizeof(OpcodeLookup) * profileCount, "Scr_PrintProfileTimes", 0);
         profileIndex = 0;
         for (ic = 0; ic < scrParserGlob.opcodeLookupLen; ++ic)
         {
@@ -1302,11 +1300,11 @@ char __cdecl Scr_PrintProfileTimes(float minTime)
             maxNameLength = 0;
         for (profileIndexa = 0; profileIndexa < 40; ++profileIndexa)
         {
-            v4 = (int)&profile->profileScriptNames[profileIndexa][1];
-            v5 = (uint)&profile->profileScriptNames[profileIndexa][strlen(profile->profileScriptNames[profileIndexa])
-                + 1];
-            if (v5 - v4 > maxNameLength)
-                maxNameLength = v5 - v4;
+            int nameLength = (int)strlen(profile->profileScriptNames[profileIndexa]);
+            if (nameLength > maxNameLength)
+            {
+                maxNameLength = nameLength;
+            }
         }
         for (profileIndexb = 0; profileIndexb < 40; ++profileIndexb)
         {
@@ -1503,7 +1501,7 @@ void __cdecl RuntimeErrorInternal(int channel, char *codePos, uint index, const 
             Com_PrintError(channel, "called from:\n");
             Scr_PrintPrevCodePos(
                 CON_CHANNEL_DONT_FILTER,
-                (char *)scrVmPub.stack[3 * i - 96].u.intValue,
+                (char *)scrVmPub.function_frame_start[i].fs.pos,
                 scrVmPub.function_frame_start[i].fs.localId == 0);
         }
         Com_PrintError(channel, "started from:\n");
@@ -1511,4 +1509,3 @@ void __cdecl RuntimeErrorInternal(int channel, char *codePos, uint index, const 
     }
     Com_PrintError(channel, "************************************\n");
 }
-
