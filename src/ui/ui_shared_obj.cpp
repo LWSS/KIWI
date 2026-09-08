@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/profile.h>
 #include "ui_shared.h"
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
@@ -6488,6 +6489,10 @@ int __cdecl Asset_Parse(int handle)
 
 char __cdecl UI_ParseMenuInternal(char *menuFile, int imageTrack)
 {
+    PROF_SCOPED("UI_ParseMenuInternal");
+#ifdef TRACY_ENABLE
+    ZoneText(menuFile, strlen(menuFile));
+#endif
     int handle; // [esp+0h] [ebp-424h]
     const char *builtinDefines[2]; // [esp+4h] [ebp-420h] BYREF
     pc_token_s token; // [esp+Ch] [ebp-418h] BYREF
@@ -6566,6 +6571,10 @@ int __cdecl Load_Menu(const char **p, int imageTrack)
 char menuBuf[32768];
 MenuList *__cdecl UI_LoadMenus_LoadObj(char *menuFile, int imageTrack)
 {
+    PROF_SCOPED("UI_LoadMenus_LoadObj");
+#ifdef TRACY_ENABLE
+    ZoneText(menuFile, strlen(menuFile));
+#endif
     int len; // [esp+0h] [ebp-10h]
     int f; // [esp+4h] [ebp-Ch] BYREF
     const char *token; // [esp+8h] [ebp-8h]

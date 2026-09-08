@@ -3661,6 +3661,11 @@ char __cdecl R_CreateGameWindow(GfxWindowParms *wndParms)
 
 void R_LoadGraphicsAssets()
 {
+    if (!IsFastFileLoad())
+    {
+        return;
+    }
+
     XZoneInfo zoneInfo[6]{ 0 }; // [esp+0h] [ebp-50h] BYREF
     uint zoneCount; // [esp+4Ch] [ebp-4h]
 

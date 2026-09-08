@@ -8,9 +8,9 @@
 add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E remove -f
-        "${BIN_DIR}/${CMAKE_BUILD_TYPE}/miles/mssvoice.asi"
-        "${BIN_DIR}/${CMAKE_BUILD_TYPE}/miles/milesEq.flt"
-        "${BIN_DIR}/${CMAKE_BUILD_TYPE}/miles/milesEq.flt.orig"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/miles/mssvoice.asi"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/miles/milesEq.flt"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/miles/milesEq.flt.orig"
         COMMENT "REMOVING OBSOLETE MILES PLUGINS"
         VERBATIM
 )
@@ -22,7 +22,7 @@ add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
         ${MILES_RUNTIME_DIR}
-        ${BIN_DIR}/${CMAKE_BUILD_TYPE}
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
         COMMENT "COPYING MILES DEPENDENCIES"
 )
 # [POST_BUILD] Copy over steam depdendency
@@ -30,6 +30,6 @@ add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${KIWI_STEAM_RUNTIME}
-        ${BIN_DIR}/${CMAKE_BUILD_TYPE}
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
         COMMENT "COPYING STEAM DEPENDENCIES"
 )

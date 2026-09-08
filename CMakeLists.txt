@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 project(KIWI)
 
+# Compiler detection above determines the target pointer size, including Win32
+# generators running on a 64-bit host.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    project(KIWI64)
+endif()
+
 # Set the default C++ standard
 set(CMAKE_CXX_STANDARD 20)
 
@@ -50,14 +56,17 @@ include(${SCRIPTS_DIR}/platform_override.cmake)
 # Log out the KISAK_PLATFORM
 message("Building KISAK_PLATFORM: ${KISAK_PLATFORM}")
 
-# Keep existing x64 tool-only builds as the default while the game database
-# port is pending. Enable KIWI_BUILD_GAME explicitly for native x64 game work.
+# Fastfile deserialization still uses the original 32-bit database layout.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(_game_default OFF)
+    set(_raw_default ON)
 else()
-    set(_game_default ON)
+    set(_raw_default OFF)
 endif()
-option(KIWI_BUILD_GAME "Expose game targets for the selected architecture" ${_game_default})
+option(KIWI_RAW_ONLY "Build the game with raw assets and no fastfile loader" ${_raw_default})
+option(KIWI_BUILD_GAME "Expose game targets for the selected architecture" ON)
+if(KIWI_BUILD_GAME AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT KIWI_RAW_ONLY)
+    message(FATAL_ERROR "The x64 game requires KIWI_RAW_ONLY until the fastfile database is ported.")
+endif()
 if(KIWI_BUILD_GAME)
     add_subdirectory(${SCRIPTS_DIR}/mp)
     #add_subdirectory(${SCRIPTS_DIR}/sp) # Disabled SP in KIWI
@@ -65,12 +74,7 @@ if(KIWI_BUILD_GAME)
 endif()
 
 # Editor and offline tool targets are independent of the game target.
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(KIWI_BUILD_RADIANT_DEFAULT OFF) # Native editor port is opt-in until integration passes.
-else()
-    set(KIWI_BUILD_RADIANT_DEFAULT ON)
-endif()
-option(KIWI_BUILD_RADIANT "Build the Radiant editor" ${KIWI_BUILD_RADIANT_DEFAULT})
+option(KIWI_BUILD_RADIANT "Build the Radiant editor" ON)
 if(KIWI_BUILD_RADIANT)
     add_subdirectory(${SCRIPTS_DIR}/radiant)
 endif()
@@ -102,8 +106,10 @@ else()
                         -B "${CMAKE_BINARY_DIR}/x64/${_tool}"
                         -G "${CMAKE_GENERATOR}"
                         -A x64
-                        -DKIWI_BUILD_COD4MAP:BOOL=ON
-                        -DKIWI_BUILD_COD4RAD:BOOL=ON
+                        -DKIWI_BUILD_GAME:BOOL=OFF
+                        -DKIWI_BUILD_RADIANT:BOOL=OFF
+                        -DKIWI_BUILD_COD4MAP:BOOL=$<STREQUAL:${_tool},cod4map>
+                        -DKIWI_BUILD_COD4RAD:BOOL=$<STREQUAL:${_tool},cod4rad>
                         -DKIWI_COD4RAD_WITH_EMBREE:BOOL=${KIWI_COD4RAD_WITH_EMBREE}
                         "-DCOD4RAD_EMBREE_ROOT:PATH=${COD4RAD_EMBREE_ROOT}"
                         "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_$<UPPER_CASE:$<CONFIG>>:PATH=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"

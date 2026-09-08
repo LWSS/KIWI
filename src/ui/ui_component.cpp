@@ -2618,7 +2618,7 @@ void Scr_ScriptList::Init()
     qsort(
         &scriptWindowsNames[1],
         this->numLines - 1,
-        4u,
+        sizeof(const char *),
         (int(__cdecl *)(const void *, const void *))ConDrawInput_CompareStrings);
     this->scriptWindows = (Scr_ScriptWindow **)Scr_AllocDebugMem(sizeof(Scr_ScriptWindow *) * this->numLines, "Scr_ScriptList::Init2");
     memset(&info, 0, sizeof(info));

@@ -914,7 +914,11 @@ extern const dvar_t *useFastFile;
 
 inline bool IsFastFileLoad()
 {
+#ifdef KIWI_RAW_ONLY
+    return false;
+#else
 	return useFastFile && useFastFile->current.enabled;
+#endif
 }
 
 template <typename T, typename U>

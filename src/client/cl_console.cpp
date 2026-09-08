@@ -184,10 +184,10 @@ void __cdecl Con_TimeJumped(int localClientNum, int serverTime)
     Con_ResetMessageWindowTimes(&con.consoleWindow, serverTime);
     for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
         Con_ResetMessageWindowTimes(
-            (MessageWindow *)&con.color[4630 * localClientNum - 2582 + 13 * gameWindowIndex],
+            &con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex],
             serverTime);
-    Con_ResetMessageWindowTimes((MessageWindow *)&con.color[4630 * localClientNum - 1122], serverTime);
-    Con_ResetMessageWindowTimes((MessageWindow *)&con.color[4630 * localClientNum - 53], serverTime);
+    Con_ResetMessageWindowTimes(&con.messageBuffer[localClientNum].miniconWindow, serverTime);
+    Con_ResetMessageWindowTimes(&con.messageBuffer[localClientNum].errorWindow, serverTime);
 }
 
 void __cdecl Con_ResetMessageWindowTimes(MessageWindow *msgwnd, int serverTime)
@@ -222,11 +222,11 @@ void __cdecl Con_TimeNudged(int localClientNum, int serverTimeNudge)
     Con_NudgeMessageWindowTimes(&con.consoleWindow, serverTimeNudge, serverTime);
     for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
         Con_NudgeMessageWindowTimes(
-            (MessageWindow *)&con.color[4630 * localClientNum - 2582 + 13 * gameWindowIndex],
+            &con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex],
             serverTimeNudge,
             serverTime);
-    Con_NudgeMessageWindowTimes((MessageWindow *)&con.color[4630 * localClientNum - 1122], serverTimeNudge, serverTime);
-    Con_NudgeMessageWindowTimes((MessageWindow *)&con.color[4630 * localClientNum - 53], serverTimeNudge, serverTime);
+    Con_NudgeMessageWindowTimes(&con.messageBuffer[localClientNum].miniconWindow, serverTimeNudge, serverTime);
+    Con_NudgeMessageWindowTimes(&con.messageBuffer[localClientNum].errorWindow, serverTimeNudge, serverTime);
 }
 #endif
 
@@ -273,7 +273,7 @@ void __cdecl Con_ClearNotify(int localClientNum)
     uint gameWindowIndex; // [esp+0h] [ebp-4h]
 
     for (gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
-        Con_ClearMessageWindow((MessageWindow *)&con.color[4630 * localClientNum - 2582 + 13 * gameWindowIndex]);
+        Con_ClearMessageWindow(&con.messageBuffer[localClientNum].gamemsgWindows[gameWindowIndex]);
 }
 
 void __cdecl Con_ClearMessageWindow(MessageWindow *msgwnd)
@@ -289,7 +289,7 @@ void __cdecl Con_ClearMessageWindow(MessageWindow *msgwnd)
 
 void __cdecl Con_ClearErrors(int localClientNum)
 {
-    Con_ClearMessageWindow((MessageWindow *)&con.color[4630 * localClientNum - 53]);
+    Con_ClearMessageWindow(&con.messageBuffer[localClientNum].errorWindow);
 }
 
 void __cdecl Con_CheckResize()
@@ -1041,12 +1041,12 @@ MessageWindow *__cdecl Con_GetDestWindow(int localClientNum, print_msg_dest_t de
     case CON_DEST_CONSOLE:
         return &con.consoleWindow;
     case CON_DEST_MINICON:
-        return (MessageWindow *)&con.color[4630 * localClientNum - 1122];
+        return &con.messageBuffer[localClientNum].miniconWindow;
     case CON_DEST_ERROR:
-        return (MessageWindow *)&con.color[4630 * localClientNum - 53];
+        return &con.messageBuffer[localClientNum].errorWindow;
     }
     iassert(dest >= CON_DEST_GAME_FIRST && dest <= CON_DEST_GAME_LAST);
-    return (MessageWindow *)&con.color[4630 * localClientNum - 2621 + 13 * dest];
+    return &con.messageBuffer[localClientNum].gamemsgWindows[dest - CON_DEST_GAME_FIRST];
 }
 
 void __cdecl Con_UpdateNotifyLine(int localClientNum, uint channel, bool lineFeed, int flags)
@@ -1715,7 +1715,7 @@ void __cdecl Con_DrawGameMessageWindow(
         bcassert(windowIndex, GAMEMSG_WINDOW_COUNT); // 4
         Con_DrawMessageWindow(
             localClientNum,
-            (MessageWindow *)&con.color[4630 * localClientNum - 2582 + 13 * windowIndex],
+            &con.messageBuffer[localClientNum].gamemsgWindows[windowIndex],
             xPos,
             yPos,
             SnapFloatToInt(fontScale * 48.0f),
@@ -2249,7 +2249,7 @@ void __cdecl Con_DrawMiniConsole(int localClientNum, int xPos, int yPos, float a
     color[3] = alpha;
     Con_DrawMessageWindow(
         localClientNum,
-        (MessageWindow *)&con.color[4630 * localClientNum - 1122],
+        &con.messageBuffer[localClientNum].miniconWindow,
         xPos,
         yPos,
         12,
@@ -2265,7 +2265,7 @@ void __cdecl Con_DrawMiniConsole(int localClientNum, int xPos, int yPos, float a
 
 void __cdecl Con_ClearMiniConsole(int localClientNum)
 {
-    Con_ClearMessageWindow((MessageWindow *)&con.color[4630 * localClientNum - 1122]);
+    Con_ClearMessageWindow(&con.messageBuffer[localClientNum].miniconWindow);
 }
 
 void __cdecl Con_DrawErrors(int localClientNum, int xPos, int yPos, float alpha)
@@ -2280,7 +2280,7 @@ void __cdecl Con_DrawErrors(int localClientNum, int xPos, int yPos, float alpha)
     color[3] = alpha;
     Con_DrawMessageWindow(
         localClientNum,
-        (MessageWindow *)&con.color[4630 * localClientNum - 53],
+        &con.messageBuffer[localClientNum].errorWindow,
         xPos,
         yPos,
         12,

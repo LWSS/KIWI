@@ -49,6 +49,16 @@ sval_u __cdecl node1(Enum_t type, sval_u val1)
     return result;
 }
 
+// Untagged pairs can contain a node pointer in either slot.
+sval_u __cdecl node1(sval_u val1, sval_u val2)
+{
+    sval_u result;
+    result.node = Scr_AllocNode(2);
+    result.node[0] = val1;
+    result.node[1] = val2;
+    return result;
+}
+
 sval_u __cdecl node2(Enum_t type, sval_u val1, sval_u val2)
 {
     sval_u result; // eax

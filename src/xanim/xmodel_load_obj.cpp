@@ -9,6 +9,7 @@
 #include <gfx_d3d/r_dvars.h>
 #include "xanim.h"
 #include <physics/phys_local.h>
+#include <universal/profile.h>
 
 XModelDefault g_default;
 Material *g_materials[1];
@@ -107,6 +108,7 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     uint vertListIndex,
     void *(__cdecl *Alloc)(int))
 {
+    PROF_SCOPED("XModel collision tree");
     unsigned __int8 *v3;            // eax
     int v5;                         // [esp+64h] [ebp-134h]
     int v7;                         // [esp+6Ch] [ebp-12Ch]
@@ -1049,6 +1051,7 @@ XModelSurfs *__cdecl R_XModelSurfsLoadFile(
     __int16 modelNumsurfs,
     const char *modelName)
 {
+    PROF_SCOPED("XModel surfaces");
     unsigned __int8 *pos; // [esp+8h] [ebp-64h] BYREF
     char filename[68]; // [esp+Ch] [ebp-60h] BYREF
     unsigned __int8 *buf = NULL; // [esp+54h] [ebp-18h] BYREF
@@ -1189,6 +1192,7 @@ void __cdecl XModelLoadCollData(
     void *(__cdecl *AllocColl)(int),
     const char *name)
 {
+    PROF_SCOPED("XModel collision data");
     iassert(!model->contents);
 
     model->numCollSurfs = Buf_Read<int>(pos);
@@ -1643,6 +1647,7 @@ void __cdecl XModelCalcBasePose(XModelPartsLoad *modelParts)
 
 XModelPartsLoad *__cdecl XModelPartsLoadFile(XModel *model, const char *name, void *(__cdecl *Alloc)(int))
 {
+    PROF_SCOPED("XModel skeleton");
     uint16_t prev; // ax
     unsigned __int8 *pos; // [esp+30h] [ebp-88h] BYREF
     int numBones; // [esp+34h] [ebp-84h]
@@ -1859,6 +1864,10 @@ XModel *__cdecl XModelPrecache_LoadObj(char *name, void *(__cdecl *Alloc)(int), 
     model = (XModel *)Hunk_FindDataForFile(5, name);
     if (model)
         return model;
+    PROF_SCOPED("XModel raw load");
+#ifdef TRACY_ENABLE
+    ZoneText(name, strlen(name));
+#endif
     ProfLoad_Begin("Load xmodel");
     modela = XModelLoad(name, Alloc, AllocColl);
     ProfLoad_End();

@@ -163,10 +163,7 @@ void __cdecl CG_RegisterWeapon(int localClientNum, uint weaponNum)
                 DObjSetHidePartBits(obj, weapInfo->partBits);
                 DObjUpdateClientInfo(weapInfo->viewModelDObj, 0.05f, 0);
             }
-            if (weapDef->hudIcon)
-                cgMedia.stanceMaterials[weaponNum - 129] = weapDef->hudIcon;
-            else
-                cgMedia.stanceMaterials[weaponNum - 129] = 0;
+            cgMedia.hintMaterials[weaponNum + WEAPON_HINT_OFFSET] = weapDef->hudIcon;
             weapInfo->translatedDisplayName = SEH_StringEd_GetString(weapDef->szDisplayName);
             if (!weapInfo->translatedDisplayName)
             {

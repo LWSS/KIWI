@@ -2835,7 +2835,7 @@ ScriptFunctionCall:
                 scrVmPub.function_frame->fs.pos = fs.pos;
                 scrVmPub.function_frame->fs.startTop = fs.startTop;
                 fs.pos = Scr_ReadCodePos(&scrVmPub.function_frame->fs.pos);
-                fs.startTop = &fs.top[-Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos)];
+                fs.startTop = fs.top - Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos);
                 goto thread_call;
             }
             scrVarPub.error_index = 1;
@@ -2854,7 +2854,7 @@ ScriptFunctionCall:
                     scrVmPub.function_frame->fs.pos = fs.pos;
                     scrVmPub.function_frame->fs.startTop = fs.startTop;
                     fs.pos = tempCodePos;
-                    fs.startTop = &fs.top[-Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos)];
+                    fs.startTop = fs.top - Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos);
                     goto thread_call;
                 }
                 scrVarPub.error_index = 1;
@@ -2878,7 +2878,7 @@ ScriptFunctionCall:
             scrVmPub.function_frame->fs.pos = fs.pos;
             scrVmPub.function_frame->fs.startTop = fs.startTop;
             fs.pos = Scr_ReadCodePos(&scrVmPub.function_frame->fs.pos);
-            fs.startTop = &fs.top[-Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos)];
+            fs.startTop = fs.top - Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos);
             goto thread_call;
 
         case OP_ScriptMethodThreadCallPointer:
@@ -2905,7 +2905,7 @@ ScriptFunctionCall:
             scrVmPub.function_frame->fs.pos = fs.pos;
             scrVmPub.function_frame->fs.startTop = fs.startTop;
             fs.pos = tempCodePos;
-            fs.startTop = &fs.top[-Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos)];
+            fs.startTop = fs.top - Scr_ReadUnsigned(&scrVmPub.function_frame->fs.pos);
 thread_call:
             scrVmPub.function_frame->fs.top = fs.startTop;
             scrVmPub.function_frame->topType = fs.startTop->type;
@@ -3465,7 +3465,7 @@ uint __cdecl VM_Execute(uint localId, const char *pos, uint paramcount)
 
     iassert(paramcount <= scrVmPub.inparamcount);
     Scr_ClearOutParams();
-    startTop = &scrVmPub.top[-paramcount];
+    startTop = scrVmPub.top - paramcount;
     paramcounta = scrVmPub.inparamcount - paramcount;
     if (scrVmPub.function_count >= 30)
     {
@@ -4988,7 +4988,7 @@ uint Scr_GetFunc(uint index)
 
     if (index < scrVmPub.outparamcount)
     {
-        value = &scrVmPub.top[-index];
+        value = scrVmPub.top - index;
         if (value->type == VAR_FUNCTION)
         {
             iassert(Scr_IsInOpcodeMemory( value->u.codePosValue ));
@@ -5035,7 +5035,7 @@ XAnim_s * Scr_GetAnimTree(uint index)
 
     if (index < scrVmPub.outparamcount)
     {
-        v3 = &scrVmPub.top[-index];
+        v3 = scrVmPub.top - index;
         type = v3->type;
         if (type == VAR_INTEGER)
         {

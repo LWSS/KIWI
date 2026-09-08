@@ -3092,7 +3092,7 @@ void __cdecl CG_ModPrvLoadModel(const cg_s *cgameGlob, const char *modelFilename
     g_mdlprv.model.surfaceCount = NumSurfaces;
     if (NumSurfaces > 0)
     {
-        g_mdlprv.mat.surfMatHandles = (Material **)Z_VirtualAlloc(4 * NumSurfaces, "MODPRV_MaterialHandles", 0);
+        g_mdlprv.mat.surfMatHandles = (Material **)Z_VirtualAlloc(sizeof(Material *) * NumSurfaces, "MODPRV_MaterialHandles", 0);
         R_DObjGetSurfMaterials(g_mdlprv.model.currentObj, modPrvLod->current.integer, g_mdlprv.mat.surfMatHandles);
         v54 = 0;
         v55 = 0;
@@ -3154,7 +3154,7 @@ void __cdecl CG_ModPrvLoadModel(const cg_s *cgameGlob, const char *modelFilename
         Dvar_UpdateEnumDomain((dvar_s*)v63, g_mdlprv.mat.nameTable);
         Dvar_UpdateEnumDomain((dvar_s*)modPrvMatReplace, g_mdlprv.mat.nameTable);
         g_mdlprv.mat.handleCount = v54;
-        g_mdlprv.mat.handleArray = (Material **)Z_VirtualAlloc(4 * v54, "MODPRV_MaterialHandles", 0);
+        g_mdlprv.mat.handleArray = (Material **)Z_VirtualAlloc(sizeof(Material *) * v54, "MODPRV_MaterialHandles", 0);
         v64 = g_mdlprv.model.surfaceCount;
         v65 = 0;
         v66 = 0;
@@ -3370,7 +3370,7 @@ void CG_ModPrvEnumerateModels_FastFile()
     if (g_mdlprv.system.modelCount)
     {
         v0 = Hunk_UserCreate(0x20000, "CG_ModPrvEnumerateModels", 0, 0, 0);
-        g_mdlprv.system.modelNames = (const char **)Hunk_UserAlloc(v0, 4 * (g_mdlprv.system.modelCount + 2), 4);
+        g_mdlprv.system.modelNames = (const char **)Hunk_UserAlloc(v0, sizeof(const char *) * (g_mdlprv.system.modelCount + 2), alignof(const char *));
         *g_mdlprv.system.modelNames = (const char *)v0;
         ++g_mdlprv.system.modelNames;
         v1[2] = (int)"CG_ModPrvEnumerateModels";
@@ -3409,7 +3409,7 @@ void CG_ModPrvEnumerateAnimations_FastFile()
     if (g_mdlprv.system.animCount)
     {
         v0 = Hunk_UserCreate(0x20000, "CG_ModPrvEnumerateAnimations", 0, 0, 0);
-        g_mdlprv.system.animNames = (const char **)Hunk_UserAlloc(v0, 4 * (g_mdlprv.system.animCount + 2), 4);
+        g_mdlprv.system.animNames = (const char **)Hunk_UserAlloc(v0, sizeof(const char *) * (g_mdlprv.system.animCount + 2), alignof(const char *));
         *g_mdlprv.system.animNames = (const char *)v0;
         v1[2] = (int)"CG_ModPrvEnumerateAnimations";
         ++g_mdlprv.system.animNames;

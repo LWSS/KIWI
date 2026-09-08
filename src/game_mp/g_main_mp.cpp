@@ -1439,7 +1439,7 @@ void ShowEntityInfo()
     }
     return;
 #else
-    return NULL;
+    return;
 #endif
 }
 

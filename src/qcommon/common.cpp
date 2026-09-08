@@ -1268,6 +1268,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     Swap_Init();
     Cbuf_Init();
     Cmd_Init();
+    Dvar_AddCommands();
     Com_StartupVariable(0);
     Com_InitDvars();
     CCS_InitConstantConfigStrings();
@@ -1295,7 +1296,14 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     if ((dvar_modifiedFlags & 0x20) != 0)
         Com_InitDvars();
     com_recommendedSet = Dvar_RegisterBool("com_recommendedSet", 0, DVAR_ARCHIVE, "Use recommended settings");
+#ifdef KISAK_MP
+    if (!com_dedicated->current.integer)
+    {
+        Com_CheckSetRecommended(0);
+    }
+#else
     Com_CheckSetRecommended(0);
+#endif
     Com_StartupVariable(0);
     if (!IsFastFileLoad())
         SEH_UpdateLanguageInfo();
@@ -1525,7 +1533,11 @@ void Com_InitDvars()
     useFastFile = Dvar_RegisterBool(
         "useFastFile",
         0,
+#ifdef KIWI_RAW_ONLY
+        DVAR_ROM,
+#else
         DVAR_INIT,
+#endif
         "Enables loading data from fast files. KIWI defaults to loose files.");
     sys_lockThreads = Dvar_RegisterEnum(
         "sys_lockThreads",

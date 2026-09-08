@@ -452,12 +452,15 @@ int __cdecl FX_DecideVelocitySampleCount(const FxEditorElemDef *edElem, int inte
 {
     const FxCurve *curves[12]; // [esp+0h] [ebp-30h] BYREF
 
-    *(_QWORD *)curves = *(_QWORD *)&edElem->velShape[0][0][0];
-    *(_QWORD *)&curves[2] = *(_QWORD *)&edElem->velShape[0][1][0];
-    *(_QWORD *)&curves[4] = *(_QWORD *)&edElem->velShape[0][2][0];
-    *(_QWORD *)&curves[6] = *(_QWORD *)&edElem->velShape[1][0][0];
-    *(_QWORD *)&curves[8] = *(_QWORD *)&edElem->velShape[1][1][0];
-    *(_QWORD *)&curves[10] = *(_QWORD *)&edElem->velShape[1][2][0];
+    int curveIndex = 0;
+    for (int velocitySet = 0; velocitySet < 2; ++velocitySet)
+    {
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            for (int variation = 0; variation < 2; ++variation)
+                curves[curveIndex++] = edElem->velShape[velocitySet][axis][variation];
+        }
+    }
     return FX_DecideSampleCount(12, curves, intervalLimit);
 }
 

@@ -3,6 +3,7 @@
 #endif
 
 #include <universal/q_shared.h>
+#include <universal/profile.h>
 #include "client_mp.h"
 
 #include <cgame_mp/cg_local_mp.h>
@@ -26,6 +27,7 @@
 #include <universal/q_parse.h>
 #include <EffectsCore/fx_system.h>
 #include <gfx_d3d/r_fog.h>
+#include <universal/profile.h>
 
 float color_allies[4];
 float color_axis[4];
@@ -697,6 +699,7 @@ void __cdecl CL_SetExpectedHunkUsage(const char *mapname)
 
 void __cdecl CL_InitCGame(int localClientNum)
 {
+    PROF_SCOPED("CL_InitCGame");
     const char *v1; // eax
     int v2; // eax
     XZoneInfo zoneInfo; // [esp+10h] [ebp-70h] BYREF

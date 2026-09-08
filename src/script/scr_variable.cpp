@@ -54,7 +54,12 @@ int VariableInfoFunctionCompare(void *arg1, void *arg2)
     return I_stricmp(left->functionName, right->functionName);
 }
 
-int __cdecl CompareThreadIndices(const void *arg1, const void *arg2)
+int __cdecl CompareThreadIndices(uint *arg1, uint *arg2)
+{
+    return (*arg1 > *arg2) - (*arg1 < *arg2);
+}
+
+static int __cdecl VariableInfoPositionCompare(const void *arg1, const void *arg2)
 {
     uintptr_t left = (uintptr_t)((const VariableDebugInfo *)arg1)->pos;
     uintptr_t right = (uintptr_t)((const VariableDebugInfo *)arg2)->pos;
@@ -1253,8 +1258,8 @@ void  Scr_DumpScriptVariables(bool spreadsheet,
 				}
 				else
 				{
-					VariableInfoCompareCallBack = (int(*)(const void *, const void *))CompareThreadIndices;
-					qsort(infoArray, num, sizeof(VariableDebugInfo), (int(*)(const void *, const void *))CompareThreadIndices);
+					VariableInfoCompareCallBack = VariableInfoPositionCompare;
+					qsort(infoArray, num, sizeof(VariableDebugInfo), VariableInfoPositionCompare);
 				}
 				i = 0;
 				while (i < num)
@@ -3292,7 +3297,7 @@ int VariableInfoCountCompare(const void *arg1, const void *arg2)
 int VariableInfoFileLineCompare(const void *arg1, const void *arg2)
 {
     int order = VariableInfoFileNameCompare(arg1, arg2);
-    return order ? order : CompareThreadIndices(arg1, arg2);
+    return order ? order : VariableInfoPositionCompare(arg1, arg2);
 }
 
 uint  FindVariableIndexInternal2(uint name, uint index)

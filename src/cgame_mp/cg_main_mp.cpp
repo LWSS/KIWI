@@ -3,6 +3,7 @@
 #endif
 
 #include <universal/q_shared.h>
+#include <universal/profile.h>
 #include "cg_local_mp.h"
 #include "cg_public_mp.h"
 #include <universal/surfaceflags.h>
@@ -1338,22 +1339,15 @@ void CG_RegisterPhysicsSounds_LoadObj()
 
     nclasses = 0;
     physicsFiles = FS_ListFilesInLocation("physic", "", FS_LIST_PURE_ONLY, &physPresetCount, 59);
-    if (physPresetCount <= 50)
+    for (i = 0; i < physPresetCount; ++i)
     {
-        for (i = 0; i < physPresetCount; ++i)
+        if (physicsFiles[i])
         {
-            if (physicsFiles[i])
-            {
-                physPreset = PhysPresetPrecache(physicsFiles[i], (void *(__cdecl *)(int))Hunk_AllocPhysPresetPrecache);
-                CG_AddAudioPhysicsClass(physPreset, classes, &nclasses);
-            }
+            physPreset = PhysPresetPrecache(physicsFiles[i], (void *(__cdecl *)(int))Hunk_AllocPhysPresetPrecache);
+            CG_AddAudioPhysicsClass(physPreset, classes, &nclasses);
         }
-        FS_FreeFileList(physicsFiles);
     }
-    else
-    {
-        Com_PrintError(CON_CHANNEL_PHYS, "ERROR: exceeded 'audio class' max %d > %d\n", physPresetCount, 50);
-    }
+    FS_FreeFileList(physicsFiles);
 }
 
 void CG_RegisterPhysicsSounds()
@@ -1387,16 +1381,23 @@ void __cdecl CG_AddAudioPhysicsClass(PhysPreset *physPreset, char (*classes)[64]
 
     for (int i = 0; i < *nclasses; ++i)
     {
-        if (!I_stricmp(physPreset->sndAliasPrefix, &(*classes)[64 * i]))
+        if (!I_stricmp(physPreset->sndAliasPrefix, classes[i]))
         {
             physPreset->type = i;
             return;
         }
     }
 
+    if (*nclasses >= ARRAY_COUNT(cgMedia.physCollisionSound))
+    {
+        Com_Error(ERR_DROP, "Too many unique physics audio classes: cannot register '%s' (max %u)",
+            physPreset->sndAliasPrefix, static_cast<unsigned int>(ARRAY_COUNT(cgMedia.physCollisionSound)));
+        return;
+    }
+
     physPreset->type = *nclasses;
     CG_RegisterSurfaceTypeSounds(physPreset->sndAliasPrefix, cgMedia.physCollisionSound[physPreset->type]);
-    I_strncpyz(&(*classes)[64 * *nclasses], (char *)physPreset->sndAliasPrefix, 64);
+    I_strncpyz(classes[*nclasses], physPreset->sndAliasPrefix, sizeof(char[64]));
     ++*nclasses;
 }
 
@@ -1675,6 +1676,7 @@ void __cdecl CL_LoadSoundAliases(const char *loadspec)
 
 void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommandSequence, int clientNum)
 {
+    PROF_SCOPED("CG_Init");
     const char *s; // [esp+24h] [ebp-4Ch]
     char mapname[68]; // [esp+28h] [ebp-48h] BYREF
 
@@ -1720,7 +1722,10 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
     CG_ParseServerInfo(localClientNum);
     CG_ParseCodInfo(localClientNum);
     R_BeginRemoteScreenUpdate();
-    UI_LoadIngameMenus(localClientNum);
+    {
+        PROF_SCOPED("CG_Init menus");
+        UI_LoadIngameMenus(localClientNum);
+    }
     SCR_UpdateLoadScreen();
     cgMedia.whiteMaterial = Material_RegisterHandle("white", 7);
     cgMedia.smallDevFont = CL_RegisterFont("fonts/smallDevFont", 1);
@@ -1771,15 +1776,19 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
     }
     if (!g_mapLoaded && !IsFastFileLoad())
     {
+        PROF_SCOPED("CG_Init sound aliases");
         CG_LoadingString(localClientNum, "sound aliases");
         CL_LoadSoundAliases(cgs->mapname);
     }
-    CG_SetupWeaponDef(localClientNum);
-    CGScr_LoadAnimTrees();
-    iassert(bgs == 0);
-    bgs = &cgameGlob->bgs;
-    BG_LoadAnim();
-    CG_LoadAnimTreeInstances(localClientNum);
+    {
+        PROF_SCOPED("CG_Init weapons and animations");
+        CG_SetupWeaponDef(localClientNum);
+        CGScr_LoadAnimTrees();
+        iassert(bgs == 0);
+        bgs = &cgameGlob->bgs;
+        BG_LoadAnim();
+        CG_LoadAnimTreeInstances(localClientNum);
+    }
     if (!cgs->localServer)
     {
         GScr_LoadConsts();
@@ -1846,6 +1855,7 @@ clientConnection_t *__cdecl CL_GetLocalClientConnection(int localClientNum)
 
 void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
 {
+    PROF_SCOPED("CG_RegisterGraphics");
     shellshock_parms_t *ShellshockParms; // eax
     const char *shellshock; // [esp+0h] [ebp-14h]
     const char *effectname; // [esp+4h] [ebp-10h]

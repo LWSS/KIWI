@@ -3167,11 +3167,11 @@ int R_PostLoadEntities()
     smodelCombinedInsts = (GfxStaticModelCombinedInst*)Z_Malloc(sizeof(GfxStaticModelCombinedInst) * s_world.dpvs.smodelCount, "R_PostLoadEntities", 21);
     for (smodelIndex = 0; smodelIndex < s_world.dpvs.smodelCount; ++smodelIndex)
     {
-        qmemcpy(&smodelCombinedInsts[smodelIndex], &s_world.dpvs.smodelDrawInsts[smodelIndex], 0x4Cu);
+        qmemcpy(&smodelCombinedInsts[smodelIndex].smodelDrawInst, &s_world.dpvs.smodelDrawInsts[smodelIndex], sizeof(GfxStaticModelDrawInst));
         qmemcpy(
             &smodelCombinedInsts[smodelIndex].smodelInst,
             &s_world.dpvs.smodelInsts[smodelIndex],
-            sizeof(smodelCombinedInsts[smodelIndex].smodelInst));
+            sizeof(GfxStaticModelInst));
     }
     //std::_Sort<GfxStaticModelCombinedInst *, int, bool(__cdecl *)(GfxStaticModelCombinedInst const &, GfxStaticModelCombinedInst const &)>(
     //    smodelCombinedInsts,

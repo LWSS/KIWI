@@ -2141,6 +2141,7 @@ void __cdecl CL_ShutdownRef()
 
 void __cdecl CL_InitRenderer()
 {
+    PROF_SCOPED("CL_InitRenderer");
     int localClientNum; // [esp+0h] [ebp-4h]
 
     iassert(!cls.rendererStarted);
@@ -2177,6 +2178,7 @@ void __cdecl CL_ShutdownRenderer(int destroyWindow)
 
 void __cdecl CL_StartHunkUsers()
 {
+    PROF_SCOPED("CL_StartHunkUsers");
     iassert(!cls.hunkUsersStarted);
     if (CL_AnyLocalClientsRunning())
     {

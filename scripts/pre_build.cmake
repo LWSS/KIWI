@@ -20,6 +20,9 @@ endif()
 
 # Set Win32 compiler flag
 target_compile_definitions(${PROJECT_NAME} PUBLIC WIN32 _CONSOLE _MBCS)
+if(KIWI_RAW_ONLY)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE KIWI_RAW_ONLY)
+endif()
 
 # Match native dependencies to the selected generator architecture.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -48,7 +51,7 @@ if (WIN32)
 
     # Example: C:\Users\USERNAME\.nuget\packages\microsoft.dxsdk.d3dx\9.29.952.8\build\native
     set(DXSDK_INC_DIR ${DXSDK_DIR}/include)
-    set(DXSDK_LIB_DIR ${DXSDK_DIR}/${CMAKE_BUILD_TYPE}/lib/${KIWI_WINDOWS_ARCH})
+    set(DXSDK_LIB_DIR ${DXSDK_DIR}/$<CONFIG>/lib/${KIWI_WINDOWS_ARCH})
     message("DXSDK_LIB_DIR: ${DXSDK_LIB_DIR}")
   else()
     message("===== BUILDING FOR LOCAL DXSDK =====")
@@ -60,11 +63,7 @@ if (WIN32)
   endif() # DEFINED CICD
   
   # Set the required library
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(D3DX_LIB d3dx9d.lib)
-  else()
-    set(D3DX_LIB d3dx9.lib)
-  endif() # CMAKE_BUILD_TYPE Debug
+  set(D3DX_LIB "$<IF:$<CONFIG:Debug>,d3dx9d.lib,d3dx9.lib>")
 
 endif() # WIN32
 

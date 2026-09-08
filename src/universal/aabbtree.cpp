@@ -3,6 +3,7 @@
 #include "assertive.h"
 #include "com_math.h"
 #include "q_shared.h"
+#include "profile.h"
 #ifndef KISAK_RADIANT
 #include <bgame/bg_public.h>
 #else
@@ -386,6 +387,7 @@ void __cdecl BuildAabbTree_r(GenericAabbTree *tree, const GenericAabbTreeOptions
 
 int __cdecl BuildAabbTree(const GenericAabbTreeOptions *options)
 {
+    PROF_SCOPED("BuildAabbTree");
     float *v2;                 // [esp+4h] [ebp-454h]
     float *v3;                 // [esp+8h] [ebp-450h]
     float *v4;                 // [esp+Ch] [ebp-44Ch]

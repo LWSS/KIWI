@@ -933,7 +933,7 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
     filetemp = zfi->file;
     ziptemp = zfi->pfile_in_zip_read;
     unzSetCurrentFileInfoPosition(iwd->handle, iwdFile->pos);
-    Com_Memcpy((char *)zfi, (char *)iwd->handle, 128);
+    Com_Memcpy((char *)zfi, (char *)iwd->handle, sizeof(unz_s));
     zfi->file = filetemp;
     zfi->pfile_in_zip_read = ziptemp;
     unzOpenCurrentFile(fsh[*file].handleFiles.file.z);
@@ -1614,7 +1614,7 @@ void __cdecl FS_AddIwdFilesForGameDirectory(char *path, char *pszGameFolder)
                 v4 = *v6;
                 *iwdGamename++ = *v6++;
             } while (v4);
-            search = (searchpath_s *)Z_Malloc(28, "FS_AddIwdFilesForGameDirectory", 3);
+            search = (searchpath_s *)Z_Malloc(sizeof(searchpath_s), "FS_AddIwdFilesForGameDirectory", 3);
             search->iwd = ZipFile;
             search->bLocalized = v10;
             search->language = piLanguageIndex;
@@ -1710,8 +1710,8 @@ void __cdecl FS_AddGameDirectory(char *path, char *dir, int bLanguageDirectory, 
     {
         I_strncpyz(fs_gamedir, szGameFolder, 256);
     }
-    search = (searchpath_s *)Z_Malloc(28, "FS_AddGameDirectory", 3);
-    v4 = (uint*)Z_Malloc(512, "FS_AddGameDirectory", 3);
+    search = (searchpath_s *)Z_Malloc(sizeof(searchpath_s), "FS_AddGameDirectory", 3);
+    v4 = (uint*)Z_Malloc(sizeof(directory_t), "FS_AddGameDirectory", 3);
     search->dir = (directory_t *)v4;
     I_strncpyz(search->dir->path, path, 256);
     I_strncpyz(search->dir->gamedir, szGameFolder, 256);

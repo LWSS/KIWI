@@ -106,6 +106,13 @@ set(DATABASE
     "${SRC_DIR}/database/db_stream_load.cpp"
     "${SRC_DIR}/database/db_stringtable_load.cpp"
 )
+if(KIWI_RAW_ONLY)
+    set(DATABASE
+        "${SRC_DIR}/database/database.h"
+        "${SRC_DIR}/database/db_assetnames.cpp"
+        "${SRC_DIR}/qcommon/db_raw.cpp"
+    )
+endif()
 
 set(DEVGUI
     "${SRC_DIR}/devgui/devgui.cpp"

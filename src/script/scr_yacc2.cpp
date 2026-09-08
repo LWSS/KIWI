@@ -1282,7 +1282,7 @@ yynewstate:
 			switch (yyn)
 			{
 			case 1:
-				yaccResult = node1(yyvsp[-1].val.type, yyvsp->val);// node2_
+				yaccResult = node1(yyvsp[-1].val, yyvsp->val);// node2_
 				break;
 			case 2:
 				yaccResult = node1(ENUM_expression, yyvsp->val);// node1
@@ -1819,13 +1819,13 @@ yynewstate:
 				break;
 			case 111:
 				valstack[4].sourcePosValue = yyvsp->pos;
-				valstack[5] = node1(yyvsp->val.type, valstack[4]);
+				valstack[5] = node1(yyvsp->val, valstack[4]);
 				yyval.val = prepend_node(valstack[5], yyvsp[-2].val);
 				break;
 			case 112:
 				valstack[3].sourcePosValue = yyvsp->pos;
 				valstack[5] = node0(ENUM_NOP);
-				valstack[4] = node1(yyvsp->val.type, valstack[3]);
+				valstack[4] = node1(yyvsp->val, valstack[3]);
 				yyval.val = prepend_node(valstack[4], valstack[5]);
 				break;
 			case 114:
@@ -1835,13 +1835,13 @@ yynewstate:
 				valstack[5].sourcePosValue = yyvsp->pos;
 				valstack[4].stringValue = LowerCase(yyvsp->val.stringValue);
 				yyvsp->val = valstack[4];
-				valstack[3] = node1(valstack[4].type, valstack[5]);
+				valstack[3] = node1(valstack[4], valstack[5]);
 				yyval.val = append_node(yyvsp[-2].val, valstack[3]);
 				break;
 			case 116:
 				yyvsp->val.stringValue = LowerCase(yyvsp->val.stringValue);
 				valstack[5].sourcePosValue = yyvsp->pos;
-				valstack[4] = node1(yyvsp->val.type, valstack[5]);
+				valstack[4] = node1(yyvsp->val, valstack[5]);
 				valstack[3] = node0(ENUM_NOP);
 				valstack[2] = linked_list_end(valstack[3]);
 				yyval.val = append_node(valstack[2], valstack[4]);
@@ -1854,13 +1854,13 @@ yynewstate:
 				valstack[5].sourcePosValue = yyvsp->pos;
 				valstack[4].stringValue = LowerCase(yyvsp->val.stringValue);
 				yyvsp->val = valstack[4];
-				valstack[3] = node1(valstack[4].type, valstack[5]);
+				valstack[3] = node1(valstack[4], valstack[5]);
 				yyval.val = append_node(yyvsp[-2].val, valstack[3]);
 				break;
 			case 120:
 				valstack[5].sourcePosValue = yyvsp->pos;
 				valstack[4] = yyvsp->val;
-				valstack[3] = node1(valstack[4].type, valstack[5]);
+				valstack[3] = node1(valstack[4], valstack[5]);
 				valstack[2] = node0(ENUM_NOP);
 				valstack[1] = linked_list_end(valstack[2]);
 				yyval.val = append_node(valstack[1], valstack[3]);
@@ -1868,26 +1868,26 @@ yynewstate:
 			case 121:
 				valstack[5].sourcePosValue = yyvsp->pos;
 				valstack[4] = yyvsp->val;
-				valstack[3] = node1(valstack[4].type, valstack[5]);
+				valstack[3] = node1(valstack[4], valstack[5]);
 				yyval.val = append_node(yyvsp[-2].val, valstack[3]);
 				break;
 			case 122:
 				valstack[5].sourcePosValue = yyvsp->pos;
 				valstack[4] = yyvsp->val;
-				valstack[3] = node1(valstack[4].type, valstack[5]);
+				valstack[3] = node1(valstack[4], valstack[5]);
 				valstack[2] = node0(ENUM_NOP);
 				valstack[1] = linked_list_end(valstack[2]);
 				yyval.val = append_node(valstack[1], valstack[3]);
 				break;
 			case 123:
 				valstack[4].sourcePosValue = yyvsp->pos;
-				valstack[5] = node1(yyvsp->val.type, valstack[4]);
+				valstack[5] = node1(yyvsp->val, valstack[4]);
 				yyval.val = prepend_node(valstack[5], yyvsp[-2].val);
 				break;
 			case 124:
 				valstack[3].sourcePosValue = yyvsp->pos;
 				valstack[5] = node0(ENUM_NOP);
-				valstack[4] = node1(yyvsp->val.type, valstack[3]);
+				valstack[4] = node1(yyvsp->val, valstack[3]);
 				yyval.val = prepend_node(valstack[4], valstack[5]);
 				break;
 			case 125:

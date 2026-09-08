@@ -29,6 +29,6 @@ set_property(TARGET TracyClient PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<
 # every zone and frame mark was a no-op and nothing ever showed up.  APPEND keeps
 # TRACY_ENABLE; on-demand mode costs nothing until a profiler connects.
 set_property(TARGET TracyClient APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST)
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_BINARY_DIR}/_deps/tracy-src/public)
+target_include_directories(${PROJECT_NAME} PUBLIC "${tracy_SOURCE_DIR}/public")
 target_link_libraries(${PROJECT_NAME} PUBLIC TracyClient)
 #################

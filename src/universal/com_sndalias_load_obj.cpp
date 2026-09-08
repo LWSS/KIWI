@@ -844,7 +844,7 @@ void __cdecl Com_AddBuildSoundAlias(snd_alias_build_s *build)
 {
     snd_alias_build_s *alias; // [esp+8h] [ebp-4h]
 
-    alias = (snd_alias_build_s*)Com_AllocateTempSoundMemory(412, "Com_AddBuildSoundAlias");
+    alias = (snd_alias_build_s*)Com_AllocateTempSoundMemory(sizeof(snd_alias_build_s), "Com_AddBuildSoundAlias");
     qmemcpy(alias, build, sizeof(snd_alias_build_s));
     alias->pNext = saLoadObjGlob.tempAliases;
     saLoadObjGlob.tempAliases = alias;

@@ -161,9 +161,10 @@ void __cdecl PBdvar_set(const char *var_name, char *value)
 char *__cdecl Dvar_InfoString(int localClientNum, char bit)
 {
     const char *UsernameForLocalClient; // eax
+    uint flags = static_cast<unsigned char>(bit);
 
     info1[0] = 0;
-    Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_InfoStringSingle, &bit);
+    Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_InfoStringSingle, &flags);
 #ifdef KISAK_MP
     if ((bit & 2) != 0)
     {
