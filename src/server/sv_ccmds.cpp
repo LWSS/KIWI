@@ -283,9 +283,9 @@ int __cdecl ReadSaveHeader(const char *filename, SaveHeader *header)
         CloseDevice(fileHandle);
         if (bytesRead == (int)sizeof(SaveHeader))
         {
-            if (header->saveVersion == 287)
+            if (header->saveVersion == SAVEGAME_VERSION)
                 return 1;
-            Com_Printf(CON_CHANNEL_SERVER, "Bad save version %d, expecting %d\n", header->saveVersion, 287);
+            Com_Printf(CON_CHANNEL_SERVER, "Bad save version %d, expecting %d\n", header->saveVersion, SAVEGAME_VERSION);
             return 0;
         }
         Com_Printf(CON_CHANNEL_SERVER, "Bad save read.\n");

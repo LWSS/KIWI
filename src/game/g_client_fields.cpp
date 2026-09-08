@@ -28,9 +28,9 @@ const client_fields_s fields[18] =
     &ClientScr_SetSessionState,
     &ClientScr_GetSessionState
   },
-  { "maxhealth", 12264, F_INT, &ClientScr_SetMaxHealth, NULL },
-  { "score", 12152, F_INT, &ClientScr_SetScore, NULL },
-  { "deaths", 12156, F_INT, NULL, NULL },
+  { "maxhealth", offsetof(gclient_s, sess.maxHealth), F_INT, &ClientScr_SetMaxHealth, NULL },
+  { "score", offsetof(gclient_s, sess.score), F_INT, &ClientScr_SetScore, NULL },
+  { "deaths", offsetof(gclient_s, sess.deaths), F_INT, NULL, NULL },
   {
     "statusicon",
     0,

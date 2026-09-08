@@ -13,120 +13,120 @@
 #include "g_main.h"
 
 static_assert(offsetof(actor_s, ent) == 0, "actor_s::ent must be first (field offsets rebase here)");
-static_assert(offsetof(actor_s, grenadeAwareness) == 3604, "actor_s script-field offset drift: grenadeawareness");
-static_assert(offsetof(actor_s, pGrenade) == 3608, "actor_s script-field offset drift: grenade");
-static_assert(offsetof(actor_s, iGrenadeWeaponIndex) == 3612, "actor_s script-field offset drift: grenadeweapon");
-static_assert(offsetof(actor_s, iGrenadeAmmo) == 3628, "actor_s script-field offset drift: grenadeammo");
-static_assert(offsetof(actor_s, suppressionMeter) == 3580, "actor_s script-field offset drift: suppressionmeter");
+static_assert(offsetof(actor_s, grenadeAwareness) == (sizeof(void *) == 8 ? 4024 : 3604), "actor_s script-field offset drift: grenadeawareness");
+static_assert(offsetof(actor_s, pGrenade) == (sizeof(void *) == 8 ? 4028 : 3608), "actor_s script-field offset drift: grenade");
+static_assert(offsetof(actor_s, iGrenadeWeaponIndex) == (sizeof(void *) == 8 ? 4032 : 3612), "actor_s script-field offset drift: grenadeweapon");
+static_assert(offsetof(actor_s, iGrenadeAmmo) == (sizeof(void *) == 8 ? 4048 : 3628), "actor_s script-field offset drift: grenadeammo");
+static_assert(offsetof(actor_s, suppressionMeter) == (sizeof(void *) == 8 ? 4000 : 3580), "actor_s script-field offset drift: suppressionmeter");
 
 const actor_fields_s aifields[82] =
 {
-  { "type", 8, F_INT, &ActorScr_SetSpecies, &ActorScr_GetSpecies },
-  { "accuracy", 188, F_FLOAT, &ActorScr_Clamp_0_Positive, NULL },
-  { "lookforward", 228, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "lookright", 240, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "lookup", 252, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "fovcosine", 2088, F_FLOAT, &ActorScr_Clamp_0_1, NULL },
-  { "maxsightdistsqrd", 2092, F_FLOAT, NULL, NULL },
-  { "ignoreclosefoliage", 2096, F_INT, NULL, NULL },
-  { "followmin", 1804, F_INT, NULL, NULL },
-  { "followmax", 1808, F_INT, NULL, NULL },
-  { "chainfallback", 1840, F_SHORT, NULL, NULL },
-  { "interval", 1812, F_FLOAT, NULL, NULL },
-  { "damagetaken", 468, F_INT, &ActorScr_ReadOnly, NULL },
-  { "damagedir", 476, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "damageyaw", 472, F_INT, &ActorScr_ReadOnly, NULL },
-  { "damagelocation", 488, F_STRING, &ActorScr_ReadOnly, NULL },
-  { "damageweapon", 490, F_STRING, &ActorScr_ReadOnly, NULL },
-  { "proneok", 332, F_INT, &ActorScr_ReadOnly, NULL },
-  { "walkdist", 1792, F_FLOAT, NULL, NULL },
-  { "desiredangle", 296, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "pacifist", 2008, F_INT, NULL, NULL },
-  { "pacifistwait", 2012, F_INT, &ActorScr_SetTime, &ActorScr_GetTime },
-  { "ignoresuppression", 3564, F_INT, NULL, NULL },
-  { "suppressionwait", 3568, F_INT, NULL, NULL },
-  { "suppressionduration", 3572, F_INT, NULL, NULL },
-  { "suppressionstarttime", 3576, F_INT, &ActorScr_ReadOnly, NULL },
-  { "suppressionmeter", 3580, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "name", 212, F_STRING, NULL, NULL },
-  { "weapon", 214, F_STRING, NULL, NULL },
-  { "dontavoidplayer", 1836, F_INT, NULL, NULL },
-  { "grenadeawareness", 3604, F_FLOAT, &ActorScr_Clamp_0_1, NULL },
-  { "grenade", 3608, F_ENTHANDLE, &ActorScr_ReadOnly, NULL },
-  { "grenadeweapon", 3612, F_INT, &ActorScr_SetWeapon, &ActorScr_GetWeapon },
-  { "grenadeammo", 3628, F_INT, NULL, NULL },
-  { "favoriteenemy", 3420, F_SENTIENTHANDLE, NULL, NULL },
-  { "allowpain", 184, F_BYTE, NULL, NULL },
-  { "allowdeath", 185, F_BYTE, NULL, NULL },
-  { "delayeddeath", 186, F_BYTE, &ActorScr_ReadOnly, NULL },
-  { "providecoveringfire", 187, F_BYTE, NULL, NULL },
-  { "useable", 3687, F_BYTE, NULL, NULL },
-  { "ignoretriggers", 3688, F_BYTE, NULL, NULL },
-  { "pushable", 3689, F_BYTE, NULL, NULL },
-  { "dropweapon", 3668, F_INT, NULL, NULL },
-  { "drawoncompass", 3672, F_INT, NULL, NULL },
-  { "scriptstate", 3712, F_STRING, &ActorScr_ReadOnly, NULL },
-  { "lastscriptstate", 3714, F_STRING, &ActorScr_ReadOnly, NULL },
-  { "statechangereason", 3716, F_STRING, &ActorScr_ReadOnly, NULL },
-  { "groundtype", 568, F_STRING, &ActorScr_ReadOnly, &ActorScr_GetGroundType },
-  { "anim_pose", 318, F_STRING, &ActorScr_SetAnimPos, NULL },
-  { "goalradius", 1920, F_FLOAT, &ActorScr_SetGoalRadius, NULL },
-  { "goalheight", 1924, F_FLOAT, &ActorScr_SetGoalHeight, NULL },
-  { "goalpos", 1876, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "ignoreforfixednodesafecheck", 1956, F_BYTE, NULL, NULL },
-  { "fixednode", 1957, F_BYTE, &ActorScr_SetFixedNode, NULL },
-  { "fixednodesaferadius", 1960, F_FLOAT, &ActorScr_Clamp_0_Positive, NULL },
+  { "type", offsetof(actor_s, species), F_INT, &ActorScr_SetSpecies, &ActorScr_GetSpecies },
+  { "accuracy", offsetof(actor_s, accuracy), F_FLOAT, &ActorScr_Clamp_0_Positive, NULL },
+  { "lookforward", offsetof(actor_s, vLookForward), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "lookright", offsetof(actor_s, vLookRight), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "lookup", offsetof(actor_s, vLookUp), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "fovcosine", offsetof(actor_s, fovDot), F_FLOAT, &ActorScr_Clamp_0_1, NULL },
+  { "maxsightdistsqrd", offsetof(actor_s, fMaxSightDistSqrd), F_FLOAT, NULL, NULL },
+  { "ignoreclosefoliage", offsetof(actor_s, ignoreCloseFoliage), F_INT, NULL, NULL },
+  { "followmin", offsetof(actor_s, iFollowMin), F_INT, NULL, NULL },
+  { "followmax", offsetof(actor_s, iFollowMax), F_INT, NULL, NULL },
+  { "chainfallback", offsetof(actor_s, chainFallback), F_SHORT, NULL, NULL },
+  { "interval", offsetof(actor_s, fInterval), F_FLOAT, NULL, NULL },
+  { "damagetaken", offsetof(actor_s, iDamageTaken), F_INT, &ActorScr_ReadOnly, NULL },
+  { "damagedir", offsetof(actor_s, damageDir), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "damageyaw", offsetof(actor_s, iDamageYaw), F_INT, &ActorScr_ReadOnly, NULL },
+  { "damagelocation", offsetof(actor_s, damageHitLoc), F_STRING, &ActorScr_ReadOnly, NULL },
+  { "damageweapon", offsetof(actor_s, damageWeapon), F_STRING, &ActorScr_ReadOnly, NULL },
+  { "proneok", offsetof(actor_s, bProneOK), F_INT, &ActorScr_ReadOnly, NULL },
+  { "walkdist", offsetof(actor_s, fWalkDist), F_FLOAT, NULL, NULL },
+  { "desiredangle", offsetof(actor_s, fDesiredBodyYaw), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "pacifist", offsetof(actor_s, bPacifist), F_INT, NULL, NULL },
+  { "pacifistwait", offsetof(actor_s, iPacifistWait), F_INT, &ActorScr_SetTime, &ActorScr_GetTime },
+  { "ignoresuppression", offsetof(actor_s, ignoreSuppression), F_INT, NULL, NULL },
+  { "suppressionwait", offsetof(actor_s, suppressionWait), F_INT, NULL, NULL },
+  { "suppressionduration", offsetof(actor_s, suppressionDuration), F_INT, NULL, NULL },
+  { "suppressionstarttime", offsetof(actor_s, suppressionStartTime), F_INT, &ActorScr_ReadOnly, NULL },
+  { "suppressionmeter", offsetof(actor_s, suppressionMeter), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "name", offsetof(actor_s, properName), F_STRING, NULL, NULL },
+  { "weapon", offsetof(actor_s, weaponName), F_STRING, NULL, NULL },
+  { "dontavoidplayer", offsetof(actor_s, bDontAvoidPlayer), F_INT, NULL, NULL },
+  { "grenadeawareness", offsetof(actor_s, grenadeAwareness), F_FLOAT, &ActorScr_Clamp_0_1, NULL },
+  { "grenade", offsetof(actor_s, pGrenade), F_ENTHANDLE, &ActorScr_ReadOnly, NULL },
+  { "grenadeweapon", offsetof(actor_s, iGrenadeWeaponIndex), F_INT, &ActorScr_SetWeapon, &ActorScr_GetWeapon },
+  { "grenadeammo", offsetof(actor_s, iGrenadeAmmo), F_INT, NULL, NULL },
+  { "favoriteenemy", offsetof(actor_s, pFavoriteEnemy), F_SENTIENTHANDLE, NULL, NULL },
+  { "allowpain", offsetof(actor_s, allowPain), F_BYTE, NULL, NULL },
+  { "allowdeath", offsetof(actor_s, allowDeath), F_BYTE, NULL, NULL },
+  { "delayeddeath", offsetof(actor_s, delayedDeath), F_BYTE, &ActorScr_ReadOnly, NULL },
+  { "providecoveringfire", offsetof(actor_s, provideCoveringFire), F_BYTE, NULL, NULL },
+  { "useable", offsetof(actor_s, useable), F_BYTE, NULL, NULL },
+  { "ignoretriggers", offsetof(actor_s, ignoreTriggers), F_BYTE, NULL, NULL },
+  { "pushable", offsetof(actor_s, pushable), F_BYTE, NULL, NULL },
+  { "dropweapon", offsetof(actor_s, bDropWeapon), F_INT, NULL, NULL },
+  { "drawoncompass", offsetof(actor_s, bDrawOnCompass), F_INT, NULL, NULL },
+  { "scriptstate", offsetof(actor_s, scriptState), F_STRING, &ActorScr_ReadOnly, NULL },
+  { "lastscriptstate", offsetof(actor_s, lastScriptState), F_STRING, &ActorScr_ReadOnly, NULL },
+  { "statechangereason", offsetof(actor_s, stateChangeReason), F_STRING, &ActorScr_ReadOnly, NULL },
+  { "groundtype", offsetof(actor_s, Physics.iSurfaceType), F_STRING, &ActorScr_ReadOnly, &ActorScr_GetGroundType },
+  { "anim_pose", offsetof(actor_s, anim_pose), F_STRING, &ActorScr_SetAnimPos, NULL },
+  { "goalradius", offsetof(actor_s, scriptGoal.radius), F_FLOAT, &ActorScr_SetGoalRadius, NULL },
+  { "goalheight", offsetof(actor_s, scriptGoal.height), F_FLOAT, &ActorScr_SetGoalHeight, NULL },
+  { "goalpos", offsetof(actor_s, codeGoal.pos), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "ignoreforfixednodesafecheck", offsetof(actor_s, ignoreForFixedNodeSafeCheck), F_BYTE, NULL, NULL },
+  { "fixednode", offsetof(actor_s, fixedNode), F_BYTE, &ActorScr_SetFixedNode, NULL },
+  { "fixednodesaferadius", offsetof(actor_s, fixedNodeSafeRadius), F_FLOAT, &ActorScr_Clamp_0_Positive, NULL },
   {
     "pathgoalpos",
-    1704,
+    offsetof(actor_s, Path.vFinalGoal),
     F_VECTOR,
     &ActorScr_ReadOnly,
     &ActorScr_GetPathGoalPos
   },
-  { "stopanimdistsq", 1784, F_FLOAT, NULL, NULL },
+  { "stopanimdistsq", offsetof(actor_s, Path.pathEndAnimDistSq), F_FLOAT, NULL, NULL },
   {
     "lastenemysightpos",
-    3428,
+    offsetof(actor_s, lastEnemySightPos),
     F_VECTOR,
     &ActorScr_SetLastEnemySightPos,
     &ActorScr_GetLastEnemySightPos
   },
-  { "pathenemylookahead", 1940, F_FLOAT, NULL, NULL },
-  { "pathenemyfightdist", 1944, F_FLOAT, NULL, NULL },
-  { "meleeattackdist", 1948, F_FLOAT, NULL, NULL },
-  { "chainnode", 1972, F_PATHNODE, &ActorScr_ReadOnly, NULL },
-  { "movemode", 516, F_STRING, &ActorScr_ReadOnly, &ActorScr_GetMoveMode },
-  { "safetochangescript", 517, F_BYTE, NULL, NULL },
-  { "keepclaimednode", 1848, F_BYTE, NULL, NULL },
-  { "keepclaimednodeingoal", 1849, F_BYTE, NULL, NULL },
-  { "keepnodeduringscriptedanim", 1850, F_BYTE, NULL, NULL },
-  { "nododgemove", 1851, F_BYTE, NULL, NULL },
-  { "leanamount", 1864, F_FLOAT, NULL, NULL },
-  { "badplaceawareness", 3692, F_FLOAT, &ActorScr_Clamp_0_1, NULL },
-  { "goodshootpos", 3696, F_VECTOR, NULL, NULL },
-  { "goodshootposvalid", 3708, F_INT, NULL, NULL },
-  { "flashbangimmunity", 3816, F_INT, NULL, NULL },
-  { "lookaheaddir", 1716, F_VECTOR, &ActorScr_ReadOnly, NULL },
-  { "exposedduration", 1872, F_INT, NULL, NULL },
-  { "requestarrivalnotify", 1976, F_INT, NULL, NULL },
-  { "engagemindist", 2068, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "engageminfalloffdist", 2072, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "engagemaxdist", 2076, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "engagemaxfalloffdist", 2080, F_FLOAT, &ActorScr_ReadOnly, NULL },
-  { "finalaccuracy", 204, F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "pathenemylookahead", offsetof(actor_s, pathEnemyLookahead), F_FLOAT, NULL, NULL },
+  { "pathenemyfightdist", offsetof(actor_s, pathEnemyFightDist), F_FLOAT, NULL, NULL },
+  { "meleeattackdist", offsetof(actor_s, meleeAttackDist), F_FLOAT, NULL, NULL },
+  { "chainnode", offsetof(actor_s, pDesiredChainPos), F_PATHNODE, &ActorScr_ReadOnly, NULL },
+  { "movemode", offsetof(actor_s, moveMode), F_STRING, &ActorScr_ReadOnly, &ActorScr_GetMoveMode },
+  { "safetochangescript", offsetof(actor_s, safeToChangeScript), F_BYTE, NULL, NULL },
+  { "keepclaimednode", offsetof(actor_s, keepClaimedNode), F_BYTE, NULL, NULL },
+  { "keepclaimednodeingoal", offsetof(actor_s, keepClaimedNodeInGoal), F_BYTE, NULL, NULL },
+  { "keepnodeduringscriptedanim", offsetof(actor_s, keepNodeDuringScriptedAnim), F_BYTE, NULL, NULL },
+  { "nododgemove", offsetof(actor_s, noDodgeMove), F_BYTE, NULL, NULL },
+  { "leanamount", offsetof(actor_s, leanAmount), F_FLOAT, NULL, NULL },
+  { "badplaceawareness", offsetof(actor_s, badPlaceAwareness), F_FLOAT, &ActorScr_Clamp_0_1, NULL },
+  { "goodshootpos", offsetof(actor_s, goodShootPos), F_VECTOR, NULL, NULL },
+  { "goodshootposvalid", offsetof(actor_s, goodShootPosValid), F_INT, NULL, NULL },
+  { "flashbangimmunity", offsetof(actor_s, flashBangImmunity), F_INT, NULL, NULL },
+  { "lookaheaddir", offsetof(actor_s, Path.lookaheadDir), F_VECTOR, &ActorScr_ReadOnly, NULL },
+  { "exposedduration", offsetof(actor_s, exposedDuration), F_INT, NULL, NULL },
+  { "requestarrivalnotify", offsetof(actor_s, arrivalInfo.arrivalNotifyRequested), F_INT, NULL, NULL },
+  { "engagemindist", offsetof(actor_s, engageMinDist), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "engageminfalloffdist", offsetof(actor_s, engageMinFalloffDist), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "engagemaxdist", offsetof(actor_s, engageMaxDist), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "engagemaxfalloffdist", offsetof(actor_s, engageMaxFalloffDist), F_FLOAT, &ActorScr_ReadOnly, NULL },
+  { "finalaccuracy", offsetof(actor_s, debugLastAccuracy), F_FLOAT, &ActorScr_ReadOnly, NULL },
   { NULL, 0, F_INT, NULL, NULL }
 };
 
 const actor_fields_s sentientfields[9] =
 {
-  { "threatbias", 8, F_INT, NULL, NULL },
-  { "node", 88, F_PATHNODE, &ActorScr_ReadOnly, NULL },
-  { "prevnode", 92, F_PATHNODE, &ActorScr_ReadOnly, NULL },
-  { "enemy", 52, F_ENTHANDLE, &ActorScr_ReadOnly, NULL },
-  { "syncedmeleetarget", 48, F_ENTHANDLE, NULL, NULL },
-  { "ignoreme", 16, F_BYTE, NULL, NULL },
-  { "ignoreall", 17, F_BYTE, NULL, NULL },
-  { "maxvisibledist", 32, F_FLOAT, NULL, NULL },
+  { "threatbias", offsetof(sentient_s, iThreatBias), F_INT, NULL, NULL },
+  { "node", offsetof(sentient_s, pClaimedNode), F_PATHNODE, &ActorScr_ReadOnly, NULL },
+  { "prevnode", offsetof(sentient_s, pPrevClaimedNode), F_PATHNODE, &ActorScr_ReadOnly, NULL },
+  { "enemy", offsetof(sentient_s, targetEnt), F_ENTHANDLE, &ActorScr_ReadOnly, NULL },
+  { "syncedmeleetarget", offsetof(sentient_s, syncedMeleeEnt), F_ENTHANDLE, NULL, NULL },
+  { "ignoreme", offsetof(sentient_s, bIgnoreMe), F_BYTE, NULL, NULL },
+  { "ignoreall", offsetof(sentient_s, bIgnoreAll), F_BYTE, NULL, NULL },
+  { "maxvisibledist", offsetof(sentient_s, maxVisibleDist), F_FLOAT, NULL, NULL },
   { NULL, 0, F_INT, NULL, NULL }
 };
 
@@ -151,11 +151,11 @@ unsigned __int8 *__cdecl BaseForFields(unsigned __int8 *actor, const actor_field
     {
         if (fields == sentientfields)
         {
-            return (unsigned __int8 *)*((unsigned int *)actor + 1);
+            return (unsigned __int8 *)((actor_s *)actor)->sentient;
         }
         else if (fields == entfields)
         {
-            return *(unsigned __int8 **)actor;
+            return (unsigned __int8 *)((actor_s *)actor)->ent;
         }
         else
         {
@@ -296,26 +296,22 @@ void __cdecl ActorScr_SetGoalHeight(actor_s *pSelf, const actor_fields_s *pField
 
 void __cdecl ActorScr_SetTime(actor_s *pSelf, const actor_fields_s *pField)
 {
-    long double v4; // fp2
-    long double v5; // fp2
-
     iassert(pSelf);
     iassert(pField);
     iassert(pField->type == F_INT);
-    *(double *)&v4 = (float)((float)(Scr_GetFloat(0) * (float)1000.0) + (float)0.5);
-    v5 = floor(v4);
-    *(gentity_s **)((char *)&pSelf->ent + pField->ofs) = (gentity_s *)(int)(float)*(double *)&v5;
+
+    float milliseconds = Scr_GetFloat(0) * 1000.0f;
+    *(int *)((char *)pSelf + pField->ofs) = (int)floorf(milliseconds + 0.5f);
 }
 
 void __cdecl ActorScr_GetTime(actor_s *pSelf, const actor_fields_s *pField)
 {
-    __int64 v2; // r11
-
+    iassert(pSelf);
     iassert(pField);
     iassert(pField->type == F_INT);
-    //LODWORD(v2) = *(gentity_s **)((char *)&pSelf->ent + pField->ofs);
-    //Scr_AddFloat((float)((float)v2 * (float)0.001));
-    Scr_AddFloat((float)*(int *)((char *)&pSelf->ent + pField->ofs) * 0.001);
+
+    int milliseconds = *(const int *)((const char *)pSelf + pField->ofs);
+    Scr_AddFloat((float)milliseconds * 0.001);
 }
 
 void __cdecl ActorScr_SetWeapon(actor_s *pSelf, const actor_fields_s *pField)
@@ -334,7 +330,7 @@ void __cdecl ActorScr_SetWeapon(actor_s *pSelf, const actor_fields_s *pField)
         Scr_ParamError(0, v5);
     }
     v6 = Scr_GetString(0);
-    *(gentity_s **)((char *)&pSelf->ent + pField->ofs) = (gentity_s *)G_GetWeaponIndexForName(v6);
+    *(int *)((char *)pSelf + pField->ofs) = G_GetWeaponIndexForName(v6);
 }
 
 void __cdecl ActorScr_GetWeapon(actor_s *pSelf, const actor_fields_s *pField)
@@ -624,7 +620,7 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
     double v9; // r7
     int ofs; // r11
     const char *v11; // r7
-    int v12; // r10
+    gentity_s *v12;
     gentity_s *gentities; // r11
     unsigned int v14; // r10
     unsigned int v15; // r29
@@ -706,12 +702,11 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
                 *(float *)&pBase[pField->ofs + 8]);
             return;
         case F_ENTITY:
-            v12 = *(unsigned int *)&pBase[pField->ofs];
+            v12 = *(gentity_s **)&pBase[pField->ofs];
             if (!v12)
                 goto LABEL_18;
             gentities = level.gentities;
-            v14 = (int)((unsigned __int64)(875407347LL * (v12 - (unsigned int)level.gentities)) >> 32) >> 7;
-            v15 = v14 + (v14 >> 31);
+            v15 = (unsigned int)(v12 - level.gentities);
             if (v15 >= 0x880)
             {
                 MyAssertHandler(
@@ -750,19 +745,19 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
                 goto LABEL_38;
             goto LABEL_29;
         case F_ACTOR:
-            v22 = pField->ofs;
-            if (*(unsigned int *)&pBase[v22])
-                goto LABEL_32;
-            goto LABEL_18;
-        case F_SENTIENT:
-            v22 = pField->ofs;
-            if (!*(unsigned int *)&pBase[v22])
+            if (!*(actor_s **)&pBase[pField->ofs])
                 goto LABEL_18;
-        LABEL_32:
-            v18 = *(unsigned __int16 *)(**(unsigned int **)&pBase[v22] + 118);
-            v23 = &level.gentities[v18];
-            targetname = v23->targetname;
-            if (v23->targetname)
+            v18 = (*(actor_s **)&pBase[pField->ofs])->ent->s.number;
+            targetname = level.gentities[v18].targetname;
+            if (targetname)
+                goto LABEL_38;
+            goto LABEL_29;
+        case F_SENTIENT:
+            if (!*(sentient_s **)&pBase[pField->ofs])
+                goto LABEL_18;
+            v18 = (*(sentient_s **)&pBase[pField->ofs])->ent->s.number;
+            targetname = level.gentities[v18].targetname;
+            if (targetname)
                 goto LABEL_38;
             goto LABEL_29;
         case F_SENTIENTHANDLE:
@@ -794,7 +789,7 @@ void __cdecl Cmd_AI_DisplayValue(actor_s *pSelf, unsigned __int8 *pBase, const a
                 "ent %i: %s = client %i\n",
                 pSelf->ent->s.number,
                 pField->name,
-                (signed int)(*(unsigned int *)&pBase[pField->ofs] - (unsigned int)level.clients) / 46104);
+                (int)(*(gclient_s **)&pBase[pField->ofs] - level.clients));
             return;
         case F_PATHNODE:
             v25 = *(const pathnode_t **)&pBase[pField->ofs];

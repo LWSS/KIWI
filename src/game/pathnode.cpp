@@ -641,45 +641,17 @@ bool __cdecl Path_IsBadPlaceLink(unsigned int nodeNumFrom, unsigned int nodeNumT
 
 unsigned int Path_InitLinkCounts()
 {
-    unsigned int result; // r3
-    pathnode_t *nodes; // r7
-    int v2; // r4
-    unsigned int v3; // r6
-    int v4; // r11
-    int v5; // r9
-    int v6; // r7
-
-    result = 0;
-    if (gameWorldSp.path.nodeCount)
+    for (unsigned int i = 0; i < gameWorldSp.path.nodeCount; ++i)
     {
-        nodes = gameWorldSp.path.nodes;
-        v2 = 0;
-        do
+        pathnode_t *node = &gameWorldSp.path.nodes[i];
+        node->dynamic.wLinkCount = node->constant.totalLinkCount;
+        for (unsigned int j = 0; j < node->constant.totalLinkCount; ++j)
         {
-            v3 = 0;
-            nodes[v2].dynamic.wLinkCount = nodes[v2].constant.totalLinkCount;
-            nodes = gameWorldSp.path.nodes;
-            if (gameWorldSp.path.nodes[v2].constant.totalLinkCount)
-            {
-                v4 = 0;
-                v5 = v2 * 128 + 64;
-                do
-                {
-                    ++v3;
-                    *(_BYTE *)(*(nodeType *)((char *)&nodes->constant.type + v5) + v4 + 8) = 0;
-                    *(_BYTE *)(*(nodeType *)((char *)&gameWorldSp.path.nodes->constant.type + v5) + v4 + 9) = 0;
-                    *(_BYTE *)(*(nodeType *)((char *)&gameWorldSp.path.nodes->constant.type + v5) + v4 + 10) = 0;
-                    v6 = *(nodeType *)((char *)&gameWorldSp.path.nodes->constant.type + v5) + v4;
-                    v4 += 12;
-                    *(_BYTE *)(v6 + 11) = 0;
-                    nodes = gameWorldSp.path.nodes;
-                } while (v3 < gameWorldSp.path.nodes[v2].constant.totalLinkCount);
-            }
-            ++result;
-            ++v2;
-        } while (result < gameWorldSp.path.nodeCount);
+            memset(node->constant.Links[j].ubBadPlaceCount, 0, sizeof(node->constant.Links[j].ubBadPlaceCount));
+            node->constant.Links[j].disconnectCount = 0;
+        }
     }
-    return result;
+    return gameWorldSp.path.nodeCount;
 }
 
 void Path_InitLinkInfoArray()
@@ -996,7 +968,7 @@ float __cdecl Path_GetDebugStringScale(const float *cameraPos, const float *orig
 
     iassert(cameraPos);
     iassert(origin);
-    v4 = G_Find(0, 284, scr_const.player);
+    v4 = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
     if (v4)
     {
         v5 = (float)(cameraPos[1] - origin[1]);
@@ -1252,7 +1224,7 @@ void __cdecl Path_DrawFriendlyChain()
     float v19[4]; // [sp+60h] [-80h] BYREF
 
     CL_GetViewPos(v18);
-    v2 = G_Find(0, 284, scr_const.player);
+    v2 = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
     v3 = v2;
     if (v2)
     {
@@ -2235,7 +2207,7 @@ void __cdecl Path_DisconnectPath(pathnode_t *node, pathlink_s *link)
     int v4; // r11
     pathlink_s *v5; // r11
     int wLinkCount; // r5
-    unsigned int v7; // r9
+    pathlink_s *v7; // native link boundary
     unsigned int v8; // r11
     const char *v9; // r3
     int v10; // r11
@@ -2303,15 +2275,15 @@ void __cdecl Path_DisconnectPath(pathnode_t *node, pathlink_s *link)
     {
         v5 = node->constant.Links;
         wLinkCount = node->dynamic.wLinkCount;
-        v7 = (unsigned int)&v5[wLinkCount];
-        if (v7 > (unsigned int)link)
+        v7 = &v5[wLinkCount];
+        if (v7 > link)
         {
             v8 = (int)((unsigned __int64)(715827883LL * ((char *)link - (char *)v5)) >> 32) >> 1;
             v9 = va(
                 "node: %d, %d (%d) %d (%d)",
                 node - gameWorldSp.path.nodes,
                 wLinkCount,
-                *(unsigned __int16 *)(v7 + 4),
+                v7->nodeNum,
                 v8 + (v8 >> 31),
                 link->nodeNum);
             MyAssertHandler(
@@ -3226,7 +3198,7 @@ void __cdecl Path_DrawVisData()
     float v15[32]; // [sp+50h] [-80h] BYREF
 
     CL_GetViewPos(v15);
-    v0 = G_Find(0, 284, scr_const.player);
+    v0 = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
     if (v0)
     {
         v3 = Sentient_NearestNode(v0->sentient);

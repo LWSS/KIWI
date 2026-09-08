@@ -551,207 +551,84 @@ int __cdecl ReadVehicleIndex(SaveGame *save)
     return G_GetVehicleInfoIndex(v5);
 }
 
+static int G_SavePointerIndex(const void *pointer, const void *array, size_t elementSize, size_t count)
+{
+    if (!pointer)
+        return 0;
+    uintptr_t offset = (uintptr_t)pointer - (uintptr_t)array;
+    if (offset % elementSize || offset / elementSize >= count)
+        Com_Error(ERR_DROP, "WriteField1: pointer outside save array");
+    return (int)(offset / elementSize) + 1;
+}
+
 void __cdecl WriteField1(const saveField_t *field, const unsigned __int8 *base, unsigned __int8 *original)
 {
-    EntHandle *v3; // r28
-    unsigned int v4; // r31
-    unsigned int v5; // r3
-    int v6; // r31
-    unsigned int v7; // r31
-    unsigned int v8; // r31
-    unsigned int v9; // r31
-    unsigned int v10; // r31
-    unsigned int v11; // r31
-    unsigned int v12; // r31
-    unsigned __int8 *v13; // r11
-    int v14; // r11
-    int v15; // r31
-    const XAnim_s *anims; // r29
-    int index; // r29
-
-    EntHandle *enthand;
-    SentientHandle *senthand;
-
-    v3 = (EntHandle *)&base[field->ofs];
-
+    unsigned __int8 *slot = (unsigned __int8 *)base + field->ofs;
+    int index = 0;
     switch (field->type)
     {
-    case SF_STRING:
-        if (v3->number)
-            v3->number = 1;
-        break;
     case SF_ENTITY:
-        if (*(unsigned int *)v3)
-        {
-            v4 = (*(unsigned int *)v3 - (int)g_entities) / 628 + 1;
-            if (v4 > 0x880)
-                Com_Error(ERR_DROP, "WriteField1: entity out of range (%i)", v4);
-
-            *(int *)v3 = v4;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
-        break;
-    case SF_ENTHANDLE:
-        enthand = (EntHandle *)&base[field->ofs];
-        if (enthand->isDefined())
-        {
-            v5 = v3->entnum();
-            v6 = v5 + 1;
-            if ((int)(v5 + 1) > MAX_GENTITIES || v6 < 0)
-                Com_Error(ERR_DROP, "WriteField1: entity out of range (%i)", v5 + 1);
-
-            *(int *)v3 = v6;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        index = G_SavePointerIndex(*(const void **)slot, g_entities, sizeof(gentity_s), MAX_GENTITIES);
         break;
     case SF_CLIENT:
-        if (*(unsigned int *)v3)
-        {
-            v7 = (signed int)(*(unsigned int *)v3 - (unsigned int)level.clients) / 46104 + 1;
-            if (v7 >= 2)
-                Com_Error(ERR_DROP, "WriteField1: client out of range (%i)", v7);
-            *(int *)v3 = v7;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        index = G_SavePointerIndex(*(const void **)slot, level.clients, sizeof(gclient_s), 1);
         break;
     case SF_ACTOR:
-        if (*(unsigned int *)v3)
-        {
-            v8 = (signed int)(*(unsigned int *)v3 - (unsigned int)level.actors) / 7824 + 1;
-            if (v8 > 0x20)
-                Com_Error(ERR_DROP, "WriteField1: actor out of range (%i)", v8);
-            *(int *)v3 = v8;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        index = G_SavePointerIndex(*(const void **)slot, level.actors, sizeof(actor_s), 32);
         break;
     case SF_SENTIENT:
-        if (*(unsigned int *)v3)
-        {
-            v9 = (signed int)(*(unsigned int *)v3 - (unsigned int)level.sentients) / 116 + 1;
-            if (v9 >= 0x22)
-                Com_Error(ERR_DROP, "WriteField1: sentient out of range (%i)", v9);
-            *(int *)v3 = v9;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
-        break;
-    case SF_SENTIENTHANDLE:
-        senthand = (SentientHandle *)&base[field->ofs];
-        if (senthand->isDefined())
-        {
-            //v10 = SentientHandle::sentient((SentientHandle *)v3) - level.sentients + 1;
-            v10 = senthand->sentient() - level.sentients + 1;
-            if (v10 >= 0x22)
-                Com_Error(ERR_DROP, "WriteField1: sentient out of range (%i)", v10);
-
-            *(int *)v3 = v10;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        index = G_SavePointerIndex(*(const void **)slot, level.sentients, sizeof(sentient_s), MAX_SENTIENTS);
         break;
     case SF_VEHICLE:
-        if (*(unsigned int *)v3)
-        {
-            v11 = (signed int)(*(unsigned int *)v3 - (unsigned int)level.vehicles) / 824 + 1;
-            if (v11 > 0x40)
-                Com_Error(ERR_DROP, "WriteField1: vehicle out of range (%i)", v11);
-            *(int *)v3 = v11;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        index = G_SavePointerIndex(*(const void **)slot, level.vehicles, sizeof(scr_vehicle_s), 64);
         break;
     case SF_TURRETINFO:
-        if (*(unsigned int *)v3)
-        {
-            v12 = (signed int)(*(unsigned int *)v3 - (unsigned int)level.turrets) / 188 + 1;
-            if (v12 > 0x20)
-                Com_Error(ERR_DROP, "WriteField1: turret out of range (%i)", v12);
-            *(int *)v3 = v12;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
-        break;
-    case SF_THREAD:
-        v3->number = Scr_ConvertThreadToSave(v3->number);
+        index = G_SavePointerIndex(*(const void **)slot, level.turrets, sizeof(TurretInfo), 32);
         break;
     case SF_ANIMSCRIPT:
-        v13 = (unsigned __int8 *)*(unsigned int *)v3;
-        if (*(unsigned int *)v3)
-        {
-            if (v13 == original + 504)
-            {
-
-                *(int *)v3 = -1;
-            }
-            else
-            {
-                v14 = (v13 - (unsigned __int8 *)&g_scr_data.anim) >> 3;
-                v15 = v14 + 1;
-                if (v14 + 1 <= 0 || v15 > 298)
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp",
-                        908,
-                        0,
-                        "%s\n\t(index) = %i",
-                        "(index > 0 && index <= (int)( sizeof( AnimScriptList ) * MAX_AI_SPECIES / sizeof( scr_animscript_t ) ))",
-                        v14 + 1);
-                *(int *)v3 = v15;
-            }
-        }
+        if (*(scr_animscript_t **)slot == &((actor_s *)original)->AnimScriptSpecific)
+            index = -1;
         else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+            index = G_SavePointerIndex(*(scr_animscript_t **)slot, &g_scr_data.anim, sizeof(scr_animscript_t), (sizeof(g_scr_data.anim) + sizeof(g_scr_data.dogAnim)) / sizeof(scr_animscript_t));
         break;
     case SF_PATHNODE:
-        *(int *)v3 = Path_SaveIndex(*(const pathnode_t **)v3);
+        index = Path_SaveIndex(*(const pathnode_t **)slot);
         break;
     case SF_ANIMTREE:
-        if (*(unsigned int *)v3)
-        {
-            anims = XAnimGetAnims(*(const XAnimTree_s **)v3);
-            iassert(anims);
-            index = Scr_GetAnimsIndex(anims);
-            iassert(index);
-            *(int *)v3 = index;
-        }
-        else
-        {
-            *(unsigned int *)v3 = 0;
-        }
+        if (*(XAnimTree_s **)slot)
+            index = Scr_GetAnimsIndex(XAnimGetAnims(*(XAnimTree_s **)slot));
         break;
     case SF_TYPE_TAG_INFO:
     case SF_TYPE_SCRIPTED:
-        //*v3 = (EntHandle)((_cntlzw((unsigned int)*v3) & 0x20) == 0);
-        *(int *)v3 = (*(unsigned int *)v3 != 0);
+        index = *(void **)slot != NULL;
         break;
+    case SF_STRING:
+        if (*(unsigned __int16 *)slot)
+            *(unsigned __int16 *)slot = 1;
+        return;
+    case SF_THREAD:
+        *(unsigned __int16 *)slot = Scr_ConvertThreadToSave(*(unsigned __int16 *)slot);
+        return;
+    case SF_ENTHANDLE:
+        if (((EntHandle *)slot)->isDefined())
+            index = ((EntHandle *)slot)->entnum() + 1;
+        memcpy(slot, &index, sizeof(int));
+        return;
+    case SF_SENTIENTHANDLE:
+        if (((SentientHandle *)slot)->isDefined())
+            index = G_SavePointerIndex(((SentientHandle *)slot)->sentient(), level.sentients, sizeof(sentient_s), MAX_SENTIENTS);
+        memcpy(slot, &index, sizeof(int));
+        return;
     case SF_MODELUSHORT:
     case SF_MODELINT:
         return;
     default:
         Com_Error(ERR_DROP, "WriteField1: unknown field type");
-        break;
+        return;
     }
+    // Store the fixed-width index in the native pointer slot, clearing its unused bytes.
+    memset(slot, 0, sizeof(void *));
+    memcpy(slot, &index, sizeof(int));
 }
 
 void __cdecl WriteField2(const saveField_t *field, unsigned __int8 *base, SaveGame *save)
@@ -770,8 +647,8 @@ void __cdecl WriteField2(const saveField_t *field, unsigned __int8 *base, SaveGa
     MemoryFile *v17; // r3
     MemoryFile *v18; // r3
     unsigned int v19; // r3
-    unsigned __int8 v20[96]; // [sp+50h] [-F0h] BYREF
-    unsigned __int8 v21[144]; // [sp+B0h] [-90h] BYREF
+    unsigned __int8 v20[sizeof(animscripted_s)]; // [sp+50h] [-F0h] BYREF
+    unsigned __int8 v21[sizeof(tagInfo_s)]; // [sp+B0h] [-90h] BYREF
 
     iassert(save);
     type = field->type;
@@ -793,11 +670,11 @@ void __cdecl WriteField2(const saveField_t *field, unsigned __int8 *base, SaveGa
         v11 = *(const void **)&base[ofs];
         if (!v11)
             return;
-        memcpy(v21, v11, 0x70u);
+        memcpy(v21, v11, sizeof(tagInfo_s));
         v12 = SaveMemory_GetMemoryFile(save);
         v13 = MemFile_GetUsedSize(v12);
         //ProfMem_Begin("tagInfo", v13);
-        G_WriteStruct(tagInfoFields, *(unsigned __int8 **)&base[ofs], v21, 112, save);
+        G_WriteStruct(tagInfoFields, *(unsigned __int8 **)&base[ofs], v21, sizeof(tagInfo_s), save);
         goto LABEL_12;
     case SF_TYPE_SCRIPTED:
         v8 = *(const void **)&base[ofs];
@@ -807,7 +684,7 @@ void __cdecl WriteField2(const saveField_t *field, unsigned __int8 *base, SaveGa
             v9 = SaveMemory_GetMemoryFile(save);
             v10 = MemFile_GetUsedSize(v9);
             //ProfMem_Begin("animscripted", v10);
-            G_WriteStruct(animscriptedFields, *(unsigned __int8 **)&base[ofs], v20, 96, save);
+            G_WriteStruct(animscriptedFields, *(unsigned __int8 **)&base[ofs], v20, sizeof(animscripted_s), save);
         LABEL_12:
             v18 = SaveMemory_GetMemoryFile(save);
             v19 = MemFile_GetUsedSize(v18);
@@ -934,7 +811,7 @@ void __cdecl ReadField(const saveField_t *field, unsigned __int8 *base, SaveGame
         break;
     case SF_TURRETINFO:
         v22 = *v7;
-        if (*(unsigned int *)v7 > 0x40u)
+        if (*(unsigned int *)v7 > 32)
             Com_Error(ERR_DROP, "ReadField: turret out of range (%i)", *v7);
         if (!*(unsigned int *)&v22)
             goto LABEL_58;
@@ -951,9 +828,9 @@ void __cdecl ReadField(const saveField_t *field, unsigned __int8 *base, SaveGame
         if (!v23)
             goto LABEL_58;
         if (v23 == -1)
-            *(uintptr_t *)v7 = (uintptr_t)(base + 504);
+            *(uintptr_t *)v7 = (uintptr_t)(base + offsetof(actor_s, AnimScriptSpecific));
         else
-            *(uintptr_t *)v7 = (uintptr_t)(&g_scr_data.scripted_init + 2 * v23);
+            *(uintptr_t *)v7 = (uintptr_t)((scr_animscript_t *)&g_scr_data.anim + v23 - 1);
         break;
     case SF_PATHNODE:
         *(uintptr_t *)v7 = (uintptr_t)Path_LoadNode(*(unsigned int*)v7);
@@ -968,23 +845,23 @@ void __cdecl ReadField(const saveField_t *field, unsigned __int8 *base, SaveGame
         else
         {
         LABEL_58:
-            *(unsigned int*)v7 = 0;
+            *(uintptr_t *)v7 = 0;
         }
         break;
     case SF_TYPE_TAG_INFO:
         if (*(unsigned int *)v7)
         {
-            v25 = (unsigned __int8 *)MT_Alloc(112, MT_TYPE_TAG_INFO);
+            v25 = (unsigned __int8 *)MT_Alloc(sizeof(tagInfo_s), MT_TYPE_TAG_INFO);
             *(uintptr_t *)v7 = (uintptr_t)v25;
-            G_ReadStruct(tagInfoFields, v25, 112, save);
+            G_ReadStruct(tagInfoFields, v25, sizeof(tagInfo_s), save);
         }
         break;
     case SF_TYPE_SCRIPTED:
         if (*(unsigned int *)v7)
         {
-            v26 = (unsigned __int8 *)MT_Alloc(96, MT_TYPE_TAG_INFO);
+            v26 = (unsigned __int8 *)MT_Alloc(sizeof(animscripted_s), MT_TYPE_TAG_INFO);
             *(uintptr_t *)v7 = (uintptr_t)v26;
-            G_ReadStruct(animscriptedFields, v26, 96, save);
+            G_ReadStruct(animscriptedFields, v26, sizeof(animscripted_s), save);
         }
         break;
     case SF_MODELUSHORT:
@@ -1047,7 +924,7 @@ void __cdecl WriteClient(gclient_s *cl, SaveGame *save)
     tempClient.ps.eventSequence = 0;
     tempClient.ps.oldEventSequence = 0;
     tempClient.ps.entityEventSequence = 0;
-    G_WriteStruct(gclientFields, (unsigned __int8 *)cl, (const unsigned __int8 *)&tempClient, 46104, save);
+    G_WriteStruct(gclientFields, (unsigned __int8 *)cl, (const unsigned __int8 *)&tempClient, sizeof(gclient_s), save);
     SaveMemory_SaveWrite(&cl->pers.cmd.buttons, 4, save);
     WriteWeaponIndex(cl->pers.cmd.weapon, save);
     WriteWeaponIndex(cl->pers.cmd.offHandIndex, save);
@@ -1062,7 +939,7 @@ void __cdecl ReadClient(gclient_s *client, SaveGame *save)
     int v8; // r5
 
     iassert(save);
-    G_ReadStruct(gclientFields, (unsigned __int8 *)client, 46104, save);
+    G_ReadStruct(gclientFields, (unsigned __int8 *)client, sizeof(gclient_s), save);
     SaveMemory_LoadRead(&client->pers.cmd.buttons, 4, save);
     client->pers.cmd.weapon = ReadWeaponIndex(save);
     WeaponIndex = ReadWeaponIndex(save);
@@ -1078,7 +955,7 @@ void WriteEntity(gentity_s *ent, SaveGame *save)
 {
     unsigned int UsedSize; // r3
     unsigned int v7; // r3
-    unsigned __int8 v8[632]; // [sp+50h] [-290h] BYREF
+    unsigned __int8 v8[sizeof(gentity_s)]; // [sp+50h] [-290h] BYREF
 
     iassert(save);
     memcpy(v8, ent, sizeof(gentity_s));
@@ -1102,7 +979,7 @@ void __cdecl ReadEntity(gentity_s *ent, SaveGame *save)
     if (ent->s.weapon)
     {
         ent->s.weapon = ReadWeaponIndex(save);
-        SaveMemory_LoadRead(v4, 1, save);
+        SaveMemory_LoadRead(&ent->s.weaponModel, sizeof(unsigned __int8), save);
     }
     ReadEntityDisconnectedLinks(ent, save);
     if (ent->snd_wait.notifyString)
@@ -1154,14 +1031,14 @@ void __cdecl ReadActorPotentialCoverNodes(actor_s *pActor, SaveGame *save)
 
 void __cdecl WriteActor(actor_s *pActor, SaveGame *save)
 {
-    unsigned __int8 v4[3832]; // [sp+50h] [-F10h] BYREF
+    unsigned __int8 v4[offsetof(actor_s, pszDebugInfo)]; // [sp+50h] [-F10h] BYREF
 
     iassert(save);
     SaveMemory_SaveWrite(&pActor->inuse, 1, save);
     if (pActor->inuse)
     {
-        memcpy(v4, pActor, 0xEECu);
-        G_WriteStruct(actorFields, (unsigned __int8 *)pActor, v4, 3820, save);
+        memcpy(v4, pActor, offsetof(actor_s, pszDebugInfo));
+        G_WriteStruct(actorFields, (unsigned __int8 *)pActor, v4, offsetof(actor_s, pszDebugInfo), save);
         WriteActorPotentialCoverNodes(pActor, save);
     }
 }
@@ -1172,7 +1049,7 @@ void __cdecl ReadActor(actor_s *pActor, SaveGame *save)
     SaveMemory_LoadRead(&pActor->inuse, 1, save);
     if (pActor->inuse)
     {
-        G_ReadStruct(actorFields, (unsigned __int8 *)pActor, 3820, save);
+        G_ReadStruct(actorFields, (unsigned __int8 *)pActor, offsetof(actor_s, pszDebugInfo), save);
         iassert(pActor->inuse);
         ReadActorPotentialCoverNodes(pActor, save);
         pActor->pszDebugInfo = "";
@@ -1181,14 +1058,14 @@ void __cdecl ReadActor(actor_s *pActor, SaveGame *save)
 
 void __cdecl WriteSentient(sentient_s *sentient, SaveGame *save)
 {
-    unsigned __int8 v4[120]; // [sp+50h] [-90h] BYREF
+    unsigned __int8 v4[sizeof(sentient_s)]; // [sp+50h] [-90h] BYREF
 
     iassert(save);
     SaveMemory_SaveWrite(&sentient->inuse, 1, save);
     if (sentient->inuse)
     {
-        memcpy(v4, sentient, 0x74u);
-        G_WriteStruct(sentientFields, (unsigned __int8 *)sentient, v4, 116, save);
+        memcpy(v4, sentient, sizeof(sentient_s));
+        G_WriteStruct(sentientFields, (unsigned __int8 *)sentient, v4, sizeof(sentient_s), save);
     }
 }
 
@@ -1198,14 +1075,14 @@ void __cdecl ReadSentient(sentient_s *sentient, SaveGame *save)
     SaveMemory_LoadRead(&sentient->inuse, 1, save);
     if (sentient->inuse)
     {
-        G_ReadStruct(sentientFields, (unsigned __int8 *)sentient, 116, save);
+        G_ReadStruct(sentientFields, (unsigned __int8 *)sentient, sizeof(sentient_s), save);
         iassert(sentient->inuse);
     }
 }
 
 void __cdecl WriteVehicle(scr_vehicle_s *pVehicle, SaveGame *save)
 {
-    unsigned __int8 v5[824]; // [sp+60h] [-350h] BYREF
+    unsigned __int8 v5[sizeof(scr_vehicle_s)]; // [sp+60h] [-350h] BYREF
 
     iassert(save);
 
@@ -1228,21 +1105,21 @@ void __cdecl ReadVehicle(scr_vehicle_s *pVehicle, SaveGame *save)
     SaveMemory_LoadRead(&v4, 4, save);
     if (v4)
     {
-        G_ReadStruct(vehicleFields, (unsigned __int8 *)pVehicle, 824, save);
+        G_ReadStruct(vehicleFields, (unsigned __int8 *)pVehicle, sizeof(scr_vehicle_s), save);
         pVehicle->infoIdx = ReadVehicleIndex(save);
     }
 }
 
 void __cdecl WriteTurretInfo(TurretInfo *pTurretInfo, SaveGame *save)
 {
-    unsigned __int8 v5[200]; // [sp+60h] [-E0h] BYREF
+    unsigned __int8 v5[sizeof(TurretInfo)]; // [sp+60h] [-E0h] BYREF
 
     iassert(save);
-    memcpy(v5, pTurretInfo, 0xBCu);
+    memcpy(v5, pTurretInfo, sizeof(TurretInfo));
     unsigned int v4 = pTurretInfo->inuse;
     SaveMemory_SaveWrite(&v4, 4, save);
     if (v4)
-        G_WriteStruct(turretFields, (unsigned __int8 *)pTurretInfo, v5, 188, save);
+        G_WriteStruct(turretFields, (unsigned __int8 *)pTurretInfo, v5, sizeof(TurretInfo), save);
 }
 
 void __cdecl ReadTurretInfo(TurretInfo *pTurretInfo, SaveGame *save)
@@ -1253,7 +1130,7 @@ void __cdecl ReadTurretInfo(TurretInfo *pTurretInfo, SaveGame *save)
     iassert(save);
     SaveMemory_LoadRead(&v4, 4, save);
     if (v4)
-        G_ReadStruct(turretFields, (unsigned __int8 *)pTurretInfo, 188, save);
+        G_ReadStruct(turretFields, (unsigned __int8 *)pTurretInfo, sizeof(TurretInfo), save);
 }
 
 void __cdecl WritePathNodes(SaveGame *save)
@@ -1374,52 +1251,13 @@ const saveField_t *__cdecl BadPlaceParmSaveFields(const badplace_t *badplace)
 
 void __cdecl WriteBadPlaces(SaveGame *save)
 {
-    int v2; // r27
-    unsigned __int8 *v3; // r31
-    unsigned __int8 *v4; // r10
-    unsigned __int8 *v5; // r11
-    int v6; // ctr
-    unsigned __int8 *v7; // r10
-    unsigned int *v8; // r11
-    int v9; // ctr
-    const saveField_t *v10; // r3
-    unsigned __int8 v11[32]; // [sp+50h] [-90h] BYREF
-    unsigned __int8 v12[112]; // [sp+70h] [-70h] BYREF
-
-    iassert(save);
-    v2 = 32;
-    v3 = (unsigned __int8 *)g_badplaces;
-    do
+    for (int i = 0; i < ARRAY_COUNT(g_badplaces); ++i)
     {
-        v4 = v12;
-        v5 = v3;
-        v6 = 10;
-        do
-        {
-            *(unsigned int *)v4 = *(unsigned int *)v5;
-            v5 += 4;
-            v4 += 4;
-            --v6;
-        } while (v6);
-        G_WriteStruct(badplaceFields, v3, v12, 12, save);
-        v7 = v11;
-        v8 = (unsigned int*)(v3 + 12);
-        v9 = 7;
-        do
-        {
-            *(unsigned int *)v7 = *v8++;
-            v7 += 4;
-            --v9;
-        } while (v9);
-        if (!v3)
-            MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_save.cpp", 1618, 0, "%s", "badplace");
-        v10 = badplaceDefaultParmsFields;
-        if (v3[10] == 2)
-            v10 = badplaceBrushParmsFields;
-        G_WriteStruct(v10, v3 + 12, v11, 28, save);
-        --v2;
-        v3 += 40;
-    } while (v2);
+        badplace_t copy = g_badplaces[i];
+        G_WriteStruct(badplaceFields, (unsigned __int8 *)&g_badplaces[i], (unsigned __int8 *)&copy, offsetof(badplace_t, parms), save);
+        badplace_parms_t parms = g_badplaces[i].parms;
+        G_WriteStruct(BadPlaceParmSaveFields(&g_badplaces[i]), (unsigned __int8 *)&g_badplaces[i].parms, (unsigned __int8 *)&parms, sizeof(badplace_parms_t), save);
+    }
 }
 
 void __cdecl ReadBadPlaces(SaveGame *save)
@@ -1433,12 +1271,12 @@ void __cdecl ReadBadPlaces(SaveGame *save)
     badplace = g_badplaces;
     do
     {
-        G_ReadStruct(badplaceFields, (unsigned __int8 *)badplace, 12, save);
+        G_ReadStruct(badplaceFields, (unsigned __int8 *)badplace, offsetof(badplace_t, parms), save);
         iassert(badplace);
         v4 = badplaceDefaultParmsFields;
         if (badplace->type == 2)
             v4 = badplaceBrushParmsFields;
-        G_ReadStruct(v4, (unsigned __int8 *)&badplace->parms, 28, save);
+        G_ReadStruct(v4, (unsigned __int8 *)&badplace->parms, sizeof(badplace_parms_t), save);
         if (badplace->type)
             Path_UpdateBadPlaceCount(badplace, 1);
         --loops;
@@ -1561,7 +1399,7 @@ void __cdecl G_LoadModelPrecacheList(SaveGame *save)
         else
             v4 = 0;
         *modelMap++ = v4;
-    } while ((int)modelMap < (int)&level.priorityNodeBias);
+    } while (modelMap < level.modelMap + ARRAY_COUNT(level.modelMap));
 }
 
 void __cdecl G_ClearConfigstrings(int iFirst, int iCount)
@@ -1690,7 +1528,7 @@ void __cdecl G_SaveWeaponCue(SaveGame *save)
             v4 = 0;
         SaveMemory_SaveWrite(&v4, 4, save);
         ++droppedWeaponCue;
-    } while ((int)droppedWeaponCue < (int)&level.changelevel);
+    } while (droppedWeaponCue < level.droppedWeaponCue + ARRAY_COUNT(level.droppedWeaponCue));
 }
 
 void __cdecl G_LoadWeaponCue(SaveGame *save)
@@ -1732,7 +1570,7 @@ void __cdecl G_LoadWeaponCue(SaveGame *save)
         if (!v5)
             droppedWeaponCue->setEnt(&g_entities[v4 - 1]);
         ++droppedWeaponCue;
-    } while ((int)droppedWeaponCue < (int)&level.changelevel);
+    } while (droppedWeaponCue < level.droppedWeaponCue + ARRAY_COUNT(level.droppedWeaponCue));
 }
 
 void __cdecl G_SaveDvars(SaveGame *save)
@@ -1908,7 +1746,7 @@ void __cdecl G_SaveMainState(bool savegame, SaveGame *save)
     iassert(save);
 
     Dvar_SaveDvars(SaveMemory_GetMemoryFile(save), 0x1000u);
-    SaveMemory_SaveWrite(g_hudelems, 44032, save);
+    SaveMemory_SaveWrite(g_hudelems, sizeof(g_hudelems), save);
     //ProfMem_End(v11);
     //ProfMem_Begin("misc", v13);
     SaveMemory_SaveWrite(&level.fFogOpaqueDist, 4, save);
@@ -2418,7 +2256,7 @@ void __cdecl G_LoadMainState(SaveGame *save)
     iassert(save);
 
     Dvar_LoadDvars(SaveMemory_GetMemoryFile(save));
-    SaveMemory_LoadRead(g_hudelems, /*44032*/ sizeof(game_hudelem_s) * 256, save); // KISAKTODO: not the right array size
+    SaveMemory_LoadRead(g_hudelems, sizeof(g_hudelems), save);
     SaveMemory_LoadRead(&level.fFogOpaqueDist, 4, save);
     SaveMemory_LoadRead(&level.fFogOpaqueDistSqrd, 4, save);
     SaveMemory_LoadRead(&level.bDrawCompassFriendlies, 4, save);

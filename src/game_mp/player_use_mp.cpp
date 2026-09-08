@@ -13,9 +13,11 @@
 #include <server/sv_game.h>
 #include <server/sv_world.h>
 
-int __cdecl compare_use(float *pe1, float *pe2)
+int __cdecl compare_use(const void *a, const void *b)
 {
-    return (int)(pe1[1] - pe2[1]);
+    const useList_t *left = (const useList_t *)a;
+    const useList_t *right = (const useList_t *)b;
+    return (left->score > right->score) - (left->score < right->score);
 }
 
 void __cdecl Player_UpdateActivate(gentity_s *ent)
@@ -409,7 +411,7 @@ int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEn
             }
         }
     }
-    qsort(useList, num, 8u, (int(__cdecl *)(const void *, const void *))compare_use);
+    qsort(useList, num, sizeof(useList_t), compare_use);
     num -= v31;
     v28 = 0;
     for (i = 0; i < (int)num; ++i)
@@ -428,7 +430,7 @@ int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEn
             }
         }
     }
-    qsort(useList, num, 8u, (int(__cdecl *)(const void *, const void *))compare_use);
+    qsort(useList, num, sizeof(useList_t), compare_use);
     return num - v28;
 }
 

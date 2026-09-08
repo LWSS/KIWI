@@ -664,9 +664,7 @@ void __cdecl Path_AddTrimmedAmount(path_t *pPath, const float *vStartPos)
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 225,
                 0,
-                (const char *)HIDWORD(fOrigLength),
-                LODWORD(fOrigLength),
-                LODWORD(fCurrLength));
+                "path length comparison: %g, %g", fOrigLength, fCurrLength);
         v18 = (float)((float)((float)(v14->fOrigLength - pPath->fCurrLength) * (float)DistToPathSegment) + (float)v8);
         if (v18 < 0.0)
             MyAssertHandler(
@@ -674,8 +672,7 @@ void __cdecl Path_AddTrimmedAmount(path_t *pPath, const float *vStartPos)
                 228,
                 0,
                 "%s\n\t(closestAmount) = %g",
-                HIDWORD(v18),
-                LODWORD(v18));
+                "closestAmount >= 0", v18);
         pPath->fLookaheadAmount = (float)v18 + pPath->fLookaheadAmount;
     }
 }
@@ -710,9 +707,7 @@ void __cdecl Path_SubtractTrimmedAmount(path_t *pPath, const float *vStartPos)
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 259,
                 0,
-                (const char *)HIDWORD(fOrigLength),
-                LODWORD(fOrigLength),
-                LODWORD(fCurrLength));
+                "path length comparison: %g, %g", fOrigLength, fCurrLength);
         v9 = pPath->wPathLen - 1;
         v10 = (float)((float)(v5->fOrigLength - pPath->fCurrLength) * (float)DistToPathSegment);
         if (v9 < pPath->wOrigPathLen - 1)
@@ -815,7 +810,7 @@ bool __cdecl Path_UsesObstacleNegotiation(const path_t *pPath)
         v4 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v4)
         {
-            v5 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v4));
+            v5 = va("path length comparison: %g, %g", fCurrLength, v4);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 2215,
@@ -867,7 +862,7 @@ void __cdecl Path_GetObstacleNegotiationScript(const path_t *pPath, scr_animscri
         v6 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v6)
         {
-            v7 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v6));
+            v7 = va("path length comparison: %g, %g", fCurrLength, v6);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 2268,
@@ -1061,7 +1056,7 @@ int __cdecl Path_DistanceGreaterThan(path_t *pPath, float fDist)
         v6 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v6)
         {
-            v7 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v6));
+            v7 = va("path length comparison: %g, %g", fCurrLength, v6);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 2454,
@@ -1316,7 +1311,7 @@ int __cdecl Path_IsTrimmed(path_t *pPath)
         v4 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v4)
         {
-            v5 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v4));
+            v5 = va("path length comparison: %g, %g", fCurrLength, v4);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 2786,
@@ -1382,7 +1377,7 @@ void __cdecl Path_RemoveCompletedPathPoints(path_t *pPath, __int16 pathPointInde
             v16 = *((float *)&pPath->pts[v13 - 1] - 2);
             if (fCurrLength > v16)
             {
-                v17 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v16));
+                v17 = va("path length comparison: %g, %g", fCurrLength, v16);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     2837,
@@ -1414,7 +1409,7 @@ void __cdecl Path_RemoveCompletedPathPoints(path_t *pPath, __int16 pathPointInde
             v7 = *((float *)&pPath->pts[v5 - 1] - 2);
             if (v6 > v7)
             {
-                v8 = va((const char *)HIDWORD(v6), LODWORD(v6), LODWORD(v7));
+                v8 = va("path length comparison: %g, %g", v6, v7);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     2825,
@@ -1488,7 +1483,7 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
         v6 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v6)
         {
-            v7 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v6));
+            v7 = va("path length comparison: %g, %g", fCurrLength, v6);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 2869,
@@ -1573,9 +1568,7 @@ void __cdecl Path_TrimCompletedPath(path_t *pPath, const float *vStartPos)
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     2937,
                     0,
-                    (const char *)HIDWORD(v21),
-                    LODWORD(v21),
-                    LODWORD(v22));
+                    "path length comparison: %g, %g", v21, v22);
             v18 = v9;
         }
         else
@@ -1665,9 +1658,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
             2981,
             0,
-            (const char *)HIDWORD(fCurrLength),
-            LODWORD(fCurrLength),
-            LODWORD(v11));
+            "path length comparison: %g, %g", fCurrLength, v11);
     while (1)
     {
         if (v4 >= pPath->wOrigPathLen)
@@ -1757,7 +1748,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
                 v22 = *((float *)&pPath->pts[wOrigPathLen - 1] - 2);
                 if (v21 > v22)
                 {
-                    v23 = va((const char *)HIDWORD(v21), LODWORD(v21), LODWORD(v22));
+                    v23 = va("path length comparison: %g, %g", v21, v22);
                     MyAssertHandler(
                         "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                         3028,
@@ -1843,7 +1834,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
             v40 = *((float *)&pPath->pts[(__int16)v4 - 1] - 2);
             if (v39 > v40)
             {
-                v41 = va((const char *)HIDWORD(v39), LODWORD(v39), LODWORD(v40));
+                v41 = va("path length comparison: %g, %g", v39, v40);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     3128,
@@ -1881,7 +1872,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
     v19 = (float)((float)v17 / (float)((float)v17 - (float)v26));
     if (v19 < 0.0)
     {
-        v27 = va("i: %d, d1: %f, d2: %f, fraction: %f", HIDWORD(v17), LODWORD(v17), LODWORD(v26), LODWORD(v19));
+        v27 = va("d1: %g, d2: %g, fraction: %g", v17, v26, v19);
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
             3059,
@@ -1892,7 +1883,7 @@ void __cdecl Path_BacktrackCompletedPath(path_t *pPath, const float *vStartPos)
     }
     if (v19 > 1.0)
     {
-        v28 = va("i: %d: %d, d1: %f, d2: %f, fraction: %f", HIDWORD(v17), LODWORD(v17), LODWORD(v26), LODWORD(v19));
+        v28 = va("d1: %g, d2: %g, fraction: %g", v17, v26, v19);
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
             3062,
@@ -1945,9 +1936,7 @@ handleFraction:
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 3088,
                 0,
-                (const char *)HIDWORD(v30),
-                LODWORD(v30),
-                LODWORD(v31));
+                "path length comparison: %g, %g", v30, v31);
         v13 = (float)((float)(pPath->fCurrLength * (float)v12) + (float)v13);
         if (v6[3] == 0.0 && v6[4] == 0.0)
             MyAssertHandler(
@@ -1977,7 +1966,7 @@ handleFraction:
         v34 = *((float *)&pPath->pts[v32 - 1] - 2);
         if (v33 > v34)
         {
-            v35 = va((const char *)HIDWORD(v33), LODWORD(v33), LODWORD(v34));
+            v35 = va("path length comparison: %g, %g", v33, v34);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 3098,
@@ -2076,8 +2065,7 @@ void __cdecl Path_UpdateForwardLookahead_IncompletePath(
             3337,
             0,
             "%s\n\t(height) = %g",
-            HIDWORD(height),
-            LODWORD(height));
+            "height != 0", height);
     v10 = (float)((float)area / (float)height);
     iassert(pt->fDir2D[0] || pt->fDir2D[1]);
     pPath->forwardLookaheadDir2D[0] = (float)(pt->fDir2D[0] * (float)-v10) + pt->vOrigPoint[0];
@@ -2362,7 +2350,7 @@ ai_stance_e __cdecl Path_AllowedStancesForPath(path_t *pPath)
         v4 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v4)
         {
-            v5 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v4));
+            v5 = va("path length comparison: %g, %g", fCurrLength, v4);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 3708,
@@ -2480,7 +2468,7 @@ int __cdecl Path_MayFaceEnemy(path_t *pPath, float *vEnemyDir, float *vOrg)
         v7 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v7)
         {
-            v8 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v7));
+            v8 = va("path length comparison: %g, %g", fCurrLength, v7);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 4040,
@@ -2785,7 +2773,7 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
         v8 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v8)
         {
-            v9 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v8));
+            v9 = va("path length comparison: %g, %g", fCurrLength, v8);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 1903,
@@ -2877,7 +2865,7 @@ void __cdecl Path_TrimLastNodes(path_t *pPath, const int iNodeCount, bool bMaint
             v20 = *((float *)&pPath->pts[v18 - 1] - 2);
             if (v19 > v20)
             {
-                v21 = va((const char *)HIDWORD(v19), LODWORD(v19), LODWORD(v20));
+                v21 = va("path length comparison: %g, %g", v19, v20);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     1967,
@@ -3485,7 +3473,7 @@ void __cdecl Path_UpdateLookahead(
         v14 = *((float *)&pPath->pts[wPathLen - 1] - 2);
         if (fCurrLength > v14)
         {
-            v15 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v14));
+            v15 = va("path length comparison: %g, %g", fCurrLength, v14);
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                 3531,
@@ -3966,7 +3954,7 @@ LABEL_18:
             v38 = *((float *)&pPath->pts[v36 - 1] - 2);
             if (fCurrLength > v38)
             {
-                v39 = va((const char *)HIDWORD(fCurrLength), LODWORD(fCurrLength), LODWORD(v38));
+                v39 = va("path length comparison: %g, %g", fCurrLength, v38);
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_navigation.cpp",
                     623,

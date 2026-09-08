@@ -69,20 +69,17 @@ actor_think_result_t __cdecl Actor_Negotiation_Think(actor_s *pSelf)
     }
     else
     {
-        HasNegotiationNode = (pathnode_t *)Path_HasNegotiationNode(&pSelf->Path);
-        if ((_BYTE)HasNegotiationNode)
+        if (Path_HasNegotiationNode(&pSelf->Path))
         {
             iassert(pSelf->Path.wNegotiationStartNode < pSelf->Path.wPathLen);
-            if (pSelf->Physics.vHitNormal[7 * pSelf->Path.wNegotiationStartNode + 2] < 0.0)
+            if (pSelf->Path.pts[pSelf->Path.wNegotiationStartNode - 1].iNodeNum < 0)
                 MyAssertHandler(
                     "c:\\trees\\cod3\\cod3src\\src\\game\\actor_negotiation.cpp",
                     62,
                     0,
                     "%s",
                     "pSelf->Path.pts[pSelf->Path.wNegotiationStartNode - 1].iNodeNum >= 0");
-            HasNegotiationNode = Path_ConvertIndexToNode(LODWORD(pSelf->Physics.vHitNormal[7
-                * pSelf->Path.wNegotiationStartNode
-                + 2]));
+            HasNegotiationNode = Path_ConvertIndexToNode(pSelf->Path.pts[pSelf->Path.wNegotiationStartNode - 1].iNodeNum);
             pSelf->sentient->pNearestNode = HasNegotiationNode;
             pSelf->sentient->bNearestNodeBad = 0;
             pSelf->sentient->bNearestNodeValid = 1;

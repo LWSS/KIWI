@@ -272,7 +272,7 @@ char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
     ClientUserinfoChanged(clientNum);
     SV_GetUserinfo(clientNum, userinfo, 1024);
     if (client->sess.localClient
-        || (value = Info_ValueForKey(userinfo, "password"), !*(_BYTE *)g_password->current.integer)
+        || (value = Info_ValueForKey(userinfo, "password"), !*(_BYTE *)g_password->current.string)
         || !I_stricmp(g_password->current.string, "none")
         || !strcmp(g_password->current.string, value))
     {

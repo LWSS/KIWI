@@ -70,7 +70,7 @@ actor_think_result_t __cdecl Actor_Death_Think(actor_s *self)
     iassert(self);
     v2 = 4 * (self->stateLevel + 8);
     self->pszDebugInfo = "death";
-    if (*(gentity_s **)((char *)&self->ent + v2) == (gentity_s *)200 && level.time - self->iStateTime >= 800)
+    if (self->eSubState[self->stateLevel] == STATE_DEATH_PRECLEANUP && level.time - self->iStateTime >= 800)
     {
         Actor_Death_Cleanup(self);
         Actor_SetSubState(self, STATE_DEATH_POSTCLEANUP);

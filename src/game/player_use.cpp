@@ -177,9 +177,11 @@ void __cdecl Player_UpdateActivate(gentity_s *ent)
     ent->client->useButtonDone = 1;
 }
 
-int __cdecl compare_use(float *pe1, float *pe2)
+int __cdecl compare_use(const void *a, const void *b)
 {
-    return (int)(float)(pe1[1] - pe2[1]);
+    const useList_t *left = (const useList_t *)a;
+    const useList_t *right = (const useList_t *)b;
+    return (left->score > right->score) - (left->score < right->score);
 }
 
 int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEntIndex)
@@ -412,17 +414,18 @@ int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEn
             ++v13;
         }
     }
-    qsort(useList, v11, 8u, (int(__cdecl *)(const void *, const void *))compare_use);
+    qsort(useList, v11, sizeof(useList_t), compare_use);
     v31 = v11 - v6;
     v33 = (int)(v11 - v6) <= 0;
     v32 = 0;
     if (!v33)
     {
-        p_score = &useList->score;
+        useList_t *use = useList;
+        p_score = &use->score;
         v35 = v31;
         do
         {
-            v36 = (const gentity_s *)*((unsigned int *)p_score - 1);
+            v36 = use->ent;
             if (v36->classname != scr_const.trigger_use_touch)
             {
                 traceEnd[0] = v36->r.absmin[0] + v36->r.absmax[0];
@@ -441,10 +444,12 @@ int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEn
                 }
             }
             --v35;
-            p_score += 2;
+            ++use;
+            if (v35)
+                p_score = &use->score;
         } while (v35);
     }
-    qsort(useList, v31, 8u, (int(__cdecl *)(const void *, const void *))compare_use);
+    qsort(useList, v31, sizeof(useList_t), compare_use);
     return v31 - v32;
 }
 

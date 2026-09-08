@@ -607,7 +607,7 @@ void __cdecl G_ClearDemoEntities()
     if (g_entities[0].r.inuse)
     {
         G_FreeEntities();
-        memset(g_entities, 0, 628 * level.num_entities);
+        memset(g_entities, 0, sizeof(gentity_s) * level.num_entities);
     }
     else
     {
@@ -1754,7 +1754,7 @@ void __cdecl G_FreeAllEntityRefs()
     droppedWeaponCue = level.droppedWeaponCue;
     do
         droppedWeaponCue++->setEnt(0);
-    while ((int)droppedWeaponCue < (int)&level.droppedWeaponCue[32]);
+    while (droppedWeaponCue < level.droppedWeaponCue + ARRAY_COUNT(level.droppedWeaponCue));
     Targ_RemoveAll();
 }
 
@@ -1790,62 +1790,31 @@ void __cdecl G_FreeEntityAfterEvent(gentity_s *ent)
 
 int __cdecl G_SaveFreeEntities(unsigned __int8 *buf)
 {
-    gentity_s *firstFreeEnt; // r9
-    int result; // r3
-    unsigned __int8 *v4; // r11
-
+    int size = 2 * sizeof(gentity_s *);
     if (buf)
     {
-        *(unsigned int *)buf = (unsigned int)level.firstFreeEnt;
-        *((unsigned int *)buf + 1) = (unsigned int)level.lastFreeEnt;
+        memcpy(buf, &level.firstFreeEnt, sizeof(gentity_s *));
+        memcpy(buf + sizeof(gentity_s *), &level.lastFreeEnt, sizeof(gentity_s *));
     }
-    firstFreeEnt = level.firstFreeEnt;
-    result = 8;
-    if (level.firstFreeEnt)
+    for (gentity_s *ent = level.firstFreeEnt; ent; ent = ent->nextFree)
     {
-        v4 = buf + 8;
-        do
-        {
-            if (buf)
-            {
-                *v4 = (unsigned __int8)firstFreeEnt->nextFree;
-                v4[1] = BYTE1(firstFreeEnt->nextFree);
-                v4[2] = BYTE2(firstFreeEnt->nextFree);
-                v4[3] = HIBYTE(firstFreeEnt->nextFree);
-            }
-            firstFreeEnt = firstFreeEnt->nextFree;
-            result += 4;
-            v4 += 4;
-        } while (firstFreeEnt);
+        if (buf)
+            memcpy(buf + size, &ent->nextFree, sizeof(gentity_s *));
+        size += sizeof(gentity_s *);
     }
-    return result;
+    return size;
 }
 
 void __cdecl G_LoadFreeEntities(unsigned __int8 *buf)
 {
-    _BYTE *v2; // r11
-    bool v3; // cr58
-    unsigned __int8 *v4; // r9
-    unsigned __int8 v5; // r10
-
     iassert(buf);
-    v2 = *(_BYTE **)buf;
-    v3 = *(unsigned int *)buf == 0;
-    level.firstFreeEnt = *(gentity_s **)buf;
-    level.lastFreeEnt = (gentity_s *)*((unsigned int *)buf + 1);
-    if (!v3)
+    memcpy(&level.firstFreeEnt, buf, sizeof(gentity_s *));
+    memcpy(&level.lastFreeEnt, buf + sizeof(gentity_s *), sizeof(gentity_s *));
+    buf += 2 * sizeof(gentity_s *);
+    for (gentity_s *ent = level.firstFreeEnt; ent; ent = ent->nextFree)
     {
-        v4 = buf + 8;
-        do
-        {
-            v2[624] = *v4;
-            v2[625] = v4[1];
-            v2[626] = v4[2];
-            v5 = v4[3];
-            v4 += 4;
-            v2[627] = v5;
-            v2 = (_BYTE *)*((unsigned int *)v2 + 156);
-        } while (v2);
+        memcpy(&ent->nextFree, buf, sizeof(gentity_s *));
+        buf += sizeof(gentity_s *);
     }
 }
 
@@ -2594,7 +2563,7 @@ void __cdecl G_EntUnlink(gentity_s *ent)
             }
         }
         Scr_SetString(&tagInfo->name, 0);
-        MT_Free((byte *)tagInfo, 112);
+        MT_Free((byte *)tagInfo, sizeof(tagInfo_s));
     }
     //Profile_EndInternal(0);
 }
@@ -3010,7 +2979,7 @@ int __cdecl G_EntLinkToInternal(gentity_s *ent, gentity_s *parent, unsigned int 
         p_parent = &i->tagInfo->parent;
         if (!p_parent)
         {
-            v10 = (tagInfo_s *)MT_Alloc(112, MT_TYPE_TAG_INFO);
+            v10 = (tagInfo_s *)MT_Alloc(sizeof(tagInfo_s), MT_TYPE_TAG_INFO);
             v10->parent = parent;
             v10->name = 0;
             if (tagName && !SL_IsLowercaseString(tagName))

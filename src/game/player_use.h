@@ -17,7 +17,7 @@ void __cdecl Player_UseEntity(gentity_s *playerEnt, gentity_s *useEnt);
 int __cdecl Player_ActivateCmd(gentity_s *ent);
 void __cdecl Player_ActivateHoldCmd(gentity_s *ent);
 void __cdecl Player_UpdateActivate(gentity_s *ent);
-int __cdecl compare_use(float *pe1, float *pe2);
+int __cdecl compare_use(const void *a, const void *b);
 int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEntIndex);
 void __cdecl G_UpdateFriendlyOverlay(gentity_s *ent);
 int __cdecl Player_GetItemCursorHint(const gclient_s *client, const gentity_s *traceEnt);

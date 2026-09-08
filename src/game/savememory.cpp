@@ -354,7 +354,7 @@ void __cdecl SaveMemory_CreateHeader(
     memset(&save->header, 0, sizeof(save->header));
     save->suppressPlayerNotify = suppressPlayerNotify;
     save->header.demoPlayback = demoPlayback;
-    save->header.saveVersion = 287;
+    save->header.saveVersion = SAVEGAME_VERSION;
     save->header.internalSave = saveType == 0;
     v36 = Dvar_RegisterString("mapname", "", 0x44u, "The current map name");
     save->header.saveId = saveId;
@@ -392,7 +392,8 @@ void __cdecl SaveMemory_CreateHeader(
     save->header.health = v43;
     save->header.skill = sv_gameskill->current.integer;
     Com_RealTime(&save->header.time);
-    save->header.bodySize = (int)MemFile_CopySegments(&save->memFile, 0, 0);
+    save->header.bodySize = (int)(save->memFile.buffer + save->memFile.bufferSize
+        - MemFile_GetSegmentAddess(&save->memFile, 0));
     save->isWrittenToDevice = 0;
 }
 
@@ -438,12 +439,12 @@ void *__cdecl SaveMemory_ReadLoadFromDevice(
             "Failed to read savegame header");
         return 0;
     }
-    if (header.saveVersion != 287)
+    if (header.saveVersion != SAVEGAME_VERSION)
     {
         CloseDevice(fileHandle);
         G_SaveError(ERR_DROP, SAVE_ERROR_CORRUPT_SAVE,
             "Savegame '%s' has bad version %d (expected %d, build %s)",
-            header.filename, header.saveVersion, 287, header.buildNumber);
+            header.filename, header.saveVersion, SAVEGAME_VERSION, header.buildNumber);
         return 0;
     }
     if ((unsigned int)header.bodySize > 1572864u)

@@ -257,12 +257,12 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     level_bgs.SafeDObjFree = G_SafeDObjFree;
     level_bgs.AllocXAnim = (void *(__cdecl *)(int))Hunk_AllocXAnimServer;
     level_bgs.anim_user = 1;
-    if (*(_BYTE *)g_log->current.integer)
+    if (*(_BYTE *)g_log->current.string)
     {
         if (g_logSync->current.enabled)
-            FS_FOpenFileByMode((char *)g_log->current.integer, &level.logFile, FS_APPEND_SYNC);
+            FS_FOpenFileByMode((char *)g_log->current.string, &level.logFile, FS_APPEND_SYNC);
         else
-            FS_FOpenFileByMode((char *)g_log->current.integer, &level.logFile, FS_APPEND);
+            FS_FOpenFileByMode((char *)g_log->current.string, &level.logFile, FS_APPEND);
         if (level.logFile)
         {
             SV_GetServerinfo(serverinfo, 1024);
@@ -319,7 +319,7 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     level.num_entities = 72;
     level.firstFreeEnt = 0;
     level.lastFreeEnt = 0;
-    SV_LocateGameData(level.gentities, level.num_entities, 628, &level.clients->ps, 12676);
+    SV_LocateGameData(level.gentities, level.num_entities, sizeof(gentity_s), &level.clients->ps, sizeof(gclient_s));
 
     G_ParseHitLocDmgTable();
     BG_LoadPenetrationDepthTable();
@@ -1397,24 +1397,21 @@ bool __cdecl DoPerFrameNotify(
     return isCurrently;
 }
 
-const dvar_s *ShowEntityInfo()
+void ShowEntityInfo()
 {
 #ifndef DEDICATED
-    const dvar_s *result; // eax
     const char *EntityTypeName; // eax
     float origin[3]; // [esp+14h] [ebp-18h] BYREF
     const char *text; // [esp+20h] [ebp-Ch]
     gentity_s *ent; // [esp+24h] [ebp-8h]
     int i; // [esp+28h] [ebp-4h]
 
-    result = g_entinfo;
     if (g_entinfo->current.integer)
     {
         ent = g_entities;
         i = 0;
         while (1)
         {
-            result = (const dvar_s *)i;
             if (i >= level.num_entities)
                 break;
             if (ent->s.eType < ET_EVENTS && ent->r.inuse && ent->r.linked)
@@ -1440,7 +1437,7 @@ const dvar_s *ShowEntityInfo()
             ++ent;
         }
     }
-    return result;
+    return;
 #else
     return NULL;
 #endif

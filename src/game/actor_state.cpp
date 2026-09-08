@@ -325,8 +325,8 @@ void __cdecl Actor_SimplifyStateTransitions(actor_s *self)
         {
             transitionCount = self->transitionCount;
             v3 = 8 * (transitionCount + 6);
-            v4 = *(unsigned int *)((char *)&self->ent + v3);
-            v5 = *(&self->iStateTime + 2 * transitionCount);
+            v4 = self->StateTransitions[transitionCount - 2].eTransition;
+            v5 = self->StateTransitions[transitionCount - 1].eTransition;
             bcassert(v4, 4);
             bcassert(v5, 4);
             if (!self->Physics.bIsAlive)
@@ -336,8 +336,8 @@ void __cdecl Actor_SimplifyStateTransitions(actor_s *self)
             {
                 if (v6)
                 {
-                    self->eSubState[2 * self->transitionCount + 4] = (ai_substate_t)v6;
-                    self->eSubState[2 * self->transitionCount + 5] = (ai_substate_t)*(&self->preThinkTime + 2 * self->transitionCount);
+                    self->StateTransitions[self->transitionCount - 2].eTransition = v6;
+                    self->StateTransitions[self->transitionCount - 2].eState = self->StateTransitions[self->transitionCount - 1].eState;
                     v7 = self->transitionCount - 1;
                 }
                 else
@@ -538,7 +538,7 @@ int __cdecl Actor_PushState(actor_s *self, ai_state_t eState)
         Actor_SimplifyStateTransitions(self);
         v6 = 4 * (self->simulatedStateLevel + 40);
         ++self->simulatedStateLevel;
-        *(gentity_s **)((char *)&self->ent + v6) = (gentity_s *)eState;
+        self->eSimulatedState[self->simulatedStateLevel] = eState;
         Actor_ClearArrivalPos(self);
         return 1;
     }

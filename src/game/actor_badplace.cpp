@@ -175,18 +175,9 @@ void __cdecl Path_MakeBadPlace(unsigned int name, int duration, int teamflags, i
     v10 = Path_AllocBadPlace(name, duration);
     if (v10)
     {
-        p_parms = (badplace_brush_t *)&v10->parms;
         v10->teamflags = teamflags;
-        v12 = parms;
         v10->type = type;
-        v13 = 7;
-        do
-        {
-            p_parms->volume = v12->brush.volume;
-            v12 = (badplace_parms_t *)((char *)v12 + 4);
-            p_parms = (badplace_brush_t *)((char *)p_parms + 4);
-            --v13;
-        } while (v13);
+        v10->parms = *parms;
         v10->pingTime = level.time;
         Path_UpdateBadPlaceCount(v10, 1);
         Actor_BadPlacesChanged();
@@ -195,23 +186,10 @@ void __cdecl Path_MakeBadPlace(unsigned int name, int duration, int teamflags, i
 
 void __cdecl Path_MakeArcBadPlace(unsigned int name, int duration, int teamflags, badplace_arc_t *arc)
 {
-    badplace_parms_t *v8; // r10
-    badplace_arc_t *v9; // r11
-    int v10; // ctr
-    badplace_parms_t v11[2]; // [sp+50h] [-50h] BYREF
-
     iassert(arc);
-    v8 = v11;
-    v9 = arc;
-    v10 = 7;
-    do
-    {
-        v8->brush.volume = (gentity_s *)LODWORD(v9->origin[0]);
-        v9 = (badplace_arc_t *)((char *)v9 + 4);
-        v8 = (badplace_parms_t *)((char *)v8 + 4);
-        --v10;
-    } while (v10);
-    Path_MakeBadPlace(name, duration, teamflags, 1, v11);
+    badplace_parms_t parms = {};
+    parms.arc = *arc;
+    Path_MakeBadPlace(name, duration, teamflags, 1, &parms);
 }
 
 void __cdecl Path_MakeBrushBadPlace(unsigned int name, int duration, int teamflags, gentity_s *volume)

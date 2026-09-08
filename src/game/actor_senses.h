@@ -17,7 +17,7 @@ int __cdecl Actor_CanSeePointFrom(
 int __cdecl Actor_CanSeeEnemyViaClaimedNode(actor_s *self);
 sentient_s *__cdecl Actor_KnowAboutEnemy(actor_s *self, int hadPath);
 int __cdecl Actor_CanShootFrom(actor_s *self, const float *vTarget, const float *vFrom);
-int __cdecl compare_sentient_sort(unsigned int *pe1, unsigned int *pe2);
+int __cdecl compare_sentient_sort(const void *a, const void *b);
 void __cdecl Actor_UpdateLastKnownPos(actor_s *self, sentient_s *other);
 void __cdecl Actor_UpdateLastEnemySightPos(actor_s *self);
 void __cdecl Actor_UpdateEyeInformation(actor_s *self);

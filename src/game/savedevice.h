@@ -4,6 +4,9 @@
 #error This file is for SinglePlayer only 
 #endif
 
+// Native save bodies contain pointer-sized structures. Keep x86 saves at version 287.
+#define SAVEGAME_VERSION (sizeof(void *) == 8 ? 0x1011F : 287)
+
 #ifdef KISAK_XBOX
 static const char *CONSOLE_DEFAULT_SAVE_NAME = "savegame.svg";
 #endif

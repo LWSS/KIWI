@@ -1066,7 +1066,7 @@ void __cdecl ActorCmd_Teleport(scr_entref_t entref)
     }
     else if (distSquared > 100.0)
     {
-        player = G_Find(0, 284, scr_const.player);
+        player = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
         iassert(player);
         iassert(player->sentient);
         Sentient_GetEyePosition(player->sentient, vEyePos);
@@ -1851,7 +1851,7 @@ void __cdecl ActorCmd_GetAnglesToLikelyEnemyPath(scr_entref_t entref)
     actor_s *v1; // r31
 
     v1 = Actor_Get(entref);
-    if ((unsigned __int8)Actor_GetAnglesToLikelyEnemyPath(v1))
+    if (Actor_GetAnglesToLikelyEnemyPath(v1))
         Scr_AddVector(v1->anglesToLikelyEnemyPath);
 }
 
@@ -2286,14 +2286,14 @@ void __cdecl ScrCmd_GetNegotiationEndNode(scr_entref_t entref)
                 0,
                 "%s",
                 "self->Path.wNegotiationStartNode < self->Path.wPathLen");
-        if (v1->Physics.vHitNormal[7 * v1->Path.wNegotiationStartNode + 2] < 0.0)
+        if (v1->Path.pts[v1->Path.wNegotiationStartNode - 1].iNodeNum < 0)
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\game\\actor_script_cmd.cpp",
                 2818,
                 0,
                 "%s",
                 "self->Path.pts[self->Path.wNegotiationStartNode - 1].iNodeNum >= 0");
-        v2 = Path_ConvertIndexToNode(LODWORD(v1->Physics.vHitNormal[7 * v1->Path.wNegotiationStartNode + 2]));
+        v2 = Path_ConvertIndexToNode(v1->Path.pts[v1->Path.wNegotiationStartNode - 1].iNodeNum);
         Scr_AddPathnode(v2);
     }
 }

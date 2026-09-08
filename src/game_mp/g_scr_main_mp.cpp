@@ -140,7 +140,7 @@ BuiltinFunctionDef functions[] =
   { "precacheshellshock", &Scr_PrecacheShellShock, 0 },
   { "precacheitem", &Scr_PrecacheItem, 0 },
   { "precacheshader", (void(__cdecl *)()) & Scr_PrecacheShader, 0 },
-  { "precachestring", (void(__cdecl *)()) & Scr_PrecacheString, 0 },
+  { "precachestring", Scr_PrecacheString, 0 },
   { "precacherumble", &KISAK_NULLSUB, 0 },
   { "loadfx", &Scr_LoadFX, 0 },
   { "playfx", &Scr_PlayFX, 0 },
@@ -3779,7 +3779,7 @@ int Scr_PrecacheShader()
     return G_MaterialIndex(shaderName);
 }
 
-char *Scr_PrecacheString()
+void Scr_PrecacheString()
 {
     const char *result; // eax
 
@@ -3787,8 +3787,7 @@ char *Scr_PrecacheString()
         Scr_Error("precacheString must be called before any wait statements in the gametype or level script\n");
     result = Scr_GetIString(0);
     if (*result)
-        return (char *)G_LocalizedStringIndex((char*)result);
-    return (char*)result;
+        G_LocalizedStringIndex((char *)result);
 }
 
 void Scr_AmbientPlay()

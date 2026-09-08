@@ -25,29 +25,11 @@ XAnimTree_s *__cdecl G_GetActorCorpseIndexAnimTree(unsigned int index)
 
 int __cdecl G_GetActorCorpseIndex(gentity_s *ent)
 {
-    int number; // r9
-    int result; // r3
-    int *p_entnum; // r11
-
-    number = ent->s.number;
-    result = 0;
-    p_entnum = &g_scr_data.actorCorpseInfo[0].entnum;
-    while (*p_entnum != number)
-    {
-        p_entnum += 8;
-        ++result;
-        if ((int)p_entnum >= (int)&g_scr_data.actorBackup)
-        {
-            if (!alwaysfails)
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\game\\actor_corpse.cpp",
-                    51,
-                    0,
-                    "G_GetActorCorpseIndex called for non actor corpse");
-            return 0;
-        }
-    }
-    return result;
+    for (int i = 0; i < ARRAY_COUNT(g_scr_data.actorCorpseInfo); ++i)
+        if (g_scr_data.actorCorpseInfo[i].entnum == ent->s.number)
+            return i;
+    iassert(!"G_GetActorCorpseIndex called for non actor corpse");
+    return 0;
 }
 
 int G_GetFreeActorCorpseIndex(int reuse)
@@ -60,7 +42,7 @@ int G_GetFreeActorCorpseIndex(int reuse)
     double maxDistSide = -1.0;
     double maxDist = -1.0;
 
-    gentity_s *playerEnt = G_Find(0, 284, scr_const.player);
+    gentity_s *playerEnt = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
     iassert(playerEnt);
     iassert(playerEnt->sentient);
 
@@ -202,13 +184,13 @@ void __cdecl G_RemoveActorCorpses(unsigned int allowedCorpseCount)
         p_entnum = &g_scr_data.actorCorpseInfo[allowedCorpseCount].entnum;
         do
         {
-            if (*p_entnum >= 0)
+            if (g_scr_data.actorCorpseInfo[v2].entnum >= 0)
             {
-                G_FreeEntity(&level.gentities[*p_entnum]);
+                G_FreeEntity(&level.gentities[g_scr_data.actorCorpseInfo[v2].entnum]);
                 actorCorpseCount = level.actorCorpseCount;
             }
             ++v2;
-            p_entnum += 8;
+
         } while (v2 < actorCorpseCount);
     }
     level.actorCorpseCount = allowedCorpseCount;
@@ -314,18 +296,17 @@ void __cdecl G_PruneLoadedCorpses()
     p_entnum = &g_scr_data.actorCorpseInfo[0].entnum;
     do
     {
-        if (*p_entnum >= 0)
+        if (g_scr_data.actorCorpseInfo[v3].entnum >= 0)
         {
             *v4 = v3;
             ++v2;
             ++v4;
         }
-        p_entnum += 8;
         ++v3;
-    } while ((int)p_entnum < (int)&g_scr_data.actorBackup);
+    } while (v3 < ARRAY_COUNT(g_scr_data.actorCorpseInfo));
     if (v2 > 6)
     {
-        ent = G_Find(0, 284, scr_const.player);
+        ent = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
         iassert(ent);
         iassert(ent->sentient);
         Sentient_GetEyePosition(ent->sentient, playerEyePos);

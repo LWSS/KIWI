@@ -895,15 +895,11 @@ void G_LoadAnimTreeInstances()
         *actorXAnimTrees++ = XAnimCreateTree(anims, Hunk_AllocActorXAnimServer);
     } while (v0);
     g_scr_data.actorBackupXAnimTree = XAnimCreateTree(anims, Hunk_AllocActorXAnimServer);
-    v3 = 16;
-    p_entnum = &g_scr_data.actorCorpseInfo[0].entnum;
-    do
+    for (int i = 0; i < ARRAY_COUNT(g_scr_data.actorCorpseInfo); ++i)
     {
-        --v3;
-        *(p_entnum - 1) = (int)XAnimCreateTree(anims, Hunk_AllocActorXAnimServer);
-        *p_entnum = -1;
-        p_entnum += 8;
-    } while (v3);
+        g_scr_data.actorCorpseInfo[i].tree = XAnimCreateTree(anims, Hunk_AllocActorXAnimServer);
+        g_scr_data.actorCorpseInfo[i].entnum = -1;
+    }
     v5 = 64;
     actorXAnimClientTrees = g_scr_data.actorXAnimClientTrees;
     do
@@ -1216,7 +1212,7 @@ void __cdecl G_InitGame(
     level.num_entities = 1;
     level.firstFreeEnt = 0;
     level.lastFreeEnt = 0;
-    SV_LocateGameData(level.gentities, 1, 628, &clients->ps, 46104);
+    SV_LocateGameData(level.gentities, 1, sizeof(gentity_s), &clients->ps, sizeof(gclient_s));
     G_ParseHitLocDmgTable();
     BG_LoadPenetrationDepthTable();
     G_InitVehiclePaths();
@@ -1318,7 +1314,7 @@ void G_ChangeLevel()
     int ConfigstringIndex; // r3
     const char *v4; // r3
 
-    v0 = G_Find(0, 284, scr_const.player);
+    v0 = G_Find(0, offsetof(gentity_s, classname), scr_const.player);
     if (!v0)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_main.cpp", 1735, 0, "%s", "player");
     if (v0->health > 0 && !g_reloading->current.integer)
@@ -1975,73 +1971,16 @@ void __cdecl G_SendClientMessages()
         ++cgData_actorProneInfo;
         ++v0;
         ++v1;
-    } while ((int)cgData_actorProneInfo < (int)&level.cgData_actorProneInfo[32]);
-    v10 = 33;
-    v11 = &level.cgData_actorProneInfo[33];
-    p_entnum = &g_scr_data.actorCorpseInfo[0].entnum;
-    v13 = 4;
-    do
+    } while (cgData_actorProneInfo < level.cgData_actorProneInfo + ARRAY_COUNT(level.cgData_actorProneInfo));
+    for (int i = 0; i < ARRAY_COUNT(g_scr_data.actorCorpseInfo); ++i)
     {
-        if (*p_entnum >= 0)
+        const corpseInfo_t *corpse = &g_scr_data.actorCorpseInfo[i];
+        if (corpse->entnum >= 0)
         {
-            v14 = p_entnum + 1;
-            v15 = v11 - 1;
-            level.specialIndex[*p_entnum] = v10 - 1;
-            v16 = 6;
-            do
-            {
-                *(unsigned int *)&v15->bCorpseOrientation = *v14++;
-                v15 = (actor_prone_info_s *)((char *)v15 + 4);
-                --v16;
-            } while (v16);
+            level.specialIndex[corpse->entnum] = 32 + i;
+            level.cgData_actorProneInfo[32 + i] = corpse->proneInfo;
         }
-        v17 = p_entnum[8];
-        if (v17 >= 0)
-        {
-            v18 = p_entnum + 9;
-            v19 = v11;
-            level.specialIndex[v17] = v10;
-            v20 = 6;
-            do
-            {
-                *(unsigned int *)&v19->bCorpseOrientation = *v18++;
-                v19 = (actor_prone_info_s *)((char *)v19 + 4);
-                --v20;
-            } while (v20);
-        }
-        v21 = p_entnum[16];
-        if (v21 >= 0)
-        {
-            v22 = p_entnum + 17;
-            v23 = v11 + 1;
-            level.specialIndex[v21] = v10 + 1;
-            v24 = 6;
-            do
-            {
-                *(unsigned int *)&v23->bCorpseOrientation = *v22++;
-                v23 = (actor_prone_info_s *)((char *)v23 + 4);
-                --v24;
-            } while (v24);
-        }
-        v25 = p_entnum[24];
-        if (v25 >= 0)
-        {
-            v26 = p_entnum + 25;
-            v27 = v11 + 2;
-            level.specialIndex[v25] = v10 + 2;
-            v28 = 6;
-            do
-            {
-                *(unsigned int *)&v27->bCorpseOrientation = *v26++;
-                v27 = (actor_prone_info_s *)((char *)v27 + 4);
-                --v28;
-            } while (v28);
-        }
-        --v13;
-        v10 += 4;
-        p_entnum += 32;
-        v11 += 4;
-    } while (v13);
+    }
     v29 = 2;
     v30 = 0;
     do
@@ -2436,28 +2375,27 @@ int __cdecl G_RunFrame(ServerFrameExtent extent, int timeCap)
                 level.checkAnimChange = 0;
                 if (level.num_entities > 1)
                 {
-                    p_inuse = &g_entities[1].r.inuse;
                     do
                     {
-                        if (*p_inuse)
+                        gentity_s *animEnt = &g_entities[level.currentIndex];
+                        if (animEnt->r.inuse)
                         {
                             do
                             {
-                                v17 = *((unsigned int *)p_inuse + 34);
+                                v17 = animEnt->flags;
                                 if ((v17 & 0x40000) == 0 || (v17 & 0x1000) != 0)
                                     break;
-                                if (!G_DObjUpdateServerTime((gentity_s *)(p_inuse - 168), 1))
+                                if (!G_DObjUpdateServerTime(animEnt, 1))
                                 {
                                     checkAnimChange = level.checkAnimChange;
                                     break;
                                 }
                                 Scr_RunCurrentThreads();
                                 checkAnimChange = 1;
-                                v18 = *p_inuse;
+                                v18 = animEnt->r.inuse;
                                 level.checkAnimChange = 1;
                             } while (v18);
                         }
-                        p_inuse += 628;
                         ++level.currentIndex;
                     } while (level.currentIndex < level.num_entities);
                 }

@@ -25,7 +25,7 @@ struct entityHandler_t // sizeof=0x28
     int methodOfDeath;
     int splashMethodOfDeath;
 };
-static_assert(sizeof(entityHandler_t) == 0x28);
+static_assert(sizeof(entityHandler_t) == (sizeof(void *) == 8 ? 72 : 40));
 
 struct trigger_info_t // sizeof=0xC
 {                                       // ...
@@ -106,7 +106,7 @@ struct level_locals_t // sizeof=0x2E6C
     float compassNorth[2];              // ...
     scr_vehicle_s *vehicles;            // ...
 };
-static_assert(sizeof(level_locals_t) == 0x2E6C);
+static_assert(sizeof(level_locals_t) == (sizeof(void *) == 8 ? 12440 : 11884));
 
 void __cdecl TRACK_g_main();
 int __cdecl G_GetSavePersist();
@@ -154,7 +154,7 @@ bool __cdecl DoPerFrameNotify(
     bool wasPreviously,
     uint16_t begin,
     uint16_t end);
-const dvar_s *ShowEntityInfo();
+void ShowEntityInfo();
 void __cdecl ShowEntityInfo_Items(gentity_s *ent);
 void __cdecl G_RunFrameForEntity(gentity_s *ent);
 void __cdecl G_TraceCapsule(

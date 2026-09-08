@@ -23,7 +23,7 @@ struct BuiltinFunctionDef // sizeof=0xC
     void(__cdecl *actionFunc)();
     int type;
 };
-static_assert(sizeof(BuiltinFunctionDef) == 0xC);
+static_assert(sizeof(BuiltinFunctionDef) == (sizeof(void *) == 8 ? 24 : 12));
 
 struct BuiltinMethodDef // sizeof=0xC
 {                                       // ...
@@ -31,7 +31,7 @@ struct BuiltinMethodDef // sizeof=0xC
     void(__cdecl *actionFunc)(scr_entref_t); // ...
     int type;                           // ...
 };
-static_assert(sizeof(BuiltinMethodDef) == 0xC);
+static_assert(sizeof(BuiltinMethodDef) == (sizeof(void *) == 8 ? 24 : 12));
 
 enum meansOfDeath_t : int32_t
 {                                       // ...
@@ -118,7 +118,7 @@ struct corpseInfo_t // sizeof=0x4DC
     // padding byte
     // padding byte
 };
-static_assert(sizeof(corpseInfo_t) == 0x4DC);
+static_assert(sizeof(corpseInfo_t) == (sizeof(void *) == 8 ? 1280 : 1244));
 
 struct scr_data_t // sizeof=0x379C
 {                                       // ...
@@ -130,7 +130,7 @@ struct scr_data_t // sizeof=0x379C
     int createstruct;                   // ...
     corpseInfo_t playerCorpseInfo[8];   // ...
 };
-static_assert(sizeof(scr_data_t) == 0x379C);
+static_assert(sizeof(scr_data_t) == (sizeof(void *) == 8 ? 14528 : 14236));
 
 // g_active_mp
 void __cdecl P_DamageFeedback(gentity_s *player);
@@ -679,7 +679,7 @@ int Scr_PrecacheModel();
 void Scr_PrecacheShellShock();
 void Scr_PrecacheItem();
 int Scr_PrecacheShader();
-char *Scr_PrecacheString();
+void Scr_PrecacheString();
 void Scr_AmbientPlay();
 void Scr_AmbientStop();
 void Scr_GrenadeExplosionEffect();
@@ -1054,7 +1054,7 @@ struct useList_t // sizeof=0x8
     gentity_s *ent;                     // ...
     float score;
 };
-static_assert(sizeof(useList_t) == 0x8);
+static_assert(sizeof(useList_t) == (sizeof(void *) == 8 ? 16 : 8));
 
 void __cdecl Player_UpdateActivate(gentity_s *ent);
 char __cdecl Player_ActivateCmd(gentity_s *ent);
@@ -1062,7 +1062,7 @@ void __cdecl Player_ActivateHoldCmd(gentity_s *ent);
 void __cdecl Player_UseEntity(gentity_s *playerEnt, gentity_s *useEnt);
 void __cdecl Player_UpdateCursorHints(gentity_s *ent);
 int __cdecl Player_GetUseList(gentity_s *ent, useList_t *useList, int prevHintEntIndex);
-int __cdecl compare_use(float *pe1, float *pe2);
+int __cdecl compare_use(const void *a, const void *b);
 int __cdecl Player_GetItemCursorHint(const gclient_s *client, const gentity_s *traceEnt);
 void __cdecl Player_SetTurretDropHint(gentity_s *ent);
 void __cdecl Player_SetVehicleDropHint(gentity_s *ent);
