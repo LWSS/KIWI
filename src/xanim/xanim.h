@@ -35,7 +35,7 @@ union XAnimIndices // sizeof=0x4
     uint16_t *_2;
     void *data;
 };
-static_assert(sizeof(XAnimIndices) == 4);
+static_assert(sizeof(XAnimIndices) == (sizeof(void *) == 8 ? 8 : 4));
 struct XAnimNotifyInfo // sizeof=0x8
 {
     uint16_t name;
@@ -179,7 +179,7 @@ struct XAnimParts // sizeof=0x58
     XAnimNotifyInfo *notify;
     XAnimDeltaPart *deltaPart;
 };
-static_assert(sizeof(XAnimParts) == 88);
+static_assert(sizeof(XAnimParts) == (sizeof(void *) == 8 ? 136 : 88));
 
 struct XModelNameMap // sizeof=0x4
 {                                       // ...
@@ -241,6 +241,8 @@ struct XAnimState // sizeof=0x20
     // padding byte
     // padding byte
 };
+
+static_assert(sizeof(XAnimState) == 32); // Savegame record, independent of pointer width.
 
 struct XAnimInfo // sizeof=0x40
 {                                       // ...
@@ -826,7 +828,7 @@ struct WeaponDef // sizeof=0x878
     float adsDofStart;
     float adsDofEnd;
 };
-static_assert(sizeof(WeaponDef) == 2168);
+static_assert(sizeof(WeaponDef) == (sizeof(void *) == 8 ? 2832 : 2168));
 
 struct SndDriverGlobals // sizeof=0x4
 {                                       // ...
@@ -839,7 +841,7 @@ struct RawFile // sizeof=0xC
     int len;
     const char* buffer;
 };
-static_assert(sizeof(RawFile) == 12);
+static_assert(sizeof(RawFile) == (sizeof(void *) == 8 ? 24 : 12));
 
 struct PhysPreset // sizeof=0x2C
 {                                       // ...
@@ -999,7 +1001,7 @@ struct XAsset // sizeof=0x8
     XAssetType type;                    // ...
     XAssetHeader header;                // ...
 };
-static_assert(sizeof(XAsset) == 8);
+static_assert(sizeof(XAsset) == (sizeof(void *) == 8 ? 16 : 8));
 
 union XAssetSize // sizeof=0x878
 {                                       // ...
@@ -1110,7 +1112,7 @@ struct ScriptStringList // sizeof=0x8
     int count;
     const char **strings;
 };
-static_assert(sizeof(ScriptStringList) == 8);
+static_assert(sizeof(ScriptStringList) == (sizeof(void *) == 8 ? 16 : 8));
 
 struct XAssetList // sizeof=0x10
 {                                       // ...
@@ -1118,7 +1120,7 @@ struct XAssetList // sizeof=0x10
     int assetCount;
     XAsset *assets;
 };
-static_assert(sizeof(XAssetList) == 16);
+static_assert(sizeof(XAssetList) == (sizeof(void *) == 8 ? 32 : 16));
 
 struct XFile // sizeof=0x2C
 {                                       // ...
@@ -1163,14 +1165,14 @@ struct XRigidVertList // sizeof=0xC
     uint16_t triCount;          // ...
     XSurfaceCollisionTree *collisionTree;
 };
-static_assert(sizeof(XRigidVertList) == 12);
+static_assert(sizeof(XRigidVertList) == (sizeof(void *) == 8 ? 16 : 12));
 
 struct XSurfaceVertexInfo // sizeof=0xC
 {                                       // ...
     __int16 vertCount[4];
     uint16_t *vertsBlend;
 };
-static_assert(sizeof(XSurfaceVertexInfo) == 12);
+static_assert(sizeof(XSurfaceVertexInfo) == (sizeof(void *) == 8 ? 16 : 12));
 
 struct XSurface // sizeof=0x38
 {
@@ -1189,7 +1191,7 @@ struct XSurface // sizeof=0x38
     XRigidVertList *vertList;
     int partBits[4];
 };
-static_assert(sizeof(XSurface) == 56);
+static_assert(sizeof(XSurface) == (sizeof(void *) == 8 ? 80 : 56));
 
 struct DObj_s;
 

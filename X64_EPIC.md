@@ -19,7 +19,7 @@ Coding conventions: C-style implementation, explicit `sizeof(Type)`, braces for 
 | 11 | ui_mp | Complete |
 | 12 | universal | Complete |
 | 13 | win32 | Complete |
-| 14 | xanim | Pending |
+| 14 | xanim | Complete |
 
 Validation distinguishes diagnostic compilation and isolated regression tests from a full native game link/run. Shared x86 layout assertions may require a test-only override until their owning part is ported. Production assertions are never globally disabled.
 
@@ -31,6 +31,21 @@ Part 9 checkpoint: `18c58233`.
 Part 10 checkpoint: `778c83d8`.
 Part 11 checkpoint: `68c05ec8`.
 Part 12 checkpoint: `94fcc029`.
+Part 13 checkpoint: `7b972b0c`.
+
+## Part 14: xanim
+
+Audited all 19 source/header files. Replaced 32-bit scratch pointer packing in the raw animation loader with typed quaternion/translation records; native flexible-record allocations and static quaternion copies now match their actual layouts. Animation trees, debug-name arrays, clones and memory counters use native sizes. DObj model/parent lists allocate and free native pointer storage, and in-place archive copies use the actual SavedDObj size. Model materials, collision surfaces/trees, brush wrappers and physics geometry allocations follow their native types. Collision alignment preserves all address bits. Allocator callback declarations and callers in server, universal, bgame and script now have matching signatures.
+
+Corrected fractional notetrack times, selected-LOD range checking, debug-name initialization and malformed count/header handling. Fixed-width packed animation streams and the 32-byte XAnimState save record remain unchanged. Database loading is still excluded; architecture-specific assertions on shared asset declarations describe runtime layouts, not a completed database port.
+
+Validation: all 42 configured x86/x64 MP/SP diagnostic compilation checks and 16 allocator-callback integration checks pass. `test_xanim_load.py` executes the production raw loader with all quaternion/translation categories, delta tracks, byte/ushort indices and large index tables, poisoned allocations and canaries; packed output matches across architectures. `test_xanim_runtime.py` passes native tree/debug-name allocation, clone reference counts, 32-model DObj create/clone/archive/restore/free, LOD selection and raw collision-surface loading on both architectures. `xanim_layout.py` verifies native structure sizes. Full skeletal rendering, physics collision-map asset loading and game save/load remain integration checks requiring a linked game.
+
+All 14 independent correctness patches were checked with `git apply --check` against their corresponding pre-part checkpoints in temporary directories. They are outside the repository under `C:/Users/M1911/.codex/visualizations/2026/09/07/01a07d6e-fce2-7062-953a-945e79d4effb/epic-upstream-fixes`. Actual KisakCOD upstream may require context adjustments. The debugger patch preserves upstream's zero-valued socket-factory failure convention.
+
+## Epic validation limits
+
+All requested folders have been reviewed and checkpointed individually. The tests are diagnostic compilation and focused native production-code regression executables, with external systems stubbed where documented. They do not establish that every gameplay path works in a full x64 executable. Database and Radiant remain excluded, legacy unconfigured translation units remain unconfigured, and the provided Steam SDK lacks steam_api64.lib/steam_api64.dll. Those dependencies and end-to-end game testing remain before declaring the complete application x64-ready.
 
 ## Part 13: win32
 

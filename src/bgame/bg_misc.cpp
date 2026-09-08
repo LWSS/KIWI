@@ -2322,7 +2322,7 @@ void __cdecl BG_CreateXAnim(XAnim_s *anims, uint animIndex, const char *name)
 {
     if (!IsFastFileLoad())
     {
-        XAnimPrecache(name, (void *(__cdecl *)(int))Hunk_AllocXAnimPrecache);
+        XAnimPrecache(name, Hunk_AllocXAnimPrecache);
     }
     XAnimCreate(anims, animIndex, name);
 }

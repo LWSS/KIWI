@@ -172,16 +172,16 @@ XModel *__cdecl SV_XModelGet(char *name)
 {
     return XModelPrecache(
         name,
-        (void *(__cdecl *)(int))SV_AllocXModelPrecache,
-        (void *(__cdecl *)(int))SV_AllocXModelPrecacheColl);
+        SV_AllocXModelPrecache,
+        SV_AllocXModelPrecacheColl);
 }
 
-uint8_t *__cdecl SV_AllocXModelPrecache(uint size)
+void *__cdecl SV_AllocXModelPrecache(int size)
 {
     return Hunk_Alloc(size, "SV_AllocXModelPrecache", 21);
 }
 
-uint8_t *__cdecl SV_AllocXModelPrecacheColl(uint size)
+void *__cdecl SV_AllocXModelPrecacheColl(int size)
 {
     return Hunk_Alloc(size, "SV_AllocXModelPrecacheColl", 27);
 }

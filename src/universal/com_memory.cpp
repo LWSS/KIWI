@@ -106,7 +106,7 @@ void FreeString(const char* str)
 }
 
 
-uint8_t* __cdecl Hunk_AllocXAnimPrecache(uint size)
+void *__cdecl Hunk_AllocXAnimPrecache(int size)
 {
     return Hunk_AllocAlign(size, 4, "XAnimPrecache", 11);
 }

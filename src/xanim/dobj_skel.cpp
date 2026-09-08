@@ -91,15 +91,14 @@ void __cdecl GetControlAndDuplicatePartBits(
     int *calcPartBits,
     int *controlPartBits)
 {
-    const char *v6; // eax
-    int boneIndex; // [esp+4h] [ebp-14h]
-    DSkel *skel; // [esp+8h] [ebp-10h]
-    int i; // [esp+10h] [ebp-8h]
+    const char *v6;    // eax
+    int boneIndex;     // [esp+4h] [ebp-14h]
+    DSkel *skel;       // [esp+8h] [ebp-10h]
+    int i;             // [esp+10h] [ebp-8h]
     uint boneIndexLow; // [esp+14h] [ebp-4h]
 
+    iassert(obj);
     skel = (DSkel *)&obj->skel;
-    if (obj == (const DObj_s *)-20)
-        MyAssertHandler(".\\xanim\\dobj_skel.cpp", 86, 0, "%s", "skel");
     for (i = 0; i < 4; ++i)
     {
         skel->partBits.skel[i] |= partBits[i];
@@ -111,8 +110,7 @@ void __cdecl GetControlAndDuplicatePartBits(
             for (boneIndex = 0; boneIndex < obj->numBones; ++boneIndex)
             {
                 boneIndexLow = 0x80000000 >> (boneIndex & 0x1F);
-                if ((boneIndexLow & controlPartBits[boneIndex >> 5]) != 0
-                    && (boneIndexLow & savedDuplicatePartBits[boneIndex >> 5]) != 0)
+                if ((boneIndexLow & controlPartBits[boneIndex >> 5]) != 0 && (boneIndexLow & savedDuplicatePartBits[boneIndex >> 5]) != 0)
                 {
                     break;
                 }

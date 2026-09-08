@@ -22,12 +22,20 @@ int __cdecl XModelGetSurfaces(const XModel *model, XSurface **surfaces, int lod)
 {
     iassert(model);
     iassert(surfaces);
-    iassert(lod >= 0);
-    bcassert(model->lodInfo[lod].surfIndex, model->numsurfs);
-    const XModelLodInfo *lodInfo = model->lodInfo;
+    if (lod < 0 || lod >= model->numLods || lod >= MAX_LODS)
+    {
+        *surfaces = NULL;
+        return 0;
+    }
+    const XModelLodInfo *lodInfo = &model->lodInfo[lod];
     iassert(lodInfo->surfIndex + lodInfo->numsurfs <= model->numsurfs);
-    *surfaces = &model->surfs[lodInfo[lod].surfIndex];
-    return lodInfo[lod].numsurfs;
+    if (lodInfo->surfIndex + lodInfo->numsurfs > model->numsurfs)
+    {
+        *surfaces = NULL;
+        return 0;
+    }
+    *surfaces = lodInfo->numsurfs ? &model->surfs[lodInfo->surfIndex] : NULL;
+    return lodInfo->numsurfs;
 }
 
 XSurface *__cdecl XModelGetSurface(const XModel *model, int lod, int surfIndex)
@@ -76,7 +84,12 @@ int __cdecl XModelGetNumLods(const XModel *model)
 
 double __cdecl XModelGetLodOutDist(const XModel *model)
 {
-    return *((float *)&model->parentList + 7 * XModelGetNumLods(model));
+    int count = XModelGetNumLods(model);
+    if (count <= 0 || count > MAX_LODS)
+    {
+        return 0.0;
+    }
+    return model->lodInfo[count - 1].dist;
 }
 
 int __cdecl XModelNumBones(const XModel *model)

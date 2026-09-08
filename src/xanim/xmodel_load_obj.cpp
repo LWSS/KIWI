@@ -107,69 +107,68 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     uint vertListIndex,
     void *(__cdecl *Alloc)(int))
 {
-    unsigned __int8 *v3; // eax
-    int v5; // [esp+64h] [ebp-134h]
-    int v7; // [esp+6Ch] [ebp-12Ch]
-    int v9; // [esp+74h] [ebp-124h]
-    int v11; // [esp+7Ch] [ebp-11Ch]
-    int v13; // [esp+84h] [ebp-114h]
-    int v15; // [esp+8Ch] [ebp-10Ch]
-    float *v16; // [esp+90h] [ebp-108h]
-    float *v17; // [esp+94h] [ebp-104h]
-    float *v18; // [esp+98h] [ebp-100h]
-    float *v19; // [esp+9Ch] [ebp-FCh]
-    GenericAabbTree *builtNode; // [esp+A0h] [ebp-F8h]
-    uint leafIndex; // [esp+A4h] [ebp-F4h]
-    float nodeMins[3]; // [esp+A8h] [ebp-F0h] BYREF
+    unsigned __int8 *v3;            // eax
+    int v5;                         // [esp+64h] [ebp-134h]
+    int v7;                         // [esp+6Ch] [ebp-12Ch]
+    int v9;                         // [esp+74h] [ebp-124h]
+    int v11;                        // [esp+7Ch] [ebp-11Ch]
+    int v13;                        // [esp+84h] [ebp-114h]
+    int v15;                        // [esp+8Ch] [ebp-10Ch]
+    float *v16;                     // [esp+90h] [ebp-108h]
+    float *v17;                     // [esp+94h] [ebp-104h]
+    float *v18;                     // [esp+98h] [ebp-100h]
+    float *v19;                     // [esp+9Ch] [ebp-FCh]
+    GenericAabbTree *builtNode;     // [esp+A0h] [ebp-F8h]
+    uint leafIndex;                 // [esp+A4h] [ebp-F4h]
+    float nodeMins[3];              // [esp+A8h] [ebp-F0h] BYREF
     XSurfaceCollisionNode *outNode; // [esp+B4h] [ebp-E4h]
-    uint leafEnd; // [esp+B8h] [ebp-E0h]
-    float nodeMaxs[3]; // [esp+BCh] [ebp-DCh] BYREF
-    uint allocSize; // [esp+C8h] [ebp-D0h]
-    uint alignedAddr; // [esp+CCh] [ebp-CCh]
-    unsigned __int8 *alloced; // [esp+D0h] [ebp-C8h]
-    float combinedVolume; // [esp+D4h] [ebp-C4h]
-    float thisVolume; // [esp+D8h] [ebp-C0h]
-    float tmp[3]; // [esp+DCh] [ebp-BCh] BYREF
-    float prevVolume; // [esp+E8h] [ebp-B0h]
-    bool merge; // [esp+EFh] [ebp-A9h]
-    float triMins[3]; // [esp+F0h] [ebp-A8h] BYREF
-    float triMaxs[3]; // [esp+FCh] [ebp-9Ch] BYREF
-    XSurfaceCollisionTree *tree; // [esp+108h] [ebp-90h]
-    bool generateLeafsPass; // [esp+10Fh] [ebp-89h]
-    uint nodeIndex; // [esp+110h] [ebp-88h]
-    uint triEndIndex; // [esp+114h] [ebp-84h]
-    float prevMins[3]; // [esp+118h] [ebp-80h] BYREF
-    uint leafCount; // [esp+124h] [ebp-74h]
+    uint leafEnd;                   // [esp+B8h] [ebp-E0h]
+    float nodeMaxs[3];              // [esp+BCh] [ebp-DCh] BYREF
+    uint allocSize;                 // [esp+C8h] [ebp-D0h]
+    uintptr_t alignedAddr;          // [esp+CCh] [ebp-CCh]
+    unsigned __int8 *alloced;       // [esp+D0h] [ebp-C8h]
+    float combinedVolume;           // [esp+D4h] [ebp-C4h]
+    float thisVolume;               // [esp+D8h] [ebp-C0h]
+    float tmp[3];                   // [esp+DCh] [ebp-BCh] BYREF
+    float prevVolume;               // [esp+E8h] [ebp-B0h]
+    bool merge;                     // [esp+EFh] [ebp-A9h]
+    float triMins[3];               // [esp+F0h] [ebp-A8h] BYREF
+    float triMaxs[3];               // [esp+FCh] [ebp-9Ch] BYREF
+    XSurfaceCollisionTree *tree;    // [esp+108h] [ebp-90h]
+    bool generateLeafsPass;         // [esp+10Fh] [ebp-89h]
+    uint nodeIndex;                 // [esp+110h] [ebp-88h]
+    uint triEndIndex;               // [esp+114h] [ebp-84h]
+    float prevMins[3];              // [esp+118h] [ebp-80h] BYREF
+    uint leafCount;                 // [esp+124h] [ebp-74h]
     GenericAabbTreeOptions options; // [esp+128h] [ebp-70h] BYREF
-    uint nodeCount; // [esp+150h] [ebp-48h]
-    float globalMaxs[3]; // [esp+154h] [ebp-44h] BYREF
-    uint triIndex; // [esp+160h] [ebp-38h]
-    float prevMaxs[3]; // [esp+164h] [ebp-34h] BYREF
-    bool lastMergeable; // [esp+173h] [ebp-25h]
-    float globalMins[3]; // [esp+174h] [ebp-24h] BYREF
-    float globalDelta[3]; // [esp+180h] [ebp-18h] BYREF
-    uint triBeginIndex; // [esp+18Ch] [ebp-Ch]
-    XRigidVertList *vertList; // [esp+190h] [ebp-8h]
-    uint allocedLeafCount; // [esp+194h] [ebp-4h]
+    uint nodeCount;                 // [esp+150h] [ebp-48h]
+    float globalMaxs[3];            // [esp+154h] [ebp-44h] BYREF
+    uint triIndex;                  // [esp+160h] [ebp-38h]
+    float prevMaxs[3];              // [esp+164h] [ebp-34h] BYREF
+    bool lastMergeable;             // [esp+173h] [ebp-25h]
+    float globalMins[3];            // [esp+174h] [ebp-24h] BYREF
+    float globalDelta[3];           // [esp+180h] [ebp-18h] BYREF
+    uint triBeginIndex;             // [esp+18Ch] [ebp-Ch]
+    XRigidVertList *vertList;       // [esp+190h] [ebp-8h]
+    uint allocedLeafCount;          // [esp+194h] [ebp-4h]
 
     iassert(!surface->deformed);
     iassert(vertListIndex >= 0 && vertListIndex < surface->vertListCount);
     vertList = &surface->vertList[vertListIndex];
-    tree = (XSurfaceCollisionTree*)Alloc(40);
+    tree = (XSurfaceCollisionTree *)Alloc(sizeof(XSurfaceCollisionTree));
     vertList->collisionTree = tree;
     iassert(surface->triCount > 0);
-    memset(&options, 0, 12);
-    options.mins = 0;
-    options.maxs = 0;
-    // treeNodePool (+0x18) is outside the binary's `memset(&options, 0, 12)`, and the
-    // failure epilogue free()s it — so it must be null before the first goto can be taken.
-    options.treeNodePool = 0;
+    memset(&options, 0, sizeof(GenericAabbTreeOptions));
     options.maintainValidBounds = 1;
     if (!tree)
+    {
         goto kiwiCollisionTreeAllocFailed;
-    options.treeNodePool = (GenericAabbTree*)malloc(0x20000u);
+    }
+    options.treeNodePool = (GenericAabbTree *)malloc(0x20000u);
     if (!options.treeNodePool)
+    {
         goto kiwiCollisionTreeAllocFailed;
+    }
     options.treeNodeLimit = 0x2000;
     options.minItemsPerLeaf = 1;
     options.maxItemsPerLeaf = 16;
@@ -202,14 +201,18 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
                 Vec3Sub(prevMaxs, prevMins, tmp);
                 combinedVolume = tmp[0] * tmp[1] * tmp[2];
                 if (combinedVolume <= prevVolume + thisVolume)
+                {
                     merge = 1;
+                }
             }
             if (merge)
             {
                 if (generateLeafsPass)
                 {
                     if (!leafCount)
+                    {
                         MyAssertHandler(".\\r_xsurface_load_obj.cpp", 284, 0, "%s", "leafCount > 0");
+                    }
                     iassert((leafCount - 1) < allocedLeafCount);
                     v19 = options.mins[leafCount - 1];
                     v19[0] = prevMins[0];
@@ -232,12 +235,14 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
                 {
                     iassert(leafCount < allocedLeafCount);
                     if (triIndex >= 0x8000)
+                    {
                         MyAssertHandler(
                             ".\\r_xsurface_load_obj.cpp",
                             298,
                             0,
                             "%s",
                             "triIndex < XSURFACE_COLLISION_LEAF_TWO_TRIANGLES");
+                    }
                     tree->leafs[leafCount].triangleBeginIndex = triIndex;
                     vassert((tree->leafs[leafCount].triangleBeginIndex == triIndex), "(triIndex) = %i", triIndex);
                     v17 = options.mins[leafCount];
@@ -263,15 +268,19 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
             }
         }
         if (generateLeafsPass)
+        {
             break;
+        }
         generateLeafsPass = 1;
-        tree->leafs = (XSurfaceCollisionLeaf*)Alloc(2 * leafCount);
+        tree->leafs = (XSurfaceCollisionLeaf *)Alloc(2 * leafCount);
         tree->leafCount = leafCount;
         options.mins = (float(*)[3])malloc(12 * leafCount);
         options.maxs = (float(*)[3])malloc(12 * leafCount);
         // Only a null from a NON-zero request is a failure: malloc(0) may return either.
         if (!tree->leafs || (leafCount && (!options.mins || !options.maxs)))
+        {
             goto kiwiCollisionTreeAllocFailed;
+        }
         options.items = tree->leafs;
         options.itemCount = leafCount;
         options.itemSize = 2;
@@ -288,14 +297,18 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
     nodeCount = BuildAabbTree(&options);
     tree->nodeCount = nodeCount;
     allocSize = 16 * nodeCount + 15;
-    v3 = (byte*)Alloc(allocSize);
+    v3 = (byte *)Alloc(allocSize);
     if (!v3)
+    {
         goto kiwiCollisionTreeAllocFailed;
+    }
     alloced = v3;
-    alignedAddr = (uintptr_t)(v3 + 15) & 0xFFFFFFF0;
-    tree->nodes = (XSurfaceCollisionNode*)alignedAddr;
+    alignedAddr = (uintptr_t)(v3 + 15) & ~(uintptr_t)15;
+    tree->nodes = (XSurfaceCollisionNode *)alignedAddr;
     if (((uintptr_t)tree->nodes & 0xF) != 0)
+    {
         MyAssertHandler(".\\r_xsurface_load_obj.cpp", 352, 0, "%s", "!(reinterpret_cast< uint32_t >( tree->nodes ) & 0x0F)");
+    }
     for (nodeIndex = 0; nodeIndex != nodeCount; ++nodeIndex)
     {
         outNode = &tree->nodes[nodeIndex];
@@ -303,15 +316,21 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         leafEnd = builtNode->itemCount + builtNode->firstItem;
         ClearBounds(nodeMins, nodeMaxs);
         for (leafIndex = builtNode->firstItem; leafIndex != leafEnd; ++leafIndex)
+        {
             ExpandBounds(options.mins[leafIndex], options.maxs[leafIndex], nodeMins, nodeMaxs);
+        }
 
         v15 = (tree->scale[0] * (tree->trans[0] + nodeMins[0]) - 0.5);
         if (v15 >= 0)
         {
             if (v15 <= 0xFFFF)
+            {
                 outNode->aabb.mins[0] = (ushort)v15;
+            }
             else
+            {
                 outNode->aabb.mins[0] = 0xFFFF;
+            }
         }
         else
         {
@@ -322,9 +341,13 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v13 >= 0)
         {
             if (v13 <= 0xFFFF)
+            {
                 outNode->aabb.mins[1] = (ushort)v13;
+            }
             else
+            {
                 outNode->aabb.mins[1] = 0xFFFF;
+            }
         }
         else
         {
@@ -335,9 +358,13 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v11 >= 0)
         {
             if (v11 <= 0xFFFF)
+            {
                 outNode->aabb.mins[2] = (ushort)v11;
+            }
             else
+            {
                 outNode->aabb.mins[2] = 0xFFFF;
+            }
         }
         else
         {
@@ -348,22 +375,30 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v9 >= 0)
         {
             if (v9 <= 0xFFFF)
+            {
                 outNode->aabb.maxs[0] = (ushort)v9;
+            }
             else
+            {
                 outNode->aabb.maxs[0] = 0xFFFF;
+            }
         }
         else
         {
             outNode->aabb.maxs[0] = 0;
         }
-        
+
         v7 = (tree->scale[1] * (tree->trans[1] + nodeMaxs[1]) + 0.5);
         if (v7 >= 0)
         {
             if (v7 <= 0xFFFF)
+            {
                 outNode->aabb.maxs[1] = (ushort)v7;
+            }
             else
+            {
                 outNode->aabb.maxs[1] = 0xFFFF;
+            }
         }
         else
         {
@@ -374,9 +409,13 @@ void __cdecl XModelReadSurface_BuildCollisionTree(
         if (v5 >= 0)
         {
             if (v5 <= 0xFFFF)
+            {
                 outNode->aabb.maxs[2] = (ushort)v5;
+            }
             else
+            {
                 outNode->aabb.maxs[2] = 0xFFFF;
+            }
         }
         else
         {
@@ -1153,17 +1192,24 @@ void __cdecl XModelLoadCollData(
     iassert(!model->contents);
 
     model->numCollSurfs = Buf_Read<int>(pos);
+    if (model->numCollSurfs < 0 || model->numCollSurfs > INT_MAX / sizeof(XModelCollSurf_s))
+    {
+        Com_Error(ERR_DROP, "XModelLoadCollData: invalid collision surface count for %s", name);
+    }
 
     if (model->numCollSurfs)
     {
-        model->collSurfs = (XModelCollSurf_s *)AllocColl(44 * model->numCollSurfs);
+        model->collSurfs = (XModelCollSurf_s *)AllocColl(sizeof(XModelCollSurf_s) * model->numCollSurfs);
         for (int i = 0; i < model->numCollSurfs; ++i)
         {
             XModelCollSurf_s *surf = &model->collSurfs[i];
 
             int numCollTris = Buf_Read<int>(pos);
 
-            iassert(numCollTris);
+            if (numCollTris <= 0 || numCollTris > INT_MAX / sizeof(XModelCollTri_s))
+            {
+                Com_Error(ERR_DROP, "XModelLoadCollData: invalid collision triangle count for %s", name);
+            }
 
             surf->numCollTris = numCollTris;
             surf->collTris = (XModelCollTri_s *)AllocColl(sizeof(XModelCollTri_s) * numCollTris);
@@ -1215,7 +1261,10 @@ void __cdecl XModelLoadCollData(
             model->contents |= surf->contents;
         }
     }
-    else iassert(!model->collSurfs);
+    else
+    {
+        iassert(!model->collSurfs);
+    }
 }
 
 char __cdecl XModelLoadConfigFile(const char *name, unsigned __int8 **pos, XModelConfig *config)
@@ -1327,32 +1376,32 @@ void __cdecl XModelCopyXModelParts(const XModelPartsLoad *modelParts, XModel *mo
 
 XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(__cdecl *AllocColl)(int))
 {
-    int *partBits; // edx
-    Material *v6; // eax
-    PhysPreset *v7; // eax
+    int *partBits;                // edx
+    Material *v6;                 // eax
+    PhysPreset *v7;               // eax
     PhysGeomList *PhysicsCollMap; // eax
-    unsigned __int8 *pos; // [esp+68h] [ebp-160Ch] BYREF
-    int j; // [esp+6Ch] [ebp-1608h]
-    int numBones; // [esp+70h] [ebp-1604h]
-    char dest[68]; // [esp+74h] [ebp-1600h] BYREF
-    float diff[12]; // [esp+B8h] [ebp-15BCh] BYREF
-    int surfIndex; // [esp+E8h] [ebp-158Ch]
-    XModel *model; // [esp+ECh] [ebp-1588h]
-    float *a; // [esp+F0h] [ebp-1584h]
-    void *buf = NULL; // [esp+F4h] [ebp-1580h] BYREF
-    XModelLodInfo *modelLodInfo; // [esp+F8h] [ebp-157Ch]
-    float *sum; // [esp+FCh] [ebp-1578h]
-    const char *v29; // [esp+104h] [ebp-1570h]
-    int filelen; // [esp+108h] [ebp-156Ch]
-    char v31[256]; // [esp+10Ch] [ebp-1568h] BYREF
-    float *b; // [esp+20Ch] [ebp-1468h]
-    XModelSurfs outModelSurfs; // [esp+210h] [ebp-1464h] BYREF
-    XBoneInfo *boneInfos; // [esp+224h] [ebp-1450h]
-    int i; // [esp+228h] [ebp-144Ch]
-    int numsurfs; // [esp+230h] [ebp-1444h]
-    XModelConfig config; // [esp+234h] [ebp-1440h] BYREF
-    XModelPartsLoad *modelParts; // [esp+166Ch] [ebp-8h]
-    const char *v40; // [esp+1670h] [ebp-4h]
+    unsigned __int8 *pos;         // [esp+68h] [ebp-160Ch] BYREF
+    int j;                        // [esp+6Ch] [ebp-1608h]
+    int numBones;                 // [esp+70h] [ebp-1604h]
+    char dest[68];                // [esp+74h] [ebp-1600h] BYREF
+    float diff[12];               // [esp+B8h] [ebp-15BCh] BYREF
+    int surfIndex;                // [esp+E8h] [ebp-158Ch]
+    XModel *model;                // [esp+ECh] [ebp-1588h]
+    float *a;                     // [esp+F0h] [ebp-1584h]
+    void *buf = NULL;             // [esp+F4h] [ebp-1580h] BYREF
+    XModelLodInfo *modelLodInfo;  // [esp+F8h] [ebp-157Ch]
+    float *sum;                   // [esp+FCh] [ebp-1578h]
+    const char *v29;              // [esp+104h] [ebp-1570h]
+    int filelen;                  // [esp+108h] [ebp-156Ch]
+    char v31[256];                // [esp+10Ch] [ebp-1568h] BYREF
+    float *b;                     // [esp+20Ch] [ebp-1468h]
+    XModelSurfs outModelSurfs;    // [esp+210h] [ebp-1464h] BYREF
+    XBoneInfo *boneInfos;         // [esp+224h] [ebp-1450h]
+    int i;                        // [esp+228h] [ebp-144Ch]
+    int numsurfs;                 // [esp+230h] [ebp-1444h]
+    XModelConfig config;          // [esp+234h] [ebp-1440h] BYREF
+    XModelPartsLoad *modelParts;  // [esp+166Ch] [ebp-8h]
+    const char *v40;              // [esp+1670h] [ebp-4h]
     unsigned __int8 *v36;
 
     if (Com_IsLegacyXModelName(name))
@@ -1385,7 +1434,9 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
 
     pos = (unsigned __int8 *)buf;
     if (!XModelLoadConfigFile(name, &pos, &config))
+    {
         goto LABEL_28;
+    }
 
     model = (XModel *)Alloc(sizeof(XModel));
     model->memUsage = sizeof(XModel);
@@ -1449,7 +1500,7 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
             iassert(config.entries[0].filename[0]);
             model->numsurfs = numsurfs;
             model->surfs = (XSurface *)Alloc(sizeof(XSurface) * numsurfs);
-            model->materialHandles = (Material **)Alloc(4 * numsurfs);
+            model->materialHandles = (Material **)Alloc(sizeof(Material *) * numsurfs);
             surfIndex = 0;
             for (i = 0; i < 4; ++i)
             {
@@ -1458,7 +1509,9 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
                 {
                     pos += 2;
                     if (!XModelSurfsPrecache(model, config.entries[i].filename, Alloc, modelLodInfo->numsurfs, name, &outModelSurfs))
+                    {
                         goto LABEL_28;
+                    }
                     partBits = modelLodInfo->partBits;
                     modelLodInfo->partBits[0] = outModelSurfs.partBits[0];
                     partBits[1] = outModelSurfs.partBits[1];
@@ -1474,14 +1527,18 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
                         v40 = (const char *)pos;
                         pos += strlen((const char *)pos) + 1;
                         if (!strcmp(v40, "$default"))
+                        {
                             v40 = "$default3d";
+                        }
                         v29 = "mc/";
                         Com_sprintf(v31, 0x100u, "%s%s", "mc/", v40);
                         v6 = Material_RegisterHandle(v31, 8);
                         model->materialHandles[surfIndex] = v6;
                         if (outModelSurfs.surfs[j].deformed)
+                        {
                             model->lodRampType = 1;
-                        qmemcpy(&model->surfs[surfIndex++], &outModelSurfs.surfs[j], sizeof(model->surfs[surfIndex++]));
+                        }
+                        qmemcpy(&model->surfs[surfIndex++], &outModelSurfs.surfs[j], sizeof(XSurface));
                     }
                 }
             }
@@ -1498,7 +1555,7 @@ XModel *__cdecl XModelLoadFile(char *name, void *(__cdecl *Alloc)(int), void *(_
             diff[10] = 0.0;
             diff[11] = 1.0;
 
-            R_GetXModelBounds(model, (const float (*)[3]) & diff[3], model->mins, model->maxs);
+            R_GetXModelBounds(model, (const float(*)[3]) & diff[3], model->mins, model->maxs);
         }
 
         FS_FreeFile((char *)buf);
@@ -1779,7 +1836,8 @@ static XModel *__cdecl XModelCreateDefault(void *(__cdecl *Alloc)(int))
 {
     XModel *model; // [esp+0h] [ebp-4h]
 
-    model = (XModel *)Alloc(332);
+    model = (XModel *)Alloc(sizeof(XModel));
+    memset(model, 0, sizeof(XModel));
     XModelMakeDefault(model);
     return model;
 }

@@ -529,17 +529,17 @@ char __cdecl AddBrushBevels(
     const char *mapname,
     uint brushnum)
 {
-    _DWORD *v9; // ecx
-    float *v10; // [esp+Ch] [ebp-60h]
-    float *v11; // [esp+10h] [ebp-5Ch]
-    uint order; // [esp+18h] [ebp-54h]
-    float planetemp; // [esp+1Ch] [ebp-50h]
-    float planetemp_4; // [esp+20h] [ebp-4Ch]
-    float planetemp_8; // [esp+24h] [ebp-48h]
-    float planetemp_12; // [esp+28h] [ebp-44h]
-    int dir; // [esp+2Ch] [ebp-40h]
-    uint i; // [esp+30h] [ebp-3Ch]
-    uint axis; // [esp+34h] [ebp-38h]
+    _DWORD *v9;                     // ecx
+    float *v10;                     // [esp+Ch] [ebp-60h]
+    float *v11;                     // [esp+10h] [ebp-5Ch]
+    uint order;                     // [esp+18h] [ebp-54h]
+    float planetemp;                // [esp+1Ch] [ebp-50h]
+    float planetemp_4;              // [esp+20h] [ebp-4Ch]
+    float planetemp_8;              // [esp+24h] [ebp-48h]
+    float planetemp_12;             // [esp+28h] [ebp-44h]
+    int dir;                        // [esp+2Ch] [ebp-40h]
+    uint i;                         // [esp+30h] [ebp-3Ch]
+    uint axis;                      // [esp+34h] [ebp-38h]
     adjacencyWinding_t tempWinding; // [esp+38h] [ebp-34h] BYREF
 
     order = 0;
@@ -556,16 +556,20 @@ char __cdecl AddBrushBevels(
                     Com_PrintError(CON_CHANNEL_ANIM, "ERROR: MAX_BUILD_SIDES for physics collmap %s, Brush %i\n", mapname, brushnum);
                     return 0;
                 }
-                v9 = (uint32*)&(*planes)[4 * *sideCount];
+                v9 = (uint32 *)&(*planes)[4 * *sideCount];
                 *v9 = 0;
                 v9[1] = 0;
                 v9[2] = 0;
                 v9[3] = 0;
                 (*planes)[4 * *sideCount + axis] = (float)dir;
                 if (dir == 1)
+                {
                     (*planes)[4 * *sideCount + 3] = maxs[axis];
+                }
                 else
+                {
                     (*planes)[4 * *sideCount + 3] = -mins[axis];
+                }
                 windings[(*sideCount)++].numsides = 0;
             }
             if (i != order)
@@ -584,7 +588,7 @@ char __cdecl AddBrushBevels(
                 v11[1] = planetemp_4;
                 v11[2] = planetemp_8;
                 v11[3] = planetemp_12;
-                qmemcpy(&tempWinding, &windings[order], sizeof(tempWinding));
+                qmemcpy(&tempWinding, &windings[order], sizeof(adjacencyWinding_t));
                 qmemcpy(&windings[order], &windings[i], sizeof(adjacencyWinding_t));
                 qmemcpy(&windings[i], &tempWinding, sizeof(adjacencyWinding_t));
             }
@@ -838,48 +842,56 @@ char __cdecl Xmodel_ParsePhysicsBrush(
     PhysGeomInfo *geom,
     void *(__cdecl *Alloc)(int))
 {
-    cplane_s *v6; // [esp+18h] [ebp-68F8h]
-    float *v7; // [esp+1Ch] [ebp-68F4h]
-    float m[3]; // [esp+28h] [ebp-68E8h] BYREF
-    float v1[3]; // [esp+34h] [ebp-68DCh] BYREF
-    float v2[3]; // [esp+40h] [ebp-68D0h] BYREF
-    int order; // [esp+4Ch] [ebp-68C4h]
-    uint sideCount; // [esp+50h] [ebp-68C0h] BYREF
-    uint dir; // [esp+54h] [ebp-68BCh]
-    float mins[3]; // [esp+58h] [ebp-68B8h] BYREF
-    int edgeIndex; // [esp+64h] [ebp-68ACh]
-    float plane[128]; // [esp+68h] [ebp-68A8h] BYREF
+    cplane_s *v6;                         // [esp+18h] [ebp-68F8h]
+    float *v7;                            // [esp+1Ch] [ebp-68F4h]
+    float m[3];                           // [esp+28h] [ebp-68E8h] BYREF
+    float v1[3];                          // [esp+34h] [ebp-68DCh] BYREF
+    float v2[3];                          // [esp+40h] [ebp-68D0h] BYREF
+    int order;                            // [esp+4Ch] [ebp-68C4h]
+    uint sideCount;                       // [esp+50h] [ebp-68C0h] BYREF
+    uint dir;                             // [esp+54h] [ebp-68BCh]
+    float mins[3];                        // [esp+58h] [ebp-68B8h] BYREF
+    int edgeIndex;                        // [esp+64h] [ebp-68ACh]
+    float plane[128];                     // [esp+68h] [ebp-68A8h] BYREF
     SimplePlaneIntersection OutPts[1024]; // [esp+268h] [ebp-66A8h] BYREF
-    int InPtCount; // [esp+6268h] [ebp-6A8h]
-    uint ptIndex; // [esp+626Ch] [ebp-6A4h]
-    int sideIndex; // [esp+6270h] [ebp-6A0h]
-    float maxs[3]; // [esp+6274h] [ebp-69Ch] BYREF
-    adjacencyWinding_t windings[32]; // [esp+6280h] [ebp-690h] BYREF
-    int v29; // [esp+6900h] [ebp-10h]
-    parseInfo_t *v30; // [esp+6904h] [ebp-Ch]
-    int totalEdges; // [esp+6908h] [ebp-8h]
-    uint axis; // [esp+690Ch] [ebp-4h]
+    int InPtCount;                        // [esp+6268h] [ebp-6A8h]
+    uint ptIndex;                         // [esp+626Ch] [ebp-6A4h]
+    int sideIndex;                        // [esp+6270h] [ebp-6A0h]
+    float maxs[3];                        // [esp+6274h] [ebp-69Ch] BYREF
+    adjacencyWinding_t windings[32];      // [esp+6280h] [ebp-690h] BYREF
+    int v29;                              // [esp+6900h] [ebp-10h]
+    parseInfo_t *v30;                     // [esp+6904h] [ebp-Ch]
+    int totalEdges;                       // [esp+6908h] [ebp-8h]
+    uint axis;                            // [esp+690Ch] [ebp-4h]
 
     v29 = 32;
 
     iassert(geom);
 
     sideCount = 0;
-    Map_SkipOptionalArg((const char**)file, "layer");
+    Map_SkipOptionalArg((const char **)file, "layer");
 
-    if (!Map_SkipNamedFlags((const char**)file, "contents"))
+    if (!Map_SkipNamedFlags((const char **)file, "contents"))
+    {
         return 0;
+    }
 
     if (!Map_SkipNamedFlags((const char **)file, "toolFlags"))
+    {
         return 0;
+    }
 
     while (1)
     {
         v30 = Com_Parse(file);
         if (!v30->token[0])
+        {
             return 0;
+        }
         if (!strcmp(v30->token, "}"))
+        {
             break;
+        }
 
         Com_UngetToken();
 
@@ -889,19 +901,23 @@ char __cdecl Xmodel_ParsePhysicsBrush(
             return 0;
         }
 
-        Com_Parse1DMatrix((const char**)file, 3, m);
-        Com_Parse1DMatrix((const char**)file, 3, v1);
-        Com_Parse1DMatrix((const char**)file, 3, v2);
+        Com_Parse1DMatrix((const char **)file, 3, m);
+        Com_Parse1DMatrix((const char **)file, 3, v1);
+        Com_Parse1DMatrix((const char **)file, 3, v2);
         PlaneFromPoints(&plane[4 * sideCount], m, v1, v2);
         SnapPlane(&plane[4 * sideCount++]);
-        Com_SkipRestOfLine((const char**)file);
+        Com_SkipRestOfLine((const char **)file);
     }
 
     if (!RemoveDuplicateBrushPlanes((float(*)[4])plane, &sideCount, mapname, brushCount))
+    {
         return 0;
+    }
 
     if (!sideCount)
+    {
         return 0;
+    }
 
     InPtCount = GetPlaneIntersections((const float(*)[4])plane, sideCount, OutPts, 0x400u);
     totalEdges = 0;
@@ -919,7 +935,9 @@ char __cdecl Xmodel_ParsePhysicsBrush(
             if (mins[axis] <= (double)OutPts[ptIndex].xyz[axis])
             {
                 if (maxs[axis] < (double)OutPts[ptIndex].xyz[axis])
+                {
                     maxs[axis] = OutPts[ptIndex].xyz[axis];
+                }
             }
             else
             {
@@ -929,19 +947,21 @@ char __cdecl Xmodel_ParsePhysicsBrush(
     }
 
     if (!AddBrushBevels((float(*)[4])plane, windings, &sideCount, 0x20u, mins, maxs, mapname, brushCount))
+    {
         return 0;
+    }
 
     InPtCount = GetPlaneIntersections((const float(*)[4])plane, sideCount, OutPts, 0x400u);
     totalEdges = 0;
     for (sideIndex = 0; sideIndex < sideCount; ++sideIndex)
     {
         if (BuildBrushdAdjacencyWindingForSide(
-            &plane[4 * sideIndex],
-            sideIndex,
-            OutPts,
-            InPtCount,
-            &windings[sideIndex],
-            12))
+                &plane[4 * sideIndex],
+                sideIndex,
+                OutPts,
+                InPtCount,
+                &windings[sideIndex],
+                12))
         {
             iassert(windings[sideIndex].numsides > 0);
             totalEdges += windings[sideIndex].numsides;
@@ -953,9 +973,11 @@ char __cdecl Xmodel_ParsePhysicsBrush(
     }
 
     if (!totalEdges)
+    {
         return 0;
+    }
 
-    geom->brush = (BrushWrapper*)Alloc(80);
+    geom->brush = (BrushWrapper *)Alloc(sizeof(BrushWrapper));
     memset(geom->brush, 0, sizeof(BrushWrapper));
 
     geom->brush->mins[0] = mins[0];
@@ -967,7 +989,7 @@ char __cdecl Xmodel_ParsePhysicsBrush(
     geom->brush->maxs[2] = maxs[2];
 
     geom->brush->totalEdgeCount = totalEdges;
-    geom->brush->baseAdjacentSide = (byte*)Alloc(totalEdges);
+    geom->brush->baseAdjacentSide = (byte *)Alloc(totalEdges);
 
     edgeIndex = 0;
     order = 0;
@@ -992,8 +1014,8 @@ char __cdecl Xmodel_ParsePhysicsBrush(
     geom->brush->numsides = sideCount - 6;
     if (geom->brush->numsides)
     {
-        geom->brush->sides = (cbrushside_t*)Alloc(12 * geom->brush->numsides);
-        geom->brush->planes = (cplane_s*)Alloc(20 * geom->brush->numsides);
+        geom->brush->sides = (cbrushside_t *)Alloc(sizeof(cbrushside_t) * geom->brush->numsides);
+        geom->brush->planes = (cplane_s *)Alloc(sizeof(cplane_s) * geom->brush->numsides);
         sideIndex = 0;
         while (sideIndex < geom->brush->numsides)
         {
@@ -1095,29 +1117,31 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
     uint geomCount,
     void *(__cdecl *Alloc)(int))
 {
-    int CurrentParseLine; // eax
-    float v6; // [esp+0h] [ebp-120h]
-    float v7; // [esp+4h] [ebp-11Ch]
-    float v8; // [esp+8h] [ebp-118h]
-    float v9; // [esp+Ch] [ebp-114h]
-    float v10; // [esp+10h] [ebp-110h]
-    float v11; // [esp+14h] [ebp-10Ch]
-    float v12; // [esp+18h] [ebp-108h]
-    float v13; // [esp+1Ch] [ebp-104h]
-    float v14; // [esp+20h] [ebp-100h]
-    float v15; // [esp+24h] [ebp-FCh]
-    float v16; // [esp+28h] [ebp-F8h]
-    float v17; // [esp+2Ch] [ebp-F4h]
-    float mins[3]; // [esp+E4h] [ebp-3Ch] BYREF
-    float geomMaxs[3]; // [esp+F0h] [ebp-30h] BYREF
-    float maxs[3]; // [esp+FCh] [ebp-24h] BYREF
+    int CurrentParseLine;   // eax
+    float v6;               // [esp+0h] [ebp-120h]
+    float v7;               // [esp+4h] [ebp-11Ch]
+    float v8;               // [esp+8h] [ebp-118h]
+    float v9;               // [esp+Ch] [ebp-114h]
+    float v10;              // [esp+10h] [ebp-110h]
+    float v11;              // [esp+14h] [ebp-10Ch]
+    float v12;              // [esp+18h] [ebp-108h]
+    float v13;              // [esp+1Ch] [ebp-104h]
+    float v14;              // [esp+20h] [ebp-100h]
+    float v15;              // [esp+24h] [ebp-FCh]
+    float v16;              // [esp+28h] [ebp-F8h]
+    float v17;              // [esp+2Ch] [ebp-F4h]
+    float mins[3];          // [esp+E4h] [ebp-3Ch] BYREF
+    float geomMaxs[3];      // [esp+F0h] [ebp-30h] BYREF
+    float maxs[3];          // [esp+FCh] [ebp-24h] BYREF
     PhysGeomList *geomList; // [esp+108h] [ebp-18h]
-    float geomMins[3]; // [esp+10Ch] [ebp-14h] BYREF
-    const char *token; // [esp+118h] [ebp-8h]
-    uint geomIndex; // [esp+11Ch] [ebp-4h]
+    float geomMins[3];      // [esp+10Ch] [ebp-14h] BYREF
+    const char *token;      // [esp+118h] [ebp-8h]
+    uint geomIndex;         // [esp+11Ch] [ebp-4h]
 
     if (!geomCount)
+    {
         MyAssertHandler(".\\xanim\\xmodel_load_phys_collmap.cpp", 840, 0, "%s", "geomCount > 0");
+    }
     if (!strcmp(Com_Parse(file)->token, "iwmap"))
     {
         token = Com_Parse(file)->token;
@@ -1127,18 +1151,22 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
             {
                 token = Com_Parse(file)->token;
                 if (!*token)
+                {
                     return 0;
+                }
                 if (!strcmp(token, "{"))
+                {
                     break;
+                }
                 Com_SkipRestOfLine(file);
             }
             if (!strcmp(token, "{"))
             {
-                geomList = (PhysGeomList*)Alloc(44);
+                geomList = (PhysGeomList *)Alloc(sizeof(PhysGeomList));
                 memset(geomList, 0, sizeof(PhysGeomList));
                 geomList->count = geomCount;
-                geomList->geoms = (PhysGeomInfo*)Alloc(68 * geomCount);
-                memset(geomList->geoms, 0, 68 * geomCount);
+                geomList->geoms = (PhysGeomInfo *)Alloc(sizeof(PhysGeomInfo) * geomCount);
+                memset(geomList->geoms, 0, sizeof(PhysGeomInfo) * geomCount);
                 geomIndex = 0;
                 while (geomIndex < geomCount)
                 {
@@ -1149,12 +1177,16 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
                         return 0;
                     }
                     if (!strcmp(token, "}"))
+                    {
                         break;
+                    }
                     if (!strcmp(token, "{"))
                     {
                         token = Com_Parse(file)->token;
                         if (!*token)
+                        {
                             break;
+                        }
                         if (!strcmp(token, "curve"))
                         {
                             Com_PrintError(CON_CHANNEL_ANIM, "ERROR: cannot have curves in collision maps");
@@ -1168,35 +1200,47 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
                         if (!strcmp(token, "physics_cylinder"))
                         {
                             if (!Xmodel_ParsePhysicsCylinder(file, &geomList->geoms[geomIndex]))
+                            {
                                 return 0;
+                            }
                             if (!Com_MatchToken(file, "}", 0))
+                            {
                                 return 0;
+                            }
                             ++geomIndex;
                         }
                         else if (!strcmp(token, "physics_box"))
                         {
                             if (!Xmodel_ParsePhysicsBox(file, &geomList->geoms[geomIndex]))
+                            {
                                 return 0;
+                            }
                             if (!Com_MatchToken(file, "}", 0))
+                            {
                                 return 0;
+                            }
                             ++geomIndex;
                         }
                         else
                         {
                             Com_UngetToken();
-                            if (!Xmodel_ParsePhysicsBrush((char**)file, name, geomIndex, &geomList->geoms[geomIndex], Alloc))
+                            if (!Xmodel_ParsePhysicsBrush((char **)file, name, geomIndex, &geomList->geoms[geomIndex], Alloc))
+                            {
                                 return 0;
+                            }
                             if (!geomList->geoms[geomIndex].brush)
+                            {
                                 MyAssertHandler(
                                     ".\\xanim\\xmodel_load_phys_collmap.cpp",
                                     930,
                                     1,
                                     "%s",
                                     "geomList->geoms[geomIndex].brush");
+                            }
                             ++geomIndex;
                         }
                     }
-                    else if (!SkipEpair((char*)token, file))
+                    else if (!SkipEpair((char *)token, file))
                     {
                         return 0;
                     }
@@ -1213,39 +1257,63 @@ PhysGeomList *__cdecl Xmodel_ParsePhysicsCollMap(
                     GetGeomAABB(&geomList->geoms[geomIndex], geomMins, geomMaxs);
                     v17 = maxs[0] - geomMaxs[0];
                     if (v17 < 0.0)
+                    {
                         v16 = geomMaxs[0];
+                    }
                     else
+                    {
                         v16 = maxs[0];
+                    }
                     maxs[0] = v16;
                     v15 = maxs[1] - geomMaxs[1];
                     if (v15 < 0.0)
+                    {
                         v14 = geomMaxs[1];
+                    }
                     else
+                    {
                         v14 = maxs[1];
+                    }
                     maxs[1] = v14;
                     v13 = maxs[2] - geomMaxs[2];
                     if (v13 < 0.0)
+                    {
                         v12 = geomMaxs[2];
+                    }
                     else
+                    {
                         v12 = maxs[2];
+                    }
                     maxs[2] = v12;
                     v11 = geomMins[0] - mins[0];
                     if (v11 < 0.0)
+                    {
                         v10 = geomMins[0];
+                    }
                     else
+                    {
                         v10 = mins[0];
+                    }
                     mins[0] = v10;
                     v9 = geomMins[1] - mins[1];
                     if (v9 < 0.0)
+                    {
                         v8 = geomMins[1];
+                    }
                     else
+                    {
                         v8 = mins[1];
+                    }
                     mins[1] = v8;
                     v7 = geomMins[2] - mins[2];
                     if (v7 < 0.0)
+                    {
                         v6 = geomMins[2];
+                    }
                     else
+                    {
                         v6 = mins[2];
+                    }
                     mins[2] = v6;
                 }
                 iassert(mins[0] < maxs[0]);

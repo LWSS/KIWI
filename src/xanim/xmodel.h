@@ -92,14 +92,14 @@ struct XModel // sizeof=0xDC
     struct PhysPreset* physPreset;
     struct PhysGeomList* physGeoms;
 };
-static_assert(sizeof(XModel) == 220);
+static_assert(sizeof(XModel) == (sizeof(void *) == 8 ? 280 : 220));
 
 struct XModelPiece // sizeof=0x10
 {
     XModel *model;
     float offset[3];
 };
-static_assert(sizeof(XModelPiece) == 16);
+static_assert(sizeof(XModelPiece) == (sizeof(void *) == 8 ? 24 : 16));
 
 struct XModelPieces // sizeof=0xC
 {                                       // ...
@@ -107,7 +107,7 @@ struct XModelPieces // sizeof=0xC
     int numpieces;
     XModelPiece *pieces;
 };
-static_assert(sizeof(XModelPieces) == 12);
+static_assert(sizeof(XModelPieces) == (sizeof(void *) == 8 ? 24 : 12));
 
 struct QueueElement // sizeof=0x8
 {                                       // ...
@@ -143,7 +143,7 @@ struct XModelSurfs // sizeof=0x14
     struct XSurface *surfs;                    // ...
     int partBits[4];                    // ...
 };
-static_assert(sizeof(XModelSurfs) == 20);
+static_assert(sizeof(XModelSurfs) == (sizeof(void *) == 8 ? 24 : 20));
 
 struct XModelConfigEntry // sizeof=0x404
 {                                       // ...
@@ -175,7 +175,7 @@ struct XModelPartsLoad // sizeof=0x1C
     unsigned __int8 *partClassification;
     DObjAnimMat *baseMat;
 };
-static_assert(sizeof(XModelPartsLoad) == 28);
+static_assert(sizeof(XModelPartsLoad) == (sizeof(void *) == 8 ? 56 : 28));
 
 struct XModelDefault // sizeof=0x4C
 {                                       // ...

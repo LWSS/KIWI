@@ -93,7 +93,7 @@ void __cdecl DObjDumpInfo(const DObj_s *obj)
 
 bool __cdecl DObjIgnoreCollision(const DObj_s *obj, char modelIndex)
 {
-    return (obj->ignoreCollision & (1 << modelIndex)) != 0;
+    return (obj->ignoreCollision & (1u << modelIndex)) != 0;
 }
 
 void __cdecl DObjGetHierarchyBits(const DObj_s *obj, int boneIndex, int *partBits)
@@ -209,7 +209,7 @@ void __cdecl DObjCreate(DObjModel_s *dobjModels, uint numModels, XAnimTree_s *tr
     iassert((unsigned)numModels <= DOBJ_MAX_SUBMODELS);
     iassert(obj);
 
-    memset((unsigned __int8 *)&obj->skel, 0, sizeof(obj->skel));
+    memset((unsigned __int8 *)&obj->skel, 0, sizeof(DSkel));
     obj->duplicatePartsSize = 0;
     obj->duplicateParts = 0;
     obj->ignoreCollision = 0;
@@ -226,28 +226,32 @@ void __cdecl DObjCreate(DObjModel_s *dobjModels, uint numModels, XAnimTree_s *tr
 
 void __cdecl DObjCreateDuplicateParts(DObj_s *obj, DObjModel_s *dobjModels, uint numModels)
 {
-    int numBones; // [esp+30h] [ebp-5ACh]
-    unsigned __int8 modelParents[32]; // [esp+34h] [ebp-5A8h] BYREF
-    int boneIndex; // [esp+58h] [ebp-584h]
-    DObjModel_s *dobjModel; // [esp+5Ch] [ebp-580h]
-    unsigned __int8 *duplicateParts; // [esp+60h] [ebp-57Ch]
-    bool bRootMeld; // [esp+67h] [ebp-575h]
-    int boneCount; // [esp+68h] [ebp-574h]
-    XModel *model; // [esp+6Ch] [ebp-570h]
-    uint currNumModels; // [esp+70h] [ebp-56Ch]
-    uint name; // [esp+74h] [ebp-568h]
-    int len; // [esp+78h] [ebp-564h]
-    uint size; // [esp+7Ch] [ebp-560h]
-    unsigned __int8 parentIndex; // [esp+83h] [ebp-559h] BYREF
-    int localBoneIndex; // [esp+84h] [ebp-558h]
-    int index; // [esp+88h] [ebp-554h]
-    int duplicatePartBits[273]; // [esp+8Ch] [ebp-550h] BYREF
-    int matOffset[32]; // [esp+4D4h] [ebp-108h]
-    XModel *models[32]; // [esp+554h] [ebp-88h] BYREF
-    int modelIndex; // [esp+5D4h] [ebp-8h]
+    int numBones;                      // [esp+30h] [ebp-5ACh]
+    unsigned __int8 modelParents[32];  // [esp+34h] [ebp-5A8h] BYREF
+    int boneIndex;                     // [esp+58h] [ebp-584h]
+    DObjModel_s *dobjModel;            // [esp+5Ch] [ebp-580h]
+    unsigned __int8 *duplicateParts;   // [esp+60h] [ebp-57Ch]
+    bool bRootMeld;                    // [esp+67h] [ebp-575h]
+    int boneCount;                     // [esp+68h] [ebp-574h]
+    XModel *model;                     // [esp+6Ch] [ebp-570h]
+    uint currNumModels;                // [esp+70h] [ebp-56Ch]
+    uint name;                         // [esp+74h] [ebp-568h]
+    int len;                           // [esp+78h] [ebp-564h]
+    uint size;                         // [esp+7Ch] [ebp-560h]
+    unsigned __int8 parentIndex;       // [esp+83h] [ebp-559h] BYREF
+    int localBoneIndex;                // [esp+84h] [ebp-558h]
+    int index;                         // [esp+88h] [ebp-554h]
+    int duplicatePartBits[273];        // [esp+8Ch] [ebp-550h] BYREF
+    int matOffset[32];                 // [esp+4D4h] [ebp-108h]
+    XModel *models[32];                // [esp+554h] [ebp-88h] BYREF
+    int modelIndex;                    // [esp+5D4h] [ebp-8h]
     unsigned const __int16 *boneNames; // [esp+5D8h] [ebp-4h]
 
     PROF_SCOPED("DObjCreateDuplicateParts");
+    if (!numModels || numModels > DOBJ_MAX_SUBMODELS)
+    {
+        Com_Error(ERR_DROP, "DObjCreateDuplicateParts: invalid model count %u", numModels);
+    }
 
     duplicateParts = (unsigned __int8 *)&duplicatePartBits[4];
     memset(duplicatePartBits, 0, 16);
@@ -263,15 +267,16 @@ void __cdecl DObjCreateDuplicateParts(DObj_s *obj, DObjModel_s *dobjModels, uint
         boneCount += XModelNumBones(model);
         if (boneCount > 128)
         {
-            iassert(currNumModels);
             DObjDumpCreationInfo(dobjModels, numModels);
-            Com_Error(ERR_DROP, "dobj for xmodel %s has more than %d bones (see console for details)", models[0]->name, 128);
+            Com_Error(ERR_DROP, "dobj for xmodel %s has more than %d bones (see console for details)", dobjModels[0].model->name, 128);
         }
         models[currNumModels] = model;
         modelParents[currNumModels] = -1;
         matOffset[currNumModels] = boneIndex;
         if (dobjModel->ignoreCollision)
-            obj->ignoreCollision |= 1 << currNumModels;
+        {
+            obj->ignoreCollision |= 1u << currNumModels;
+        }
         if (currNumModels)
         {
             name = dobjModel->boneName;
@@ -280,7 +285,9 @@ void __cdecl DObjCreateDuplicateParts(DObj_s *obj, DObjModel_s *dobjModels, uint
                 for (modelIndex = currNumModels - 1; modelIndex >= 0; --modelIndex)
                 {
                     if (XModelGetBoneIndex(models[modelIndex], name, matOffset[modelIndex], &modelParents[currNumModels]))
+                    {
                         goto LABEL_2;
+                    }
                 }
                 iassert(currNumModels);
                 Com_PrintWarning(CON_CHANNEL_ANIM, "WARNING: Part '%s' not found in model '%s' or any of its descendants\n", SL_ConvertToString(name), models[0]->name);
@@ -302,7 +309,9 @@ void __cdecl DObjCreateDuplicateParts(DObj_s *obj, DObjModel_s *dobjModels, uint
                             iassert(parentIndex != 254);
                             iassert(parentIndex != boneIndex + localBoneIndex);
                             if (!localBoneIndex)
+                            {
                                 bRootMeld = 1;
+                            }
                             iassert(boneIndex + localBoneIndex + 1 < 256);
                             iassert(parentIndex + 1 < 256);
                             iassert(parentIndex < boneIndex + localBoneIndex);
@@ -338,8 +347,8 @@ void __cdecl DObjCreateDuplicateParts(DObj_s *obj, DObjModel_s *dobjModels, uint
     iassert(boneCount == (byte)boneCount);
     obj->numBones = boneCount;
     iassert(numModels > 0);
-    obj->models = (XModel **)MT_Alloc(5 * numModels, MT_TYPE_MODEL_LIST);
-    memcpy((unsigned __int8 *)obj->models, (unsigned __int8 *)models, 4 * numModels);
+    obj->models = (XModel **)MT_Alloc((sizeof(XModel *) + sizeof(byte)) * numModels, MT_TYPE_MODEL_LIST);
+    memcpy((unsigned __int8 *)obj->models, (unsigned __int8 *)models, sizeof(XModel *) * numModels);
     memcpy((unsigned __int8 *)&obj->models[numModels], modelParents, numModels);
     iassert(g_empty);
     iassert(!obj->duplicateParts);
@@ -410,7 +419,7 @@ void __cdecl DObjFree(DObj_s *obj)
     models = obj->models;
     if (models)
     {
-        MT_Free((byte*)models, 5 * obj->numModels);
+        MT_Free((byte *)models, (sizeof(XModel *) + sizeof(byte)) * obj->numModels);
         obj->models = 0;
     }
     obj->numModels = 0; // LWSS: blops backport
@@ -423,7 +432,9 @@ void __cdecl DObjFree(DObj_s *obj)
     if (obj->duplicateParts)
     {
         if (obj->duplicateParts != g_empty)
+        {
             SL_RemoveRefToStringOfSize(obj->duplicateParts, obj->duplicatePartsSize);
+        }
         obj->duplicatePartsSize = 0;
         obj->duplicateParts = 0;
     }
@@ -437,19 +448,21 @@ void __cdecl DObjGetCreateParms(
     uint16_t *entnum)
 {
     const unsigned __int8 *modelParents; // [esp+0h] [ebp-A8h]
-    DObjModel_s *dobjModel; // [esp+4h] [ebp-A4h]
-    int boneIndex; // [esp+8h] [ebp-A0h]
-    XModel *model; // [esp+Ch] [ebp-9Ch]
-    int startBoneIndex; // [esp+10h] [ebp-98h]
-    int parentModelIndex; // [esp+14h] [ebp-94h]
-    int matOffset[33]; // [esp+18h] [ebp-90h]
-    XModel **models; // [esp+9Ch] [ebp-Ch]
-    int modelIndex; // [esp+A0h] [ebp-8h]
-    unsigned const __int16 *boneNames; // [esp+A4h] [ebp-4h]
+    DObjModel_s *dobjModel;              // [esp+4h] [ebp-A4h]
+    int boneIndex;                       // [esp+8h] [ebp-A0h]
+    XModel *model;                       // [esp+Ch] [ebp-9Ch]
+    int startBoneIndex;                  // [esp+10h] [ebp-98h]
+    int parentModelIndex;                // [esp+14h] [ebp-94h]
+    int matOffset[33];                   // [esp+18h] [ebp-90h]
+    XModel **models;                     // [esp+9Ch] [ebp-Ch]
+    int modelIndex;                      // [esp+A0h] [ebp-8h]
+    unsigned const __int16 *boneNames;   // [esp+A4h] [ebp-4h]
 
     iassert(obj);
     if (!obj->numModels || obj->numModels > 0x20u)
+    {
         MyAssertHandler(".\\xanim\\dobj.cpp", 622, 0, "%s", "obj->numModels > 0 && obj->numModels <= DOBJ_MAX_SUBMODELS");
+    }
     iassert(dobjModels);
     iassert(numModels);
     iassert(tree);
@@ -468,7 +481,7 @@ void __cdecl DObjGetCreateParms(
         startBoneIndex += XModelNumBones(model);
         dobjModel->model = models[modelIndex];
         dobjModel->boneName = 0;
-        dobjModel->ignoreCollision = (obj->ignoreCollision & (1 << modelIndex)) != 0;
+        dobjModel->ignoreCollision = (obj->ignoreCollision & (1u << modelIndex)) != 0;
         if (modelParents[modelIndex] != 255)
         {
             for (parentModelIndex = modelIndex - 1; parentModelIndex >= 0; --parentModelIndex)
@@ -476,7 +489,7 @@ void __cdecl DObjGetCreateParms(
                 if (modelParents[modelIndex] >= matOffset[parentModelIndex])
                 {
                     boneIndex = modelParents[modelIndex] - matOffset[parentModelIndex];
-                    iassert(boneIndex < XModelNumBones( models[parentModelIndex] ));
+                    iassert(boneIndex < XModelNumBones(models[parentModelIndex]));
                     boneNames = models[parentModelIndex]->boneNames;
                     dobjModel->boneName = boneNames[boneIndex];
                     break;
@@ -490,9 +503,9 @@ void __cdecl DObjGetCreateParms(
 
 void __cdecl DObjArchive(DObj_s *obj)
 {
-    DObjModel_s *model; // [esp+8h] [ebp-170h]
-    SavedDObj savedObj; // [esp+10h] [ebp-168h] BYREF
-    uint modelIndex; // [esp+74h] [ebp-104h]
+    DObjModel_s *model;         // [esp+8h] [ebp-170h]
+    SavedDObj savedObj;         // [esp+10h] [ebp-168h] BYREF
+    uint modelIndex;            // [esp+74h] [ebp-104h]
     DObjModel_s dobjModels[32]; // [esp+78h] [ebp-100h] BYREF
 
     DObjGetCreateParms(obj, dobjModels, &savedObj.numModels, &savedObj.tree, &savedObj.entnum);
@@ -507,15 +520,17 @@ void __cdecl DObjArchive(DObj_s *obj)
         model = &dobjModels[modelIndex];
         savedObj.dobjModels[modelIndex].boneName = model->boneName;
         if (model->ignoreCollision)
-            savedObj.ignoreCollision |= 1 << modelIndex;
+        {
+            savedObj.ignoreCollision |= 1u << modelIndex;
+        }
     }
 
     iassert(obj->models);
     obj->models = NULL;
     DObjFree(obj);
 
-    static_assert((sizeof(DObj_s) - sizeof(obj->models)) == 96);
-    memcpy(obj, &savedObj, sizeof(DObj_s) - sizeof(obj->models));
+    static_assert(sizeof(SavedDObj) <= offsetof(DObj_s, models));
+    memcpy(obj, &savedObj, sizeof(SavedDObj));
 }
 
 void __cdecl DObjUnarchive(DObj_s *obj)
@@ -525,22 +540,22 @@ void __cdecl DObjUnarchive(DObj_s *obj)
     uint modelIndex; // [esp+74h] [ebp-104h]
     DObjModel_s dobjModels[32]; // [esp+78h] [ebp-100h] BYREF
 
-    memcpy(&savedObj, obj, sizeof(savedObj));
+    memcpy(&savedObj, obj, sizeof(SavedDObj));
     for (modelIndex = 0; modelIndex < savedObj.numModels; ++modelIndex)
     {
         model = &dobjModels[modelIndex];
         model->boneName = savedObj.dobjModels[modelIndex].boneName;
         model->model = savedObj.models[modelIndex];
-        model->ignoreCollision = (savedObj.ignoreCollision & (1 << modelIndex)) != 0;
+        model->ignoreCollision = (savedObj.ignoreCollision & (1u << modelIndex)) != 0;
     }
-    MT_Free((_BYTE *)savedObj.models, 5 * savedObj.numModels);
+    MT_Free((_BYTE *)savedObj.models, (sizeof(XModel *) + sizeof(byte)) * savedObj.numModels);
     DObjCreate(dobjModels, savedObj.numModels, savedObj.tree, obj, savedObj.entnum);
     DObjSetHidePartBits(obj, savedObj.hidePartBits);
 }
 
 void __cdecl DObjSkelClear(const DObj_s *obj)
 {
-    memset((unsigned __int8 *)&obj->skel, 0, sizeof(obj->skel));
+    memset((unsigned __int8 *)&obj->skel, 0, sizeof(DSkel));
 }
 
 void __cdecl DObjGetBounds(const DObj_s *obj, float *mins, float *maxs)
@@ -924,13 +939,13 @@ LABEL_17:
 
 void __cdecl DObjTracelinePartBits(DObj_s *obj, int *partBits)
 {
-    uint j; // [esp+30h] [ebp-24h]
-    XModel *model; // [esp+34h] [ebp-20h]
-    uint numModels; // [esp+38h] [ebp-1Ch]
-    uint size; // [esp+3Ch] [ebp-18h]
+    uint j;               // [esp+30h] [ebp-24h]
+    XModel *model;        // [esp+34h] [ebp-20h]
+    uint numModels;       // [esp+38h] [ebp-1Ch]
+    uint size;            // [esp+3Ch] [ebp-18h]
     uint globalBoneIndex; // [esp+40h] [ebp-14h]
-    uint localBoneIndex; // [esp+44h] [ebp-10h]
-    XModel **models; // [esp+50h] [ebp-4h]
+    uint localBoneIndex;  // [esp+44h] [ebp-10h]
+    XModel **models;      // [esp+50h] [ebp-4h]
 
     PROF_SCOPED("DObjTracelinePartBits");
 
@@ -945,7 +960,7 @@ void __cdecl DObjTracelinePartBits(DObj_s *obj, int *partBits)
     {
         model = models[j];
         size = model->numBones;
-        if ((obj->ignoreCollision & (1 << j)) != 0)
+        if ((obj->ignoreCollision & (1u << j)) != 0)
         {
             globalBoneIndex += size;
         }
@@ -956,7 +971,9 @@ void __cdecl DObjTracelinePartBits(DObj_s *obj, int *partBits)
                 if (LODWORD(model->boneInfo[localBoneIndex].radiusSquared))
                 {
                     if ((obj->hidePartBits[globalBoneIndex >> 5] & (0x80000000 >> (globalBoneIndex & 0x1F))) == 0)
+                    {
                         partBits[globalBoneIndex >> 5] |= 0x80000000 >> (globalBoneIndex & 0x1F);
+                    }
                 }
                 ++globalBoneIndex;
             }
@@ -1244,17 +1261,19 @@ int DObjGetNumSurfaces(const DObj_s *obj, char *lods)
 void DObjClone(const DObj_s *from, DObj_s *obj)
 {
     uint duplicateParts; // r3
-    XModel **v5; // r3
+    XModel **v5;         // r3
 
     iassert(obj);
 
     memcpy(obj, from, sizeof(DObj_s));
-    memset(&obj->skel, 0, sizeof(obj->skel));
+    memset(&obj->skel, 0, sizeof(DSkel));
     duplicateParts = obj->duplicateParts;
     if (obj->duplicateParts && duplicateParts != g_empty)
+    {
         SL_AddRefToString(duplicateParts);
+    }
     obj->tree = 0;
-    v5 = (XModel **)MT_Alloc(from->numModels + __ROL4__(from->numModels, 2), MT_TYPE_MODEL_LIST);
+    v5 = (XModel **)MT_Alloc((sizeof(XModel *) + sizeof(byte)) * from->numModels, MT_TYPE_MODEL_LIST);
     obj->models = v5;
-    memcpy(v5, from->models, from->numModels + __ROL4__(from->numModels, 2));
+    memcpy(v5, from->models, (sizeof(XModel *) + sizeof(byte)) * from->numModels);
 }

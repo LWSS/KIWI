@@ -32,12 +32,12 @@ static XAnimInfo g_xAnimInfo[0x1000];
 
 int __cdecl XAnimGetTreeHighMemUsage()
 {
-    return g_info_high_usage << 6;
+    return g_info_high_usage * sizeof(XAnimInfo);
 }
 
 int __cdecl XAnimGetTreeMemUsage()
 {
-    return g_info_usage << 6;
+    return g_info_usage * sizeof(XAnimInfo);
 }
 
 void __cdecl TRACK_xanim()
@@ -48,7 +48,7 @@ void __cdecl TRACK_xanim()
 
 int __cdecl XAnimGetTreeMaxMemUsage()
 {
-    return 0x40000;
+    return sizeof(g_xAnimInfo);
 }
 
 XAnimInfo *XAnimAllocInfo(DObj_s *obj, uint animIndex, int after)
@@ -147,7 +147,7 @@ XAnimParts *__cdecl XAnimClone(XAnimParts *fromParts, void *(__cdecl *Alloc)(int
     __int16 notifyInfoIndex; // [esp+18h] [ebp-8h]
     uint16_t *boneNames; // [esp+1Ch] [ebp-4h]
 
-    toParts = (XAnimParts*)Alloc(88);
+    toParts = (XAnimParts*)Alloc(sizeof(XAnimParts));
     qmemcpy(toParts, fromParts, sizeof(XAnimParts));
     boneNames = toParts->names;
     size = toParts->boneCount[9];
@@ -269,23 +269,29 @@ bool __cdecl IsLeafNode(const XAnimEntry* anim)
     return anim->numAnims == 0;
 }
 
-XAnim_s* __cdecl XAnimCreateAnims(const char* debugName, uint size, void* (__cdecl* Alloc)(int))
+XAnim_s *__cdecl XAnimCreateAnims(const char *debugName, uint size, void *(__cdecl *Alloc)(int))
 {
-    char v4; // [esp+3h] [ebp-29h]
-    char* v5; // [esp+8h] [ebp-24h]
-    const char* v6; // [esp+Ch] [ebp-20h]
-    char* newDebugName; // [esp+20h] [ebp-Ch]
-    XAnim_s* anims; // [esp+28h] [ebp-4h]
+    char v4;            // [esp+3h] [ebp-29h]
+    char *v5;           // [esp+8h] [ebp-24h]
+    const char *v6;     // [esp+Ch] [ebp-20h]
+    char *newDebugName; // [esp+20h] [ebp-Ch]
+    XAnim_s *anims;     // [esp+28h] [ebp-4h]
 
     iassert(debugName);
     iassert(Alloc);
 
-    anims = (XAnim_s*)Alloc(8 * size + 12);
+    if (!size || size > UINT16_MAX)
+    {
+        Com_Error(ERR_DROP, "XAnimCreateAnims: invalid animation count %u", size);
+    }
+
+    anims = (XAnim_s *)Alloc(offsetof(XAnim_s, entries) + sizeof(XAnimEntry) * size);
+    memset(anims, 0, offsetof(XAnim_s, entries) + sizeof(XAnimEntry) * size);
     anims->size = size;
 
     if (g_anim_developer)
     {
-        newDebugName = (char*)Hunk_AllocDebugMem(strlen(debugName) + 1, "XAnimCreateAnims");
+        newDebugName = (char *)Hunk_AllocDebugMem(strlen(debugName) + 1, "XAnimCreateAnims");
         v6 = debugName;
         v5 = newDebugName;
         do
@@ -294,11 +300,14 @@ XAnim_s* __cdecl XAnimCreateAnims(const char* debugName, uint size, void* (__cde
             *v5++ = *v6++;
         } while (v4);
         anims->debugName = newDebugName;
-        anims->debugAnimNames = (const char**)Hunk_AllocDebugMem(4 * size, "XAnimCreateAnims");
+        anims->debugAnimNames = (const char **)Hunk_AllocDebugMem(sizeof(const char *) * size, "XAnimCreateAnims");
+        memset(anims->debugAnimNames, 0, sizeof(const char *) * size);
     }
 
-    if (Hunk_DataOnHunk((byte*)anims))
+    if (Hunk_DataOnHunk((byte *)anims))
+    {
         Hunk_AddData(2, anims, Alloc);
+    }
 
     return anims;
 }
@@ -538,16 +547,16 @@ uint __cdecl XAnimGetAnimMap(const XAnimParts* parts, const XModelNameMap* model
     return SL_GetStringOfSize((char*)&animToModel, 0, boneCount + 17, MT_TYPE_MODEL_PART_MAP);
 }
 
-double __cdecl XAnimGetLength(const XAnim_s* anims, uint animIndex)
+double __cdecl XAnimGetLength(const XAnim_s *anims, uint animIndex)
 {
-    XAnimParts* parts; // [esp+Ch] [ebp-4h]
+    XAnimParts *parts; // [esp+Ch] [ebp-4h]
 
     iassert(anims);
     vassert(animIndex < anims->size, "%i, %i", animIndex, anims->size);
-    if ((const XAnim_s*)((char*)anims + 8 * animIndex) == (const XAnim_s*)-12)
-        MyAssertHandler(".\\xanim\\xanim.cpp", 2399, 0, "%s", "entry");
     if (!IsLeafNode(&anims->entries[animIndex]))
+    {
         MyAssertHandler(".\\xanim\\xanim.cpp", 2400, 0, "%s", "IsLeafNode( entry )");
+    }
     parts = anims->entries[animIndex].parts;
     iassert(parts);
     return (float)((double)parts->numframes / parts->framerate);
@@ -3464,17 +3473,17 @@ void __cdecl XAnimSetupSyncNodes_r(XAnim_s* anims, uint animIndex)
     }
 }
 
-void __cdecl XAnimFillInSyncNodes_r(XAnim_s* anims, uint animIndex, bool bLoop)
+void __cdecl XAnimFillInSyncNodes_r(XAnim_s *anims, uint animIndex, bool bLoop)
 {
-    XAnimParts* Data_FastFile; // eax
-    char* AnimDebugName; // eax
-    const char* debugName; // [esp-4h] [ebp-24h]
-    bool IsXAssetDefault; // [esp+7h] [ebp-19h]
-    XAnimParts* parts; // [esp+8h] [ebp-18h]
-    int numAnims; // [esp+10h] [ebp-10h]
-    XAnimEntry* anim; // [esp+14h] [ebp-Ch]
-    int i; // [esp+18h] [ebp-8h]
-    int count; // [esp+1Ch] [ebp-4h]
+    XAnimParts *Data_FastFile; // eax
+    char *AnimDebugName;       // eax
+    const char *debugName;     // [esp-4h] [ebp-24h]
+    bool IsXAssetDefault;      // [esp+7h] [ebp-19h]
+    XAnimParts *parts;         // [esp+8h] [ebp-18h]
+    int numAnims;              // [esp+10h] [ebp-10h]
+    XAnimEntry *anim;          // [esp+14h] [ebp-Ch]
+    int i;                     // [esp+18h] [ebp-8h]
+    int count;                 // [esp+1Ch] [ebp-4h]
 
     anim = &anims->entries[animIndex];
     if (IsLeafNode(anim))
@@ -3483,22 +3492,34 @@ void __cdecl XAnimFillInSyncNodes_r(XAnim_s* anims, uint animIndex, bool bLoop)
         {
             parts = anims->entries[animIndex].parts;
             if (IsFastFileLoad())
+            {
                 IsXAssetDefault = DB_IsXAssetDefault(ASSET_TYPE_XANIMPARTS, parts->name);
+            }
             else
+            {
                 IsXAssetDefault = parts->isDefault;
+            }
             if (IsXAssetDefault)
             {
                 if (!IsFastFileLoad())
-                    XAnimPrecache("void_loop", (void*(*)(int))Hunk_AllocXAnimPrecache);
+                {
+                    XAnimPrecache("void_loop", Hunk_AllocXAnimPrecache);
+                }
 
                 if (IsFastFileLoad())
+                {
                     Data_FastFile = XAnimFindData_FastFile("void_loop");
+                }
                 else
+                {
                     Data_FastFile = XAnimFindData_LoadObj("void_loop");
+                }
 
                 anims->entries[animIndex].parts = Data_FastFile;
                 if (!anims->entries[animIndex].parts)
+                {
                     Com_Error(ERR_DROP, "Cannot find xanim/%s. This is a default xanim file that you should have.", "void_loop");
+                }
             }
             else if (bLoop)
             {
@@ -3527,7 +3548,9 @@ void __cdecl XAnimFillInSyncNodes_r(XAnim_s* anims, uint animIndex, bool bLoop)
         anim->animParent.flags |= 2 - bLoop;
         numAnims = anim->numAnims;
         for (i = 0; i < numAnims; ++i)
+        {
             XAnimFillInSyncNodes_r(anims, i + anim->animParent.children, bLoop);
+        }
     }
 }
 
@@ -3765,17 +3788,19 @@ int __cdecl XAnimSetCompleteGoalWeight(
     return error;
 }
 
-void __cdecl XAnimCloneAnimInfo(const XAnimInfo* from, XAnimInfo* to)
+void __cdecl XAnimCloneAnimInfo(const XAnimInfo *from, XAnimInfo *to)
 {
     iassert(to->animIndex == from->animIndex);
-    qmemcpy(&to->state, &from->state, sizeof(to->state));
+    qmemcpy(&to->state, &from->state, sizeof(XAnimState));
     to->notifyChild = from->notifyChild;
     to->notifyIndex = from->notifyIndex;
     to->notifyName = from->notifyName;
     to->notifyType = from->notifyType;
 
     if (to->notifyName)
+    {
         SL_AddRefToString(to->notifyName);
+    }
 }
 
 void __cdecl XAnimCloneAnimTree(const XAnimTree_s* from, XAnimTree_s* to)
@@ -3850,7 +3875,7 @@ void XAnimFreeAnims(XAnim_s *anims, void(*Free)(void *, int))
 {
     int v4; // r29
 
-    v4 = 8 * anims->size + 12;
+    v4 = offsetof(XAnim_s, entries) + sizeof(XAnimEntry) * anims->size;
     XAnimFreeList(anims);
     Free(anims, v4);
 }
@@ -3861,7 +3886,7 @@ static void XAnimCloneClientAnimInfo(const XAnimInfo *from, XAnimInfo *to)
 
     iassert(!from->notifyType);
 
-    memcpy(&to->state, &from->state, sizeof(to->state));
+    memcpy(&to->state, &from->state, sizeof(XAnimState));
 
     to->notifyType = 0;
     to->notifyChild = 0;

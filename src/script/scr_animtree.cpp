@@ -169,7 +169,7 @@ void __cdecl Scr_PrecacheAnimationTree(uint parentNode)
             }
             else
             {
-                XAnimPrecache(SL_ConvertToString(name), (void *(__cdecl *)(int))Hunk_AllocXAnimPrecache);
+                XAnimPrecache(SL_ConvertToString(name), Hunk_AllocXAnimPrecache);
             }
         }
     }

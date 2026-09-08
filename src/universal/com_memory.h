@@ -20,7 +20,7 @@ void __cdecl Hunk_AddAsset(XAssetHeader header, void *data);
 
 void Com_TouchMemory();
 
-uint8_t* __cdecl Hunk_AllocXAnimPrecache(uint size);
+void *__cdecl Hunk_AllocXAnimPrecache(int size);
 uint8_t* __cdecl Hunk_AllocPhysPresetPrecache(uint size);
 void* __cdecl Hunk_AllocXAnimClient(int size);
 uint8_t* __cdecl Hunk_AllocXAnimServer(uint size);
