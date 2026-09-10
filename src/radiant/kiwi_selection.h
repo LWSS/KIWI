@@ -90,6 +90,12 @@ bool Sel_ItemWorldPos( const sel_item_t &it, float out[3], bool checkLive = true
 selection_t &KiwiSel();
 sel_mask_t   KiwiSel_GetModeMask();
 void         KiwiSel_SetModeMask( sel_mask_t mask );
+// KIWI (2026-09-09): the "models only" sub-mode of Object mode.  While set, click and
+// marquee picks in Object mode name model entities only (brushes and patches occlude
+// but never select).  Entered by a double tap of 4 or the [4 Object] chip dropdown;
+// a plain 4 (or any other mode key) leaves it.
+bool         KiwiSel_ModelsOnly();
+void         KiwiSel_SetModelsOnly( bool on );
 
 // ── selection_t mutation (does NOT sync — call Sel_SyncToLegacy when done) ───
 // Click/marquee grammar: plain replaces, Shift adds, Ctrl removes.  Ctrl wins

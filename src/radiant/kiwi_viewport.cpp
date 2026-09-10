@@ -67,9 +67,15 @@ namespace
     // Tags own the full press/release cycle. COMMAND and CONSUMED distinguish a modal
     // owner from a press-only owner; CMD_MARQUEE borrows KiwiBox geometry without
     // mutating selection. SECTION and SUN need distinct release/abort paths.
+    // KG_DROP_ARM (KIWI 2026-09-09): LMB is down on a selected model but the placer has
+    // NOT started — it starts only once the cursor travels past the click slop, so a
+    // click on a model selects it instead of dropping it under the cursor.
+    // KG_DROP_DONE (KIWI 2026-09-10): RMB confirmed a placer drag while LMB was still
+    // down; the pending LMB release is swallowed so it cannot re-select or re-drop.
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
-                      KG_SUN, KG_DROP, KG_GRASS, KG_REFIMG, KG_TERRAIN, KG_DECAL };
+                      KG_SUN, KG_DROP, KG_GRASS, KG_REFIMG, KG_TERRAIN, KG_DECAL,
+                      KG_DROP_ARM, KG_DROP_DONE };
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -105,6 +111,10 @@ namespace
     bool         s_sunCtrl   = false;
     int          s_sunPressX = 0, s_sunPressY = 0;
     int          s_sunMaxX   = 0, s_sunMaxY = 0;
+
+    // Press position of an armed model placer (KG_DROP_ARM); the placer and the
+    // click-select fallback both act at the PRESS, not at the release.
+    int          s_dropPressX = 0, s_dropPressY = 0;
 
     void EndGesture()
     {
@@ -252,12 +262,64 @@ namespace
                 ImGui::PushStyleColor( ImGuiCol_ButtonHovered, ImVec4( 0.24f, 0.24f, 0.27f, 0.90f ) );
                 ImGui::PushStyleColor( ImGuiCol_ButtonActive,  ImVec4( 0.30f, 0.30f, 0.34f, 0.95f ) );
             }
-            if ( ImGui::Button( KCHIPS[i].label ) )
+            // KIWI (2026-09-09): the [4 Object] chip carries the "models only" sub-mode.
+            // Hovering it opens a dropdown (Objects / Models only); the label reads
+            // "4 Models" while the sub-mode is on.  Double-tapping 4 does the same by key.
+            const bool objectChip = ( KCHIPS[i].mask == SEL_MASK_OBJECT );
+            const bool modelsOnly = objectChip && KiwiSel_ModelsOnly();
+            const char *label = modelsOnly ? "4 Models" : KCHIPS[i].label;
+            if ( ImGui::Button( label ) )
+            {
+                if ( objectChip )
+                    KiwiSel_SetModelsOnly( false );  // a plain click is plain Object mode
                 KiwiSel_SetModeMask( KCHIPS[i].mask );
+            }
+            const ImVec2 chipMin = ImGui::GetItemRectMin();
+            const ImVec2 chipMax = ImGui::GetItemRectMax();
             if ( ImGui::IsItemHovered() )
             {
                 anyHovered = true;
-                ImGui::SetTooltip( "%s", KCHIPS[i].tip );
+                if ( objectChip )
+                {
+                    if ( !ImGui::IsPopupOpen( "kiwiobjfilter" ) )
+                    {
+                        ImGui::SetNextWindowPos( ImVec2( chipMin.x, chipMax.y + 2.0f ) );
+                        ImGui::OpenPopup( "kiwiobjfilter" );
+                    }
+                }
+                else
+                    ImGui::SetTooltip( "%s", KCHIPS[i].tip );
+            }
+            if ( objectChip && ImGui::BeginPopup( "kiwiobjfilter" ) )
+            {
+                anyHovered = true;
+                ImGui::TextDisabled( "Object mode picks" );
+                if ( ImGui::Selectable( "Objects: brushes, patches, entities, models", !modelsOnly ) )
+                {
+                    KiwiSel_SetModelsOnly( false );
+                    KiwiSel_SetModeMask( SEL_MASK_OBJECT );
+                }
+                if ( ImGui::Selectable( "Models only  (double-tap 4)", modelsOnly ) )
+                {
+                    KiwiSel_SetModelsOnly( true );
+                    KiwiSel_SetModeMask( SEL_MASK_OBJECT );
+                }
+                // KIWI (2026-09-10, user): the dropdown GOES AWAY when the mouse leaves the
+                // chip + popup area, with a generous margin, so it never sits over the view.
+                {
+                    const float margin = 48.0f;
+                    const ImVec2 popMin = ImGui::GetWindowPos();
+                    const ImVec2 popMax( popMin.x + ImGui::GetWindowSize().x,
+                                         popMin.y + ImGui::GetWindowSize().y );
+                    const ImVec2 lo( ( chipMin.x < popMin.x ? chipMin.x : popMin.x ) - margin,
+                                     ( chipMin.y < popMin.y ? chipMin.y : popMin.y ) - margin );
+                    const ImVec2 hi( ( chipMax.x > popMax.x ? chipMax.x : popMax.x ) + margin,
+                                     ( chipMax.y > popMax.y ? chipMax.y : popMax.y ) + margin );
+                    const ImVec2 m = ImGui::GetIO().MousePos;
+                    if ( m.x < lo.x || m.x > hi.x || m.y < lo.y || m.y > hi.y )
+                        ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
             }
             ImGui::PopStyleColor( 3 );
         }
@@ -340,7 +402,24 @@ namespace
 bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl )
 {
     if ( s_gesture != KG_NONE )
+    {
+        // KIWI (2026-09-10, user: "right click needs to confirm a model action"): a right
+        // click while a model is being carried by the placer (LMB still held) confirms the
+        // placement where it stands, the same RMB-confirms rule the paused gesture already
+        // has after release.  The press on an ARMED-but-unmoved model, or after a confirm,
+        // is swallowed so the legacy right-click chain never runs under a held LMB.
+        if ( btn == 1 && ( s_gesture == KG_DROP || s_gesture == KG_DROP_ARM
+                        || s_gesture == KG_DROP_DONE ) )
+        {
+            if ( s_gesture == KG_DROP )
+            {
+                KiwiCmd_Commit();             // the live preview closes as one move record
+                s_gesture = KG_DROP_DONE;     // LMB is still down: eat its release
+            }
+            return true;
+        }
         return false;
+    }
 
     // KIWI (REFIMG): only a hit is consumed; misses still reach normal geometry tools.
     if ( btn == 0 && KiwiRefImage_IsArmed()
@@ -585,15 +664,20 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
             return true;
         }
 
-        // A plain drag on an all-model selection uses the ground-contact solver;
-        // KiwiDrop_BeginAt also proves the press hit a selected model.
+        // A plain DRAG on an all-model selection uses the ground-contact solver.
+        // KIWI (2026-09-09, user: "hard to not accidentally move it"): the press only
+        // ARMS the placer.  KiwiVP_CameraMouseMove starts the Move once the cursor
+        // leaves the click slop; a release inside it is a plain click-select at the
+        // press, so a model can be picked without being dropped under the cursor.
         if ( !shift && !ctrl && !ImGui::GetIO().KeyAlt
-             && KiwiDrop_BeginAt( imgX, imgY ) )
+             && KiwiDrop_HitSelectedModelAt( imgX, imgY ) )
         {
             KiwiHover_Clear();
+            s_dropPressX = imgX;
+            s_dropPressY = imgY;
             s_lastX      = imgX;
             s_lastY      = imgY;
-            s_gesture    = KG_DROP;
+            s_gesture    = KG_DROP_ARM;
             s_gestureBtn = btn;
             return true;
         }
@@ -612,6 +696,38 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
 {
     if ( s_gesture == KG_NONE )
         return false;
+
+    if ( s_gesture == KG_DROP_DONE )
+    {
+        s_lastX = imgX;
+        s_lastY = imgY;
+        return true;                         // confirmed by RMB; LMB travel is dead
+    }
+
+    if ( s_gesture == KG_DROP_ARM )
+    {
+        // Armed model placer: nothing moves inside the click slop.  Past it, start the
+        // drop Move at the PRESS (the model under the press is the one that travels);
+        // if the command cannot start any more, the stroke degrades to a marquee.
+        const int tx = imgX - s_dropPressX;
+        const int ty = imgY - s_dropPressY;
+        const int ax = ( tx < 0 ) ? -tx : tx;
+        const int ay = ( ty < 0 ) ? -ty : ty;
+        if ( ax < KBOX_CLICK_PIXELS && ay < KBOX_CLICK_PIXELS )
+        {
+            s_lastX = imgX;
+            s_lastY = imgY;
+            return true;
+        }
+        if ( KiwiDrop_BeginAt( s_dropPressX, s_dropPressY ) )
+            s_gesture = KG_DROP;
+        else
+        {
+            KiwiBox_Begin( s_dropPressX, s_dropPressY, false, false );
+            s_gesture = KG_MARQUEE;
+        }
+        // fall through: the live owner below receives this move as its first delta
+    }
 
     if ( s_gesture == KG_GRASS )
     {
@@ -750,6 +866,14 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
         KiwiDecal_HandleUp();
     else if ( s_gesture == KG_MARQUEE )
         KiwiBox_End( imgX, imgY );
+    else if ( s_gesture == KG_DROP_ARM )
+        // Released inside the click slop: a click on a selected model SELECTS it
+        // (same grammar as any other click), and nothing was moved.
+        KiwiBox_ClickSelectAt( s_dropPressX, s_dropPressY, false, false );
+    else if ( s_gesture == KG_DROP_DONE )
+    {
+        // RMB already confirmed the placement; this release is the dead LMB.
+    }
     else if ( s_gesture == KG_CMD_MARQUEE )
         CommandMarqueeEnd( imgX, imgY );
     else if ( s_gesture == KG_GIZMO )

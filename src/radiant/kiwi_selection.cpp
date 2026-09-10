@@ -27,6 +27,7 @@ namespace
 {
     selection_t s_selection;
     sel_mask_t  s_modeMask   = SEL_MASK_EVERYTHING;   // "5 Everything" is the start mode
+    bool        s_modelsOnly = false;                 // Object mode restricted to models (KIWI 2026-09-09)
     unsigned    s_generation = 1;
 
     // Suppress notifications driven by our own sync and guard rebuild recursion.
@@ -257,9 +258,27 @@ void KiwiSel_SetModeMask( sel_mask_t mask )
     mask &= SEL_MASK_EVERYTHING;
     if ( !mask )
         mask = SEL_MASK_EVERYTHING;      // an empty filter would make picking dead
+    if ( mask != SEL_MASK_OBJECT && s_modelsOnly )
+    {
+        s_modelsOnly = false;            // the sub-mode belongs to Object mode alone
+        ++s_generation;
+    }
     if ( mask == s_modeMask )
         return;
     s_modeMask = mask;
+    ++s_generation;
+}
+
+bool KiwiSel_ModelsOnly()
+{
+    return s_modelsOnly;
+}
+
+void KiwiSel_SetModelsOnly( bool on )
+{
+    if ( s_modelsOnly == on )
+        return;
+    s_modelsOnly = on;
     ++s_generation;
 }
 

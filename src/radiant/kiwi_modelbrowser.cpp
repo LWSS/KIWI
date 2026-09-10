@@ -515,6 +515,16 @@ namespace
         {
             if ( live->PreemptIdle() )
                 KiwiCmd_Cancel();
+            else if ( live == KiwiXform_CommandForId( KIWI_CMD_MOVE )
+                   || live == KiwiXform_CommandForId( KIWI_CMD_ROTATE )
+                   || live == KiwiXform_CommandForId( KIWI_CMD_SCALE ) )
+            {
+                // KIWI (2026-09-09, user: "I should be able to chain drag out models"):
+                // the previous drop left its model in a PAUSED Move (the placement gesture);
+                // a new drag from the browser confirms that placement where it stands and
+                // carries on, instead of refusing until the operator presses Enter.
+                KiwiCmd_Commit();
+            }
             else
             {
                 Sys_Printf( "Models browser: finish or cancel \"%s\" before placing a model.\n",

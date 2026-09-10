@@ -21,5 +21,9 @@ void KiwiUX_SetShowHover( bool on );
 bool KiwiUX_ShowTriCount();                // camera bottom-right "N tris" readout (View menu)
 void KiwiUX_SetShowTriCount( bool on );
 
+// KIWI (2026-09-09): the selected-entity facing arrows (kiwi_entarrow) — View menu toggle.
+bool KiwiUX_ShowFacingArrows();
+void KiwiUX_SetShowFacingArrows( bool on );
+
 // Draws the KIWI UX settings block from ImGuiPanels_Menu.
 void KiwiUX_DrawSettings();

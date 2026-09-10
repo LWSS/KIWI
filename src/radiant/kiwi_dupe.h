@@ -8,9 +8,10 @@
 // (select.cpp 0x424F30). bSwap=1 preserves outward windings; DoFlip also
 // owns undo and fixed-size entity angle updates.
 //
-// Clone_Selection (select.cpp 0x48F0D0) snapshots at most 4096 cloneable brushes,
-// skips patches and fixed-size entities, deselects originals, and selects copies.
-// gridSize is unused in this port, and the helper opens no undo bracket.
+// Clone_Selection (select.cpp 0x48F0D0) clones through the map text (Copy ->
+// Map_ImportBuffer, KIWI 2026-09-09): brushes, patches and entities all duplicate,
+// originals are deselected and the copies selected.  gridSize is unused in this port;
+// the import owns its own "import buffer" undo bracket (nested inside ours).
 //
 // Arrays use one mutation-style undo record. Each iteration clones the current
 // selection, then transforms it; before commit, every original saved at begin and

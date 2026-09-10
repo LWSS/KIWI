@@ -285,6 +285,161 @@ namespace
     }
 }
 
+// ── Mixed straight / spline chains (KIWI 2026-09-10) ─────────────────────────
+// A control chain whose spans are individually straight or smooth.  Consecutive
+// smooth spans form one Catmull-Rom run through their control points; the run's
+// ends clamp (duplicate endpoint) exactly like TessellateSpline, so a straight
+// span meeting a spline run keeps its corner.  Straight spans emit only their
+// start point.  Segments per span are reduced so a long chain stays under the
+// draw/snap budgets (KCON_DRAW_SEGMENTS).
+namespace
+{
+    const int KCON_MIXED_MAX_VERTS = 1024;
+
+    bool SpanSmooth( const std::vector<unsigned char> &smooth, int i )
+    {
+        return i >= 0 && i < (int)smooth.size() && smooth[(size_t)i] != 0;
+    }
+}
+
+void KiwiCon_TessellateMixed( const std::vector<float> &ctrl,
+                              const std::vector<unsigned char> &smooth, bool closed,
+                              std::vector<float> *out )
+{
+    out->clear();
+    const int n = (int)( ctrl.size() / 3 );
+    if ( n < 2 )
+        return;
+    const int spans = closed ? n : ( n - 1 );
+    int smoothSpans = 0;
+    for ( int s = 0; s < spans; ++s )
+        if ( SpanSmooth( smooth, s ) )
+            ++smoothSpans;
+    if ( smoothSpans == 0 || n < 3 )
+    {
+        out->assign( ctrl.begin(), ctrl.end() );  // a plain chain: the control points
+        return;
+    }
+    int segs = KCON_SPLINE_SEGS;
+    while ( segs > 1 && ( n - smoothSpans ) + smoothSpans * segs + 1 > KCON_MIXED_MAX_VERTS )
+        --segs;
+
+    // Every span is smooth on a closed chain: one wrapping spline (TessellateSpline's
+    // closed form) with no clamped ends at all.
+    if ( closed && smoothSpans == spans )
+    {
+        for ( int s = 0; s < spans; ++s )
+        {
+            const int i0 = ( s - 1 + n ) % n, i1 = s, i2 = ( s + 1 ) % n, i3 = ( s + 2 ) % n;
+            for ( int k = 0; k < segs; ++k )
+            {
+                float w[3];
+                SplinePoint3( &ctrl[(size_t)i0 * 3], &ctrl[(size_t)i1 * 3],
+                              &ctrl[(size_t)i2 * 3], &ctrl[(size_t)i3 * 3],
+                              (float)k / (float)segs, w );
+                out->push_back( w[0] );  out->push_back( w[1] );  out->push_back( w[2] );
+            }
+        }
+        return;
+    }
+
+    // Walk the spans; a run is [a, b] of consecutive smooth spans, through control
+    // points a .. b+1 (modular on closed chains).  Start the walk on a straight span
+    // when the chain is closed so no run is cut at index 0.
+    int start = 0;
+    if ( closed )
+        for ( int s = 0; s < spans; ++s )
+            if ( !SpanSmooth( smooth, s ) ) { start = s; break; }
+
+    for ( int step = 0; step < spans; )
+    {
+        const int s = ( start + step ) % spans;
+        if ( !SpanSmooth( smooth, s ) )
+        {
+            const int p = s;                       // straight: its start point only
+            out->push_back( ctrl[(size_t)p * 3 + 0] );
+            out->push_back( ctrl[(size_t)p * 3 + 1] );
+            out->push_back( ctrl[(size_t)p * 3 + 2] );
+            ++step;
+            continue;
+        }
+        // Gather the run's control points.
+        int runLen = 0;
+        while ( step + runLen < spans && SpanSmooth( smooth, ( start + step + runLen ) % spans ) )
+            ++runLen;
+        std::vector<int> idx;                      // runLen + 1 control indices
+        for ( int r = 0; r <= runLen; ++r )
+            idx.push_back( closed ? ( ( s + r ) % n ) : ( s + r ) );
+        const int m = (int)idx.size();
+        for ( int r = 0; r < runLen; ++r )
+        {
+            const int i0 = idx[( r - 1 < 0 ) ? 0 : r - 1];
+            const int i1 = idx[r];
+            const int i2 = idx[( r + 1 > m - 1 ) ? m - 1 : r + 1];
+            const int i3 = idx[( r + 2 > m - 1 ) ? m - 1 : r + 2];
+            for ( int k = 0; k < segs; ++k )
+            {
+                float w[3];
+                SplinePoint3( &ctrl[(size_t)i0 * 3], &ctrl[(size_t)i1 * 3],
+                              &ctrl[(size_t)i2 * 3], &ctrl[(size_t)i3 * 3],
+                              (float)k / (float)segs, w );
+                out->push_back( w[0] );  out->push_back( w[1] );  out->push_back( w[2] );
+            }
+        }
+        step += runLen;                            // the run's last point opens the next span
+    }
+    if ( !closed )                                 // land exactly on the last click
+    {
+        out->push_back( ctrl[( (size_t)n - 1 ) * 3 + 0] );
+        out->push_back( ctrl[( (size_t)n - 1 ) * 3 + 1] );
+        out->push_back( ctrl[( (size_t)n - 1 ) * 3 + 2] );
+    }
+}
+
+bool KiwiCon_HasSmooth( const kconObject_t &o )
+{
+    if ( o.type != KCON_LINE && o.type != KCON_POLYLINE )
+        return false;
+    const int n = (int)( o.pts.size() / 3 );
+    if ( n < 3 )
+        return false;
+    const int spans = o.closed ? n : ( n - 1 );
+    for ( int s = 0; s < spans; ++s )
+        if ( SpanSmooth( o.smooth, s ) )
+            return true;
+    return false;
+}
+
+namespace
+{
+    // Fingerprint: sizes, closure and the first/last points guard the pointer-free
+    // cache against a copy edited within one store generation.
+    unsigned long long SmoothKey( const kconObject_t &o )
+    {
+        unsigned long long h = 1469598103934665603ull;
+        const size_t np = o.pts.size();
+        const unsigned long long parts[5] = { (unsigned long long)np, (unsigned long long)o.smooth.size(),
+                                              o.closed ? 1ull : 0ull,
+                                              np ? (unsigned long long)*(const unsigned *)&o.pts[0] : 0ull,
+                                              np ? (unsigned long long)*(const unsigned *)&o.pts[np - 1] : 0ull };
+        for ( int i = 0; i < 5; ++i ) { h ^= parts[i]; h *= 1099511628211ull; }
+        for ( size_t i = 0; i < o.smooth.size(); ++i ) { h ^= (unsigned long long)o.smooth[i] + 7ull; h *= 1099511628211ull; }
+        return h ? h : 1ull;
+    }
+
+    const std::vector<float> &SmoothTess( const kconObject_t &o )
+    {
+        const unsigned long long key = SmoothKey( o );
+        if ( o.tessCache.empty() || o.tessGen != KiwiCon_Generation() || o.tessKey != key )
+        {
+            KiwiCon_TessellateMixed( o.pts, o.smooth, o.closed, &o.tessCache );
+            o.tessGen = KiwiCon_Generation();
+            o.tessKey = key;
+        }
+        return o.tessCache;
+    }
+}
+
 // Plane math.
 void KiwiCon_PlaneToWorld( const kconPlane_t &p, const float uv[2], float out[3] )
 {
@@ -637,6 +792,8 @@ int KiwiCon_VertCount( const kconObject_t &o )
         return CircleSegsFor( o );                // closed: the wrap is implicit
     if ( o.type == KCON_ARC )
         return ArcSegs( o ) + 1;
+    if ( KiwiCon_HasSmooth( o ) )
+        return (int)( SmoothTess( o ).size() / 3 );   // the spline tessellation
     return (int)( o.pts.size() / 3 );                 // three floats per WORLD point
 }
 
@@ -660,6 +817,14 @@ bool KiwiCon_VertWorld( const kconObject_t &o, int i, float out[3] )
         float uv[2];
         ArcPointUV( o, (float)i / (float)( n - 1 ), uv );
         KiwiCon_PlaneToWorld( o.plane, uv, out );
+        return true;
+    }
+    if ( KiwiCon_HasSmooth( o ) )
+    {
+        const std::vector<float> &t = SmoothTess( o );
+        if ( (size_t)i * 3 + 2 >= t.size() )
+            return false;
+        Copy3( &t[(size_t)i * 3], out );
         return true;
     }
     Copy3( &o.pts[(size_t)i * 3], out );          // world, verbatim
@@ -842,20 +1007,27 @@ namespace
             return;
 
         std::vector<float> out;
+        std::vector<unsigned char> outSmooth;      // kept parallel (KIWI spline spans)
         out.reserve( o.pts.size() );
         for ( int i = 0; i < n; ++i )
         {
             const float *p = &o.pts[(size_t)i * 3];
             const int have = (int)( out.size() / 3 );
+            const unsigned char sm = ( i < (int)o.smooth.size() ) ? o.smooth[(size_t)i] : 0;
             if ( have > 0 )
             {
                 const float dx = p[0] - out[(size_t)( have - 1 ) * 3 + 0];
                 const float dy = p[1] - out[(size_t)( have - 1 ) * 3 + 1];
                 const float dz = p[2] - out[(size_t)( have - 1 ) * 3 + 2];
                 if ( sqrtf( dx * dx + dy * dy + dz * dz ) <= KREG_JOIN_DIST )
+                {
+                    // The collapsed duplicate's outgoing span survives on the kept point.
+                    outSmooth[(size_t)( have - 1 )] = sm;
                     continue;
+                }
             }
             out.push_back( p[0] );  out.push_back( p[1] );  out.push_back( p[2] );
+            outSmooth.push_back( sm );
         }
 
         // Closed wraps are implicit, so remove only a closed chain's repeated seam;
@@ -867,11 +1039,25 @@ namespace
             const float dy = out[1] - out[(size_t)( m - 1 ) * 3 + 1];
             const float dz = out[2] - out[(size_t)( m - 1 ) * 3 + 2];
             if ( sqrtf( dx * dx + dy * dy + dz * dz ) <= KREG_JOIN_DIST )
+            {
                 out.resize( (size_t)( m - 1 ) * 3 );
+                outSmooth.resize( (size_t)( m - 1 ) );
+            }
         }
 
         if ( (int)( out.size() / 3 ) != n )
+        {
             o.pts.swap( out );
+            o.smooth.swap( outSmooth );
+        }
+        // Never longer than the points; an all-straight vector is dropped entirely.
+        if ( o.smooth.size() > o.pts.size() / 3 )
+            o.smooth.resize( o.pts.size() / 3 );
+        bool any = false;
+        for ( size_t i = 0; i < o.smooth.size() && !any; ++i )
+            any = o.smooth[i] != 0;
+        if ( !any )
+            o.smooth.clear();
     }
 
     // Reset document-global plane state directly to world-ground defaults.
@@ -2299,6 +2485,7 @@ namespace
             static const kiwiPrompt_t s_curve[] = {
                 { "aim",  "Z guide = vertical" },
                 { "Z",    "Vertical lock" },
+                { "S",    "Spline span on/off" },
                 { "Esc",  "Drop last point" },
             };
             *out = s_curve;
@@ -2310,9 +2497,18 @@ namespace
             m_wantClosed   = false;
             m_noTailPoint  = false;
             m_anyLmbPoint  = false;
+            m_splineMode   = false;
+            m_smooth.clear();
             return KiwiDrawTool::Begin();
         }
 
+        // KIWI (2026-09-10, user: "add an S key in the line mode to start a spline
+        // curve ... works just like the Plasticity spline tool"): S toggles SPLINE
+        // MODE for the span being drawn.  The rubber band from the last placed point
+        // and every span placed while the mode is on are Catmull-Rom spans through
+        // their control points; a plain span in between keeps its corner, and clicking
+        // the first point closes the chain with whichever kind is live.  Stored as the
+        // ordinary KCON_LINE/POLYLINE control points plus per-point `smooth` flags.
         bool KeyDown( int vk, unsigned int mods ) override
         {
             // Record RMB provenance but let the common Enter/confirm path finish.
@@ -2320,10 +2516,27 @@ namespace
             if ( vk == 0x0D && KiwiCmd_ConfirmIsRmb() && m_anyLmbPoint )
                 m_noTailPoint = true;
 
+            if ( vk == 0x53 && !mods )                  // S: spline span on / off
+            {
+                m_splineMode = !m_splineMode;
+                // The live rubber band leaves the LAST placed point: retag it now.
+                if ( !m_smooth.empty() )
+                    m_smooth.back() = m_splineMode ? 1 : 0;
+                Sys_Printf( "Curve: spline spans %s%s.\n", m_splineMode ? "ON" : "off",
+                            m_splineMode ? " (a spline never becomes a brush edge; press S again for straight spans)" : "" );
+                UpdateHud();
+                g_nUpdateBits |= 1;
+                return true;
+            }
+
             // Remove one point; an empty-chain Esc falls through to command cancel.
             if ( vk == 0x1B && !m_pts.empty() )         // VK_ESCAPE
             {
                 m_pts.resize( m_pts.size() - 3 );
+                if ( !m_smooth.empty() )
+                    m_smooth.pop_back();
+                if ( !m_smooth.empty() )
+                    m_smooth.back() = m_splineMode ? 1 : 0;   // the band re-attaches here
                 if ( m_pts.empty() )
                     m_zLock = false;                    // nothing to go up FROM
                 UpdateHud();
@@ -2334,6 +2547,11 @@ namespace
                 return true;
             }
             return KiwiDrawTool::KeyDown( vk, mods );
+        }
+
+        void OnChainCleared() override
+        {
+            m_smooth.clear();
         }
 
         bool OnClick( bool doubleClick ) override
@@ -2358,9 +2576,38 @@ namespace
                 return false;
             }
             PushPoint( m_cur );
+            m_smooth.push_back( m_splineMode ? 1 : 0 );   // the span leaving this point
             m_anyLmbPoint = true;
             UpdateHud();
             return true;
+        }
+
+        // The placed chain plus the rubber band, tessellated through any spline spans;
+        // a plain chain draws through the base helper.
+        void DrawWorld() override
+        {
+            bool anySmooth = false;
+            for ( size_t i = 0; i < m_smooth.size() && !anySmooth; ++i )
+                anySmooth = m_smooth[i] != 0;
+            if ( !anySmooth || PointCount() < 1 )
+            {
+                KiwiDrawTool::DrawWorld();
+                return;
+            }
+            std::vector<float>         ctrl = m_pts;
+            std::vector<unsigned char> flags = m_smooth;
+            if ( m_haveCur )
+            {
+                ctrl.push_back( m_cur[0] );  ctrl.push_back( m_cur[1] );  ctrl.push_back( m_cur[2] );
+                flags.push_back( 0 );
+            }
+            std::vector<float> tess;
+            KiwiCon_TessellateMixed( ctrl, flags, false, &tess );
+            KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
+            const int n = (int)( tess.size() / 3 );
+            for ( int i = 0; i + 1 < n; ++i )
+                if ( !KiwiLines_Add( &tess[(size_t)i * 3], &tess[( (size_t)i + 1 ) * 3] ) )
+                    return;
         }
 
         void Recompute() override
@@ -2384,7 +2631,8 @@ namespace
             const int n = PointCount();
             if ( n == 0 )
             {
-                SetHud( "curve  ·  click: first point  ·  keep clicking to chain  ·  %s",
+                SetHud( "curve%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
+                        m_splineMode ? " [SPLINE]" : "",
                         m_anyLmbPoint ? "RMB: end (no point)"
                                       : "RMB: place a point and end" );
                 return;
@@ -2396,9 +2644,10 @@ namespace
             KiwiUnits_Format( b,  sizeof( b ),  Len3( d ) );
             KiwiUnits_Format( dz, sizeof( dz ), d[2] );
             // Advertise both the aimable Z guide and the explicit Z lock.
-            SetHud( "curve  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
+            SetHud( "curve%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
                     "Enter: finish here  ·  "
-                    "Esc: drop last  ·  vertical: aim the Z guide%s",
+                    "Esc: drop last  ·  S: spline span  ·  vertical: aim the Z guide%s",
+                    m_splineMode ? " [SPLINE]" : "",
                     n, b, dz, m_zLock ? "  [Z LOCK]" : "",
                     ( n >= 3 && NearFirstPoint() )
                         ? "click: CLOSE the loop"
@@ -2451,11 +2700,19 @@ namespace
             o.plane  = m_plane;                    // seed only; refit on Add
             o.pts    = pts;
             o.closed = m_wantClosed;
+            // Spline spans: one flag per placed point; a cursor tail adds a straight end.
+            o.smooth = m_smooth;
+            o.smooth.resize( pts.size() / 3, 0 );
+            int splineSpans = 0;
+            for ( size_t k = 0; k < o.smooth.size(); ++k )
+                if ( o.smooth[k] ) ++splineSpans;
             // Announce success only when the store accepted the object.
             if ( KiwiCon_AddWithUndo( o ) >= 0 )
-                Sys_Printf( "Curve: %i points%s.\n", (int)( pts.size() / 3 ),
-                            m_wantClosed ? ", closed" : "" );
+                Sys_Printf( "Curve: %i points%s%s.\n", (int)( pts.size() / 3 ),
+                            m_wantClosed ? ", closed" : "",
+                            splineSpans ? " (with spline spans: a layout curve, never a brush edge)" : "" );
             m_pts.clear();
+            m_smooth.clear();
             m_wantClosed  = false;
             m_noTailPoint = false;
             m_anyLmbPoint = false;
@@ -2463,6 +2720,9 @@ namespace
 
     private:
         bool m_wantClosed  = false;
+        // Spline-span mode (S) and the per-placed-point flags (kiwi_construct.h smooth).
+        bool m_splineMode  = false;
+        std::vector<unsigned char> m_smooth;
         // One-gesture RMB finish-without-tail latch.
         bool m_noTailPoint = false;
         // One-chain LMB-history latch controlling RMB grammar and hints.
@@ -3775,6 +4035,17 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
             fprintf( f, "group %i\n", o.group );
         if ( !o.name.empty() )
             fprintf( f, "name \"%s\"\n", o.name.c_str() );
+        // KIWI (2026-09-10): spline spans, one digit per control point (1 = the span
+        // leaving that point is smooth).  Omitted for plain chains; an older build
+        // skips the keyword and loads the control polygon.
+        if ( !KiwiCon_IsParametric( o ) && KiwiCon_HasSmooth( o ) )
+        {
+            fprintf( f, "smooth " );
+            const size_t np = o.pts.size() / 3;
+            for ( size_t k = 0; k < np; ++k )
+                fputc( ( k < o.smooth.size() && o.smooth[k] ) ? '1' : '0', f );
+            fprintf( f, "\n" );
+        }
         if ( KiwiCon_IsParametric( o ) )
         {
             // Omit AUTO tessellation so older KIWI2 output remains stable.
@@ -3972,6 +4243,16 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
             char nm[KCON_NAME_MAX] = { 0 };
             if ( KiwiCon_QuotedField( line, nm, KCON_NAME_MAX ) )
                 cur.name = nm;
+        }
+        else if ( !strcmp( kw, "smooth" ) )              // KIWI spline spans (absent = straight)
+        {
+            char bits[KCON_MAX_POINTS + 8] = { 0 };
+            if ( sscanf( line, "%*s %263s", bits ) == 1 )
+            {
+                cur.smooth.clear();
+                for ( const char *c = bits; *c && cur.smooth.size() < (size_t)KCON_MAX_POINTS; ++c )
+                    cur.smooth.push_back( *c == '1' ? 1 : 0 );
+            }
         }
         else if ( !strcmp( kw, "wpt" ) )                 // KIWI2 — WORLD, verbatim
         {

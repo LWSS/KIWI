@@ -5,7 +5,7 @@
 
 // Terrain Sculpt — the KIWI replacement for the Advanced Patch Editor (Y).
 //
-// An armed camera paint tool over the ported patch control grid: raise/lower,
+// An armed camera paint tool over the ported patch control grid: raise/dig,
 // flatten / set height, smooth, noise, texture-blend weight and vertex colour, with
 // circular or square brushes and selectable falloff.  Strokes reuse the ported
 // per-patch undo marking (Patch_Paint / sub_45E770 / PMESH_18) so a stroke is one

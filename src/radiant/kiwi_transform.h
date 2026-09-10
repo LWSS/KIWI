@@ -44,6 +44,9 @@ bool KiwiDrop_ComputePlacement( const ray_t &ray,
                                 const float *supportCorners = 0,
                                 int supportCornerCount = 0 );
 
+// Would a press here start the drop variant?  Pure query for the viewport's armed
+// press (KIWI 2026-09-09): the Move only begins once the cursor leaves the click slop.
+bool KiwiDrop_HitSelectedModelAt( int imgX, int imgY );
 // Start the Move drop variant from an already-selected model-only selection.
 bool KiwiDrop_BeginAt( int imgX, int imgY );
 bool KiwiDrop_Active();

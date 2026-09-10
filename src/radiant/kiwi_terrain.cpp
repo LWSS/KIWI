@@ -5,7 +5,7 @@
 // Terrain Sculpt — see kiwi_terrain.h.
 //
 // Sculpts the control points of the selected patches (optionally every visible patch)
-// with a circular or square brush: raise/lower, set height, smooth, noise, texture
+// with a circular or square brush: raise/dig, set height, smooth, noise, texture
 // layers, vertex colour, grass scatter, trim, plus chunk splitting and terrain
 // creation ("Allow terrain creation": the Raise brush lays new chunks in the empty
 // lattice cells it covers, next to existing terrain or over nothing at all).
@@ -108,7 +108,7 @@ namespace
 
     enum kterTool_t
     {
-        KTER_RAISE = 0,     // raise (Ctrl: lower)
+        KTER_RAISE = 0,     // raise (Ctrl: dig)
         KTER_SETHEIGHT,     // snap toward a global target Z (Ctrl+click: pick height)
         KTER_SMOOTH,        // neighbour average
         KTER_NOISE,         // additive value noise
@@ -123,10 +123,11 @@ namespace
     enum kterFalloff_t { KTER_FO_SMOOTH = 0, KTER_FO_LINEAR, KTER_FO_SHARP, KTER_FO_CONSTANT };
 
     const char *KTER_TOOL_NAME[KTER_TOOL_COUNT] =
-        { "Raise / Lower", "Set height", "Smooth", "Noise", "Texture paint", "Blend", "Grass", "Trim" };
+        { "Raise / Dig", "Set height", "Smooth", "Noise", "Texture paint", "Blend", "Grass", "Trim" };
+    // KIWI (2026-09-10, user): "lowering" is called "digging" everywhere the tool speaks.
     const char *KTER_TOOL_HINT[KTER_TOOL_COUNT] =
     {
-        "LMB raise   Ctrl+LMB lower   Shift+LMB smooth   V pick base height",
+        "LMB raise   Ctrl+LMB dig   Shift+LMB smooth   V pick base height",
         "LMB snap to target Z   V / Ctrl+LMB pick the height under the pointer   Shift+LMB smooth",
         "LMB smooth",
         "LMB add noise   Ctrl+LMB subtract   Shift+LMB smooth",

@@ -39,6 +39,7 @@ namespace
     kuxFlag_t s_showAxes    = { "ShowAxes",    -1, 1 };
     kuxFlag_t s_showHover   = { "ShowHover",   -1, 1 };
     kuxFlag_t s_showTris    = { "ShowTriCount", -1, 1 };
+    kuxFlag_t s_showFacing  = { "ShowFacingArrows", -1, 1 };   // KIWI 2026-09-09: View menu
 
     bool Get( kuxFlag_t &f )
     {
@@ -67,6 +68,8 @@ bool KiwiUX_ShowHover()                { return Get( s_showHover ); }
 void KiwiUX_SetShowHover( bool on )    { Set( s_showHover, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_ShowTriCount()             { return Get( s_showTris ); }
 void KiwiUX_SetShowTriCount( bool on ) { Set( s_showTris, on ); g_nUpdateBits |= 1; }
+bool KiwiUX_ShowFacingArrows()             { return Get( s_showFacing ); }
+void KiwiUX_SetShowFacingArrows( bool on ) { Set( s_showFacing, on ); g_nUpdateBits = -1; }
 
 // Settings UI.
 void KiwiUX_DrawSettings()

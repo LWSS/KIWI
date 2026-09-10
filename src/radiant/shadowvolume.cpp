@@ -527,7 +527,10 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
     // memoize while a face's material handle is still unrealized — memoizing "no" there would
     // disable the brush's shadow until the next edit.
     {
-        const int memo = KiwiShadowCache_BrushCasts( def );
+        // The def's own version keys the memo (KIWI 2026-09-09): a drag frame no longer
+        // re-runs this material walk for every brush in the map.
+        const unsigned defVersion = (unsigned)(unsigned __int16)def->version;
+        const int memo = KiwiShadowCache_BrushCasts( def, defVersion );
         if ( memo == 0 )
             return;
         if ( memo < 0 )
@@ -545,7 +548,7 @@ static void ShadVol_AddBrushFaces( const brush_t *def, const orientation_t *orie
                 any = ShadVol_MaterialCasts( lm->next );
             }
             if ( !unrealized )
-                KiwiShadowCache_SetBrushCasts( def, any );
+                KiwiShadowCache_SetBrushCasts( def, defVersion, any );
             if ( !any )
                 return;
         }

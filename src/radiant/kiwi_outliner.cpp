@@ -78,6 +78,7 @@ enum koutKind_t
     KOUT_BRUSH,                 // one brush instance
     KOUT_CON_GROUP,             // a construction-group folder
     KOUT_CON_OBJECT,            // one construction object
+    KOUT_IMAGE_GROUP,           // an image-group folder (KIWI 2026-09-10)
     KOUT_IMAGE,                 // one reference image
 };
 
@@ -90,6 +91,7 @@ struct koutRow_t
     int         conIndex;   // KOUT_CON_OBJECT        — store index
     int         conGroup;   // KOUT_CON_GROUP         — group id
     int         imageIndex; // KOUT_IMAGE store index
+    int         imageGroup; // KOUT_IMAGE_GROUP       — group id (also set on member rows)
     int         ordinal;    // the display number ("Brush 12", "Line 3")
     int         count;      // folders: how many children
     unsigned    key;        // collapse-set key; 0 = not collapsible
@@ -97,8 +99,9 @@ struct koutRow_t
 
 // numberId is stable for an entity's lifetime. Tags separate key namespaces and
 // keep valid id 0 distinct from the non-collapsible sentinel.
-inline unsigned EntKey     ( int numberId ) { return 0xD0000000u | (unsigned)numberId; }
-inline unsigned ConGroupKey( int group    ) { return 0xE0000000u | (unsigned)group; }
+inline unsigned EntKey       ( int numberId ) { return 0xD0000000u | (unsigned)numberId; }
+inline unsigned ConGroupKey  ( int group    ) { return 0xE0000000u | (unsigned)group; }
+inline unsigned ImageGroupKey( int group    ) { return 0xA0000000u | (unsigned)group; }
 const unsigned KOUT_KEY_BRUSHES  = 0xF0000001u;
 const unsigned KOUT_KEY_CURVES   = 0xF0000002u;
 const unsigned KOUT_KEY_ENTITIES = 0xF0000003u;
@@ -181,7 +184,8 @@ bool RenamingRow( const koutRow_t &r )
 bool Renameable( koutKind_t k )
 {
     return k == KOUT_GROUP_ENTITY || k == KOUT_ENTITY
-        || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT || k == KOUT_IMAGE;
+        || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT || k == KOUT_IMAGE
+        || k == KOUT_IMAGE_GROUP;
 }
 
 // Seed the editor with the current label (kiwi_viewcube.cpp:502-508).
@@ -213,7 +217,25 @@ struct koutDrag_t
     selbrush_t *inst;
     int         conIndex;
     unsigned    conGen;
+    int         imageIndex;     // KOUT_IMAGE rows (KIWI 2026-09-10): paired with the
+    unsigned    imageGen;       // image-store generation, like the construction pair
 };
+
+// Outliner MMB opacity drag (KIWI 2026-09-10, user: "allow opacity changes in the
+// outliner for images only by MMB clicking and going left and right for each image or
+// group section header"): press MMB on an image row, an image-group folder or the
+// Images section header, then move left/right.  One picture, the group's members or
+// every picture follow; the whole drag is one ref-image undo record (SettleEdit).
+struct koutOpacityDrag_t
+{
+    bool  active = false;
+    int   imageIndex = -1;      // one picture, else
+    int   imageGroup = -1;      // its members, else every picture
+    float lastX = 0.0f;
+    float shown = -1.0f;        // the opacity last reported, for the tooltip
+};
+koutOpacityDrag_t s_opacityDrag;
+const float KOUT_OPACITY_PER_PIXEL = 0.005f;   // 200 px = the full 0..1 range
 
 // Small helpers
 bool Collapsed( unsigned key )
@@ -402,6 +424,7 @@ void PushRow( koutKind_t kind, int indent, unsigned key )
     r.conIndex = -1;
     r.conGroup = -1;
     r.imageIndex = -1;
+    r.imageGroup = -1;
     r.ordinal  = 0;
     r.count    = 0;
     r.key      = key;
@@ -529,11 +552,36 @@ void FlattenImages()
     s_rows.back().count = KiwiRefImage_Count();
     if ( Collapsed( KOUT_KEY_IMAGES ) )
         return;
+    // Groups first (like the Curves section), then the ungrouped pictures.
+    const int nGroups = KiwiRefImage_GroupCount();
+    for ( int g = 0; g < nGroups; ++g )
+    {
+        const int      gid = KiwiRefImage_GroupIdAt( g );
+        const unsigned key = ImageGroupKey( gid );
+        PushRow( KOUT_IMAGE_GROUP, 1, key );
+        s_rows.back().imageGroup = gid;
+        s_rows.back().count      = KiwiRefImage_GroupMemberCount( gid );
+        if ( Collapsed( key ) )
+            continue;
+        int ordinal = 0;
+        for ( int i = 0; i < KiwiRefImage_Count(); ++i )
+        {
+            if ( KiwiRefImage_Group( i ) != gid )
+                continue;
+            PushRow( KOUT_IMAGE, 2, 0 );
+            s_rows.back().imageIndex = i;
+            s_rows.back().imageGroup = gid;
+            s_rows.back().ordinal    = ++ordinal;
+        }
+    }
+    int ordinal = 0;
     for ( int i = 0; i < KiwiRefImage_Count(); ++i )
     {
+        if ( KiwiRefImage_Group( i ) >= 0 )
+            continue;
         PushRow( KOUT_IMAGE, 1, 0 );
         s_rows.back().imageIndex = i;
-        s_rows.back().ordinal = i + 1;
+        s_rows.back().ordinal = ++ordinal;
     }
 }
 
@@ -582,8 +630,11 @@ void AutoExpandForSelection()
         if ( e == world_entity )
         {
             // Worldspawn lists its terrain under "Terrain", the rest under "Brushes".
+            // KIWI (2026-09-10, user: "when clicking on a terrain piece, do NOT expand the
+            // terrain group"): a selected terrain chunk never opens the Terrain section -
+            // it holds hundreds of sculpt chunks and stays closed until opened by hand.
+            (void)anyTerrain;
             if ( anyOther )   SetCollapsed( KOUT_KEY_BRUSHES, false );
-            if ( anyTerrain ) SetCollapsed( KOUT_KEY_TERRAIN, false );
             continue;
         }
 
@@ -601,7 +652,16 @@ void ObserveImageGeneration()
         return;
     s_lastImageGen = gen;
     if ( KiwiRefImage_SelectedCount() > 0 )
+    {
         SetCollapsed( KOUT_KEY_IMAGES, false );
+        // A selected picture opens its own group folder too.
+        for ( int i = 0; i < KiwiRefImage_SelectedCount(); ++i )
+        {
+            const int g = KiwiRefImage_Group( KiwiRefImage_SelectedAt( i ) );
+            if ( g >= 0 )
+                SetCollapsed( ImageGroupKey( g ), false );
+        }
+    }
     if ( s_anchor.kind == KOUT_IMAGE
       && ( s_anchor.imageIndex < 0 || s_anchor.imageIndex >= KiwiRefImage_Count() ) )
         s_anchor = koutAnchor_t();
@@ -1055,8 +1115,47 @@ bool RowAcceptsCurves( const koutRow_t &r )
         || r.kind == KOUT_CON_GROUP;
 }
 
+bool RowAcceptsImages( const koutRow_t &r )
+{
+    return r.kind == KOUT_SECTION_IMAGES       // -> ungrouped
+        || r.kind == KOUT_IMAGE_GROUP;
+}
+
 void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 {
+    if ( drag.kind == KOUT_IMAGE )
+    {
+        if ( !RowAcceptsImages( target ) )
+            return;
+        if ( drag.imageGen != KiwiRefImage_Generation() )
+        {
+            Sys_Printf( "Outliner: the image store changed — drop cancelled.\n" );
+            return;
+        }
+        if ( drag.imageIndex < 0 || drag.imageIndex >= KiwiRefImage_Count() )
+        {
+            Sys_Printf( "Outliner: the dragged image is gone (index %i of %i) — "
+                        "drop cancelled.\n", drag.imageIndex, KiwiRefImage_Count() );
+            return;
+        }
+        const int gid = ( target.kind == KOUT_SECTION_IMAGES ) ? -1 : target.imageGroup;
+        // Dragging a selected row moves the whole image selection.
+        std::vector<int> moving;
+        if ( KiwiRefImage_IsSelected( drag.imageIndex ) )
+            for ( int i = 0; i < KiwiRefImage_SelectedCount(); ++i )
+                moving.push_back( KiwiRefImage_SelectedAt( i ) );
+        if ( moving.empty() )
+            moving.push_back( drag.imageIndex );
+        int moved = 0;
+        for ( size_t i = 0; i < moving.size(); ++i )
+            if ( KiwiRefImage_SetGroup( moving[i], gid ) )
+                ++moved;
+        s_structural = true;
+        Sys_Printf( "Outliner: moved %i image(s)%s.\n", moved,
+                    gid >= 0 ? " into the group" : " out of their group" );
+        return;
+    }
+
     if ( drag.kind == KOUT_BRUSH )
     {
         if ( !RowAcceptsBrushes( target ) )
@@ -1127,6 +1226,9 @@ static bool s_collapseFoldersPending = false;
 
 static void CollapseFoldersOnly()
 {
+    // KIWI (2026-09-10, user): the Terrain section is ALWAYS collapsed when a map loads —
+    // the only top-level section that starts closed (its rows are hundreds of sculpt chunks).
+    SetCollapsed( KOUT_KEY_TERRAIN, true );
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
         if ( e == world_entity )
@@ -1138,11 +1240,15 @@ static void CollapseFoldersOnly()
     const int nGroups = KiwiCon_GroupCount();
     for ( int g = 0; g < nGroups; ++g )
         SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
+    const int nImageGroups = KiwiRefImage_GroupCount();
+    for ( int g = 0; g < nImageGroups; ++g )
+        SetCollapsed( ImageGroupKey( KiwiRefImage_GroupIdAt( g ) ), true );
 }
 
 void KiwiOutliner_ResetForNewMap()
 {
     s_collapsed.clear();
+    SetCollapsed( KOUT_KEY_TERRAIN, true );   // closed from the first frame (KIWI 2026-09-10)
     s_collapseFoldersPending = true;
     s_rows.clear();
     s_lastSelGen = 0;
@@ -1209,6 +1315,33 @@ void KiwiOutliner_Draw()
         if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
             s_paintSelecting = false;
 
+        // An MMB opacity drag in flight follows the mouse wherever it goes; release
+        // settles it into one undo record.  Rows below only START a drag.
+        if ( s_opacityDrag.active )
+        {
+            if ( ImGui::IsMouseDown( ImGuiMouseButton_Middle ) )
+            {
+                const float x  = io.MousePos.x;
+                const float dx = x - s_opacityDrag.lastX;
+                s_opacityDrag.lastX = x;
+                if ( dx != 0.0f )
+                {
+                    const float shown = KiwiRefImage_NudgeOpacity( s_opacityDrag.imageIndex,
+                                                                    s_opacityDrag.imageGroup,
+                                                                    dx * KOUT_OPACITY_PER_PIXEL );
+                    if ( shown >= 0.0f )
+                        s_opacityDrag.shown = shown;
+                }
+                if ( s_opacityDrag.shown >= 0.0f )
+                    ImGui::SetTooltip( "Opacity %.2f  (MMB drag left / right)", (double)s_opacityDrag.shown );
+            }
+            else
+            {
+                KiwiRefImage_SettleEdit();
+                s_opacityDrag = koutOpacityDrag_t();
+            }
+        }
+
         // Items use itemH, but the clipper needs item height plus ItemSpacing.y;
         // otherwise hit rows drift by one spacing per entry.
         const float itemH   = ImGui::GetTextLineHeight();
@@ -1272,6 +1405,10 @@ void KiwiOutliner_Draw()
                     hasEye = image != nullptr;
                     break;
                 }
+                case KOUT_IMAGE_GROUP:
+                    hidden = KiwiRefImage_GroupAllHidden( r.imageGroup );
+                    hasEye = KiwiRefImage_GroupMemberCount( r.imageGroup ) > 0;
+                    break;
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
                 {
@@ -1359,6 +1496,10 @@ void KiwiOutliner_Draw()
                         else if ( r.kind == KOUT_IMAGE )
                         {
                             KiwiRefImage_SetHidden( r.imageIndex, want );
+                        }
+                        else if ( r.kind == KOUT_IMAGE_GROUP )
+                        {
+                            KiwiRefImage_SetGroupHidden( r.imageGroup, want );   // one record
                         }
                         else if ( r.key >= KOUT_KEY_BRUSHES )      // a category row
                         {
@@ -1448,6 +1589,10 @@ void KiwiOutliner_Draw()
                     selected = KiwiConSel_ObjectSelected( r.conIndex );
                     break;
                 }
+                case KOUT_IMAGE_GROUP:
+                    _snprintf( label, sizeof( label ), "%s (%i)",
+                               KiwiRefImage_GroupName( r.imageGroup ), r.count );
+                    break;
                 case KOUT_IMAGE:
                 {
                     const krefImage_t *image = KiwiRefImage_At( r.imageIndex );
@@ -1492,6 +1637,10 @@ void KiwiOutliner_Draw()
                             else if ( r.kind == KOUT_CON_GROUP )
                             {
                                 KiwiCon_SetGroupName( r.conGroup, s_renameBuf );
+                            }
+                            else if ( r.kind == KOUT_IMAGE_GROUP )
+                            {
+                                KiwiRefImage_SetGroupName( r.imageGroup, s_renameBuf );
                             }
                             else if ( r.kind == KOUT_CON_OBJECT )
                             {
@@ -1586,12 +1735,48 @@ void KiwiOutliner_Draw()
                             {
                                 BeginRename( r, KiwiCon_GroupName( r.conGroup ) );
                             }
+                            else if ( r.kind == KOUT_IMAGE_GROUP )
+                            {
+                                BeginRename( r, KiwiRefImage_GroupName( r.imageGroup ) );
+                            }
                             else
                             {
                                 char nm[80];
                                 FolderName( r.ent, nm, sizeof( nm ) );
                                 BeginRename( r, nm );
                             }
+                        }
+                        else if ( r.kind == KOUT_IMAGE_GROUP )
+                        {
+                            // Plain: the group's pictures replace the selection; Shift adds
+                            // them; Ctrl on a fully selected group removes them.
+                            const int n = KiwiRefImage_Count();
+                            bool any = false, all = true;
+                            for ( int k = 0; k < n; ++k )
+                            {
+                                if ( KiwiRefImage_Group( k ) != r.imageGroup )
+                                    continue;
+                                any = true;
+                                if ( !KiwiRefImage_IsSelected( k ) )
+                                    all = false;
+                            }
+                            const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
+                            bool first = !io.KeyShift && !io.KeyCtrl;
+                            for ( int k = 0; k < n; ++k )
+                            {
+                                if ( KiwiRefImage_Group( k ) != r.imageGroup )
+                                    continue;
+                                if ( remove )
+                                    KiwiRefImage_SelectRemove( k );
+                                else if ( first )
+                                {
+                                    KiwiRefImage_ApplyClick( k, false, false, false );   // replaces
+                                    first = false;
+                                }
+                                else
+                                    KiwiRefImage_SelectAdd( k );
+                            }
+                            g_nUpdateBits = -1;
                         }
                         else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY )
                         {
@@ -1735,6 +1920,23 @@ void KiwiOutliner_Draw()
                         ImGui::EndPopup();
                     }
                 }
+                else if ( r.kind == KOUT_IMAGE_GROUP )
+                {
+                    if ( ImGui::BeginPopupContextItem( "##imagegroupctx" ) )
+                    {
+                        if ( ImGui::MenuItem( "Rename" ) )
+                            BeginRename( r, KiwiRefImage_GroupName( r.imageGroup ) );
+                        const bool allHidden = KiwiRefImage_GroupAllHidden( r.imageGroup );
+                        if ( ImGui::MenuItem( allHidden ? "Show all" : "Hide all" ) )
+                            KiwiRefImage_SetGroupHidden( r.imageGroup, !allHidden );
+                        if ( ImGui::MenuItem( "Ungroup" ) )
+                        {
+                            KiwiRefImage_RemoveGroup( r.imageGroup );   // members stay, ungrouped
+                            s_structural = true;
+                        }
+                        ImGui::EndPopup();
+                    }
+                }
                 else if ( r.kind == KOUT_IMAGE )
                 {
                     if ( ImGui::BeginPopupContextItem( "##imagectx" ) )
@@ -1748,12 +1950,74 @@ void KiwiOutliner_Draw()
                         image = KiwiRefImage_At( r.imageIndex );
                         if ( image && ImGui::MenuItem( "Rename" ) )
                             BeginRename( r, image->name.c_str() );
-                        if ( image && ImGui::MenuItem( "Delete" ) )
+                        ImGui::Separator();
+                        // Grouping (KIWI 2026-09-10): a new group takes the selected pictures
+                        // (this one when it is not selected); "Move to" re-homes the same set.
+                        if ( ImGui::MenuItem( "New group from selected" ) )
+                        {
+                            if ( !KiwiRefImage_IsSelected( r.imageIndex ) )
+                                KiwiRefImage_ApplyClick( r.imageIndex, false, false, false );
+                            const int gid = KiwiRefImage_GroupFromSelection( nullptr );
+                            if ( gid >= 0 )
+                                SetCollapsed( ImageGroupKey( gid ), false );
+                            s_structural = true;
+                        }
+                        if ( KiwiRefImage_GroupCount() > 0 && ImGui::BeginMenu( "Move to group" ) )
+                        {
+                            for ( int g = 0; g < KiwiRefImage_GroupCount(); ++g )
+                            {
+                                const int gid = KiwiRefImage_GroupIdAt( g );
+                                ImGui::PushID( gid );
+                                if ( ImGui::MenuItem( KiwiRefImage_GroupName( gid ), 0,
+                                                      KiwiRefImage_Group( r.imageIndex ) == gid ) )
+                                {
+                                    if ( KiwiRefImage_IsSelected( r.imageIndex ) )
+                                    {
+                                        std::vector<int> set;
+                                        for ( int k = 0; k < KiwiRefImage_SelectedCount(); ++k )
+                                            set.push_back( KiwiRefImage_SelectedAt( k ) );
+                                        for ( size_t k = 0; k < set.size(); ++k )
+                                            KiwiRefImage_SetGroup( set[k], gid );
+                                    }
+                                    else
+                                        KiwiRefImage_SetGroup( r.imageIndex, gid );
+                                    s_structural = true;
+                                }
+                                ImGui::PopID();
+                            }
+                            ImGui::EndMenu();
+                        }
+                        if ( KiwiRefImage_Group( r.imageIndex ) >= 0 && ImGui::MenuItem( "Remove from group" ) )
+                        {
+                            KiwiRefImage_SetGroup( r.imageIndex, -1 );
+                            s_structural = true;
+                        }
+                        ImGui::Separator();
+                        if ( KiwiRefImage_At( r.imageIndex ) && ImGui::MenuItem( "Delete" ) )
                         {
                             KiwiRefImage_DeleteAt( r.imageIndex );
                             s_structural = true;
                         }
                         ImGui::EndPopup();
+                    }
+                }
+
+                // MMB opacity drag start (KIWI 2026-09-10): the row under the middle press
+                // names the target; the drag itself runs above the clipper each frame.
+                if ( !s_opacityDrag.active
+                  && ( r.kind == KOUT_IMAGE || r.kind == KOUT_IMAGE_GROUP || r.kind == KOUT_SECTION_IMAGES )
+                  && ImGui::IsItemHovered() && ImGui::IsMouseClicked( ImGuiMouseButton_Middle ) )
+                {
+                    s_opacityDrag.active     = true;
+                    s_opacityDrag.imageIndex = ( r.kind == KOUT_IMAGE ) ? r.imageIndex : -1;
+                    s_opacityDrag.imageGroup = ( r.kind == KOUT_IMAGE_GROUP ) ? r.imageGroup : -1;
+                    s_opacityDrag.lastX      = io.MousePos.x;
+                    s_opacityDrag.shown      = -1.0f;
+                    if ( r.kind == KOUT_IMAGE )
+                    {
+                        const krefImage_t *image = KiwiRefImage_At( r.imageIndex );
+                        if ( image )
+                            s_opacityDrag.shown = image->opacity;
                     }
                 }
 
@@ -1783,15 +2047,17 @@ void KiwiOutliner_Draw()
 
                 // Drag source
                 if ( !io.KeyShift && !s_paintSelecting
-                  && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT ) )
+                  && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT || r.kind == KOUT_IMAGE ) )
                 {
                     if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
                     {
                         koutDrag_t d;
-                        d.kind     = (int)r.kind;
-                        d.inst     = r.inst;
-                        d.conIndex = r.conIndex;
-                        d.conGen   = KiwiCon_Generation();
+                        d.kind       = (int)r.kind;
+                        d.inst       = r.inst;
+                        d.conIndex   = r.conIndex;
+                        d.conGen     = KiwiCon_Generation();
+                        d.imageIndex = r.imageIndex;
+                        d.imageGen   = KiwiRefImage_Generation();
                         ImGui::SetDragDropPayload( KOUT_PAYLOAD, &d, sizeof( d ) );
                         ImGui::TextUnformatted( label );
                         ImGui::EndDragDropSource();
@@ -1799,7 +2065,7 @@ void KiwiOutliner_Draw()
                 }
 
                 // Drop target
-                if ( RowAcceptsBrushes( r ) || RowAcceptsCurves( r ) )
+                if ( RowAcceptsBrushes( r ) || RowAcceptsCurves( r ) || RowAcceptsImages( r ) )
                 {
                     if ( ImGui::BeginDragDropTarget() )
                     {

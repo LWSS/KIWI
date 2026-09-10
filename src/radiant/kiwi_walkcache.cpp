@@ -456,7 +456,21 @@ namespace
         Sig_Mix( h, (unsigned long long)(uintptr_t)b->def );
         // brush_t::version changes with geometry/texdef rebuilds and gates DrawBrush faceVis sync.
         if ( b->def )
+        {
             Sig_Mix( h, (unsigned long long)(unsigned short)b->def->version );
+            // KIWI (2026-09-10, user: "large amounts of terrain sculpting ... appears to
+            // UNDO my work"): a patch edit that rebuilds only the control grid
+            // (Patch_Rebuild without bounds: texture paint, blend, heatmap re-tints,
+            // RebuildAllPatchVisuals) bumps patchMesh_t::version but NOT the symbiot
+            // brush's version, so this signature stayed equal and the camera's surf-cache
+            // PATCH pass kept replaying the segments it recorded for the OLD instance
+            // visuals - the vertex buffer freed and re-uploaded by the live selected-pass
+            // draw - and the sculpt looked reverted until some unrelated structural
+            // change re-recorded the pass.  The patch def version is part of the object
+            // now, so every grid edit dirties its segment.
+            if ( b->def->patch )
+                Sig_Mix( h, (unsigned long long)(unsigned short)b->def->patch->version );
+        }
         // The bits FilterBrush reads: hidden, filtered, layer.
         Sig_Mix( h, (unsigned long long)(unsigned)( b->brushFlags & 0x1F ) );
         const entity_s *owner = b->owner;

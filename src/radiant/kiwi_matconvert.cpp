@@ -700,6 +700,14 @@ bool KiwiMatConvert_ToLit( const char *materialName, char *errOut, size_t errLen
     }
 
     RefreshLiveMaterial( materialName, oldMaterial, fresh, browserMaterial );
+    // KIWI (2026-09-09): the sun-preview cast memo is keyed on brush versions and the
+    // STRUCTURAL epoch (kiwi_shadowcache.cpp), and a converted material changes what its
+    // brushes cast without touching any brush — bump the structural epoch so every memo
+    // re-evaluates against the fresh material.
+    {
+        extern void KiwiWalkCache_MarkStructural();   // kiwi_walkcache.h
+        KiwiWalkCache_MarkStructural();
+    }
     ScanMap( false );
     PrintConversion( materialName, source, family, moved, written );
     return true;

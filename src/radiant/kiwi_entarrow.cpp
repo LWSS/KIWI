@@ -491,8 +491,14 @@ bool KiwiEntArrow_GetFacing( const entity_s_def *ent, float *outOrigin,
     return GetFacing( ent, outOrigin, outDir, outLen, nullptr );
 }
 
+// KIWI (2026-09-09): View > Show Facing Arrows gates both overlays (user: "remove these
+// shitty arrows").  The pref lives in kiwi_ux.cpp beside the other View toggles.
+extern bool KiwiUX_ShowFacingArrows();   // kiwi_ux.h
+
 void KiwiEntArrow_DrawWorld()
 {
+    if ( !KiwiUX_ShowFacingArrows() )
+        return;
     entArrow_t arrows[KENTARROW_MAX_ARROWS];
     const int count = GatherArrows( arrows );
     if ( count <= 0 )
@@ -509,6 +515,8 @@ void KiwiEntArrow_DrawWorld()
 
 void KiwiEntArrow_DrawXY( int viewType, float scale )
 {
+    if ( !KiwiUX_ShowFacingArrows() )
+        return;
     if ( viewType != ED_VIEW_XY && viewType != ED_VIEW_XZ && viewType != ED_VIEW_YZ )
         return;
 

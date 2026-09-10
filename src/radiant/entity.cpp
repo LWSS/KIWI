@@ -237,8 +237,12 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
         return;
 
     // The prefab/walk caches derive from this epair list (prefab layer prefix from "model",
-    // the walk recording from origin/angles/modelscale/spawnflags): any key set drops them.
-    KiwiPrefabPrefix_Invalidate();
+    // the walk recording from origin/angles/modelscale/spawnflags): any key set drops the
+    // walk epoch.  KIWI (2026-09-09): the prefab layer prefix reads ONLY "model" (and the
+    // class, via "classname"), so a drag that rewrites "origin"/"angles" every frame no
+    // longer rebuilds every prefab's prefix string per frame.
+    if ( !_stricmp( key, "model" ) || !_stricmp( key, "classname" ) )
+        KiwiPrefabPrefix_Invalidate();
     KiwiShadowCache_Invalidate();
     // KIWI-UX: A light epair edit evicts that light while retaining unrelated light previews.
     KiwiLightCache_EntityKeyChanged( e, key );
@@ -405,6 +409,10 @@ void Entity_Free_R( entity_s *e )
 {
     iassert( e );
     vassert( (e->refCount == 0), "(e->refCount) = %i", e->refCount );
+    // KIWI (2026-09-09): the prefab-prefix memo is keyed by DEF POINTER; a def freed here
+    // can be re-allocated for a different prefab, so drop the memo now that SetKeyValue
+    // no longer bumps it on every key (only "model"/"classname").
+    KiwiPrefabPrefix_Invalidate();
     if ( e->next )
         DecRef( e );
 
@@ -1957,6 +1965,11 @@ extern void Entity_WriteSelected_R( WriteFunc_entity_t *writer );   // map.cpp 0
 static char  *s_clipboardBuf = nullptr;
 static size_t s_clipboardLen = 0;   // strlen (excludes the NUL)
 static size_t s_clipboardCap = 0;
+// KIWI (2026-09-09): the Win32 clipboard sequence number at the moment of the last
+// in-app Copy.  Paste (mainfrm.cpp 33040) lets clipboard IMAGES win only when the OS
+// clipboard changed AFTER that copy — "whichever was copied most recently wins".
+// Without it a screenshot taken hours earlier hijacked every Ctrl+V into an image paste.
+static DWORD  s_clipboardSysSeq = 0;
 
 static void RadiantClipboard_Reset()
 {
@@ -2014,6 +2027,51 @@ void RadiantClipboard_Copy()
     writer[0] = &RadiantClipboard_Writer;
     writer[1] = nullptr;
     Entity_WriteSelected_R( writer );   // writer decays to WriteFunc_entity_t* (the handle)
+    s_clipboardSysSeq = ::GetClipboardSequenceNumber();
+}
+
+// True when the in-app clipboard holds a copy made AFTER the last change to the OS
+// clipboard, i.e. the brush/entity copy is the more recent one and Paste must not be
+// diverted to a clipboard image (KiwiRefImage_PasteClipboard).
+bool RadiantClipboard_NewerThanSystem()
+{
+    return s_clipboardLen != 0 && s_clipboardBuf
+        && ::GetClipboardSequenceNumber() == s_clipboardSysSeq;
+}
+
+// KIWI (2026-09-09): Clone = Copy + Paste through the map text, which is what the
+// binary's Clone_Selection did (OLE clipboard -> Map_ImportBuffer).  That route
+// duplicates ENTITIES (misc_model, triggers, lights: a fresh entity with its epairs and
+// the auto-target renumber), patches, and worldspawn brushes alike; the previous
+// in-memory clone only deep-copied brush DEFs into their EXISTING owner entity, so a
+// cloned model was a second proxy brush inside the same misc_model — invisible and
+// unsaved — and fixed-size entities were skipped outright.  The user's own clipboard is
+// stashed around the round trip so Clone never clobbers a pending Ctrl+V.
+void RadiantClipboard_Paste();   // defined below
+
+void RadiantClipboard_CloneSelection()
+{
+    char  *stashBuf = nullptr;
+    size_t stashLen = s_clipboardLen;
+    const DWORD stashSeq = s_clipboardSysSeq;
+    if ( stashLen && s_clipboardBuf )
+    {
+        stashBuf = (char *)malloc( stashLen + 1 );
+        if ( !stashBuf )
+            Com_Error( ERR_FATAL, "RadiantClipboard_CloneSelection: out of memory" );
+        memcpy( stashBuf, s_clipboardBuf, stashLen + 1 );
+    }
+
+    RadiantClipboard_Copy();
+    RadiantClipboard_Paste();
+
+    RadiantClipboard_Reset();
+    if ( stashBuf )
+    {
+        RadiantClipboard_Append( stashBuf, stashLen );
+        free( stashBuf );
+    }
+    s_clipboardSysSeq = stashSeq;
 }
 
 // CXYWnd::Paste core (IDB 0x46E280, minus the OLE fetch). Re-parse the in-app clipboard

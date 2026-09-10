@@ -2497,67 +2497,32 @@ void DoFlip( int axis, const char *opName )
 //  0x48F0D0  Clone_Selection — duplicate every selected brush into its owner entity,
 //  then select the duplicates.
 //
-//  KISAK SUBSET: the binary clones via the OLE clipboard (CXYWnd::Copy ->
-//  Entity_WriteSelected_R -> CMemFile -> CXYWnd::Paste -> Map_ImportBuffer with full
-//  target/targetname auto-remap), and follows the paste with NudgeSelection(2)+(3).  This
-//  is an IN-MEMORY clone with the same observable effect for brush selections: per selected
-//  brush, deep-copy the DEF (Brush_Clone), link it into the same owner entity's def-list
-//  (Entity_LinkBrush) + display list (Brush_AddToList/_2), rebuild windings, re-select the
-//  copies.  The clipboard's entity-with-epairs duplication, the auto-target renumbering and
-//  the cosmetic grid offset are NOT reproduced (`a1` = grid size, unused for that reason).
+//  The binary clones via the OLE clipboard (CXYWnd::Copy -> Entity_WriteSelected_R ->
+//  CMemFile -> CXYWnd::Paste -> Map_ImportBuffer with full target/targetname auto-remap),
+//  and follows the paste with NudgeSelection(2)+(3).  KIWI (2026-09-09) restored that
+//  route through the in-app clipboard (RadiantClipboard_CloneSelection): entities,
+//  patches and worldspawn brushes all clone.  Only the cosmetic grid offset is not
+//  reproduced (`a1` = grid size, unused for that reason) — KiwiCmd_AfterPaste enters a
+//  paused Move on the copies instead.
 // ═════════════════════════════════════════════════════════════════════════════
 void Clone_Selection( float /*a1*/ )
 {
-    // SNAPSHOT the selection FIRST: Brush_AddToList2 - despite its name - appends the new
-    // instance to selected_brushes, the SAME list, so iterating while adding would clone
-    // the clones forever.
-    selbrush_t *src[4096];
-    int nSrc = 0;
-    for ( selbrush_t *b = selected_brushes.next;
-          b != &selected_brushes && nSrc < 4096;
-          b = b->next )
-    {
-        if ( b->patch )                       // patch clone = pmesh path (deferred)
-            continue;
-        entity_s_def *ownerDef = (entity_s_def *)b->owner->def;
-        if ( *(int *)&ownerDef->eclass->fixedsize )
-            continue;                         // fixed-size bbox entities: clipboard path
-        src[nSrc++] = b;
-    }
-    if ( nSrc == 0 )
-        return;                               // nothing cloneable (all patches/bboxes)
+    if ( selected_brushes.next == &selected_brushes )
+        return;                               // nothing selected: no undo record either
 
-    // KIWI: the binary reaches Clone through CXYWnd::Paste -> Map_ImportBuffer (0x487C90),
-    // which brackets the whole paste in Undo_ClearRedo / Undo_GeneralStart("import buffer")
-    // ... modified = 1 / Undo_End (0x487D96..0x488B8E).  This in-memory subset had lost
-    // that bracket, so Ctrl+Z after a Clone popped the user's PREVIOUS edit while the
-    // clones stayed, and a clone-only session closed without a save prompt.
-    Undo_ClearRedo();
-    Undo_GeneralStart( "import buffer" );
-
-    // Deselect the originals (they return to active_brushes); the clones become the
-    // new selection (matches the binary's paste-selects-the-new-brushes net effect).
-    Select_Deselect( 1 );
-
-    for ( int i = 0; i < nSrc; ++i )
-    {
-        selbrush_t *b = src[i];
-        brush_t *cdef = Brush_Clone( b->def );      // owner already = b->def->owner
-        // Link the copy into the owner entity's DEF list (sets cdef->owner = entity def).
-        Entity_LinkBrush( cdef, (entity_s *)b->def->owner );
-        Brush_BuildWindings( cdef, 1 );
-        ++cdef->version;
-
-        // Create the display instance (refCount→2) + add it to the selection.
-        selbrush_t *inst = Brush_AddToList( cdef, b->owner );
-        if ( inst->next || inst->prev )
-            Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-        Brush_AddToList2( inst );             // appends to selected_brushes
-    }
-
-    Undo_EndBrushList( &selected_brushes );   // the clones are the selection, as at 0x488B7E
-    MarkMapModified();
-    Undo_End();
+    // KIWI (2026-09-09): the binary's route, minus the OLE mirror and the cosmetic
+    // nudge — Copy (Entity_WriteSelected_R) then Paste (Map_ImportBuffer), which owns the
+    // whole bracket: Select_Deselect(1), Undo_ClearRedo / Undo_GeneralStart("import
+    // buffer"), the target/targetname/script_link auto-renumber, MarkMapModified,
+    // Undo_EndBrushList(selected) / Undo_End, and leaves the copies selected.  That is
+    // the ONLY clone that is right for entities: a misc_model, trigger or light must
+    // come back as a NEW entity with its own epairs.  The previous in-memory subset
+    // deep-copied brush DEFs into their EXISTING owner entity (a cloned misc_model was a
+    // second proxy brush inside the same entity — invisible and never saved) and skipped
+    // fixed-size entities and patches altogether.  The user's in-app clipboard is stashed
+    // and restored around the round trip (RadiantClipboard_CloneSelection).
+    extern void RadiantClipboard_CloneSelection();   // entity.cpp
+    RadiantClipboard_CloneSelection();
     g_nUpdateBits = -1;
 }
 

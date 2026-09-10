@@ -438,6 +438,8 @@ namespace
         { KIWI_CMD_WINDOW_REFIMAGES, { "Reference Images", "Windows", 0, nullptr    } },
         { KIWI_CMD_PERF_HUD,         { "Perf HUD",         "View",    0, nullptr    } },
         { KIWI_CMD_VIEW_SHOW_TRIS,   { "Show Triangle Count", "View", 0, nullptr    } },
+        { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
+        { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
     };
 
@@ -713,6 +715,7 @@ namespace
         case KIWI_CMD_SELMODE_FACE:
         case KIWI_CMD_SELMODE_OBJECT:
         case KIWI_CMD_SELMODE_ALL:
+        case KIWI_CMD_SELMODE_MODELS:
         case KIWI_CMD_SELCONV_POINT:                    // selection:convert:*
         case KIWI_CMD_SELCONV_EDGE:
         case KIWI_CMD_SELCONV_FACE:
@@ -742,6 +745,7 @@ namespace
         case KIWI_CMD_WINDOW_REFIMAGES:                 // KIWI (REFIMG): panel toggle
         case KIWI_CMD_PERF_HUD:                         // a HUD toggle, not a verb
         case KIWI_CMD_VIEW_SHOW_TRIS:                   // View readout toggle
+        case KIWI_CMD_VIEW_SHOW_FACING:                 // View overlay toggle (facing arrows)
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
@@ -846,7 +850,22 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
     case KIWI_CMD_SELMODE_POINT:  SetModeMask( SEL_MASK_VERTEX );     return true;
     case KIWI_CMD_SELMODE_EDGE:   SetModeMask( SEL_MASK_EDGE );       return true;
     case KIWI_CMD_SELMODE_FACE:   SetModeMask( SEL_MASK_FACE );       return true;
-    case KIWI_CMD_SELMODE_OBJECT: SetModeMask( SEL_MASK_OBJECT );     return true;
+    case KIWI_CMD_SELMODE_OBJECT:
+    {
+        // KIWI (2026-09-09): a DOUBLE TAP of 4 (two Object-mode presses within 400 ms while
+        // already in plain Object mode) enters the models-only sub-mode; a single tap is
+        // plain Object mode and leaves it.  The chip dropdown does the same by mouse.
+        static DWORD s_lastObjectTap = 0;
+        const DWORD now = ::GetTickCount();
+        const bool doubleTap = ( now - s_lastObjectTap ) < 400u
+                            && KiwiSel_GetModeMask() == SEL_MASK_OBJECT
+                            && !KiwiSel_ModelsOnly();
+        s_lastObjectTap = now;
+        KiwiSel_SetModelsOnly( doubleTap );
+        SetModeMask( SEL_MASK_OBJECT );
+        return true;
+    }
+    case KIWI_CMD_SELMODE_MODELS: KiwiSel_SetModelsOnly( true ); SetModeMask( SEL_MASK_OBJECT ); return true;
     case KIWI_CMD_SELMODE_ALL:    SetModeMask( SEL_MASK_EVERYTHING ); return true;
     case KIWI_CMD_PALETTE:        KiwiPalette_Toggle();               return true;
     case KIWI_CMD_GRID_HALVE:     StepGrid( false );                  return true;

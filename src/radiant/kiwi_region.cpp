@@ -404,11 +404,13 @@ namespace
         const int count = KiwiCon_Count();
 
         // ── PASS 1: a closed object IS a region ─────────────────────────────
+        // KIWI (2026-09-10): objects with spline spans are layout curves and never
+        // define a region (so never a brush edge) - every pass below skips them.
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
             // Hidden geometry cannot define a face the user can see or repair.
-            if ( !o || o->hidden )
+            if ( !o || o->hidden || KiwiCon_HasSmooth( *o ) )
                 continue;
             const bool closed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed;
             if ( !closed )
@@ -442,7 +444,7 @@ namespace
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            if ( !o || o->hidden )        // hidden geometry is inert
+            if ( !o || o->hidden || KiwiCon_HasSmooth( *o ) )   // hidden / spline: inert
                 continue;
             const bool closed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed;
             if ( !closed && KiwiCon_VertCount( *o ) >= 2 )
@@ -598,7 +600,7 @@ namespace
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            if ( !o || o->hidden )
+            if ( !o || o->hidden || KiwiCon_HasSmooth( *o ) )
                 continue;
             const bool isClosed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT )
                                || o->closed;
@@ -620,7 +622,7 @@ namespace
             for ( int k = 0; k < count; ++k )
             {
                 const kconObject_t *ok = KiwiCon_At( k );
-                if ( !ok || ok->hidden || !ObjectOnPlane( *ok, plane ) )
+                if ( !ok || ok->hidden || KiwiCon_HasSmooth( *ok ) || !ObjectOnPlane( *ok, plane ) )
                     continue;
                 arrMembers.push_back( k );
             }
@@ -1756,7 +1758,7 @@ void KiwiRegion_ReportGaps( bool force )
     for ( int i = 0; i < count; ++i )
     {
         const kconObject_t *o = KiwiCon_At( i );
-        if ( !o || o->hidden )
+        if ( !o || o->hidden || KiwiCon_HasSmooth( *o ) )   // splines never seed regions
             continue;
         const bool closed = ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed;
         if ( closed )

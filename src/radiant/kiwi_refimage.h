@@ -30,6 +30,10 @@ struct krefImage_t
     bool        hidden;
     int         layerOrder;
     std::string name;
+    // KIWI (2026-09-10): flat group handle, -1 = ungrouped.  Group ids are minted by
+    // KiwiRefImage_NewGroup, never renumbered, and declared in the sidecar as
+    // `refimagegroup <id> "name"` lines ahead of the refimage blocks.
+    int         group;
 
     // Runtime only. Material resolution is lazy and attempted once per asset key.
     Material   *material;
@@ -85,6 +89,33 @@ bool KiwiRefImage_SetLocked( int index, bool locked );
 bool KiwiRefImage_SetName( int index, const char *name );
 bool KiwiRefImage_DeleteAt( int index );
 bool KiwiRefImage_Focus( int index );
+
+// KIWI (2026-09-10, user: "Allow grouping of images and custom names for images /
+// imagegroups. Allow show/hide by group."): image groups.  Every mutation is one
+// ref-image undo record; the whole-store snapshot carries the group table too.
+int         KiwiRefImage_Group( int index );                 // -1 = ungrouped / bad index
+bool        KiwiRefImage_SetGroup( int index, int group );   // -1 removes; unknown ids refused
+int         KiwiRefImage_NewGroup( const char *name );       // mints an id; null/empty = "Group N"
+int         KiwiRefImage_GroupCount();
+int         KiwiRefImage_GroupIdAt( int i );
+bool        KiwiRefImage_GroupExists( int group );
+const char *KiwiRefImage_GroupName( int group );             // "" for an unknown id
+bool        KiwiRefImage_SetGroupName( int group, const char *name );
+bool        KiwiRefImage_RemoveGroup( int group );           // members return to ungrouped
+int         KiwiRefImage_GroupMemberCount( int group );
+// The selected pictures become a new group (one record); -1 when nothing is selected.
+int         KiwiRefImage_GroupFromSelection( const char *name );
+// Show / hide every member at once (one record); false when nothing changed.
+bool        KiwiRefImage_SetGroupHidden( int group, bool hidden );
+bool        KiwiRefImage_GroupAllHidden( int group );        // false for an empty group
+
+// Outliner MMB opacity drags (user: "MMB clicking and going left and right"): a
+// CONTINUOUS edit - the first nudge opens the pending record, every further nudge
+// piles on, and SettleEdit closes it as ONE undo record on release.  `index` >= 0
+// nudges one picture; else `group` >= 0 nudges its members; else every picture.
+// Returns the opacity now shown (the first touched picture's), or -1 when nothing moved.
+float       KiwiRefImage_NudgeOpacity( int index, int group, float delta );
+void        KiwiRefImage_SettleEdit();
 // World-space box of the picture quad with its rotation applied; false for a bad index.
 bool KiwiRefImage_Bounds( int index, float mins[3], float maxs[3] );
 // Unit normal of the picture's actual plane (tilt included); false for a bad index.

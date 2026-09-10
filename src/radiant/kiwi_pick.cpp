@@ -14,7 +14,10 @@
 #include "kiwi_pick.h"
 #include "kiwi_section.h"   // section-plane pick clamps
 #include "kiwi_vec.h"     // Dot3/Sub3/...
+#include "kiwi_droptrace.h" // KiwiDrop_PickModelMesh: models pick by mesh, not by proxy box
+#include "kiwi_selection.h" // KiwiSel_ModelsOnly
 
+#include <float.h>
 #include <math.h>
 #include <vector>
 
@@ -461,7 +464,20 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     // Every Pick() area hit passes here; the clamp is inactive without a cut or
     // when the origin is already visible.
     KiwiSection_ClampRayStart( start, dir );
-    const int contents = Pick_CameraContents();
+    const int baseContents = Pick_CameraContents();
+
+    // KIWI (2026-09-09, user: "the raycast clickbox for selecting models is inconsistent,
+    // it needs to always get the first model the ray hits"): models are picked by their
+    // MESH, not by the bounding-box proxy brush the ported Test_Ray walks.  Overlapping
+    // proxies (fence panels, buildings) used to hand the click to whichever box was
+    // nearest, which is rarely the model under the cursor.  The proxy walk now skips
+    // renderable models (contents 0x400, the walker's own "not selectable models" gate)
+    // and a mesh pass over the models whose bounds the ray enters picks the nearest
+    // triangle hit.  A brush/patch hit still occludes: a model must be nearer to win.
+    // In the models-only sub-mode (KiwiSel_ModelsOnly) brushes never select at all.
+    const bool wantObjects   = ( kindMask & SEL_MASK_OBJECT ) != 0;
+    const bool modelsAllowed = wantObjects && ( baseContents & ( 0x200 | 0x400 ) ) == 0;
+    const int  contents      = modelsAllowed ? ( baseContents | 0x400 ) : baseContents;
 
     edTrace_t t;
     {
@@ -472,6 +488,31 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
         Test_Ray( start, dir, contents, &t, 1 );
     }
     selbrush_t *hb = t.hit.brush;
+
+    if ( modelsAllowed )
+    {
+        selbrush_t *modelNode = nullptr;
+        float modelDist = 0.0f, modelNormal[3] = { 0.0f, 0.0f, 1.0f };
+        const float occluder = hb ? t.dist : FLT_MAX;   // an excluded/rejected hit still occludes
+        if ( KiwiDrop_PickModelMesh( start, dir, occluder, pExcl != nullptr,
+                                     &modelNode, &modelDist, modelNormal ) )
+        {
+            r.valid      = true;
+            r.point[0]   = start[0] + dir[0] * modelDist;
+            r.point[1]   = start[1] + dir[1] * modelDist;
+            r.point[2]   = start[2] + dir[2] * modelDist;
+            r.screenDist = 0.0f;                   // area hit (spec §2)
+            r.normal[0]  = modelNormal[0];
+            r.normal[1]  = modelNormal[1];
+            r.normal[2]  = modelNormal[2];
+            r.haveNormal = true;
+            r.item       = Sel_MakeObject( modelNode );
+            return r;
+        }
+        if ( KiwiSel_ModelsOnly() )
+            return r;                              // brushes occlude but never select here
+    }
+
     if ( !hb )
         return r;
 

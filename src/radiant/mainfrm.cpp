@@ -5577,9 +5577,14 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     // kinds of pasted geometry are landed and selected and it can decide what one
     // Move gesture may carry.  Order matters: AfterPaste must run LAST.
     case 33040:
-        { // KIWI (REFIMG): clipboard pixels/files take precedence over brush paste.
+        { // KIWI (REFIMG): clipboard pixels/files take precedence over brush paste —
+          // but ONLY when they are the more recent copy.  KIWI (2026-09-09): the
+          // unconditional version hijacked every Ctrl+V while a screenshot sat on the OS
+          // clipboard, which read as "copy/paste of models doesn't work".
             extern bool KiwiRefImage_PasteClipboard();
-            if ( KiwiRefImage_PasteClipboard() ) return true;
+            extern bool RadiantClipboard_NewerThanSystem();   // entity.cpp
+            if ( !RadiantClipboard_NewerThanSystem() && KiwiRefImage_PasteClipboard() )
+                return true;
         }
         Cmd_OnEditPastebrush(); KiwiConClip_Paste(); KiwiCmd_AfterPaste(); return true;   // Edit->Paste           0x4286D0
     case 32818: Cmd_OnFileProjectsettings(); return true;   // File->Project Settings 0x428DE0

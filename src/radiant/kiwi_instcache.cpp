@@ -13,6 +13,7 @@
 #include <gfx_d3d/r_dobj_skin.h>   // XSurface definition
 // DObjSkelMat is only a cast target, avoiding the heavier xanim/dobj.h include.
 #include <universal/com_math.h>    // transform helpers
+#include <universal/profile.h>     // PROF_SCOPED: the re-transform shows up in Tracy
 #include "kiwi_instcache.h"
 #include "kiwi_shadowcache.h"    // sun-preview invalidation
 
@@ -40,6 +41,23 @@ const int      KIWI_IC_TABLE_MASK = KIWI_IC_TABLE_SIZE - 1;
 // Limit first-seen transforms per frame to spread map warmup.
 const int      KIWI_IC_BUILD_BUDGET = 1024;
 
+// KIWI (2026-09-09) — THE MODEL DRAG LAG.  A moved or rotated model re-stamps its
+// placement every frame of the gesture; each stamp marked every cached surface of the
+// instance stale, and the very next draw re-transformed ALL of its vertices on the CPU
+// and Lock()ed the shared 2 MB vertex-buffer page (flags 0: a pipeline stall on a buffer
+// the GPU is still reading) — every frame, for every surface, for as long as the
+// operator dragged.  Brushes never touch this cache, which is why only models lagged.
+// A stale entry is now re-transformed only once its pose has been unchanged for this
+// long; until then Get refuses it and the caller takes the ordinary per-instance draw
+// (GPU world matrix), which is exactly the path a full pool uses.
+// 2026-09-10 (Tracy lagwhiledrag.tracy, 46 ms per drag frame inside
+// RB_DrawEditorSkinnedCached with the frame-counted version built in): the settle
+// clock was KiwiInstCache_BeginFrame, which runs once per FRONT-END frame — and every
+// RTT view (camera, XY, texture) is its own front-end frame, so a drag that redraws the
+// XY view advanced the clock 2-3 times per editor frame and the "settled" rebuild ran
+// every frame anyway.  The clock is wall time now; view count cannot fool it.
+const unsigned long long KIWI_IC_SETTLE_MS = 150;
+
 struct Entry
 {
     const GfxScaledPlacement *inst;    // key 1; null = free slot
@@ -48,6 +66,7 @@ struct Entry
     bool                      built;   // geo holds a real allocation
     bool                      stale;   // allocation valid, contents need re-transform
     bool                      failed;  // refused once — never retried
+    unsigned long long        staleTick;  // GetTickCount64 when it was last marked stale
 };
 
 Entry                    s_table[KIWI_IC_TABLE_SIZE];
@@ -173,6 +192,7 @@ unsigned short *IC_AllocIndices( unsigned indexCount )
 bool IC_Transform( const GfxScaledPlacement *pl, const XSurface *xsurf,
                    IDirect3DVertexBuffer9 *vb, unsigned baseVert, unsigned vertCount )
 {
+    PROF_SCOPED( "instcache transform" );
     mat3x3 axis;
     UnitQuatToAxis( pl->base.quat, axis );
 
@@ -247,6 +267,11 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
             *out = e->geo;
             return true;
         }
+        // A pose still in motion is NOT rebuilt (KIWI_IC_SETTLE_MS): the per-instance
+        // draw carries it until it has stayed put, so a drag costs no CPU re-transform
+        // and no vertex-buffer lock per frame.
+        if ( ::GetTickCount64() - e->staleTick < KIWI_IC_SETTLE_MS )
+            return false;                              // per-instance fallback while moving
         // Re-transform stale geometry in place; an XSurface's vertex count is immutable.
         if ( s_builtThisFrame >= KIWI_IC_BUILD_BUDGET )
             return false;                              // per-instance fallback this frame
@@ -353,7 +378,10 @@ void KiwiInstCache_InvalidateInstance( const GfxScaledPlacement *placement )
         if ( e->inst != placement )
             continue;
         if ( e->built )
-            e->stale = true;       // re-transform in place on the next draw
+        {
+            e->stale     = true;   // re-transform in place once the pose settles
+            e->staleTick = ::GetTickCount64();
+        }
         else
             e->failed = true;      // never held geometry; keep refusing
     }

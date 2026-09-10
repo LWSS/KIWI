@@ -18,7 +18,15 @@ extern int Sys_Printf( const char *fmt, ... );
 #define KIWI_SV_MAX_MODEL_MB       96
 #define KIWI_SV_MAX_MODELS       4096
 
-static inline unsigned Sv_Epoch() { return KiwiWalkCache_Epoch(); }
+// KIWI (2026-09-09) — DRAG LAG, cast-memo half.  The memo used to be keyed on the GENERAL
+// walk epoch, which every drag frame bumps (each epair write and each model-pose stamp),
+// so with the sun-preview shadows on, EVERY brush in the map re-ran its per-face material
+// walk on EVERY frame of a drag.  "Does this def cast" depends only on the def's own faces
+// and materials, so the memo is now keyed on the def pointer + the def's own version
+// (bumped by every geometry/texture edit of that brush) + the STRUCTURAL epoch (a freed
+// def whose address is re-used).  A dragged brush still recomputes (its version moves);
+// everything else keeps its answer.
+static inline unsigned Sv_Epoch() { return KiwiWalkCache_StructEpoch(); }
 
 void KiwiShadowCache_Invalidate()
 {
@@ -31,7 +39,8 @@ void KiwiShadowCache_Invalidate()
 struct SvCastSlot
 {
     const void *key;
-    unsigned    epoch;
+    unsigned    epoch;      // structural epoch at the memo
+    unsigned    version;    // the def's own version at the memo
     int         casts;
 };
 static SvCastSlot s_castTable[KIWI_SV_CAST_SLOTS];
@@ -43,7 +52,7 @@ static int Sv_CastSlot( const void *key )
     return (int)( h & ( KIWI_SV_CAST_SLOTS - 1 ) );
 }
 
-int KiwiShadowCache_BrushCasts( const void *brushDef )
+int KiwiShadowCache_BrushCasts( const void *brushDef, unsigned defVersion )
 {
     if ( !brushDef )
         return -1;
@@ -54,13 +63,13 @@ int KiwiShadowCache_BrushCasts( const void *brushDef )
         if ( !e->key )
             return -1;
         if ( e->key == brushDef )
-            return ( e->epoch == Sv_Epoch() ) ? e->casts : -1;
+            return ( e->epoch == Sv_Epoch() && e->version == defVersion ) ? e->casts : -1;
         slot = ( slot + 1 ) & ( KIWI_SV_CAST_SLOTS - 1 );
     }
     return -1;
 }
 
-void KiwiShadowCache_SetBrushCasts( const void *brushDef, bool casts )
+void KiwiShadowCache_SetBrushCasts( const void *brushDef, unsigned defVersion, bool casts )
 {
     if ( !brushDef )
         return;
@@ -70,9 +79,10 @@ void KiwiShadowCache_SetBrushCasts( const void *brushDef, bool casts )
         SvCastSlot *e = &s_castTable[slot];
         if ( !e->key || e->key == brushDef || e->epoch != Sv_Epoch() )
         {
-            e->key   = brushDef;
-            e->epoch = Sv_Epoch();
-            e->casts = casts ? 1 : 0;
+            e->key     = brushDef;
+            e->epoch   = Sv_Epoch();
+            e->version = defVersion;
+            e->casts   = casts ? 1 : 0;
             return;
         }
         slot = ( slot + 1 ) & ( KIWI_SV_CAST_SLOTS - 1 );

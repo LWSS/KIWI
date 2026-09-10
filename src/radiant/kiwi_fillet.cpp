@@ -53,7 +53,7 @@ namespace
     // Only straight-segment chains can have corners to replace.
     bool Filletable( const kconObject_t &o )
     {
-        if ( KiwiCon_IsParametric( o ) )
+        if ( KiwiCon_IsParametric( o ) || KiwiCon_HasSmooth( o ) )   // splines: layout curves only
             return false;
         return (int)( o.pts.size() / 3 ) >= 3;
     }

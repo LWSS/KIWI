@@ -1804,6 +1804,7 @@ void KiwiEdScene_ToggleInstBatching()
 
 static int Editor_DrawMergedInstanceRun(const editorSurf_s *surfs, int first, int avail)
 {
+    PROF_SCOPED( "merged instance run" );   // KIWI 2026-09-10: was invisible in Tracy
     if (!s_edInstBatching)
         return 0;
     if (!gfxCmdBufState.technique)
@@ -1950,9 +1951,13 @@ static unsigned Editor_MeshWindowSignature( int index, int amount )
         const editorSurf_s *e = &edSceneGlobals.sceneSurfs[index + i];
         if ( e->type == ED_SURF_MESH ) {
             const editorMesh_s *m = (const editorMesh_s *)e->mesh_or_surfSub;
+            // handle = VB page + first vertex; with index/vertex counts it names the run's
+            // geometry exactly, which is what lets per-brush VB churn elsewhere leave this
+            // window's runs alone (kiwi_surfcache.cpp KiwiSurfCache_Invalidate, 2026-09-10).
             h = ( h ^ (unsigned)m->handle ) * 16777619u;
             h = ( h ^ (unsigned)(uintptr_t)m->material ) * 16777619u;
             h = ( h ^ (unsigned)( ( m->techType << 16 ) ^ (int)m->indexCount ) ) * 16777619u;
+            h = ( h ^ (unsigned)m->vertCount ) * 16777619u;
         } else {
             h = ( h ^ 0x9E3779B9u ) * 16777619u;    // a model surf: its POSITION is what matters
         }
@@ -2079,6 +2084,7 @@ static bool Editor_EnsureRunIB( int indexCount )
 // tess path in charge) on any failure.
 static void Editor_BuildMeshRuns( int index, int amount, int runsKey, unsigned sig )
 {
+    PROF_SCOPED( "build mesh runs" );        // KIWI 2026-09-10: was invisible in Tracy
     s_edRuns.clear();
     s_edRunStaging.clear();
     s_edRunsKey = 0;

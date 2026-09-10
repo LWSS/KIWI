@@ -128,3 +128,15 @@ else()
         endforeach()
     endif()
 endif()
+
+# KIWI (2026-09-10): the editor launches cod4map / cod4rad, so building (F5) the editor
+# must bring the tools up to date first.  add_dependencies becomes a VS project reference
+# in the .sln, which "Build startup project" honours; it applies to the real x64 tool
+# targets and to the x86 custom targets alike (both are named KIWI-<tool>).
+if(TARGET KIWI-Radiant)
+    foreach(_tool cod4map cod4rad)
+        if(TARGET KIWI-${_tool})
+            add_dependencies(KIWI-Radiant KIWI-${_tool})
+        endif()
+    endforeach()
+endif()

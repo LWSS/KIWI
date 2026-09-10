@@ -6,6 +6,7 @@
 #include "qe3.h"
 #include "kiwi_lightcache.h"
 #include "kiwi_walkcache.h"
+#include "kiwi_command.h"      // KiwiCmd_Active: hold caster lists during a live gesture
 
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ namespace
 
     LightCacheEntry s_entries[KLIGHT_CACHE_SLOTS];
     unsigned        s_epoch = ~0u;
+    unsigned        s_structEpoch = ~0u;   // KiwiWalkCache_StructEpoch at the last sync
     unsigned        s_stamp = 0;
     int             s_filterGeneration = -1;
     int             s_editLayer = -1;
@@ -84,6 +86,7 @@ namespace
     void SyncGenerations(unsigned epoch)
     {
         s_epoch = epoch;
+        s_structEpoch = KiwiWalkCache_StructEpoch();
         s_filterGeneration = g_qeglobals.g_filtersUpdated;
         s_editLayer = g_qeglobals.current_edit_layer;
         s_seenVisibilityGeneration = s_visibilityGeneration;
@@ -92,6 +95,27 @@ namespace
     bool GenerationsMatch(unsigned epoch)
     {
         return s_epoch == epoch
+            && s_filterGeneration == g_qeglobals.g_filtersUpdated
+            && s_editLayer == g_qeglobals.current_edit_layer
+            && s_seenVisibilityGeneration == s_visibilityGeneration;
+    }
+
+    // KIWI (2026-09-09) — DRAG LAG, light half.  Every frame of a Move/Rotate/Scale
+    // gesture bumps the walk epoch (each epair write and each model-pose stamp does),
+    // and a mismatch used to drop EVERY caster list, so every previewed light
+    // re-gathered its casters (a sphere test over the whole map) on every frame of the
+    // drag.  While a modal command is live and ONLY the general epoch has moved (same
+    // structure, filters, layer and visibility: no brush was created, freed or relinked,
+    // so every recorded brush pointer is still alive) the lists gathered before the
+    // gesture are kept and reused; the first frame after the gesture ends misses the
+    // match and rebuilds them once, exactly as before.  A caster that is being dragged
+    // therefore keeps its pre-drag shadow until release — the same trade the
+    // instance-geometry cache makes (kiwi_instcache.cpp).
+    bool HoldListsDuringGesture()
+    {
+        return s_epoch != ~0u
+            && KiwiCmd_Active() != 0
+            && s_structEpoch == KiwiWalkCache_StructEpoch()
             && s_filterGeneration == g_qeglobals.g_filtersUpdated
             && s_editLayer == g_qeglobals.current_edit_layer
             && s_seenVisibilityGeneration == s_visibilityGeneration;
@@ -131,12 +155,17 @@ const KiwiLightCasterRecord *KiwiLightCache_Get(
     if ( !lightDef || !origin || !( radius > 0.0f ) || !gather )
         return nullptr;
 
-    const unsigned epoch = KiwiWalkCache_Epoch();
+    unsigned epoch = KiwiWalkCache_Epoch();
     if ( !GenerationsMatch(epoch) )
     {
-        ClearEntries();
-        SyncGenerations(epoch);
-        ResetPendingEdits();
+        if ( HoldListsDuringGesture() )
+            epoch = s_epoch;            // reuse the pre-gesture lists (see above)
+        else
+        {
+            ClearEntries();
+            SyncGenerations(epoch);
+            ResetPendingEdits();
+        }
     }
 
     for ( int i = 0; i < KLIGHT_CACHE_SLOTS; ++i )

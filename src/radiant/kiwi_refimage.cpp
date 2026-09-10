@@ -109,7 +109,7 @@ extern void ImGuiShell_FocusTab( const char *title );                         //
 krefImage_t::krefImage_t()
     : axis( 2 ), width( 512.0f ), height( 512.0f ), keepAspect( true ),
       rotation( 0.0f ), flipU( false ), flipV( false ), opacity( 1.0f ),
-      locked( false ), hidden( false ), layerOrder( 0 ), material( nullptr ),
+      locked( false ), hidden( false ), layerOrder( 0 ), group( -1 ), material( nullptr ),
       pixW( 0 ), pixH( 0 )
 {
     origin[0] = origin[1] = origin[2] = 0.0f;
@@ -130,7 +130,17 @@ namespace
     // Selection is an ordered set of indices (s_sel); the LAST one is the primary
     // (s_selected) that the inspector and the corner handles act on.  Snapshots
     // carry the whole set so undo/redo restore it.
-    struct storeSnap_t { std::vector<krefImage_t> images; int selected = -1; std::vector<int> sel; };
+    // KIWI (2026-09-10): image groups are a flat id -> name table; the snapshot carries it
+    // so undo/redo of a grouping edit restores memberships AND the declared groups.
+    struct krefGroup_t { int id = -1; std::string name; };
+    struct storeSnap_t
+    {
+        std::vector<krefImage_t> images;
+        int                      selected = -1;
+        std::vector<int>         sel;
+        std::vector<krefGroup_t> groups;
+        int                      nextGroupId = 1;
+    };
     enum dragMode_t { KREF_DRAG_NONE = 0, KREF_DRAG_MOVE, KREF_DRAG_SCALE, KREF_DRAG_ROTATE };
     struct drag_t
     {
@@ -152,6 +162,8 @@ namespace
     };
 
     extern std::vector<krefImage_t> s_images;
+    extern std::vector<krefGroup_t> s_groups;
+    extern int s_nextGroupId;
     extern unsigned s_generation;
     extern int s_selected;
     extern std::vector<int> s_sel;
@@ -187,6 +199,7 @@ namespace
     void CommitPending();
     void BeginEdit( const char *label );
     void CancelEdit();
+    float ClampF( float v, float lo, float hi );
     void ImmediateCommit( const storeSnap_t &before, const char *label );
     void Restore( const storeSnap_t &snap );
     void DrawImages( int axisFilter, float scale, bool camera );
@@ -320,26 +333,31 @@ void KiwiRefImage_ApplyClick( int index, bool shift, bool ctrl, bool viewport )
     g_nUpdateBits = -1;
 }
 
+// KIWI (2026-09-09, user directive): reference images are NEVER click targets in a
+// viewport.  They are selected from the Outliner's Images section only (and the
+// Reference Images panel).  Every viewport pick / hover / marquee entry point below
+// therefore reports "no image"; the armed Edit-images tool still drags the corners and
+// body of images that are ALREADY selected (see CameraHit / XYHit).  A picture that
+// covers a wall must never steal the click meant for the wall.
 bool KiwiRefImage_PickAt( int imgX, int imgY, int *outIndex, float *outDepthOrDist )
 {
-    int index = -1;
-    float distance = FLT_MAX;
-    const bool hit = CameraPick( imgX, imgY, &index, &distance, nullptr );
-    if ( outIndex ) *outIndex = hit ? index : -1;
-    if ( outDepthOrDist ) *outDepthOrDist = hit ? distance : FLT_MAX;
-    return hit;
+    (void)imgX; (void)imgY;
+    if ( outIndex ) *outIndex = -1;
+    if ( outDepthOrDist ) *outDepthOrDist = FLT_MAX;
+    return false;
 }
 
 void KiwiRefImage_ApplyRect( float x0, float y0, float x1, float y1,
                              bool crossing, bool shift, bool ctrl )
 {
-    ApplyRectInternal( x0, y0, x1, y1, crossing, shift, ctrl, true );
+    // Marquee never selects images (viewport clicks are not image selection).
+    (void)x0; (void)y0; (void)x1; (void)y1; (void)crossing; (void)shift; (void)ctrl;
 }
 
 void KiwiRefImage_ApplyRectXY( float x0, float y0, float x1, float y1,
                                bool crossing, bool shift, bool ctrl )
 {
-    ApplyRectInternal( x0, y0, x1, y1, crossing, shift, ctrl, false );
+    (void)x0; (void)y0; (void)x1; (void)y1; (void)crossing; (void)shift; (void)ctrl;
 }
 
 bool KiwiRefImage_SetHidden( int index, bool hidden )
@@ -391,6 +409,183 @@ bool KiwiRefImage_DeleteAt( int index )
         return false;
     ImmediateCommit( before, "remove reference image" );
     return true;
+}
+
+// ── image groups (KIWI 2026-09-10) ───────────────────────────────────────────
+namespace
+{
+    int GroupSlot( int group )
+    {
+        if ( group < 0 ) return -1;
+        for ( size_t i = 0; i < s_groups.size(); ++i )
+            if ( s_groups[i].id == group ) return (int)i;
+        return -1;
+    }
+}
+
+int KiwiRefImage_Group( int index )
+{
+    if ( index < 0 || index >= (int)s_images.size() ) return -1;
+    return s_images[index].group;
+}
+
+bool KiwiRefImage_SetGroup( int index, int group )
+{
+    if ( index < 0 || index >= (int)s_images.size() ) return false;
+    if ( group >= 0 && GroupSlot( group ) < 0 ) return false;   // unknown id
+    if ( group < 0 ) group = -1;
+    if ( s_images[index].group == group ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    s_images[index].group = group;
+    Touch( true );
+    ImmediateCommit( before, group >= 0 ? "group reference image" : "ungroup reference image" );
+    return true;
+}
+
+int KiwiRefImage_NewGroup( const char *name )
+{
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    krefGroup_t g;
+    g.id = s_nextGroupId++;
+    if ( name && name[0] ) g.name = name;
+    else
+    {
+        char nm[32];
+        _snprintf( nm, sizeof( nm ), "Group %i", g.id ); nm[sizeof( nm ) - 1] = '\0';
+        g.name = nm;
+    }
+    s_groups.push_back( g );
+    Touch( true );
+    ImmediateCommit( before, "new reference image group" );
+    return g.id;
+}
+
+int KiwiRefImage_GroupCount()          { return (int)s_groups.size(); }
+int KiwiRefImage_GroupIdAt( int i )     { return ( i >= 0 && i < (int)s_groups.size() ) ? s_groups[i].id : -1; }
+bool KiwiRefImage_GroupExists( int group ) { return GroupSlot( group ) >= 0; }
+
+const char *KiwiRefImage_GroupName( int group )
+{
+    const int slot = GroupSlot( group );
+    return slot >= 0 ? s_groups[slot].name.c_str() : "";
+}
+
+bool KiwiRefImage_SetGroupName( int group, const char *name )
+{
+    const int slot = GroupSlot( group );
+    if ( slot < 0 ) return false;
+    const std::string next = ( name && name[0] ) ? name : s_groups[slot].name;
+    if ( s_groups[slot].name == next ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    s_groups[slot].name = next;
+    Touch( true );
+    ImmediateCommit( before, "rename reference image group" );
+    return true;
+}
+
+bool KiwiRefImage_RemoveGroup( int group )
+{
+    const int slot = GroupSlot( group );
+    if ( slot < 0 ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    for ( size_t i = 0; i < s_images.size(); ++i )
+        if ( s_images[i].group == group ) s_images[i].group = -1;
+    s_groups.erase( s_groups.begin() + slot );
+    Touch( true );
+    ImmediateCommit( before, "dissolve reference image group" );
+    return true;
+}
+
+int KiwiRefImage_GroupMemberCount( int group )
+{
+    if ( group < 0 ) return 0;
+    int n = 0;
+    for ( size_t i = 0; i < s_images.size(); ++i )
+        if ( s_images[i].group == group ) ++n;
+    return n;
+}
+
+int KiwiRefImage_GroupFromSelection( const char *name )
+{
+    if ( s_sel.empty() ) return -1;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    krefGroup_t g;
+    g.id = s_nextGroupId++;
+    if ( name && name[0] ) g.name = name;
+    else
+    {
+        char nm[32];
+        _snprintf( nm, sizeof( nm ), "Group %i", g.id ); nm[sizeof( nm ) - 1] = '\0';
+        g.name = nm;
+    }
+    s_groups.push_back( g );
+    for ( size_t i = 0; i < s_sel.size(); ++i )
+        if ( s_sel[i] >= 0 && s_sel[i] < (int)s_images.size() )
+            s_images[s_sel[i]].group = g.id;
+    Touch( true );
+    ImmediateCommit( before, "group reference images" );
+    return g.id;
+}
+
+bool KiwiRefImage_SetGroupHidden( int group, bool hidden )
+{
+    if ( GroupSlot( group ) < 0 ) return false;
+    bool any = false;
+    for ( size_t i = 0; i < s_images.size() && !any; ++i )
+        any = ( s_images[i].group == group && s_images[i].hidden != hidden );
+    if ( !any ) return false;
+    CommitPending();
+    const storeSnap_t before = Snapshot();
+    for ( size_t i = 0; i < s_images.size(); ++i )
+        if ( s_images[i].group == group ) s_images[i].hidden = hidden;
+    Touch( true );
+    ImmediateCommit( before, hidden ? "hide reference image group" : "show reference image group" );
+    return true;
+}
+
+bool KiwiRefImage_GroupAllHidden( int group )
+{
+    int n = 0, nh = 0;
+    for ( size_t i = 0; i < s_images.size(); ++i )
+    {
+        if ( s_images[i].group != group ) continue;
+        ++n;
+        if ( s_images[i].hidden ) ++nh;
+    }
+    return n > 0 && nh == n;
+}
+
+float KiwiRefImage_NudgeOpacity( int index, int group, float delta )
+{
+    if ( delta == 0.0f || s_images.empty() ) return -1.0f;
+    float shown = -1.0f;
+    bool  opened = false;
+    for ( size_t i = 0; i < s_images.size(); ++i )
+    {
+        if ( index >= 0 ) { if ( (int)i != index ) continue; }
+        else if ( group >= 0 && s_images[i].group != group ) continue;
+        if ( !opened )
+        {
+            // One pending record for the whole MMB drag; SettleEdit closes it.
+            if ( !s_pendingHave ) BeginEdit( "change reference image opacity" );
+            opened = true;
+        }
+        s_images[i].opacity = ClampF( s_images[i].opacity + delta, 0.0f, 1.0f );
+        if ( shown < 0.0f ) shown = s_images[i].opacity;
+    }
+    if ( opened ) Touch( true );
+    return shown;
+}
+
+void KiwiRefImage_SettleEdit()
+{
+    if ( s_pendingHave && !s_move.active && !s_drag.active )
+        CommitPending();
 }
 
 bool KiwiRefImage_Bounds( int index, float mins[3], float maxs[3] )
@@ -714,26 +909,25 @@ void KiwiRefImage_HandleCameraDrag( int imgX, int imgY )
 void KiwiRefImage_HandleCameraUp() { EndDrag( false ); }
 void KiwiRefImage_HandleCameraAbort() { EndDrag( true ); }
 
+// Hover never highlights a picture under the cursor: images are not viewport
+// targets (see KiwiRefImage_PickAt).  The state is still cleared so a highlight
+// left over from an older build's hover cannot stick.
 void KiwiRefImage_HoverCamera( int imgX, int imgY, bool over )
 {
-    int next = -1;
-    if ( !s_armed && over && SelectionAllowsImages() )
-        (void)KiwiRefImage_PickAt( imgX, imgY, &next, nullptr );
-    if ( next != s_hoverCamera )
+    (void)imgX; (void)imgY; (void)over;
+    if ( s_hoverCamera != -1 )
     {
-        s_hoverCamera = next;
+        s_hoverCamera = -1;
         g_nUpdateBits |= W_CAMERA;
     }
 }
 
 void KiwiRefImage_HoverXY( int imgX, int imgY, bool over )
 {
-    int next = -1;
-    if ( !s_armed && over && SelectionAllowsImages() )
-        (void)XYPick( imgX, imgY, &next, nullptr );
-    if ( next != s_hoverXY )
+    (void)imgX; (void)imgY; (void)over;
+    if ( s_hoverXY != -1 )
     {
-        s_hoverXY = next;
+        s_hoverXY = -1;
         g_nUpdateBits |= ( W_XY | W_Z );
     }
 }
@@ -743,19 +937,16 @@ bool KiwiRefImage_HandleXYDown( int imgX, int imgY, unsigned int flags )
     s_xyClickOwned = false;
     if ( s_armed )
     {
+        // Edit-images tool: only the ALREADY-SELECTED pictures accept a drag
+        // (XYHit restricts itself to the selection).
         int corner; float p[3];
         const int hit = XYHit( imgX, imgY, &corner, p );
         return hit >= 0 && BeginDrag( hit, corner, ( flags & MK_SHIFT ) != 0, p );
     }
-    if ( !SelectionAllowsImages() )
-        return false;
-    int hit = -1;
-    if ( !XYPick( imgX, imgY, &hit, nullptr ) )
-        return false;
-    KiwiRefImage_ApplyClick( hit, ( flags & MK_SHIFT ) != 0,
-                            ( flags & MK_CONTROL ) != 0, true );
-    s_xyClickOwned = true;
-    return true;
+    // A plain click never selects an image: select it in the Outliner's Images
+    // section instead.  The click falls through to the geometry under it.
+    (void)imgX; (void)imgY; (void)flags;
+    return false;
 }
 
 bool KiwiRefImage_HandleXYMove( int imgX, int imgY )
@@ -978,6 +1169,8 @@ void KiwiRefImage_UndoReset()
 namespace
 {
     std::vector<krefImage_t> s_images;
+    std::vector<krefGroup_t> s_groups;          // declared image groups (may be empty groups)
+    int                      s_nextGroupId = 1;
     unsigned                 s_generation = 1;
     int                      s_selected = -1;
     std::vector<int>         s_sel;
@@ -1122,6 +1315,8 @@ namespace
         s.images = s_images;
         s.selected = s_selected;
         s.sel = s_sel;
+        s.groups = s_groups;
+        s.nextGroupId = s_nextGroupId;
         return s;
     }
 
@@ -1129,7 +1324,8 @@ namespace
     {
         if ( a.file != b.file || a.axis != b.axis || a.keepAspect != b.keepAspect
           || a.flipU != b.flipU || a.flipV != b.flipV || a.locked != b.locked
-          || a.hidden != b.hidden || a.layerOrder != b.layerOrder || a.name != b.name )
+          || a.hidden != b.hidden || a.layerOrder != b.layerOrder || a.name != b.name
+          || a.group != b.group )
             return false;
         if ( !NearF( a.width, b.width ) || !NearF( a.height, b.height )
           || !NearF( a.rotation, b.rotation ) || !NearF( a.opacity, b.opacity ) )
@@ -1147,6 +1343,9 @@ namespace
         if ( a.selected != b.selected || a.sel != b.sel || a.images.size() != b.images.size() ) return false;
         for ( size_t i = 0; i < a.images.size(); ++i )
             if ( !SameRecord( a.images[i], b.images[i] ) ) return false;
+        if ( a.groups.size() != b.groups.size() ) return false;
+        for ( size_t i = 0; i < a.groups.size(); ++i )
+            if ( a.groups[i].id != b.groups[i].id || a.groups[i].name != b.groups[i].name ) return false;
         return true;
     }
 
@@ -1165,6 +1364,9 @@ namespace
     void Restore( const storeSnap_t &snap )
     {
         s_images = snap.images;
+        s_groups = snap.groups;
+        // Never hand out an id a restored table may still hold.
+        s_nextGroupId = snap.nextGroupId > s_nextGroupId ? snap.nextGroupId : s_nextGroupId;
         RestoreSelection( snap );
         s_drag = drag_t();
         s_move = move_t();
@@ -2473,6 +2675,8 @@ namespace
         }
         // Nearest plane first, layer order only for coplanar hits: the armed pick
         // must land on the picture the draw order shows on top (CameraPick agrees).
+        // KIWI (2026-09-09): only pictures that are ALREADY selected (Outliner) are
+        // drag targets — an unselected image is never clickable in a viewport.
         ray_t ray;
         if ( !Pick_RayFromImagePos( x, y, &ray ) ) return -1;
         int best = -1, bestLayer = INT_MIN;
@@ -2481,7 +2685,7 @@ namespace
         {
             const krefImage_t &r = s_images[i];
             float t;
-            if ( r.hidden || !r.material
+            if ( r.hidden || !r.material || !IsSel( i )
               || !RayPlane( ray, r, p, &t ) || !PointInside( r, p ) )
                 continue;
             const bool sameDepth = fabsf( t - bestT ) <= 1.0e-3f;
@@ -2517,8 +2721,9 @@ namespace
                 if ( *corner >= 0 ) return s_selected;
             }
         }
+        // Body drag: only an already-selected picture (KIWI 2026-09-09, see CameraHit).
         int hit = -1;
-        return XYPick( x, y, &hit, hitPoint ) ? hit : -1;
+        return ( XYPick( x, y, &hit, hitPoint ) && IsSel( hit ) ) ? hit : -1;
     }
 
     bool AltDown() { return ( ::GetKeyState( VK_MENU ) & 0x8000 ) != 0; }
@@ -2786,6 +2991,28 @@ namespace
         }
         EditSettle();
 
+        // KIWI (2026-09-10): the picture's group; the outliner does the bulk grouping.
+        {
+            const int cur = r.group;
+            const char *curName = cur >= 0 ? KiwiRefImage_GroupName( cur ) : "(none)";
+            if ( ImGui::BeginCombo( "Group", curName ) )
+            {
+                if ( ImGui::Selectable( "(none)", cur < 0 ) )
+                    KiwiRefImage_SetGroup( s_selected, -1 );
+                for ( size_t g = 0; g < s_groups.size(); ++g )
+                {
+                    ImGui::PushID( s_groups[g].id );
+                    if ( ImGui::Selectable( s_groups[g].name.c_str(), s_groups[g].id == cur ) )
+                        KiwiRefImage_SetGroup( s_selected, s_groups[g].id );
+                    ImGui::PopID();
+                }
+                ImGui::Separator();
+                if ( ImGui::Selectable( "+ New group from the selected pictures" ) )
+                    KiwiRefImage_GroupFromSelection( nullptr );
+                ImGui::EndCombo();
+            }
+        }
+
         static const char *axisItems[] = { "YZ (X normal)", "XZ (Y normal)", "XY (Z normal)" };
         before = Snapshot(); int axis = r.axis;
         if ( ImGui::Combo( "Axis", &axis, axisItems, 3 ) )
@@ -2992,10 +3219,25 @@ void KiwiRefImage_WriteSidecar( FILE *f )
 {
     if ( !f ) return;
     CommitPending();
+    // Groups are declared ahead of the pictures that name them; empty groups persist.
+    for ( size_t g = 0; g < s_groups.size(); ++g )
+    {
+        fprintf( f, "refimagegroup %i ", s_groups[g].id );
+        // WriteQuoted's escaping, inline: the key was already written.
+        fputc( '"', f );
+        for ( size_t c = 0; c < s_groups[g].name.size(); ++c )
+        {
+            const char ch = s_groups[g].name[c];
+            if ( ch == '\\' || ch == '"' ) fputc( '\\', f );
+            if ( ch != '\r' && ch != '\n' ) fputc( ch, f );
+        }
+        fprintf( f, "\"\n" );
+    }
     for ( size_t i = 0; i < s_images.size(); ++i )
     {
         const krefImage_t &r = s_images[i];
         WriteQuoted( f, "refimage", r.file );
+        if ( r.group >= 0 ) fprintf( f, "group %i\n", r.group );
         fprintf( f, "axis %i\n", r.axis );
         fprintf( f, "origin %.9g %.9g %.9g\n", r.origin[0], r.origin[1], r.origin[2] );
         fprintf( f, "size %.9g %.9g\n", r.width, r.height );
@@ -3021,6 +3263,26 @@ bool KiwiRefImage_ParseSidecarLine( const char *line )
     const char *rest = nullptr;
     if ( !s_parseActive )
     {
+        if ( Keyword( line, "refimagegroup", &rest ) )
+        {
+            // `refimagegroup <id> "name"`: declared groups stay addressable when empty.
+            int id = -1;
+            if ( sscanf( rest, "%i", &id ) == 1 && id >= 0 && GroupSlot( id ) < 0 )
+            {
+                const char *q = strchr( rest, '"' );
+                krefGroup_t g;
+                g.id = id;
+                if ( !q || !ReadString( q, &g.name ) || g.name.empty() )
+                {
+                    char nm[32];
+                    _snprintf( nm, sizeof( nm ), "Group %i", id ); nm[sizeof( nm ) - 1] = '\0';
+                    g.name = nm;
+                }
+                s_groups.push_back( g );
+                if ( id >= s_nextGroupId ) s_nextGroupId = id + 1;
+            }
+            return true;
+        }
         if ( !Keyword( line, "refimage", &rest ) ) return false;
         s_parseImage = krefImage_t();
         ReadString( rest, &s_parseImage.file );
@@ -3028,6 +3290,13 @@ bool KiwiRefImage_ParseSidecarLine( const char *line )
         return true;
     }
     if ( Keyword( line, "end", &rest ) ) { FinishParsedImage(); return true; }
+    if ( Keyword( line, "group", &rest ) )
+    {
+        int g = -1;
+        sscanf( rest, "%i", &g );
+        s_parseImage.group = ( g >= 0 && GroupSlot( g ) >= 0 ) ? g : -1;   // undeclared = ungrouped
+        return true;
+    }
     if ( Keyword( line, "axis", &rest ) ) { sscanf( rest, "%i", &s_parseImage.axis ); return true; }
     if ( Keyword( line, "origin", &rest ) ) { sscanf( rest, "%f %f %f", &s_parseImage.origin[0], &s_parseImage.origin[1], &s_parseImage.origin[2] ); return true; }
     if ( Keyword( line, "size", &rest ) ) { sscanf( rest, "%f %f", &s_parseImage.width, &s_parseImage.height ); return true; }
@@ -3053,7 +3322,8 @@ bool KiwiRefImage_ParseSidecarLine( const char *line )
 
 void KiwiRefImage_ResetForNewMap()
 {
-    s_images.clear(); SelClear(); s_armed = false; s_drag = drag_t(); s_move = move_t();
+    s_images.clear(); s_groups.clear(); s_nextGroupId = 1;
+    SelClear(); s_armed = false; s_drag = drag_t(); s_move = move_t();
     s_hoverCamera = s_hoverXY = -1; s_xyClickOwned = false; s_focusPending = false;
     s_parseActive = false; s_parseImage = krefImage_t();
     s_fileAsset.clear(); s_assetCache.clear(); s_missingWarned.clear();

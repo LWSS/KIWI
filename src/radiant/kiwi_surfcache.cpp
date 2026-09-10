@@ -128,22 +128,37 @@ void KiwiSurfCache_Invalidate( const char *why )
 {
     ++s_epoch;
     s_lastWhy = why ? why : "(unnamed)";
-    // May run inside a draw walk, so retain storage; resident runs name D3D9 VBs and drop now.
+    // May run inside a draw walk, so retain storage.  Whole-block replay is refused
+    // until the signatures re-prove the capture.
     s_have   = false;
-    s_serial = 0;
-    KiwiEdScene_DropMeshRuns();
+    // KIWI (2026-09-10, Tracy lag3.tracy) — THE 46 ms PER DRAG FRAME.  This funnel fires
+    // on EVERY per-brush VB upload or free (r_ed_vertbuf.cpp), and a dragged model
+    // rebuilds its proxy brush — one VB upload — every frame.  Each call used to zero
+    // the resident-run key and drop the mesh runs, so the WORLD window (tens of
+    // thousands of surfs, nothing to do with that brush) rebuilt its runs on every drag
+    // frame: "build mesh runs", 45.8 ms x 67 in the trace.  A per-brush VB event cannot
+    // stale another window's runs: a run names its surfs by handle (page + first index),
+    // index count and vertex count, and RB_DrawEditorSkinnedCached re-hashes exactly
+    // those every frame (Editor_MeshWindowSignature) before it trusts a run table, so a
+    // window whose own surfs changed rebuilds by itself and every other window keeps
+    // its runs.  Only pool-wide events (InvalidateAll: device reset, pool teardown) drop
+    // the runs now.
 }
 
 void KiwiSurfCache_InvalidateAll( const char *why )
 {
     KiwiSurfCache_Invalidate( why );
+    s_serial = 0;
+    KiwiEdScene_DropMeshRuns();
     DropSegments();
     KiwiEdScene_DropCapture();
 }
 
 int KiwiSurfCache_BuildSerial()
 {
-    return ( Enabled() && s_have ) ? s_serial : 0;
+    // The key names a capture generation; the run table validates its contents by
+    // signature, so it stays usable while whole-block replay is merely refused.
+    return Enabled() ? s_serial : 0;
 }
 
 bool KiwiSurfCache_TryReplay( unsigned passKey )
@@ -365,11 +380,18 @@ int KiwiSurfCache_PassMode( unsigned passKey, selbrush_t *const *brushes,
     if ( dirty == 0 )
     {
         // Signatures prove the block valid despite the refused whole-block gate.
+        // KIWI (2026-09-10, Tracy lagwhiledrag2.tracy): this arm used to issue a NEW
+        // resident-run key too, although the capture is the very same one.  A dragged
+        // (selected) model lives in the SELECTED pass, so this entity/prefab pass came
+        // through here on every drag frame (the walk epoch moved, nothing here changed),
+        // the main flush was stamped with the new key, and RB_DrawEditorSkinnedCached
+        // rebuilt the whole world's mesh runs — "build mesh runs", 45.7 ms — every frame.
+        // The key now only changes when a capture is actually re-recorded (EndRecord).
         s_capEpoch = s_epoch;
         s_capWalk  = KiwiWalkCache_Epoch();
         s_have     = true;
-        if ( ++s_serial == 0 )
-            s_serial = 1;
+        if ( s_serial == 0 )
+            s_serial = 1;                    // never hand out the "no key" value
         if ( KiwiSurfCache_TryReplay( passKey ) )
             return KIWI_SURFPASS_REPLAY;
         return KIWI_SURFPASS_LIVE;

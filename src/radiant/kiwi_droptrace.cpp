@@ -166,6 +166,7 @@ namespace
     struct modelCandidate_t
     {
         entity_s *owner;
+        selbrush_t *node;      // the instance brush that names this model in a pick
         XModel *model;
         float mins[3];
         float maxs[3];
@@ -241,6 +242,7 @@ namespace
                 continue;
 
             candidate.owner = node->owner;
+            candidate.node  = node;
             candidate.meshVisible = ModelMeshVisible( node );
             KeepCandidate( candidate, candidates, candidateCount );
         }
@@ -529,5 +531,62 @@ bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
     }
     if ( !found )
         outHit->point[2] = 0.0f;
+    return true;
+}
+
+// KIWI (2026-09-09): the pick-side model test.  Same candidate gather as the drop trace
+// (bounds the ray enters, nearest-first, at most KDROP_MODEL_CANDIDATES) but it returns
+// the NODE whose mesh the ray hits first inside `maxDist` (the occluding brush hit, or
+// FLT_MAX).  This is what makes a click land on the model under the cursor instead of
+// on whichever bounding-box proxy happens to be nearest.
+bool KiwiDrop_PickModelMesh( const float start[3], const float dir[3], float maxDist,
+                             bool excludeSelectedModels, selbrush_t **outNode,
+                             float *outDist, float outNormal[3] )
+{
+    if ( !outNode )
+        return false;
+    *outNode = nullptr;
+    if ( !start || !dir || g_PrefsDlg->entities_off )
+        return false;
+    for ( int axis = 0; axis < 3; ++axis )
+        if ( !_finite( start[axis] ) || !_finite( dir[axis] ) )
+            return false;
+
+    modelCandidate_t candidates[KDROP_MODEL_CANDIDATES];
+    int candidateCount = 0;
+    GatherModelCandidates( &active_brushes, start, dir, maxDist,
+                           excludeSelectedModels, candidates, &candidateCount );
+    GatherModelCandidates( &selected_brushes, start, dir, maxDist,
+                           excludeSelectedModels, candidates, &candidateCount );
+
+    float best = maxDist;
+    float bestNormal[3] = { 0.0f, 0.0f, 1.0f };
+    selbrush_t *bestNode = nullptr;
+    for ( int i = 0; i < candidateCount; ++i )
+    {
+        if ( candidates[i].boundsDist >= best )
+            continue;
+        float dist, normal[3];
+        if ( TraceModelCandidate( candidates[i], start, dir, &dist, normal )
+          && dist < best )
+        {
+            best = dist;
+            bestNode = candidates[i].node;
+            bestNormal[0] = normal[0];
+            bestNormal[1] = normal[1];
+            bestNormal[2] = normal[2];
+        }
+    }
+    if ( !bestNode )
+        return false;
+    *outNode = bestNode;
+    if ( outDist )
+        *outDist = best;
+    if ( outNormal )
+    {
+        outNormal[0] = bestNormal[0];
+        outNormal[1] = bestNormal[1];
+        outNormal[2] = bestNormal[2];
+    }
     return true;
 }

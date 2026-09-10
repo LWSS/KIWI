@@ -123,7 +123,28 @@ struct kconObject_t
     int                group = -1;
     // Empty means unnamed; names are sidecar-only labels and need not be unique.
     std::string        name;
+    // KIWI (2026-09-10, user: "S key in the line mode to start a spline curve"): per
+    // control point, 1 = the span LEAVING point i (to i+1, wrapping when closed) is a
+    // spline span.  LINE/POLYLINE only; a shorter vector reads as straight.  The
+    // control points stay in `pts` (anchors, moves, sidecar); VertCount/VertWorld hand
+    // out the Catmull-Rom tessellation through the smooth runs, so drawing, picking,
+    // snapping and the Plasticity export see the curve.  Regions, extrusion, trim,
+    // fillet, offset and arrangement refuse objects with spline spans: they are 2D
+    // layout curves and never a brush edge.
+    std::vector<unsigned char> smooth;
+    // Tessellation cache for smooth chains (store generation + shape fingerprint).
+    mutable std::vector<float> tessCache;
+    mutable unsigned           tessGen  = 0;
+    mutable unsigned long long tessKey  = 0;
 };
+
+// True for a LINE/POLYLINE with at least three points and one spline span.
+bool KiwiCon_HasSmooth( const kconObject_t &o );
+// The tessellated polyline of a smooth chain (WORLD xyz triples); `closed` mirrors
+// o.closed.  Used by the draw tool preview as well as the store accessors.
+void KiwiCon_TessellateMixed( const std::vector<float> &ctrl,
+                              const std::vector<unsigned char> &smooth, bool closed,
+                              std::vector<float> *out );
 
 // A circle/arc: parametric, intrinsically planar, `plane` authoritative.
 inline bool KiwiCon_IsParametric( const kconObject_t &o )

@@ -15,6 +15,7 @@
 #include "kiwi_lines.h"              // live marquee preview
 #include "kiwi_command.h"            // face-click auto push/pull
 #include "kiwi_conselect.h"          // construction selection
+#include "kiwi_droptrace.h"          // KiwiDrop_IsModelEntity: the models-only marquee
 #include "kiwi_hover.h"
 #include "kiwi_pick.h"
 #include "kiwi_refimage.h"
@@ -416,6 +417,8 @@ namespace
     {
         s_faceRayBudget = rayBudget;
         const sel_kind_t kind = RectKind( KiwiSel_GetModeMask() );
+        // KIWI (2026-09-09): the models-only sub-mode of Object mode marquees models alone.
+        const bool modelsOnly = ( kind == SEL_OBJECT ) && KiwiSel_ModelsOnly();
         selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
         for ( int L = 0; L < 2; ++L )
         {
@@ -424,6 +427,8 @@ namespace
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
             {
                 if ( !Pick_BrushPickable( b ) )
+                    continue;
+                if ( modelsOnly && !KiwiDrop_IsModelEntity( b ) )
                     continue;
                 CollectFromBrush( b, r, crossing, kind, out );
             }
@@ -731,6 +736,8 @@ int KiwiBox_CollectBrushes( int x0, int y0, int x1, int y1, bool crossing,
         {
             if ( !Pick_BrushPickable( b ) )
                 continue;
+            if ( KiwiSel_ModelsOnly() && !KiwiDrop_IsModelEntity( b ) )
+                continue;                // models-only sub-mode (KIWI 2026-09-09)
             CollectFromBrush( b, r, crossing, SEL_OBJECT, items );
         }
     }

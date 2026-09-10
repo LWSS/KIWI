@@ -100,8 +100,9 @@ namespace
         return KiwiCon_PickSegmentAt( imgX, imgY, outA, outB, outObj, outSeg, 0 );
     }
 
-    // Match Clone_Selection's patch and fixed-size entity exclusions.
-    inline bool Cloneable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
+    // KIWI (2026-09-09): Clone_Selection clones through the map text now (entities,
+    // patches, fixed-size proxies included), so anything with a def is cloneable.
+    inline bool Cloneable( const selbrush_t *b ) { return b && b->def && b->owner && b->owner->def; }
 
     int CloneableSelectedCount()
     {
@@ -207,8 +208,7 @@ namespace
 
             if ( CloneableSelectedCount() <= 0 )
             {
-                Sys_Printf( "Array: select at least one ordinary brush "
-                            "(patches and fixed-size entities cannot be cloned).\n" );
+                Sys_Printf( "Array: select at least one brush, patch or entity.\n" );
                 return false;
             }
 
@@ -808,8 +808,7 @@ bool KiwiDupe_DispatchInstant( unsigned int cmdId )
 
     if ( CloneableSelectedCount() <= 0 )
     {
-        Sys_Printf( "Duplicate: nothing cloneable is selected (patches and "
-                    "fixed-size entity brushes go through Copy/Paste).\n" );
+        Sys_Printf( "Duplicate: nothing is selected.\n" );
         return true;
     }
     if ( KiwiCmd_Active() )
@@ -909,9 +908,7 @@ void KiwiDupe_MenuItems()
     if ( arrayHover )
     {
         if ( !canArray )
-            ImGui::SetTooltip( "Select at least one ordinary brush.\n"
-                               "Patches and fixed-size entities cannot be cloned\n"
-                               "by the ported Clone_Selection." );
+            ImGui::SetTooltip( "Select at least one brush, patch or entity." );
         else
             ImGui::SetTooltip( "Linear: click a CONSTRUCTION LINE to array across it\n"
                                "(the count spans the line), or drag to set the step\n"

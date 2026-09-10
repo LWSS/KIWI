@@ -54,6 +54,8 @@ namespace
 
     bool Offsettable( const kconObject_t &o )
     {
+        if ( KiwiCon_HasSmooth( o ) )                    // spline spans: layout curves only
+            return false;
         if ( KiwiCon_IsParametric( o ) )                 // CIRCLE / ARC
             return o.radius > KOFF_MIN_RADIUS;
         return (int)( o.pts.size() / 3 ) >= 2;           // LINE / POLYLINE / RECT

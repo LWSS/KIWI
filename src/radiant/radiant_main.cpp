@@ -120,6 +120,47 @@ void Radiant_RefreshMenuKeyBindings()
         Radiant_ShowMenuItemKeyBindings( s_hMenu );
 }
 
+// KIWI (2026-09-09) — THE "CLICKS LAND BELOW THE WIDGET" FIX.  The frame's swap chain
+// is the ImGui dockspace surface, and a windowed Present STRETCHES the back buffer over
+// the client area.  ImGui lays out and hit-tests against the CLIENT rect (the win32
+// backend's DisplaySize), so whenever the swap chain is a different size than the client
+// the picture is squeezed while the hit boxes are not: every widget's clickable area
+// drifts away from its pixels, proportionally to its distance from the top-left.  The
+// boot sequence produced exactly that: Radiant_BootFrame registers the frame swap chain
+// (R_InitRendererForWindow, client rect WITHOUT a menu bar) and only THEN attaches
+// IDR_MENU_QUAKE3 — ::SetMenu shrinks the client by SM_CYMENU and fires WM_SIZE, but the
+// WM_SIZE arm below is gated on s_bootDone, which is still false, so the resize was
+// dropped and the surface stayed ~20 px taller than the client until the operator
+// happened to resize the window.  With a 1256 px client that is a 1.6 % squeeze — too
+// small to read as blur, big enough to put the Reference-Images opacity slider's hit
+// box a full row under the slider.
+//
+// This is the one reconciliation point: it compares the registered size with the live
+// client rect and recreates the chain only on a mismatch, so it is free to call on
+// every authorized paint (it runs BEFORE the scene bracket — R_Hwnd_Resize must never
+// run inside BeginFrame/Present).  Also covers a WM_SIZE lost to the device-lost defer
+// path and anything else that moves the client rect behind the gate.
+static void Radiant_SyncFrameSwapChain( HWND hwnd )
+{
+    if ( !hwnd || !dx.device )
+        return;
+    RECT rc;
+    if ( !::GetClientRect( hwnd, &rc ) )
+        return;
+    const int cx = rc.right - rc.left;
+    const int cy = rc.bottom - rc.top;
+    if ( cx <= 0 || cy <= 0 )
+        return;                          // minimized: keep the last real size
+    for ( int i = 0; i < dx.windowCount; ++i )
+    {
+        if ( dx.windows[i].hwnd != hwnd )
+            continue;
+        if ( dx.windows[i].width != cx || dx.windows[i].height != cy )
+            R_Hwnd_Resize( hwnd, cx, cy );
+        return;
+    }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  Layout — CMainFrame::RelayoutPanes (mainfrm.cpp:1662) minus the two docked MFC bars.
 //  The MFC body subtracted the status-bar height and passed g_texBarHeight as the topInset;
@@ -202,6 +243,11 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
             // pre-round-U behaviour, for exactly one paint.
             static bool s_framePresented = false;
             const bool  drawScene = ImGuiShell_FrameAuthorized() || !s_framePresented;
+
+            // Surface/client reconciliation, OUTSIDE the scene bracket (see the helper).
+            // No-op on the steady state; only a mismatched size recreates the chain.
+            if ( drawScene && dx.device )
+                Radiant_SyncFrameSwapChain( hwnd );
 
             PAINTSTRUCT ps;
             ::BeginPaint( hwnd, &ps );
@@ -576,6 +622,10 @@ static bool Radiant_BootFrame( HWND frame )
     s_hMenu = ::LoadMenuA( inst, MAKEINTRESOURCEA( IDR_MENU_QUAKE3 ) );
     if ( s_hMenu )
         ::SetMenu( frame, s_hMenu );
+    // ::SetMenu just took SM_CYMENU off the client area and its WM_SIZE was dropped by the
+    // s_bootDone gate — re-register the frame swap chain at the real client size NOW, or
+    // every ImGui hit box sits below its pixels (Radiant_SyncFrameSwapChain).
+    Radiant_SyncFrameSwapChain( frame );
     s_hAccel = ::LoadAcceleratorsA( inst, MAKEINTRESOURCEA( IDR_MAIN_ACCEL ) );
     Radiant_FL_Log( "menu=%p accel=%p", (void *)s_hMenu, (void *)s_hAccel );
 

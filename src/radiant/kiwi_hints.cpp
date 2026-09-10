@@ -217,7 +217,12 @@ namespace
                 AddChip( chips, &n, "Snap", "On" );
                 break;
             default:
-                AddChip( chips, &n, "Ctrl", "Snap" );
+                // KIWI (2026-09-10): the rotate ring snaps to 5 degrees by default and
+                // Ctrl frees it (kiwi_transform.cpp KiwiRotateCommand::Recompute).
+                if ( cmd->Name() && strcmp( cmd->Name(), "Rotate" ) == 0 )
+                    AddChip( chips, &n, "Ctrl", "Free angle" );
+                else
+                    AddChip( chips, &n, "Ctrl", "Snap" );
                 break;
             }
         }

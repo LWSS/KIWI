@@ -37,3 +37,10 @@ bool KiwiDrop_TransformBounds( const float mins[3], const float maxs[3],
 // Only live drags omit selected models; browser drops may land on them.
 bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
                      kiwiDropHit_t *outHit );
+
+// KIWI (2026-09-09): the pick-side model test — the node whose MESH the ray hits first
+// within `maxDist` (the occluding brush hit, or FLT_MAX), or false.  Same bounded
+// candidate gather as KiwiDrop_Trace; the ray must already be section-clamped.
+bool KiwiDrop_PickModelMesh( const float start[3], const float dir[3], float maxDist,
+                             bool excludeSelectedModels, selbrush_t **outNode,
+                             float *outDist, float outNormal[3] );

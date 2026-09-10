@@ -150,6 +150,8 @@
 #define KIWI_CMD_WINDOW_REFIMAGES   34145   // "Reference Images" (editor-only planes)
 #define KIWI_CMD_PERF_HUD           34146   // "KiwiPerf" - per-stage frame timers in the camera
 #define KIWI_CMD_VIEW_SHOW_TRIS     34147   // View > Show Triangle Count (camera bottom-right readout)
+#define KIWI_CMD_VIEW_SHOW_FACING   34148   // View > Show Facing Arrows (selected-entity facing overlay)
+#define KIWI_CMD_SELMODE_MODELS     34149   // "Select Mode: Models only" (objects restricted to models)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

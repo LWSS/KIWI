@@ -19,8 +19,16 @@ namespace
         int  w         = -1;
         int  h         = -1;
         unsigned lastTick = 0;
+        unsigned long long lastRenderMs = 0;   // GetTickCount64 at the last render
     };
     viewDirty_t s_view[KIWI_DIRTYVIEW_COUNT];
+
+    // KIWI (2026-09-10, Tracy lagwhiledrag.tracy): while a modal command is live the 2D
+    // views were re-rendered EVERY editor frame (OverlayForcesRender), and the XY pass of a
+    // big map costs ~15 ms — a quarter of the 64 ms drag frame.  The camera is what the
+    // operator is looking at during a drag; the 2D views now follow at this cadence and
+    // catch up on the frame the gesture ends (the dirty flag is left set meanwhile).
+    const unsigned long long KIWI_VIEWDIRTY_GESTURE_MS = 100;
 
     unsigned s_tick        = 0;
     // Shared across views to stagger heartbeat renders; -1 leaves tick zero available.
@@ -78,13 +86,22 @@ bool KiwiViewDirty_ShouldRender( kiwiDirtyView_t view, int w, int h )
     if ( !render && OverlayForcesRender( view ) )
         render = true;
 
+    // Live-gesture cadence (KIWI_VIEWDIRTY_GESTURE_MS): a size change or a never-drawn
+    // view still renders at once; everything else waits, and stays dirty so the first
+    // frame after the gesture repaints it.
+    const unsigned long long nowMs = ::GetTickCount64();
+    if ( render && KiwiCmd_Active() && s.everDrawn && w == s.w && h == s.h
+      && ( nowMs - s.lastRenderMs ) < KIWI_VIEWDIRTY_GESTURE_MS )
+        return false;
+
     if ( render )
     {
-        s.dirty     = false;
-        s.everDrawn = true;
-        s.w         = w;
-        s.h         = h;
-        s.lastTick  = s_tick;
+        s.dirty        = false;
+        s.everDrawn    = true;
+        s.w            = w;
+        s.h            = h;
+        s.lastTick     = s_tick;
+        s.lastRenderMs = nowMs;
     }
     return render;
 }

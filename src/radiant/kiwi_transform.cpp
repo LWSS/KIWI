@@ -45,6 +45,8 @@ extern void  CamWnd_BuildMatrix();                                     // camwnd
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:100
 extern void  SetKeyValue( entity_s_def *e, const char *key, const char *value );    // entity.cpp:213
+extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );      // entity.cpp:115
+extern entity_s *Brush_Move( const float *move, brush_t *def, char snap );          // brush.cpp 0x47BA40
 extern void  Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
 extern void  Select_Scale( float sx, float sy, float sz );             // select.cpp 0x48FDC0
 extern void  Select_GetMid( float *mid );                              // select.cpp 0x48FC70
@@ -2979,7 +2981,17 @@ namespace
 
         // Rotate changes only from an active ring sweep or typed degrees. Bare mouse
         // movement leaves m_deg latched and cannot open undo. Five-degree snapping
-        // applies only while a non-fresh ring is active.
+        // applies while a non-fresh ring is active.
+        // KIWI (2026-09-10, user: "when rotating an xmodel, I want it to by default snap
+        // to the 5deg angles and then with ctrl held it is freeform"): the ring snaps to
+        // KX_ANGLE_STEP by DEFAULT and Ctrl releases it to free degrees - the reverse of
+        // the other transforms' Ctrl-engages-snap rule.  Ctrl is polled, never latched,
+        // so a mid-sweep press/release changes the angle immediately.
+        static bool FreeformHeld()
+        {
+            return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+        }
+
         void Recompute() override
         {
             float deg = m_deg;
@@ -2989,7 +3001,7 @@ namespace
 
             if ( m_hasNum )
                 deg = NumRaw();                             // exact degrees
-            else if ( m_ringActive && !m_ringFresh && SnapActive() )
+            else if ( m_ringActive && !m_ringFresh && !FreeformHeld() )
                 deg = floorf( deg / KX_ANGLE_STEP + 0.5f ) * KX_ANGLE_STEP;
 
             m_deg = deg;
@@ -3114,8 +3126,10 @@ namespace
                         chain, m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot)" );
                 return;
             }
-            SetHud( "%s  axis %s  %.1f deg%s%s", What(), AxisName( m_axis ), (double)m_deg,
-                    chain, m_pivotOverridden ? "  [pivot moved]" : "" );
+            // The ring snaps to 5 degrees unless Ctrl is held (KIWI 2026-09-10).
+            SetHud( "%s  axis %s  %.1f deg%s%s  ·  %s", What(), AxisName( m_axis ), (double)m_deg,
+                    chain, m_pivotOverridden ? "  [pivot moved]" : "",
+                    m_hasNum ? "typed" : ( FreeformHeld() ? "FREE (Ctrl held)" : "5 deg steps, Ctrl: free" ) );
         }
 
         const char *What() const
@@ -3210,8 +3224,92 @@ namespace
                 Select_GetMid( m_pivot );
             }
             m_pivotOverridden = PivotActive( m_pivot );
+            CaptureModels();
             UpdateHud();
             return true;
+        }
+
+        // KIWI (2026-09-10, user: "Can we not add model scaling?"): xmodels DO scale - the
+        // misc_model "modelscale" epair (cod4map map.cpp:1720 FloatForKey "modelscale",
+        // Checkkey_Model rebuilds the proxy on it, the inspector exposes it).  It is one
+        // uniform float, so S on a model writes modelscale = baseline x factor and moves
+        // the model's origin about the pivot; a per-axis (X/Y/Z, Shift+XYZ) scale leaves
+        // models alone with one console line.  Absolute from the baseline captured at
+        // Begin, so Cancel (factor 1) restores it exactly and the undo bracket's saved
+        // entity epairs cover Ctrl+Z.
+        struct modelBase_t
+        {
+            selbrush_t   *node;
+            entity_s_def *def;
+            float         scale;
+            float         origin[3];
+        };
+
+        void CaptureModels()
+        {
+            m_models.clear();
+            m_modelWarned = false;
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            {
+                entity_s_def *def = b->owner ? (entity_s_def *)b->owner->def : nullptr;
+                if ( !def || !def->eclass || !def->eclass->fixedsize )
+                    continue;
+                if ( !KiwiDrop_IsModelEntity( b ) )
+                    continue;
+                bool dup = false;
+                for ( size_t i = 0; i < m_models.size() && !dup; ++i )
+                    dup = ( m_models[i].def == def );
+                if ( dup )
+                    continue;
+                modelBase_t m;
+                m.node  = b;
+                m.def   = def;
+                m.scale = Entity_GetFloatValueForKey( def, "modelscale" );
+                if ( !( m.scale > 0.0f ) )
+                    m.scale = 1.0f;
+                if ( !Entity_GetVec3ForKey( def, m.origin, "origin" ) )
+                    m.origin[0] = m.origin[1] = m.origin[2] = 0.0f;
+                m_models.push_back( m );
+            }
+        }
+
+        void ApplyModels( const float want[3] )
+        {
+            if ( m_models.empty() )
+                return;
+            const bool uniform = fabsf( want[0] - want[1] ) <= 1.0e-5f
+                              && fabsf( want[0] - want[2] ) <= 1.0e-5f;
+            if ( !uniform )
+            {
+                if ( !m_modelWarned )
+                    Sys_Printf( "Scale: xmodels take one UNIFORM modelscale (the engine has no "
+                                "per-axis model scale) - the axis/plane scale leaves the %i "
+                                "model(s) unchanged.\n", (int)m_models.size() );
+                m_modelWarned = true;
+                return;
+            }
+            const float f = want[0];
+            for ( size_t i = 0; i < m_models.size(); ++i )
+            {
+                modelBase_t &m = m_models[i];
+                if ( !Sel_BrushLive( m.node ) || !m.node->def )
+                    continue;
+                // Origin about the pivot, absolute from the baseline.
+                float cur[3], desired[3], delta[3];
+                if ( !Entity_GetVec3ForKey( m.def, cur, "origin" ) )
+                    Copy3( m.origin, cur );
+                for ( int k = 0; k < 3; ++k )
+                {
+                    desired[k] = m_pivot[k] + ( m.origin[k] - m_pivot[k] ) * f;
+                    delta[k]   = desired[k] - cur[k];
+                }
+                if ( Len3( delta ) > 1.0e-4f )
+                    Brush_Move( delta, m.node->def, 0 );   // carries the origin epair along
+                char value[32];
+                _snprintf( value, sizeof( value ), "%.6g", (double)( m.scale * f ) );
+                value[sizeof( value ) - 1] = '\0';
+                SetKeyValue( m.def, "modelscale", value ); // Checkkey_Model rebuilds the proxy
+            }
         }
 
         // Scale may yield to another transform unless V placement owns the keyboard.
@@ -3255,6 +3353,7 @@ namespace
         {
             if ( m_construct )      KiwiConSel_MoveCommit();      // the snapshot IS the undo record
             else if ( m_refImage )  KiwiRefImage_MoveCommit();
+            m_models.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3265,7 +3364,8 @@ namespace
         {
             if ( m_construct )      KiwiConSel_MoveCancel();      // pops the snapshot
             else if ( m_refImage )  KiwiRefImage_MoveCancel();
-            else                    ApplyWanted( 1.0f, 1.0f, 1.0f );
+            else                    ApplyWanted( 1.0f, 1.0f, 1.0f );   // models: modelscale back to baseline
+            m_models.clear();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3371,12 +3471,19 @@ namespace
                     shift[k] = ( mid[k] - m_pivot[k] ) * ( ratio[k] - 1.0f );
                 Select_Move( shift, 0 );
             }
+            // Selected xmodels: the proxy box above is moot (Checkkey_Model rebuilds it);
+            // the real scale is the modelscale epair, absolute from the baseline.
+            ApplyModels( want );
             m_applied[0] = want[0]; m_applied[1] = want[1]; m_applied[2] = want[2];
             g_nUpdateBits = -1;
         }
 
         const char *What() const
-        { return m_construct ? "construction" : m_refImage ? "image" : "objects"; }
+        {
+            if ( m_construct ) return "construction";
+            if ( m_refImage )  return "image";
+            return m_models.empty() ? "objects" : "objects+models";
+        }
 
         void UpdateHud()
         {
@@ -3403,6 +3510,8 @@ namespace
         bool  m_construct  = false;       // the construction store owns this gesture
         bool  m_refImage   = false;       // the reference-image store owns it
         bool  m_pivotOverridden = false;  // scaling about a session (V) pivot
+        std::vector<modelBase_t> m_models;   // selected xmodels: modelscale + origin baseline
+        bool  m_modelWarned = false;      // one "uniform only" line per gesture
     };
 
     KiwiMoveCommand   s_move;
@@ -3479,29 +3588,42 @@ bool KiwiDrop_ComputePlacement( const ray_t &ray,
     return true;
 }
 
-bool KiwiDrop_BeginAt( int imgX, int imgY )
+// The press-time test, split out (KIWI 2026-09-09) so the viewport can ARM the placer
+// on a press and only start the Move once the cursor has travelled: a click on a
+// selected model must select it, never drop it.  Nothing here mutates state.
+static selbrush_t *DropHitSelectedModel( int imgX, int imgY )
 {
     if ( KiwiCmd_Active() )
-        return false;
+        return 0;
     std::vector<selbrush_t *> selectedModels;
     if ( !DropSelectionOnlyModels( &selectedModels ) )
-        return false;
+        return 0;
 
     ray_t ray;
     if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
-        return false;
+        return 0;
     const pick_result_t hit = Pick( ray, SEL_MASK_OBJECT );
     if ( !hit.valid || !hit.item.brush || !KiwiDrop_IsModelEntity( hit.item.brush ) )
-        return false;
+        return 0;
 
-    bool hitSelectedModel = false;
     for ( size_t i = 0; i < selectedModels.size(); ++i )
         if ( selectedModels[i]->owner == hit.item.brush->owner )
-            hitSelectedModel = true;
-    if ( !hitSelectedModel )
+            return hit.item.brush;
+    return 0;
+}
+
+bool KiwiDrop_HitSelectedModelAt( int imgX, int imgY )
+{
+    return DropHitSelectedModel( imgX, imgY ) != 0;
+}
+
+bool KiwiDrop_BeginAt( int imgX, int imgY )
+{
+    selbrush_t *hitBrush = DropHitSelectedModel( imgX, imgY );
+    if ( !hitBrush )
         return false;
 
-    s_move.ArmDrop( hit.item.brush );
+    s_move.ArmDrop( hitBrush );
     if ( !KiwiCmd_Start( KIWI_CMD_MOVE ) )
     {
         s_move.ClearDropArm();

@@ -43,6 +43,8 @@ namespace
     // shapes freeze to their current visible tessellation; the HUD warns first.
     bool Trimmable( const kconObject_t &o )
     {
+        if ( KiwiCon_HasSmooth( o ) )                    // spline spans: layout curves only
+            return false;
         if ( o.type == KCON_LINE || o.type == KCON_POLYLINE )
             return (int)( o.pts.size() / 3 ) >= 2;
         if ( o.type == KCON_CIRCLE || o.type == KCON_ARC || o.type == KCON_RECT )
