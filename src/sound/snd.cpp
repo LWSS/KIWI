@@ -5,7 +5,7 @@
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
 #include <universal/com_sndalias.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/q_parse.h>
 #include <client/client.h>
 #include <universal/profile.h>

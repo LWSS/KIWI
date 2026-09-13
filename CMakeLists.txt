@@ -56,16 +56,22 @@ include(${SCRIPTS_DIR}/platform_override.cmake)
 # Log out the KISAK_PLATFORM
 message("Building KISAK_PLATFORM: ${KISAK_PLATFORM}")
 
-# Fastfile deserialization still uses the original 32-bit database layout.
+option(KIWI_BUILD_LINKER_PC64 "Build the x64 map package linker" ON)
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(_raw_default ON)
-else()
-    set(_raw_default OFF)
+    add_subdirectory(${SCRIPTS_DIR}/linker_pc64)
 endif()
-option(KIWI_RAW_ONLY "Build the game with raw assets and no fastfile loader" ${_raw_default})
+
+# Native x64 builds include database64. Raw asset loading remains available at
+# runtime; Win32 builds retain the raw-only implementation.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(_raw_default OFF)
+else()
+    set(_raw_default ON)
+endif()
+option(KIWI_RAW_ONLY "Omit native FastFile loading and build only raw asset loaders" ${_raw_default})
 option(KIWI_BUILD_GAME "Expose game targets for the selected architecture" ON)
-if(KIWI_BUILD_GAME AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT KIWI_RAW_ONLY)
-    message(FATAL_ERROR "The x64 game requires KIWI_RAW_ONLY until the fastfile database is ported.")
+if(KIWI_BUILD_GAME AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT KIWI_RAW_ONLY)
+    message(FATAL_ERROR "database64 fastfiles require x64. Win32 supports raw assets only.")
 endif()
 if(KIWI_BUILD_GAME)
     add_subdirectory(${SCRIPTS_DIR}/mp)
@@ -134,7 +140,7 @@ endif()
 # in the .sln, which "Build startup project" honours; it applies to the real x64 tool
 # targets and to the x86 custom targets alike (both are named KIWI-<tool>).
 if(TARGET KIWI-Radiant)
-    foreach(_tool cod4map cod4rad)
+    foreach(_tool cod4map cod4rad linker_pc64)
         if(TARGET KIWI-${_tool})
             add_dependencies(KIWI-Radiant KIWI-${_tool})
         endif()

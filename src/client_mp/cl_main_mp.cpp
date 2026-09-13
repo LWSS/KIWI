@@ -25,7 +25,7 @@
 #include <universal/com_files.h>
 #include <ragdoll/ragdoll.h>
 #include <DynEntity/DynEntity_client.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <sound/snd_local.h>
 #include <stringed/stringed_hooks.h>
 #include <gfx_d3d/r_init.h>

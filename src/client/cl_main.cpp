@@ -12,7 +12,7 @@
 #include <server/sv_public.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <ui/ui.h>
 #include <qcommon/threads.h>
 #include <cgame/cg_snapshot.h>

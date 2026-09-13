@@ -3,7 +3,7 @@
 #include "cg_public.h"
 
 #include <client/client.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>

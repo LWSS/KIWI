@@ -2,7 +2,7 @@
 #include "stringed_ingame.h"
 #include <universal/assertive.h>
 #include <universal/com_memory.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_files.h>
 
 CStringEdPackage *TheStringPackage;

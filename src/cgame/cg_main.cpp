@@ -10,7 +10,7 @@
 #include "cg_vehicle_hud.h"
 #include <universal/com_sndalias.h>
 #include <universal/surfaceflags.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "cg_servercmds.h"
 #include <gfx_d3d/r_model.h>
 #include <EffectsCore/fx_system.h>

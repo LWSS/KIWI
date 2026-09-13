@@ -8,7 +8,7 @@
 #include "mem_track.h"
 #include "threads.h"
 
-#include <database/database.h>
+#include <database64/database.h>
 #include <win32/win_local.h>
 #include <universal/com_files.h>
 #include <script/scr_debugger.h>

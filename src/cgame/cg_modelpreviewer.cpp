@@ -13,7 +13,7 @@
 #include <gfx_d3d/r_model.h>
 #include <devgui/devgui.h>
 #include <ragdoll/ragdoll.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <algorithm>
 

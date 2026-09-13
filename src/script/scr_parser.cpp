@@ -6,7 +6,7 @@
 #include <universal/com_memory.h>
 #include <win32/win_net_debug.h>
 #include <universal/com_files.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/qcommon.h>
 #include <universal/profile.h>
 #include <qcommon/threads.h>

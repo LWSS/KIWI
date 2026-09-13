@@ -7,7 +7,7 @@
 #include "r_init.h"
 #include "r_scene.h"
 #include "r_dvars.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_bsp.h"
 #include "r_marks.h"
 

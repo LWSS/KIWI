@@ -2,7 +2,10 @@
 #include "com_bsp.h"
 #include <universal/com_memory.h>
 #include <universal/com_files.h>
-#include <database/database.h>
+#include <database64/database.h>
+#ifdef KIWI_DATABASE64
+#include <database64/db_package_runtime.h>
+#endif
 #include <universal/profile.h>
 
 BspGlob comBspGlob;
@@ -93,6 +96,9 @@ bool __cdecl Com_IsBspLoaded()
 
 void __cdecl Com_LoadBsp(char *filename)
 {
+#ifdef KIWI_DATABASE64
+    DB64_LoadMapPackage(filename);
+#endif
     uint bytesRead; // [esp+18h] [ebp-Ch]
     uint len; // [esp+1Ch] [ebp-8h]
     int h; // [esp+20h] [ebp-4h] BYREF

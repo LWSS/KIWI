@@ -5,7 +5,7 @@
 #include <sound/snd_local.h>
 #include "com_files.h"
 #include <qcommon/cmd.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "q_parse.h"
 
 SoundAliasGlobals g_sa;
@@ -340,7 +340,15 @@ LABEL_11:
 
 void __cdecl StreamFileNameGetName(const StreamFileName *streamFileName, char *filename, uint size)
 {
-    Com_sprintf(filename, size, "%s\\%s", streamFileName->info.raw.dir, streamFileName->info.raw.name);
+    const char *directory = streamFileName->info.raw.dir;
+    if (!directory || !directory[0] || !strcmp(directory, "."))
+    {
+        Com_sprintf(filename, size, "%s", streamFileName->info.raw.name);
+    }
+    else
+    {
+        Com_sprintf(filename, size, "%s\\%s", directory, streamFileName->info.raw.name);
+    }
 }
 
 void __cdecl Com_GetSoundFileName(const snd_alias_t *alias, char *filename, int size)

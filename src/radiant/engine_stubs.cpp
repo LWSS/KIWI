@@ -19,7 +19,7 @@
 #include <qcommon/qcommon.h>       // Com_*, errorParm_t, CM_*, DObj_s, dvar_t (via q_shared.h)
 #include <qcommon/threads.h>       // ThreadContext_t, WinThreadLock
 #include <qcommon/com_bsp.h>       // LumpType, ComSaveLumpBehavior
-#include <database/database.h>     // XAssetType, XAssetHeader, XZoneInfo
+#include <database64/database.h>     // XAssetType, XAssetHeader, XZoneInfo
 #include <DynEntity/DynEntity_client.h> // DynEntityDrawType, DynEntityCollType
 #include <EffectsCore/fx_system.h> // FxEffectDef, FxSystem, FxCmd, FX_*
 #include <gfx_d3d/r_dpvs.h>       // DpvsDynamicCellCmd

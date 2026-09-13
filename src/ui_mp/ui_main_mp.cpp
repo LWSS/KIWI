@@ -12,7 +12,7 @@
 #include <client/client.h>
 #include <buildnumber.h>
 #include <stringed/stringed_hooks.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_files.h>
 #include <universal/com_sndalias.h>
 

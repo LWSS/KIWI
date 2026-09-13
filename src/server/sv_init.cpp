@@ -6,7 +6,7 @@
 #include "server.h"
 #include "sv_public.h"
 #include <ui/ui.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/cmd.h>
 #include "sv_game.h"
 #include <qcommon/com_bsp.h>

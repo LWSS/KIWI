@@ -19,7 +19,7 @@
 #include "r_water.h"
 #include "r_fog.h"
 #include "r_workercmds.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_scene.h"
 #include "r_rendertarget.h"
 #include "r_buffers.h"

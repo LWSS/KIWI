@@ -7,10 +7,12 @@
 
 stringDef_s *g_strHandle[2048];
 
+#ifndef KIWI_LINKER_PC64
 void __cdecl TRACK_ui_utils()
 {
     track_static_alloc_internal(g_strHandle, sizeof(g_strHandle), "g_strHandle", 34);
 }
+#endif
 
 void __cdecl Window_SetDynamicFlags(int localClientNum, windowDef_t *w, int flags)
 {
@@ -54,6 +56,7 @@ void __cdecl Menu_SetCursorItem(int localClientNum, menuDef_t *menu, int cursorI
     menu->cursorItem[localClientNum] = cursorItem;
 }
 
+#ifndef KIWI_LINKER_PC64
 int __cdecl Item_IsVisible(int localClientNum, itemDef_s *item)
 {
     PROF_SCOPED("Item_IsVisible");
@@ -92,6 +95,8 @@ bool __cdecl Item_EnableShowViaDvar(const itemDef_s *item, int flag)
     } while (val[0] == 59 && !val[1] || I_stricmp(testValue, val));
     return (flag & item->dvarFlags) != 0;
 }
+
+#endif
 
 void __cdecl Item_SetTextRect(int localClientNum, itemDef_s *item, const rectDef_s *textRect)
 {

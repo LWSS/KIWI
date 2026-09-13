@@ -10,7 +10,7 @@
 #include "r_dpvs.h"
 #include "r_shadowcookie.h"
 #include "r_sky.h"
-#include <database/database.h>
+#include <database64/database.h>
 
 
 //struct GfxWorld s_world    85b28080     gfx_d3d : r_bsp.obj // LWSS: moved to db_registry for DEDICATED

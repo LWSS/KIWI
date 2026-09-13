@@ -1,7 +1,7 @@
 #include <universal/q_shared.h>
 #include "ui_shared.h"
 
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/profile.h>
 
 #ifdef KISAK_MP

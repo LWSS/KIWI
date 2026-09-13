@@ -6,7 +6,7 @@
 #include <stringed/stringed_hooks.h>
 #include <win32/win_storage.h>
 #include <qcommon/mem_track.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <cgame/cg_local.h>
 
 #include <algorithm>

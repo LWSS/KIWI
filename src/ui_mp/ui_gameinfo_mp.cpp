@@ -5,7 +5,7 @@
 #include <universal/q_shared.h>
 #include "ui_mp.h"
 #include <universal/q_parse.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_files.h>
 
 int ui_numArenas;

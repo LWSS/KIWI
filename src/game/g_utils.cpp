@@ -13,7 +13,7 @@
 #include "turret.h"
 #include "actor_corpse.h"
 #include <script/scr_animtree.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <cgame/cg_ents.h>
 #include <xanim/dobj_utils.h>
 #include <script/scr_memorytree.h>

@@ -19,7 +19,7 @@
 #include <stringed/stringed_hooks.h>
 #include <server/sv_game.h>
 #include "g_main_mp.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "g_public_mp.h"
 #include <server/sv_world.h>
 #include <universal/profile.h>

@@ -38,6 +38,8 @@ bool s_open = false;
 // Options persist for the session only.
 bool s_buildBsp    = true;
 bool s_buildLight  = true;
+bool s_buildPackage = false;
+char s_packageLanguage[32] = "english";
 bool s_saveFirst   = true;
 bool s_verbose     = true;
 bool s_onlyEnts    = false;
@@ -57,14 +59,14 @@ enum launchStage_t
 {
     LSTAGE_NONE = 0,
     LSTAGE_BSP,
-    LSTAGE_LIGHT
+    LSTAGE_LIGHT,
+    LSTAGE_PACKAGE
 };
 
-// Tracks whether LIGHT follows BSP or the running process is the final stage.
+// Tracks whether a captured process belongs to the selected build sequence.
 enum launchChain_t
 {
     LCHAIN_OFF = 0,
-    LCHAIN_LIGHT_AFTER_BSP,
     LCHAIN_FINAL_STAGE
 };
 
@@ -233,6 +235,11 @@ struct launchPaths_t
     bool haveMap;
 };
 
+launchPaths_t s_buildPaths;
+launchStage_t s_buildStages[3];
+int s_buildStageCount;
+int s_nextBuildStage;
+
 const char *ExeDir()
 {
     static char s_dir[MAX_PATH];
@@ -397,6 +404,7 @@ const char *StageName( launchStage_t s )
     {
     case LSTAGE_BSP:   return "BSP";
     case LSTAGE_LIGHT: return "LIGHT";
+    case LSTAGE_PACKAGE: return "NATIVE FASTFILE";
     default:           return "BUILD";
     }
 }
@@ -468,11 +476,20 @@ void FormatFileSize( ULONGLONG bytes, char *out, size_t outSz )
 
 void BeginBuildStatus( const launchPaths_t &p )
 {
+    s_buildPaths = p;
     s_buildStatus = BSTATUS_RUNNING;
     s_buildStartedAt = ImGui::GetTime();
     s_buildElapsed = 0.0;
     s_buildOutputBytes = 0;
-    _snprintf( s_buildOutputPath, sizeof( s_buildOutputPath ), "%s", p.bspAbs );
+    if ( s_buildPackage )
+    {
+        _snprintf( s_buildOutputPath, sizeof( s_buildOutputPath ), "%s\\zone\\%s\\%s.ff",
+            p.root, s_packageLanguage, p.name );
+    }
+    else
+    {
+        _snprintf( s_buildOutputPath, sizeof( s_buildOutputPath ), "%s", p.bspAbs );
+    }
     s_buildOutputPath[sizeof( s_buildOutputPath ) - 1] = '\0';
     s_failureStage = LSTAGE_NONE;
     s_failureExit = 0;
@@ -837,6 +854,99 @@ bool StartLight( const launchPaths_t &p )
     return true;
 }
 
+bool StartPackage( const launchPaths_t &p )
+{
+    ResetStageCapture();
+    char exe[MAX_PATH];
+    ToolPath( p, "linker_pc64.exe", exe, sizeof( exe ) );
+    if ( !FileExists( exe ) || !FileExists( p.bspAbs ) )
+    {
+        LogLine( "ERROR: FF64 needs linker_pc64.exe and a compiled BSP." );
+        return false;
+    }
+    const char *identifiers[] = { p.name, s_packageLanguage };
+    for ( int i = 0; i < 2; ++i )
+    {
+        if ( !identifiers[i][0] || strlen( identifiers[i] ) >= 64 )
+        {
+            LogLine( "ERROR: Invalid map name or language for FF64." );
+            return false;
+        }
+        for ( const char *c = identifiers[i]; *c; ++c )
+        {
+            if ( !( *c >= 'a' && *c <= 'z' ) && !( *c >= '0' && *c <= '9' ) && *c != '_' )
+            {
+                LogLine( "ERROR: FF64 map name and language require lowercase letters, digits or underscores." );
+                return false;
+            }
+        }
+    }
+    char output[MAX_PATH];
+    const int length = snprintf( output, sizeof( output ), "%s\\zone\\%s\\%s.ff",
+        p.root, s_packageLanguage, p.name );
+    if ( length < 0 || length >= sizeof( output ) )
+    {
+        LogLine( "ERROR: FF64 output path exceeds MAX_PATH." );
+        return false;
+    }
+    std::string cmd = "\"";
+    cmd += exe;
+    cmd += "\" -root \"";
+    cmd += p.root;
+    cmd += "\" -language ";
+    cmd += s_packageLanguage;
+    cmd += " -compress -native-map \"maps/mp/";
+    cmd += p.name;
+    cmd += ".d3dbsp\"";
+    char manifest[MAX_PATH];
+    const int manifestLength = snprintf( manifest, sizeof( manifest ), "%s\\zone_source\\%s.csv", p.root, p.name );
+    if ( manifestLength < 0 || manifestLength >= sizeof( manifest ) )
+    {
+        LogLine( "ERROR: Native zone source path exceeds MAX_PATH." );
+        return false;
+    }
+    if ( FileExists( manifest ) )
+    {
+        cmd += " -native \"";
+        cmd += manifest;
+        cmd += "\"";
+    }
+    cmd += " ";
+    cmd += p.name;
+    LogLine( "" );
+    LogLine( "==== NATIVE FASTFILE ====" );
+    LogLine( "Compiling one map and its referenced native assets." );
+    LogLine( "%s", cmd.c_str() );
+    if ( !SpawnCaptured( cmd.c_str(), p.root ) )
+    {
+        return false;
+    }
+    s_stage = LSTAGE_PACKAGE;
+    return true;
+}
+
+void StartNextBuildStage()
+{
+    if ( s_nextBuildStage == s_buildStageCount )
+    {
+        FinishBuildSuccess( s_buildStages[s_buildStageCount - 1] );
+        return;
+    }
+    const launchStage_t stage = s_buildStages[s_nextBuildStage++];
+    bool started = false;
+    switch ( stage )
+    {
+    case LSTAGE_BSP: started = StartBsp( s_buildPaths ); break;
+    case LSTAGE_LIGHT: started = StartLight( s_buildPaths ); break;
+    case LSTAGE_PACKAGE: started = StartPackage( s_buildPaths ); break;
+    default: break;
+    }
+    if ( !started )
+    {
+        FinishBuildFailure( stage, 0, false, "The selected build stage could not be started." );
+    }
+}
+
 void OnStageFinished( DWORD exitCode )
 {
     const launchStage_t finished = s_stage;
@@ -847,7 +957,9 @@ void OnStageFinished( DWORD exitCode )
              StageName( finished ), exitCode, exitCode );
 
     if ( finished == LSTAGE_BSP )
+    {
         AfterBspDiagnostics( exitCode );
+    }
 
     if ( s_cancelled )
     {
@@ -856,7 +968,9 @@ void OnStageFinished( DWORD exitCode )
     }
 
     if ( s_chain == LCHAIN_OFF )
+    {
         return;
+    }
 
     if ( exitCode != 0 )
     {
@@ -865,34 +979,20 @@ void OnStageFinished( DWORD exitCode )
         return;
     }
 
-    if ( s_chain == LCHAIN_FINAL_STAGE )
+    if ( s_nextBuildStage == s_buildStageCount )
     {
         FinishBuildSuccess( finished );
         return;
     }
 
-    launchPaths_t p;
-    ResolvePaths( p );
-    if ( !p.haveRoot || !p.haveMap || !SamePath( p.bspAbs, s_buildOutputPath ) )
+    launchPaths_t current;
+    ResolvePaths( current );
+    if ( !current.haveRoot || !current.haveMap || !SamePath( current.bspAbs, s_buildPaths.bspAbs ) )
     {
-        LogLine( "ERROR: build stopped because the map path changed during BSP." );
-        FinishBuildFailure( LSTAGE_LIGHT, 0, false,
-                            "The map path changed before LIGHT could start." );
+        FinishBuildFailure( finished, 0, false, "The map path changed during the build." );
         return;
     }
-
-    if ( s_chain == LCHAIN_LIGHT_AFTER_BSP )
-    {
-        if ( StartLight( p ) )
-            s_chain = LCHAIN_FINAL_STAGE;
-        else
-        {
-            LogLine( "build STOPPED: could not start LIGHT." );
-            FinishBuildFailure( LSTAGE_LIGHT, 0, false,
-                                "The LIGHT stage could not be started." );
-        }
-        return;
-    }
+    StartNextBuildStage();
 }
 
 // STILL_ACTIVE (259) cannot collide with these compilers' documented exit codes.
@@ -1016,7 +1116,7 @@ void DrawStatusBanner()
 
     default:
         _snprintf( headline, sizeof( headline ), "Ready to build" );
-        _snprintf( detail, sizeof( detail ), "Select BSP and/or LIGHT, then press Build." );
+        _snprintf( detail, sizeof( detail ), "Select BSP, LIGHT and/or Native fastfile, then press Build." );
         break;
     }
     headline[sizeof( headline ) - 1] = '\0';
@@ -1094,6 +1194,20 @@ void DrawStageRows( bool busy )
     ImGui::EndDisabled();
     ImGui::PopID();
 
+    ImGui::PushID( "fastfile_stage" );
+    ImGui::Checkbox( "##enabled", &s_buildPackage );
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "FASTFILE" );
+    ImGui::SameLine( 105.0f );
+    ImGui::BeginDisabled( !s_buildPackage );
+    ImGui::SetNextItemWidth( 120.0f );
+    ImGui::InputText( "Language", s_packageLanguage, sizeof( s_packageLanguage ) );
+    HelpMarker( "Builds one map into zone/<language>/<map>.ff after the selected BSP and lighting stages. "
+                "Referenced assets and literal script dependencies are included automatically. "
+                "List dynamically selected assets in zone_source/<map>.csv." );
+    ImGui::EndDisabled();
+    ImGui::PopID();
+
     ImGui::BeginDisabled( !s_buildBsp );
     ImGui::Checkbox( "Save map before BSP", &s_saveFirst );
     ImGui::EndDisabled();
@@ -1103,26 +1217,29 @@ void DrawStageRows( bool busy )
 void StartSelectedBuild( const launchPaths_t &p )
 {
     BeginBuildStatus( p );
-    s_chain = LCHAIN_OFF;
-
-    LogLine( "" );
-    LogLine( "================ BUILD ================" );
-
+    s_buildStageCount = 0;
+    s_nextBuildStage = 0;
     if ( s_buildBsp )
     {
-        if ( StartBsp( p ) )
-            s_chain = s_buildLight ? LCHAIN_LIGHT_AFTER_BSP : LCHAIN_FINAL_STAGE;
-        else
-            FinishBuildFailure( LSTAGE_BSP, 0, false,
-                                "The BSP stage could not be started." );
+        s_buildStages[s_buildStageCount++] = LSTAGE_BSP;
+    }
+    if ( s_buildLight )
+    {
+        s_buildStages[s_buildStageCount++] = LSTAGE_LIGHT;
+    }
+    if ( s_buildPackage )
+    {
+        s_buildStages[s_buildStageCount++] = LSTAGE_PACKAGE;
+    }
+    if ( !s_buildStageCount )
+    {
+        FinishBuildFailure( LSTAGE_NONE, 0, false, "No build stages selected." );
         return;
     }
-
-    if ( StartLight( p ) )
-        s_chain = LCHAIN_FINAL_STAGE;
-    else
-        FinishBuildFailure( LSTAGE_LIGHT, 0, false,
-                            "The LIGHT stage could not be started." );
+    s_chain = LCHAIN_FINAL_STAGE;
+    LogLine( "" );
+    LogLine( "================ BUILD ================" );
+    StartNextBuildStage();
 }
 
 void DrawCancelPopup()
@@ -1284,22 +1401,27 @@ void DrawWindow()
     ImGui::Separator();
     DrawStageRows( busy );
 
-    char bspExe[MAX_PATH], lightExe[MAX_PATH];
+    char bspExe[MAX_PATH], lightExe[MAX_PATH], packageExe[MAX_PATH];
     ToolPath( p, "KIWI-cod4map.exe", bspExe, sizeof( bspExe ) );
     ToolPath( p, "KIWI-cod4rad.exe", lightExe, sizeof( lightExe ) );
+    ToolPath( p, "linker_pc64.exe", packageExe, sizeof( packageExe ) );
     const bool haveBspExe = FileExists( bspExe );
     const bool haveLightExe = FileExists( lightExe );
     const char *blockedReason = nullptr;
     if ( !canBuild )
         blockedReason = "A saved map and fs_basepath are required.";
-    else if ( !s_buildBsp && !s_buildLight )
+    else if ( !s_buildBsp && !s_buildLight && !s_buildPackage )
         blockedReason = "Select at least one build stage.";
     else if ( s_buildBsp && !haveBspExe )
         blockedReason = "KIWI-cod4map.exe was not found beside Radiant.";
     else if ( s_buildLight && !haveLightExe )
         blockedReason = "KIWI-cod4rad.exe was not found beside Radiant.";
-    else if ( !s_buildBsp && s_buildLight && !FileExists( p.bspAbs ) )
-        blockedReason = "LIGHT needs an existing .d3dbsp; enable BSP first.";
+    else if ( s_buildPackage && !FileExists( packageExe ) )
+    {
+        blockedReason = "linker_pc64.exe was not found beside Radiant.";
+    }
+    else if ( !s_buildBsp && ( s_buildLight || s_buildPackage ) && !FileExists( p.bspAbs ) )
+        blockedReason = "LIGHT and FF64 need an existing .d3dbsp; enable BSP first.";
 
     if ( busy )
     {

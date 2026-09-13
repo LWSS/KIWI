@@ -4,6 +4,9 @@
 #include <gfx_d3d/r_model.h>
 #include <universal/com_files.h>
 #include <qcommon/qcommon.h>
+#ifdef KIWI_LINKER_PC64
+#include <linker_pc64/native_anim_services.h>
+#endif
 
 enum $69AF8E44C9D6025F282D494F15F1F016 : int
 {
@@ -207,6 +210,7 @@ void* XAnimTempAlloc(int size)
     return Hunk_UserAlloc(g_animUser, size, alignof(void *));
 }
 
+#ifndef KIWI_LINKER_PC64
 XModelPieces *__cdecl XModelPiecesLoadFile(const char *name, void *(__cdecl *Alloc)(int))
 {
     XModelPiece *piece;          // [esp+38h] [ebp-A4h]
@@ -320,6 +324,8 @@ XModelPieces *__cdecl XModelPiecesPrecache(const char *name, void *(__cdecl *All
         return 0;
     }
 }
+
+#endif
 
 unsigned __int8 *__cdecl LoadTrans(
     void *(__cdecl *Alloc)(int),

@@ -1,7 +1,7 @@
 #include <universal/q_shared.h>
 #include "r_draw_staticmodel.h"
 #include "rb_stats.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_state.h"
 #include "r_model_lighting.h"
 #include "r_shade.h"

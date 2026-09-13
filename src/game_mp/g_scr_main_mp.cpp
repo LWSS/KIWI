@@ -10,7 +10,7 @@
 #include <client/client.h>
 #include <client_mp/client_mp.h>
 
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <server/sv_game.h>
 #include <server_mp/server_mp.h>

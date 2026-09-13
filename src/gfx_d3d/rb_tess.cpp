@@ -12,7 +12,7 @@
 #include "r_draw_material.h"
 #include <universal/profile.h>
 #include "r_xsurface.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_dobj_skin.h"
 #include <cgame/cg_local.h>
 #include "r_draw_staticmodel.h"

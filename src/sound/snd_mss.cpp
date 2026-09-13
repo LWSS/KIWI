@@ -6,44 +6,6 @@
 #include <universal/com_memory.h>
 #include <math.h>
 #include <mss.h>
-
-uint __stdcall MSS_FileOpenCallback(const MSS_FILE *pszFilename, UINTa *phFileHandle)
-{
-    int handle = 0;
-    int result = FS_FOpenFileReadStream(pszFilename, &handle);
-    *phFileHandle = (UINTa)handle;
-    return result >= 0;
-}
-void __stdcall MSS_FileCloseCallback(UINTa hFileHandle)
-{
-    FS_FCloseFile(hFileHandle);
-}
-int __stdcall MSS_FileSeekCallback(UINTa hFileHandle, int offset, uint type)
-{
-    if (type)
-    {
-        if (type == 1)
-        {
-            FS_Seek(hFileHandle, offset, 0);
-        }
-        else
-        {
-            if (type != 2)
-                return 0;
-            FS_Seek(hFileHandle, offset, 1);
-        }
-    }
-    else
-    {
-        FS_Seek(hFileHandle, offset, 2);
-    }
-    return FS_FTell(hFileHandle);
-}
-uint __stdcall MSS_FileReadCallback(UINTa hFileHandle, void *pBuffer, uint bytes)
-{
-    return FS_Read((byte *)pBuffer, bytes, hFileHandle);
-}
-
 static void MSS_SetMixerPreferences(int hertz)
 {
   // KIWI (miles9): DirectSound rounds a 1 ms fragment up to 256 sample frames
@@ -258,26 +220,6 @@ void __cdecl MSS_ResumeSample(int i, int frametime)
 _DIG_DRIVER *__cdecl MSS_GetDriver()
 {
   return milesGlob.driver;
-}
-
-int __cdecl MSS_DigitalFormatType(int waveFormat, int bits, int channels)
-{
-  int digitalFormat; // [esp+0h] [ebp-4h]
-
-  if ( waveFormat != 1 && waveFormat != 17 )
-    Com_Error(ERR_FATAL, "unknown wave format %i", waveFormat);
-  if ( channels != 1 && channels != 2 )
-    Com_Error(ERR_FATAL, "Sound has %i channels; only 1 or 2 channels are supported.\n", channels);
-  if ( bits != 8 && bits != 16 )
-    Com_Error(ERR_FATAL, "Sound uses %i bits per channel; only 8 or 16 bit channels are supported.\n", bits);
-  digitalFormat = 0;
-  if ( waveFormat == 17 )
-    digitalFormat = 4;
-  if ( bits == 16 )
-    digitalFormat |= 1u;
-  if ( channels == 2 )
-    return digitalFormat | 2;
-  return digitalFormat;
 }
 
 uint8_t *__cdecl MSS_Alloc(uint bytes, uint rate)

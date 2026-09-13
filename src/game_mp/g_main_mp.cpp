@@ -12,7 +12,7 @@
 
 #include <client/client.h>
 
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <game/game_public.h>
 
@@ -803,11 +803,14 @@ void __cdecl G_PrintFastFileErrors(const char *fastfile)
     iassert(fastfile);
     rawfile = DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, fastfile).rawfile;
     if (!rawfile)
-        MyAssertHandler(".\\game_mp\\g_main_mp.cpp", 960, 1, "%s", "rawfile");
+    {
+        // Older native fastfiles do not contain a build-diagnostics record.
+        return;
+    }
     if (rawfile->len)
     {
         Com_PrintError(CON_CHANNEL_ERROR, "There were errors when building fast file '%s'\n", fastfile);
-        Com_PrintError(CON_CHANNEL_ERROR, (char *)rawfile->buffer);
+        Com_PrintError(CON_CHANNEL_ERROR, "%s", rawfile->buffer);
     }
 }
 

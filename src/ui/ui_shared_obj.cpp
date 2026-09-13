@@ -1442,95 +1442,91 @@ script_s *__cdecl LoadScriptFile(const char *filename)
 
 int __cdecl PC_Directive_include(source_s *source)
 {
-    char v2; // [esp+1Bh] [ebp-4B9h]
-    char *v3; // [esp+20h] [ebp-4B4h]
-    char *v4; // [esp+24h] [ebp-4B0h]
-    char v5; // [esp+2Bh] [ebp-4A9h]
-    token_s *v6; // [esp+2Ch] [ebp-4A8h]
-    char *v7; // [esp+40h] [ebp-494h]
-    char v8; // [esp+47h] [ebp-48Dh]
-    char *v9; // [esp+4Ch] [ebp-488h]
-    char *includepath; // [esp+50h] [ebp-484h] BYREF
-    char path[68]; // [esp+54h] [ebp-480h] BYREF
-    script_s *script; // [esp+98h] [ebp-43Ch]
-    token_s token; // [esp+9Ch] [ebp-438h] BYREF
-
     if (source->skip > 0)
+    {
         return 1;
+    }
+    token_s token = {};
+    char path[64] = {};
+    script_s *script = NULL;
     if (!PC_ReadSourceToken(source, &token) || token.linescrossed > 0)
-        goto LABEL_4;
+    {
+        SourceError(source, "#include without file name");
+        return 0;
+    }
     if (token.type == 1)
     {
         StripDoubleQuotes(token.string);
         PC_ConvertPath(token.string);
-        script = LoadScriptFile(token.string);
+        if (strlen(token.string) >= sizeof(path))
+        {
+            SourceError(source, "#include file name is too long");
+            return 0;
+        }
+        strcpy(path, token.string);
+        script = LoadScriptFile(path);
         if (!script)
         {
-            includepath = source->includepath;
-            v9 = path;
-            do
+            if (strlen(source->includepath) + strlen(token.string) >= sizeof(path))
             {
-                v8 = *includepath;
-                *v9++ = *includepath++;
-            } while (v8);
-            v7 = &token.string[strlen(token.string) + 1];
-            v6 = (token_s *)((char *)&includepath + 3);
-            do
-            {
-                v5 = v6->string[1];
-                v6 = (token_s *)((char *)v6 + 1);
-            } while (v5);
-            memcpy(v6, &token, v7 - (char *)&token);
+                SourceError(source, "#include path is too long");
+                return 0;
+            }
+            strcpy(path, source->includepath);
+            strcat(path, token.string);
             script = LoadScriptFile(path);
         }
-        goto LABEL_30;
     }
-    if (token.type != 5 || token.string[0] != 60)
+    else if (token.type == 5 && token.string[0] == '<')
     {
-    LABEL_4:
+        if (strlen(source->includepath) >= sizeof(path))
+        {
+            SourceError(source, "#include path is too long");
+            return 0;
+        }
+        strcpy(path, source->includepath);
+        const size_t prefix = strlen(path);
+        bool closed = false;
+        while (PC_ReadSourceToken(source, &token))
+        {
+            if (token.linescrossed > 0)
+            {
+                PC_UnreadSourceToken(source, &token);
+                break;
+            }
+            if (token.type == 5 && token.string[0] == '>')
+            {
+                closed = true;
+                break;
+            }
+            if (strlen(path) + strlen(token.string) >= sizeof(path))
+            {
+                SourceError(source, "#include path is too long");
+                return 0;
+            }
+            strcat(path, token.string);
+        }
+        if (!closed || strlen(path) == prefix)
+        {
+            SourceError(source, "#include requires a file name and trailing >");
+            return 0;
+        }
+        PC_ConvertPath(path);
+        script = LoadScriptFile(path);
+    }
+    else
+    {
         SourceError(source, "#include without file name");
         return 0;
     }
-    v4 = source->includepath;
-    v3 = path;
-    do
-    {
-        v2 = *v4;
-        *v3++ = *v4++;
-    } while (v2);
-    while (PC_ReadSourceToken(source, &token))
-    {
-        if (token.linescrossed > 0)
-        {
-            PC_UnreadSourceToken(source, &token);
-            break;
-        }
-        if (token.type == 5 && token.string[0] == 62)
-            break;
-        strncat(path, token.string, 0x40u);
-    }
-    if (token.string[0] != 62)
-        SourceWarning(source, "#include missing trailing >");
-    if (&path[strlen(path) + 1] == &path[1])
-    {
-        SourceError(source, "#include without file name between < >");
-        return 0;
-    }
-    PC_ConvertPath(path);
-    script = LoadScriptFile(path);
-LABEL_30:
-    if (script)
-    {
-        PC_PushScript(source, script);
-        return 1;
-    }
-    else
+    if (!script)
     {
         SourceError(source, "file %s not found", path);
         return 0;
     }
+    PC_PushScript(source, script);
+    return 1;
 }
-
 bool __cdecl PC_WhiteSpaceBeforeToken(token_s *token)
 {
     return token->endwhitespace_p - token->whitespace_p > 0;

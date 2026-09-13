@@ -10,7 +10,7 @@
 #include <script/scr_main.h>
 #include "g_scr_load_obj.h"
 #include <universal/com_files.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "g_save.h"
 #include "savememory.h"
 #include "actor.h"
@@ -1040,12 +1040,16 @@ void __cdecl G_PrintFastFileErrors(const char *fastfile)
     iassert(fastfile);
 
     RawFile *rawfile = DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, fastfile).rawfile;
-    iassert(rawfile);
+    if (!rawfile)
+    {
+        // Older native fastfiles do not contain a build-diagnostics record.
+        return;
+    }
 
     if (rawfile->len)
     {
         Com_PrintError(CON_CHANNEL_ERROR, "There were errors when building fast file '%s'\n", fastfile);
-        Com_PrintError(CON_CHANNEL_ERROR, rawfile->buffer);
+        Com_PrintError(CON_CHANNEL_ERROR, "%s", rawfile->buffer);
     }
 }
 

@@ -3,7 +3,7 @@
 #include <universal/assertive.h>
 #include <universal/com_files.h>
 #include "qcommon.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "cmd.h"
 #include <sound/snd_public.h>
 

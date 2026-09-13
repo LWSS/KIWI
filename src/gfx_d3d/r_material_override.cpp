@@ -4,7 +4,7 @@
 #include "r_dvars.h"
 #include "r_init.h"
 #include "r_rendercmds.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include "rb_uploadshaders.h"
 
 $4ABF24606230B73E4E420CE33A1F14B1 mtlOverrideGlob;

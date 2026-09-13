@@ -27,7 +27,7 @@
 #include <server/sv_public.h>
 #include <universal/com_sndalias.h>
 #include <universal/surfaceflags.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "savememory.h"
 #include <gfx_d3d/r_cinematic.h>
 #include "actor_corpse.h"

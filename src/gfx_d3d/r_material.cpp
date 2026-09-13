@@ -1,4 +1,7 @@
 #include <universal/q_shared.h>
+#if defined(KIWI_DATABASE64) && !defined(KIWI_RAW_ONLY)
+#include <database64/db_external_assets.h>
+#endif
 #include <universal/surfaceflags.h>
 #include "r_material.h"
 #include "r_init.h"
@@ -6,7 +9,7 @@
 #include <universal/com_memory.h>
 #include <qcommon/mem_track.h>
 #include <qcommon/cmd.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "rb_logfile.h"
 #include "r_utils.h"
 #include "r_dvars.h"
@@ -465,6 +468,14 @@ MaterialTechniqueSet *__cdecl Material_FindTechniqueSet_FastFile(
     const char *name,
     MtlTechSetNotFoundBehavior notFoundBehavior)
 {
+#if defined(KIWI_DATABASE64) && !defined(KIWI_RAW_ONLY)
+    if (notFoundBehavior == MTL_TECHSET_NOT_FOUND_RETURN_NULL)
+    {
+        // Optional renderer variants must not wait for unrelated zones or create
+        // default assets. Zone completion marks the overrides dirty for a retry.
+        return DB64_FindLoadedAsset(ASSET_TYPE_TECHNIQUE_SET, name).techniqueSet;
+    }
+#endif
     XAssetHeader header; // [esp+4h] [ebp-4h]
 
     header.xmodelPieces = DB_FindXAssetHeader(ASSET_TYPE_TECHNIQUE_SET, name).xmodelPieces;

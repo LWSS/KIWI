@@ -5,7 +5,7 @@
 #include <gfx_d3d/r_model.h>
 #include <universal/com_memory.h>
 #include <physics/phys_local.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 struct $5E78DEAD8FFD2AA25C77996D083B001E // sizeof=0x808
 {                                       // ...
@@ -1028,6 +1028,7 @@ char __cdecl FX_LoadEditorEffectFromBuffer(
     return success;
 }
 
+#ifndef KIWI_LINKER_PC64
 bool __cdecl FX_LoadEditorEffect(const char *name, FxEditorEffectDef *edEffectDef)
 {
     char v3; // [esp+3h] [ebp-5Dh]
@@ -1222,3 +1223,4 @@ void __cdecl FX_ForEachEffectDef(void(__cdecl* callback)(const FxEffectDef*, voi
             callback(fx_load.effectDefs[hashIndex], data);
     }
 }
+#endif // KIWI_LINKER_PC64

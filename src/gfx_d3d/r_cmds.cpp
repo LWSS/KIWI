@@ -15,7 +15,7 @@
 #include "r_xsurface.h"
 #include "rb_stats.h"
 #include <DynEntity/DynEntity_client.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_staticmodelcache.h"
 
 #include <algorithm>

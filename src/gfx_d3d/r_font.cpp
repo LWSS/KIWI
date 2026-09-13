@@ -5,7 +5,7 @@
 #include <universal/com_files.h>
 #include <universal/com_memory.h>
 #include "r_init.h"
-#include <database/database.h>
+#include <database64/database.h>
 
 Font_s *registeredFont[16];
 int registeredFontCount;

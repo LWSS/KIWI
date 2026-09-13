@@ -2,7 +2,7 @@
 #include "cg_local.h"
 #include "cg_public.h"
 
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <client/client.h>
 #include <universal/profile.h>

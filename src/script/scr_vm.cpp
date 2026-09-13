@@ -7,7 +7,7 @@
 #include "scr_main.h"
 #include "scr_stringlist.h"
 
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <bgame/bg_local.h>
 

@@ -23,6 +23,11 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC WIN32 _CONSOLE _MBCS)
 if(KIWI_RAW_ONLY)
   target_compile_definitions(${PROJECT_NAME} PRIVATE KIWI_RAW_ONLY)
 endif()
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE KIWI_DATABASE64)
+  target_link_libraries(${PROJECT_NAME} PRIVATE kiwi_package64)
+  target_sources(${PROJECT_NAME} PRIVATE "${SRC_DIR}/database64/db_package_runtime.cpp")
+endif()
 
 # Match native dependencies to the selected generator architecture.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)

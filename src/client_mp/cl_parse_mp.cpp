@@ -12,7 +12,7 @@
 #include <qcommon/cmd.h>
 #include <qcommon/dl_main.h>
 #include <universal/com_constantconfigstrings.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/files.h>
 #include <client/client.h>
 #include <server_mp/server_mp.h>

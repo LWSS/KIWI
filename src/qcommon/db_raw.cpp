@@ -1,5 +1,5 @@
 #include <universal/q_shared.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/files.h>
 #include <qcommon/threads.h>
 #include <gfx_d3d/r_init.h>

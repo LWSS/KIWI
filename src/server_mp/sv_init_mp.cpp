@@ -6,7 +6,7 @@
 #include "server_mp.h"
 #include <qcommon/qcommon.h>
 #include <server/sv_game.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <game_mp/g_public_mp.h>
 #include <gfx_d3d/r_rendercmds.h>
 #include <universal/com_files.h>

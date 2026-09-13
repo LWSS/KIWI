@@ -7,7 +7,7 @@
 #include "cg_public_mp.h"
 
 #include <client_mp/client_mp.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
 #include <gfx_d3d/r_fog.h>
@@ -802,12 +802,10 @@ void __cdecl CG_SetSingleClientScore(int localClientNum, int clientIndex, int ne
 
 void __cdecl CG_SortSingleClientScore(cg_s *cgameGlob, int scoreIndex)
 {
-    score_t temp;
-
     while (scoreIndex > 0
         && CG_ClientScoreIsBetter(&cgameGlob->scores[scoreIndex], &cgameGlob->scores[scoreIndex - 1]))
     {
-        temp = cgameGlob->scores[scoreIndex - 1];
+        score_t temp = cgameGlob->scores[scoreIndex - 1];
         cgameGlob->scores[scoreIndex - 1] = cgameGlob->scores[scoreIndex];
         cgameGlob->scores[scoreIndex] = temp;
         --scoreIndex;
@@ -815,7 +813,7 @@ void __cdecl CG_SortSingleClientScore(cg_s *cgameGlob, int scoreIndex)
     while (scoreIndex < cgameGlob->numScores - 1
         && CG_ClientScoreIsBetter(&cgameGlob->scores[scoreIndex + 1], &cgameGlob->scores[scoreIndex]))
     {
-        temp = cgameGlob->scores[scoreIndex + 1];
+        score_t temp = cgameGlob->scores[scoreIndex + 1];
         cgameGlob->scores[scoreIndex + 1] = cgameGlob->scores[scoreIndex];
         cgameGlob->scores[scoreIndex] = temp;
         ++scoreIndex;

@@ -459,3 +459,6 @@ radiant_artifacts/
 /scripts/cod4rad/tools/
 /scripts/inspect_raw_xmodel_blends.py
 /tools/
+
+# Local database64 regression tests
+/src/database64/tests/

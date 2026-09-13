@@ -21,7 +21,7 @@
 #include "r_draw_method.h"
 #include <xanim/xmodel.h>
 #include <win32/win_net.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <cgame/cg_local.h>
 #include "r_drawsurf.h"
 #include "rb_state.h"

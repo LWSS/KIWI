@@ -8,7 +8,7 @@
 #include <qcommon/mem_track.h>
 #include <universal/com_memory.h>
 #include <universal/com_files.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <devgui/devgui.h>
 #include <physics/phys_local.h>
 

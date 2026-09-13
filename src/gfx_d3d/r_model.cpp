@@ -4,7 +4,7 @@
 #include <universal/com_memory.h>
 #include "r_buffers.h"
 #include <universal/profile.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <algorithm>
 #include "r_staticmodel.h"

@@ -22,7 +22,7 @@
 #include <universal/com_sndalias.h>
 #include <gfx_d3d/r_scene.h>
 #include <gfx_d3d/r_bsp.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
 #include <EffectsCore/fx_system.h>

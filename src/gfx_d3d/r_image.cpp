@@ -4,7 +4,7 @@
 #include <qcommon/qcommon.h>
 #include <universal/com_memory.h>
 #include <qcommon/cmd.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "r_init.h"
 #include "r_dvars.h"
 #include <universal/com_files.h>

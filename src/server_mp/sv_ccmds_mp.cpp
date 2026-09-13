@@ -16,7 +16,7 @@
 #include <game_mp/g_public_mp.h>
 #include <script/scr_vm.h>
 #include <script/scr_memorytree.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 #ifdef WIN32
 #include <win32/win_steam.h>

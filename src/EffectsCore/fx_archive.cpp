@@ -1,7 +1,7 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
 
-#include <database/database.h>
+#include <database64/database.h>
 
 #include <physics/phys_local.h>
 

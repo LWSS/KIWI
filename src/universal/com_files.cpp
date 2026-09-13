@@ -13,6 +13,9 @@
 #include <qcommon/cmd.h>
 #include <qcommon/files.h>
 #include <io.h>
+#ifdef KIWI_DATABASE64
+#include <database64/db_package.h>
+#endif
 
 const dvar_t *fs_remotePCDirectory;
 const dvar_t *fs_remotePCName;
@@ -42,6 +45,10 @@ int fs_checksumFeed;
 int bLanguagesListed;
 
 static fileHandleData_t fsh[65];
+#ifdef KIWI_DATABASE64
+static DB64FileView s_packageFiles[65];
+static size_t s_packagePositions[65];
+#endif
 
 char fs_gamedir[256];
 searchpath_s *fs_searchpaths;
@@ -342,6 +349,17 @@ int __cdecl FS_HashFileName(const char *fname, int hashSize)
 
 FILE *__cdecl FS_FileForHandle(int f)
 {
+    if (f <= 0 || f >= ARRAY_COUNT(fsh))
+    {
+        return NULL;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[f].owner)
+    {
+        Com_Error(ERR_DROP, "File %s is memory-backed; use FS_Read/FS_Seek", fsh[f].name);
+    }
+#endif
     vassert((f > 0 && f < (1 + 48 + 13 + 1 + 1 + 1)), "(f) = %i", f);
     iassert(!fsh[f].zipFile);
     iassert(fsh[f].handleFiles.file.o);
@@ -350,6 +368,17 @@ FILE *__cdecl FS_FileForHandle(int f)
 
 int __cdecl FS_filelength(int f)
 {
+    if (f <= 0 || f >= ARRAY_COUNT(fsh))
+    {
+        return 0;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[f].owner)
+    {
+        return (int)s_packageFiles[f].size;
+    }
+#endif
     FILE *h; // [esp+4h] [ebp-4h]
 
     iassert(f);
@@ -463,6 +492,20 @@ void __cdecl FS_FileClose(FILE *stream)
 
 void __cdecl FS_FCloseFile(int h)
 {
+    if (h <= 0 || h >= ARRAY_COUNT(fsh))
+    {
+        return;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[h].owner)
+    {
+        DB64_ReleaseFile(&s_packageFiles[h]);
+        s_packagePositions[h] = 0;
+        memset(&fsh[h], 0, sizeof(fileHandleData_t));
+        return;
+    }
+#endif
     FILE *f; // [esp+0h] [ebp-4h]
 
     FS_CheckFileSystemStarted();
@@ -485,7 +528,7 @@ void __cdecl FS_FCloseFile(int h)
         f = FS_FileForHandle(h);
         FS_FileClose(f);
     }
-    Com_Memset((uint *)&fsh[h], 0, 284);
+    memset(&fsh[h], 0, sizeof(fileHandleData_t));
 }
 
 void __cdecl FS_FCloseLogFile(int h)
@@ -546,6 +589,12 @@ int __cdecl FS_HandleForFile(FsThread thread)
     }
     for (i = 0; i < count; ++i)
     {
+#ifdef KIWI_DATABASE64
+        if (s_packageFiles[i + first].owner)
+        {
+            continue;
+        }
+#endif
         if (!fsh[i + first].handleFiles.file.o)
             return i + first;
     }
@@ -756,6 +805,42 @@ uint __cdecl FS_FOpenFileReadForThread(const char *filename, int *file, FsThread
         }
         return -1;
     }
+#ifdef KIWI_DATABASE64
+    if (!file && DB64_PackageFileExists(sanitizedName))
+    {
+        return 1;
+    }
+    if (file)
+    {
+        // Check capacity before acquiring a view: the main-thread failure path
+        // raises ERR_DROP and cannot release a package reference afterwards.
+        const int handle = FS_HandleForFile(thread);
+        if (!handle)
+        {
+            *file = 0;
+            return (uint)-1;
+        }
+        DB64FileView view = {};
+        char error[1024];
+        const int found = DB64_AcquireFile(sanitizedName, &view, error, sizeof(error));
+        if (found < 0)
+        {
+            *file = 0;
+            Com_Error(ERR_DROP, "database64: %s", error);
+            return (uint)-1;
+        }
+        if (found)
+        {
+            memset(&fsh[handle], 0, sizeof(fileHandleData_t));
+            I_strncpyz(fsh[handle].name, sanitizedName, sizeof(fsh[handle].name));
+            fsh[handle].fileSize = (int)view.size;
+            s_packageFiles[handle] = view;
+            s_packagePositions[handle] = 0;
+            *file = handle;
+            return (uint)view.size;
+        }
+    }
+#endif
     if (!file)
     {
         for (search = fs_searchpaths;; search = search->next)
@@ -972,6 +1057,17 @@ bool __cdecl FS_Delete(const char *filename)
 
 uint __cdecl FS_Read(uint8_t *buffer, uint len, int h)
 {
+    if (h <= 0 || h >= ARRAY_COUNT(fsh))
+    {
+        return 0;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[h].owner)
+    {
+        return (uint)DB64_ReadView(&s_packageFiles[h], &s_packagePositions[h], buffer, len);
+    }
+#endif
     int tries; // [esp+4h] [ebp-14h]
     uint remaining; // [esp+8h] [ebp-10h]
     uint8_t *buf; // [esp+Ch] [ebp-Ch]
@@ -1059,6 +1155,17 @@ void FS_Printf(int h, const char *fmt, ...)
 
 int __cdecl FS_Seek(int f, int offset, int origin)
 {
+    if (f <= 0 || f >= ARRAY_COUNT(fsh))
+    {
+        return -1;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[f].owner)
+    {
+        return DB64_SeekView(&s_packageFiles[f], &s_packagePositions[f], offset, origin);
+    }
+#endif
     uint CurrentFile; // eax
     const char *v5; // eax
     FILE*v6; // eax
@@ -2167,6 +2274,17 @@ void __cdecl FS_FreeFileList(const char **list)
 
 uint __cdecl FS_FTell(int f)
 {
+    if (f <= 0 || f >= ARRAY_COUNT(fsh))
+    {
+        return UINT_MAX;
+    }
+
+#ifdef KIWI_DATABASE64
+    if (s_packageFiles[f].owner)
+    {
+        return (uint)s_packagePositions[f];
+    }
+#endif
     FILE *v1; // eax
 
     if (fsh[f].zipFile)
@@ -2386,6 +2504,69 @@ int __cdecl FS_IwdIsPure(iwd_t *iwd)
     return 0;
 }
 
+#ifdef KIWI_DATABASE64
+struct FSPackageListContext
+{
+    HunkUser *user;
+    const char **list;
+    int count;
+    const char *path;
+    size_t pathLength;
+    const char *extension;
+    const char *filter;
+};
+
+static void FS_ListPackageFile(const char *name, void *data)
+{
+    FSPackageListContext *context = (FSPackageListContext *)data;
+    if (context->filter)
+    {
+        if (Com_FilterPath(context->filter, name, 0))
+        {
+            context->count = FS_AddFileToList(context->user, name, context->list, context->count);
+        }
+        return;
+    }
+    if (context->pathLength && (I_strnicmp(name, context->path, (int)context->pathLength) ||
+        name[context->pathLength] != '/'))
+    {
+        return;
+    }
+    const char *relative = name + context->pathLength + (context->pathLength ? 1 : 0);
+    const char *slash = strchr(relative, '/');
+    if (!strcmp(context->extension, "/"))
+    {
+        if (slash)
+        {
+            char directory[DB64_PACKAGE_PATH];
+            const size_t size = slash - relative;
+            memcpy(directory, relative, size);
+            directory[size] = 0;
+            context->count = FS_AddFileToList(context->user, directory, context->list, context->count);
+        }
+        return;
+    }
+    if (slash)
+    {
+        return;
+    }
+    const char *extension = context->extension;
+    if (extension[0] == '.')
+    {
+        ++extension;
+    }
+    if (extension[0])
+    {
+        const char *dot = strrchr(relative, '.');
+        if (!dot || I_stricmp(dot + 1, extension))
+        {
+            return;
+        }
+    }
+    context->count = FS_AddFileToList(context->user, relative, context->list, context->count);
+}
+#endif
+
 const char **__cdecl FS_ListFilteredFiles(
     searchpath_s *searchPath,
     const char *path,
@@ -2453,6 +2634,15 @@ const char **__cdecl FS_ListFilteredFiles(
     user = Hunk_UserCreate(0x20000, "FS_ListFilteredFiles", 0, 0, 3);
     list = (const char **)Hunk_UserAlloc(user, 8193 * sizeof(const char *), alignof(const char *));
     *list++ = (const char *)user;
+#ifdef KIWI_DATABASE64
+    if (searchPath == fs_searchpaths)
+    {
+        FSPackageListContext context = { user, list, nfiles, sanitizedPath,
+            (size_t)pathLength, extension, filter };
+        DB64_EnumPackageFiles(FS_ListPackageFile, &context);
+        nfiles = context.count;
+    }
+#endif
     for (search = searchPath; search; search = search->next)
     {
         if (FS_UseSearchPath(search))
@@ -2993,9 +3183,19 @@ void __cdecl FS_Shutdown()
     SEH_Shutdown_StringEd();
     for (i = 1; i < 65; ++i)
     {
+#ifdef KIWI_DATABASE64
+        if (s_packageFiles[i].owner)
+        {
+            FS_FCloseFile(i);
+            continue;
+        }
+#endif
         if (fsh[i].fileSize)
             FS_FCloseFile(i);
     }
+#ifdef KIWI_DATABASE64
+    DB64_UnmountPackage();
+#endif
     FS_ShutdownSearchPaths(fs_searchpaths);
     fs_searchpaths = 0;
     FS_RemoveCommands();

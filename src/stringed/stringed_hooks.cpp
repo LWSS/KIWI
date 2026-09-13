@@ -5,7 +5,7 @@
 #include <qcommon/qcommon.h>
 #include "stringed_ingame.h"
 #include <universal/com_files.h>
-#include <database/database.h>
+#include <database64/database.h>
 
 
 // struct dvar_s const *const loc_warningsAsErrors 85059680     stringed_hooks.obj

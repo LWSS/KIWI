@@ -22,7 +22,7 @@
 #include <universal/com_sndalias.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/com_playerprofile.h>
 
 const dvar_t *ui_showList;

@@ -1,3 +1,6 @@
+#if defined(KIWI_DATABASE64) && !defined(KIWI_RAW_ONLY)
+#include <database64/db_load_error.h>
+#endif
 #include <universal/q_shared.h>
 #include "qcommon.h"
 
@@ -19,7 +22,7 @@
 #include <script/scr_vm.h>
 #include <gfx_d3d/r_init.h>
 #include <EffectsCore/fx_system.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/com_constantconfigstrings.h>
 #include <universal/physicalmemory.h>
 #include <win32/win_storage.h>
@@ -659,6 +662,9 @@ void Com_Error(errorParm_t code, const char* fmt, ...)
     va_list va; // [esp+18h] [ebp+10h] BYREF
 
     va_start(va, fmt);
+#if defined(KIWI_DATABASE64) && !defined(KIWI_RAW_ONLY)
+    DB64_CaptureLoadError(fmt, va);
+#endif
     Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
     if ((uint)code <= ERR_DROP)
         Com_PrintStackTrace();
@@ -1539,6 +1545,10 @@ void Com_InitDvars()
         DVAR_INIT,
 #endif
         "Enables loading data from fast files. KIWI defaults to loose files.");
+#ifdef KIWI_DATABASE64
+    Dvar_RegisterBool("fs_usePackages", true, DVAR_INIT,
+        "Mount linker_pc64 map packages before reading map assets");
+#endif
     sys_lockThreads = Dvar_RegisterEnum(
         "sys_lockThreads",
         s_lockThreadNames,

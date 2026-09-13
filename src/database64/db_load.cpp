@@ -1,0 +1,5695 @@
+#include "db_external_assets.h"
+#include "db_render_light_grid.h"
+#include "db_font_assets.h"
+#include "db_render_visibility.h"
+#include "db_render_shadows.h"
+#include "db_render_cells.h"
+#include "db_render_world.h"
+#include "db_effect_layout.h"
+#include "db_effect_references.h"
+#include "db_effect_assets.h"
+#include "db_model_pieces.h"
+#include "db_clipmap_assets.h"
+#include "db_collision_primitives.h"
+#include "db_sound_aliases.h"
+#include "db_clipmap_layout.h"
+#include "db_render_world_layout.h"
+#include "db_sound_assets.h"
+#include "db_animation_assets.h"
+#include "db_model_assets.h"
+#include "db_model_surfaces.h"
+#include <universal/q_shared.h>
+#include "database.h"
+#include "db_text_assets.h"
+#include "db_world_assets.h"
+#include "db_preset_assets.h"
+#include "db_menu_layout.h"
+#include "db_menu_assets.h"
+#include "db_weapon_assets.h"
+#include "db_impact_assets.h"
+#include "db_image_assets.h"
+#include "db_shader_assets.h"
+#include "db_technique_assets.h"
+#include "db_material_assets.h"
+
+#include <xanim/xanim.h>
+#include <xanim/xmodel.h>
+
+#include <sound/snd_local.h>
+
+#include <gfx_d3d/fxprimitives.h>
+#include <gfx_d3d/r_material.h>
+#include <gfx_d3d/r_gfx.h>
+#include <xanim/dobj.h>
+#include <gfx_d3d/r_buffers.h>
+
+#include <DynEntity/DynEntity_client.h>
+#include <gfx_d3d/r_water.h>
+#include <gfx_d3d/r_image.h>
+#include <universal/com_sndalias.h>
+#include <gfx_d3d/r_sky.h>
+#include <gfx_d3d/r_primarylights.h>
+#include <game/g_bsp.h>
+
+// Static Prototypes
+static void Load_byte(bool atStreamStart);
+static void Load_byteArray(bool atStreamStart, int count);
+static void Load_charArray(bool atStreamStart, int count);
+static void Load_int(bool atStreamStart);
+static void Load_intArray(bool atStreamStart, int count);
+static void Load_uintArray(bool atStreamStart, int count);
+static void Load_uint(bool atStreamStart);
+static void Load_float(bool atStreamStart);
+static void Load_floatArray(bool atStreamStart, int count);
+static void Load_raw_uintArray(bool atStreamStart, int count);
+static uint8_t *AllocLoad_raw_uint128();
+static void Load_raw_uint128Array(bool atStreamStart, int count);
+static void Load_raw_byteArray(bool atStreamStart, int count);
+static void Load_raw_byte16Array(bool atStreamStart, int count);
+static void Load_vec2_tArray(bool atStreamStart, int count);
+static void Load_vec3_t(bool atStreamStart);
+static void Load_vec3_tArray(bool atStreamStart, int count);
+static void Load_shortArray(bool atStreamStart, int count);
+static void Load_ushortArray(bool atStreamStart, int count);
+static void Load_XQuat2(bool atStreamStart);
+static void Load_XQuat2Array(bool atStreamStart, int count);
+static uint8_t *AllocLoad_XBlendInfo();
+static void Load_UnsignedShortArray(bool atStreamStart, int count);
+static void Load_ScriptString(bool atStreamStart);
+static void Load_ScriptStringArray(bool atStreamStart, int count);
+static uint8_t *AllocLoad_raw_byte();
+static void Load_ConstCharArray(bool atStreamStart, int count);
+static void Load_TempString(bool atStreamStart);
+static void Load_TempStringArray(bool atStreamStart, int count);
+static void Load_XString(bool atStreamStart);
+static void Load_XStringArray(bool atStreamStart, int count);
+static void Load_XStringPtr(bool atStreamStart);
+static void Load_complex_tArray(bool atStreamStart, int count);
+static void Load_dmaterial_tArray(bool atStreamStart, int count);
+static void Load_XAnimIndices();
+static void Load_XAnimDynamicIndicesDeltaQuat(bool atStreamStart);
+static void Load_XAnimDeltaPartQuatDataFrames(bool atStreamStart);
+static void Load_XAnimDeltaPartQuatData(bool atStreamStart);
+static void Load_XAnimDeltaPartQuat(bool atStreamStart);
+static void Load_XAnimDeltaPart(bool atStreamStart);
+static void Load_XAnimDynamicIndicesTrans(bool atStreamStart);
+static void Load_ByteVecArray(bool atStreamStart, int count);
+static void Load_UShortVecArray(bool atStreamStart, int count);
+static void Load_XAnimDynamicFrames();
+static void Load_XAnimPartTransFrames(bool atStreamStart);
+static void Load_XAnimPartTransData(bool atStreamStart);
+static void Load_XAnimPartTrans(bool atStreamStart);
+static void Load_XAnimNotifyInfo(bool atStreamStart);
+static void Load_XAnimNotifyInfoArray(bool atStreamStart, int count);
+static void Load_XAnimParts(bool atStreamStart);
+static void Load_XAnimPartsPtr(bool atStreamStart);
+static void Load_XBoneInfoArray(bool atStreamStart, int count);
+static void Load_DObjAnimMatArray(bool atStreamStart, int count);
+static void Load_StreamFileNameRaw(bool atStreamStart);
+static void Load_StreamFileInfo(bool atStreamStart);
+static void Load_StreamFileName(bool atStreamStart);
+static void Load_LoadedSound(bool atStreamStart);
+static void Load_LoadedSoundPtr(bool atStreamStart);
+static void Load_StreamedSound(bool atStreamStart);
+static void Load_SoundFileRef(bool atStreamStart);
+static void Load_SoundFile(bool atStreamStart);
+static void Load_SndCurvePtr(bool atStreamStart);
+static void Load_SpeakerMap(bool atStreamStart);
+static void Load_snd_alias_t(bool atStreamStart);
+static void Load_snd_alias_tArray(bool atStreamStart, int count);
+static void Load_snd_alias_list_t(bool atStreamStart);
+static void Load_snd_alias_list_ptr(bool atStreamStart);
+static void Load_snd_alias_list_name(bool atStreamStart);
+static void Load_snd_alias_list_nameArray(bool atStreamStart, int count);
+static void Load_MaterialInfo(bool atStreamStart);
+static void Load_GfxWorldVertex0Array(bool atStreamStart, int count);
+static void Load_GfxPackedVertex0Array(bool atStreamStart, int count);
+static void Load_GfxBrushModelArray(bool atStreamStart, int count);
+static void Load_XSurfaceCollisionLeafArray(bool atStreamStart, int count);
+static cbrush_t *AllocLoad_GfxPackedVertex0();
+static void Load_XSurfaceCollisionNodeArray(bool atStreamStart, int count);
+static void Load_XSurfaceCollisionTree(bool atStreamStart);
+static void Load_XRigidVertList(bool atStreamStart);
+static void Load_XRigidVertListArray(bool atStreamStart, int count);
+static void Load_GfxVertexBuffer(bool atStreamStart);
+static void Load_XBlendInfoArray(bool atStreamStart, int count);
+static void Load_XSurfaceVertexInfo(bool atStreamStart);
+static void Load_r_index_tArray(bool atStreamStart, int count);
+static void Load_r_index16_tArray(bool atStreamStart, int count);
+static void Load_XSurface(bool atStreamStart);
+static void Load_XSurfaceArray(bool atStreamStart, int count);
+static void Load_GfxRawTextureArray(bool atStreamStart, int count);
+static void Load_GfxImagePtr(bool atStreamStart);
+static void Load_water_t(bool atStreamStart);
+static void Load_MaterialVertexShaderPtr(bool atStreamStart);
+static void Load_MaterialPixelShaderPtr(bool atStreamStart);
+static void Load_MaterialVertexDeclaration(bool atStreamStart);
+static void Load_MaterialArgumentCodeConst(bool atStreamStart);
+static void Load_MaterialArgumentDef(bool atStreamStart);
+static void Load_MaterialShaderArgument(bool atStreamStart);
+static void Load_MaterialShaderArgumentArray(bool atStreamStart, int count);
+static void Load_GfxStateBitsArray(bool atStreamStart, int count);
+static void Load_MaterialPass(bool atStreamStart);
+static void Load_MaterialPassArray(bool atStreamStart, int count);
+static void Load_MaterialTechnique(bool atStreamStart);
+static void Load_MaterialTextureDefInfo(bool atStreamStart);
+static void Load_MaterialTextureDef(bool atStreamStart);
+static void Load_MaterialTextureDefArray(bool atStreamStart, int count);
+static void Load_MaterialConstantDefArray(bool atStreamStart, int count);
+static void Load_MaterialTechniquePtr(bool atStreamStart);
+static void Load_MaterialTechniquePtrArray(bool atStreamStart, int count);
+static void Load_MaterialTechniqueSet(bool atStreamStart);
+static void Load_MaterialTechniqueSetPtr(bool atStreamStart);
+static void Load_Material(bool atStreamStart);
+static void Load_MaterialHandle(bool atStreamStart);
+static void Load_MaterialHandleArray(bool atStreamStart, int count);
+static void Load_GfxLightDefPtr(bool atStreamStart);
+static void Load_GfxLight(bool atStreamStart);
+static void Load_GfxSurface(bool atStreamStart);
+static void Load_GfxSurfaceArray(bool atStreamStart, int count);
+static void Load_GfxLightmapArray(bool atStreamStart);
+static void Load_GfxLightmapArrayArray(bool atStreamStart, int count);
+static void Load_PhysPresetPtr(bool atStreamStart);
+static void Load_cplane_t(bool atStreamStart);
+static void Load_cplane_tArray(bool atStreamStart, int count);
+static void Load_cbrushside_t(bool atStreamStart);
+static void Load_cbrushside_tArray(bool atStreamStart, int count);
+static void Load_cbrushedge_t(bool atStreamStart);
+static void Load_cbrushedge_tArray(bool atStreamStart, int count);
+static void Load_XModelCollSurf(bool atStreamStart);
+static void Load_XModelCollSurfArray(bool atStreamStart, int count);
+static void Load_BrushWrapper(bool atStreamStart);
+static void Load_PhysGeomInfo(bool atStreamStart);
+static void Load_PhysGeomInfoArray(bool atStreamStart, int count);
+static void Load_PhysGeomList(bool atStreamStart);
+static void Load_XModel(bool atStreamStart);
+static void Load_XModelPtr(bool atStreamStart);
+static void Load_XModelPtrArray(bool atStreamStart, int count);
+static void Load_XModelPiece(bool atStreamStart);
+static void Load_XModelPieceArray(bool atStreamStart, int count);
+static void Load_XModelPieces(bool atStreamStart);
+static void Load_XModelPiecesPtr(bool atStreamStart);
+static void Load_pathlink_tArray(bool atStreamStart, int count);
+static void Load_pathnode_constant_t(bool atStreamStart);
+static void Load_pathnode_t(bool atStreamStart);
+static void Load_pathnode_tArray(bool atStreamStart, int count);
+static void Load_pathbasenode_tArray(bool atStreamStart, int count);
+static void Load_pathnode_tree_nodes_t(bool atStreamStart);
+static void Load_pathnode_tree_ptr(bool atStreamStart);
+static void Load_pathnode_tree_ptrArray(bool atStreamStart, int count);
+static void Load_pathnode_tree_info_t(bool atStreamStart);
+static void Load_pathnode_tree_t(bool atStreamStart);
+static void Load_pathnode_tree_tArray(bool atStreamStart, int count);
+static void Load_PathData(bool atStreamStart);
+static void Load_GameWorldSp(bool atStreamStart);
+static void Load_GameWorldSpPtr(bool atStreamStart);
+static void Load_GameWorldMpPtr(bool atStreamStart);
+static void Load_FxEffectDefHandle(bool atStreamStart);
+static void Load_FxEffectDefHandleArray(bool atStreamStart, int count);
+static void Load_FxEffectDefRef(bool atStreamStart);
+static void Load_FxElemMarkVisuals(bool atStreamStart);
+static void Load_FxElemMarkVisualsArray(bool atStreamStart, int count);
+static void Load_FxElemVisuals(bool atStreamStart);
+static void Load_FxElemVisualsArray(bool atStreamStart, int count);
+static void Load_FxElemVisStateSampleArray(bool atStreamStart, int count);
+static void Load_FxElemVelStateSampleArray(bool atStreamStart, int count);
+static void Load_FxElemDefVisuals(bool atStreamStart);
+static void Load_FxTrailVertexArray(bool atStreamStart, int count);
+static void Load_FxTrailDef(bool atStreamStart);
+static void Load_FxElemDef(bool atStreamStart);
+static void Load_FxElemDefArray(bool atStreamStart, int count);
+static void Load_FxEffectDef(bool atStreamStart);
+static void Load_DynEntityDef(bool atStreamStart);
+static void Load_DynEntityDefArray(bool atStreamStart, int count);
+static void Load_DynEntityCollArray(bool atStreamStart, int count);
+static void Load_DynEntityPoseArray(bool atStreamStart, int count);
+static void Load_DynEntityClientArray(bool atStreamStart, int count);
+static void Load_MapEntsPtr(bool atStreamStart);
+static void Load_cStaticModel_t(bool atStreamStart);
+static void Load_cStaticModel_tArray(bool atStreamStart, int count);
+static void Load_cNode_t(bool atStreamStart);
+static void Load_cNode_tArray(bool atStreamStart, int count);
+static void Load_cLeaf_tArray(bool atStreamStart, int count);
+static void Load_cLeafBrushNodeLeaf_t(bool atStreamStart);
+static void Load_cLeafBrushNodeChildren_t(bool atStreamStart);
+static void Load_cLeafBrushNodeData_t(bool atStreamStart);
+static void Load_cLeafBrushNode_t(bool atStreamStart);
+static void Load_cLeafBrushNode_tArray(bool atStreamStart, int count);
+static void Load_CollisionBorder(bool atStreamStart);
+static void Load_CollisionBorderArray(bool atStreamStart, int count);
+static void Load_CollisionPartition(bool atStreamStart);
+static void Load_CollisionPartitionArray(bool atStreamStart, int count);
+static void Load_CollisionAabbTreeArray(bool atStreamStart, int count);
+static void Load_cmodel_tArray(bool atStreamStart, int count);
+static void Load_cbrush_t(bool atStreamStart);
+static void Load_cbrush_tArray(bool atStreamStart, int count);
+static void Load_LeafBrushArray(bool atStreamStart, int count);
+static void Load_clipMap_t(bool atStreamStart);
+static void Load_clipMap_ptr(bool atStreamStart);
+static void Load_ComPrimaryLight(bool atStreamStart);
+static void Load_ComPrimaryLightArray(bool atStreamStart, int count);
+static void Load_ComWorldPtr(bool atStreamStart);
+static void Load_operandInternalDataUnion(bool atStreamStart);
+static void Load_Operand(bool atStreamStart);
+static void Load_Operator(bool atStreamStart);
+static void Load_entryInternalData(bool atStreamStart);
+static void Load_expressionEntry(bool atStreamStart);
+static void Load_expressionEntry_ptr(bool atStreamStart);
+static void Load_expressionEntry_ptrArray(bool atStreamStart, int count);
+static void Load_statement(bool atStreamStart);
+static void Load_listBoxDef_t(bool atStreamStart);
+static void Load_listBoxDef_ptr(bool atStreamStart);
+static void Load_editFieldDef_t(bool atStreamStart);
+static void Load_editFieldDef_ptr(bool atStreamStart);
+static void Load_multiDef_t(bool atStreamStart);
+static void Load_multiDef_ptr(bool atStreamStart);
+static void Load_windowDef_t(bool atStreamStart);
+static void Load_Window(bool atStreamStart);
+static void Load_ItemKeyHandler(bool atStreamStart);
+static void Load_ItemKeyHandlerNext(bool atStreamStart);
+static void Load_itemDefData_t(bool atStreamStart);
+static void Load_itemDef_t(bool atStreamStart);
+static void Load_itemDef_ptr(bool atStreamStart);
+static void Load_itemDef_ptrArray(bool atStreamStart, int count);
+static void Load_menuDef_t(bool atStreamStart);
+static void Load_menuDef_ptr(bool atStreamStart);
+static void Load_menuDef_ptrArray(bool atStreamStart, int count);
+static void Load_MenuList(bool atStreamStart);
+static void Load_MenuListPtr(bool atStreamStart);
+static void Load_LocalizeEntryPtr(bool atStreamStart);
+static void Load_RawFilePtr(bool atStreamStart);
+static void Load_StringTablePtr(bool atStreamStart);
+static void Load_GfxStaticModelDrawInst(bool atStreamStart);
+static void Load_GfxStaticModelDrawInstArray(bool atStreamStart, int count);
+static void Load_GfxStaticModelInstArray(bool atStreamStart, int count);
+static void Load_sunflare_t(bool atStreamStart);
+static void Load_GfxReflectionProbe(bool atStreamStart);
+static void Load_GfxReflectionProbeArray(bool atStreamStart, int count);
+static void Load_StaticModelIndexArray(bool atStreamStart, int count);
+static void Load_GfxCullGroupArray(bool atStreamStart, int count);
+static void Load_GfxLightGridEntryArray(bool atStreamStart, int count);
+static void Load_GfxLightGridColorsArray(bool atStreamStart, int count);
+static void Load_MaterialMemory(bool atStreamStart);
+static void Load_MaterialMemoryArray(bool atStreamStart, int count);
+static void Load_GfxWorldVertexData(bool atStreamStart);
+static void Load_GfxWorldVertexLayerData(bool atStreamStart);
+static void Load_GfxLightGrid(bool atStreamStart);
+static void Load_GfxSceneDynModelArray(bool atStreamStart, int count);
+static void Load_GfxSceneDynBrushArray(bool atStreamStart, int count);
+static void Load_GfxDrawSurfArray(bool atStreamStart, int count);
+static void Load_GfxWorldDpvsDynamic(bool atStreamStart);
+static void Load_GfxWorldDpvsStatic(bool atStreamStart);
+static void Load_GfxWorldDpvsPlanes(bool atStreamStart);
+static void Load_GfxWorld(bool atStreamStart);
+static void Load_GfxWorldPtr(bool atStreamStart);
+static void Load_GlyphArray(bool atStreamStart, int count);
+static void Load_Font(bool atStreamStart);
+static void Load_FontHandle(bool atStreamStart);
+static void Load_XAssetHeader(bool atStreamStart);
+static void Mark_ScriptString();
+static void Mark_ScriptStringArray(int count);
+static void Mark_XAnimNotifyInfo();
+static void Mark_XAnimNotifyInfoArray(int count);
+static void Mark_XAnimParts();
+static void Mark_XAnimPartsPtr();
+static void Mark_LoadedSoundPtr();
+static void Mark_SoundFileRef();
+static void Mark_SoundFile();
+static void Mark_SndCurvePtr();
+static void Mark_snd_alias_t();
+static void Mark_snd_alias_tArray(int count);
+static void Mark_snd_alias_list_t();
+static void Mark_snd_alias_list_ptr();
+static void Mark_snd_alias_list_name();
+static void Mark_snd_alias_list_nameArray(int count);
+static void Mark_GfxImagePtr();
+static void Mark_water_t();
+static void Mark_MaterialTextureDefInfo();
+static void Mark_MaterialTextureDef();
+static void Mark_MaterialTextureDefArray(int count);
+static void Mark_MaterialTechniqueSetPtr();
+static void Mark_Material();
+static void Mark_MaterialHandle();
+static void Mark_MaterialHandleArray(int count);
+static void Mark_GfxLightImage();
+static void Mark_GfxLightDef();
+static void Mark_GfxLightDefPtr();
+static void Mark_GfxLight();
+static void Mark_GfxSurface();
+static void Mark_GfxSurfaceArray(int count);
+static void Mark_GfxLightmapArray();
+static void Mark_GfxLightmapArrayArray(int count);
+static void Mark_PhysPresetPtr();
+static void Mark_XModel();
+static void Mark_XModelPtr();
+static void Mark_XModelPtrArray(int count);
+static void Mark_XModelPiece();
+static void Mark_XModelPieceArray(int count);
+static void Mark_XModelPieces();
+static void Mark_XModelPiecesPtr();
+static void Mark_pathnode_constant_t();
+static void Mark_pathnode_t();
+static void Mark_pathnode_tArray(int count);
+static void Mark_PathData();
+static void Mark_GameWorldSp();
+static void Mark_GameWorldSpPtr();
+static void Mark_GameWorldMpPtr();
+static void Mark_FxEffectDefHandle();
+static void Mark_FxEffectDefHandleArray(int count);
+static void Mark_FxElemMarkVisuals();
+static void Mark_FxElemMarkVisualsArray(int count);
+static void Mark_FxElemVisuals();
+static void Mark_FxElemVisualsArray(int count);
+static void Mark_FxElemDefVisuals();
+static void Mark_FxElemDef();
+static void Mark_FxElemDefArray(int count);
+static void Mark_FxEffectDef();
+static void Mark_DynEntityDef();
+static void Mark_DynEntityDefArray(int count);
+static void Mark_MapEntsPtr();
+static void Mark_cStaticModel_t();
+static void Mark_cStaticModel_tArray(int count);
+static void Mark_clipMap_t();
+static void Mark_clipMap_ptr();
+static void Mark_ComWorldPtr();
+static void Mark_listBoxDef_t();
+static void Mark_listBoxDef_ptr();
+static void Mark_windowDef_t();
+static void Mark_Window();
+static void Mark_itemDefData_t();
+static void Mark_itemDef_t();
+static void Mark_itemDef_ptr();
+static void Mark_itemDef_ptrArray(int count);
+static void Mark_menuDef_t();
+static void Mark_menuDef_ptr();
+static void Mark_menuDef_ptrArray(int count);
+static void Mark_MenuList();
+static void Mark_MenuListPtr();
+static void Mark_LocalizeEntryPtr();
+static void Mark_FxImpactEntry();
+static void Mark_FxImpactEntryArray(int count);
+static void Mark_FxImpactTable();
+static void Mark_FxImpactTablePtr();
+static void Mark_WeaponDef();
+static void Mark_WeaponDefPtr();
+static void Mark_RawFilePtr();
+static void Mark_StringTablePtr();
+static void Mark_GfxStaticModelDrawInst();
+static void Mark_GfxStaticModelDrawInstArray(int count);
+static void Mark_sunflare_t();
+static void Mark_GfxReflectionProbe();
+static void Mark_GfxReflectionProbeArray(int count);
+static void Mark_MaterialMemory();
+static void Mark_MaterialMemoryArray(int count);
+static void Mark_GfxWorldDpvsStatic();
+static void Mark_GfxWorld();
+static void Mark_GfxWorldPtr();
+static void Mark_Font();
+static void Mark_FontHandle();
+static void Mark_XAssetHeader();
+static void Mark_SndAliasCustom(snd_alias_list_t **var);
+
+struct DynEntityServer // sizeof=0x24
+{
+    GfxPlacement pose;
+    uint16_t flags;
+    // padding byte
+    // padding byte
+    int health;
+};
+
+void *varint;
+void *varuint;
+GfxVertex *varGfxVertex;
+uint64_t *varuint64_t;
+int *varexpressionEntryType;
+float *varfloat;
+ComWorld **varComWorldPtr;
+enum weapInventoryType_t *varweapInventoryType_t;
+RawFile **varRawFilePtr;
+GfxLightDef **varGfxLightDefPtr;
+GfxLightmapArray *varGfxLightmapArray;
+itemDef_s **varitemDef_ptr;
+GameWorldSp **varGameWorldSpPtr;
+XAnimDeltaPartQuat *varXAnimDeltaPartQuat;
+clipMap_t *varclipMap_t;
+MaterialPixelShaderProgram *varMaterialPixelShaderProgram;
+GfxWorldStreamInfo *varGfxWorldStreamInfo;
+char const *varConstChar;
+uint16_t *varr_index16_t;
+MenuList *varMenuList;
+listBoxDef_s *varlistBoxDef_t;
+Operand *varOperand;
+DObjAnimMat *varDObjAnimMat;
+uint *varXAUDIOSAMPLERATE;
+mnode_t *varmnode_t;
+union FxElemDefVisuals *varFxElemDefVisuals;
+XModelCollSurf_s *varXModelCollSurf;
+XModelCollTri_s *varXModelCollTri;
+DynEntityServer *varDynEntityServer;
+MaterialStreamRouting *varMaterialStreamRouting;
+GfxScaledPlacement *varGfxScaledPlacement;
+FxFloatRange *varFxFloatRange;
+short *varint16_t;
+GfxWorld *varGfxWorld;
+GfxPortal *varGfxPortal;
+CardMemory *varCardMemory;
+// XAUDIOFXDATPARAM *varXAUDIOFXDATAPARAM     ;
+LocalizeEntry *varLocalizeEntry;
+MenuList **varMenuListPtr;
+uint *varunsigned;
+// XAUDIOCHANNELMAPENTRY *varXAUDIOCHANNELMAPENTRY     ;
+MaterialTechnique *varMaterialTechnique;
+enum MapType *varMapType;
+sunflare_t *varsunflare_t;
+PhysPreset *varPhysPreset;
+// D3DCubeTexture *varIDirect3DCubeTexture9     ;
+// uint8_t *varXQuat2           ;
+__int16 (*varXQuat2)[2];
+// uint16_t (*)[3] varedgeCount_t      ;
+Material **varMaterialHandle;
+// XAUDIOREVERBSETTINGS *varXAUDIOREVERBSETTINGS     ;
+pathnode_t *varpathnode_t;
+byte *varbyte16;
+StreamFileName *varStreamFileName;
+XAnimPartTrans *varXAnimPartTrans;
+enum weapOverlayReticle_t *varweapOverlayReticle_t;
+uint16_t *varushort;
+float *varraw_float;
+byte *varbyte4096;
+uint16_t *varDynEntityId;
+clipMap_t **varclipMap_ptr;
+GfxLightRegionHull *varGfxLightRegionHull;
+byte *varbyte128;
+XModel **varXModelPtr;
+enum XAssetType *varXAssetType;
+enum weapType_t *varweapType_t;
+MaterialPass *varMaterialPass;
+GfxCell *varGfxCell;
+enum weapPositionAnimNum_t *varweapPositionAnimNum_t;
+pathlink_s *varpathlink_t;
+FxElemMarkVisuals *varFxElemMarkVisuals;
+byte *varXAUDIOSAMPLETYPE;
+union XAnimPartTransData *varXAnimPartTransData;
+Font_s *varFont;
+SndCurve *varSndCurve;
+editFieldDef_s *vareditFieldDef_t;
+XSurfaceCollisionNode *varXSurfaceCollisionNode;
+GfxSceneDynBrush *varGfxSceneDynBrush;
+pathnode_constant_t *varpathnode_constant_t;
+cmodel_t *varcmodel_t;
+byte *varFxElemType;
+XBoneInfo *varXBoneInfo;
+FxImpactTable **varFxImpactTablePtr;
+float *varXAUDIOVOLUME;
+// XaReverbSettings *varXaReverbSettings     ;
+uint8_t *varvec2_;
+float (*varvec2_t)[2];
+FxElemAtlas *varFxElemAtlas;
+MaterialVertexStreamRouting *varMaterialVertexStreamRouting;
+CollisionPartition *varCollisionPartition;
+union XAnimIndices *varXAnimIndices;
+XAsset *varXAsset;
+snd_alias_list_t **varsnd_alias_list_ptr;
+uint *varuint32_t;
+byte **varGfxImagePixels;
+enum weapStance_t *varweapStance_t;
+pathnode_tree_t **varpathnode_tree_ptr;
+MaterialShaderArgument *varMaterialShaderArgument;
+WeaponDef *varWeaponDef;
+enum expDataType *varoperandDataType;
+// int (*)[4] varXPartBits        ;
+ComPrimaryLight *varComPrimaryLight;
+MaterialTextureDef *varMaterialTextureDef;
+BOOL *varbool;
+uint16_t *varUnsignedShort;
+union MaterialArgumentDef *varMaterialArgumentDef;
+Glyph *varGlyph;
+// StreamFileNamePacked *varStreamFileNamePacked     ;
+XModelLodInfo *varXModelLodInfo;
+enum ammoCounterClipType_t *varammoCounterClipType_t;
+uint16_t *varLeafBrush;
+// XAUDIOCHANNELMAP *varXAUDIOCHANNELMAP     ;
+enum nodeType *varnodeType;
+columnInfo_s *varcolumnInfo_t;
+enum snd_alias_type_t *varsnd_alias_type_t;
+enum activeReticleType_t *varactiveReticleType_t;
+GfxLightGridEntry *varGfxLightGridEntry;
+ItemKeyHandler *varItemKeyHandler;
+union XAUDIOFXPARAM *varXAUDIOFXPARAM;
+union StreamFileInfo *varStreamFileInfo;
+GfxPackedVertex *varGfxPackedVertex;
+cLeaf_t *varcLeaf_t;
+union FxEffectDefRef *varFxEffectDefRef;
+byte *varbyteShader;
+enum WeapAccuracyType *varWeapAccuracyType;
+byte *varbyte;
+FxTrailVertex *varFxTrailVertex;
+// XAUDIOXMAFORMAT *varXAUDIOXMAFORMAT     ;
+char const **varTempString;
+StringTable **varStringTablePtr;
+// float (*)[4] varraw_vec4_t       ;
+// uint8_t *varUShortVec        ;
+uint16_t (*varUShortVec)[3];
+statement_s *varstatement;
+// D3DVolumeTexture *varIDirect3DVolumeTexture9     ;
+GfxLightGridColors *varGfxLightGridColors;
+enum operationEnum *varOperator;
+cLeafBrushNodeLeaf_t *varcLeafBrushNodeLeaf_t;
+multiDef_s **varmultiDef_ptr;
+XRigidVertList *varXRigidVertList;
+DpvsPlane *varDpvsPlane;
+// short (*)[3] varAxialMaterialNum     ;
+XModelPiece *varXModelPiece;
+XModelPieces **varXModelPiecesPtr;
+union XAssetHeader *varXAssetHeader;
+CollisionAabbTree *varCollisionAabbTree;
+cplane_s *varcplane_t;
+union operandInternalDataUnion *varoperandInternalDataUnion;
+short *varXQuat[4];
+expressionEntry *varexpressionEntry;
+XAssetList *varXAssetList;
+enum weapClass_t *varweapClass_t;
+enum MaterialWorldVertexFormat *varMaterialWorldVertexFormat;
+MaterialPixelShader **varMaterialPixelShaderPtr;
+uint8_t *varvec4_t;
+char *varchar;
+FxEffectDef const **varFxEffectDefHandle;
+uint16_t *varXBlendInfo;
+GfxImageLoadDef *varGfxImageLoadDef;
+GfxLightRegion *varGfxLightRegion;
+GfxPackedPlacement *varGfxPackedPlacement;
+SoundFile *varSoundFile;
+DynEntityColl *varDynEntityColl;
+byte *varuint8_t;
+GfxShadowGeometry *varGfxShadowGeometry;
+union SoundFileRef *varSoundFileRef;
+XModelPieces *varXModelPieces;
+// uint8_t *varvec3_t           ;
+float (*varvec3_t)[3];
+Font_s **varFontHandle;
+GfxImage *varGfxImage;
+// union MaterialTextureDefInfo *varMaterialTextureDefInfo     ;
+water_t **varMaterialTextureDefInfo; // KISAKTODO: this is really the above union
+MaterialInfo *varMaterialInfo;
+union FxSpawnDef *varFxSpawnDef;
+union FxElemVisuals *varFxElemVisuals;
+enum weapAnimFiles_t *varweapAnimFiles_t;
+SunLightParseParams *varSunLightParseParams;
+FxEffectDef *varFxEffectDef;
+enum GfxLightType *varGfxLightType;
+XAnimParts **varXAnimPartsPtr;
+PathData *varPathData;
+float *varvec_t;
+GfxBrushModel *varGfxBrushModel;
+itemDef_s *varitemDef_t;
+XAnimPartTransFrames *varXAnimPartTransFrames;
+// short (*)[3] varShort3           ;
+XSurfaceCollisionLeaf *varXSurfaceCollisionLeaf;
+// D3DBaseTexture *varIDirect3DBaseTexture9     ;
+XAnimDeltaPartQuatDataFrames *varXAnimDeltaPartQuatDataFrames;
+union GfxTexture *varGfxRawTexture;
+GfxPlacement *varGfxPlacement;
+GfxLightImage *varGfxLightImage;
+XModel *varXModel;
+ComWorld *varComWorld;
+int *varqboolean;
+rectDef_s *varrectDef_t;
+char *varint8_t;
+GfxAabbTree *varGfxAabbTree;
+FxElemVec3Range *varFxElemVec3Range;
+PhysMass *varPhysMass;
+SndDriverGlobals *varSndDriverGlobals;
+menuDef_t **varmenuDef_ptr;
+water_t *varwater_t;
+GfxWorldVertex *varGfxWorldVertex;
+GfxLightGrid *varGfxLightGrid;
+MaterialTechniqueSet *varMaterialTechniqueSet;
+enum OffhandClass *varOffhandClass;
+FxIntRange *varFxIntRange;
+uint *varraw_uint;
+void *varDWORD;
+GameWorldSp *varGameWorldSp;
+XSurfaceVertexInfo *varXSurfaceVertexInfo;
+enum DynEntityType *varDynEntityType;
+union GfxColor *varGfxColor;
+MaterialTechnique **varMaterialTechniquePtr;
+union GfxTexture *varGfxTexture;
+GfxWorldDpvsPlanes *varGfxWorldDpvsPlanes;
+MaterialPixelShader *varMaterialPixelShader;
+Picmip *varPicmip;
+int *varint32_t;
+Material *varMaterial;
+// XModelHighMipBounds *varXModelHighMipBounds     ;
+snd_alias_list_t **varsnd_alias_list_name;
+DynEntityDef *varDynEntityDef;
+union XAnimDeltaPartQuatData *varXAnimDeltaPartQuatData;
+srfTriangles_t *varsrfTriangles_t;
+XAnimNotifyInfo *varXAnimNotifyInfo;
+union itemDefData_t *varitemDefData_t;
+// D3DTexture *varIDirect3DTexture9     ;
+GfxLight *varGfxLight;
+FxImpactEntry *varFxImpactEntry;
+FxElemVisualState *varFxElemVisualState;
+windowDef_t *varwindowDef_t;
+XSurfaceCollisionTree *varXSurfaceCollisionTree;
+union CollisionAabbTreeIndex *varCollisionAabbTreeIndex;
+XSurfaceCollisionAabb *varXSurfaceCollisionAabb;
+XSurface *varXSurface;
+// union PackedTexCoords *varPackedTexCoords     ;
+enum weaponIconRatioType_t *varweaponIconRatioType_t;
+GfxVertexShaderLoadDef *varGfxVertexShaderLoadDef;
+enum WeapOverlayInteface_t *varWeapOverlayInteface_t;
+editFieldDef_s **vareditFieldDef_ptr;
+MaterialMemory *varMaterialMemory;
+// XaIwXmaDataInfo *varXaIwXmaDataInfo     ;
+FxElemDef *varFxElemDef;
+union cLeafBrushNodeData_t *varcLeafBrushNodeData_t;
+PhysGeomList *varPhysGeomList;
+// GfxStreamingAabbTree *varGfxStreamingAabbTree     ;
+LoadedSound **varLoadedSoundPtr;
+uint *varraw_uint128;
+StringTable *varStringTable;
+union GfxDrawSurf *varGfxDrawSurf;
+DynEntityClient *varDynEntityClient;
+dmaterial_t *vardmaterial_t;
+RawFile *varRawFile;
+SndCurve **varSndCurvePtr;
+ItemKeyHandler *varItemKeyHandlerNext;
+MaterialTechniqueSet **varMaterialTechniqueSetPtr;
+GfxWorldVertexData *varGfxWorldVertexData;
+MaterialVertexDeclaration *varMaterialVertexDeclaration;
+enum guidedMissileType_t *varguidedMissileType_t;
+GfxPixelShaderLoadDef *varGfxPixelShaderLoadDef;
+union PackedLightingCoords *varPackedLightingCoords;
+MaterialVertexShader **varMaterialVertexShaderPtr;
+union XAnimDynamicIndices *varXAnimDynamicIndicesTrans;
+uint16_t *varStaticModelIndex;
+GfxStaticModelDrawInst *varGfxStaticModelDrawInst;
+enum PenetrateType *varPenetrateType;
+int marker_db_load;
+GfxLightDef *varGfxLightDef;
+// union MaterialVertexShaderProgram *varMaterialVertexShaderProgram     ;
+SndDriverGlobals **varSndDriverGlobalsPtr;
+cStaticModel_s *varcStaticModel_t;
+menuDef_t *varmenuDef_t;
+expressionEntry **varexpressionEntry_ptr;
+byte *varbyte4;
+uint *varraw_DWORD;
+pathnode_tree_t *varpathnode_tree_t;
+char const ***varXStringPtr;
+union pathnode_tree_info_t *varpathnode_tree_info_t;
+cLeafBrushNode_s *varcLeafBrushNode_t;
+complex_s *varcomplex_t;
+WeaponDef **varWeaponDefPtr;
+LoadedSound *varLoadedSound;
+// XaSeekTable *varXaSeekTable     ;
+// XAUDIOSOURCEFORMAT *varXAUDIOSOURCEFORMAT     ;
+byte *varGfxImageCategory;
+byte *varXAUDIOXMASTREAMCOUNT;
+GfxSceneDynModel *varGfxSceneDynModel;
+FxSpawnDefOneShot *varFxSpawnDefOneShot;
+ScriptStringList *varScriptStringList;
+union XAnimDynamicIndices *varXAnimDynamicIndicesDeltaQuat;
+GfxLightRegionAxis *varGfxLightRegionAxis;
+byte *varraw_byte;
+void *varvoid;
+cNode_t *varcNode_t;
+GfxSurface *varGfxSurface;
+multiDef_s *varmultiDef_t;
+union GfxTexture *varGfxTextureLoad;
+GameWorldMp **varGameWorldMpPtr;
+enum WeapStickinessType *varWeapStickinessType;
+GfxWorld **varGfxWorldPtr;
+enum weapProjExposion_t *varweapProjExposion_t;
+snd_alias_t *varsnd_alias_t;
+byte *varraw_byte16;
+SpeakerMap *varSpeakerMap;
+// D3DIndexBuffer *varGfxIndexBuffer     ;
+byte *varGfxSamplerState;
+uint16_t *varraw_ushort;
+MaterialArgumentCodeConst *varMaterialArgumentCodeConst;
+union XAnimDynamicFrames *varXAnimDynamicFrames;
+pathnode_tree_nodes_t *varpathnode_tree_nodes_t;
+StreamedSound *varStreamedSound;
+XModelStreamInfo *varXModelStreamInfo;
+FxElemVelStateInFrame *varFxElemVelStateInFrame;
+byte *varcbrushedge_t;
+pathbasenode_t *varpathbasenode_t;
+GfxStateBits *varGfxStateBits;
+union PackedUnitVec *varPackedUnitVec;
+GfxPosTexVertex *varGfxPosTexVertex;
+uint16_t *varr_index_t;
+BrushWrapper *varBrushWrapper;
+GfxPackedVertex *varGfxPackedVertex0;
+int *varFxElemDefFlags;
+FxTrailDef *varFxTrailDef;
+GfxReflectionProbe *varGfxReflectionProbe;
+GfxStaticModelInst *varGfxStaticModelInst;
+union entryInternalData *varentryInternalData;
+GameWorldMp *varGameWorldMp;
+MaterialVertexShader *varMaterialVertexShader;
+cbrushside_t *varcbrushside_t;
+char const **varXString;
+byte *varBYTE;
+GfxWorldDpvsDynamic *varGfxWorldDpvsDynamic;
+FxSpawnDefLooping *varFxSpawnDefLooping;
+MaterialConstantDef *varMaterialConstantDef;
+StreamFileNameRaw *varStreamFileNameRaw;
+GfxCullGroup *varGfxCullGroup;
+PhysPreset **varPhysPresetPtr;
+rectDef_s *varUiRectangle;
+DynEntityPose *varDynEntityPose;
+MapEnts **varMapEntsPtr;
+enum ImpactType *varImpactType;
+FxImpactTable *varFxImpactTable;
+cbrush_t *varcbrush_t;
+// D3DVertexBuffer *varGfxVertexBuffer     ;
+GfxWorldVertexLayerData *varGfxWorldVertexLayerData;
+MapEnts *varMapEnts;
+byte *varXAUDIOCHANNEL;
+char *varchar2048;
+// XAUDIOPACKET_ALIGNED *varXAUDIOPACKET_ALIGNED     ;
+uint16_t *varScriptString;
+windowDef_t *varWindow;
+CollisionBorder *varCollisionBorder;
+FxElemVelStateSample *varFxElemVelStateSample;
+XAnimDeltaPart *varXAnimDeltaPart;
+GfxWorldVertex *varGfxWorldVertex0;
+// float (*)[3] varshared_vec3_t     ;
+listBoxDef_s **varlistBoxDef_ptr;
+PhysGeomInfo *varPhysGeomInfo;
+// byte (*)[3] varByteVec          ;
+uint16_t *varuint16_t;
+enum weapFireType_t *varweapFireType_t;
+enum weaponAltModel_t *varweaponAltModel_t;
+FxElemVisStateSample *varFxElemVisStateSample;
+GfxWorldDpvsStatic *varGfxWorldDpvsStatic;
+XAnimParts *varXAnimParts;
+short *varshort;
+GfxImage **varGfxImagePtr;
+snd_alias_list_t *varsnd_alias_list_t;
+cLeafBrushNodeChildren_t *varcLeafBrushNodeChildren_t;
+LocalizeEntry **varLocalizeEntryPtr;
+uint8_t (*varByteVec)[3];
+// MssSound *varMssSound;
+MssSoundCOD4 *varMssSound;
+IDirect3DVertexBuffer9 **varGfxVertexBuffer;
+uint8_t *varXZoneHandle;
+MaterialVertexShaderProgram *varMaterialVertexShaderProgram;
+
+void __cdecl Load_byte(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, varbyte, sizeof(byte));
+}
+
+void __cdecl Load_byteArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, varbyte, count);
+}
+
+void __cdecl Load_charArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varchar, count);
+}
+
+void __cdecl Load_int(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varint, 4);
+}
+
+void __cdecl Load_intArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varint, 4 * count);
+}
+
+void __cdecl Load_uintArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (byte *)varuint, 4 * count);
+}
+
+void __cdecl Load_uint(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varuint, 4);
+}
+
+void __cdecl Load_float(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varfloat, sizeof(float));
+}
+
+void __cdecl Load_floatArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varfloat, DB_StreamArraySize(sizeof(float), count));
+}
+
+void __cdecl Load_raw_uintArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varraw_uint, DB_StreamArraySize(sizeof(uint), count));
+}
+
+uint8_t *__cdecl AllocLoad_raw_uint128()
+{
+    return DB_AllocStreamPos(127);
+}
+
+void __cdecl Load_raw_uint128Array(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varraw_uint128, DB_StreamArraySize(sizeof(uint), count));
+}
+
+void __cdecl Load_raw_byteArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, varraw_byte, count);
+}
+
+void __cdecl Load_raw_byte16Array(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, varraw_byte16, count);
+}
+
+void __cdecl Load_vec2_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varvec2_t, DB_StreamArraySize(sizeof(float[2]), count));
+}
+
+void __cdecl Load_vec3_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varvec3_t, sizeof(float[3]));
+}
+
+void __cdecl Load_vec3_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varvec3_t, DB_StreamArraySize(sizeof(float[3]), count));
+}
+
+void __cdecl Load_shortArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varshort, DB_StreamArraySize(sizeof(short), count));
+}
+
+void __cdecl Load_ushortArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varushort, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_XQuat2(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXQuat2, sizeof(int16_t[2]));
+}
+
+void __cdecl Load_XQuat2Array(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXQuat2, DB_StreamArraySize(sizeof(int16_t[2]), count));
+}
+
+uint8_t *__cdecl AllocLoad_XBlendInfo()
+{
+    return DB_AllocStreamPos(1);
+}
+
+void __cdecl Load_UnsignedShortArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varUnsignedShort, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_ScriptString(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varScriptString, sizeof(uint16_t));
+    Load_ScriptStringCustom(varScriptString);
+}
+
+void __cdecl Load_ScriptStringArray(bool atStreamStart, int count)
+{
+    uint16_t *var; // [esp+0h] [ebp-8h]
+    int i;         // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varScriptString, DB_StreamArraySize(sizeof(uint16_t), count));
+    var = varScriptString;
+    for (i = 0; i < count; ++i)
+    {
+        varScriptString = var;
+        Load_ScriptString(0);
+        ++var;
+    }
+}
+
+uint8_t *__cdecl AllocLoad_raw_byte()
+{
+    return DB_AllocStreamPos(0);
+}
+
+void __cdecl Load_ConstCharArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varConstChar, count);
+}
+
+void __cdecl Load_TempString(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varTempString, sizeof(char const *));
+    if (*varTempString)
+    {
+        if (*varTempString == (const char *)-1)
+        {
+            *varTempString = (const char *)AllocLoad_raw_byte();
+            varConstChar = *varTempString;
+            Load_TempStringCustom((char **)varTempString);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varTempString);
+        }
+    }
+}
+
+void __cdecl Load_TempStringArray(bool atStreamStart, int count)
+{
+    const char **var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varTempString, DB_StreamArraySize(sizeof(char const *), count));
+    var = varTempString;
+    for (i = 0; i < count; ++i)
+    {
+        varTempString = var;
+        Load_TempString(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_XString(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXString, sizeof(const char *));
+    DB64_LoadAssetString(varXString);
+}
+
+void __cdecl Load_XStringArray(bool atStreamStart, int count)
+{
+    const char **var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXString, DB_StreamArraySize(sizeof(char const *), count));
+    var = varXString;
+    for (i = 0; i < count; ++i)
+    {
+        varXString = var;
+        Load_XString(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_XStringPtr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXStringPtr, sizeof(char const **));
+    if (*varXStringPtr)
+    {
+        if (*varXStringPtr == (const char **)-1)
+        {
+            *varXStringPtr = (const char **)AllocLoad_FxElemVisStateSample();
+            varXString = *varXStringPtr;
+            Load_XString(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varXStringPtr);
+        }
+    }
+}
+
+void __cdecl Load_ScriptStringList(bool atStreamStart)
+{
+    DB64_LoadScriptStrings(varScriptStringList, atStreamStart);
+}
+
+void __cdecl Load_complex_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcomplex_t, DB_StreamArraySize(sizeof(complex_s), count));
+}
+
+void __cdecl Load_dmaterial_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)vardmaterial_t, DB_StreamArraySize(sizeof(dmaterial_t), count));
+}
+
+void __cdecl Mark_ScriptString()
+{
+    Mark_ScriptStringCustom(varScriptString);
+}
+
+void __cdecl Mark_ScriptStringArray(int count)
+{
+    uint16_t *var; // [esp+0h] [ebp-8h]
+    int i;         // [esp+4h] [ebp-4h]
+
+    var = varScriptString;
+    for (i = 0; i < count; ++i)
+    {
+        varScriptString = var;
+        Mark_ScriptString();
+        ++var;
+    }
+}
+
+void __cdecl Load_XAnimIndices()
+{
+    if (varXAnimParts->numframes >= 0x100u)
+    {
+        if (varXAnimIndices->_2)
+        {
+            varXAnimIndices->_2 = (uint16_t *)AllocLoad_XBlendInfo();
+            varushort = varXAnimIndices->_2;
+            Load_ushortArray(1, varXAnimParts->indexCount);
+        }
+    }
+    else if (varXAnimIndices->_1)
+    {
+        varXAnimIndices->_1 = AllocLoad_raw_byte();
+        varbyte = varXAnimIndices->_1;
+        Load_byteArray(1, varXAnimParts->indexCount);
+    }
+}
+
+void __cdecl Load_XAnimDynamicIndicesDeltaQuat(bool atStreamStart)
+{
+    if (varXAnimParts->numframes >= 0x100u)
+    {
+        iassert(atStreamStart);
+        Load_Stream(1, (byte *)varXAnimDynamicIndicesDeltaQuat->_2, 0);
+        iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(varXAnimDynamicIndicesDeltaQuat->_2));
+        varUnsignedShort = (uint16_t *)varXAnimDynamicIndicesDeltaQuat;
+        Load_UnsignedShortArray(1, varXAnimDeltaPartQuat->size + 1);
+    }
+    else
+    {
+        iassert(atStreamStart);
+        Load_Stream(1, varXAnimDynamicIndicesDeltaQuat->_1, 0);
+        iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(varXAnimDynamicIndicesDeltaQuat->_1));
+        varbyte = (uint8_t *)varXAnimDynamicIndicesDeltaQuat;
+        Load_byteArray(1, varXAnimDeltaPartQuat->size + 1);
+    }
+}
+
+void __cdecl Load_XAnimDeltaPartQuatDataFrames(bool atStreamStart)
+{
+    iassert(atStreamStart);
+    Load_Stream(1, (uint8_t *)varXAnimDeltaPartQuatDataFrames, offsetof(XAnimDeltaPartQuatDataFrames, indices));
+    iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(&varXAnimDeltaPartQuatDataFrames->indices));
+    varXAnimDynamicIndicesDeltaQuat = &varXAnimDeltaPartQuatDataFrames->indices;
+    Load_XAnimDynamicIndicesDeltaQuat(1);
+    if (varXAnimDeltaPartQuatDataFrames->frames)
+    {
+        varXAnimDeltaPartQuatDataFrames->frames = (__int16(*)[2])AllocLoad_FxElemVisStateSample();
+        varXQuat2 = varXAnimDeltaPartQuatDataFrames->frames;
+        if (varXAnimDeltaPartQuat->size)
+        {
+            Load_XQuat2Array(1, varXAnimDeltaPartQuat->size + 1);
+        }
+        else
+        {
+            Load_XQuat2Array(1, 0);
+        }
+    }
+}
+
+void __cdecl Load_XAnimDeltaPartQuatData(bool atStreamStart)
+{
+    if (varXAnimDeltaPartQuat->size)
+    {
+        varXAnimDeltaPartQuatDataFrames = &varXAnimDeltaPartQuatData->frames;
+        Load_XAnimDeltaPartQuatDataFrames(atStreamStart);
+    }
+    else if (atStreamStart)
+    {
+        varXQuat2 = (__int16(*)[2])varXAnimDeltaPartQuatData;
+        Load_XQuat2(atStreamStart);
+    }
+}
+
+void __cdecl Load_XAnimDeltaPartQuat(bool atStreamStart)
+{
+    iassert(atStreamStart);
+    Load_Stream(1, (uint8_t *)varXAnimDeltaPartQuat, offsetof(XAnimDeltaPartQuat, u));
+    iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(&varXAnimDeltaPartQuat->u));
+    varXAnimDeltaPartQuatData = &varXAnimDeltaPartQuat->u;
+    Load_XAnimDeltaPartQuatData(1);
+}
+
+void __cdecl Load_XAnimDeltaPart(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXAnimDeltaPart, sizeof(XAnimDeltaPart));
+    if (varXAnimDeltaPart->trans)
+    {
+        varXAnimDeltaPart->trans = (XAnimPartTrans *)AllocLoad_FxElemVisStateSample();
+        varXAnimPartTrans = varXAnimDeltaPart->trans;
+        Load_XAnimPartTrans(1);
+    }
+    if (varXAnimDeltaPart->quat)
+    {
+        varXAnimDeltaPart->quat = (XAnimDeltaPartQuat *)AllocLoad_FxElemVisStateSample();
+        varXAnimDeltaPartQuat = varXAnimDeltaPart->quat;
+        Load_XAnimDeltaPartQuat(1);
+    }
+}
+
+void __cdecl Load_XAnimDynamicIndicesTrans(bool atStreamStart)
+{
+    if (varXAnimParts->numframes >= 0x100u)
+    {
+        iassert(atStreamStart);
+        Load_Stream(1, varXAnimDynamicIndicesTrans->_1, 0);
+        if (DB_GetStreamPos() != (uint8_t *)varXAnimDynamicIndicesTrans)
+        {
+            MyAssertHandler("c:\\trees\\cod3\\src\\database\\../xanim/xanim_load_db.h", 1552, 0, "%s",
+                            "DB_GetStreamPos() == reinterpret_cast< byte * >( varXAnimDynamicIndicesTrans->_2 )");
+        }
+        varUnsignedShort = (uint16_t *)varXAnimDynamicIndicesTrans;
+        Load_UnsignedShortArray(1, varXAnimPartTrans->size + 1);
+    }
+    else
+    {
+        iassert(atStreamStart);
+        Load_Stream(1, varXAnimDynamicIndicesTrans->_1, 0);
+        if (DB_GetStreamPos() != (uint8_t *)varXAnimDynamicIndicesTrans)
+        {
+            MyAssertHandler("c:\\trees\\cod3\\src\\database\\../xanim/xanim_load_db.h", 1544, 0, "%s",
+                            "DB_GetStreamPos() == reinterpret_cast< byte * >( varXAnimDynamicIndicesTrans->_1 )");
+        }
+        varbyte = (uint8_t *)varXAnimDynamicIndicesTrans;
+        Load_byteArray(1, varXAnimPartTrans->size + 1);
+    }
+}
+
+void __cdecl Load_ByteVecArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varByteVec, DB_StreamArraySize(sizeof(uint8_t[3]), count));
+}
+
+void __cdecl Load_UShortVecArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varUShortVec, DB_StreamArraySize(sizeof(uint16_t[3]), count));
+}
+
+void __cdecl Load_XAnimDynamicFrames()
+{
+    if (varXAnimPartTrans->smallTrans)
+    {
+        if (varXAnimDynamicFrames->_1)
+        {
+            varXAnimDynamicFrames->_1 = (uint8_t(*)[3])AllocLoad_raw_byte();
+            varByteVec = varXAnimDynamicFrames->_1;
+            if (varXAnimPartTrans->size)
+            {
+                Load_ByteVecArray(1, varXAnimPartTrans->size + 1);
+            }
+            else
+            {
+                Load_ByteVecArray(1, 0);
+            }
+        }
+    }
+    else if (varXAnimDynamicFrames->_1)
+    {
+        varXAnimDynamicFrames->_2 = (uint16_t(*)[3])AllocLoad_FxElemVisStateSample();
+        varUShortVec = varXAnimDynamicFrames->_2;
+        if (varXAnimPartTrans->size)
+        {
+            Load_UShortVecArray(1, varXAnimPartTrans->size + 1);
+        }
+        else
+        {
+            Load_UShortVecArray(1, 0);
+        }
+    }
+}
+
+void __cdecl Load_XAnimPartTransFrames(bool atStreamStart)
+{
+    iassert(atStreamStart);
+    Load_Stream(1, (uint8_t *)varXAnimPartTransFrames, offsetof(XAnimPartTransFrames, indices));
+    iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(&varXAnimPartTransFrames->indices));
+    varXAnimDynamicIndicesTrans = &varXAnimPartTransFrames->indices;
+    Load_XAnimDynamicIndicesTrans(1);
+    varXAnimDynamicFrames = &varXAnimPartTransFrames->frames;
+    Load_XAnimDynamicFrames();
+}
+
+void __cdecl Load_XAnimPartTransData(bool atStreamStart)
+{
+    if (varXAnimPartTrans->size)
+    {
+        varXAnimPartTransFrames = &varXAnimPartTransData->frames;
+        Load_XAnimPartTransFrames(atStreamStart);
+    }
+    else if (atStreamStart)
+    {
+        varvec3_t = (float(*)[3])varXAnimPartTransData;
+        Load_vec3_t(atStreamStart);
+    }
+}
+
+void __cdecl Load_XAnimPartTrans(bool atStreamStart)
+{
+    iassert(atStreamStart);
+    Load_Stream(1, (uint8_t *)varXAnimPartTrans, offsetof(XAnimPartTrans, u));
+    iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(&varXAnimPartTrans->u));
+    varXAnimPartTransData = &varXAnimPartTrans->u;
+    Load_XAnimPartTransData(1);
+}
+
+void __cdecl Load_XAnimNotifyInfo(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXAnimNotifyInfo, sizeof(XAnimNotifyInfo));
+    varScriptString = &varXAnimNotifyInfo->name;
+    Load_ScriptString(0);
+}
+
+void __cdecl Load_XAnimNotifyInfoArray(bool atStreamStart, int count)
+{
+    XAnimNotifyInfo *var; // [esp+0h] [ebp-8h]
+    int i;                // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXAnimNotifyInfo, DB_StreamArraySize(sizeof(XAnimNotifyInfo), count));
+    var = varXAnimNotifyInfo;
+    for (i = 0; i < count; ++i)
+    {
+        varXAnimNotifyInfo = var;
+        Load_XAnimNotifyInfo(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_XAnimParts(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXAnimParts, sizeof(XAnimParts));
+    DB_PushStreamPos(4);
+    varXString = &varXAnimParts->name;
+    Load_XString(0);
+    if (varXAnimParts->names)
+    {
+        varXAnimParts->names = (uint16_t *)AllocLoad_XBlendInfo();
+        varScriptString = varXAnimParts->names;
+        Load_ScriptStringArray(1, varXAnimParts->boneCount[9]);
+    }
+    if (varXAnimParts->notify)
+    {
+        varXAnimParts->notify = (XAnimNotifyInfo *)AllocLoad_FxElemVisStateSample();
+        varXAnimNotifyInfo = varXAnimParts->notify;
+        Load_XAnimNotifyInfoArray(1, varXAnimParts->notifyCount);
+    }
+    if (varXAnimParts->deltaPart)
+    {
+        varXAnimParts->deltaPart = (XAnimDeltaPart *)AllocLoad_FxElemVisStateSample();
+        varXAnimDeltaPart = varXAnimParts->deltaPart;
+        Load_XAnimDeltaPart(1);
+    }
+    if (varXAnimParts->dataByte)
+    {
+        varXAnimParts->dataByte = AllocLoad_raw_byte();
+        varbyte = varXAnimParts->dataByte;
+        Load_byteArray(1, varXAnimParts->dataByteCount);
+    }
+    if (varXAnimParts->dataShort)
+    {
+        varXAnimParts->dataShort = (__int16 *)AllocLoad_XBlendInfo();
+        varshort = varXAnimParts->dataShort;
+        Load_shortArray(1, varXAnimParts->dataShortCount);
+    }
+    if (varXAnimParts->dataInt)
+    {
+        varXAnimParts->dataInt = (int *)AllocLoad_FxElemVisStateSample();
+        varint = varXAnimParts->dataInt;
+        Load_intArray(1, varXAnimParts->dataIntCount);
+    }
+    if (varXAnimParts->randomDataShort)
+    {
+        varXAnimParts->randomDataShort = (__int16 *)AllocLoad_XBlendInfo();
+        varshort = varXAnimParts->randomDataShort;
+        Load_shortArray(1, varXAnimParts->randomDataShortCount);
+    }
+    if (varXAnimParts->randomDataByte)
+    {
+        varXAnimParts->randomDataByte = AllocLoad_raw_byte();
+        varbyte = varXAnimParts->randomDataByte;
+        Load_byteArray(1, varXAnimParts->randomDataByteCount);
+    }
+    if (varXAnimParts->randomDataInt)
+    {
+        varXAnimParts->randomDataInt = (int *)AllocLoad_FxElemVisStateSample();
+        varint = varXAnimParts->randomDataInt;
+        Load_intArray(1, varXAnimParts->randomDataIntCount);
+    }
+    varXAnimIndices = &varXAnimParts->indices;
+    Load_XAnimIndices();
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_XAnimPartsPtr(bool atStreamStart)
+{
+    DB64_LoadAnimationAsset((XAssetHeader *)varXAnimPartsPtr, atStreamStart);
+}
+
+void __cdecl Mark_XAnimNotifyInfo()
+{
+    varScriptString = &varXAnimNotifyInfo->name;
+    Mark_ScriptString();
+}
+
+void __cdecl Mark_XAnimNotifyInfoArray(int count)
+{
+    XAnimNotifyInfo *var; // [esp+0h] [ebp-8h]
+    int i;                // [esp+4h] [ebp-4h]
+
+    var = varXAnimNotifyInfo;
+    for (i = 0; i < count; ++i)
+    {
+        varXAnimNotifyInfo = var;
+        Mark_XAnimNotifyInfo();
+        ++var;
+    }
+}
+
+void __cdecl Mark_XAnimParts()
+{
+    if (varXAnimParts->names)
+    {
+        varScriptString = varXAnimParts->names;
+        Mark_ScriptStringArray(varXAnimParts->boneCount[9]);
+    }
+    if (varXAnimParts->notify)
+    {
+        varXAnimNotifyInfo = varXAnimParts->notify;
+        Mark_XAnimNotifyInfoArray(varXAnimParts->notifyCount);
+    }
+}
+
+void __cdecl Mark_XAnimPartsPtr()
+{
+    if (*varXAnimPartsPtr)
+    {
+        varXAnimParts = *varXAnimPartsPtr;
+        Mark_XAnimPartsAsset(varXAnimParts);
+        Mark_XAnimParts();
+    }
+}
+
+void __cdecl Load_XBoneInfoArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXBoneInfo, DB_StreamArraySize(sizeof(XBoneInfo), count));
+}
+
+void __cdecl Load_DObjAnimMatArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDObjAnimMat, DB_StreamArraySize(sizeof(DObjAnimMat), count));
+}
+
+void __cdecl Load_StreamFileNameRaw(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varStreamFileNameRaw, sizeof(StreamFileNameRaw));
+    varXString = &varStreamFileNameRaw->dir;
+    Load_XString(0);
+    varXString = &varStreamFileNameRaw->name;
+    Load_XString(0);
+}
+
+void __cdecl Load_StreamFileInfo(bool atStreamStart)
+{
+    varStreamFileNameRaw = &varStreamFileInfo->raw;
+    Load_StreamFileNameRaw(atStreamStart);
+}
+
+void __cdecl Load_StreamFileName(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varStreamFileName, sizeof(StreamFileName));
+    varStreamFileInfo = &varStreamFileName->info;
+    Load_StreamFileInfo(0);
+}
+
+void __cdecl Load_SetSoundData(uint8_t **data, MssSoundCOD4 *mssSound)
+{
+    SND_SetData(mssSound, *data);
+}
+
+void __cdecl Load_MssSound(bool atStreamStart)
+{
+    const void **inserted; // [esp+0h] [ebp-Ch]
+    uintptr_t value;       // [esp+4h] [ebp-8h]
+
+    Load_Stream(atStreamStart, (byte *)varMssSound, sizeof(MssSoundCOD4));
+    DB_PushStreamPos(0);
+    if (varMssSound->data)
+    {
+        value = (uintptr_t)varMssSound->data;
+        if (value < UINTPTR_MAX - 1)
+        {
+            DB_ConvertOffsetToAlias((uintptr_t *)&varMssSound->data);
+        }
+        else
+        {
+            varMssSound->data = AllocLoad_raw_byte();
+            varbyte = varMssSound->data;
+            if (value == UINTPTR_MAX - 1)
+            {
+                inserted = DB_InsertPointer();
+            }
+            else
+            {
+                inserted = 0;
+            }
+            Load_byteArray(1, varMssSound->info.data_len);
+            Load_SetSoundData(&varMssSound->data, varMssSound);
+            if (inserted)
+            {
+                *inserted = varMssSound->data;
+            }
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_LoadedSound(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varLoadedSound, sizeof(LoadedSound));
+    DB_PushStreamPos(4);
+    varXString = &varLoadedSound->name;
+    Load_XString(0);
+    varMssSound = &varLoadedSound->sound;
+    Load_MssSound(0);
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_LoadedSoundPtr(bool atStreamStart)
+{
+    DB64_LoadSoundAsset((XAssetHeader *)varLoadedSoundPtr, atStreamStart);
+}
+
+void __cdecl Load_StreamedSound(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varStreamedSound, sizeof(StreamedSound));
+    varStreamFileName = &varStreamedSound->filename;
+    Load_StreamFileName(0);
+}
+
+void __cdecl Load_SoundFileRef(bool atStreamStart)
+{
+    if (varSoundFile->type == SAT_LOADED)
+    {
+        varLoadedSoundPtr = &varSoundFileRef->loadSnd;
+        Load_LoadedSoundPtr(atStreamStart);
+    }
+    else
+    {
+        varStreamedSound = (StreamedSound *)varSoundFileRef;
+        Load_StreamedSound(atStreamStart);
+    }
+}
+
+void __cdecl Load_SoundFile(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, &varSoundFile->type, sizeof(SoundFile));
+    varSoundFileRef = &varSoundFile->u;
+    Load_SoundFileRef(0);
+}
+
+
+
+void __cdecl Load_SndCurvePtr(bool atStreamStart)
+{
+    DB64_LoadPresetAsset(ASSET_TYPE_SOUND_CURVE, (XAssetHeader *)varSndCurvePtr, atStreamStart);
+}
+
+void __cdecl Load_SpeakerMap(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varSpeakerMap, sizeof(SpeakerMap));
+    varXString = &varSpeakerMap->name;
+    Load_XString(0);
+}
+
+void __cdecl Load_snd_alias_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varsnd_alias_t, sizeof(snd_alias_t));
+    varXString = &varsnd_alias_t->aliasName;
+    Load_XString(0);
+    varXString = &varsnd_alias_t->subtitle;
+    Load_XString(0);
+    varXString = &varsnd_alias_t->secondaryAliasName;
+    Load_XString(0);
+    varXString = &varsnd_alias_t->chainAliasName;
+    Load_XString(0);
+    if (varsnd_alias_t->soundFile)
+    {
+        if (varsnd_alias_t->soundFile == (SoundFile *)-1)
+        {
+            varsnd_alias_t->soundFile = (SoundFile *)AllocLoad_FxElemVisStateSample();
+            varSoundFile = varsnd_alias_t->soundFile;
+            Load_SoundFile(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varsnd_alias_t->soundFile);
+        }
+    }
+    varSndCurvePtr = &varsnd_alias_t->volumeFalloffCurve;
+    Load_SndCurvePtr(0);
+    if (varsnd_alias_t->speakerMap)
+    {
+        if (varsnd_alias_t->speakerMap == (SpeakerMap *)-1)
+        {
+            varsnd_alias_t->speakerMap = (SpeakerMap *)AllocLoad_FxElemVisStateSample();
+            varSpeakerMap = varsnd_alias_t->speakerMap;
+            Load_SpeakerMap(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varsnd_alias_t->speakerMap);
+        }
+    }
+}
+
+void __cdecl Load_snd_alias_tArray(bool atStreamStart, int count)
+{
+    snd_alias_t *var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varsnd_alias_t, DB_StreamArraySize(sizeof(snd_alias_t), count));
+    var = varsnd_alias_t;
+    for (i = 0; i < count; ++i)
+    {
+        varsnd_alias_t = var;
+        Load_snd_alias_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_snd_alias_list_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varsnd_alias_list_t, sizeof(snd_alias_list_t));
+    DB_PushStreamPos(4);
+    varXString = &varsnd_alias_list_t->aliasName;
+    Load_XString(0);
+    if (varsnd_alias_list_t->head)
+    {
+        if (varsnd_alias_list_t->head == (snd_alias_t *)-1)
+        {
+            varsnd_alias_list_t->head = (snd_alias_t *)AllocLoad_FxElemVisStateSample();
+            varsnd_alias_t = varsnd_alias_list_t->head;
+            Load_snd_alias_tArray(1, varsnd_alias_list_t->count);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varsnd_alias_list_t->head);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_snd_alias_list_ptr(bool atStreamStart)
+{
+    DB64_LoadSoundAliases((XAssetHeader *)varsnd_alias_list_ptr, atStreamStart);
+}
+
+void __cdecl Load_SndAliasCustom(snd_alias_list_t **var)
+{
+    if (*var)
+    {
+        varXStringPtr = (const char ***)var;
+        Load_XStringPtr(0);
+        iassert(*varXStringPtr);
+        *(XAssetHeader *)var = DB_FindXAssetHeader(ASSET_TYPE_SOUND, **varXStringPtr);
+    }
+}
+
+void __cdecl Load_snd_alias_list_name(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varsnd_alias_list_name, sizeof(snd_alias_list_t *));
+    Load_SndAliasCustom(varsnd_alias_list_name);
+}
+
+void __cdecl Load_snd_alias_list_nameArray(bool atStreamStart, int count)
+{
+    snd_alias_list_t **var; // [esp+0h] [ebp-8h]
+    int i;                  // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varsnd_alias_list_name,
+                DB_StreamArraySize(sizeof(snd_alias_list_t *), count));
+    var = varsnd_alias_list_name;
+    for (i = 0; i < count; ++i)
+    {
+        varsnd_alias_list_name = var;
+        Load_snd_alias_list_name(0);
+        ++var;
+    }
+}
+
+void __cdecl Mark_LoadedSoundPtr()
+{
+    if (*varLoadedSoundPtr)
+    {
+        varLoadedSound = *varLoadedSoundPtr;
+        Mark_LoadedSoundAsset(varLoadedSound);
+    }
+}
+
+void __cdecl Mark_SoundFileRef()
+{
+    if (varSoundFile->type == SAT_LOADED)
+    {
+        varLoadedSoundPtr = &varSoundFileRef->loadSnd;
+        Mark_LoadedSoundPtr();
+    }
+}
+
+void __cdecl Mark_SoundFile()
+{
+    varSoundFileRef = &varSoundFile->u;
+    Mark_SoundFileRef();
+}
+
+void __cdecl Mark_SndCurvePtr()
+{
+    if (*varSndCurvePtr)
+    {
+        varSndCurve = *varSndCurvePtr;
+        Mark_SndCurveAsset(varSndCurve);
+    }
+}
+
+void __cdecl Mark_snd_alias_t()
+{
+    if (varsnd_alias_t->soundFile)
+    {
+        varSoundFile = varsnd_alias_t->soundFile;
+        Mark_SoundFile();
+    }
+    varSndCurvePtr = &varsnd_alias_t->volumeFalloffCurve;
+    Mark_SndCurvePtr();
+}
+
+void __cdecl Mark_snd_alias_tArray(int count)
+{
+    snd_alias_t *var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    var = varsnd_alias_t;
+    for (i = 0; i < count; ++i)
+    {
+        varsnd_alias_t = var;
+        Mark_snd_alias_t();
+        ++var;
+    }
+}
+
+void __cdecl Mark_snd_alias_list_t()
+{
+    if (varsnd_alias_list_t->head)
+    {
+        varsnd_alias_t = varsnd_alias_list_t->head;
+        Mark_snd_alias_tArray(varsnd_alias_list_t->count);
+    }
+}
+
+void __cdecl Mark_snd_alias_list_ptr()
+{
+    if (*varsnd_alias_list_ptr)
+    {
+        varsnd_alias_list_t = *varsnd_alias_list_ptr;
+        Mark_snd_alias_list_Asset(varsnd_alias_list_t);
+        Mark_snd_alias_list_t();
+    }
+}
+
+void __cdecl Mark_snd_alias_list_name()
+{
+    Mark_SndAliasCustom(varsnd_alias_list_name);
+}
+
+void __cdecl Mark_snd_alias_list_nameArray(int count)
+{
+    snd_alias_list_t **var; // [esp+0h] [ebp-8h]
+    int i;                  // [esp+4h] [ebp-4h]
+
+    var = varsnd_alias_list_name;
+    for (i = 0; i < count; ++i)
+    {
+        varsnd_alias_list_name = var;
+        Mark_snd_alias_list_name();
+        ++var;
+    }
+}
+
+void __cdecl Load_MaterialInfo(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialInfo, sizeof(MaterialInfo));
+    varXString = &varMaterialInfo->name;
+    Load_XString(0);
+}
+
+void __cdecl Load_GfxWorldVertex0Array(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxWorldVertex0, DB_StreamArraySize(sizeof(GfxWorldVertex), count));
+}
+
+void __cdecl Load_GfxPackedVertex0Array(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxPackedVertex0, DB_StreamArraySize(sizeof(GfxPackedVertex), count));
+}
+
+void __cdecl Load_GfxBrushModelArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxBrushModel, DB_StreamArraySize(sizeof(GfxBrushModel), count));
+}
+
+void __cdecl Load_XSurfaceCollisionLeafArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXSurfaceCollisionLeaf,
+                DB_StreamArraySize(sizeof(XSurfaceCollisionLeaf), count));
+}
+
+cbrush_t *__cdecl AllocLoad_GfxPackedVertex0()
+{
+    return (cbrush_t *)DB_AllocStreamPos(15);
+}
+
+void __cdecl Load_XSurfaceCollisionNodeArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXSurfaceCollisionNode,
+                DB_StreamArraySize(sizeof(XSurfaceCollisionNode), count));
+}
+
+void __cdecl Load_XSurfaceCollisionTree(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXSurfaceCollisionTree, sizeof(XSurfaceCollisionTree));
+    if (varXSurfaceCollisionTree->nodes)
+    {
+        varXSurfaceCollisionTree->nodes = (XSurfaceCollisionNode *)AllocLoad_GfxPackedVertex0();
+        varXSurfaceCollisionNode = varXSurfaceCollisionTree->nodes;
+        Load_XSurfaceCollisionNodeArray(1, varXSurfaceCollisionTree->nodeCount);
+    }
+    if (varXSurfaceCollisionTree->leafs)
+    {
+        varXSurfaceCollisionTree->leafs = (XSurfaceCollisionLeaf *)AllocLoad_XBlendInfo();
+        varXSurfaceCollisionLeaf = varXSurfaceCollisionTree->leafs;
+        Load_XSurfaceCollisionLeafArray(1, varXSurfaceCollisionTree->leafCount);
+    }
+}
+
+void __cdecl Load_XRigidVertList(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXRigidVertList, sizeof(XRigidVertList));
+    if (varXRigidVertList->collisionTree)
+    {
+        if (varXRigidVertList->collisionTree == (XSurfaceCollisionTree *)-1)
+        {
+            varXRigidVertList->collisionTree = (XSurfaceCollisionTree *)AllocLoad_FxElemVisStateSample();
+            varXSurfaceCollisionTree = varXRigidVertList->collisionTree;
+            Load_XSurfaceCollisionTree(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXRigidVertList->collisionTree);
+        }
+    }
+}
+
+void __cdecl Load_XRigidVertListArray(bool atStreamStart, int count)
+{
+    XRigidVertList *var; // [esp+0h] [ebp-8h]
+    int i;               // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXRigidVertList, DB_StreamArraySize(sizeof(XRigidVertList), count));
+    var = varXRigidVertList;
+    for (i = 0; i < count; ++i)
+    {
+        varXRigidVertList = var;
+        Load_XRigidVertList(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_GfxVertexBuffer(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxVertexBuffer, sizeof(IDirect3DVertexBuffer9 *));
+}
+
+void __cdecl Load_XBlendInfoArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXBlendInfo, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_XSurfaceVertexInfo(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXSurfaceVertexInfo, sizeof(XSurfaceVertexInfo));
+    if (varXSurfaceVertexInfo->vertsBlend)
+    {
+        if (varXSurfaceVertexInfo->vertsBlend == (uint16_t *)-1)
+        {
+            varXSurfaceVertexInfo->vertsBlend = (uint16_t *)AllocLoad_XBlendInfo();
+            varXBlendInfo = varXSurfaceVertexInfo->vertsBlend;
+            Load_XBlendInfoArray(1, 7 * varXSurfaceVertexInfo->vertCount[3] + 5 * varXSurfaceVertexInfo->vertCount[2] +
+                                        3 * varXSurfaceVertexInfo->vertCount[1] + varXSurfaceVertexInfo->vertCount[0]);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXSurfaceVertexInfo->vertsBlend);
+        }
+    }
+}
+
+void __cdecl Load_r_index_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varr_index_t, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_r_index16_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varr_index16_t, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_XZoneHandle(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, varXZoneHandle, sizeof(uint8_t));
+    varbyte = varXZoneHandle;
+    Load_byte(0);
+    Load_GetCurrentZoneHandle(varXZoneHandle);
+}
+
+void __cdecl Load_XSurface(bool atStreamStart)
+{
+    DB64_LoadModelSurface(varXSurface, atStreamStart);
+}
+
+void __cdecl Load_XSurfaceArray(bool atStreamStart, int count)
+{
+    XSurface *var; // [esp+0h] [ebp-8h]
+    int i;         // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, &varXSurface->tileMode, DB_StreamArraySize(sizeof(XSurface), count));
+    var = varXSurface;
+    for (i = 0; i < count; ++i)
+    {
+        varXSurface = var;
+        Load_XSurface(0);
+        ++var;
+    }
+}
+
+
+
+void __cdecl Load_GfxRawTextureArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxRawTexture, DB_StreamArraySize(sizeof(union GfxTexture), count));
+}
+
+
+
+
+
+void __cdecl Load_GfxImagePtr(bool atStreamStart)
+{
+    DB64_LoadImageAsset((XAssetHeader *)varGfxImagePtr, atStreamStart);
+}
+
+void __cdecl Mark_GfxImagePtr()
+{
+    if (*varGfxImagePtr)
+    {
+        varGfxImage = *varGfxImagePtr;
+        Mark_GfxImageAsset(varGfxImage);
+    }
+}
+
+void __cdecl Load_water_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varwater_t, sizeof(water_t));
+    if (varwater_t->H0)
+    {
+        varwater_t->H0 = (complex_s *)AllocLoad_FxElemVisStateSample();
+        varcomplex_t = varwater_t->H0;
+        Load_complex_tArray(1, varwater_t->N * varwater_t->M);
+    }
+    if (varwater_t->wTerm)
+    {
+        varwater_t->wTerm = (float *)AllocLoad_FxElemVisStateSample();
+        varfloat = varwater_t->wTerm;
+        Load_floatArray(1, varwater_t->N * varwater_t->M);
+    }
+    varGfxImagePtr = &varwater_t->image;
+    Load_GfxImagePtr(0);
+}
+
+void __cdecl Mark_water_t()
+{
+    varGfxImagePtr = &varwater_t->image;
+    Mark_GfxImagePtr();
+}
+
+void __cdecl Load_DWORDArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDWORD, 4 * count);
+}
+
+
+
+
+
+
+
+
+
+
+
+void __cdecl Load_MaterialVertexShaderPtr(bool atStreamStart)
+{
+    DB64_LoadVertexShader(varMaterialVertexShaderPtr, atStreamStart);
+}
+
+
+
+void __cdecl Load_MaterialPixelShaderPtr(bool atStreamStart)
+{
+    DB64_LoadPixelShader(varMaterialPixelShaderPtr, atStreamStart);
+}
+
+void __cdecl Load_MaterialVertexDeclaration(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, &varMaterialVertexDeclaration->streamCount, sizeof(MaterialVertexDeclaration));
+}
+
+void __cdecl Load_MaterialArgumentCodeConst(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialArgumentCodeConst, sizeof(MaterialArgumentCodeConst));
+}
+
+void __cdecl Load_MaterialArgumentDef(bool atStreamStart)
+{
+    switch (varMaterialShaderArgument->type)
+    {
+    case 1u:
+    case 7u:
+        if (varMaterialArgumentDef->literalConst)
+        {
+            if (varMaterialArgumentDef->literalConst == (const float *)-1)
+            {
+                varMaterialArgumentDef->literalConst = (const float *)AllocLoad_FxElemVisStateSample();
+                varfloat = (float *)varMaterialArgumentDef->literalConst;
+                Load_floatArray(1, 4);
+            }
+            else
+            {
+                DB_ConvertOffsetToPointer((uintptr_t *)varMaterialArgumentDef);
+            }
+        }
+        break;
+    case 3u:
+    case 5u:
+        if (atStreamStart)
+        {
+            varMaterialArgumentCodeConst = (MaterialArgumentCodeConst *)varMaterialArgumentDef;
+            Load_MaterialArgumentCodeConst(atStreamStart);
+        }
+        break;
+    case 4u:
+        if (atStreamStart)
+        {
+            varuint = &varMaterialArgumentDef->nameHash;
+            Load_uint(atStreamStart);
+        }
+        break;
+    default:
+        if (atStreamStart)
+        {
+            varuint = &varMaterialArgumentDef->nameHash;
+            Load_uint(atStreamStart);
+        }
+        break;
+    }
+}
+
+void __cdecl Load_MaterialShaderArgument(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialShaderArgument, sizeof(MaterialShaderArgument));
+    varMaterialArgumentDef = &varMaterialShaderArgument->u;
+    Load_MaterialArgumentDef(0);
+}
+
+void __cdecl Load_MaterialShaderArgumentArray(bool atStreamStart, int count)
+{
+    MaterialShaderArgument *var; // [esp+0h] [ebp-8h]
+    int i;                       // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialShaderArgument,
+                DB_StreamArraySize(sizeof(MaterialShaderArgument), count));
+    var = varMaterialShaderArgument;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialShaderArgument = var;
+        Load_MaterialShaderArgument(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_GfxStateBitsArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxStateBits, DB_StreamArraySize(sizeof(GfxStateBits), count));
+}
+
+void __cdecl Load_MaterialPass(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (byte *)varMaterialPass, sizeof(MaterialPass));
+    if (varMaterialPass->vertexDecl)
+    {
+        if (varMaterialPass->vertexDecl == (MaterialVertexDeclaration *)-1)
+        {
+            varMaterialPass->vertexDecl = (MaterialVertexDeclaration *)AllocLoad_FxElemVisStateSample();
+            varMaterialVertexDeclaration = varMaterialPass->vertexDecl;
+            Load_MaterialVertexDeclaration(1);
+            Load_BuildVertexDecl(&varMaterialPass->vertexDecl);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varMaterialPass);
+        }
+    }
+    varMaterialVertexShaderPtr = &varMaterialPass->vertexShader;
+    Load_MaterialVertexShaderPtr(0);
+    varMaterialPixelShaderPtr = &varMaterialPass->pixelShader;
+    Load_MaterialPixelShaderPtr(0);
+    if (varMaterialPass->args)
+    {
+        varMaterialPass->args = (MaterialShaderArgument *)AllocLoad_FxElemVisStateSample();
+        varMaterialShaderArgument = varMaterialPass->args;
+        Load_MaterialShaderArgumentArray(1, varMaterialPass->stableArgCount + varMaterialPass->perObjArgCount +
+                                                varMaterialPass->perPrimArgCount);
+    }
+}
+
+void __cdecl Load_MaterialPassArray(bool atStreamStart, int count)
+{
+    MaterialPass *var; // [esp+0h] [ebp-8h]
+    int i;             // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialPass, DB_StreamArraySize(sizeof(MaterialPass), count));
+    var = (MaterialPass *)varMaterialPass;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialPass = (MaterialPass *)&var->vertexDecl;
+        Load_MaterialPass(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_MaterialTechnique(bool atStreamStart)
+{
+    iassert(atStreamStart);
+    Load_Stream(1, (uint8_t *)varMaterialTechnique, offsetof(MaterialTechnique, passArray));
+    iassert(DB_GetStreamPos() == reinterpret_cast<byte *>(varMaterialTechnique->passArray));
+    varMaterialPass = (MaterialPass *)&varMaterialTechnique->passArray[0].vertexDecl;
+    Load_MaterialPassArray(1, varMaterialTechnique->passCount); // 0x2990
+    varXString = &varMaterialTechnique->name;
+    Load_XString(0); // 0x29A1
+}
+
+void __cdecl Load_MaterialTextureDefInfo(bool atStreamStart)
+{
+    if (varMaterialTextureDef->semantic == TS_WATER_MAP)
+    {
+        if (*varMaterialTextureDefInfo)
+        {
+            if (*varMaterialTextureDefInfo == (water_t *)-1)
+            {
+                *varMaterialTextureDefInfo = (water_t *)AllocLoad_FxElemVisStateSample();
+                varwater_t = *varMaterialTextureDefInfo;
+                Load_water_t(1);
+                Load_PicmipWater(varMaterialTextureDefInfo);
+            }
+            else
+            {
+                DB_ConvertOffsetToPointer((uintptr_t *)varMaterialTextureDefInfo);
+            }
+        }
+    }
+    else
+    {
+        varGfxImagePtr = (GfxImage **)varMaterialTextureDefInfo;
+        Load_GfxImagePtr(atStreamStart);
+    }
+}
+
+void __cdecl Load_MaterialTextureDef(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialTextureDef, sizeof(MaterialTextureDef));
+    varMaterialTextureDefInfo = (water_t **)&varMaterialTextureDef->u;
+    Load_MaterialTextureDefInfo(0);
+}
+
+void __cdecl Load_MaterialTextureDefArray(bool atStreamStart, int count)
+{
+    MaterialTextureDef *var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialTextureDef, DB_StreamArraySize(sizeof(MaterialTextureDef), count));
+    var = varMaterialTextureDef;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialTextureDef = var;
+        Load_MaterialTextureDef(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_MaterialConstantDefArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialConstantDef,
+                DB_StreamArraySize(sizeof(MaterialConstantDef), count));
+}
+
+void __cdecl Load_MaterialTechniquePtr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialTechniquePtr, sizeof(MaterialTechnique *));
+    if (*varMaterialTechniquePtr)
+    {
+        if (*varMaterialTechniquePtr == (MaterialTechnique *)-1)
+        {
+            *varMaterialTechniquePtr = (MaterialTechnique *)AllocLoad_FxElemVisStateSample();
+            varMaterialTechnique = *varMaterialTechniquePtr;
+            Load_MaterialTechnique(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varMaterialTechniquePtr);
+        }
+    }
+}
+
+void __cdecl Load_MaterialTechniquePtrArray(bool atStreamStart, int count)
+{
+    MaterialTechnique **var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialTechniquePtr,
+                DB_StreamArraySize(sizeof(MaterialTechnique *), count));
+    var = varMaterialTechniquePtr;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialTechniquePtr = var;
+        Load_MaterialTechniquePtr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_MaterialTechniqueSet(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialTechniqueSet, sizeof(MaterialTechniqueSet));
+    DB_PushStreamPos(4);
+    varXString = &varMaterialTechniqueSet->name;
+    Load_XString(0);
+    varMaterialTechniquePtr = varMaterialTechniqueSet->techniques;
+    Load_MaterialTechniquePtrArray(0, TECHNIQUE_COUNT);
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart)
+{
+    DB64_LoadTechniqueSet((XAssetHeader *)varMaterialTechniqueSetPtr, atStreamStart);
+}
+
+void __cdecl Load_Material(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterial, sizeof(Material));
+    DB_PushStreamPos(4);
+    varMaterialInfo = &varMaterial->info;
+    Load_MaterialInfo(0);
+    varMaterialTechniqueSetPtr = &varMaterial->techniqueSet;
+    Load_MaterialTechniqueSetPtr(0);
+    if (varMaterial->textureTable)
+    {
+        if (varMaterial->textureTable == (MaterialTextureDef *)-1)
+        {
+            varMaterial->textureTable = (MaterialTextureDef *)AllocLoad_FxElemVisStateSample();
+            varMaterialTextureDef = varMaterial->textureTable;
+            Load_MaterialTextureDefArray(1, varMaterial->textureCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varMaterial->textureTable);
+        }
+    }
+    if (varMaterial->constantTable)
+    {
+        if (varMaterial->constantTable == (MaterialConstantDef *)-1)
+        {
+            varMaterial->constantTable = (MaterialConstantDef *)AllocLoad_GfxPackedVertex0();
+            varMaterialConstantDef = varMaterial->constantTable;
+            Load_MaterialConstantDefArray(1, varMaterial->constantCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varMaterial->constantTable);
+        }
+    }
+    if (varMaterial->stateBitsTable)
+    {
+        if (varMaterial->stateBitsTable == (GfxStateBits *)-1)
+        {
+            varMaterial->stateBitsTable = (GfxStateBits *)AllocLoad_FxElemVisStateSample();
+            varGfxStateBits = varMaterial->stateBitsTable;
+            Load_GfxStateBitsArray(1, varMaterial->stateBitsCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varMaterial->stateBitsTable);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_MaterialHandle(bool atStreamStart)
+{
+    DB64_LoadMaterialAsset((XAssetHeader *)varMaterialHandle, atStreamStart);
+}
+
+void __cdecl Load_MaterialHandleArray(bool atStreamStart, int count)
+{
+    Material **var; // [esp+0h] [ebp-8h]
+    int i;          // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialHandle, DB_StreamArraySize(sizeof(Material *), count));
+    var = varMaterialHandle;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialHandle = var;
+        Load_MaterialHandle(0);
+        ++var;
+    }
+}
+
+void __cdecl Mark_MaterialTextureDefInfo()
+{
+    if (varMaterialTextureDef->semantic == TS_WATER_MAP)
+    {
+        if (varMaterialTextureDefInfo)
+        {
+            varwater_t = *(water_t **)varMaterialTextureDefInfo;
+            Mark_water_t();
+        }
+    }
+    else
+    {
+        varGfxImagePtr = (GfxImage **)varMaterialTextureDefInfo;
+        Mark_GfxImagePtr();
+    }
+}
+
+void __cdecl Mark_MaterialTextureDef()
+{
+    varMaterialTextureDefInfo = (water_t **)&varMaterialTextureDef->u;
+    Mark_MaterialTextureDefInfo();
+}
+
+void __cdecl Mark_MaterialTextureDefArray(int count)
+{
+    MaterialTextureDef *var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    var = varMaterialTextureDef;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialTextureDef = var;
+        Mark_MaterialTextureDef();
+        ++var;
+    }
+}
+
+void __cdecl Mark_MaterialTechniqueSetPtr()
+{
+    if (*varMaterialTechniqueSetPtr)
+    {
+        varMaterialTechniqueSet = *varMaterialTechniqueSetPtr;
+        Mark_MaterialTechniqueSetAsset(varMaterialTechniqueSet);
+    }
+}
+
+void __cdecl Mark_Material()
+{
+    varMaterialTechniqueSetPtr = &varMaterial->techniqueSet;
+    Mark_MaterialTechniqueSetPtr();
+    if (varMaterial->textureTable)
+    {
+        varMaterialTextureDef = varMaterial->textureTable;
+        Mark_MaterialTextureDefArray(varMaterial->textureCount);
+    }
+}
+
+void __cdecl Mark_MaterialHandle()
+{
+    if (*varMaterialHandle)
+    {
+        varMaterial = *varMaterialHandle;
+        Mark_MaterialAsset(varMaterial);
+        Mark_Material();
+    }
+}
+
+void __cdecl Mark_MaterialHandleArray(int count)
+{
+    Material **var; // [esp+0h] [ebp-8h]
+    int i;          // [esp+4h] [ebp-4h]
+
+    var = varMaterialHandle;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialHandle = var;
+        Mark_MaterialHandle();
+        ++var;
+    }
+}
+
+
+
+
+
+void __cdecl Load_GfxLightDefPtr(bool atStreamStart)
+{
+    DB64_LoadLightDefAsset((XAssetHeader *)varGfxLightDefPtr, atStreamStart);
+}
+
+void __cdecl Load_GfxLight(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, &varGfxLight->type, sizeof(GfxLight));
+    varGfxLightDefPtr = &varGfxLight->def;
+    Load_GfxLightDefPtr(0);
+}
+
+void __cdecl Mark_GfxLightImage()
+{
+    varGfxImagePtr = &varGfxLightImage->image;
+    Mark_GfxImagePtr();
+}
+
+void __cdecl Mark_GfxLightDef()
+{
+    varGfxLightImage = &varGfxLightDef->attenuation;
+    Mark_GfxLightImage();
+}
+
+void __cdecl Mark_GfxLightDefPtr()
+{
+    if (*varGfxLightDefPtr)
+    {
+        varGfxLightDef = *varGfxLightDefPtr;
+        Mark_LightDefAsset(varGfxLightDef);
+        Mark_GfxLightDef();
+    }
+}
+
+void __cdecl Mark_GfxLight()
+{
+    varGfxLightDefPtr = &varGfxLight->def;
+    Mark_GfxLightDefPtr();
+}
+
+void __cdecl Load_GfxSurface(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxSurface, sizeof(GfxSurface));
+    varMaterialHandle = &varGfxSurface->material;
+    Load_MaterialHandle(0);
+}
+
+void __cdecl Load_GfxSurfaceArray(bool atStreamStart, int count)
+{
+    GfxSurface *var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varGfxSurface, DB_StreamArraySize(sizeof(GfxSurface), count));
+    var = varGfxSurface;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxSurface = var;
+        Load_GfxSurface(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_GfxLightmapArray(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxLightmapArray, sizeof(GfxLightmapArray));
+    varGfxImagePtr = &varGfxLightmapArray->primary;
+    Load_GfxImagePtr(0);
+    varGfxImagePtr = &varGfxLightmapArray->secondary;
+    Load_GfxImagePtr(0);
+}
+
+void __cdecl Load_GfxLightmapArrayArray(bool atStreamStart, int count)
+{
+    GfxLightmapArray *var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varGfxLightmapArray, DB_StreamArraySize(sizeof(GfxLightmapArray), count));
+    var = varGfxLightmapArray;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxLightmapArray = var;
+        Load_GfxLightmapArray(0);
+        ++var;
+    }
+}
+
+void __cdecl Mark_GfxSurface()
+{
+    varMaterialHandle = &varGfxSurface->material;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Mark_GfxSurfaceArray(int count)
+{
+    GfxSurface *var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    var = varGfxSurface;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxSurface = var;
+        Mark_GfxSurface();
+        ++var;
+    }
+}
+
+void __cdecl Mark_GfxLightmapArray()
+{
+    varGfxImagePtr = &varGfxLightmapArray->primary;
+    Mark_GfxImagePtr();
+    varGfxImagePtr = &varGfxLightmapArray->secondary;
+    Mark_GfxImagePtr();
+}
+
+void __cdecl Mark_GfxLightmapArrayArray(int count)
+{
+    GfxLightmapArray *var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    var = varGfxLightmapArray;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxLightmapArray = var;
+        Mark_GfxLightmapArray();
+        ++var;
+    }
+}
+
+
+
+void __cdecl Load_PhysPresetPtr(bool atStreamStart)
+{
+    DB64_LoadPresetAsset(ASSET_TYPE_PHYSPRESET, (XAssetHeader *)varPhysPresetPtr, atStreamStart);
+}
+
+void __cdecl Mark_PhysPresetPtr()
+{
+    if (*varPhysPresetPtr)
+    {
+        varPhysPreset = *varPhysPresetPtr;
+        Mark_PhysPresetAsset(varPhysPreset);
+    }
+}
+
+void __cdecl Load_cplane_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcplane_t, sizeof(cplane_s));
+}
+
+void __cdecl Load_cplane_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcplane_t, DB_StreamArraySize(sizeof(cplane_s), count));
+}
+
+void __cdecl Load_cbrushside_t(bool atStreamStart)
+{
+    DB64_LoadBrushSide(varcbrushside_t, atStreamStart);
+}
+
+XAsset *__cdecl AllocLoad_FxElemVisStateSample()
+{
+    return (XAsset *)DB_AllocStreamPos(15);
+}
+
+void __cdecl Load_cbrushside_tArray(bool atStreamStart, int count)
+{
+    cbrushside_t *var; // [esp+0h] [ebp-8h]
+    int i;             // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varcbrushside_t, DB_StreamArraySize(sizeof(cbrushside_t), count));
+    var = varcbrushside_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcbrushside_t = var;
+        Load_cbrushside_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_cbrushedge_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, varcbrushedge_t, sizeof(byte));
+}
+
+void __cdecl Load_cbrushedge_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, varcbrushedge_t, count);
+}
+
+void __cdecl Load_XModelCollTriArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (byte *)varXModelCollTri, DB_StreamArraySize(sizeof(XModelCollTri_s), count));
+}
+
+void __cdecl Load_XModelCollSurf(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXModelCollSurf, sizeof(XModelCollSurf_s));
+    if (varXModelCollSurf->collTris)
+    {
+        varXModelCollSurf->collTris = (XModelCollTri_s *)AllocLoad_FxElemVisStateSample();
+        varXModelCollTri = varXModelCollSurf->collTris;
+        Load_XModelCollTriArray(1, varXModelCollSurf->numCollTris);
+    }
+}
+
+void __cdecl Load_XModelCollSurfArray(bool atStreamStart, int count)
+{
+    XModelCollSurf_s *var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXModelCollSurf, DB_StreamArraySize(sizeof(XModelCollSurf_s), count));
+    var = varXModelCollSurf;
+    for (i = 0; i < count; ++i)
+    {
+        varXModelCollSurf = var;
+        Load_XModelCollSurf(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_BrushWrapper(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varBrushWrapper, sizeof(BrushWrapper));
+    if (varBrushWrapper->sides)
+    {
+        varBrushWrapper->sides = (cbrushside_t *)AllocLoad_FxElemVisStateSample();
+        varcbrushside_t = varBrushWrapper->sides;
+        Load_cbrushside_tArray(1, varBrushWrapper->numsides);
+    }
+    if (varBrushWrapper->baseAdjacentSide)
+    {
+        varBrushWrapper->baseAdjacentSide = AllocLoad_raw_byte();
+        varcbrushedge_t = varBrushWrapper->baseAdjacentSide;
+        Load_cbrushedge_tArray(1, varBrushWrapper->totalEdgeCount);
+    }
+    if (varBrushWrapper->planes)
+    {
+        if (varBrushWrapper->planes == (cplane_s *)-1)
+        {
+            varBrushWrapper->planes = (cplane_s *)AllocLoad_FxElemVisStateSample();
+            varcplane_t = varBrushWrapper->planes;
+            Load_cplane_tArray(1, varBrushWrapper->numsides);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varBrushWrapper->planes);
+        }
+    }
+}
+
+void __cdecl Load_PhysGeomInfo(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varPhysGeomInfo, sizeof(PhysGeomInfo));
+    if (varPhysGeomInfo->brush)
+    {
+        if (varPhysGeomInfo->brush == (BrushWrapper *)-1)
+        {
+            varPhysGeomInfo->brush = (BrushWrapper *)AllocLoad_FxElemVisStateSample();
+            varBrushWrapper = varPhysGeomInfo->brush;
+            Load_BrushWrapper(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varPhysGeomInfo);
+        }
+    }
+}
+
+void __cdecl Load_PhysGeomInfoArray(bool atStreamStart, int count)
+{
+    PhysGeomInfo *var; // [esp+0h] [ebp-8h]
+    int i;             // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varPhysGeomInfo, DB_StreamArraySize(sizeof(PhysGeomInfo), count));
+    var = varPhysGeomInfo;
+    for (i = 0; i < count; ++i)
+    {
+        varPhysGeomInfo = var;
+        Load_PhysGeomInfo(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_PhysGeomList(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varPhysGeomList, sizeof(PhysGeomList));
+    if (varPhysGeomList->geoms)
+    {
+        varPhysGeomList->geoms = (PhysGeomInfo *)AllocLoad_FxElemVisStateSample();
+        varPhysGeomInfo = varPhysGeomList->geoms;
+        Load_PhysGeomInfoArray(1, varPhysGeomList->count);
+    }
+}
+
+void __cdecl Load_XModel(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXModel, sizeof(XModel));
+    DB_PushStreamPos(4);
+    varXString = &varXModel->name;
+    Load_XString(0);
+    if (varXModel->boneNames)
+    {
+        if (varXModel->boneNames == (uint16_t *)-1)
+        {
+            varXModel->boneNames = (uint16_t *)AllocLoad_XBlendInfo();
+            varScriptString = varXModel->boneNames;
+            Load_ScriptStringArray(1, varXModel->numBones);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->boneNames);
+        }
+    }
+    if (varXModel->parentList)
+    {
+        if (varXModel->parentList == (uint8_t *)-1)
+        {
+            varXModel->parentList = AllocLoad_raw_byte();
+            varbyte = varXModel->parentList;
+            Load_byteArray(1, varXModel->numBones - varXModel->numRootBones);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->parentList);
+        }
+    }
+    if (varXModel->quats)
+    {
+        if (varXModel->quats == (__int16 *)-1)
+        {
+            varXModel->quats = (__int16 *)AllocLoad_XBlendInfo();
+            varshort = varXModel->quats;
+            Load_shortArray(1, 4 * (varXModel->numBones - varXModel->numRootBones));
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->quats);
+        }
+    }
+    if (varXModel->trans)
+    {
+        if (varXModel->trans == (float *)-1)
+        {
+            varXModel->trans = (float *)AllocLoad_FxElemVisStateSample();
+            varfloat = varXModel->trans;
+            Load_floatArray(1, 4 * (varXModel->numBones - varXModel->numRootBones));
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->trans);
+        }
+    }
+    if (varXModel->partClassification)
+    {
+        if (varXModel->partClassification == (uint8_t *)-1)
+        {
+            varXModel->partClassification = AllocLoad_raw_byte();
+            varbyte = varXModel->partClassification;
+            Load_byteArray(1, varXModel->numBones);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->partClassification);
+        }
+    }
+    if (varXModel->baseMat)
+    {
+        if (varXModel->baseMat == (DObjAnimMat *)-1)
+        {
+            varXModel->baseMat = (DObjAnimMat *)AllocLoad_FxElemVisStateSample();
+            varDObjAnimMat = varXModel->baseMat;
+            Load_DObjAnimMatArray(1, varXModel->numBones);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->baseMat);
+        }
+    }
+    if (varXModel->surfs)
+    {
+        varXModel->surfs = (XSurface *)AllocLoad_FxElemVisStateSample();
+        varXSurface = varXModel->surfs;
+        Load_XSurfaceArray(1, varXModel->numsurfs);
+    }
+    if (varXModel->materialHandles)
+    {
+        varXModel->materialHandles = (Material **)AllocLoad_FxElemVisStateSample();
+        varMaterialHandle = varXModel->materialHandles;
+        Load_MaterialHandleArray(1, varXModel->numsurfs);
+    }
+    if (varXModel->collSurfs)
+    {
+        varXModel->collSurfs = (XModelCollSurf_s *)AllocLoad_FxElemVisStateSample();
+        varXModelCollSurf = varXModel->collSurfs;
+        Load_XModelCollSurfArray(1, varXModel->numCollSurfs);
+    }
+    if (varXModel->boneInfo)
+    {
+        varXModel->boneInfo = (XBoneInfo *)AllocLoad_FxElemVisStateSample();
+        varXBoneInfo = varXModel->boneInfo;
+        Load_XBoneInfoArray(1, varXModel->numBones);
+    }
+    varPhysPresetPtr = &varXModel->physPreset;
+    Load_PhysPresetPtr(0);
+    if (varXModel->physGeoms)
+    {
+        if (varXModel->physGeoms == (PhysGeomList *)-1)
+        {
+            varXModel->physGeoms = (PhysGeomList *)AllocLoad_FxElemVisStateSample();
+            varPhysGeomList = varXModel->physGeoms;
+            Load_PhysGeomList(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varXModel->physGeoms);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_XModelPtr(bool atStreamStart)
+{
+    DB64_LoadModelAsset((XAssetHeader *)varXModelPtr, atStreamStart);
+}
+
+void __cdecl Load_XModelPtrArray(bool atStreamStart, int count)
+{
+    XModel **var; // [esp+0h] [ebp-8h]
+    int i;        // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXModelPtr, DB_StreamArraySize(sizeof(XModel *), count));
+    var = varXModelPtr;
+    for (i = 0; i < count; ++i)
+    {
+        varXModelPtr = var;
+        Load_XModelPtr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_XModelPiece(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXModelPiece, sizeof(XModelPiece));
+    varXModelPtr = &varXModelPiece->model;
+    Load_XModelPtr(0);
+}
+
+void __cdecl Load_XModelPieceArray(bool atStreamStart, int count)
+{
+    XModelPiece *var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varXModelPiece, DB_StreamArraySize(sizeof(XModelPiece), count));
+    var = varXModelPiece;
+    for (i = 0; i < count; ++i)
+    {
+        varXModelPiece = var;
+        Load_XModelPiece(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_XModelPieces(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXModelPieces, sizeof(XModelPieces));
+    varXString = &varXModelPieces->name;
+    Load_XString(0);
+    if (varXModelPieces->pieces)
+    {
+        varXModelPieces->pieces = (XModelPiece *)AllocLoad_FxElemVisStateSample();
+        varXModelPiece = varXModelPieces->pieces;
+        Load_XModelPieceArray(1, varXModelPieces->numpieces);
+    }
+}
+
+void __cdecl Load_XModelPiecesPtr(bool atStreamStart)
+{
+    DB64_LoadModelPieces((XAssetHeader *)varXModelPiecesPtr, atStreamStart);
+}
+
+void __cdecl Mark_XModel()
+{
+    if (varXModel->boneNames)
+    {
+        varScriptString = varXModel->boneNames;
+        Mark_ScriptStringArray(varXModel->numBones);
+    }
+    if (varXModel->materialHandles)
+    {
+        varMaterialHandle = varXModel->materialHandles;
+        Mark_MaterialHandleArray(varXModel->numsurfs);
+    }
+    varPhysPresetPtr = &varXModel->physPreset;
+    Mark_PhysPresetPtr();
+}
+
+void __cdecl Mark_XModelPtr()
+{
+    if (*varXModelPtr)
+    {
+        varXModel = *varXModelPtr;
+        Mark_XModelAsset(varXModel);
+        Mark_XModel();
+    }
+}
+
+void __cdecl Mark_XModelPtrArray(int count)
+{
+    XModel **var; // [esp+0h] [ebp-8h]
+    int i;        // [esp+4h] [ebp-4h]
+
+    var = varXModelPtr;
+    for (i = 0; i < count; ++i)
+    {
+        varXModelPtr = var;
+        Mark_XModelPtr();
+        ++var;
+    }
+}
+
+void __cdecl Mark_XModelPiece()
+{
+    varXModelPtr = &varXModelPiece->model;
+    Mark_XModelPtr();
+}
+
+void __cdecl Mark_XModelPieceArray(int count)
+{
+    XModelPiece *var; // [esp+0h] [ebp-8h]
+    int i;            // [esp+4h] [ebp-4h]
+
+    var = varXModelPiece;
+    for (i = 0; i < count; ++i)
+    {
+        varXModelPiece = var;
+        Mark_XModelPiece();
+        ++var;
+    }
+}
+
+void __cdecl Mark_XModelPieces()
+{
+    if (varXModelPieces->pieces)
+    {
+        varXModelPiece = varXModelPieces->pieces;
+        Mark_XModelPieceArray(varXModelPieces->numpieces);
+    }
+}
+
+void __cdecl Mark_XModelPiecesPtr()
+{
+    if (*varXModelPiecesPtr)
+    {
+        Mark_XModelPiecesAsset(*varXModelPiecesPtr);
+        varXModelPieces = *varXModelPiecesPtr;
+        Mark_XModelPieces();
+    }
+}
+
+void __cdecl Load_pathlink_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathlink_t, DB_StreamArraySize(sizeof(pathlink_s), count));
+}
+
+void __cdecl Load_pathnode_constant_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_constant_t, sizeof(pathnode_constant_t));
+    varScriptString = &varpathnode_constant_t->targetname;
+    Load_ScriptString(0);
+    varScriptString = &varpathnode_constant_t->script_linkName;
+    Load_ScriptString(0);
+    varScriptString = &varpathnode_constant_t->script_noteworthy;
+    Load_ScriptString(0);
+    varScriptString = &varpathnode_constant_t->target;
+    Load_ScriptString(0);
+    varScriptString = &varpathnode_constant_t->animscript;
+    Load_ScriptString(0);
+    if (varpathnode_constant_t->Links)
+    {
+        varpathnode_constant_t->Links = (pathlink_s *)AllocLoad_FxElemVisStateSample();
+        varpathlink_t = varpathnode_constant_t->Links;
+        Load_pathlink_tArray(1, varpathnode_constant_t->totalLinkCount);
+    }
+}
+
+void __cdecl Load_pathnode_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_t, sizeof(pathnode_t));
+    varpathnode_constant_t = &varpathnode_t->constant;
+    Load_pathnode_constant_t(0);
+}
+
+void __cdecl Load_pathnode_tArray(bool atStreamStart, int count)
+{
+    pathnode_t *var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_t, DB_StreamArraySize(sizeof(pathnode_t), count));
+    var = varpathnode_t;
+    for (i = 0; i < count; ++i)
+    {
+        varpathnode_t = var;
+        Load_pathnode_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_pathbasenode_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathbasenode_t, DB_StreamArraySize(sizeof(pathbasenode_t), count));
+}
+
+void __cdecl Load_pathnode_tree_nodes_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_tree_nodes_t, sizeof(pathnode_tree_nodes_t));
+    if (varpathnode_tree_nodes_t->nodes)
+    {
+        varpathnode_tree_nodes_t->nodes = (uint16_t *)AllocLoad_XBlendInfo();
+        varushort = varpathnode_tree_nodes_t->nodes;
+        Load_ushortArray(1, varpathnode_tree_nodes_t->nodeCount);
+    }
+}
+
+void __cdecl Load_pathnode_tree_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_tree_ptr, sizeof(pathnode_tree_t *));
+    if (*varpathnode_tree_ptr)
+    {
+        if (*varpathnode_tree_ptr == (pathnode_tree_t *)-1)
+        {
+            *varpathnode_tree_ptr = (pathnode_tree_t *)AllocLoad_FxElemVisStateSample();
+            varpathnode_tree_t = *varpathnode_tree_ptr;
+            Load_pathnode_tree_t(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varpathnode_tree_ptr);
+        }
+    }
+}
+
+void __cdecl Load_pathnode_tree_ptrArray(bool atStreamStart, int count)
+{
+    pathnode_tree_t **var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_tree_ptr, DB_StreamArraySize(sizeof(pathnode_tree_t *), count));
+    var = varpathnode_tree_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varpathnode_tree_ptr = var;
+        Load_pathnode_tree_ptr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_pathnode_tree_info_t(bool atStreamStart)
+{
+    if (varpathnode_tree_t->axis < 0)
+    {
+        varpathnode_tree_nodes_t = (pathnode_tree_nodes_t *)varpathnode_tree_info_t;
+        Load_pathnode_tree_nodes_t(atStreamStart);
+    }
+    else
+    {
+        varpathnode_tree_ptr = (pathnode_tree_t **)varpathnode_tree_info_t;
+        Load_pathnode_tree_ptrArray(atStreamStart, 2);
+    }
+}
+
+void __cdecl Load_pathnode_tree_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_tree_t, sizeof(pathnode_tree_t));
+    varpathnode_tree_info_t = &varpathnode_tree_t->u;
+    Load_pathnode_tree_info_t(0);
+}
+
+void __cdecl Load_pathnode_tree_tArray(bool atStreamStart, int count)
+{
+    pathnode_tree_t *var; // [esp+0h] [ebp-8h]
+    int i;                // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varpathnode_tree_t, DB_StreamArraySize(sizeof(pathnode_tree_t), count));
+    var = varpathnode_tree_t;
+    for (i = 0; i < count; ++i)
+    {
+        varpathnode_tree_t = var;
+        Load_pathnode_tree_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Mark_pathnode_constant_t()
+{
+    varScriptString = &varpathnode_constant_t->targetname;
+    Mark_ScriptString();
+    varScriptString = &varpathnode_constant_t->script_linkName;
+    Mark_ScriptString();
+    varScriptString = &varpathnode_constant_t->script_noteworthy;
+    Mark_ScriptString();
+    varScriptString = &varpathnode_constant_t->target;
+    Mark_ScriptString();
+    varScriptString = &varpathnode_constant_t->animscript;
+    Mark_ScriptString();
+}
+
+void __cdecl Mark_pathnode_t()
+{
+    varpathnode_constant_t = &varpathnode_t->constant;
+    Mark_pathnode_constant_t();
+}
+
+void __cdecl Mark_pathnode_tArray(int count)
+{
+    pathnode_t *var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    var = varpathnode_t;
+    for (i = 0; i < count; ++i)
+    {
+        varpathnode_t = var;
+        Mark_pathnode_t();
+        ++var;
+    }
+}
+
+void __cdecl Load_PathData(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varPathData, sizeof(PathData));
+    if (varPathData->nodes)
+    {
+        varPathData->nodes = (pathnode_t *)AllocLoad_FxElemVisStateSample();
+        varpathnode_t = varPathData->nodes;
+        Load_pathnode_tArray(1, varPathData->nodeCount);
+    }
+    DB_PushStreamPos(1);
+    if (varPathData->basenodes)
+    {
+        varPathData->basenodes = (pathbasenode_t *)AllocLoad_GfxPackedVertex0();
+        varpathbasenode_t = varPathData->basenodes;
+        Load_pathbasenode_tArray(1, varPathData->nodeCount);
+    }
+    DB_PopStreamPos();
+    if (varPathData->chainNodeForNode)
+    {
+        varPathData->chainNodeForNode = (uint16_t *)AllocLoad_XBlendInfo();
+        varUnsignedShort = varPathData->chainNodeForNode;
+        Load_UnsignedShortArray(1, varPathData->nodeCount);
+    }
+    if (varPathData->nodeForChainNode)
+    {
+        varPathData->nodeForChainNode = (uint16_t *)AllocLoad_XBlendInfo();
+        varUnsignedShort = varPathData->nodeForChainNode;
+        Load_UnsignedShortArray(1, varPathData->nodeCount);
+    }
+    if (varPathData->pathVis)
+    {
+        varPathData->pathVis = AllocLoad_raw_byte();
+        varbyte = varPathData->pathVis;
+        Load_byteArray(1, varPathData->visBytes);
+    }
+    if (varPathData->nodeTree)
+    {
+        varPathData->nodeTree = (pathnode_tree_t *)AllocLoad_FxElemVisStateSample();
+        varpathnode_tree_t = varPathData->nodeTree;
+        Load_pathnode_tree_tArray(1, varPathData->nodeTreeCount);
+    }
+}
+
+void __cdecl Load_GameWorldSp(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGameWorldSp, sizeof(GameWorldSp));
+    DB_PushStreamPos(4);
+    varXString = &varGameWorldSp->name;
+    Load_XString(0);
+    varPathData = &varGameWorldSp->path;
+    Load_PathData(0);
+    DB_PopStreamPos();
+}
+
+
+
+void __cdecl Load_GameWorldSpPtr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGameWorldSpPtr, sizeof(GameWorldSp *));
+    if (DB64_LoadExternalAsset(ASSET_TYPE_GAMEWORLD_SP, (XAssetHeader *)varGameWorldSpPtr))
+    {
+        return;
+    }
+    DB_PushStreamPos(0);
+    const uintptr_t token = (uintptr_t)*varGameWorldSpPtr;
+    if (token == UINTPTR_MAX || token == UINTPTR_MAX - 1)
+    {
+        *varGameWorldSpPtr = (GameWorldSp *)DB_AllocStreamPos(15);
+        varGameWorldSp = *varGameWorldSpPtr;
+        const void **inserted = token == UINTPTR_MAX - 1 ? DB_InsertPointer() : NULL;
+        Load_GameWorldSp(true);
+        Load_GameWorldSpAsset((XAssetHeader *)varGameWorldSpPtr);
+        if (inserted)
+        {
+            *inserted = *varGameWorldSpPtr;
+        }
+    }
+    else if (token)
+    {
+        DB_ConvertOffsetToAlias((uintptr_t *)varGameWorldSpPtr);
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_GameWorldMpPtr(bool atStreamStart)
+{
+    DB64_LoadWorldAsset(ASSET_TYPE_GAMEWORLD_MP, (XAssetHeader *)varGameWorldMpPtr, atStreamStart);
+}
+
+void __cdecl Mark_PathData()
+{
+    if (varPathData->nodes)
+    {
+        varpathnode_t = varPathData->nodes;
+        Mark_pathnode_tArray(varPathData->nodeCount);
+    }
+}
+
+void __cdecl Mark_GameWorldSp()
+{
+    varPathData = &varGameWorldSp->path;
+    Mark_PathData();
+}
+
+void __cdecl Mark_GameWorldSpPtr()
+{
+    if (*varGameWorldSpPtr)
+    {
+        varGameWorldSp = *varGameWorldSpPtr;
+        Mark_GameWorldSpAsset(varGameWorldSp);
+        Mark_GameWorldSp();
+    }
+}
+
+void __cdecl Mark_GameWorldMpPtr()
+{
+    if (*varGameWorldMpPtr)
+    {
+        varGameWorldMp = *varGameWorldMpPtr;
+        Mark_GameWorldMpAsset(varGameWorldMp);
+    }
+}
+
+void __cdecl Load_FxEffectDefHandle(bool atStreamStart)
+{
+    DB64_LoadEffectAsset((XAssetHeader *)varFxEffectDefHandle, atStreamStart);
+}
+
+void __cdecl Load_FxEffectDefHandleArray(bool atStreamStart, int count)
+{
+    const FxEffectDef **var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varFxEffectDefHandle, DB_StreamArraySize(sizeof(FxEffectDef const *), count));
+    var = varFxEffectDefHandle;
+    for (i = 0; i < count; ++i)
+    {
+        varFxEffectDefHandle = var;
+        Load_FxEffectDefHandle(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_FxEffectDefRef(bool atStreamStart)
+{
+    varXString = (const char **)varFxEffectDefRef;
+    Load_XString(atStreamStart);
+    DB64_DeferEffectReference(varFxEffectDefRef);
+}
+
+void __cdecl Load_FxElemMarkVisuals(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemMarkVisuals, sizeof(FxElemMarkVisuals));
+    varMaterialHandle = (Material **)varFxElemMarkVisuals;
+    Load_MaterialHandleArray(0, 2);
+}
+
+void __cdecl Load_FxElemMarkVisualsArray(bool atStreamStart, int count)
+{
+    FxElemMarkVisuals *var; // [esp+0h] [ebp-8h]
+    int i;                  // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemMarkVisuals, DB_StreamArraySize(sizeof(FxElemMarkVisuals), count));
+    var = varFxElemMarkVisuals;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemMarkVisuals = var;
+        Load_FxElemMarkVisuals(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_FxElemVisuals(bool atStreamStart)
+{
+    switch (varFxElemDef->elemType)
+    {
+    case 5u:
+        varXModelPtr = (XModel **)varFxElemVisuals;
+        Load_XModelPtr(atStreamStart);
+        break;
+    case 0xAu:
+        varFxEffectDefRef = (FxEffectDefRef *)varFxElemVisuals;
+        Load_FxEffectDefRef(atStreamStart);
+        break;
+    case 8u:
+        varXString = (const char **)varFxElemVisuals;
+        Load_XString(atStreamStart);
+        break;
+    default:
+        if (varFxElemDef->elemType != 6 && varFxElemDef->elemType != 7)
+        {
+            varMaterialHandle = (Material **)varFxElemVisuals;
+            Load_MaterialHandle(atStreamStart);
+        }
+        break;
+    }
+}
+
+void __cdecl Load_FxElemVisualsArray(bool atStreamStart, int count)
+{
+    FxElemVisuals *var; // [esp+0h] [ebp-8h]
+    int i;              // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemVisuals, DB_StreamArraySize(sizeof(union FxElemVisuals), count));
+    var = varFxElemVisuals;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemVisuals = var;
+        Load_FxElemVisuals(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_FxElemVisStateSampleArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, varFxElemVisStateSample->base.color,
+                DB_StreamArraySize(sizeof(FxElemVisStateSample), count));
+}
+
+void __cdecl Load_FxElemVelStateSampleArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemVelStateSample,
+                DB_StreamArraySize(sizeof(FxElemVelStateSample), count));
+}
+
+void __cdecl Load_FxElemDefVisuals(bool atStreamStart)
+{
+    if (varFxElemDef->elemType == 9)
+    {
+        if ((uintptr_t)varFxElemDefVisuals->markArray == UINTPTR_MAX)
+        {
+            varFxElemDefVisuals->markArray = (FxElemMarkVisuals *)DB_AllocStreamPos(15);
+            varFxElemMarkVisuals = varFxElemDefVisuals->markArray;
+            Load_FxElemMarkVisualsArray(true, varFxElemDef->visualCount);
+        }
+        else if (varFxElemDefVisuals->markArray)
+        {
+            DB64_ConvertOffsetRange((uintptr_t *)&varFxElemDefVisuals->markArray,
+                                    varFxElemDef->visualCount * sizeof(FxElemMarkVisuals));
+        }
+    }
+    else if (varFxElemDef->visualCount > 1)
+    {
+        if ((uintptr_t)varFxElemDefVisuals->array == UINTPTR_MAX)
+        {
+            varFxElemDefVisuals->array = (FxElemVisuals *)DB_AllocStreamPos(15);
+            varFxElemVisuals = varFxElemDefVisuals->array;
+            Load_FxElemVisualsArray(true, varFxElemDef->visualCount);
+        }
+        else if (varFxElemDefVisuals->array)
+        {
+            DB64_ConvertOffsetRange((uintptr_t *)&varFxElemDefVisuals->array,
+                                    varFxElemDef->visualCount * sizeof(FxElemVisuals));
+        }
+    }
+    else
+    {
+        varFxElemVisuals = (FxElemVisuals *)varFxElemDefVisuals;
+        Load_FxElemVisuals(atStreamStart);
+    }
+}
+
+void __cdecl Load_FxTrailVertexArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFxTrailVertex, DB_StreamArraySize(sizeof(FxTrailVertex), count));
+}
+
+void __cdecl Load_FxTrailDef(bool atStreamStart)
+{
+    DB64_LoadEffectTrail(varFxTrailDef, atStreamStart);
+}
+
+void __cdecl Load_FxElemDef(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemDef, sizeof(FxElemDef));
+    if (!DB64_ValidateEffectElement(varFxElemDef))
+    {
+        Com_Error(ERR_DROP, "Invalid native effect element metadata");
+    }
+    DB64_LoadEffectSamples(varFxElemDef);
+    varFxElemDefVisuals = &varFxElemDef->visuals;
+    Load_FxElemDefVisuals(0);
+    varFxEffectDefRef = &varFxElemDef->effectOnImpact;
+    Load_FxEffectDefRef(0);
+    varFxEffectDefRef = &varFxElemDef->effectOnDeath;
+    Load_FxEffectDefRef(0);
+    varFxEffectDefRef = &varFxElemDef->effectEmitted;
+    Load_FxEffectDefRef(0);
+    if ((uintptr_t)varFxElemDef->trailDef == UINTPTR_MAX)
+    {
+        varFxElemDef->trailDef = (FxTrailDef *)AllocLoad_FxElemVisStateSample();
+        varFxTrailDef = varFxElemDef->trailDef;
+        Load_FxTrailDef(1);
+    }
+    else if (varFxElemDef->trailDef)
+    {
+        DB64_ConvertOffsetRange((uintptr_t *)&varFxElemDef->trailDef, sizeof(FxTrailDef));
+    }
+}
+
+void __cdecl Load_FxElemDefArray(bool atStreamStart, int count)
+{
+    FxElemDef *var; // [esp+0h] [ebp-8h]
+    int i;          // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varFxElemDef, DB_StreamArraySize(sizeof(FxElemDef), count));
+    var = varFxElemDef;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemDef = var;
+        Load_FxElemDef(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_FxEffectDef(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFxEffectDef, sizeof(FxEffectDef));
+    size_t elementCount;
+    if (!DB64_EffectElementCount(varFxEffectDef, &elementCount))
+    {
+        Com_Error(ERR_DROP, "Invalid native effect element counts");
+    }
+    DB_PushStreamPos(4);
+    varXString = &varFxEffectDef->name;
+    Load_XString(0);
+    if ((uintptr_t)varFxEffectDef->elemDefs == UINTPTR_MAX)
+    {
+        varFxEffectDef->elemDefs = (const FxElemDef *)AllocLoad_FxElemVisStateSample();
+        varFxElemDef = (FxElemDef *)varFxEffectDef->elemDefs;
+        Load_FxElemDefArray(1, (int)elementCount);
+    }
+    else if (varFxEffectDef->elemDefs)
+    {
+        DB64_ConvertOffsetRange((uintptr_t *)&varFxEffectDef->elemDefs, elementCount * sizeof(FxElemDef));
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Mark_FxEffectDefHandle()
+{
+    if (*varFxEffectDefHandle)
+    {
+        varFxEffectDef = (FxEffectDef *)*varFxEffectDefHandle;
+        Mark_FxEffectDefAsset(varFxEffectDef);
+        Mark_FxEffectDef();
+    }
+}
+
+void __cdecl Mark_FxEffectDefHandleArray(int count)
+{
+    const FxEffectDef **var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    var = varFxEffectDefHandle;
+    for (i = 0; i < count; ++i)
+    {
+        varFxEffectDefHandle = var;
+        Mark_FxEffectDefHandle();
+        ++var;
+    }
+}
+
+void __cdecl Mark_FxElemMarkVisuals()
+{
+    varMaterialHandle = (Material **)varFxElemMarkVisuals;
+    Mark_MaterialHandleArray(2);
+}
+
+void __cdecl Mark_FxElemMarkVisualsArray(int count)
+{
+    FxElemMarkVisuals *var; // [esp+0h] [ebp-8h]
+    int i;                  // [esp+4h] [ebp-4h]
+
+    var = varFxElemMarkVisuals;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemMarkVisuals = var;
+        Mark_FxElemMarkVisuals();
+        ++var;
+    }
+}
+
+void __cdecl Mark_FxElemVisuals()
+{
+    if (varFxElemDef->elemType == 10)
+    {
+        if (varFxElemVisuals->effectDef.handle)
+        {
+            Mark_FxEffectDefAsset((FxEffectDef *)varFxElemVisuals->effectDef.handle);
+        }
+    }
+    else if (varFxElemDef->elemType == 5)
+    {
+        varXModelPtr = (XModel **)varFxElemVisuals;
+        Mark_XModelPtr();
+    }
+    else if (varFxElemDef->elemType != 10 && varFxElemDef->elemType != 8 && varFxElemDef->elemType != 6 &&
+             varFxElemDef->elemType != 7)
+    {
+        varMaterialHandle = (Material **)varFxElemVisuals;
+        Mark_MaterialHandle();
+    }
+}
+
+void __cdecl Mark_FxElemVisualsArray(int count)
+{
+    FxElemVisuals *var; // [esp+0h] [ebp-8h]
+    int i;              // [esp+4h] [ebp-4h]
+
+    var = varFxElemVisuals;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemVisuals = var;
+        Mark_FxElemVisuals();
+        ++var;
+    }
+}
+
+void __cdecl Mark_FxElemDefVisuals()
+{
+    if (varFxElemDef->elemType == 9)
+    {
+        if (varFxElemDefVisuals->markArray)
+        {
+            varFxElemMarkVisuals = varFxElemDefVisuals->markArray;
+            Mark_FxElemMarkVisualsArray(varFxElemDef->visualCount);
+        }
+    }
+    else if (varFxElemDef->visualCount > 1u)
+    {
+        if (varFxElemDefVisuals->markArray)
+        {
+            varFxElemVisuals = (FxElemVisuals *)varFxElemDefVisuals->markArray;
+            Mark_FxElemVisualsArray(varFxElemDef->visualCount);
+        }
+    }
+    else
+    {
+        varFxElemVisuals = (FxElemVisuals *)varFxElemDefVisuals;
+        Mark_FxElemVisuals();
+    }
+}
+
+void __cdecl Mark_FxElemDef()
+{
+    varFxElemDefVisuals = &varFxElemDef->visuals;
+    Mark_FxElemDefVisuals();
+    if (varFxElemDef->effectOnImpact.handle)
+    {
+        Mark_FxEffectDefAsset((FxEffectDef *)varFxElemDef->effectOnImpact.handle);
+    }
+    if (varFxElemDef->effectOnDeath.handle)
+    {
+        Mark_FxEffectDefAsset((FxEffectDef *)varFxElemDef->effectOnDeath.handle);
+    }
+    if (varFxElemDef->effectEmitted.handle)
+    {
+        Mark_FxEffectDefAsset((FxEffectDef *)varFxElemDef->effectEmitted.handle);
+    }
+}
+
+void __cdecl Mark_FxElemDefArray(int count)
+{
+    FxElemDef *var; // [esp+0h] [ebp-8h]
+    int i;          // [esp+4h] [ebp-4h]
+
+    var = varFxElemDef;
+    for (i = 0; i < count; ++i)
+    {
+        varFxElemDef = var;
+        Mark_FxElemDef();
+        ++var;
+    }
+}
+
+void __cdecl Mark_FxEffectDef()
+{
+    if (varFxEffectDef->elemDefs)
+    {
+        varFxElemDef = (FxElemDef *)varFxEffectDef->elemDefs;
+        Mark_FxElemDefArray(varFxEffectDef->elemDefCountEmission + varFxEffectDef->elemDefCountOneShot +
+                            varFxEffectDef->elemDefCountLooping);
+    }
+}
+
+void __cdecl Load_DynEntityDef(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDynEntityDef, sizeof(DynEntityDef));
+    varXModelPtr = &varDynEntityDef->xModel;
+    Load_XModelPtr(0);
+    varFxEffectDefHandle = &varDynEntityDef->destroyFx;
+    Load_FxEffectDefHandle(0);
+    varXModelPiecesPtr = &varDynEntityDef->destroyPieces;
+    Load_XModelPiecesPtr(0);
+    varPhysPresetPtr = &varDynEntityDef->physPreset;
+    Load_PhysPresetPtr(0);
+}
+
+void __cdecl Load_DynEntityDefArray(bool atStreamStart, int count)
+{
+    DynEntityDef *var; // [esp+0h] [ebp-8h]
+    int i;             // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varDynEntityDef, DB_StreamArraySize(sizeof(DynEntityDef), count));
+    var = varDynEntityDef;
+    for (i = 0; i < count; ++i)
+    {
+        varDynEntityDef = var;
+        Load_DynEntityDef(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_DynEntityCollArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDynEntityColl, DB_StreamArraySize(sizeof(DynEntityColl), count));
+}
+
+void __cdecl Load_DynEntityPoseArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDynEntityPose, DB_StreamArraySize(sizeof(DynEntityPose), count));
+}
+
+void __cdecl Load_DynEntityClientArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varDynEntityClient, DB_StreamArraySize(sizeof(DynEntityClient), count));
+}
+
+void __cdecl Mark_DynEntityDef()
+{
+    varXModelPtr = &varDynEntityDef->xModel;
+    Mark_XModelPtr();
+    varFxEffectDefHandle = &varDynEntityDef->destroyFx;
+    Mark_FxEffectDefHandle();
+    varXModelPiecesPtr = &varDynEntityDef->destroyPieces;
+    Mark_XModelPiecesPtr();
+    varPhysPresetPtr = &varDynEntityDef->physPreset;
+    Mark_PhysPresetPtr();
+}
+
+void __cdecl Mark_DynEntityDefArray(int count)
+{
+    DynEntityDef *var; // [esp+0h] [ebp-8h]
+    int i;             // [esp+4h] [ebp-4h]
+
+    var = varDynEntityDef;
+    for (i = 0; i < count; ++i)
+    {
+        varDynEntityDef = var;
+        Mark_DynEntityDef();
+        ++var;
+    }
+}
+
+
+
+void __cdecl Load_MapEntsPtr(bool atStreamStart)
+{
+    DB64_LoadWorldAsset(ASSET_TYPE_MAP_ENTS, (XAssetHeader *)varMapEntsPtr, atStreamStart);
+}
+
+void __cdecl Mark_MapEntsPtr()
+{
+    if (*varMapEntsPtr)
+    {
+        varMapEnts = *varMapEntsPtr;
+        Mark_MapEntsAsset(varMapEnts);
+    }
+}
+
+void __cdecl Load_cStaticModel_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcStaticModel_t, sizeof(cStaticModel_s));
+    varXModelPtr = &varcStaticModel_t->xmodel;
+    Load_XModelPtr(0);
+}
+
+void __cdecl Load_cStaticModel_tArray(bool atStreamStart, int count)
+{
+    cStaticModel_s *var; // [esp+0h] [ebp-8h]
+    int i;               // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varcStaticModel_t, DB_StreamArraySize(sizeof(cStaticModel_s), count));
+    var = varcStaticModel_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcStaticModel_t = var;
+        Load_cStaticModel_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_cNode_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcNode_t, sizeof(cNode_t));
+    if (varcNode_t->plane)
+    {
+        if (varcNode_t->plane == (cplane_s *)-1)
+        {
+            varcNode_t->plane = (cplane_s *)AllocLoad_FxElemVisStateSample();
+            varcplane_t = varcNode_t->plane;
+            Load_cplane_t(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varcNode_t);
+        }
+    }
+}
+
+void __cdecl Load_cNode_tArray(bool atStreamStart, int count)
+{
+    cNode_t *var; // [esp+0h] [ebp-8h]
+    int i;        // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varcNode_t, DB_StreamArraySize(sizeof(cNode_t), count));
+    var = varcNode_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcNode_t = var;
+        Load_cNode_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_cLeaf_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcLeaf_t, DB_StreamArraySize(sizeof(cLeaf_t), count));
+}
+
+void __cdecl Load_cLeafBrushNodeLeaf_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcLeafBrushNodeLeaf_t, sizeof(cLeafBrushNodeLeaf_t));
+    if (varcLeafBrushNodeLeaf_t->brushes)
+    {
+        if (varcLeafBrushNodeLeaf_t->brushes == (uint16_t *)-1)
+        {
+            varcLeafBrushNodeLeaf_t->brushes = (uint16_t *)AllocLoad_XBlendInfo();
+            varLeafBrush = varcLeafBrushNodeLeaf_t->brushes;
+            Load_LeafBrushArray(1, varcLeafBrushNode_t->leafBrushCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)varcLeafBrushNodeLeaf_t);
+        }
+    }
+}
+
+void __cdecl Load_cLeafBrushNodeChildren_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcLeafBrushNodeChildren_t, sizeof(cLeafBrushNodeChildren_t));
+}
+
+void __cdecl Load_cLeafBrushNodeData_t(bool atStreamStart)
+{
+    if (varcLeafBrushNode_t->leafBrushCount <= 0)
+    {
+        if (atStreamStart)
+        {
+            varcLeafBrushNodeChildren_t = (cLeafBrushNodeChildren_t *)varcLeafBrushNodeData_t;
+            Load_cLeafBrushNodeChildren_t(atStreamStart);
+        }
+    }
+    else
+    {
+        varcLeafBrushNodeLeaf_t = &varcLeafBrushNodeData_t->leaf;
+        Load_cLeafBrushNodeLeaf_t(atStreamStart);
+    }
+}
+
+void __cdecl Load_cLeafBrushNode_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, &varcLeafBrushNode_t->axis, sizeof(cLeafBrushNode_s));
+    varcLeafBrushNodeData_t = &varcLeafBrushNode_t->data;
+    Load_cLeafBrushNodeData_t(0);
+}
+
+void __cdecl Load_cLeafBrushNode_tArray(bool atStreamStart, int count)
+{
+    cLeafBrushNode_s *var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, &varcLeafBrushNode_t->axis, DB_StreamArraySize(sizeof(cLeafBrushNode_s), count));
+    var = varcLeafBrushNode_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcLeafBrushNode_t = var;
+        Load_cLeafBrushNode_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_CollisionBorder(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varCollisionBorder, sizeof(CollisionBorder));
+}
+
+void __cdecl Load_CollisionBorderArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varCollisionBorder, DB_StreamArraySize(sizeof(CollisionBorder), count));
+}
+
+void __cdecl Load_CollisionPartition(bool atStreamStart)
+{
+    DB64_LoadCollisionPartition(varCollisionPartition, atStreamStart);
+}
+
+void __cdecl Load_CollisionPartitionArray(bool atStreamStart, int count)
+{
+    CollisionPartition *var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, &varCollisionPartition->triCount, DB_StreamArraySize(sizeof(CollisionPartition), count));
+    var = varCollisionPartition;
+    for (i = 0; i < count; ++i)
+    {
+        varCollisionPartition = var;
+        Load_CollisionPartition(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_CollisionAabbTreeArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varCollisionAabbTree, DB_StreamArraySize(sizeof(CollisionAabbTree), count));
+}
+
+void __cdecl Load_cmodel_tArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varcmodel_t, DB_StreamArraySize(sizeof(cmodel_t), count));
+}
+
+void __cdecl Load_cbrush_t(bool atStreamStart)
+{
+    DB64_LoadCollisionBrush(varcbrush_t, atStreamStart);
+}
+
+void __cdecl Load_cbrush_tArray(bool atStreamStart, int count)
+{
+    cbrush_t *var; // [esp+0h] [ebp-8h]
+    int i;         // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varcbrush_t, DB_StreamArraySize(sizeof(cbrush_t), count));
+    var = varcbrush_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcbrush_t = var;
+        Load_cbrush_t(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_LeafBrushArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varLeafBrush, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_clipMap_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varclipMap_t, sizeof(clipMap_t));
+    char error[256];
+    if (!DB64_ValidateClipMapHeader(varclipMap_t, error, sizeof(error)))
+    {
+        Com_Error(ERR_DROP, "%s", error);
+    }
+    DB_PushStreamPos(4);
+    varXString = &varclipMap_t->name;
+    Load_XString(0);
+    if (varclipMap_t->planes)
+    {
+        if (varclipMap_t->planes == (cplane_s *)-1)
+        {
+            varclipMap_t->planes = (cplane_s *)AllocLoad_FxElemVisStateSample();
+            varcplane_t = varclipMap_t->planes;
+            Load_cplane_tArray(1, varclipMap_t->planeCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varclipMap_t->planes);
+        }
+    }
+    if (varclipMap_t->staticModelList)
+    {
+        varclipMap_t->staticModelList = (cStaticModel_s *)AllocLoad_FxElemVisStateSample();
+        varcStaticModel_t = varclipMap_t->staticModelList;
+        Load_cStaticModel_tArray(1, varclipMap_t->numStaticModels);
+    }
+    if (varclipMap_t->materials)
+    {
+        varclipMap_t->materials = (dmaterial_t *)AllocLoad_FxElemVisStateSample();
+        vardmaterial_t = varclipMap_t->materials;
+        Load_dmaterial_tArray(1, varclipMap_t->numMaterials);
+    }
+    if (varclipMap_t->brushsides)
+    {
+        varclipMap_t->brushsides = (cbrushside_t *)AllocLoad_FxElemVisStateSample();
+        varcbrushside_t = varclipMap_t->brushsides;
+        Load_cbrushside_tArray(1, varclipMap_t->numBrushSides);
+    }
+    if (varclipMap_t->brushEdges)
+    {
+        varclipMap_t->brushEdges = AllocLoad_raw_byte();
+        varcbrushedge_t = varclipMap_t->brushEdges;
+        Load_cbrushedge_tArray(1, varclipMap_t->numBrushEdges);
+    }
+    if (varclipMap_t->nodes)
+    {
+        varclipMap_t->nodes = (cNode_t *)AllocLoad_FxElemVisStateSample();
+        varcNode_t = varclipMap_t->nodes;
+        Load_cNode_tArray(1, varclipMap_t->numNodes);
+    }
+    if (varclipMap_t->leafs)
+    {
+        varclipMap_t->leafs = (cLeaf_t *)AllocLoad_FxElemVisStateSample();
+        varcLeaf_t = varclipMap_t->leafs;
+        Load_cLeaf_tArray(1, varclipMap_t->numLeafs);
+    }
+    if (varclipMap_t->leafbrushes)
+    {
+        varclipMap_t->leafbrushes = (uint16_t *)AllocLoad_XBlendInfo();
+        varLeafBrush = varclipMap_t->leafbrushes;
+        Load_LeafBrushArray(1, varclipMap_t->numLeafBrushes);
+    }
+    if (varclipMap_t->leafbrushNodes)
+    {
+        varclipMap_t->leafbrushNodes = (cLeafBrushNode_s *)AllocLoad_FxElemVisStateSample();
+        varcLeafBrushNode_t = varclipMap_t->leafbrushNodes;
+        Load_cLeafBrushNode_tArray(1, varclipMap_t->leafbrushNodesCount);
+    }
+    if (varclipMap_t->leafsurfaces)
+    {
+        varclipMap_t->leafsurfaces = (uint *)AllocLoad_FxElemVisStateSample();
+        varuint = varclipMap_t->leafsurfaces;
+        Load_uintArray(1, varclipMap_t->numLeafSurfaces);
+    }
+    if (varclipMap_t->verts)
+    {
+        varclipMap_t->verts = (float(*)[3])AllocLoad_FxElemVisStateSample();
+        varvec3_t = varclipMap_t->verts;
+        Load_vec3_tArray(1, varclipMap_t->vertCount);
+    }
+    if (varclipMap_t->triIndices)
+    {
+        varclipMap_t->triIndices = (uint16_t *)AllocLoad_XBlendInfo();
+        varUnsignedShort = varclipMap_t->triIndices;
+        Load_UnsignedShortArray(1, 3 * varclipMap_t->triCount);
+    }
+    if (varclipMap_t->triEdgeIsWalkable)
+    {
+        varclipMap_t->triEdgeIsWalkable = AllocLoad_raw_byte();
+        varbyte = varclipMap_t->triEdgeIsWalkable;
+        Load_byteArray(1, (int)DB64_ClipMapWalkableBytes(varclipMap_t->triCount));
+    }
+    if (varclipMap_t->borders)
+    {
+        varclipMap_t->borders = (CollisionBorder *)AllocLoad_FxElemVisStateSample();
+        varCollisionBorder = varclipMap_t->borders;
+        Load_CollisionBorderArray(1, varclipMap_t->borderCount);
+    }
+    if (varclipMap_t->partitions)
+    {
+        varclipMap_t->partitions = (CollisionPartition *)AllocLoad_FxElemVisStateSample();
+        varCollisionPartition = varclipMap_t->partitions;
+        Load_CollisionPartitionArray(1, varclipMap_t->partitionCount);
+    }
+    if (varclipMap_t->aabbTrees)
+    {
+        varclipMap_t->aabbTrees = (CollisionAabbTree *)AllocLoad_FxElemVisStateSample();
+        varCollisionAabbTree = varclipMap_t->aabbTrees;
+        Load_CollisionAabbTreeArray(1, varclipMap_t->aabbTreeCount);
+    }
+    if (varclipMap_t->cmodels)
+    {
+        varclipMap_t->cmodels = (cmodel_t *)AllocLoad_FxElemVisStateSample();
+        varcmodel_t = varclipMap_t->cmodels;
+        Load_cmodel_tArray(1, varclipMap_t->numSubModels);
+    }
+    if (varclipMap_t->brushes)
+    {
+        varclipMap_t->brushes = AllocLoad_GfxPackedVertex0();
+        varcbrush_t = varclipMap_t->brushes;
+        Load_cbrush_tArray(1, varclipMap_t->numBrushes);
+    }
+    if (varclipMap_t->visibility)
+    {
+        varclipMap_t->visibility = AllocLoad_raw_byte();
+        varbyte = varclipMap_t->visibility;
+        Load_byteArray(1, varclipMap_t->numClusters * varclipMap_t->clusterBytes);
+    }
+    varMapEntsPtr = &varclipMap_t->mapEnts;
+    Load_MapEntsPtr(0);
+    if (varclipMap_t->box_brush)
+    {
+        if (varclipMap_t->box_brush == (cbrush_t *)-1)
+        {
+            varclipMap_t->box_brush = AllocLoad_GfxPackedVertex0();
+            varcbrush_t = varclipMap_t->box_brush;
+            Load_cbrush_t(1);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varclipMap_t->box_brush);
+        }
+    }
+    if (varclipMap_t->dynEntDefList[0])
+    {
+        varclipMap_t->dynEntDefList[0] = (DynEntityDef *)AllocLoad_FxElemVisStateSample();
+        varDynEntityDef = varclipMap_t->dynEntDefList[0];
+        Load_DynEntityDefArray(1, varclipMap_t->dynEntCount[0]);
+    }
+    if (varclipMap_t->dynEntDefList[1])
+    {
+        varclipMap_t->dynEntDefList[1] = (DynEntityDef *)AllocLoad_FxElemVisStateSample();
+        varDynEntityDef = varclipMap_t->dynEntDefList[1];
+        Load_DynEntityDefArray(1, varclipMap_t->dynEntCount[1]);
+    }
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntPoseList[0])
+    {
+        varclipMap_t->dynEntPoseList[0] = (DynEntityPose *)AllocLoad_FxElemVisStateSample();
+        varDynEntityPose = varclipMap_t->dynEntPoseList[0];
+        Load_DynEntityPoseArray(1, varclipMap_t->dynEntCount[0]);
+    }
+    DB_PopStreamPos();
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntPoseList[1])
+    {
+        varclipMap_t->dynEntPoseList[1] = (DynEntityPose *)AllocLoad_FxElemVisStateSample();
+        varDynEntityPose = varclipMap_t->dynEntPoseList[1];
+        Load_DynEntityPoseArray(1, varclipMap_t->dynEntCount[1]);
+    }
+    DB_PopStreamPos();
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntClientList[0])
+    {
+        varclipMap_t->dynEntClientList[0] = (DynEntityClient *)AllocLoad_FxElemVisStateSample();
+        varDynEntityClient = varclipMap_t->dynEntClientList[0];
+        Load_DynEntityClientArray(1, varclipMap_t->dynEntCount[0]);
+    }
+    DB_PopStreamPos();
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntClientList[1])
+    {
+        varclipMap_t->dynEntClientList[1] = (DynEntityClient *)AllocLoad_FxElemVisStateSample();
+        varDynEntityClient = varclipMap_t->dynEntClientList[1];
+        Load_DynEntityClientArray(1, varclipMap_t->dynEntCount[1]);
+    }
+    DB_PopStreamPos();
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntCollList[0])
+    {
+        varclipMap_t->dynEntCollList[0] = (DynEntityColl *)AllocLoad_FxElemVisStateSample();
+        varDynEntityColl = varclipMap_t->dynEntCollList[0];
+        Load_DynEntityCollArray(1, varclipMap_t->dynEntCount[0]);
+    }
+    DB_PopStreamPos();
+    DB_PushStreamPos(1);
+    if (varclipMap_t->dynEntCollList[1])
+    {
+        varclipMap_t->dynEntCollList[1] = (DynEntityColl *)AllocLoad_FxElemVisStateSample();
+        varDynEntityColl = varclipMap_t->dynEntCollList[1];
+        Load_DynEntityCollArray(1, varclipMap_t->dynEntCount[1]);
+    }
+    DB_PopStreamPos();
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_clipMap_ptr(bool atStreamStart)
+{
+    DB64_LoadClipMapAsset((XAssetHeader *)varclipMap_ptr, atStreamStart);
+}
+
+void __cdecl Mark_cStaticModel_t()
+{
+    varXModelPtr = &varcStaticModel_t->xmodel;
+    Mark_XModelPtr();
+}
+
+void __cdecl Mark_cStaticModel_tArray(int count)
+{
+    cStaticModel_s *var; // [esp+0h] [ebp-8h]
+    int i;               // [esp+4h] [ebp-4h]
+
+    var = varcStaticModel_t;
+    for (i = 0; i < count; ++i)
+    {
+        varcStaticModel_t = var;
+        Mark_cStaticModel_t();
+        ++var;
+    }
+}
+
+void __cdecl Mark_clipMap_t()
+{
+    if (varclipMap_t->staticModelList)
+    {
+        varcStaticModel_t = varclipMap_t->staticModelList;
+        Mark_cStaticModel_tArray(varclipMap_t->numStaticModels);
+    }
+    varMapEntsPtr = &varclipMap_t->mapEnts;
+    Mark_MapEntsPtr();
+    if (varclipMap_t->dynEntDefList[0])
+    {
+        varDynEntityDef = varclipMap_t->dynEntDefList[0];
+        Mark_DynEntityDefArray(varclipMap_t->dynEntCount[0]);
+    }
+    if (varclipMap_t->dynEntDefList[1])
+    {
+        varDynEntityDef = varclipMap_t->dynEntDefList[1];
+        Mark_DynEntityDefArray(varclipMap_t->dynEntCount[1]);
+    }
+}
+
+void __cdecl Mark_clipMap_ptr()
+{
+    if (*varclipMap_ptr)
+    {
+        varclipMap_t = *varclipMap_ptr;
+        Mark_ClipMapAsset(varclipMap_t);
+        Mark_clipMap_t();
+    }
+}
+
+void __cdecl Load_ComPrimaryLight(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, &varComPrimaryLight->type, sizeof(ComPrimaryLight));
+    varXString = &varComPrimaryLight->defName;
+    Load_XString(0);
+}
+
+void __cdecl Load_ComPrimaryLightArray(bool atStreamStart, int count)
+{
+    ComPrimaryLight *var; // [esp+0h] [ebp-8h]
+    int i;                // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, &varComPrimaryLight->type, DB_StreamArraySize(sizeof(ComPrimaryLight), count));
+    var = varComPrimaryLight;
+    for (i = 0; i < count; ++i)
+    {
+        varComPrimaryLight = var;
+        Load_ComPrimaryLight(0);
+        ++var;
+    }
+}
+
+
+
+void __cdecl Load_ComWorldPtr(bool atStreamStart)
+{
+    DB64_LoadWorldAsset(ASSET_TYPE_COMWORLD, (XAssetHeader *)varComWorldPtr, atStreamStart);
+}
+
+void __cdecl Mark_ComWorldPtr()
+{
+    if (*varComWorldPtr)
+    {
+        varComWorld = *varComWorldPtr;
+        Mark_ComWorldAsset(varComWorld);
+    }
+}
+
+void __cdecl Load_operandInternalDataUnion(bool atStreamStart)
+{
+    if (varOperand->dataType)
+    {
+        if (varOperand->dataType == VAL_FLOAT)
+        {
+            if (atStreamStart)
+            {
+                varfloat = &varoperandInternalDataUnion->floatVal;
+                Load_float(atStreamStart);
+            }
+        }
+        else if (varOperand->dataType == VAL_STRING)
+        {
+            varXString = (const char **)varoperandInternalDataUnion;
+            Load_XString(atStreamStart);
+        }
+    }
+    else if (atStreamStart)
+    {
+        varint = varoperandInternalDataUnion;
+        Load_int(atStreamStart);
+    }
+}
+
+void __cdecl Load_Operand(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varOperand, sizeof(Operand));
+    varoperandInternalDataUnion = &varOperand->internals;
+    Load_operandInternalDataUnion(0);
+}
+
+void __cdecl Load_Operator(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varOperator, sizeof(enum operationEnum));
+}
+
+void __cdecl Load_entryInternalData(bool atStreamStart)
+{
+    if (varexpressionEntry->type)
+    {
+        varOperand = (Operand *)varentryInternalData;
+        Load_Operand(atStreamStart);
+    }
+    else if (atStreamStart)
+    {
+        varOperator = &varentryInternalData->op;
+        Load_Operator(atStreamStart);
+    }
+}
+
+void __cdecl Load_expressionEntry(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varexpressionEntry, sizeof(expressionEntry));
+    if (!DB64_ValidateMenuExpression(varexpressionEntry))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu expression");
+    }
+    varentryInternalData = &varexpressionEntry->data;
+    Load_entryInternalData(0);
+}
+
+void __cdecl Load_expressionEntry_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varexpressionEntry_ptr, sizeof(expressionEntry *));
+    if (!*varexpressionEntry_ptr)
+    {
+        Com_Error(ERR_DROP, "Missing native menu expression entry");
+    }
+    if (*varexpressionEntry_ptr)
+    {
+        *varexpressionEntry_ptr = (expressionEntry *)AllocLoad_FxElemVisStateSample();
+        varexpressionEntry = *varexpressionEntry_ptr;
+        Load_expressionEntry(1);
+    }
+}
+
+void __cdecl Load_expressionEntry_ptrArray(bool atStreamStart, int count)
+{
+    expressionEntry **var; // [esp+0h] [ebp-8h]
+    int i;                 // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varexpressionEntry_ptr, DB_StreamArraySize(sizeof(expressionEntry *), count));
+    var = varexpressionEntry_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varexpressionEntry_ptr = var;
+        Load_expressionEntry_ptr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_statement(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varstatement, sizeof(statement_s));
+    if (!DB64_ValidateMenuStatement(varstatement))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu statement");
+    }
+    if (varstatement->entries)
+    {
+        varstatement->entries = (expressionEntry **)AllocLoad_FxElemVisStateSample();
+        varexpressionEntry_ptr = varstatement->entries;
+        Load_expressionEntry_ptrArray(1, varstatement->numEntries);
+    }
+}
+
+void __cdecl Load_listBoxDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varlistBoxDef_t, sizeof(listBoxDef_s));
+    if (!DB64_ValidateMenuListBox(varlistBoxDef_t))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu list-box columns");
+    }
+    varXString = &varlistBoxDef_t->doubleClick;
+    Load_XString(0);
+    varMaterialHandle = &varlistBoxDef_t->selectIcon;
+    Load_MaterialHandle(0);
+}
+
+void __cdecl Load_listBoxDef_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varlistBoxDef_ptr, sizeof(listBoxDef_s *));
+    if (*varlistBoxDef_ptr)
+    {
+        *varlistBoxDef_ptr = (listBoxDef_s *)AllocLoad_FxElemVisStateSample();
+        varlistBoxDef_t = *varlistBoxDef_ptr;
+        Load_listBoxDef_t(1);
+    }
+}
+
+void __cdecl Load_editFieldDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)vareditFieldDef_t, sizeof(editFieldDef_s));
+}
+
+void __cdecl Load_editFieldDef_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)vareditFieldDef_ptr, sizeof(editFieldDef_s *));
+    if (*vareditFieldDef_ptr)
+    {
+        *vareditFieldDef_ptr = (editFieldDef_s *)AllocLoad_FxElemVisStateSample();
+        vareditFieldDef_t = *vareditFieldDef_ptr;
+        Load_editFieldDef_t(1);
+    }
+}
+
+void __cdecl Load_multiDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varmultiDef_t, sizeof(multiDef_s));
+    if (!DB64_ValidateMenuMulti(varmultiDef_t))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu multi-choice values");
+    }
+    varXString = (const char **)varmultiDef_t;
+    Load_XStringArray(0, 32);
+    varXString = varmultiDef_t->dvarStr;
+    Load_XStringArray(0, 32);
+}
+
+void __cdecl Load_multiDef_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varmultiDef_ptr, sizeof(multiDef_s *));
+    if (*varmultiDef_ptr)
+    {
+        *varmultiDef_ptr = (multiDef_s *)AllocLoad_FxElemVisStateSample();
+        varmultiDef_t = *varmultiDef_ptr;
+        Load_multiDef_t(1);
+    }
+}
+
+void __cdecl Load_windowDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varwindowDef_t, sizeof(windowDef_t));
+    varXString = &varwindowDef_t->name;
+    Load_XString(0);
+    varXString = &varwindowDef_t->group;
+    Load_XString(0);
+    varMaterialHandle = &varwindowDef_t->background;
+    Load_MaterialHandle(0);
+}
+
+void __cdecl Load_Window(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varWindow, sizeof(windowDef_t));
+    varwindowDef_t = varWindow;
+    Load_windowDef_t(0);
+}
+
+void __cdecl Load_ItemKeyHandler(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varItemKeyHandler, sizeof(ItemKeyHandler));
+    varXString = &varItemKeyHandler->action;
+    Load_XString(0);
+    if (varItemKeyHandler->next)
+    {
+        varItemKeyHandler->next = (ItemKeyHandler *)AllocLoad_FxElemVisStateSample();
+        varItemKeyHandlerNext = varItemKeyHandler->next;
+        Load_ItemKeyHandlerNext(1);
+    }
+}
+
+void __cdecl Load_ItemKeyHandlerNext(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varItemKeyHandlerNext, sizeof(ItemKeyHandler));
+    varItemKeyHandler = varItemKeyHandlerNext;
+    Load_ItemKeyHandler(0);
+}
+
+void __cdecl Load_itemDefData_t(bool atStreamStart)
+{
+    switch (varitemDef_t->type)
+    {
+    case 6:
+        varlistBoxDef_ptr = &varitemDefData_t->listBox;
+        Load_listBoxDef_ptr(atStreamStart);
+        break;
+    case 4:
+    case 9:
+    case 0x10:
+    case 0x12:
+    case 0xB:
+    case 0xE:
+    case 0xA:
+    case 0:
+    case 0x11:
+        vareditFieldDef_ptr = (editFieldDef_s **)varitemDefData_t;
+        Load_editFieldDef_ptr(atStreamStart);
+        break;
+    case 0xC:
+        varmultiDef_ptr = (multiDef_s **)varitemDefData_t;
+        Load_multiDef_ptr(atStreamStart);
+        break;
+    case 0xD:
+        varXString = (const char **)varitemDefData_t;
+        Load_XString(atStreamStart);
+        break;
+    }
+}
+
+void __cdecl Load_itemDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varitemDef_t, sizeof(itemDef_s));
+    varWindow = &varitemDef_t->window;
+    Load_Window(0);
+    varXString = &varitemDef_t->text;
+    Load_XString(0);
+    varXString = &varitemDef_t->mouseEnterText;
+    Load_XString(0);
+    varXString = &varitemDef_t->mouseExitText;
+    Load_XString(0);
+    varXString = &varitemDef_t->mouseEnter;
+    Load_XString(0);
+    varXString = &varitemDef_t->mouseExit;
+    Load_XString(0);
+    varXString = &varitemDef_t->action;
+    Load_XString(0);
+    varXString = &varitemDef_t->onAccept;
+    Load_XString(0);
+    varXString = &varitemDef_t->onFocus;
+    Load_XString(0);
+    varXString = &varitemDef_t->leaveFocus;
+    Load_XString(0);
+    varXString = &varitemDef_t->dvar;
+    Load_XString(0);
+    varXString = &varitemDef_t->dvarTest;
+    Load_XString(0);
+    if (varitemDef_t->onKey)
+    {
+        varitemDef_t->onKey = (ItemKeyHandler *)AllocLoad_FxElemVisStateSample();
+        varItemKeyHandler = varitemDef_t->onKey;
+        Load_ItemKeyHandler(1);
+    }
+    varXString = &varitemDef_t->enableDvar;
+    Load_XString(0);
+    varsnd_alias_list_ptr = &varitemDef_t->focusSound;
+    Load_snd_alias_list_ptr(0);
+    varitemDefData_t = &varitemDef_t->typeData;
+    Load_itemDefData_t(0);
+    varstatement = &varitemDef_t->visibleExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->textExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->materialExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->rectXExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->rectYExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->rectWExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->rectHExp;
+    Load_statement(0);
+    varstatement = &varitemDef_t->forecolorAExp;
+    Load_statement(0);
+}
+
+void __cdecl Load_itemDef_ptr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varitemDef_ptr, sizeof(itemDef_s *));
+    if (!*varitemDef_ptr)
+    {
+        Com_Error(ERR_DROP, "Missing native menu item");
+    }
+    if (*varitemDef_ptr)
+    {
+        *varitemDef_ptr = (itemDef_s *)AllocLoad_FxElemVisStateSample();
+        varitemDef_t = *varitemDef_ptr;
+        Load_itemDef_t(1);
+    }
+}
+
+void __cdecl Load_itemDef_ptrArray(bool atStreamStart, int count)
+{
+    itemDef_s **var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varitemDef_ptr, DB_StreamArraySize(sizeof(itemDef_s *), count));
+    var = varitemDef_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varitemDef_ptr = var;
+        Load_itemDef_ptr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_menuDef_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varmenuDef_t, sizeof(menuDef_t));
+    if (!DB64_ValidateMenuHeader(varmenuDef_t))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu header");
+    }
+    DB_PushStreamPos(4);
+    varWindow = &varmenuDef_t->window;
+    Load_Window(0);
+    varXString = &varmenuDef_t->font;
+    Load_XString(0);
+    varXString = &varmenuDef_t->onOpen;
+    Load_XString(0);
+    varXString = &varmenuDef_t->onClose;
+    Load_XString(0);
+    varXString = &varmenuDef_t->onESC;
+    Load_XString(0);
+    if (varmenuDef_t->onKey)
+    {
+        varmenuDef_t->onKey = (ItemKeyHandler *)AllocLoad_FxElemVisStateSample();
+        varItemKeyHandler = varmenuDef_t->onKey;
+        Load_ItemKeyHandler(1);
+    }
+    varstatement = &varmenuDef_t->visibleExp;
+    Load_statement(0);
+    varXString = &varmenuDef_t->allowedBinding;
+    Load_XString(0);
+    varXString = &varmenuDef_t->soundName;
+    Load_XString(0);
+    varstatement = &varmenuDef_t->rectXExp;
+    Load_statement(0);
+    varstatement = &varmenuDef_t->rectYExp;
+    Load_statement(0);
+    if (varmenuDef_t->items)
+    {
+        varmenuDef_t->items = (itemDef_s **)AllocLoad_FxElemVisStateSample();
+        varitemDef_ptr = varmenuDef_t->items;
+        Load_itemDef_ptrArray(1, varmenuDef_t->itemCount);
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_menuDef_ptr(bool atStreamStart)
+{
+    const void **inserted; // [esp+0h] [ebp-Ch]
+    uintptr_t value;       // [esp+4h] [ebp-8h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varmenuDef_ptr, sizeof(menuDef_t *));
+    DB_PushStreamPos(0);
+    if (*varmenuDef_ptr)
+    {
+        value = (uintptr_t)*varmenuDef_ptr;
+        if (value == UINTPTR_MAX || value == UINTPTR_MAX - 1)
+        {
+            *varmenuDef_ptr = (menuDef_t *)AllocLoad_FxElemVisStateSample();
+            varmenuDef_t = *varmenuDef_ptr;
+            if (value == UINTPTR_MAX - 1)
+            {
+                inserted = DB_InsertPointer();
+            }
+            else
+            {
+                inserted = 0;
+            }
+            Load_menuDef_t(1);
+            Load_MenuAsset((XAssetHeader *)varmenuDef_ptr);
+            if (inserted)
+            {
+                *inserted = *varmenuDef_ptr;
+            }
+        }
+        else
+        {
+            DB_ConvertOffsetToAlias((uintptr_t *)varmenuDef_ptr);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_menuDef_ptrArray(bool atStreamStart, int count)
+{
+    menuDef_t **var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varmenuDef_ptr, DB_StreamArraySize(sizeof(menuDef_t *), count));
+    var = varmenuDef_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varmenuDef_ptr = var;
+        Load_menuDef_ptr(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_MenuList(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMenuList, sizeof(MenuList));
+    if (!DB64_ValidateMenuListHeader(varMenuList))
+    {
+        Com_Error(ERR_DROP, "Invalid native menu-list header");
+    }
+    DB_PushStreamPos(4);
+    varXString = &varMenuList->name;
+    Load_XString(0);
+    if (varMenuList->menus)
+    {
+        varMenuList->menus = (menuDef_t **)AllocLoad_FxElemVisStateSample();
+        varmenuDef_ptr = varMenuList->menus;
+        Load_menuDef_ptrArray(1, varMenuList->menuCount);
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_MenuListPtr(bool atStreamStart)
+{
+    const void **inserted; // [esp+0h] [ebp-Ch]
+    uintptr_t value;       // [esp+4h] [ebp-8h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMenuListPtr, sizeof(MenuList *));
+    DB_PushStreamPos(0);
+    if (*varMenuListPtr)
+    {
+        value = (uintptr_t)*varMenuListPtr;
+        if (value == UINTPTR_MAX || value == UINTPTR_MAX - 1)
+        {
+            *varMenuListPtr = (MenuList *)AllocLoad_FxElemVisStateSample();
+            varMenuList = *varMenuListPtr;
+            if (value == UINTPTR_MAX - 1)
+            {
+                inserted = DB_InsertPointer();
+            }
+            else
+            {
+                inserted = 0;
+            }
+            Load_MenuList(1);
+            Load_MenuListAsset((XAssetHeader *)varMenuListPtr);
+            if (inserted)
+            {
+                *inserted = *varMenuListPtr;
+            }
+        }
+        else
+        {
+            DB_ConvertOffsetToAlias((uintptr_t *)varMenuListPtr);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Mark_listBoxDef_t()
+{
+    varMaterialHandle = &varlistBoxDef_t->selectIcon;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Mark_listBoxDef_ptr()
+{
+    if (*varlistBoxDef_ptr)
+    {
+        varlistBoxDef_t = *varlistBoxDef_ptr;
+        Mark_listBoxDef_t();
+    }
+}
+
+void __cdecl Mark_windowDef_t()
+{
+    varMaterialHandle = &varwindowDef_t->background;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Mark_Window()
+{
+    varwindowDef_t = varWindow;
+    Mark_windowDef_t();
+}
+
+void __cdecl Mark_itemDefData_t()
+{
+    if (varitemDef_t->dataType == 6)
+    {
+        varlistBoxDef_ptr = &varitemDefData_t->listBox;
+        Mark_listBoxDef_ptr();
+    }
+}
+
+void __cdecl Mark_itemDef_t()
+{
+    varWindow = &varitemDef_t->window;
+    Mark_Window();
+    varsnd_alias_list_ptr = &varitemDef_t->focusSound;
+    Mark_snd_alias_list_ptr();
+    varitemDefData_t = &varitemDef_t->typeData;
+    Mark_itemDefData_t();
+}
+
+void __cdecl Mark_itemDef_ptr()
+{
+    if (*varitemDef_ptr)
+    {
+        varitemDef_t = *varitemDef_ptr;
+        Mark_itemDef_t();
+    }
+}
+
+void __cdecl Mark_itemDef_ptrArray(int count)
+{
+    itemDef_s **var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    var = varitemDef_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varitemDef_ptr = var;
+        Mark_itemDef_ptr();
+        ++var;
+    }
+}
+
+void __cdecl Mark_menuDef_t()
+{
+    varWindow = &varmenuDef_t->window;
+    Mark_Window();
+    if (varmenuDef_t->items)
+    {
+        varitemDef_ptr = varmenuDef_t->items;
+        Mark_itemDef_ptrArray(varmenuDef_t->itemCount);
+    }
+}
+
+void __cdecl Mark_menuDef_ptr()
+{
+    if (*varmenuDef_ptr)
+    {
+        varmenuDef_t = *varmenuDef_ptr;
+        Mark_MenuAsset(varmenuDef_t);
+        Mark_menuDef_t();
+    }
+}
+
+void __cdecl Mark_menuDef_ptrArray(int count)
+{
+    menuDef_t **var; // [esp+0h] [ebp-8h]
+    int i;           // [esp+4h] [ebp-4h]
+
+    var = varmenuDef_ptr;
+    for (i = 0; i < count; ++i)
+    {
+        varmenuDef_ptr = var;
+        Mark_menuDef_ptr();
+        ++var;
+    }
+}
+
+void __cdecl Mark_MenuList()
+{
+    if (varMenuList->menus)
+    {
+        varmenuDef_ptr = varMenuList->menus;
+        Mark_menuDef_ptrArray(varMenuList->menuCount);
+    }
+}
+
+void __cdecl Mark_MenuListPtr()
+{
+    if (*varMenuListPtr)
+    {
+        varMenuList = *varMenuListPtr;
+        Mark_MenuListAsset(varMenuList);
+        Mark_MenuList();
+    }
+}
+
+void __cdecl Load_LocalizeEntryPtr(bool atStreamStart)
+{
+    DB64_LoadTextAsset(ASSET_TYPE_LOCALIZE_ENTRY, (XAssetHeader *)varLocalizeEntryPtr, atStreamStart);
+}
+
+void __cdecl Mark_LocalizeEntryPtr()
+{
+    if (*varLocalizeEntryPtr)
+    {
+        varLocalizeEntry = *varLocalizeEntryPtr;
+        Mark_LocalizeEntryAsset(varLocalizeEntry);
+    }
+}
+
+void __cdecl Mark_FxImpactEntry()
+{
+    varFxEffectDefHandle = (const FxEffectDef **)varFxImpactEntry;
+    Mark_FxEffectDefHandleArray(29);
+    varFxEffectDefHandle = varFxImpactEntry->flesh;
+    Mark_FxEffectDefHandleArray(4);
+}
+
+void __cdecl Mark_FxImpactEntryArray(int count)
+{
+    FxImpactEntry *var; // [esp+0h] [ebp-8h]
+    int i;              // [esp+4h] [ebp-4h]
+
+    var = varFxImpactEntry;
+    for (i = 0; i < count; ++i)
+    {
+        varFxImpactEntry = var;
+        Mark_FxImpactEntry();
+        ++var;
+    }
+}
+
+void __cdecl Mark_FxImpactTable()
+{
+    if (varFxImpactTable->table)
+    {
+        varFxImpactEntry = varFxImpactTable->table;
+        Mark_FxImpactEntryArray(12);
+    }
+}
+
+void __cdecl Mark_FxImpactTablePtr()
+{
+    if (*varFxImpactTablePtr)
+    {
+        varFxImpactTable = *varFxImpactTablePtr;
+        Mark_FxImpactTableAsset(varFxImpactTable);
+        Mark_FxImpactTable();
+    }
+}
+
+void __cdecl Mark_WeaponDef()
+{
+    varXModelPtr = varWeaponDef->gunXModel;
+    Mark_XModelPtrArray(16);
+    varXModelPtr = &varWeaponDef->handXModel;
+    Mark_XModelPtr();
+    varScriptString = varWeaponDef->hideTags;
+    Mark_ScriptStringArray(8);
+    varScriptString = varWeaponDef->notetrackSoundMapKeys;
+    Mark_ScriptStringArray(16);
+    varScriptString = varWeaponDef->notetrackSoundMapValues;
+    Mark_ScriptStringArray(16);
+    varFxEffectDefHandle = &varWeaponDef->viewFlashEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->worldFlashEffect;
+    Mark_FxEffectDefHandle();
+    varsnd_alias_list_name = &varWeaponDef->pickupSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->pickupSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->ammoPickupSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->ammoPickupSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->projectileSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->pullbackSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->pullbackSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireLoopSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireLoopSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireStopSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireStopSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireLastSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->fireLastSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->emptyFireSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->emptyFireSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->meleeSwipeSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->meleeSwipeSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->meleeHitSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->meleeMissSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->rechamberSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->rechamberSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadEmptySound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadEmptySoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadStartSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadStartSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadEndSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->reloadEndSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->detonateSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->detonateSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->nightVisionWearSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->nightVisionWearSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->nightVisionRemoveSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->nightVisionRemoveSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->altSwitchSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->altSwitchSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->raiseSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->raiseSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->firstRaiseSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->firstRaiseSoundPlayer;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->putawaySound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->putawaySoundPlayer;
+    Mark_snd_alias_list_name();
+    if (varWeaponDef->bounceSound)
+    {
+        varsnd_alias_list_name = varWeaponDef->bounceSound;
+        Mark_snd_alias_list_nameArray(29);
+    }
+    varFxEffectDefHandle = &varWeaponDef->viewShellEjectEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->worldShellEjectEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->viewLastShotEjectEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->worldLastShotEjectEffect;
+    Mark_FxEffectDefHandle();
+    varMaterialHandle = &varWeaponDef->reticleCenter;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->reticleSide;
+    Mark_MaterialHandle();
+    varXModelPtr = varWeaponDef->worldModel;
+    Mark_XModelPtrArray(16);
+    varXModelPtr = &varWeaponDef->worldClipModel;
+    Mark_XModelPtr();
+    varXModelPtr = &varWeaponDef->rocketModel;
+    Mark_XModelPtr();
+    varXModelPtr = &varWeaponDef->knifeModel;
+    Mark_XModelPtr();
+    varXModelPtr = &varWeaponDef->worldKnifeModel;
+    Mark_XModelPtr();
+    varMaterialHandle = &varWeaponDef->hudIcon;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->ammoCounterIcon;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->overlayMaterial;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->overlayMaterialLowRes;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->killIcon;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varWeaponDef->dpadIcon;
+    Mark_MaterialHandle();
+    varXModelPtr = &varWeaponDef->projectileModel;
+    Mark_XModelPtr();
+    varFxEffectDefHandle = &varWeaponDef->projExplosionEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->projDudEffect;
+    Mark_FxEffectDefHandle();
+    varsnd_alias_list_name = &varWeaponDef->projExplosionSound;
+    Mark_snd_alias_list_name();
+    varsnd_alias_list_name = &varWeaponDef->projDudSound;
+    Mark_snd_alias_list_name();
+    varFxEffectDefHandle = &varWeaponDef->projTrailEffect;
+    Mark_FxEffectDefHandle();
+    varFxEffectDefHandle = &varWeaponDef->projIgnitionEffect;
+    Mark_FxEffectDefHandle();
+    varsnd_alias_list_name = &varWeaponDef->projIgnitionSound;
+    Mark_snd_alias_list_name();
+}
+
+void __cdecl Mark_WeaponDefPtr()
+{
+    if (*varWeaponDefPtr)
+    {
+        varWeaponDef = *varWeaponDefPtr;
+        Mark_WeaponDefAsset(varWeaponDef);
+        Mark_WeaponDef();
+    }
+}
+
+void __cdecl Load_RawFilePtr(bool atStreamStart)
+{
+    DB64_LoadTextAsset(ASSET_TYPE_RAWFILE, (XAssetHeader *)varRawFilePtr, atStreamStart);
+}
+
+void __cdecl Mark_RawFilePtr()
+{
+    if (*varRawFilePtr)
+    {
+        varRawFile = *varRawFilePtr;
+        Mark_RawFileAsset(varRawFile);
+    }
+}
+
+void __cdecl Load_StringTablePtr(bool atStreamStart)
+{
+    DB64_LoadTextAsset(ASSET_TYPE_STRINGTABLE, (XAssetHeader *)varStringTablePtr, atStreamStart);
+}
+
+void __cdecl Mark_StringTablePtr()
+{
+    if (*varStringTablePtr)
+    {
+        varStringTable = *varStringTablePtr;
+        Mark_StringTableAsset(varStringTable);
+    }
+}
+
+void __cdecl Load_GfxStaticModelDrawInst(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxStaticModelDrawInst, sizeof(GfxStaticModelDrawInst));
+    varXModelPtr = &varGfxStaticModelDrawInst->model;
+    Load_XModelPtr(0);
+}
+
+void __cdecl Load_GfxStaticModelDrawInstArray(bool atStreamStart, int count)
+{
+    GfxStaticModelDrawInst *var; // [esp+0h] [ebp-8h]
+    int i;                       // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varGfxStaticModelDrawInst,
+                DB_StreamArraySize(sizeof(GfxStaticModelDrawInst), count));
+    var = varGfxStaticModelDrawInst;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxStaticModelDrawInst = var;
+        Load_GfxStaticModelDrawInst(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_GfxStaticModelInstArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxStaticModelInst, DB_StreamArraySize(sizeof(GfxStaticModelInst), count));
+}
+
+void __cdecl Mark_GfxStaticModelDrawInst()
+{
+    varXModelPtr = &varGfxStaticModelDrawInst->model;
+    Mark_XModelPtr();
+}
+
+void __cdecl Mark_GfxStaticModelDrawInstArray(int count)
+{
+    GfxStaticModelDrawInst *var; // [esp+0h] [ebp-8h]
+    int i;                       // [esp+4h] [ebp-4h]
+
+    var = varGfxStaticModelDrawInst;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxStaticModelDrawInst = var;
+        Mark_GfxStaticModelDrawInst();
+        ++var;
+    }
+}
+
+void __cdecl Load_sunflare_t(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varsunflare_t, sizeof(sunflare_t));
+    varMaterialHandle = &varsunflare_t->spriteMaterial;
+    Load_MaterialHandle(0);
+    varMaterialHandle = &varsunflare_t->flareMaterial;
+    Load_MaterialHandle(0);
+}
+
+void __cdecl Mark_sunflare_t()
+{
+    varMaterialHandle = &varsunflare_t->spriteMaterial;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varsunflare_t->flareMaterial;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Load_GfxReflectionProbe(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxReflectionProbe, sizeof(GfxReflectionProbe));
+    varGfxImagePtr = &varGfxReflectionProbe->reflectionImage;
+    Load_GfxImagePtr(0);
+}
+
+void __cdecl Load_GfxReflectionProbeArray(bool atStreamStart, int count)
+{
+    GfxReflectionProbe *var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varGfxReflectionProbe, DB_StreamArraySize(sizeof(GfxReflectionProbe), count));
+    var = varGfxReflectionProbe;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxReflectionProbe = var;
+        Load_GfxReflectionProbe(0);
+        ++var;
+    }
+}
+
+void __cdecl Mark_GfxReflectionProbe()
+{
+    varGfxImagePtr = &varGfxReflectionProbe->reflectionImage;
+    Mark_GfxImagePtr();
+}
+
+void __cdecl Mark_GfxReflectionProbeArray(int count)
+{
+    GfxReflectionProbe *var; // [esp+0h] [ebp-8h]
+    int i;                   // [esp+4h] [ebp-4h]
+
+    var = varGfxReflectionProbe;
+    for (i = 0; i < count; ++i)
+    {
+        varGfxReflectionProbe = var;
+        Mark_GfxReflectionProbe();
+        ++var;
+    }
+}
+
+void __cdecl Load_StaticModelIndexArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varStaticModelIndex, DB_StreamArraySize(sizeof(uint16_t), count));
+}
+
+void __cdecl Load_GfxCullGroupArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxCullGroup, DB_StreamArraySize(sizeof(GfxCullGroup), count));
+}
+
+void __cdecl Load_GfxLightGridEntryArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxLightGridEntry, DB_StreamArraySize(sizeof(GfxLightGridEntry), count));
+}
+
+void __cdecl Load_GfxLightGridColorsArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxLightGridColors, DB_StreamArraySize(sizeof(GfxLightGridColors), count));
+}
+
+void __cdecl Load_MaterialMemory(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialMemory, sizeof(MaterialMemory));
+    varMaterialHandle = &varMaterialMemory->material;
+    Load_MaterialHandle(0);
+}
+
+void __cdecl Load_MaterialMemoryArray(bool atStreamStart, int count)
+{
+    MaterialMemory *var; // [esp+0h] [ebp-8h]
+    int i;               // [esp+4h] [ebp-4h]
+
+    Load_Stream(atStreamStart, (uint8_t *)varMaterialMemory, DB_StreamArraySize(sizeof(MaterialMemory), count));
+    var = varMaterialMemory;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialMemory = var;
+        Load_MaterialMemory(0);
+        ++var;
+    }
+}
+
+void __cdecl Load_GfxWorldVertexData(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxWorldVertexData, sizeof(GfxWorldVertexData));
+    if (varGfxWorldVertexData->vertices)
+    {
+        varGfxWorldVertexData->vertices = (GfxWorldVertex *)AllocLoad_FxElemVisStateSample();
+        varGfxWorldVertex0 = varGfxWorldVertexData->vertices;
+        Load_GfxWorldVertex0Array(1, varGfxWorld->vertexCount);
+    }
+    varGfxVertexBuffer = &varGfxWorldVertexData->worldVb;
+    Load_GfxVertexBuffer(0);
+    Load_VertexBuffer(&varGfxWorldVertexData->worldVb, (uint8_t *)varGfxWorld->vd.vertices,
+                      44 * varGfxWorld->vertexCount);
+}
+
+void __cdecl Load_GfxWorldVertexLayerData(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxWorldVertexLayerData, sizeof(GfxWorldVertexLayerData));
+    if (varGfxWorldVertexLayerData->data)
+    {
+        varGfxWorldVertexLayerData->data = AllocLoad_raw_byte();
+        varbyte = varGfxWorldVertexLayerData->data;
+        Load_byteArray(1, varGfxWorld->vertexLayerDataSize);
+    }
+    varGfxVertexBuffer = &varGfxWorldVertexLayerData->layerVb;
+    Load_GfxVertexBuffer(0);
+    Load_VertexBuffer(&varGfxWorldVertexLayerData->layerVb, varGfxWorld->vld.data, varGfxWorld->vertexLayerDataSize);
+}
+
+void __cdecl Load_GfxLightGrid(bool atStreamStart)
+{
+    DB64_LoadRenderLightGrid(varGfxLightGrid, varGfxWorld->primaryLightCount, atStreamStart);
+}
+
+void __cdecl Load_GfxSceneDynModelArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxSceneDynModel, DB_StreamArraySize(sizeof(GfxSceneDynModel), count));
+}
+
+void __cdecl Load_GfxSceneDynBrushArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxSceneDynBrush, DB_StreamArraySize(sizeof(GfxSceneDynBrush), count));
+}
+
+void __cdecl Load_GfxDrawSurfArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxDrawSurf, DB_StreamArraySize(sizeof(union GfxDrawSurf), count));
+}
+
+void __cdecl Load_GfxWorldDpvsDynamic(bool atStreamStart)
+{
+    DB64_LoadRenderDynamicVisibility(varGfxWorld, atStreamStart);
+}
+
+void __cdecl Load_GfxWorldDpvsStatic(bool atStreamStart)
+{
+    DB64_LoadRenderStaticVisibility(varGfxWorld, atStreamStart);
+}
+
+void __cdecl Load_GfxWorldDpvsPlanes(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGfxWorldDpvsPlanes, sizeof(GfxWorldDpvsPlanes));
+    if (varGfxWorldDpvsPlanes->planes)
+    {
+        if (varGfxWorldDpvsPlanes->planes == (cplane_s *)-1)
+        {
+            varGfxWorldDpvsPlanes->planes = (cplane_s *)AllocLoad_FxElemVisStateSample();
+            varcplane_t = varGfxWorldDpvsPlanes->planes;
+            Load_cplane_tArray(1, varGfxWorld->planeCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varGfxWorldDpvsPlanes->planes);
+        }
+    }
+    if (varGfxWorldDpvsPlanes->nodes)
+    {
+        varGfxWorldDpvsPlanes->nodes = (uint16_t *)AllocLoad_XBlendInfo();
+        varushort = varGfxWorldDpvsPlanes->nodes;
+        Load_ushortArray(1, varGfxWorld->nodeCount);
+    }
+    DB_PushStreamPos(1);
+    if (varGfxWorldDpvsPlanes->sceneEntCellBits)
+    {
+        varGfxWorldDpvsPlanes->sceneEntCellBits = (uint *)AllocLoad_FxElemVisStateSample();
+        varraw_uint = varGfxWorldDpvsPlanes->sceneEntCellBits;
+        Load_raw_uintArray(1, varGfxWorldDpvsPlanes->cellCount << 8);
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_GfxWorld(bool atStreamStart)
+{
+    DB64_LoadRenderWorld(varGfxWorld, atStreamStart);
+}
+
+void __cdecl Load_GfxWorldPtr(bool atStreamStart)
+{
+    DB64_LoadRenderWorldAsset((XAssetHeader *)varGfxWorldPtr, atStreamStart);
+}
+
+void __cdecl Mark_MaterialMemory()
+{
+    varMaterialHandle = &varMaterialMemory->material;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Mark_MaterialMemoryArray(int count)
+{
+    MaterialMemory *var; // [esp+0h] [ebp-8h]
+    int i;               // [esp+4h] [ebp-4h]
+
+    var = varMaterialMemory;
+    for (i = 0; i < count; ++i)
+    {
+        varMaterialMemory = var;
+        Mark_MaterialMemory();
+        ++var;
+    }
+}
+
+void __cdecl Mark_GfxWorldDpvsStatic()
+{
+    if (varGfxWorldDpvsStatic->surfaces)
+    {
+        varGfxSurface = varGfxWorldDpvsStatic->surfaces;
+        Mark_GfxSurfaceArray(varGfxWorld->surfaceCount);
+    }
+    if (varGfxWorldDpvsStatic->smodelDrawInsts)
+    {
+        varGfxStaticModelDrawInst = varGfxWorldDpvsStatic->smodelDrawInsts;
+        Mark_GfxStaticModelDrawInstArray(varGfxWorldDpvsStatic->smodelCount);
+    }
+}
+
+void __cdecl Mark_GfxWorld()
+{
+    varGfxImagePtr = &varGfxWorld->skyImage;
+    Mark_GfxImagePtr();
+    if (varGfxWorld->sunLight)
+    {
+        varGfxLight = varGfxWorld->sunLight;
+        Mark_GfxLight();
+    }
+    if (varGfxWorld->reflectionProbes)
+    {
+        varGfxReflectionProbe = varGfxWorld->reflectionProbes;
+        Mark_GfxReflectionProbeArray(varGfxWorld->reflectionProbeCount);
+    }
+    if (varGfxWorld->lightmaps)
+    {
+        varGfxLightmapArray = varGfxWorld->lightmaps;
+        Mark_GfxLightmapArrayArray(varGfxWorld->lightmapCount);
+    }
+    if (varGfxWorld->materialMemory)
+    {
+        varMaterialMemory = varGfxWorld->materialMemory;
+        Mark_MaterialMemoryArray(varGfxWorld->materialMemoryCount);
+    }
+    varsunflare_t = &varGfxWorld->sun;
+    Mark_sunflare_t();
+    varGfxImagePtr = &varGfxWorld->outdoorImage;
+    Mark_GfxImagePtr();
+    varGfxWorldDpvsStatic = &varGfxWorld->dpvs;
+    Mark_GfxWorldDpvsStatic();
+}
+
+void __cdecl Mark_GfxWorldPtr()
+{
+    if (*varGfxWorldPtr)
+    {
+        varGfxWorld = *varGfxWorldPtr;
+        Mark_GfxWorldAsset(varGfxWorld);
+        Mark_GfxWorld();
+    }
+}
+
+void __cdecl Load_GlyphArray(bool atStreamStart, int count)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varGlyph, DB_StreamArraySize(sizeof(Glyph), count));
+}
+
+void __cdecl Load_Font(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varFont, sizeof(Font_s));
+    DB_PushStreamPos(4);
+    varXString = &varFont->fontName;
+    Load_XString(0);
+    varMaterialHandle = &varFont->material;
+    Load_MaterialHandle(0);
+    varMaterialHandle = &varFont->glowMaterial;
+    Load_MaterialHandle(0);
+    if (varFont->glyphs)
+    {
+        if (varFont->glyphs == (Glyph *)-1)
+        {
+            varFont->glyphs = (Glyph *)AllocLoad_FxElemVisStateSample();
+            varGlyph = varFont->glyphs;
+            Load_GlyphArray(1, varFont->glyphCount);
+        }
+        else
+        {
+            DB_ConvertOffsetToPointer((uintptr_t *)&varFont->glyphs);
+        }
+    }
+    DB_PopStreamPos();
+}
+
+void __cdecl Load_FontHandle(bool atStreamStart)
+{
+    DB64_LoadFontAsset((XAssetHeader *)varFontHandle, atStreamStart);
+}
+
+void __cdecl Mark_Font()
+{
+    varMaterialHandle = &varFont->material;
+    Mark_MaterialHandle();
+    varMaterialHandle = &varFont->glowMaterial;
+    Mark_MaterialHandle();
+}
+
+void __cdecl Mark_FontHandle()
+{
+    if (*varFontHandle)
+    {
+        varFont = *varFontHandle;
+        Mark_FontAsset(varFont);
+        Mark_Font();
+    }
+}
+
+void __cdecl Load_XAssetHeader(bool atStreamStart)
+{
+    switch (varXAsset->type)
+    {
+    case ASSET_TYPE_XMODELPIECES:
+        DB64_LoadModelPieces(varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_PHYSPRESET:
+        varPhysPresetPtr = (PhysPreset **)varXAssetHeader;
+        Load_PhysPresetPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_XANIMPARTS:
+        varXAnimPartsPtr = (XAnimParts **)varXAssetHeader;
+        Load_XAnimPartsPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_XMODEL:
+        varXModelPtr = (XModel **)varXAssetHeader;
+        Load_XModelPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_MATERIAL:
+        varMaterialHandle = (Material **)varXAssetHeader;
+        Load_MaterialHandle(atStreamStart);
+        break;
+    case ASSET_TYPE_TECHNIQUE_SET:
+        varMaterialTechniqueSetPtr = (MaterialTechniqueSet **)varXAssetHeader;
+        Load_MaterialTechniqueSetPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_IMAGE:
+        varGfxImagePtr = (GfxImage **)varXAssetHeader;
+        Load_GfxImagePtr(atStreamStart);
+        break;
+    case ASSET_TYPE_SOUND:
+        varsnd_alias_list_ptr = (snd_alias_list_t **)varXAssetHeader;
+        Load_snd_alias_list_ptr(atStreamStart);
+        break;
+    case ASSET_TYPE_SOUND_CURVE:
+        varSndCurvePtr = (SndCurve **)varXAssetHeader;
+        Load_SndCurvePtr(atStreamStart);
+        break;
+    case ASSET_TYPE_LOADED_SOUND:
+        varLoadedSoundPtr = (LoadedSound **)varXAssetHeader;
+        Load_LoadedSoundPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_CLIPMAP:
+    case ASSET_TYPE_CLIPMAP_PVS:
+        varclipMap_ptr = (clipMap_t **)varXAssetHeader;
+        Load_clipMap_ptr(atStreamStart);
+        break;
+    case ASSET_TYPE_COMWORLD:
+        varComWorldPtr = (ComWorld **)varXAssetHeader;
+        Load_ComWorldPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_GAMEWORLD_SP:
+        varGameWorldSpPtr = (GameWorldSp **)varXAssetHeader;
+        Load_GameWorldSpPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_GAMEWORLD_MP:
+        varGameWorldMpPtr = (GameWorldMp **)varXAssetHeader;
+        Load_GameWorldMpPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_MAP_ENTS:
+        varMapEntsPtr = (MapEnts **)varXAssetHeader;
+        Load_MapEntsPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_GFXWORLD:
+        varGfxWorldPtr = (GfxWorld **)varXAssetHeader;
+        Load_GfxWorldPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_LIGHT_DEF:
+        varGfxLightDefPtr = (GfxLightDef **)varXAssetHeader;
+        Load_GfxLightDefPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_FONT:
+        varFontHandle = (Font_s **)varXAssetHeader;
+        Load_FontHandle(atStreamStart);
+        break;
+    case ASSET_TYPE_MENULIST:
+        varMenuListPtr = (MenuList **)varXAssetHeader;
+        DB64_LoadMenuAsset(ASSET_TYPE_MENULIST, varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_MENU:
+        varmenuDef_ptr = (menuDef_t **)varXAssetHeader;
+        DB64_LoadMenuAsset(ASSET_TYPE_MENU, varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_LOCALIZE_ENTRY:
+        varLocalizeEntryPtr = (LocalizeEntry **)varXAssetHeader;
+        Load_LocalizeEntryPtr(atStreamStart);
+        break;
+    case ASSET_TYPE_WEAPON:
+        varWeaponDefPtr = (WeaponDef **)varXAssetHeader;
+        DB64_LoadWeaponAsset(varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_SNDDRIVER_GLOBALS:
+        DB64_LoadPresetAsset(ASSET_TYPE_SNDDRIVER_GLOBALS, varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_FX:
+        varFxEffectDefHandle = (const FxEffectDef **)varXAssetHeader;
+        Load_FxEffectDefHandle(atStreamStart);
+        break;
+    case ASSET_TYPE_IMPACT_FX:
+        varFxImpactTablePtr = (FxImpactTable **)varXAssetHeader;
+        DB64_LoadImpactAsset(varXAssetHeader, atStreamStart);
+        break;
+    case ASSET_TYPE_RAWFILE:
+        varRawFilePtr = (RawFile **)varXAssetHeader;
+        Load_RawFilePtr(atStreamStart);
+        break;
+    case ASSET_TYPE_STRINGTABLE:
+        varStringTablePtr = (StringTable **)varXAssetHeader;
+        Load_StringTablePtr(atStreamStart);
+        break;
+    default:
+        Com_Error(ERR_DROP, "Unsupported native asset type %d", varXAsset->type);
+        break;
+    }
+}
+
+void __cdecl Load_XAsset(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, (uint8_t *)varXAsset, sizeof(XAsset));
+    varXAssetHeader = &varXAsset->header;
+    Load_XAssetHeader(0);
+}
+
+void __cdecl Mark_XAssetHeader()
+{
+    switch (varXAsset->type)
+    {
+    case ASSET_TYPE_XMODELPIECES:
+        varXModelPiecesPtr = (XModelPieces **)varXAssetHeader;
+        Mark_XModelPiecesPtr();
+        break;
+    case ASSET_TYPE_PHYSPRESET:
+        varPhysPresetPtr = (PhysPreset **)varXAssetHeader;
+        Mark_PhysPresetPtr();
+        break;
+    case ASSET_TYPE_XANIMPARTS:
+        varXAnimPartsPtr = (XAnimParts **)varXAssetHeader;
+        Mark_XAnimPartsPtr();
+        break;
+    case ASSET_TYPE_XMODEL:
+        varXModelPtr = (XModel **)varXAssetHeader;
+        Mark_XModelPtr();
+        break;
+    case ASSET_TYPE_MATERIAL:
+        varMaterialHandle = (Material **)varXAssetHeader;
+        Mark_MaterialHandle();
+        break;
+    case ASSET_TYPE_TECHNIQUE_SET:
+        varMaterialTechniqueSetPtr = (MaterialTechniqueSet **)varXAssetHeader;
+        Mark_MaterialTechniqueSetPtr();
+        break;
+    case ASSET_TYPE_IMAGE:
+        varGfxImagePtr = (GfxImage **)varXAssetHeader;
+        Mark_GfxImagePtr();
+        break;
+    case ASSET_TYPE_SOUND:
+        varsnd_alias_list_ptr = (snd_alias_list_t **)varXAssetHeader;
+        Mark_snd_alias_list_ptr();
+        break;
+    case ASSET_TYPE_SOUND_CURVE:
+        varSndCurvePtr = (SndCurve **)varXAssetHeader;
+        Mark_SndCurvePtr();
+        break;
+    case ASSET_TYPE_LOADED_SOUND:
+        varLoadedSoundPtr = (LoadedSound **)varXAssetHeader;
+        Mark_LoadedSoundPtr();
+        break;
+    case ASSET_TYPE_CLIPMAP:
+    case ASSET_TYPE_CLIPMAP_PVS:
+        varclipMap_ptr = (clipMap_t **)varXAssetHeader;
+        Mark_clipMap_ptr();
+        break;
+    case ASSET_TYPE_COMWORLD:
+        varComWorldPtr = (ComWorld **)varXAssetHeader;
+        Mark_ComWorldPtr();
+        break;
+    case ASSET_TYPE_GAMEWORLD_SP:
+        varGameWorldSpPtr = (GameWorldSp **)varXAssetHeader;
+        Mark_GameWorldSpPtr();
+        break;
+    case ASSET_TYPE_GAMEWORLD_MP:
+        varGameWorldMpPtr = (GameWorldMp **)varXAssetHeader;
+        Mark_GameWorldMpPtr();
+        break;
+    case ASSET_TYPE_MAP_ENTS:
+        varMapEntsPtr = (MapEnts **)varXAssetHeader;
+        Mark_MapEntsPtr();
+        break;
+    case ASSET_TYPE_GFXWORLD:
+        varGfxWorldPtr = (GfxWorld **)varXAssetHeader;
+        Mark_GfxWorldPtr();
+        break;
+    case ASSET_TYPE_LIGHT_DEF:
+        varGfxLightDefPtr = (GfxLightDef **)varXAssetHeader;
+        Mark_GfxLightDefPtr();
+        break;
+    case ASSET_TYPE_FONT:
+        varFontHandle = (Font_s **)varXAssetHeader;
+        Mark_FontHandle();
+        break;
+    case ASSET_TYPE_MENULIST:
+        varMenuListPtr = (MenuList **)varXAssetHeader;
+        Mark_MenuListPtr();
+        break;
+    case ASSET_TYPE_MENU:
+        varmenuDef_ptr = (menuDef_t **)varXAssetHeader;
+        Mark_menuDef_ptr();
+        break;
+    case ASSET_TYPE_LOCALIZE_ENTRY:
+        varLocalizeEntryPtr = (LocalizeEntry **)varXAssetHeader;
+        Mark_LocalizeEntryPtr();
+        break;
+    case ASSET_TYPE_WEAPON:
+        varWeaponDefPtr = (WeaponDef **)varXAssetHeader;
+        Mark_WeaponDefPtr();
+        break;
+    case ASSET_TYPE_SNDDRIVER_GLOBALS:
+        if (varXAssetHeader->sndDriverGlobals)
+        {
+            Mark_SndDriverGlobalsAsset(varXAssetHeader->sndDriverGlobals);
+        }
+        break;
+    case ASSET_TYPE_FX:
+        varFxEffectDefHandle = (const FxEffectDef **)varXAssetHeader;
+        Mark_FxEffectDefHandle();
+        break;
+    case ASSET_TYPE_IMPACT_FX:
+        varFxImpactTablePtr = (FxImpactTable **)varXAssetHeader;
+        Mark_FxImpactTablePtr();
+        break;
+    case ASSET_TYPE_RAWFILE:
+        varRawFilePtr = (RawFile **)varXAssetHeader;
+        Mark_RawFilePtr();
+        break;
+    case ASSET_TYPE_STRINGTABLE:
+        varStringTablePtr = (StringTable **)varXAssetHeader;
+        Mark_StringTablePtr();
+        break;
+    }
+}
+
+void __cdecl Mark_XAsset()
+{
+    varXAssetHeader = &varXAsset->header;
+    Mark_XAssetHeader();
+}
+
+void __cdecl Mark_SndAliasCustom(snd_alias_list_t **var)
+{
+    varsnd_alias_list_ptr = var;
+    Mark_snd_alias_list_ptr();
+}
+
+void __cdecl DB_SaveDObjs()
+{
+    for (int localClientNum = 0; localClientNum < STATIC_MAX_LOCAL_CLIENTS; ++localClientNum)
+    {
+        for (int handle = 0; handle < CLIENT_DOBJ_HANDLE_MAX; ++handle)
+        {
+            DObj_s *obj = Com_GetClientDObj(handle, localClientNum);
+            if (obj)
+            {
+                DObjArchive(obj);
+            }
+        }
+    }
+
+    for (int handle = 0; handle < MAX_GENTITIES; ++handle)
+    {
+        DObj_s *obj = Com_GetServerDObj(handle);
+        if (obj)
+        {
+            DObjArchive(obj);
+        }
+    }
+}
+
+void __cdecl DB_LoadDObjs()
+{
+    for (int localClientNum = 0; localClientNum < STATIC_MAX_LOCAL_CLIENTS; ++localClientNum)
+    {
+        for (int handle = 0; handle < CLIENT_DOBJ_HANDLE_MAX; ++handle)
+        {
+            DObj_s *obj = Com_GetClientDObj(handle, localClientNum);
+            if (obj)
+            {
+                DObjUnarchive(obj);
+            }
+        }
+    }
+
+    for (int handle = 0; handle < MAX_GENTITIES; ++handle)
+    {
+        DObj_s *obj = Com_GetServerDObj(handle);
+        if (obj)
+        {
+            DObjUnarchive(obj);
+        }
+    }
+}

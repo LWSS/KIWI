@@ -5,7 +5,7 @@
 #include "dobj.h"
 
 #include <qcommon/qcommon.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <qcommon/threads.h>
 #include <universal/profile.h>
 #include <script/scr_vm.h>

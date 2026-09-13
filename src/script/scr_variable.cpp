@@ -11,7 +11,7 @@
 #include <Windows.h>
 #include <universal/com_files.h>
 #include "scr_parser.h"
-#include <database/database.h>
+#include <database64/database.h>
 #include <universal/q_parse.h>
 #include <cstdint>
 

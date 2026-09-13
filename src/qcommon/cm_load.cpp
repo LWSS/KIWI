@@ -2,7 +2,7 @@
 #include "qcommon.h"
 #include "mem_track.h"
 #include <universal/com_memory.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include <win32/win_local.h>
 #include "com_bsp.h"
 #include <gfx_d3d/rb_backend.h>
@@ -85,7 +85,7 @@ void __cdecl CM_Shutdown()
     const char *savedName; // [esp+0h] [ebp-4h]
 
     savedName = cm.name;
-    Com_Memset((uint *)&cm, 0, 284);
+    Com_Memset(&cm, 0, sizeof(clipMap_t));
     cm.name = savedName;
     iassert( !cm.isInUse );
 }

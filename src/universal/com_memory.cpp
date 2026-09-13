@@ -11,7 +11,7 @@
 #include <qcommon/mem_track.h>
 #include <win32/win_local.h>
 #include <win32/win_net.h>
-#include <database/database.h>
+#include <database64/database.h>
 #include "com_files.h"
 #include <qcommon/cmd.h>
 #include <gfx_d3d/r_dvars.h>
