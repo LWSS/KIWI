@@ -266,6 +266,11 @@ void __cdecl Con_NudgeMessageWindowTimes(MessageWindow *msgwnd, int serverTimeNu
     }
 }
 
+/*
+================
+Con_ClearNotify
+================
+*/
 void __cdecl Con_ClearNotify(int localClientNum)
 {
     for (uint gameWindowIndex = 0; gameWindowIndex < 4; ++gameWindowIndex)
@@ -290,6 +295,13 @@ void __cdecl Con_ClearErrors(int localClientNum)
     Con_ClearMessageWindow(&con.messageBuffer[localClientNum].errorWindow);
 }
 
+/*
+================
+Con_CheckResize
+
+If the line width has changed, reformat the buffer.
+================
+*/
 void __cdecl Con_CheckResize()
 {
     float x; // [esp+0h] [ebp-2Ch]
@@ -327,6 +339,7 @@ void __cdecl Con_CheckResize()
     }
     else
     {
+        // video hasn't been initialized yet
         con.fontHeight = 0;
         con.visibleLineCount = 0;
         con.visiblePixelWidth = 0;
@@ -337,6 +350,11 @@ cmd_function_s Con_ChatModePublic_f_VAR;
 cmd_function_s Con_ChatModeTeam_f_VAR;
 cmd_function_s Con_Clear_f_VAR;
 
+/*
+================
+Con_Init
+================
+*/
 void __cdecl Con_Init()
 {
     int i; // [esp+0h] [ebp-4h]
@@ -395,11 +413,16 @@ void __cdecl Con_ChatModeTeam_f()
     SetupChatField(0, 1, 543);
 }
 
+/*
+================
+Con_Clear_f
+================
+*/
 void __cdecl Con_Clear_f()
 {
     Con_ClearMessageWindow(&con.consoleWindow);
     con.lineOffset = 0;
-    con.displayLineOffset = 0;
+    con.displayLineOffset = 0;		// go to end
 }
 
 void __cdecl Con_InitClientAssets()
@@ -486,10 +509,20 @@ void __cdecl Con_InitMessageWindow(
     msgwnd->fadeOut = fadeOut;
 }
 
+/*
+================
+CL_ConsolePrint
+
+Handles cursor positioning, line wrapping, etc
+All console printing must go through this in order to be logged to disk
+If no console is visible, the text will appear at the top of the game window
+================
+*/
 void __cdecl CL_ConsolePrint(int localClientNum, int channel, const char *txt, int duration, int pixelWidth, int flags)
 {
     iassert(txt);
 
+    // for some demos we don't want to ever show anything on the console
     if (cl_noprint && !cl_noprint->current.enabled && channel != 6)
     {
         if (!con.initialized)
@@ -823,6 +856,7 @@ char __cdecl CL_ConsolePrint_AddLine(
     if (callDepth)
         return color;
     callDepth = 1;
+    // mark time for transparent overlay
     Con_UpdateNotifyMessage(localClientNum, channel, duration, flags);
     if (channel != con.prevChannel && con.lineOffset)
         Con_Linefeed(localClientNum, con.prevChannel, flags);
@@ -839,6 +873,7 @@ char __cdecl CL_ConsolePrint_AddLine(
     }
     if (!pixelWidth)
         pixelWidth = con.visiblePixelWidth;
+    // word wrap
     v16 = R_TextLineWrapPosition(txt, 512 - con.lineOffset, pixelWidth, font, xScale);
     iassert(v16); // KISAK_AI: lineWrapPos -> v16
     wrapPosition = *v16 != 0 ? v16 : 0;
@@ -851,6 +886,7 @@ char __cdecl CL_ConsolePrint_AddLine(
     }
     text = txt;
     atStartOfBrokenLine = 0;
+    // display character and advance
     while (*text)
     {
         c = SEH_ReadCharFromString(&text, 0);
@@ -1284,8 +1320,14 @@ int __cdecl PrintTimeWriteOut(MessageWindow *msgwnd, MessageLine *line)
         return 0;
 }
 
+/*
+===============
+Con_Linefeed
+===============
+*/
 void __cdecl Con_Linefeed(int localClientNum, uint channel, int flags)
 {
+    // mark time for transparent overlay
     Con_UpdateNotifyLine(localClientNum, channel, 1, flags);
     con.lineOffset = 0;
     if (con.displayLineOffset == con.consoleWindow.activeLineCount - 1)
@@ -2349,13 +2391,26 @@ void __cdecl Con_ToggleConsoleOutput()
     con.outputVisible = !con.outputVisible;
 }
 
+/*
+==================
+Con_DrawConsole
+==================
+*/
 void __cdecl Con_DrawConsole(int localClientNum)
 {
+    // check for console width changes from a vid mode change
     Con_CheckResize();
     if (Key_IsCatcherActive(localClientNum, 1))
         Con_DrawSolidConsole(localClientNum);
 }
 
+/*
+================
+Con_DrawSolidConsole
+
+Draws the console with the solid background
+================
+*/
 void __cdecl Con_DrawSolidConsole(int localClientNum)
 {
     Sys_EnterCriticalSection(CRITSECT_CONSOLE);
@@ -2364,12 +2419,22 @@ void __cdecl Con_DrawSolidConsole(int localClientNum)
     Sys_LeaveCriticalSection(CRITSECT_CONSOLE);
     if (!Key_IsCatcherActive(localClientNum, 1))
         con.outputVisible = 0;
+    // draw the text
     if (con.outputVisible)
         Con_DrawOuputWindow();
+
+    // draw the input prompt, user text, and cursor if desired
     Con_DrawInput(localClientNum);
 }
 
 
+/*
+================
+Con_DrawInput
+
+Draw the editline after a ] prompt
+================
+*/
 void __cdecl Con_DrawInput(int localClientNum)
 {
     bool v1; // [esp+10h] [ebp-3Ch]

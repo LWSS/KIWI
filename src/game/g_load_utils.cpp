@@ -47,6 +47,16 @@ int __cdecl G_GetEntityToken(char *buffer, int bufferSize)
     return 1;
 }
 
+/*
+====================
+G_ParseSpawnVars
+
+Parses a brace bounded set of key / value pairs out of the
+level's entity strings into level.spawnVars[]
+
+This does not actually spawn an entity.
+====================
+*/
 int __cdecl G_ParseSpawnVars(SpawnVar *spawnVar)
 {
     char com_token[1024]; // [esp+0h] [ebp-808h] BYREF
@@ -55,16 +65,21 @@ int __cdecl G_ParseSpawnVars(SpawnVar *spawnVar)
     spawnVar->spawnVarsValid = 0;
     spawnVar->numSpawnVars = 0;
     spawnVar->numSpawnVarChars = 0;
+    // parse the opening brace
+    // end of spawn string
     if (!G_GetEntityToken(com_token, 1024))
         return 0;
     if (com_token[0] != 123)
         Com_Error(ERR_DROP, "G_ParseSpawnVars: found %s when expecting {", com_token);
+    // go through all the key / value pairs
     while (1)
     {
+        // parse key
         if (!G_GetEntityToken(keyname, 1024))
             Com_Error(ERR_DROP, "G_ParseSpawnVars: EOF without closing brace");
         if (keyname[0] == 125)
             break;
+        // parse value
         if (!G_GetEntityToken(com_token, 1024))
             Com_Error(ERR_DROP, "G_ParseSpawnVars: EOF without closing brace");
         if (com_token[0] == 125)
@@ -78,6 +93,11 @@ int __cdecl G_ParseSpawnVars(SpawnVar *spawnVar)
     return 1;
 }
 
+/*
+====================
+G_AddSpawnVarToken
+====================
+*/
 char *__cdecl G_AddSpawnVarToken(char *string, SpawnVar *spawnVar)
 {
     uint v3; // [esp+0h] [ebp-18h]
@@ -109,6 +129,14 @@ int __cdecl G_SpawnString(const SpawnVar *spawnVar, const char *key, const char 
     return 0;
 }
 
+/*
+=============
+G_NewString
+
+Builds a copy of the string, translating \n to real linefeeds
+so message texts can be multi-line
+=============
+*/
 uint __cdecl G_NewString(const char *string)
 {
     char str[0x4000]; // [esp+10h] [ebp-4010h] BYREF
@@ -120,6 +148,7 @@ uint __cdecl G_NewString(const char *string)
     if (v3 > 0x4000)
         Com_Error(ERR_DROP, "G_NewString: len = %i > %i", v3, 0x4000);
     v4 = str;
+    // turn \n into a real linefeed
     for (i = 0; i < v3; ++i)
     {
         if (string[i] == '\\' && i < v3 - 1)

@@ -68,15 +68,25 @@ float __cdecl CL_GetScreenAspectRatioDisplayPixel()
     return cls.vidConfig.aspectRatioDisplayPixel;
 }
 
+/*
+====================
+CL_GetUserCmd
+====================
+*/
 int __cdecl CL_GetUserCmd(int localClientNum, int cmdNumber, usercmd_s *ucmd)
 {
     iassert(localClientNum == 0);
-    
+
+    // cmds[cmdNumber] is the last properly generated command
+
+    // can't return anything that we haven't created yet
     if (cmdNumber > clients[0].cmdNumber)
     {
         Com_Error(ERR_DROP, "CL_GetUserCmd:cmdNumber %i >= %i", cmdNumber, clients[0].cmdNumber);
     }
 
+    // the usercmd has been overwritten in the wrapping
+    // buffer because it is too far out of date
     if (cmdNumber <= clients[0].cmdNumber - 64 || cmdNumber <= 0)
         return 0;
 
@@ -91,6 +101,11 @@ int __cdecl CL_GetCurrentCmdNumber(int localClientNum)
     return clients[0].cmdNumber;
 }
 
+/*
+====================
+CL_GetCurrentSnapshotNumber
+====================
+*/
 void __cdecl CL_GetCurrentSnapshotNumber(int localClientNum, int *snapshotNumber, int *serverTime)
 {
     iassert(localClientNum == 0);
@@ -99,6 +114,11 @@ void __cdecl CL_GetCurrentSnapshotNumber(int localClientNum, int *snapshotNumber
     *serverTime = clients[0].snap.serverTime;
 }
 
+/*
+====================
+CL_GetSnapshot
+====================
+*/
 int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
 {
     int numEntities; // r28
@@ -108,8 +128,11 @@ int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
 
     iassert(localClientNum == 0);
 
+    // if the frame is not valid, we can't return it
     if (!clients[0].snapshots[0].valid)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 155, 0, "%s", "clSnap->valid");
+    // if the entities in the frame have fallen out of their
+    // circular buffer, we can't return it
     if (clients[0].parseEntitiesNum - clients[0].snapshots[0].parseEntitiesNum >= 2048)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp",
@@ -117,6 +140,7 @@ int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
             0,
             "%s",
             "cl->parseEntitiesNum - clSnap->parseEntitiesNum < MAX_PARSE_ENTITIES");
+    // write the snapshot
     snapshot->snapFlags = clients[0].snapshots[0].snapFlags;
     snapshot->serverCommandSequence = clients[0].snapshots[0].serverCommandNum;
     snapshot->serverTime = clients[0].snapshots[0].serverTime;
@@ -144,6 +168,9 @@ int __cdecl CL_GetSnapshot(int localClientNum, snapshot_s *snapshot)
             ++entityNums;
         } while (v4 < numEntities);
     }
+
+    // FIXME: configstring changes and server commands!!!
+
     return 1;
 }
 
@@ -182,6 +209,11 @@ void __cdecl CL_SetExtraButtons(int localClientNum, int buttons)
     clients[0].cgameExtraButtons |= buttons;
 }
 
+/*
+=====================
+CL_ConfigstringModified
+=====================
+*/
 void CL_ConfigstringModified()
 {
     int nesting; // r7
@@ -199,6 +231,7 @@ void CL_ConfigstringModified()
     if (index > 2814)
         Com_Error(ERR_DROP, "configstring > MAX_CONFIGSTRINGS");
 
+    // get everything after "cs <num>"
     v4 = Cmd_Argv(2);
     if (!clients[0].configstrings[index])
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 244, 0, "%s", "cl->configstrings[index]");
@@ -481,6 +514,12 @@ void __cdecl CL_LoadServerCommands(SaveGame *save)
     SaveMemory_LoadRead(clientConnections[0].serverCommands.buf, clientConnections[0].serverCommands.header.rover, save);
 }
 
+/*
+====================
+CL_ShutdownCGame
+
+====================
+*/
 void __cdecl CL_ShutdownCGame()
 {
     // MP ADD
@@ -781,6 +820,13 @@ void __cdecl CL_StartLoading(const char *mapname)
     Dvar_SetInt(cl_paused, 1);
 }
 
+/*
+====================
+CL_InitCGame
+
+Should only be called by CL_StartHunkUsers
+====================
+*/
 void __cdecl CL_InitCGame(int localClientNum, int savegame)
 {
     int startTime; // r22
@@ -821,6 +867,7 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
             "cl->configstrings[CS_SERVERINFO]");
         v5 = clients[0].configstrings[0];
     }
+    // find the current mapname
     info = SL_ConvertToString(v5);
     iassert(info);
     v7 = Info_ValueForKey(info, "mapname");
@@ -852,22 +899,34 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
             "%s",
             "!CL_GetLocalClientConnection( localClientNum )->serverCommands.header.sent || cls.demoplaying");
     clientUIActives[0].cgameInitCalled = 1;
+    // init for this gamestate
+    // use the lastExecutedServerCommand instead of the serverCommandSequence
+    // otherwise server commands sent just before a gamestate are dropped
     CG_Init(localClientNum, savegame);
     Com_Printf(
         CON_CHANNEL_CLIENT,
         "CL_InitCGame: %5.2f seconds\n",
         (double)(Sys_Milliseconds() - startTime) / 1000.0
     );
+    // have the renderer touch all its images, so they are present
+    // on the card even if the driver does deferred loading
     R_EndRegistration();
+    // clear anything that got printed
     Con_ClearNotify(0);
     Con_InitMessageBuffer();
     Con_InitGameMsgChannels();
 }
 
+/*
+==================
+CL_FirstSnapshot
+==================
+*/
 void __cdecl CL_FirstSnapshot()
 {
     if (!clientUIActives[0].isRunning)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_cgame.cpp", 886, 0, "%s", "clUI->isRunning");
+    // set the timedelta so we are exactly on this first frame
     clients[0].serverTime = com_time;
     Con_TimeJumped(0, com_time);
     CL_ResetSkeletonCache();
@@ -957,6 +1016,11 @@ void CL_UpdateTimeDemo()
     Com_Printf(CON_CHANNEL_CLIENT, "time %i (UpdateTimeDemo)\n", v5 + cls.timeDemoBaseTime);
 }
 
+/*
+==================
+CL_SetCGameTime
+==================
+*/
 void __cdecl CL_SetCGameTime(int localClientNum)
 {
     int serverTime; // r11
@@ -965,10 +1029,19 @@ void __cdecl CL_SetCGameTime(int localClientNum)
     if (clientUIActives[0].connectionState == CA_ACTIVE)
     {
         vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+        // get our current view of time
         serverTime = com_time;
         clients[0].serverTime = com_time;
+
+        // if we are playing a demo back, we can just keep reading
+        // messages from the demo file until the cgame definately
+        // has valid snapshots to interpolate between
         if (cls.demoplaying)
         {
+            // a timedemo will always use a deterministic set of time samples
+            // no matter what speed machine it is run on,
+            // while a normal demo may have different time samples
+            // each time it is played back
             if (cls.isTimeDemo)
             {
                 CL_UpdateTimeDemo();
@@ -976,6 +1049,8 @@ void __cdecl CL_SetCGameTime(int localClientNum)
             }
             if (serverTime >= clients[0].snap.serverTime)
             {
+                // feed another messag, which should change
+                // the contents of cl.snap
                 do
                     CL_ReadDemoMessage();
                 while (cls.demoplaying && clients[0].serverTime >= clients[0].snap.serverTime);

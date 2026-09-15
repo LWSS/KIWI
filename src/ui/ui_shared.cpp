@@ -411,10 +411,16 @@ void __cdecl Menus_FreeAllMemory(UiContext *dc)
         Menu_FreeMemory(dc->Menus[menu]);
 }
 
+/*
+=================
+LerpColor
+=================
+*/
 void __cdecl LerpColor(float *a, float *b, float *c, float t)
 {
     int i; // [esp+0h] [ebp-4h]
 
+    // lerp and clamp each component
     for (i = 0; i < 4; ++i)
     {
         c[i] = (b[i] - a[i]) * t + a[i];
@@ -430,6 +436,11 @@ void __cdecl LerpColor(float *a, float *b, float *c, float t)
     }
 }
 
+/*
+=================
+Color_Parse
+=================
+*/
 int __cdecl Color_Parse(const char **p, float (*c)[4])
 {
     float f; // [esp+0h] [ebp-8h] BYREF
@@ -444,6 +455,11 @@ int __cdecl Color_Parse(const char **p, float (*c)[4])
     return 1;
 }
 
+/*
+=================
+String_Parse
+=================
+*/
 int __cdecl String_Parse(const char **p, char *out, int len)
 {
     char *pszTranslated; // [esp+0h] [ebp-8h]
@@ -480,6 +496,7 @@ void __cdecl Script_SetColor(UiContext *dc, itemDef_s *item, const char **args)
     float f; // [esp+40Ch] [ebp-8h] BYREF
     int i; // [esp+410h] [ebp-4h]
 
+    // expecting type of color to set and 4 args for the color
     if (String_Parse(args, name, 1024))
     {
         out = 0;
@@ -513,6 +530,7 @@ void __cdecl Script_SetBackground(UiContext *dc, itemDef_s *item, const char **a
 {
     char name[1028]; // [esp+0h] [ebp-408h] BYREF
 
+    // expecting name to set asset to
     if (String_Parse(args, name, 1024))
         item->window.background = Material_RegisterHandle(name, item->imageTrack);
 }
@@ -528,6 +546,7 @@ void __cdecl Script_SetItemColor(UiContext *dc, itemDef_s *item, const char **ar
     int i; // [esp+814h] [ebp-14h]
     float color[4]; // [esp+818h] [ebp-10h] BYREF
 
+    // expecting type of color to set and 4 args for the color
     if (String_Parse(args, itemname, 1024))
     {
         if (String_Parse(args, name, 1024))
@@ -933,6 +952,11 @@ void __cdecl Script_FadeOut(UiContext *dc, itemDef_s *item, const char **args)
         Menu_FadeItemByName(dc->localClientNum, item->parent, name, 1);
 }
 
+/*
+=================
+Script_ShowMenu
+=================
+*/
 void __cdecl Script_ShowMenu(UiContext *dc, itemDef_s *item, const char **args)
 {
     char name[1028]; // [esp+0h] [ebp-408h] BYREF
@@ -1173,15 +1197,18 @@ int __cdecl Item_ListBox_OverLB(int localClientNum, itemDef_s *item, float x, fl
         MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 53, 0, "%s", "w");
     if ((item->window.staticFlags & 0x200000) != 0)
     {
+        // check if on left arrow
         r.x = rect->x;
         r.y = rect->y + rect->h - 16.0;
         r.w = 16.0;
         r.h = 16.0;
         if (Rect_ContainsPoint(localClientNum, &r, x, y))
             return 256;
+        // check if on right arrow
         r.x = rect->x + rect->w - 16.0;
         if (Rect_ContainsPoint(localClientNum, &r, x, y))
             return 512;
+        // check if on thumb
         thumbstart = Item_ListBox_ThumbPosition(localClientNum, item);
         r.x = thumbstart;
         if (Rect_ContainsPoint(localClientNum, &r, x, y))
@@ -1250,6 +1277,7 @@ void __cdecl Item_ListBox_MouseEnter(int localClientNum, itemDef_s *item, float 
         if ((item->window.staticFlags & 0x200000) != 0)
         {
             vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
+            // check for selection hit as we have exausted buttons and thumb
             if ((item->window.dynamicFlags[localClientNum] & 0x1F00) == 0 && listPtr->elementStyle == 1)
             {
                 r.x = rect->x;
@@ -1304,8 +1332,10 @@ void __cdecl Item_MouseEnter(UiContext *dc, itemDef_s *item, float x, float y)
         textRect = Item_GetTextRect(dc->localClientNum, item);
         r = *textRect;
         r.y = r.y - r.h;
+        // in the text rect?
         r.horzAlign = textRect->horzAlign;
         r.vertAlign = textRect->vertAlign;
+        // items can be enabled and disabled based on cvars
         if ((item->dvarFlags & 3) == 0 || Item_EnableShowViaDvar(item, 1))
         {
             if (Item_IsVisible(dc->localClientNum, item))
@@ -1328,8 +1358,10 @@ void __cdecl Item_MouseEnter(UiContext *dc, itemDef_s *item, float x, float y)
                 }
                 else
                 {
+                    // not in the text rect
                     if ((flags & 0x40) != 0)
                     {
+                        // if we were
                         Item_RunScript(dc, item, (char *)item->mouseExitText);
                         Window_RemoveDynamicFlags(dc->localClientNum, &item->window, 64);
                     }
@@ -1418,6 +1450,8 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
         return 0;
     x = dc->cursor.x;
     y = dc->cursor.y;
+    // FIXME: this is the whole issue of focus vs. mouse over..
+    // need a better overall solution as i don't like going through everything twice
     for (pass = 0; pass < 2; ++pass)
     {
         for (i = menu->itemCount - 1; i >= 0; --i)
@@ -1426,6 +1460,7 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
             v9 = dc->localClientNum;
             vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v9, 1);
             if ((v8->window.dynamicFlags[v9] & 0x4004) != 0
+                // items can be enabled and disabled based on cvars
                 && ((menu->items[i]->dvarFlags & 3) == 0 || Item_EnableShowViaDvar(menu->items[i], 1))
                 && ((menu->items[i]->dvarFlags & 0xC) == 0 || Item_EnableShowViaDvar(menu->items[i], 4))
                 && Item_IsVisible(dc->localClientNum, menu->items[i]))
@@ -1447,9 +1482,12 @@ BOOL __cdecl Menu_HandleMouseMove(UiContext *dc, menuDef_t *menu)
                         {
                             v6 = dc->localClientNum;
                             vassert((dc->localClientNum) == 0, "%i not in [0, %i)", v6, 1);
+                            // if we are over an item
                             if (IsVisible(overItem->window.dynamicFlags[v6]))
                             {
+                                // different one
                                 Item_MouseEnter(dc, overItem, x, y);
+                                // if item is not a decoration see if it can take focus
                                 if (!focusSet)
                                 {
                                     focusSet = Item_SetFocus(dc, overItem, x, y);
@@ -1951,6 +1989,7 @@ void __cdecl Item_RunScript(UiContext *dc, itemDef_s *item, char *s)
     {
         I_strncat((char *)dst, 5120, s);
         p = (char *)dst;
+        // expect command then arguments, ; ends command, NULL ends script
         while (String_Parse((const char **)&p, out, 1024))
         {
             if (out[0] != 59 || out[1])
@@ -1975,6 +2014,7 @@ void __cdecl Item_RunScript(UiContext *dc, itemDef_s *item, char *s)
                         break;
                     }
                 }
+                // not in our auto list, pass to handler
                 if (!v3)
                     UI_RunMenuScript(dc->localClientNum, &p, s);
             }
@@ -1991,6 +2031,7 @@ int __cdecl Item_SetFocus(UiContext *dc, itemDef_s *item, float x, float y)
     menuDef_t *parent; // [esp+4Ch] [ebp-8h]
     int i; // [esp+50h] [ebp-4h]
 
+    // sanity check, non-null, not a decoration and does not already have the focus
     if (!item)
     {
         MyAssertHandler(".\\ui\\ui_shared.cpp", 2183, 0, "%s", "item != NULL");
@@ -2000,6 +2041,7 @@ int __cdecl Item_SetFocus(UiContext *dc, itemDef_s *item, float x, float y)
         return 0;
     if (Window_HasFocus(dc->localClientNum, &item->window) && Item_IsVisible(dc->localClientNum, item))
         return 1;
+    // bk001206 - this can be NULL.
     parent = item->parent;
     if (parent)
     {
@@ -2016,6 +2058,7 @@ int __cdecl Item_SetFocus(UiContext *dc, itemDef_s *item, float x, float y)
             }
         }
     }
+    // items can be enabled and disabled based on cvars
     if ((item->dvarFlags & 3) != 0 && !Item_EnableShowViaDvar(item, 1))
         return 0;
     if (!Item_IsVisible(dc->localClientNum, item))
@@ -2278,6 +2321,9 @@ void __cdecl Menus_HandleOOBClick(UiContext *dc, menuDef_t *menu, int key, int d
 
     if (menu)
     {
+        // basically the behaviour we are looking for is if there are windows in the stack.. see if
+        // the cursor is within any of them.. if not close them otherwise activate them and pass the
+        // key on.. force a mouse move to activate focus and script stuff
         if (down && (menu->window.staticFlags & 0x2000000) != 0)
         {
             Menu_RunCloseScript(dc, menu);
@@ -2499,6 +2545,7 @@ void __cdecl Menu_HandleKey(UiContext *dc, menuDef_t *menu, int key, int down)
                 v4 = CL_ControllerIndexFromClientNum(dc->localClientNum);
                 Cbuf_ExecuteBuffer(dc->localClientNum, v4, (char *)binding);
             }
+            // see if the mouse is within the window bounds and if so is this a mouse click
             else if (!down
                 || (menu->window.staticFlags & 0x1000000) != 0
                 || menu->fullScreen
@@ -2506,6 +2553,7 @@ void __cdecl Menu_HandleKey(UiContext *dc, menuDef_t *menu, int key, int down)
                 || inHandleKey
                 || key != K_MOUSE1 && key != K_MOUSE2 && key != K_MOUSE3)
             {
+                // get the item with focus
                 for (i = 0; i < menu->itemCount; ++i)
                 {
                     if (Item_IsVisible(dc->localClientNum, menu->items[i]))
@@ -2525,6 +2573,7 @@ void __cdecl Menu_HandleKey(UiContext *dc, menuDef_t *menu, int key, int down)
                     {
                         if (key <= 0 || key > 255 || !Menu_CheckOnKey(dc, menu, key))
                         {
+                            // default handling
                             switch (key)
                             {
                             case K_TAB:
@@ -2666,7 +2715,7 @@ bool __cdecl Item_TextField_HandleKey(UiContext *dc, itemDef_s *item, int key)
     {
         key &= ~K_CHAR_FLAG;
         if (key == '\b')
-        {
+        { // ctrl-h is backspace
             if (item->cursorPos[dc->localClientNum] > 0)
             {
                 cursorPos = item->cursorPos[dc->localClientNum];
@@ -2683,6 +2732,9 @@ bool __cdecl Item_TextField_HandleKey(UiContext *dc, itemDef_s *item, int key)
         }
         if (item->type == 16 && !I_isforfilename(key))
             return 1;
+        //
+        // ignore any non printable chars
+        //
         if (key < K_SPACE || !item->dvar)
             return 1;
         if (key == '@')
@@ -2863,6 +2915,9 @@ void __cdecl Scroll_ListBox_AutoFunc(UiContext *dc, void *p)
     scrollInfo_s *info = (scrollInfo_s *)p;
     if (dc->realTime > info->nextScrollTime)
     {
+        // need to scroll which is done by simulating a click to the item
+        // this is done a bit sideways as the autoscroll "knows" that the item is a listbox
+        // so it calls it directly
         Item_ListBox_HandleKey(dc, info->item, info->scrollKey, 1, 0);
         info->nextScrollTime = info->adjustValue + dc->realTime;
     }
@@ -2920,6 +2975,9 @@ void __cdecl Scroll_ListBox_ThumbFunc(UiContext *dc, void *p)
             info->yStart = cursor;
         }
     }
+    // need to scroll which is done by simulating a click to the item
+    // this is done a bit sideways as the autoscroll "knows" that the item is a listbox
+    // so it calls it directly
     Scroll_ListBox_AutoFunc(dc, p);
 }
 
@@ -3136,6 +3194,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
     LABEL_48:
         switch (key)
         {
+        // mouse hit
         case K_MOUSE1:
         case K_MOUSE2:
             if ((flags & 0x100) != 0)
@@ -3148,6 +3207,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
             }
             else if ((flags & 0x200) != 0)
             {
+                // one down
                 if (listPtr->startPos[dc->localClientNum] + 1 < max)
                     v8 = listPtr->startPos[dc->localClientNum] + 1;
                 else
@@ -3156,6 +3216,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
             }
             else if ((flags & 0x800) != 0)
             {
+                // page up
                 if (listPtr->startPos[dc->localClientNum] - viewmax > 0)
                     v7 = listPtr->startPos[dc->localClientNum] - viewmax;
                 else
@@ -3164,6 +3225,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
             }
             else if ((flags & 0x1000) != 0)
             {
+                // page down
                 if (viewmax + listPtr->startPos[dc->localClientNum] < max)
                     v6 = viewmax + listPtr->startPos[dc->localClientNum];
                 else
@@ -3172,6 +3234,7 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
             }
             else if ((flags & 0x400) == 0)
             {
+                // select an item
                 if (item->special == 25.0)
                 {
                     UI_OverrideCursorPos(dc->localClientNum, item);
@@ -3201,18 +3264,22 @@ int __cdecl Item_ListBox_HandleKey(UiContext *dc, itemDef_s *item, int key, int 
             return 1;
         case K_HOME:
         case K_KP_HOME:
+            // home
             Script_FeederTop(dc, item);
             return 1;
         case K_END:
         case K_KP_END:
+            // end
             Script_FeederBottom(dc, item);
             return 1;
         case K_PGUP:
         case K_KP_PGUP:
+            // page up
             Item_ListBox_Page(dc->localClientNum, item, v12, max, viewmax, -viewmax);
             return 1;
         case K_PGDN:
         case K_KP_PGDN:
+            // page down
             Item_ListBox_Page(dc->localClientNum, item, v12, max, viewmax, viewmax);
             return 1;
         }
@@ -3704,6 +3771,11 @@ void __cdecl Scroll_Slider_SetThumbPos(UiContext *dc, itemDef_s *item)
     }
 }
 
+/*
+=================
+Item_Slider_HandleKey
+=================
+*/
 int __cdecl Item_Slider_HandleKey(UiContext *dc, itemDef_s *item, int key, int down)
 {
     const char *VariantString; // eax
@@ -4386,8 +4458,11 @@ char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
     }
 
     Menu_UpdatePosition(dc->localClientNum, menu);
+    // draw the background if necessary
     if (menu->fullScreen && menu->window.background)
     {
+        // implies a background shader
+        // FIXME: make sure we have a default shader if fullscreen is set with no background
         if (!menu)
         {
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
@@ -4404,6 +4479,7 @@ char __cdecl Menu_Paint(UiContext *dc, menuDef_t *menu)
             menu->window.background);
     }
     fadeCycle = (float)menu->fadeCycle;
+    // paint the background and or border
     Window_Paint(dc, &menu->window, menu->fadeAmount, menu->fadeInAmount, menu->fadeClamp, fadeCycle);
 
     for (i = 0; i < menu->itemCount; ++i)
@@ -4489,6 +4565,7 @@ void __cdecl Window_Paint(
         switch (w->style)
         {
         case 1:
+            // box, but possible a shader that needs filled
             if (w->background)
             {
                 localClientNum = dc->localClientNum;
@@ -4522,6 +4599,7 @@ void __cdecl Window_Paint(
             break;
         case 2:
             KISAK_NULLSUB();
+            // gradient bar
             break;
         case 3:
             v11 = dc->localClientNum;
@@ -4589,6 +4667,7 @@ void __cdecl Window_Paint(
         switch (w->border)
         {
         case 1:
+            // full
             UI_DrawRect(
                 scrPlace,
                 origRect->x,
@@ -4601,6 +4680,7 @@ void __cdecl Window_Paint(
                 w->borderColor);
             break;
         case 2:
+            // top/bottom
             UI_DrawTopBottom(
                 scrPlace,
                 origRect->x,
@@ -4613,6 +4693,7 @@ void __cdecl Window_Paint(
                 w->borderColor);
             break;
         case 3:
+            // left right
             UI_DrawSides(
                 scrPlace,
                 origRect->x,
@@ -4625,6 +4706,7 @@ void __cdecl Window_Paint(
                 w->borderColor);
             break;
         case 4:
+            // this is just two gradient bars along each horz edge
             KISAK_NULLSUB();
             KISAK_NULLSUB();
             break;
@@ -4757,6 +4839,7 @@ void __cdecl Item_Paint(UiContext *dc, itemDef_s *item)
                     item->window.background = Material_RegisterHandle(lowerCaseName, item->imageTrack);
                 }
                 fadeCycle = (float)parent->fadeCycle;
+                // paint the rect first..
                 Window_Paint(dc, &item->window, parent->fadeAmount, parent->fadeInAmount, parent->fadeClamp, fadeCycle);
                 if (g_debugMode)
                 {
@@ -4961,6 +5044,7 @@ void __cdecl Item_Text_Paint(UiContext *dc, itemDef_s *item)
     if (*textPtr)
     {
         Item_TextColor(dc, item, (float (*)[4])color);
+        // this needs to go here as it sets extents for cvar types as well
         Item_SetTextExtents(dc->localClientNum, item, textPtr);
         if ((item->window.staticFlags & 0x800000) != 0)
         {
@@ -5024,6 +5108,7 @@ void __cdecl Item_SetTextExtents(int localClientNum, itemDef_s *item, const char
     v4 = item->type != 8 && item->dvar;
     isDvarField = v4;
     v3 = xAlignMode && (isOwnerDraw || isDvarField);
+    // keeps us from computing the widths and heights more than once
     if (v3 || Item_GetTextRect(localClientNum, item)->w == 0.0)
     {
         font = UI_GetFontHandle(&scrPlaceView[localClientNum], item->fontEnum, item->textscale);
@@ -5115,6 +5200,7 @@ void __cdecl Item_TextColor(UiContext *dc, itemDef_s *item, float (*newColor)[4]
         (*newColor)[1] = item->window.foreColor[1];
         (*newColor)[2] = item->window.foreColor[2];
         (*newColor)[3] = item->window.foreColor[3];
+    // items can be enabled and disabled based on cvars
     }
     else
     {
@@ -5602,11 +5688,18 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\ui_utils_api.h", 36, 0, "%s", "w");
         rect = &item->window.rect;
         scrPlace = &scrPlaceView[dc->localClientNum];
+        // the listbox is horizontal or vertical and has a fixed size scroll bar going either direction
+        // elements are enumerated from the DC and either text or image handles are acquired from the DC as well
+        // textscale is used to size the text, textalignx and textaligny are used to size image elements
+        // there is no clipping available so only the last completely visible item is painted
         count = UI_FeederCount(dc->localClientNum, item->special);
         if (!item)
             MyAssertHandler("c:\\trees\\cod3\\src\\ui\\../ui/ui_utils.h", 53, 0, "%s", "w");
+        // default is vertical if horizontal flag is not here
         if ((item->window.staticFlags & 0x200000) != 0)
         {
+            // draw scrollbar in bottom of the window
+            // bar
             xe = rect->x + 1.0;
             y = item->window.rect.y + item->window.rect.h - 16.0 - 1.0;
             UI_DrawHandlePic(
@@ -5643,6 +5736,7 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
                 item->window.rect.vertAlign,
                 0,
                 sharedUiInfo.assets.scrollBarArrowRight);
+            // thumb
             thumb = Item_ListBox_ThumbDrawPosition(dc, item);
             if (thumb > x - 16.0 - 1.0)
                 thumb = x - 16.0 - 1.0;
@@ -5658,12 +5752,16 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
                 sharedUiInfo.assets.scrollBarThumb);
             listPtr->endPos[dc->localClientNum] = listPtr->startPos[dc->localClientNum];
             size = item->window.rect.w - 2.0;
+            // items
+            // size contains max available space
             if (listPtr->elementStyle == 1)
             {
                 xa = rect->x + 1.0;
                 ya = item->window.rect.y + 1.0;
                 for (i = listPtr->startPos[dc->localClientNum]; i < count; ++i)
                 {
+                    // always draw at least one
+                    // which may overdraw the box if it is too small for the element
                     image = UI_FeederItemImage(item->special, i);
                     if (image)
                     {
@@ -5711,6 +5809,7 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
         else
         {
             UI_OverrideCursorPos(dc->localClientNum, item);
+            // draw scrollbar to right side of the window
             if (!listPtr->noScrollBars)
             {
                 xb = item->window.rect.x + item->window.rect.w - 16.0 - 1.0;
@@ -5750,6 +5849,7 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
                     item->window.rect.vertAlign,
                     0,
                     sharedUiInfo.assets.scrollBarArrowDown);
+                // thumb
                 thumba = Item_ListBox_ThumbDrawPosition(dc, item);
                 if (thumba > yb - 16.0 - 1.0)
                     thumba = yb - 16.0 - 1.0;
@@ -5764,6 +5864,7 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
                     0,
                     sharedUiInfo.assets.scrollBarThumb);
             }
+            // adjust size for item painting
             sizea = item->window.rect.h - 2.0;
             if (listPtr->elementStyle == 1)
             {
@@ -5772,6 +5873,8 @@ void __cdecl Item_ListBox_Paint(UiContext *dc, itemDef_s *item)
                 listPtr->endPos[dc->localClientNum] = listPtr->startPos[dc->localClientNum];
                 for (ia = listPtr->startPos[dc->localClientNum]; ia < count; ++ia)
                 {
+                    // always draw at least one
+                    // which may overdraw the box if it is too small for the element
                     imagea = UI_FeederItemImage(item->special, ia);
                     if (imagea)
                     {
@@ -6165,6 +6268,7 @@ void __cdecl Item_OwnerDraw_Paint(UiContext *dc, itemDef_s *item)
     }
     if ((item->dvarFlags & 3) != 0 && !Item_EnableShowViaDvar(item, 1))
     {
+        // bk001207 - FIXME: Com_Memcpy
         color[0] = parent->disableColor[0];
         color[1] = parent->disableColor[1];
         color[2] = parent->disableColor[2];
@@ -6181,6 +6285,7 @@ void __cdecl Item_OwnerDraw_Paint(UiContext *dc, itemDef_s *item)
         clamp = item->parent->window.rect;
         if (*item->text)
         {
+            // +8 is an offset kludge to properly align owner draw items that have text combined with them
             x = textRect->x + textRect->w + 8.0;
             UI_OwnerDraw(
                 dc->localClientNum,

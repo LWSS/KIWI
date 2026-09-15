@@ -10,23 +10,46 @@
 #include "sv_public.h"
 #include <EffectsCore/fx_system.h>
 
+/*
+==================
+SV_DirectConnect
+
+A "connect" OOB command has been received
+==================
+*/
 void __cdecl SV_DirectConnect()
 {
     client_t *clients; // r31
 
     Com_DPrintf(CON_CHANNEL_SERVER, "SVC_DirectConnect ()\n");
     clients = svs.clients;
+    // build a new connection
+    // accept the new client
+    // this is the only place a client_t is ever initialized
     memset(svs.clients, 0, sizeof(client_t));
     clients->gentity = SV_GentityNum(0);
     clients->netchan.outgoingSequence = 1;
+    // init the netchan queue
     SV_InitReliableCommandsForClient(clients);
     clients->state = 1;
     clients->lastUsercmd.serverTime = G_GetTime();
 }
 
+/*
+================
+SV_SendClientGameState
+
+Sends the first message from the server to a connected client.
+This will be sent on the initial connection and upon each new map load.
+
+It will be resent if the client acknowledges a later message but has
+the wrong gamestate.
+================
+*/
 void __cdecl SV_SendClientGameState(client_t *client)
 {
     iassert(client == svs.clients);
+    // send the gamestate
     CL_ParseGamestate((char *)sv.configstrings);
 }
 
@@ -35,11 +58,18 @@ void __cdecl SV_SendGameState()
     CL_ParseGamestate((char *)sv.configstrings);
 }
 
+/*
+==================
+SV_ClientEnterWorld
+==================
+*/
 void __cdecl SV_ClientEnterWorld(client_t *client)
 {
     if (client->state != 1)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_client.cpp", 87, 0, "%s", "client->state == CS_ACTIVE");
+    // call the game begin function
     ClientConnect(0);
+    // set up the entity for the client
     client->gentity = SV_GentityNum(client - svs.clients);
 }
 
@@ -59,6 +89,13 @@ float __cdecl SV_FX_GetVisibility(const float *start, const float *end)
     }
 }
 
+/*
+==================
+SV_ExecuteClientCommand
+
+Also called by bot code
+==================
+*/
 void __cdecl SV_ExecuteClientCommand(const char *s)
 {
     iassert(SV_Loaded());
@@ -69,9 +106,17 @@ void __cdecl SV_ExecuteClientCommand(const char *s)
             0,
             "%s",
             "svs.clients[0].state == CS_ACTIVE");
+    // pass unknown strings to the game
     ClientCommand(0, s);
 }
 
+/*
+==================
+SV_ClientThink
+
+Also called by bot code
+==================
+*/
 void __cdecl SV_ClientThink(usercmd_s *cmd)
 {
     client_t *clients; // r11
@@ -89,6 +134,7 @@ void __cdecl SV_ClientThink(usercmd_s *cmd)
         clients = svs.clients;
     }
     memcpy(&clients->lastUsercmd, cmd, sizeof(clients->lastUsercmd));
+    // may have been kicked during the last usercmd
     ClientThink(0);
 }
 

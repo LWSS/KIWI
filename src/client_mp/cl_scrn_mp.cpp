@@ -23,6 +23,16 @@
 int scr_initialized;
 BOOL updateScreenCalled;
 
+/*
+==================
+SCR_DrawSmallStringExt
+
+Draws a multi-colored string with a drop shadow, optionally forcing
+to a fixed color.
+
+Coordinates are at 640 by 480 virtual resolution
+==================
+*/
 void __cdecl SCR_DrawSmallStringExt(int x, int y, char *string, const float *setColor)
 {
     float yAdj; // [esp+28h] [ebp-8h]
@@ -30,9 +40,15 @@ void __cdecl SCR_DrawSmallStringExt(int x, int y, char *string, const float *set
 
     xAdj = (float)x;
     yAdj = (double)R_TextHeight(cls.consoleFont) + (double)y;
+    // draw the colored text
     R_AddCmdDrawText(string, 0x7FFFFFFF, cls.consoleFont, xAdj, yAdj, 1.0, 1.0, 0.0, setColor, 0);
 }
 
+/*
+==================
+SCR_Init
+==================
+*/
 void __cdecl SCR_Init()
 {
     scr_initialized = 1;
@@ -62,6 +78,14 @@ float __cdecl CL_GetMenuBlurRadius(int localClientNum)
         return 0.0f;
 }
 
+/*
+==================
+SCR_UpdateScreen
+
+This is called every frame, and can also be called explicitly to flush
+text to the screen.
+==================
+*/
 void __cdecl SCR_UpdateScreen()
 {
     if (!updateScreenCalled && !SCR_ShouldSkipUpdateScreen())
@@ -97,6 +121,11 @@ void SCR_UpdateFrame()
         R_BspGenerateReflections();
 }
 
+/*
+=====================
+CL_CGameRendering
+=====================
+*/
 int __cdecl CL_CGameRendering(int localClientNum)
 {
     BOOL demType; // eax
@@ -150,6 +179,13 @@ void __cdecl CL_DrawScreen(int localClientNum)
     }
 }
 
+/*
+==================
+SCR_DrawScreenField
+
+This will be called twice if rendering in stereo mode
+==================
+*/
 void __cdecl SCR_DrawScreenField(int localClientNum, int refreshedUI)
 {
     connstate_t clcState; // [esp+8h] [ebp-4h]
@@ -161,9 +197,12 @@ void __cdecl SCR_DrawScreenField(int localClientNum, int refreshedUI)
         SCR_ClearScreen();
         return;
     }
+    // refresh to update the time
     UI_UpdateTime(localClientNum, cls.realtime);
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clcState = clientUIActives[0].connectionState;
+    // if the menu is going to cover the entire screen, we
+    // don't need to render anything under it
     if (!UI_IsFullscreen(localClientNum))
     {
         switch (clcState)
@@ -190,13 +229,18 @@ void __cdecl SCR_DrawScreenField(int localClientNum, int refreshedUI)
             SCR_ClearScreen();
             CL_DrawLogo(localClientNum);
             break;
+        // connecting clients will only show the connection dialog
+        // refresh to update the time
         case CA_CONNECTING:
         case CA_CHALLENGING:
         case CA_CONNECTED:
         case CA_SENDINGSTATS:
+        // draw the game information screen and loading progress
         case CA_LOADING:
         case CA_PRIMED:
             SCR_ClearScreen();
+            // also draw the connection information, so it doesn't
+            // flash away too briefly on local or lan games
             UI_Refresh(localClientNum);
             UI_DrawConnectScreen(localClientNum);
             refreshedUI = 1;
@@ -221,12 +265,19 @@ void __cdecl SCR_DrawScreenField(int localClientNum, int refreshedUI)
         Com_Error(ERR_FATAL, "SCR_DrawScreenField: bad clcState");
     }
 LABEL_26:
+    // the menu draws next
     if (!refreshedUI && Key_IsCatcherActive(localClientNum, 16))
         UI_Refresh(localClientNum);
+    // debug graph can be drawn on top of anything
     if (net_showprofile->current.integer)
         Net_DisplayProfile(localClientNum);
 }
 
+/*
+=================
+SCR_DrawDemoRecording
+=================
+*/
 void SCR_DrawDemoRecording()
 {
     signed int pos; // [esp+1Ch] [ebp-430h]

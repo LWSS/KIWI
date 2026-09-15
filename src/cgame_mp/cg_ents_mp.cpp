@@ -209,6 +209,13 @@ bool __cdecl CG_VecLessThan(float *a, float *b)
     return v3 <= 0.0;
 }
 
+/*
+=========================
+CG_AdjustPositionForMover
+
+Also called by client movement prediction code
+=========================
+*/
 void __cdecl CG_AdjustPositionForMover(
     int localClientNum,
     const float *in,
@@ -250,6 +257,8 @@ void __cdecl CG_AdjustPositionForMover(
                 outDeltaAngles[1] = deltaAngles[1];
                 outDeltaAngles[2] = deltaAngles[2];
             }
+
+            // FIXME: origin change when on a rotating object
         }
         else
         {
@@ -449,6 +458,12 @@ void __cdecl CG_UpdateClientDobjPartBits(centity_s *cent, int entnum, int localC
     }
 }
 
+/*
+===============
+CG_AddPacketEntities
+
+===============
+*/
 int __cdecl CG_AddPacketEntities(int localClientNum)
 {
     int viewlocked_entNum; // [esp+0h] [ebp-154h]
@@ -477,6 +492,7 @@ int __cdecl CG_AddPacketEntities(int localClientNum)
     lockedView = 0;
     linkedPlayerCount = 0;
     CG_AddClientSideSounds(localClientNum);
+    // add each entity sent over by the server
     for (num = 0; num < cgameGlob->nextSnap->numEntities; ++num)
     {
         entnum = cgameGlob->nextSnap->entities[num].number;
@@ -621,6 +637,12 @@ cpose_t*__cdecl CG_GetPose(int localClientNum, uint handle)
     return &CG_GetLocalClientGlobals(localClientNum)->viewModelPose;
 }
 
+/*
+===============
+CG_CalcEntityLerpPositions
+
+===============
+*/
 void __cdecl CG_CalcEntityLerpPositions(int localClientNum, centity_s *cent)
 {
     uint corpseIndex; // [esp+18h] [ebp-8h]
@@ -685,6 +707,11 @@ void __cdecl CG_CalcEntityLerpPositions(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+=============================
+CG_InterpolateEntityPosition
+=============================
+*/
 void __cdecl CG_InterpolateEntityPosition(cg_s *cgameGlob, centity_s *cent)
 {
     float v2; // [esp+8h] [ebp-B4h]
@@ -725,9 +752,13 @@ void __cdecl CG_InterpolateEntityPosition(cg_s *cgameGlob, centity_s *cent)
     float current[3]; // [esp+B0h] [ebp-Ch] BYREF
 
     iassert(cgameGlob->snap);
+    // it would be an internal error to find an entity that interpolates without
+    // a snapshot ahead of the current one
     iassert(cgameGlob->nextSnap);
     iassert(cent->nextState.lerp.pos.trType != TR_PHYSICS);
     f = cgameGlob->frameInterpolation;
+    // this will linearize a sine or parabolic curve, but it is important
+    // to not extrapolate player positions if more recent data is available
     BG_EvaluateTrajectory(&cent->currentState.pos, cgameGlob->snap->serverTime, current);
     BG_EvaluateTrajectory(&cent->nextState.lerp.pos, cgameGlob->nextSnap->serverTime, next);
     Vec3Lerp(current, next, f, cent->pose.origin);
@@ -1203,12 +1234,18 @@ void __cdecl CG_ProcessEntity(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+==================
+CG_General
+==================
+*/
 void __cdecl CG_General(int localClientNum, centity_s *cent)
 {
     DObj_s *obj; // [esp+4h] [ebp-18h]
     float lightingOrigin[3]; // [esp+10h] [ebp-Ch] BYREF
     cgs_t *cgs;
 
+    // if set to invisible, skip
     if ((cent->nextState.lerp.eFlags & 0x20) == 0)
     {
         cgs = CG_GetLocalClientStaticGlobals(localClientNum);
@@ -1221,6 +1258,7 @@ void __cdecl CG_General(int localClientNum, centity_s *cent)
         if (obj)
         {
             CG_LockLightingOrigin(cent, lightingOrigin);
+            // add to refresh list
             R_AddDObjToScene(obj, &cent->pose, cent->nextState.number, 0, lightingOrigin, 0.0);
         }
     }
@@ -1249,6 +1287,11 @@ void __cdecl CG_LockLightingOrigin(centity_s *cent, float *lightingOrigin)
     lightingOrigin[2] = lightingOrigin[2] + 4.0;
 }
 
+/*
+==================
+CG_Item
+==================
+*/
 void __cdecl CG_Item(int localClientNum, centity_s *cent)
 {
     DObj_s *obj; // [esp+Ch] [ebp-20h]
@@ -1259,6 +1302,7 @@ void __cdecl CG_Item(int localClientNum, centity_s *cent)
 
     if (cent->nextState.index.brushmodel >= 2048)
         Com_Error(ERR_DROP, "Bad item index %i on entity", cent->nextState.index.brushmodel);
+    // if set to invisible, skip
     if ((cent->nextState.lerp.eFlags & 0x20) == 0)
     {
         weapIdx = cent->nextState.index.brushmodel % 128;
@@ -1277,11 +1321,19 @@ void __cdecl CG_Item(int localClientNum, centity_s *cent)
             lightingOrigin[0] = cent->pose.origin[0];
             lightingOrigin[1] = cent->pose.origin[1];
             lightingOrigin[2] = cent->pose.origin[2] + 4.0;
+            // add to refresh list
             R_AddDObjToScene(obj, &cent->pose, cent->nextState.number, 0, lightingOrigin, 0.0);
         }
     }
 }
 
+/*
+==================
+CG_EntityEffects
+
+Add continuous entity effects, like local entity emission and lighting
+==================
+*/
 void __cdecl CG_EntityEffects(int localClientNum, centity_s *cent)
 {
     if (cent->nextState.loopSound)
@@ -1353,6 +1405,11 @@ void __cdecl CG_mg42(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+===============
+CG_Missile
+===============
+*/
 void __cdecl CG_Missile(int localClientNum, centity_s *cent)
 {
     DObj_s *obj; // [esp+10h] [ebp-20h]
@@ -1369,8 +1426,10 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
                 cent->nextState.weapon = 0;
             vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
             weapDef = BG_GetWeaponDef(cent->nextState.weapon);
+            // add missile sound
             if (weapDef->projectileSound)
                 CG_PlaySoundAlias(localClientNum, cent->nextState.number, cent->pose.origin, weapDef->projectileSound);
+            // create the render entity
             obj = CG_PreProcess_GetDObj(
                 localClientNum,
                 cent->nextState.number,
@@ -1378,6 +1437,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
                 weapDef->projectileModel);
             if (obj)
             {
+                // add trails
                 if (weapDef->projTrailEffect && !cent->bTrailMade)
                 {
                     cent->bTrailMade = 1;
@@ -1387,6 +1447,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
                 lightingOrigin[1] = cent->pose.origin[1];
                 lightingOrigin[2] = cent->pose.origin[2];
                 lightingOrigin[2] = lightingOrigin[2] + 4.0;
+                // add to refresh list, possibly with quad glow
                 R_AddDObjToScene(obj, &cent->pose, s1->number, 0, lightingOrigin, 0.0);
                 CG_AddHudGrenade(CG_GetLocalClientGlobals(localClientNum), cent);
             }

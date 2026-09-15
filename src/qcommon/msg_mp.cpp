@@ -104,6 +104,7 @@ void __cdecl MSG_WriteBits(msg_t *msg, int value, uint bits)
 
     iassert( (unsigned)bits <= 32 );
     iassert( !msg->readOnly );
+    // this isn't an exact overflow check, but close enough
     if (msg->maxsize - msg->cursize >= 4)
     {
         while (bits)
@@ -338,6 +339,7 @@ void __cdecl MSG_WriteString(msg_t *sb, const char *s)
     l = strlen(s);
     if (l < 1024)
     {
+        // get rid of 0xff chars, because old clients don't like them
         for (i = 0; i < l; ++i)
         {
             v2 = I_CleanChar(s[i]);
@@ -366,6 +368,7 @@ void __cdecl MSG_WriteBigString(msg_t *sb, char *s)
     if (v3 < 0x2000)
     {
         I_strncpyz(dest, s, 0x2000);
+        // get rid of 0xff chars, because old clients don't like them
         for (i = 0; i < v3; ++i)
         {
             v2 = I_CleanChar(dest[i]);
@@ -461,7 +464,7 @@ char *__cdecl MSG_ReadString(msg_t *msg)
 
     for (l = 0; ; ++l)
     {
-        c = MSG_ReadByte(msg);
+        c = MSG_ReadByte(msg); // use ReadByte so -1 is out of bounds
         if (c == -1)
             c = 0;
         if (l < 0x400)
@@ -481,7 +484,8 @@ char *__cdecl MSG_ReadBigString(msg_t *msg)
 
     for (l = 0; ; ++l)
     {
-        c = MSG_ReadByte(msg);
+        c = MSG_ReadByte(msg); // use ReadByte so -1 is out of bounds
+        // translate all fmt spec to avoid crash bugs
         if (c == 37)
         {
             c = 46;
@@ -507,7 +511,8 @@ char *__cdecl MSG_ReadStringLine(msg_t *msg)
 
     for (l = 0; ; ++l)
     {
-        c = MSG_ReadByte(msg);
+        c = MSG_ReadByte(msg); // use ReadByte so -1 is out of bounds
+        // translate all fmt spec to avoid crash bugs
         if (c == 37)
         {
             c = 46;
@@ -738,6 +743,11 @@ void __cdecl MSG_HorMoveFrom(char iFlags, char *pForwardMove, char *pRightMove)
     }
 }
 
+/*
+=====================
+MSG_WriteDeltaUsercmdKey
+=====================
+*/
 void __cdecl MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from, const usercmd_s *to)
 {
     int horToMove; // [esp+4h] [ebp-Ch]
@@ -778,7 +788,7 @@ void __cdecl MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from
             && (from->buttons & BUTTON_ATTACK) == (to->buttons & BUTTON_ATTACK)
             && horFromMove == horToMove)
         {
-            MSG_WriteKey(msg, key, 0, 1u);
+            MSG_WriteKey(msg, key, 0, 1u); // no change
         }
         else
         {
@@ -821,6 +831,11 @@ void __cdecl MSG_WriteDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from
     }
 }
 
+/*
+=====================
+MSG_ReadDeltaUsercmdKey
+=====================
+*/
 void __cdecl MSG_ReadDeltaUsercmdKey(msg_t *msg, int key, const usercmd_s *from, usercmd_s *to)
 {
     char horToMove; // [esp+Ch] [ebp-8h]
@@ -981,17 +996,20 @@ void __cdecl MSG_ReadDeltaField(
     iassert( !msg->overflowed );
     if (field->changeHints != 2 && !MSG_ReadBit(msg))
     {
+        // no change
         *toF = *fromF;
         return;
     }
     iassert( !msg->overflowed );
     switch (field->bits)
     {
+    // float
     case 0:
         if (MSG_ReadBit(msg))
         {
             if (MSG_ReadBit(msg))
             {
+                // full floating point value
                 Long = MSG_ReadLong(msg);
                 *toF = Long;
                 *toF ^= *fromF;
@@ -1000,10 +1018,12 @@ void __cdecl MSG_ReadDeltaField(
             }
             else
             {
+                // integral float
                 trunc = MSG_ReadBits(msg, 5u);
                 Byte = MSG_ReadByte(msg);
                 trunc += 32 * Byte;
                 trunc ^= (int)*(float *)fromF + 4096;
+                // bias to allow equal parts positive and negative
                 trunc -= 4096;
                 *(float *)toF = (float)trunc;
                 if (print)
@@ -1148,6 +1168,7 @@ void __cdecl MSG_ReadDeltaField(
     default:
         if (MSG_ReadBit(msg))
         {
+            // integer
             sgn = field->bits < 0;
             if (sgn)
                 v25 = -field->bits;
@@ -1282,6 +1303,18 @@ double __cdecl MSG_ReadOriginZFloat(msg_t *msg, float oldValue)
     }
 }
 
+/*
+==================
+MSG_ReadDeltaEntity
+
+The entity number has already been read from the message, which
+is how the from state is identified.
+
+If the delta removes the entity, entityState_t->number will be set to MAX_GENTITIES-1
+
+Can go from either a baseline or a previous packet_entity
+==================
+*/
 int __cdecl MSG_ReadDeltaEntity(msg_t *msg, int time, const entityState_s *from, entityState_s *to, uint number)
 {
     return MSG_ReadDeltaEntityStruct(msg, time, (const char *)from, (char *)to, number);
@@ -1427,6 +1460,7 @@ int __cdecl MSG_ReadDeltaStruct(
     int ia; // [esp+14h] [ebp-4h]
 
     iassert( number < (1u << indexBits) );
+    // check for a remove
     if (MSG_ReadBit(msg) == 1)
     {
         if (cl_shownet && (cl_shownet->current.integer >= 2 || cl_shownet->current.integer == -1))
@@ -1439,6 +1473,8 @@ int __cdecl MSG_ReadDeltaStruct(
         
         if ((uint32_t)lc <= (uint32_t)numFields)
         {
+            // shownet 2/3 will interleave with other printed info, -1 will
+            // just print the delta records`
             if (cl_shownet && (cl_shownet->current.integer >= 2 || cl_shownet->current.integer == -1))
             {
                 print = 1;
@@ -1475,6 +1511,7 @@ int __cdecl MSG_ReadDeltaStruct(
     }
     else
     {
+        // check for no delta
         memcpy((uint8_t *)to, (const uint8_t *)from, 4 * numFields + 4);
         return 0;
     }
@@ -1585,6 +1622,11 @@ static void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, int time, const hudelem_s 
     }
 }
 
+/*
+===================
+MSG_ReadDeltaPlayerstate
+===================
+*/
 void __cdecl MSG_ReadDeltaPlayerstate(
     int localClientNum,
     msg_t *msg,
@@ -1604,6 +1646,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(
 
     int print;
 
+    // shownet 2/3 will interleave with other printed info, -2 will
+    // just print the delta records
     if (cl_shownet && (cl_shownet->current.integer >= 2 || cl_shownet->current.integer == -2))
     {
         print = 1;
@@ -1681,6 +1725,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(
         }
     }
 
+    // read the arrays
+    // parse stats
     if (MSG_ReadBit(msg))
     {
         if (cl_shownet && cl_shownet->current.integer == 4)
@@ -1698,6 +1744,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(
             to->stats[STAT_SPAWN_COUNT] = MSG_ReadByte(msg);
     }
 
+    // parse ammo
     if (MSG_ReadBit(msg))
     {
         for (int i = 0; i < 4; ++i)

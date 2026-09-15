@@ -2,6 +2,12 @@
 #include "qcommon.h"
 #include <xanim/xanim.h>
 
+/*
+==================
+CM_PointLeafnum_r
+
+==================
+*/
 int __cdecl CM_PointLeafnum_r(const float *p, int num)
 {
     cNode_t *node; // [esp+0h] [ebp-Ch]
@@ -26,10 +32,17 @@ int __cdecl CM_PointLeafnum_r(const float *p, int num)
 
 int __cdecl CM_PointLeafnum(const float *p)
 {
-    iassert( cm.numNodes );
+    iassert( cm.numNodes ); // map not loaded
     return CM_PointLeafnum_r(p, 0);
 }
 
+/*
+=============
+CM_BoxLeafnums_r
+
+Fills in a list of all the leafs touched
+=============
+*/
 void __cdecl CM_BoxLeafnums_r(leafList_s *ll, int nodenum)
 {
     cNode_t *node; // [esp+0h] [ebp-Ch]
@@ -47,6 +60,7 @@ void __cdecl CM_BoxLeafnums_r(leafList_s *ll, int nodenum)
         }
         else
         {
+            // go down both
             if (s != 2)
                 CM_BoxLeafnums_r(ll, node->children[0]);
             nodenum = node->children[1];
@@ -60,6 +74,7 @@ void __cdecl CM_StoreLeafs(leafList_s *ll, int nodenum)
     int leafNum; // [esp+0h] [ebp-4h]
 
     leafNum = -1 - nodenum;
+    // store the lastLeaf even if the list is overflowed
     if (cm.leafs[-1 - nodenum].cluster != -1)
         ll->lastLeaf = leafNum;
     if (ll->count < ll->maxcount)
@@ -73,6 +88,11 @@ void __cdecl CM_StoreLeafs(leafList_s *ll, int nodenum)
     }
 }
 
+/*
+==================
+CM_BoxLeafnums
+==================
+*/
 int __cdecl CM_BoxLeafnums(const float *mins, const float *maxs, uint16_t *list, int listsize, int *lastLeaf)
 {
     leafList_s ll; // [esp+4h] [ebp-2Ch] BYREF
@@ -93,12 +113,18 @@ int __cdecl CM_BoxLeafnums(const float *mins, const float *maxs, uint16_t *list,
     return ll.count;
 }
 
+/*
+==================
+CM_PointContents
+
+==================
+*/
 int __cdecl CM_PointContents(const float *p, uint model)
 {
     cLeaf_t *leaf; // [esp+0h] [ebp-10h]
     int i; // [esp+Ch] [ebp-4h]
 
-    iassert( cm.numNodes );
+    iassert( cm.numNodes ); // map not loaded
     if (model)
         leaf = &CM_ClipHandleToModel(model)->leaf;
     else
@@ -144,6 +170,7 @@ int __cdecl CM_PointContentsLeafBrushNode_r(const float *p, cLeafBrushNode_s *no
             if (b->mins[i] > (double)p[i] || b->maxs[i] < (double)p[i])
                 goto miss;
         }
+        // see if the point is in the brush
         side = b->sides;
         ia = b->numsides;
         iassert( i >= 0 );
@@ -161,13 +188,23 @@ int __cdecl CM_PointContentsLeafBrushNode_r(const float *p, cLeafBrushNode_s *no
     return contents;
 }
 
+/*
+==================
+CM_TransformedPointContents
+
+Handles offseting and rotation of the end points for moving and
+rotating entities
+==================
+*/
 int __cdecl CM_TransformedPointContents(const float *p, uint model, const float *origin, const float *angles)
 {
     float temp[3]; // [esp+0h] [ebp-3Ch] BYREF
     float axis[3][3]; // [esp+Ch] [ebp-30h] BYREF
     float p_l[3]; // [esp+30h] [ebp-Ch] BYREF
 
+    // subtract origin offset
     Vec3Sub(p, origin, p_l);
+    // rotate start and end into the models frame of reference
     if (*angles != 0.0 || angles[1] != 0.0 || angles[2] != 0.0)
     {
         AnglesToAxis(angles, axis);
@@ -180,6 +217,14 @@ int __cdecl CM_TransformedPointContents(const float *p, uint model, const float 
     }
     return CM_PointContents(p_l, model);
 }
+
+/*
+===============================================================================
+
+PVS
+
+===============================================================================
+*/
 
 uint8_t *__cdecl CM_ClusterPVS(int cluster)
 {

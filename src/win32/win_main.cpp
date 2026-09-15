@@ -98,17 +98,20 @@ sysEvent_t *__cdecl Win_GetEvent(sysEvent_t *result)
     sysEvent_t ev; // [esp+38h] [ebp-18h] BYREF
 
     Sys_EnterCriticalSection(CRITSECT_SYS_EVENT_QUEUE);
+    // return if we have data
     if (eventHead <= eventTail)
     {
         {
             PROF_SCOPED("Message Pump");
 
+            // pump the message loop
             while (PeekMessageA(&msg, 0, 0, 0, 0))
             {
                 if (!GetMessageA(&msg, 0, 0, 0))
                 {
                     Com_Quit_f();
                 }
+                // save the msg time, because wndprocs don't have access to the timestamp
                 g_wv.sysMsgTime = msg.time;
                 TranslateMessage(&msg);
                 DispatchMessageA(&msg);
@@ -117,10 +120,12 @@ sysEvent_t *__cdecl Win_GetEvent(sysEvent_t *result)
 
         {
             PROF_SCOPED("Console Input");
+            // check for console commands
             s = Sys_ConsoleInput();
             if (s)
             {
                 v2 = strlen(s);
+                // copy out to a seperate buffer for qeueing
                 b = (char *)Com_AllocEvent(v2 + 1);
                 I_strncpyz(b, s, v2 + 1);
                 Sys_QueEvent(0, SE_CONSOLE, 0, 0, v2 + 1, b);
@@ -129,6 +134,7 @@ sysEvent_t *__cdecl Win_GetEvent(sysEvent_t *result)
 
         if (eventHead <= eventTail)
         {
+            // create an empty event to return
             memset(&ev, 0, sizeof(sysEvent_t));
             ev.evTime = Sys_Milliseconds();
         }
@@ -324,6 +330,13 @@ int __cdecl Sys_CheckCrashOrRerun()
 #endif
 }
 
+/*
+=============
+Sys_Error
+
+Show the early console as an error dialog
+=============
+*/
 void Sys_Error(const char *error, ...)
 {
     tagMSG Msg;        // [esp+4h] [ebp-1024h] BYREF
@@ -354,6 +367,7 @@ void Sys_Error(const char *error, ...)
             Conbuf_AppendText(string);
             Conbuf_AppendText("\n");
             Sys_SetErrorText(string);
+            // wait for the user to quit
             while (GetMessageA(&Msg, 0, 0, 0))
             {
                 TranslateMessage(&Msg);
@@ -406,6 +420,11 @@ void Sys_SpawnQuitProcess()
     }
 }
 
+/*
+==============
+Sys_Quit
+==============
+*/
 void __cdecl  Sys_Quit()
 {
 	Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
@@ -429,11 +448,22 @@ void __cdecl  Sys_Quit()
 	exit(0);
 }
 
+/*
+==============
+Sys_Print
+==============
+*/
 void __cdecl Sys_Print(const char *msg)
 {
 	Conbuf_AppendTextInMainThread(msg);
 }
 
+/*
+================
+Sys_GetClipboardData
+
+================
+*/
 char *__cdecl Sys_GetClipboardData()
 {
 	SIZE_T v0; // eax
@@ -494,6 +524,15 @@ int __cdecl Sys_SetClipboardData(const char *text)
 	}
 }
 
+/*
+================
+Sys_QueEvent
+
+A time of 0 will get the current time
+Ptr should either be null, or point to a block of data that can
+be freed by the game later.
+================
+*/
 void __cdecl Sys_QueEvent(uint time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr)
 {
 	sysEvent_t *ev; // [esp+0h] [ebp-4h]
@@ -503,9 +542,10 @@ void __cdecl Sys_QueEvent(uint time, sysEventType_t type, int value, int value2,
 	if (eventHead - eventTail >= 256)
 	{
 		Com_Printf(CON_CHANNEL_SYSTEM, "Sys_QueEvent: overflow\n");
+		// we are discarding an event, but don't leak memory
 		if (ev->evPtr)
 			Z_Free((char *)ev->evPtr, 10);
-		++eventTail;
+		++eventTail; // bk000305 - was missing
 	}
 	++eventHead;
 	if (!time)
@@ -547,6 +587,12 @@ void __cdecl Sys_LoadingKeepAlive()
 	R_CheckLostDevice();
 }
 
+/*
+================
+Sys_GetEvent
+
+================
+*/
 sysEvent_t *__cdecl Sys_GetEvent(sysEvent_t *result)
 {
 	PROF_SCOPED("Sys_GetEvent");
@@ -559,10 +605,20 @@ sysEvent_t *__cdecl Sys_GetEvent(sysEvent_t *result)
 	return result;
 }
 
+/*
+================
+Sys_Init
+
+Called after the common systems (cvars, files, etc)
+are initialized
+================
+*/
 void __cdecl Sys_Init()
 {
 	// _OSVERSIONINFOA osversion; // [esp+14h] [ebp-A0h] BYREF
 
+	// make sure the timer is high precision, otherwise
+	// NT gets 18ms resolution
 	timeBeginPeriod(1);
 	Cmd_AddCommandInternal("in_restart", Sys_In_Restart_f, &Sys_In_Restart_f_VAR);
 #ifdef KISAK_MP
@@ -598,9 +654,16 @@ void __cdecl Sys_Init()
 	else
 		Com_Printf(CON_CHANNEL_SYSTEM, "Streaming SIMD Extensions (SSE) %ssupported\n", "not ");
 	Com_Printf(CON_CHANNEL_SYSTEM, "\n");
-	IN_Init();
+	IN_Init();	// FIXME: not in dedicated?
 }
 
+/*
+=================
+Sys_In_Restart_f
+
+Restart the input subsystem
+=================
+*/
 void Sys_In_Restart_f()
 {
 	IN_Shutdown();
@@ -608,6 +671,13 @@ void Sys_In_Restart_f()
 }
 
 #ifdef KISAK_MP
+/*
+=================
+Sys_Net_Restart_f
+
+Restart the network subsystem
+=================
+*/
 void Sys_Net_Restart_f()
 {
 	NET_Restart();
@@ -818,7 +888,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 			Sys_CreateSplashWindow();
 			Sys_ShowSplashWindow();
 			Win_RegisterClass();
+			// no abort/retry/fail errors
 			SetErrorMode(1);
+			// get the initial time base
 			Sys_Milliseconds();
 			Profile_Init();
 			Profile_InitContext(0);

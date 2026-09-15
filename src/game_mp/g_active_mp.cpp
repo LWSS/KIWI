@@ -68,6 +68,16 @@ int __cdecl GetFollowPlayerState(int clientNum, playerState_s *ps)
     }
 }
 
+/*
+===============
+P_DamageFeedback
+
+Called just before a snapshot is sent to the given player.
+Totals up all damage and generates both the player_state_t
+damage values to that client for pain blends and kicks, and
+global pain sound events for all clients.
+===============
+*/
 void __cdecl P_DamageFeedback(gentity_s *player)
 {
     gclient_s *client; // [esp+8h] [ebp-40h]
@@ -85,7 +95,9 @@ void __cdecl P_DamageFeedback(gentity_s *player)
     {
         if (level.time - client->damageTime > 500)
             client->ps.damageCount = 0;
+        // total points of damage shot at the player this frame
         damage = client->damage_blood;
+        // didn't take any damage
         if (damage > 0 && client->sess.maxHealth > 0)
         {
             damagea = 100 * damage / client->sess.maxHealth;
@@ -104,6 +116,10 @@ void __cdecl P_DamageFeedback(gentity_s *player)
             {
                 kick = bg_viewKickMin->current.value;
             }
+            // send the information to the client
+
+            // world damage (falling, slime, etc) uses a special code
+            // to make the blend blob centered instead of positional
             if (client->damage_fromWorld)
             {
                 client->v_dmg_roll = 0.0;
@@ -121,19 +137,33 @@ void __cdecl P_DamageFeedback(gentity_s *player)
                 client->ps.damagePitch = (int)(angles[0] / 360.0 * 256.0);
                 client->ps.damageYaw = (int)(angles[1] / 360.0 * 256.0);
             }
+            // play an apropriate pain sound
             ++client->ps.damageEvent;
             client->damageTime = level.time - 20;
             client->ps.damageCount = damagea;
+            //
+            // clear totals
+            //
             client->damage_blood = 0;
         }
     }
 }
 
+/*
+===============
+G_SetClientSound
+===============
+*/
 void __cdecl G_SetClientSound(gentity_s *ent)
 {
     ent->s.loopSound = 0;
 }
 
+/*
+==============
+ClientImpacts
+==============
+*/
 void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
 {
     int j; // [esp+4h] [ebp-14h]
@@ -147,6 +177,7 @@ void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
     {
         for (j = 0; j < i && pm->touchents[j] != pm->touchents[i]; ++j)
             ;
+        // duplicated
         if (j == i)
         {
             other = &g_entities[pm->touchents[i]];
@@ -167,6 +198,14 @@ void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
 }
 
 const float range[3] = { 20.0f, 20.0f, 20.0f };
+/*
+============
+G_TouchTriggers
+
+Find all trigger entities that ent's current position touches.
+Spectators will only interact with teleporters.
+============
+*/
 void __cdecl G_TouchTriggers(gentity_s *ent)
 {
     int entityList[1025]; // [esp+30h] [ebp-1030h] BYREF
@@ -180,6 +219,7 @@ void __cdecl G_TouchTriggers(gentity_s *ent)
 
     PROF_SCOPED("G_TouchTriggers");
     iassert(ent->client);
+    // dead clients don't activate triggers!
     if (ent->client->ps.pm_type > PM_NORMAL_LINKED)
     {
         return;
@@ -187,6 +227,7 @@ void __cdecl G_TouchTriggers(gentity_s *ent)
     Vec3Sub(ent->r.absmin, range, diff);
     Vec3Add(ent->r.absmax, range, sum);
     v7 = CM_AreaEntities(diff, sum, entityList, 1024, 0x405C0008);
+    // can't use ent->absmin, because that has a one unit pad
     Vec3Add(ent->client->ps.origin, ent->r.mins, diff);
     Vec3Add(ent->client->ps.origin, ent->r.maxs, sum);
     ExpandBoundsToWidth(diff, sum);
@@ -201,6 +242,8 @@ void __cdecl G_TouchTriggers(gentity_s *ent)
         v6 = entityHandlers[BYTE2(item[1].attackerEntityNum)].touch;
         if (v6 || touch)
         {
+            // use seperate code for determining if an item is picked up
+            // so you don't have to actually contact its bounding box
             if (item->eType == ET_ITEM)
             {
                 if (!BG_PlayerTouchesItem(&ent->client->ps, item, level.time))
@@ -223,6 +266,11 @@ void __cdecl G_TouchTriggers(gentity_s *ent)
     }
 }
 
+/*
+=================
+SpectatorThink
+=================
+*/
 void __cdecl SpectatorThink(gentity_s *ent, usercmd_s *ucmd)
 {
     gclient_s *client; // [esp+10h] [ebp-11Ch]
@@ -239,6 +287,7 @@ void __cdecl SpectatorThink(gentity_s *ent, usercmd_s *ucmd)
     {
         StopFollowing(ent);
     }
+    // attack button cycles through spectators
     if ((client->buttons & BUTTON_ATTACK) == 0 || (client->oldbuttons & BUTTON_ATTACK) != 0)
     {
         if ((client->buttons & BUTTON_ADS) != 0 && (client->oldbuttons & BUTTON_ADS) == 0)
@@ -252,15 +301,18 @@ void __cdecl SpectatorThink(gentity_s *ent, usercmd_s *ucmd)
     {
         client->ps.pm_type = PM_SPECTATOR;
         if (G_ClientCanSpectateTeam(client, TEAM_NUM_TEAMS))
-            client->ps.speed = 400;
+            client->ps.speed = 400;	// faster than normal
         else
             client->ps.speed = 0;
+        // set up for pmove
         memset((uint8_t *)&pm, 0, sizeof(pm));
         pm.ps = &client->ps;
         memcpy(&pm.cmd, ucmd, sizeof(pm.cmd));
-        pm.tracemask = 0x800811;
+        pm.tracemask = 0x800811; // spectators can fly through bodies
         pm.handler = 1;
+        // perform a pmove
         Pmove(&pm);
+        // save results of pmove
         ent->r.currentOrigin[0] = client->ps.origin[0];
         ent->r.currentOrigin[1] = client->ps.origin[1];
         ent->r.currentOrigin[2] = client->ps.origin[2];
@@ -268,6 +320,13 @@ void __cdecl SpectatorThink(gentity_s *ent, usercmd_s *ucmd)
     }
 }
 
+/*
+=================
+ClientInactivityTimer
+
+Returns qfalse if the client is dropped
+=================
+*/
 int __cdecl ClientInactivityTimer(gclient_s *client)
 {
     const char *v2; // eax
@@ -296,17 +355,28 @@ int __cdecl ClientInactivityTimer(gclient_s *client)
     }
     else
     {
+        // give everyone some time, so if the operator sets g_inactivity during
+        // gameplay, everyone isn't kicked
         client->inactivityTime = level.time + 60000;
         client->inactivityWarning = 0;
     }
     return 1;
 }
 
+/*
+====================
+ClientIntermissionThink
+====================
+*/
 void __cdecl ClientIntermissionThink(gentity_s *ent)
 {
     gclient_s *client; // [esp+0h] [ebp-4h]
 
     client = ent->client;
+
+    // the level will exit when everyone wants to or after timeouts
+
+    // swap and latch button actions
     client->oldbuttons = client->buttons;
     client->buttons = client->sess.cmd.buttons;
     client->buttonsSinceLastFrame |= client->buttons & ~client->oldbuttons;
@@ -445,6 +515,14 @@ bool __cdecl IsLiveGrenade(gentity_s *ent)
     return weapDef->offhandClass == OFFHAND_CLASS_FRAG_GRENADE;
 }
 
+/*
+================
+ClientEvents
+
+Events will be passed on to the clients for presentation,
+but any server game effects are handled here
+================
+*/
 void __cdecl ClientEvents(gentity_s *ent, int oldEventSequence)
 {
     gclient_s *client; // [esp+0h] [ebp-10h]
@@ -492,6 +570,17 @@ void __cdecl G_SetClientContents(gentity_s *pEnt)
     }
 }
 
+/*
+==============
+ClientThink_real
+
+This will be called once for each client frame, which will
+usually be a couple times for each server frame on fast clients.
+
+If "g_synchronousClients 1" is set, this will be called exactly
+once for each server frame, which makes for smooth demo recording.
+==============
+*/
 void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
 {
     float *v2; // [esp+50h] [ebp-2FCh]
@@ -522,29 +611,39 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
     float ssSwayScale; // [esp+348h] [ebp-4h]
 
     client = ent->client;
+    // don't think if the client is not yet connected (and thus not yet spawned in)
     if (client->sess.connected == CON_CONNECTED)
     {
+        // sanity check the command time to prevent speedup cheating
         if (ucmd->serverTime > level.time + 200)
             ucmd->serverTime = level.time + 200;
         if (ucmd->serverTime < level.time - 1000)
             ucmd->serverTime = level.time - 1000;
         msec = ucmd->serverTime - client->ps.commandTime;
+        // following others may result in bad times, but we still want
+        // to check for follow toggles
         if (msec >= 1 || client->ps.clientNum != ent - g_entities)
         {
             if (msec > 200)
                 msec = 200;
+            //
+            // check for exiting intermission
+            //
             if (client->sess.sessionState == SESS_STATE_INTERMISSION)
             {
                 PROF_SCOPED("IntermissionThink");
                 ClientIntermissionThink(ent);
             }
+            // spectators don't do much
             else if (client->sess.sessionState == SESS_STATE_SPECTATOR)
             {
                 PROF_SCOPED("SpectatorThink");
                 SpectatorThink(ent, ucmd);
             }
+            // check for inactivity timer, but never drop the local client of a non-dedicated server
             else if (ClientInactivityTimer(client))
             {
+                // swap and latch button actions
                 client->oldbuttons = client->buttons;
                 if (!client->useButtonDone)
                     client->oldbuttons &= ~(BUTTON_USE | BUTTON_USE_RELOAD);
@@ -575,6 +674,7 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                     client->latched_buttons &= BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE;
   client->buttonsSinceLastFrame &= BUTTON_PRONE | BUTTON_CROUCH | BUTTON_TEMP_STANCE;
                 }
+                // set up for pmove
                 oldEventSequence = client->ps.eventSequence;
                 memset((uint8_t *)&pm, 0, sizeof(pm));
                 pm.ps = &client->ps;
@@ -599,6 +699,7 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                 vs.frametime = (double)msec * EQUAL_EPSILON;
                 vs.fLastIdleFactor = client->fLastIdleFactor;
                 vs.weapIdleTime = &client->weapIdleTime;
+                // set speed
                 client->ps.speed = g_speed->current.integer;
                 BG_CalculateViewAngles(&vs, angles);
                 Vec3Add(client->ps.viewangles, angles, viewangles);
@@ -681,6 +782,7 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                     iassert(client->ps.pm_flags & PMF_MANTLE);
                     G_AddPlayerMantleBlockage(pm.mantleEndPos, pm.mantleDuration, &pm);
                 }
+                // save results of pmove
                 if (client->ps.eventSequence != oldEventSequence)
                 {
                     ent->eventTime = level.time;
@@ -690,6 +792,7 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                     G_PlayerStateToEntityStateExtrapolate(&client->ps, &ent->s, client->ps.commandTime, 1);
                 else
                     BG_PlayerStateToEntityState(&client->ps, &ent->s, 1, 1u);
+                // use the snapped origin for linking so it matches client predicted versions
                 ent->r.currentOrigin[0] = ent->s.lerp.pos.trBase[0];
                 ent->r.currentOrigin[1] = ent->s.lerp.pos.trBase[1];
                 ent->r.currentOrigin[2] = ent->s.lerp.pos.trBase[2];
@@ -699,11 +802,14 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                 ent->r.maxs[0] = pm.maxs[0];
                 ent->r.maxs[1] = pm.maxs[1];
                 ent->r.maxs[2] = pm.maxs[2];
+                // execute client events
                 {
                     PROF_SCOPED("ClientEvents");
                     ClientEvents(ent, oldEventSequence);
                 }
+                // link entity now, after any personal teleporters have been used
                 SV_LinkEntity(ent);
+                // NOTE: now copy the exact origin over otherwise clients can be snapped into solid
                 v2 = client->ps.origin;
                 ent->r.currentOrigin[0] = client->ps.origin[0];
                 ent->r.currentOrigin[1] = v2[1];
@@ -712,10 +818,12 @@ void __cdecl ClientThink_real(gentity_s *ent, usercmd_s *ucmd)
                 ent->r.currentAngles[1] = 0.0;
                 ent->r.currentAngles[2] = 0.0;
                 ent->r.currentAngles[1] = client->ps.viewangles[1];
+                // touch other objects
                 {
                     PROF_SCOPED("ClientImpacts");
                     ClientImpacts(ent, &pm);
                 }
+                // save results of triggers and client events
                 if (client->ps.eventSequence != oldEventSequence)
                     ent->eventTime = level.time;
                 Player_UpdateActivate(ent);
@@ -761,6 +869,13 @@ void __cdecl G_AddPlayerMantleBlockage(float *endPos, int duration, pmove_t *pm)
     ent->nextthink = g_mantleBlockTimeBuffer->current.integer + duration + level.time;
 }
 
+/*
+==================
+ClientThink
+
+A new command has arrived from the client
+==================
+*/
 void __cdecl ClientThink(int clientNum)
 {
     gentity_s *ent; // [esp+8h] [ebp-4h]
@@ -772,6 +887,8 @@ void __cdecl ClientThink(int clientNum)
     bgs = &level_bgs;
     memcpy(&ent->client->sess.oldcmd, &ent->client->sess.cmd, sizeof(ent->client->sess.oldcmd));
     SV_GetUsercmd(clientNum, &ent->client->sess.cmd);
+    // mark the time we got info, so we can display the
+    // phone jack if they don't get any for a while
     ent->client->lastCmdTime = level.time;
     if (!g_synchronousClients->current.enabled)
         ClientThink_real(ent, &ent->client->sess.cmd);
@@ -854,6 +971,11 @@ void __cdecl IntermissionClientEndFrame(gentity_s *ent)
     SV_SetConfigstring(5, v2);
 }
 
+/*
+==================
+SpectatorClientEndFrame
+==================
+*/
 void __cdecl SpectatorClientEndFrame(gentity_s *ent)
 {
     uint v1; // edx
@@ -874,6 +996,7 @@ void __cdecl SpectatorClientEndFrame(gentity_s *ent)
     client->ps.viewmodelIndex = 0;
     client->fGunPitch = 0.0;
     client->fGunYaw = 0.0;
+    // if we are doing a chase cam or a remote view, grab the latest info
     if (client->sess.forceSpectatorClient >= 0)
     {
         clientNum = client->sess.forceSpectatorClient;
@@ -893,6 +1016,7 @@ void __cdecl SpectatorClientEndFrame(gentity_s *ent)
                 if (G_ClientCanSpectateTeam(client, v3.team))
                     goto doFollow;
             }
+            // drop them to free spectators unless they are dedicated camera followers
             if (!client->sess.archiveTime)
             {
                 client->sess.forceSpectatorClient = -1;
@@ -1064,6 +1188,15 @@ void __cdecl G_PlayerController(const gentity_s *self, int *partBits)
     BG_Player_DoControllers(&player, obj, partBits);
 }
 
+/*
+==============
+ClientEndFrame
+
+Called at the end of each server frame for each connected client
+A fast client will have multiple ClientThink for each ClientEdFrame,
+while a slow client may have multiple ClientEndFrame between ClientThink.
+==============
+*/
 void __cdecl ClientEndFrame(gentity_s *ent)
 {
     //int v1; // ecx
@@ -1155,16 +1288,20 @@ void __cdecl ClientEndFrame(gentity_s *ent)
                 PROF_SCOPED("Player_UpdateCursorHints");
                 Player_UpdateCursorHints(ent);
             }
+            // apply all the damage taken this frame
             P_DamageFeedback(ent);
+
+            // add the EF_CONNECTION flag if we haven't gotten commands recently
             if (level.time - client->lastCmdTime <= 1000)
                 v2 = ent->s.lerp.eFlags & 0xFFFFFF7F;
             else
                 v2 = ent->s.lerp.eFlags | 0x80;
             ent->s.lerp.eFlags = v2;
-            client->ps.stats[STAT_HEALTH] = ent->health;
+            client->ps.stats[STAT_HEALTH] = ent->health;	// FIXME: get rid of ent->health...
             G_SetClientSound(ent);
             v7 = level.teamHasRadar[client->sess.cs.team] || client->hasRadar;
             client->ps.radarEnabled = v7;
+            // set the latest infor
             if (g_smoothClients->current.enabled)
             {
                 PROF_SCOPED("G_PlayerStateToEntityStateExtrapolate");

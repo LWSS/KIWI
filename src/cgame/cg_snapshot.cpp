@@ -78,6 +78,11 @@ void __cdecl CG_InitEntity(centity_s *cent)
     }
 }
 
+/*
+==================
+CG_ResetEntity
+==================
+*/
 void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent)
 {
     int eType; // r11
@@ -167,6 +172,17 @@ void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+==================
+CG_SetInitialSnapshot
+
+This will only happen on the very first snapshot, or
+on tourney restarts.  All other times will use
+CG_TransitionSnapshot instead.
+
+FIXME: Also called by map_restart?
+==================
+*/
 void __cdecl CG_SetInitialSnapshot(int localClientNum)
 {
     snapshot_s *nextSnap; // r31
@@ -298,6 +314,16 @@ void __cdecl CG_UpdateSnapshotNum(int localClientNum)
     }
 }
 
+/*
+========================
+CG_ReadNextSnapshot
+
+This is the only place new snapshots are requested
+This may increment cgs.processedSnapshotNum multiple
+times if the client system fails to return a
+valid snapshot.
+========================
+*/
 snapshot_s *__cdecl CG_ReadNextSnapshot(int localClientNum)
 {
     int v2; // r3
@@ -305,7 +331,10 @@ snapshot_s *__cdecl CG_ReadNextSnapshot(int localClientNum)
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     v2 = localClientNum;
+    // decide which of the two slots to load it into
     v3 = &cgArray[0].activeSnapshots[cgArray[0].activeSnapshots == cgArray[0].snap];
+
+    // try to read the snapshot from the client system
     CL_GetSnapshot(v2, v3);
     return v3;
 }
@@ -386,6 +415,13 @@ void __cdecl CG_ServerDObjClean(int entnum)
     g_clientDirty[entnum] = 1;
 }
 
+/*
+===================
+CG_SetNextSnap
+
+A new snapshot has just been read in from the client system.
+===================
+*/
 void __cdecl CG_SetNextSnap(int localClientNum)
 {
     snapshot_s *snap; // r18
@@ -547,6 +583,8 @@ void __cdecl CG_SetNextSnap(int localClientNum)
         v24->nextState.number = nextSnap->ps.clientNum;
         if (!nextValid)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_snapshot.cpp", 689, 0, "%s", "cent->nextValid");
+        // if the next frame is a teleport for the playerstate, we
+        // can't interpolate during demos
         if (snap == nextSnap
             || (((unsigned __int8)v24->nextState.lerp.eFlags ^ (unsigned __int8)v24->currentState.eFlags) & 2) != 0)
         {
@@ -1010,6 +1048,25 @@ void __cdecl CG_ProcessDemoSnapshots(int localClientNum)
     }
 }
 
+/*
+============
+CG_ProcessSnapshots
+
+We are trying to set up a renderable view, so determine
+what the simulated time is, and try to get snapshots
+both before and after that time if available.
+
+If we don't have a valid cg.snap after exiting this function,
+then a 3D game view cannot be rendered.  This should only happen
+right after the initial connection.  After cg.snap has been valid
+once, it will never turn invalid.
+
+Even if cg.snap is valid, cg.nextSnap may not be, if the snapshot
+hasn't arrived yet (it becomes an extrapolating situation instead
+of an interpolating one)
+
+============
+*/
 void __cdecl CG_ProcessSnapshots(int localClientNum)
 {
     snapshot_s *snap; // r11
@@ -1033,6 +1090,8 @@ void __cdecl CG_ProcessSnapshots(int localClientNum)
         CG_ProcessNextSnap(localClientNum);
     }
     CG_SetFrameInterpolation(localClientNum);
+
+    // assert our valid conditions upon exiting
     snap = cgArray[0].snap;
     if (!cgArray[0].snap)
     {

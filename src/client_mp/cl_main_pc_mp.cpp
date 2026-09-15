@@ -19,24 +19,34 @@
 
 bool s_playerMute[64];
 
+/*
+===================
+CL_ServerStatus
+===================
+*/
 int __cdecl CL_ServerStatus(char *serverAddress, char *serverStatusString, int maxLen)
 {
     serverStatus_s *serverStatus; // [esp+0h] [ebp-20h]
     int i; // [esp+4h] [ebp-1Ch]
     netadr_t to; // [esp+8h] [ebp-18h] BYREF
 
+    // if no server address then reset all server status requests
     if (serverAddress)
     {
+        // get the address
         if (!NET_StringToAdr(serverAddress, &to))
             return 0;
         serverStatus = CL_GetServerStatus(to);
+        // if no server status string then reset the server status request for this address
         if (!serverStatusString)
         {
             serverStatus->retrieved = 1;
             return 0;
         }
+        // if this server status request has the same address
         if (NET_CompareAdr(to, serverStatus->address))
         {
+            // if we recieved an response for this server status request
             if (!serverStatus->pending)
             {
                 I_strncpyz(serverStatusString, serverStatus->string, maxLen);
@@ -44,6 +54,7 @@ int __cdecl CL_ServerStatus(char *serverAddress, char *serverStatusString, int m
                 serverStatus->startTime = 0;
                 return 1;
             }
+            // resend the request regularly
             if (serverStatus->startTime < (Sys_Milliseconds() - cl_serverStatusResendTime->current.integer))
             {
                 serverStatus->print = 0;
@@ -55,6 +66,7 @@ int __cdecl CL_ServerStatus(char *serverAddress, char *serverStatusString, int m
                 return 0;
             }
         }
+        // if retrieved
         else if (serverStatus->retrieved)
         {
             serverStatus->address = to;
@@ -196,6 +208,11 @@ void __cdecl CL_SetServerInfo(serverInfo_t *server, char *info, __int16 ping)
     }
 }
 
+/*
+===================
+CL_ServerInfoPacket
+===================
+*/
 void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
 {
     const char *v3; // eax
@@ -219,16 +236,21 @@ void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
         v8 = atoi(ptr);
     else
         v8 = 1;
+    // if this isn't the correct protocol version, ignore it
     if (prot == v8)
     {
+        // iterate servers waiting for ping response
         for (i = 0; i < 16; ++i)
         {
             if (cl_pinglist[i].adr.port && !cl_pinglist[i].time && NET_CompareAdr(from, cl_pinglist[i].adr))
             {
+                // calc ping time
                 cl_pinglist[i].time = time - cl_pinglist[i].start + 1;
                 v4 = NET_AdrToString(from);
                 Com_DPrintf(CON_CHANNEL_CLIENT, "ping time %dms from %s\n", cl_pinglist[i].time, v4);
                 I_strncpyz(cl_pinglist[i].info, infoString, 1024);
+                // save of info
+                // NOTE: make sure these types are in sync with the netnames strings in the UI
                 switch (from.type)
                 {
                 case NA_BROADCAST:
@@ -244,15 +266,19 @@ void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
                     break;
                 }
                 v5 = va("%d", type);
+                // tack on the net type
                 Info_SetValueForKey(cl_pinglist[i].info, "nettype", v5);
                 CL_SetServerInfoByAddress(from, infoString, cl_pinglist[i].time);
                 return;
             }
         }
+        // if not just sent a local broadcast or pinging local servers
         if (!cls.pingUpdateSource)
         {
+            // empty slot
             for (i = 0; i < 128 && cls.localServers[i].adr.port; ++i)
             {
+                // avoid duplicate
                 if (NET_CompareAdr(from, cls.localServers[i].adr))
                     return;
             }
@@ -262,6 +288,7 @@ void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
             }
             else
             {
+                // add this to the list
                 cls.numlocalservers = i + 1;
                 cls.localServers[i].adr = from;
                 cls.localServers[i].clients = 0;
@@ -294,6 +321,12 @@ void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
     }
 }
 
+/*
+================
+CL_Connect_f
+
+================
+*/
 void __cdecl CL_Connect_f()
 {
     const char *v0; // eax
@@ -310,7 +343,10 @@ void __cdecl CL_Connect_f()
             CL_GetLocalClientGlobals(0);
             clc = CL_GetLocalClientConnection(0);
             clc->serverMessage[0] = 0;
+            // clear any previous "server full" type messages
             server = (char *)Cmd_Argv(1);
+            // if running a local server, kill it
+            // make sure a local server is killed
             if (!strcmp(server, "localhost"))
                 SV_KillLocalServer();
             cl_serverLoadingMap = 0;
@@ -334,6 +370,8 @@ void __cdecl CL_Connect_f()
                     clc->serverAddress.ip[3],
                     v1);
                 //if (NET_IsLocalAddress(clc->serverAddress) || CL_CDKeyValidate(cl_cdkey, cl_cdkeychecksum))
+                // if we aren't playing on a lan, we need to authenticate
+                // with the cd key
                 if (NET_IsLocalAddress(clc->serverAddress) || CL_CDKeyValidate(clc->serverAddress))
                 {
                     if (Com_HasPlayerProfile())
@@ -349,7 +387,7 @@ void __cdecl CL_Connect_f()
                         }
                         clientUIActives[0].keyCatchers = 0;
                         clientUIActives[0].displayHUDWithKeycatchUI = 0;
-                        clc->connectTime = -99999;
+                        clc->connectTime = -99999;	// CL_CheckForResend() will fire immediately
                         clc->connectPacketCount = 0;
                         clc->qport = g_qport;
                         Cbuf_ExecuteBuffer(0, 0, "selectStringTableEntryInDvar mp/didyouknow.csv 0 didyouknow");
@@ -419,6 +457,11 @@ bool __cdecl CL_CDKeyValidate(netadr_t addr)
 //    return checksum && !I_strnicmp(chs, checksum, 4) || checksum == 0;
 //}
 
+/*
+==================
+CL_GlobalServers_f
+==================
+*/
 void __cdecl CL_GlobalServers_f()
 {
     const char *v0; // eax
@@ -432,6 +475,8 @@ void __cdecl CL_GlobalServers_f()
 
     if (Cmd_Argc() >= 3)
     {
+        // reset the list, waiting for response
+        // -1 is used to distinguish a "no response"
         for (i = 0; i < cls.numglobalservers; ++i)
         {
             server = &cls.globalServers[i];
@@ -448,11 +493,13 @@ void __cdecl CL_GlobalServers_f()
         snprintf(command, ARRAYSIZE(command), "getservers %s", v0);
         buffptr = &command[&command[strlen(command) + 1] - &command[1]]; // kiwi: see below what the hell...
         count = Cmd_Argc();
+        // tack on keywords
         for (i = 3; i < count; ++i)
         {
             v1 = Cmd_Argv(i);
             buffptr += sprintf(buffptr, " %s", v1); // kiwi: uhhhh, what the hell.
         }
+        // if we are a demo, automatically add a "demo" keyword
         if (Dvar_GetBool("fs_restrict"))
             sprintf(buffptr, " demo");
         NET_OutOfBandPrint(NS_SERVER, to, command);
@@ -463,6 +510,11 @@ void __cdecl CL_GlobalServers_f()
     }
 }
 
+/*
+===================
+CL_ServerStatusResponse
+===================
+*/
 void __cdecl CL_ServerStatusResponse(netadr_t from, msg_t *msg)
 {
     char *v2; // eax
@@ -484,11 +536,13 @@ void __cdecl CL_ServerStatusResponse(netadr_t from, msg_t *msg)
             break;
         }
     }
+    // if we didn't request this server status
     if (serverStatus)
     {
         s = MSG_ReadStringLine(msg);
         len = 0;
         Com_sprintf(serverStatus->string, 0x2000u, "%s", s);
+        // print cvars
         if (serverStatus->print)
         {
             Com_Printf(CON_CHANNEL_CLIENT, "Server settings:\n");

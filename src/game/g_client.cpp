@@ -75,6 +75,11 @@ void __cdecl SP_info_player_start(gentity_s *ent)
     ent->nextthink = time + 100;
 }
 
+/*
+================
+SpotWouldTelefrag
+================
+*/
 int __cdecl SpotWouldTelefrag(gentity_s *spot)
 {
     double v1; // fp13
@@ -115,6 +120,13 @@ int __cdecl SpotWouldTelefrag(gentity_s *spot)
     return 1;
 }
 
+/*
+================
+SelectNearestDeathmatchSpawnPoint
+
+Find the spot that we DON'T want to use
+================
+*/
 gentity_s *__cdecl SelectNearestDeathmatchSpawnPoint(const float *from)
 {
     gentity_s *v2; // r29
@@ -142,6 +154,13 @@ gentity_s *__cdecl SelectNearestDeathmatchSpawnPoint(const float *from)
     return v2;
 }
 
+/*
+================
+SelectRandomDeathmatchSpawnPoint
+
+go to a random point that doesn't telefrag
+================
+*/
 gentity_s *__cdecl SelectRandomDeathmatchSpawnPoint()
 {
     signed int numSpots; // r30
@@ -169,6 +188,7 @@ gentity_s *__cdecl SelectRandomDeathmatchSpawnPoint()
         spot = G_Find(spot, offsetof(gentity_s, classname), scr_const.info_player_deathmatch);
     } while (spot);
 
+    // no spots that won't telefrag
     if (!numSpots)
         return G_Find(0, offsetof(gentity_s, classname), scr_const.info_player_deathmatch);
 
@@ -183,6 +203,13 @@ gentity_s *__cdecl SelectRandomDeathmatchSpawnPoint()
     return (gentity_s *)spotPtrs[randnum % numSpots];
 }
 
+/*
+===========
+SelectSpawnPoint
+
+Chooses a player start, deathmatch start, etc
+============
+*/
 gentity_s *__cdecl SelectSpawnPoint(const float *avoidPoint, float *origin, float *angles)
 {
     gentity_s *v5; // r30
@@ -209,6 +236,14 @@ gentity_s *__cdecl SelectSpawnPoint(const float *avoidPoint, float *origin, floa
     return result;
 }
 
+/*
+===========
+SelectInitialSpawnPoint
+
+Try to find a spawn point marked 'initial', otherwise
+use normal spawn selection.
+============
+*/
 gentity_s *__cdecl SelectInitialSpawnPoint(float *origin, float *angles)
 {
     gentity_s *v4; // r31
@@ -296,6 +331,11 @@ void __cdecl InitClientDeltaAngles(gclient_s *client)
 }
 
 
+/*
+==================
+SetClientViewAngle
+==================
+*/
 void __cdecl SetClientViewAngle(gentity_s *ent, const float *angle)
 {
     double v4; // fp31
@@ -364,6 +404,7 @@ void __cdecl SetClientViewAngle(gentity_s *ent, const float *angle)
     v19->ps.viewangles[0] = v4;
     v19->ps.viewangles[1] = ent->r.currentAngles[1];
     v19->ps.viewangles[2] = ent->r.currentAngles[2];
+    // set the delta angle
     InitClientDeltaAngles(v19);
 }
 
@@ -455,6 +496,11 @@ void __cdecl Client_Touch(gentity_s *pSelf, gentity_s *pOther, int bTouched)
     }
 }
 
+/*
+================
+respawn
+================
+*/
 void __cdecl respawn(gentity_s *ent)
 {
     const dvar_s *v2; // r30
@@ -486,6 +532,26 @@ void __cdecl respawn(gentity_s *ent)
     }
 }
 
+/*
+===========
+ClientConnect
+
+Called when a player begins connecting to the server.
+Called again for every map change or tournement restart.
+
+The session information will be valid after exit.
+
+Return NULL if the client should be allowed, otherwise return
+a string with the reason for denial.
+
+Otherwise, the client will be sent the current gamestate
+and will eventually get to ClientBegin.
+
+firstTime will be qtrue the very first time a client connects
+to the server machine, but qfalse on map changes and tournement
+restarts.
+============
+*/
 char *__cdecl ClientConnect(int clientNum)
 {
     gclient_s *v2; // r31
@@ -529,6 +595,15 @@ char *__cdecl ClientConnect(int clientNum)
     return 0;
 }
 
+/*
+===========
+ClientSpawn
+
+Called every time a client is placed fresh in the world:
+after the first ClientBegin, and after each respawn
+Initializes all non-persistant parts of playerState
+============
+*/
 void __cdecl ClientSpawn(gentity_s *ent)
 {
     gclient_s *client; // r31
@@ -557,17 +632,25 @@ void __cdecl ClientSpawn(gentity_s *ent)
     iassert(ent->r.inuse);
     if (client->ps.clientNum != v3)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\g_client.cpp", 625, 0, "%s", "client->ps.clientNum == index");
+    // find a spawn point
+    // do it before setting health back up, so farthest
+    // ranging doesn't count this client
     SelectInitialSpawnPoint(v12, v13);
+    // toggle the teleport bit so the client knows to not lerp
     v4 = ~client->ps.eFlags & 2;
+
+    // clear everything but the persistant data
+
     memcpy(v14, &client->pers, sizeof(v14));
     viewmodelIndex = client->ps.viewmodelIndex;
-    memset(client, 0, sizeof(gclient_s));
+    memset(client, 0, sizeof(gclient_s)); // bk FIXME: Com_Memset?
     memcpy(&client->pers, v14, sizeof(client->pers));
     client->ps.viewmodelIndex = viewmodelIndex;
     client->ps.eFlags = v4;
     maxHealth = client->pers.maxHealth;
     client->ps.viewlocked_entNum = ENTITYNUM_NONE;
     client->groundTiltEntNum = ENTITYNUM_NONE;
+    // clear entity values
     client->ps.stats[STAT_MAX_HEALTH] = maxHealth;
     ent->s.groundEntityNum = ENTITYNUM_NONE;
     ent->takedamage = 1;
@@ -591,16 +674,19 @@ void __cdecl ClientSpawn(gentity_s *ent)
     client->ps.spreadOverrideState = PSOS_DISABLED;
     client->ps.throwBackGrenadeTimeLeft = 0;
     client->ps.throwBackGrenadeOwner = ENTITYNUM_NONE;
+    // health will count down towards max_health
     client->ps.stats[STAT_HEALTH] = v7;
     ent->health = v7;
     G_SetOrigin(ent, v12);
     client->ps.origin[0] = v12[0];
     client->ps.origin[1] = v12[1];
     client->ps.origin[2] = v12[2];
+    // the respawned flag will be cleared after the attack and jump keys come up
     client->ps.pm_flags |= 0x400u;
     SV_GetUsercmd(client - level.clients, &client->pers.cmd);
     SetClientViewAngle(ent, v13);
     SV_LinkEntity(ent);
+    // don't allow full run speed for a bit
     v9 = client->ps.pm_flags | 0x100;
     client->ps.pm_time = 100;
     client->ps.pm_flags = v9;
@@ -616,8 +702,11 @@ void __cdecl ClientSpawn(gentity_s *ent)
     client->playerLOSCheckDir[1] = 0.0;
     client->playerLOSPosTime = 0;
     client->playerADSTargetTime = 0;
+    // run a client frame to drop exactly to the floor,
+    // initialize animations and other things
     client->ps.commandTime = level.time - 200;
     ClientThink(v3);
+    // positively link the client, even if the command times are weird
     BG_PlayerStateToEntityState(&client->ps, &ent->s, 1, 1u);
     ent->r.currentOrigin[0] = client->ps.origin[0];
     ent->r.currentOrigin[1] = client->ps.origin[1];
@@ -627,8 +716,10 @@ void __cdecl ClientSpawn(gentity_s *ent)
     sentient->oldOrigin[1] = client->ps.origin[1];
     sentient->oldOrigin[2] = client->ps.origin[2];
     SV_LinkEntity(ent);
+    // run the presend to set anything else
     ClientEndFrame(ent);
     level.clientIsSpawning = 0;
+    // clear entity state values
     BG_PlayerStateToEntityState(&client->ps, &ent->s, 1, 1u);
 }
 
@@ -710,9 +801,20 @@ void __cdecl G_RemoveHeadHitEnt(gentity_s *pSelf)
     }
 }
 
+/*
+===========
+ClientBegin
+
+called when a client has finished connecting, and is ready
+to be placed into the level.  This will happen every level load,
+and on transition between teams, but doesn't happen on respawns
+============
+*/
 void __cdecl ClientBegin(int clientNum)
 {
     level.clients[clientNum].pers.connected = CON_CONNECTED;
+
+    // locate ent at a spawn point
     ClientSpawn(&g_entities[clientNum]);
 }
 

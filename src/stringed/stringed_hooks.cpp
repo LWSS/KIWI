@@ -442,18 +442,30 @@ uint __cdecl SEH_DecodeLetter(
     return result;
 }
 
+// only call this when Taiwanese_ValidBig5Code() has already returned true...
+//
 bool __cdecl Taiwanese_IsTrailingPunctuation(uint uiCode)
 {
+    // so far I'm just counting the first 21 chars, those seem to be all the basic punctuation...
+    //
     return uiCode >= 0xA140 && uiCode < 0xA154;
 }
 
+// only call this when Japanese_ValidShiftJISCode() has already returned true...
+//
 bool __cdecl Japanese_IsTrailingPunctuation(uint uiCode)
 {
+    // so far I'm just counting the first 18 chars, those seem to be all the basic punctuation...
+    //
     return uiCode >= 0x8140 && uiCode < 0x8152;
 }
 
+// only call this when Chinese_ValidGBCode() has already returned true...
+//
 bool __cdecl Chinese_IsTrailingPunctuation(uint uiCode)
 {
+    // so far I'm just counting the first 13 chars, those seem to be all the basic punctuation...
+    //
     return uiCode > 0x8140 && uiCode < 0x814E;
 }
 
@@ -471,6 +483,9 @@ uint __cdecl SEH_ReadCharFromString(const char **text, int *isTrailingPunctuatio
     return letter;
 }
 
+// needed for subtitle printing since original code no longer worked once camera bar height was changed to 480/10
+//	rather than refdef height / 10. I now need to bodge the coords to come out right.
+//
 int __cdecl Language_IsAsian()
 {
     return g_currentAsian;

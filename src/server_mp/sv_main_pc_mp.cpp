@@ -72,6 +72,17 @@ void __cdecl SV_MasterGameCompleteStatus()
     }
 }
 
+/*
+================
+SV_MasterHeartbeat
+
+Send a message to the masters every few minutes to
+let it know we are alive, and log information.
+We will also have a heartbeat sent when a server
+changes from empty to non-empty, and full to non-full,
+but not on every player enter or exit.
+================
+*/
 void __cdecl SV_MasterHeartbeat(const char *hbname)
 {
     // LWSS: this was disabled because the master server sends responses back that end up in the Steam Auth code
@@ -93,12 +104,32 @@ void __cdecl SV_MasterHeartbeat(const char *hbname)
     //}
 }
 
+/*
+=================
+SV_MasterShutdown
+
+Informs all masters that this server is going down
+=================
+*/
 void __cdecl SV_MasterShutdown()
 {
+    // send a hearbeat right now
     svs.nextHeartbeatTime = 0x80000000;
     SV_MasterHeartbeat("flatline");
+
+    // when the master tries to poll the server, it won't respond, so
+    // it will be removed from the list
 }
 
+/*
+====================
+SV_AuthorizeIpPacket
+
+A packet has been returned from the authorize server.
+If we have a challenge adr for that ip, send the
+challengeResponse to it
+====================
+*/
 void __cdecl SV_AuthorizeIpPacket(netadr_t from)
 {
     const char *v1; // eax
@@ -128,10 +159,12 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
         Com_Printf(CON_CHANNEL_SERVER, "SV_AuthorizeIpPacket: challenge not found\n");
         return;
     }
+    // send a packet back to the original client
     svs.challenges[i].pingTime = svs.time;
     s = SV_Cmd_Argv(2);
-    r = SV_Cmd_Argv(3);
+    r = SV_Cmd_Argv(3);			// reason
     cdkeyHashFromAuth = SV_Cmd_Argv(5);
+    // authorization failed
     if (!I_stricmp(s, "deny"))
     {
         if (r && *r)
@@ -140,6 +173,7 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
             {
                 NET_OutOfBandPrint(NS_SERVER, svs.challenges[i].adr, "needcdkey");
             LABEL_22:
+                // clear the challenge record so it won't timeout and let them through
                 memset(&svs.challenges[i], 0, sizeof(svs.challenges[i]));
                 return;
             }
@@ -168,6 +202,7 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
     }
     if (!strcmp(svs.challenges[i].cdkeyHash, cdkeyHashFromAuth))
     {
+        // a demo client connecting to a demo server
         if (I_stricmp(s, "demo"))
         {
             if (I_stricmp(s, "accept"))
@@ -196,7 +231,9 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
         }
         else
         {
+            // they are a demo client trying to connect to a real server
             NET_OutOfBandPrint(NS_SERVER, svs.challenges[i].adr, "error\nEXE_ERR_NOT_A_DEMO_SERVER");
+            // clear the challenge record so it won't timeout and let them through
             memset(&svs.challenges[i], 0, sizeof(svs.challenges[i]));
         }
     }
@@ -212,6 +249,11 @@ void __cdecl SV_AuthorizeIpPacket(netadr_t from)
     }
 }
 
+/*
+================
+SV_FlushRedirect
+================
+*/
 void __cdecl SV_FlushRedirect(char *outputbuf)
 {
     char c; // [esp+13h] [ebp-525h]
@@ -234,6 +276,15 @@ void __cdecl SV_FlushRedirect(char *outputbuf)
 }
 
 int lasttime;
+/*
+===============
+SVC_RemoteCommand
+
+An rcon packet arrived from the network.
+Shift down the remaining args
+Redirect all printfs
+===============
+*/
 void __cdecl SVC_RemoteCommand(netadr_t from)
 {
     const char *v1; // eax
@@ -243,6 +294,8 @@ void __cdecl SVC_RemoteCommand(netadr_t from)
     const char *v5; // [esp-4h] [ebp-C24h]
     const char *v6; // [esp-4h] [ebp-C24h]
     char remaining[1024]; // [esp+18h] [ebp-C08h] BYREF
+    // TTimo - scaled down to accumulate, but not overflow anything network wise, print wise etc.
+    // (OOB messages are the bottleneck here)
     char sv_outputbuf[2032]; // [esp+418h] [ebp-808h] BYREF
     int valid; // [esp+C08h] [ebp-18h]
     int len; // [esp+C0Ch] [ebp-14h]
@@ -250,6 +303,7 @@ void __cdecl SVC_RemoteCommand(netadr_t from)
     int time; // [esp+C14h] [ebp-Ch]
     int i; // [esp+C18h] [ebp-8h]
 
+    // TTimo - https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=534
     time = Sys_Milliseconds();
     if (!lasttime || time - lasttime >= 500)
     {
@@ -269,12 +323,17 @@ void __cdecl SVC_RemoteCommand(netadr_t from)
             v1 = NET_AdrToString(from);
             Com_Printf(CON_CHANNEL_SERVER, "Bad rcon from %s:\n%s\n", v1, v5);
         }
+        // start redirecting all print outputs to the packet
         svs.redirectAddress = from;
         Com_BeginRedirect(sv_outputbuf, 0x7F0u, SV_FlushRedirect);
         if (rcon_password->current.integer)
         {
             if (valid)
             {
+                // https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=543
+                // get the command directly, "rcon <pass> <command>" to avoid quoting issues
+                // extract the command by walking
+                // since the cmd formatting can fuckup (amount of spaces), using a dumb step by step parsing
                 len = 0;
                 for (i = 2; i < SV_Cmd_Argc(); ++i)
                 {

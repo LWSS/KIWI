@@ -11,6 +11,13 @@
 #include "cg_servercmds.h"
 #endif
 
+/*
+================
+CG_Respawn
+
+A respawn happened this snapshot
+================
+*/
 void __cdecl CG_Respawn(int localClientNum)
 {
     cg_s *cgameGlob;
@@ -23,7 +30,9 @@ void __cdecl CG_Respawn(int localClientNum)
         (uint8_t*)&cgameGlob->predictedPlayerState,
         (uint8_t*)&cgameGlob->snap->ps,
         sizeof(cgameGlob->predictedPlayerState));
+    // select the weapon the server says we are using
     cgameGlob->weaponSelect = cgameGlob->predictedPlayerState.weapon;
+    // display weapons available
     cgameGlob->weaponSelectTime = cgameGlob->time;
     cgameGlob->equippedOffHand = cgameGlob->predictedPlayerState.offHandIndex;
     cgameGlob->cursorHintIcon = HINT_NONE;
@@ -57,6 +66,7 @@ void __cdecl CG_Respawn(int localClientNum)
     cgameGlob->vGunSpeed[2] = 0.0;
     memset((uint8_t*)cgameGlob->viewDamage, 0, sizeof(cgameGlob->viewDamage));
     CG_ClearCameraShakes(localClientNum);
+    // no error decay on player movement
     cgameGlob->predictedError[0] = 0.0;
     cgameGlob->predictedError[1] = 0.0;
     cgameGlob->predictedError[2] = 0.0;
@@ -75,6 +85,11 @@ void __cdecl CG_Respawn(int localClientNum)
 #endif
 }
 
+/*
+==============
+CG_DamageFeedback
+==============
+*/
 void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, int damage)
 {
     double v4; // st7
@@ -101,6 +116,7 @@ void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, i
     {
         kick = bg_viewKickMin->current.value;
     }
+    // if yaw and pitch are both 255, make the damage always centered (falling, etc)
     if (yawByte == 255 && pitchByte == 255)
     {
         cgameGlob->v_dmg_roll = 0.0;
@@ -108,6 +124,7 @@ void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, i
     }
     else
     {
+        // positional
         pitch = (double)pitchByte / 255.0 * 360.0;
         yaw = (double)yawByte / 255.0 * 360.0;
         angles[0] = pitch;
@@ -136,13 +153,27 @@ void __cdecl CG_DamageFeedback(int localClientNum, int yawByte, int pitchByte, i
 }
 
 #ifdef KISAK_MP
+/*
+===============
+CG_TransitionPlayerState
+
+===============
+*/
 int __cdecl CG_TransitionPlayerState(int localClientNum, playerState_s *ps, const transPlayerState_t *ops)
 {
+    // damage events (player is getting wounded)
     if (ps->damageEvent != ops->damageEvent && ps->damageCount)
         CG_DamageFeedback(localClientNum, ps->damageYaw, ps->damagePitch, ps->damageCount);
+
+    // run events
     return CG_CheckPlayerstateEvents(localClientNum, ps, ops);
 }
 
+/*
+==============
+CG_CheckPlayerstateEvents
+==============
+*/
 int __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s* ps, const transPlayerState_t* ops)
 {
     int v4; // [esp+4h] [ebp-18h]
@@ -158,8 +189,12 @@ int __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s* ps, con
         eventSequence = ops->eventSequence;
     else
         eventSequence = v4 - 256;
+    // go through the predictable events buffer
     for (i = ps->eventSequence - 4; i < ps->eventSequence; ++i)
     {
+        // if we have a new predictable event
+        // or the server told us to play another event instead of a predicted event we already issued
+        // or something the server told us changed our prediction causing a different event
         if (i >= eventSequence || i > eventSequence - 4 && ps->events[i & 3] != ops->events[i & 3])
         {
             event = ps->events[i & 3];
@@ -170,13 +205,27 @@ int __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s* ps, con
     return eventSequence;
 }
 #elif KISAK_SP
+/*
+===============
+CG_TransitionPlayerState
+
+===============
+*/
 void __cdecl CG_TransitionPlayerState(int localClientNum, playerState_s *ps, const playerState_s *ops)
 {
+    // damage events (player is getting wounded)
     if (ps->damageEvent != ops->damageEvent && ps->damageCount)
         CG_DamageFeedback(localClientNum, ps->damageYaw, ps->damagePitch, ps->damageCount);
+
+    // run events
     CG_CheckPlayerstateEvents(localClientNum, ps, ops);
 }
 
+/*
+==============
+CG_CheckPlayerstateEvents
+==============
+*/
 void __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s *ps, const playerState_s *ops)
 {
     int eventSequence; // r29
@@ -201,8 +250,12 @@ void __cdecl CG_CheckPlayerstateEvents(int localClientNum, playerState_s *ps, co
     v9 = ps->eventSequence - 4;
     v10 = v9 - eventSequence;
     v11 = eventSequence - v9;
+    // go through the predictable events buffer
     do
     {
+        // if we have a new predictable event
+        // or the server told us to play another event instead of a predicted event we already issued
+        // or something the server told us changed our prediction causing a different event
         if (v10 >= 0 || v11 < 4 && ps->events[v9 & 3] != v13[v9 & 3])
         {
             v12 = ps->events[v9 & 3];

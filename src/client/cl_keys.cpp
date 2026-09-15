@@ -332,6 +332,14 @@ void __cdecl Field_DrawTextOverride(
         cursorChar);
 }
 
+/*
+===================
+Field_Draw
+
+Handles horizontal scrolling and cursor blinking
+x, y, amd width are in pixels
+===================
+*/
 void __cdecl Field_Draw(int localClientNum, field_t *edit, int x, int y, int horzAlign, int vertAlign)
 {
     char str[1024]; // [esp+0h] [ebp-408h] BYREF
@@ -434,6 +442,13 @@ void __cdecl Field_AdjustScroll(const ScreenPlacement *scrPlace, field_t *edit)
     }
 }
 
+/*
+====================
+Console_Key
+
+Handles history and console scrollback
+====================
+*/
 void __cdecl Console_Key(int localClientNum, int key)
 {
     bool v2; // [esp+8h] [ebp-1Ch]
@@ -450,11 +465,13 @@ void __cdecl Console_Key(int localClientNum, int key)
     isShiftDown = playerKeys[localClientNum].keys[K_SHIFT].down;
     isCtrlDown = playerKeys[localClientNum].keys[K_CTRL].down;
     isAltDown = playerKeys[localClientNum].keys[K_ALT].down;
+    // ctrl-L clears screen
     if (key == 'l' && isCtrlDown)
     {
         Cbuf_AddText(localClientNum, "clear\n");
         return;
     }
+    // enter finishes the line
     if (key == K_ENTER || key == K_KP_ENTER)
     {
         if (Con_CommitToAutoComplete())
@@ -463,10 +480,11 @@ void __cdecl Console_Key(int localClientNum, int key)
         if (Key_IsCatcherActive(localClientNum, 2))
         {
             Scr_AddDebugText(g_consoleField.buffer);
+        // leading slash is an explicit command
         }
         else if (g_consoleField.buffer[0] == 92 || g_consoleField.buffer[0] == 47)
         {
-            Cbuf_AddText(localClientNum, &g_consoleField.buffer[1]);
+            Cbuf_AddText(localClientNum, &g_consoleField.buffer[1]);	// valid command
             Cbuf_AddText(localClientNum, "\n");
         }
         else if (Console_IsClientDisconnected()
@@ -478,8 +496,9 @@ void __cdecl Console_Key(int localClientNum, int key)
         }
         else
         {
+            // other text will be chat messages
             if (!g_consoleField.buffer[0])
-                return;
+                return;	// empty lines just scroll the console without adding to history
 
 #ifdef KISAK_MP
             if (!Console_IsRconCmd(g_consoleField.buffer))
@@ -494,6 +513,7 @@ void __cdecl Console_Key(int localClientNum, int key)
         }
         if (g_consoleField.buffer[0])
         {
+            // copy line to history buffer
             memcpy(&historyEditLines[nextHistoryLine % 32], &g_consoleField, sizeof(field_t));
             historyLine = ++nextHistoryLine;
             if (Key_IsCatcherActive(localClientNum, 2))
@@ -504,6 +524,8 @@ void __cdecl Console_Key(int localClientNum, int key)
         g_consoleField.charHeight = g_console_char_height;
         g_consoleField.fixedSize = 1;
         if (Console_IsClientDisconnected())
+            // force an update, because the command
+            // may take some time
             SCR_UpdateScreen();
     }
     else if (Key_IsCatcherActive(localClientNum, 2) || key != K_TAB)
@@ -518,6 +540,7 @@ void __cdecl Console_Key(int localClientNum, int key)
             Con_CycleAutoComplete(1);
             return;
         }
+        // command history (ctrl-p ctrl-n for unix style)
         if (key == K_MWHEELUP && isShiftDown)
         {
             v5 = 1;
@@ -556,6 +579,7 @@ void __cdecl Console_Key(int localClientNum, int key)
             }
             else
             {
+                // console scrolling
                 switch (key)
                 {
                 case K_PGUP:
@@ -564,28 +588,30 @@ void __cdecl Console_Key(int localClientNum, int key)
                 case K_PGDN:
                     Con_PageDown();
                     return;
-                case K_MWHEELUP:
+                case K_MWHEELUP:	//----(SA)	added some mousewheel functionality to the console
                     Con_PageUp();
-                    if (isCtrlDown)
+                    if (isCtrlDown)	// hold <ctrl> to accelerate scrolling
                     {
                         Con_PageUp();
                         Con_PageUp();
                     }
                     break;
-                case K_MWHEELDOWN:
+                case K_MWHEELDOWN:	//----(SA)	added some mousewheel functionality to the console
                     Con_PageDown();
-                    if (isCtrlDown)
+                    if (isCtrlDown)	// hold <ctrl> to accelerate scrolling
                     {
                         Con_PageDown();
                         Con_PageDown();
                     }
                     break;
                 default:
+                    // ctrl-home = top of console
                     if (key == K_HOME && isCtrlDown)
                     {
                         Con_Top();
                         return;
                     }
+                    // ctrl-end = bottom of console
                     if (key == K_END && isCtrlDown)
                     {
                         Con_Bottom();
@@ -604,6 +630,7 @@ void __cdecl Console_Key(int localClientNum, int key)
                     {
                         Con_CommitToAutoComplete();
                     }
+                    // pass to the normal editline routine
                     if (Field_KeyDownEvent(localClientNum, &scrPlaceFull, &g_consoleField, key))
                         Con_AllowAutoCompleteCycling(1);
                     break;
@@ -613,6 +640,7 @@ void __cdecl Console_Key(int localClientNum, int key)
     }
     else
     {
+        // command completion
         if (shouldCompleteCmd)
             CompleteCommand();
         else
@@ -621,6 +649,16 @@ void __cdecl Console_Key(int localClientNum, int key)
     }
 }
 
+/*
+=================
+Field_KeyDownEvent
+
+Performs the basic line editing functions for the console,
+in-game talk, and menu fields
+
+Key events are used for non-printable characters, others are gotten from char events.
+=================
+*/
 char __cdecl Field_KeyDownEvent(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int key)
 {
     int OverstrikeMode; // eax
@@ -631,6 +669,7 @@ char __cdecl Field_KeyDownEvent(int localClientNum, const ScreenPlacement *scrPl
     isCtrlDown = playerKeys[localClientNum].keys[K_CTRL].down;
     isModified = 0;
     len = strlen(edit->buffer);
+    // shift-insert is paste
     if ((key == K_INS || key == K_KP_INS) && playerKeys[localClientNum].keys[K_SHIFT].down)
     {
         isModified = Field_Paste(localClientNum, scrPlace, edit);
@@ -690,6 +729,11 @@ char __cdecl Field_KeyDownEvent(int localClientNum, const ScreenPlacement *scrPl
     return isModified;
 }
 
+/*
+================
+Field_Paste
+================
+*/
 char __cdecl Field_Paste(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit)
 {
     int v4; // [esp+0h] [ebp-1Ch]
@@ -699,6 +743,7 @@ char __cdecl Field_Paste(int localClientNum, const ScreenPlacement *scrPlace, fi
     cbd = Sys_GetClipboardData();
     if (!cbd)
         return 0;
+    // send as if typed, so insert / overstrike works properly
     v4 = strlen(cbd);
     for (i = 0; i < v4; ++i)
         Field_CharEvent(localClientNum, scrPlace, edit, cbd[i]);
@@ -706,6 +751,11 @@ char __cdecl Field_Paste(int localClientNum, const ScreenPlacement *scrPlace, fi
     return 1;
 }
 
+/*
+==================
+Field_CharEvent
+==================
+*/
 bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace, field_t *edit, int ch)
 {
     uint len; // [esp+10h] [ebp-8h]
@@ -714,14 +764,14 @@ bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace
     len = strlen(edit->buffer);
     switch (ch)
     {
-    case 22:
+    case 22: // ctrl-v is paste
         isModified = Field_Paste(localClientNum, scrPlace, edit);
         break;
-    case 3:
+    case 3: // ctrl-c clears the field
         Field_Clear(edit);
         isModified = 1;
         break;
-    case 8:
+    case 8: // ctrl-h is backspace
         isModified = edit->cursor > 0;
         if (edit->cursor > 0)
         {
@@ -732,15 +782,18 @@ bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace
             --edit->cursor;
         }
         break;
-    case 1:
+    case 1: // ctrl-a is home
         edit->cursor = 0;
         edit->scroll = 0;
         return 0;
-    case 5:
+    case 5: // ctrl-e is end
         edit->cursor = len;
         isModified = 0;
         break;
     default:
+        //
+        // ignore any other non printable chars
+        //
         if (ch < 32)
             return 0;
         if (Key_GetOverstrikeMode(localClientNum))
@@ -750,9 +803,9 @@ bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace
             edit->buffer[edit->cursor++] = ch;
         }
         else
-        {
+        { // insert mode
             if (len == 255)
-                return 0;
+                return 0; // all full
             memmove(
                 (uint8_t *)&edit->buffer[edit->cursor + 1],
                 (uint8_t *)&edit->buffer[edit->cursor],
@@ -768,6 +821,13 @@ bool __cdecl Field_CharEvent(int localClientNum, const ScreenPlacement *scrPlace
     return isModified;
 }
 
+/*
+===============
+CompleteCommand
+
+Tab expansion
+===============
+*/
 void CompleteCommand()
 {
     bool v0; // [esp+28h] [ebp-268h]
@@ -799,6 +859,7 @@ void CompleteCommand()
     //}
     //else
     {
+        // only look at the first token for completion purposes
         s_completionString = Con_TokenizeInput();
         s_matchCount = 0;
         s_prefixMatchCount = 0;
@@ -838,6 +899,7 @@ void CompleteCommand()
                 memcpy(&savedField, &g_consoleField, sizeof(savedField));
                 v0 = isDvarCommand || s_matchCount == 1 || s_hasExactMatch && Con_AnySpaceAfterCommand();
                 useExactMatch = v0;
+                // multiple matches, complete to shortest
                 if (isDvarCommand)
                     Com_sprintf(edit->buffer, 0x100u, "\\%s %s", originalCommand, s_shortestMatch);
                 else
@@ -865,6 +927,7 @@ void CompleteCommand()
                 else if (Con_HasTooManyMatchesToShow())
                 {
                     Com_Printf(CON_CHANNEL_DONT_FILTER, "]%s\n", g_consoleField.buffer);
+                    // run through again, printing matches
                     Cmd_ForEach(PrintMatches);
                     Dvar_ForEachName(PrintMatches);
                 }
@@ -883,6 +946,12 @@ void CompleteCommand()
     }
 }
 
+/*
+===============
+PrintMatches
+
+===============
+*/
 void __cdecl PrintMatches(const char *s)
 {
     if (con_ignoreMatchPrefixOnly && con_matchPrefixOnly->current.enabled
@@ -1030,6 +1099,12 @@ void __cdecl UpdateMatches(bool searchCmds, int *matchLenAfterCmds, int *matchLe
     *matchLenAfterDvars = strlen(s_shortestMatch);
 }
 
+/*
+===============
+FindMatches
+
+===============
+*/
 void __cdecl FindMatches(char *s)
 {
     int v1; // esi
@@ -1053,6 +1128,7 @@ void __cdecl FindMatches(char *s)
         {
             if (v3)
             {
+                // cut shortestMatch to the amount common with s
                 for (i = 0; s[i]; ++i)
                 {
                     v1 = tolower(s_shortestMatch[i]);
@@ -1095,6 +1171,11 @@ void __cdecl Key_SetOverstrikeMode(int localClientNum, int state)
     playerKeys[localClientNum].overstrikeMode = state;
 }
 
+/*
+===================
+Key_IsDown
+===================
+*/
 int __cdecl Key_IsDown(int localClientNum, int keynum)
 {
     if (keynum == -1)
@@ -1152,15 +1233,30 @@ const char *__cdecl Key_KeynumToString(int keynum, int translate)
     return tinystr;
 }
 
+/*
+===================
+Key_SetBinding
+===================
+*/
 void __cdecl Key_SetBinding(int localClientNum, int keynum, char *binding)
 {
     if (keynum != -1)
     {
+        // free old bindings
+        // allocate memory for new binding
         ReplaceString(&playerKeys[localClientNum].keys[keynum].binding, binding);
+
+        // consider this like modifying an archived cvar, so the
+        // file write will be triggered at the next oportunity
         dvar_modifiedFlags |= 1u;
     }
 }
 
+/*
+===================
+Key_GetBinding
+===================
+*/
 const char *__cdecl Key_GetBinding(int localClientNum, uint keynum)
 {
     vassert((localClientNum) == 0, "%i not in [0, %i)", localClientNum, 1);
@@ -1205,6 +1301,11 @@ bool __cdecl Key_IsCommandBound(int localClientNum, const char *command)
     return Key_GetCommandAssignment(localClientNum, command, keys) > 0;
 }
 
+/*
+===================
+Key_Unbind_f
+===================
+*/
 void __cdecl Key_Unbind_f()
 {
     const char *v0; // eax
@@ -1231,6 +1332,19 @@ void __cdecl Key_Unbind_f()
     }
 }
 
+/*
+===================
+Key_StringToKeynum
+
+Returns a key number to be used to index keys[] by looking at
+the given string.  Single ascii characters return themselves, while
+the K_* names are matched up.
+
+0x11 will be interpreted as raw hex, which will allow new controlers
+
+to be configured even if they don't have defined names.
+===================
+*/
 int __cdecl Key_StringToKeynum(const char *str)
 {
     int n2; // [esp+10h] [ebp-Ch]
@@ -1243,6 +1357,7 @@ int __cdecl Key_StringToKeynum(const char *str)
         return -1;
     if (!str[1])
         return *str;
+    // check for hex code
     if (*str == 48 && str[1] == 120 && strlen(str) == 4)
     {
         n1 = str[2];
@@ -1275,6 +1390,7 @@ int __cdecl Key_StringToKeynum(const char *str)
     }
     else
     {
+        // scan for a text match
         for (kn = keynames; kn->name; ++kn)
         {
             if (!I_stricmp(str, kn->name))
@@ -1284,6 +1400,11 @@ int __cdecl Key_StringToKeynum(const char *str)
     }
 }
 
+/*
+===================
+Key_Unbindall_f
+===================
+*/
 void __cdecl Key_Unbindall_f()
 {
     int keynum; // [esp+0h] [ebp-Ch]
@@ -1295,6 +1416,11 @@ void __cdecl Key_Unbindall_f()
     }
 }
 
+/*
+===================
+Key_Bind_f
+===================
+*/
 void __cdecl Key_Bind_f()
 {
     const char *v0; // eax
@@ -1340,7 +1466,8 @@ void __cdecl Key_Bind_f()
             }
             else
             {
-                cmd[0] = 0;
+                // copy the rest of the command line
+                cmd[0] = 0;		// start out with a null string
                 for (i = 2; i < argc; ++i)
                 {
                     v7 = 0;
@@ -1369,6 +1496,13 @@ void __cdecl Key_Bind_f()
     }
 }
 
+/*
+============
+Key_WriteBindings
+
+Writes lines containing "bind key value"
+============
+*/
 void __cdecl Key_WriteBindings(int localClientNum, int f)
 {
     char buffer[8196]; // [esp+0h] [ebp-2008h] BYREF
@@ -1415,6 +1549,11 @@ int __cdecl Key_WriteBindingsToBuffer(int localClientNum, char *buffer, int buff
     return bytesUsed;
 }
 
+/*
+============
+Key_Bindlist_f
+============
+*/
 void __cdecl Key_Bindlist_f()
 {
     const char *v0; // eax
@@ -1439,8 +1578,14 @@ cmd_function_s Key_Bind_f_VAR;
 cmd_function_s Key_Unbind_f_VAR;
 cmd_function_s Key_Unbindall_f_VAR;
 cmd_function_s Key_Bindlist_f_VAR;
+/*
+===================
+CL_InitKeyCommands
+===================
+*/
 void __cdecl CL_InitKeyCommands()
 {
+    // register our functions
     Cmd_AddCommandInternal("bind", Key_Bind_f, &Key_Bind_f_VAR);
     Cmd_AddCommandInternal("unbind", Key_Unbind_f, &Key_Unbind_f_VAR);
     Cmd_AddCommandInternal("unbindall", Key_Unbindall_f, &Key_Unbindall_f_VAR);
@@ -1454,6 +1599,13 @@ bool __cdecl CL_IsConsoleKey(int key)
 }
 
 #ifdef KISAK_MP
+/*
+===================
+CL_KeyEvent
+
+Called by the system for both key up and key down events
+===================
+*/
 void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
 {
     PROF_SCOPED("CL_KeyEvent");
@@ -1469,6 +1621,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
     char cmd[1028]; // [esp+48h] [ebp-408h] BYREF
 
     keys = playerKeys[localClientNum].keys;
+    // update auto-repeat status and BUTTON_ANY status
     keys[key].down = down;
     if (down)
     {
@@ -1512,6 +1665,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         {
             if (!con_restricted->current.enabled || (clientUIActives[0].keyCatchers & 1) != 0)
             {
+                // console key is hardcoded, so the user can never unbind it
                 if (CL_IsConsoleKey(key))
                 {
                     if (!down)
@@ -1560,6 +1714,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         clcState = clientUIActives[0].connectionState;
         if (down)
         {
+            // keys can still be used for bound actions
             v6 = key == K_MOUSE1 || key < K_ASCII_FIRST;
             if (v6
                 && (CL_GetLocalClientConnection(localClientNum)->demoplaying || clcState == CA_CINEMATIC || clcState == CA_LOGO)
@@ -1569,6 +1724,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
                 key = K_ESCAPE;
             }
         }
+        // escape is always handled special
         if (key == K_ESCAPE && down)
         {
             if ((clientUIActives[0].keyCatchers & 2) != 0)
@@ -1625,6 +1781,10 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         {
             return;
         }
+        // key up events only perform actions if the game key binding is
+        // a button command (leading + sign).  These will be processed even in
+        // console mode and menu mode, to keep the character from continuing
+        // an action started before a mode switch.
         if (!down)
         {
             kba = keys[key].binding;
@@ -1637,6 +1797,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
                 UI_KeyEvent(localClientNum, key, 0);
             return;
         }
+        // distribute the key down event to the apropriate handler
         if ((clientUIActives[0].keyCatchers & 1) == 0)
         {
             if ((clientUIActives[0].keyCatchers & 2) != 0)
@@ -1653,21 +1814,26 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
             if ((clientUIActives[0].keyCatchers & 0x20) != 0)
             {
             LABEL_91:
+                // clear message mode
                 Message_Key(localClientNum, key);
                 return;
             }
             if (clcState)
             {
+                // send the bound action
                 kbb = keys[key].binding;
                 if (kbb)
                 {
                     if (*kbb == '+')
                     {
+                        // button commands add keynum and time as parms so that multiple
+                        // sources can be discriminated and subframe corrected
                         Com_sprintf(cmd, 0x400u, "%s %i %i\n", kbb, key, time);
                         Cbuf_AddText(localClientNum, cmd);
                     }
                     else
                     {
+                        // down-only command
                         Cbuf_AddText(localClientNum, kbb);
                         Cbuf_AddText(localClientNum, "\n");
                     }
@@ -1727,6 +1893,13 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
     }
 }
 #elif KISAK_SP
+/*
+===================
+CL_KeyEvent
+
+Called by the system for both key up and key down events
+===================
+*/
 void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
 {
     PROF_SCOPED("CL_KeyEvent");
@@ -1741,6 +1914,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
     char cmd[1028]; // [esp+48h] [ebp-408h] BYREF
 
     keys = playerKeys[localClientNum].keys;
+    // update auto-repeat status and BUTTON_ANY status
     keys[key].down = down;
     if (down)
     {
@@ -1784,6 +1958,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         {
             if (!con_restricted->current.enabled || (clientUIActives[0].keyCatchers & 1) != 0)
             {
+                // console key is hardcoded, so the user can never unbind it
                 if (CL_IsConsoleKey(key))
                 {
                     if (!down)
@@ -1831,6 +2006,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
         clcState = CL_GetLocalClientConnectionState(localClientNum);
         if (down)
         {
+            // keys can still be used for bound actions
             if ((key == K_MOUSE1 || key < K_ASCII_FIRST)
                 && (cls.demoplaying || clcState == CA_CINEMATIC || clcState == CA_LOGO)
                 && !clientUIActives[0].keyCatchers)
@@ -1839,6 +2015,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
                 key = K_ESCAPE;
             }
         }
+        // escape is always handled special
         if (key == K_ESCAPE && down)
         {
             if ((clientUIActives[0].keyCatchers & 2) != 0)
@@ -1879,6 +2056,10 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
             goto LABEL_91;
         }
 
+        // key up events only perform actions if the game key binding is
+        // a button command (leading + sign).  These will be processed even in
+        // console mode and menu mode, to keep the character from continuing
+        // an action started before a mode switch.
         if (!down)
         {
             kba = keys[key].binding;
@@ -1891,6 +2072,7 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
                 UI_KeyEvent(localClientNum, key, 0);
             return;
         }
+        // distribute the key down event to the apropriate handler
         if ((clientUIActives[0].keyCatchers & 1) == 0)
         {
             if ((clientUIActives[0].keyCatchers & 2) != 0)
@@ -1907,21 +2089,26 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
             if ((clientUIActives[0].keyCatchers & 0x20) != 0)
             {
             LABEL_91:
+                // clear message mode
                 Message_Key(localClientNum, key);
                 return;
             }
             if (clcState)
             {
+                // send the bound action
                 kbb = keys[key].binding;
                 if (kbb)
                 {
                     if (*kbb == '+')
                     {
+                        // button commands add keynum and time as parms so that multiple
+                        // sources can be discriminated and subframe corrected
                         Com_sprintf(cmd, 0x400u, "%s %i %i\n", kbb, key, time);
                         Cbuf_AddText(localClientNum, cmd);
                     }
                     else
                     {
+                        // down-only command
                         Cbuf_AddText(localClientNum, kbb);
                         Cbuf_AddText(localClientNum, "\n");
                     }
@@ -1982,6 +2169,13 @@ void __cdecl CL_KeyEvent(int localClientNum, int key, int down, uint time)
 }
 #endif
 
+/*
+================
+Message_Key
+
+In game talk message
+================
+*/
 void __cdecl Message_Key(int localClientNum, int key)
 {
     char buffer[1028]; // [esp+4h] [ebp-410h] BYREF
@@ -2031,12 +2225,21 @@ bool __cdecl CL_MouseInputShouldBypassMenus(int localClientNum, int key)
 #endif
 }
 
+/*
+===================
+CL_CharEvent
+
+Normal keyboard characters, already shifted / capslocked / etc
+===================
+*/
 void __cdecl CL_CharEvent(int localClientNum, int key)
 {
     PROF_SCOPED("CL_CharEvent");
 
+    // the console key should never be used as a char
     if (DevGui_IsActive() || key == '`' || key == '~')
         return;
+    // distribute the key down event to the apropriate handler
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if ((clientUIActives[0].keyCatchers & 1) != 0)
     {
@@ -2067,6 +2270,11 @@ void __cdecl CL_ConsoleCharEvent(int localClientNum, int key)
         Con_AllowAutoCompleteCycling(1);
 }
 
+/*
+===================
+Key_ClearStates
+===================
+*/
 void __cdecl Key_ClearStates(int localClientNum)
 {
     int keynum; // [esp+0h] [ebp-8h]
@@ -2150,6 +2358,11 @@ void __cdecl Key_RemoveCatcher(int localClientNum, int andMask)
         clientUIActives[0].displayHUDWithKeycatchUI = 0;
 }
 
+/*
+====================
+Key_SetCatcher
+====================
+*/
 void __cdecl Key_SetCatcher(int localClientNum, int catcher)
 {
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);

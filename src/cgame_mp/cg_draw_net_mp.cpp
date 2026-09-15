@@ -27,21 +27,40 @@ struct lagometer_t // sizeof=0x608
 
 lagometer_t lagometer;
 
+/*
+==============
+CG_AddLagometerFrameInfo
+
+Adds the current interpolate / extrapolate bar for this frame
+==============
+*/
 void __cdecl CG_AddLagometerFrameInfo(const cg_s *cgameGlob)
 {
     lagometer.frameSamples[lagometer.frameCount & 0x7F] = cgameGlob->time - cgameGlob->latestSnapshotTime;
     ++lagometer.frameCount;
 }
 
+/*
+==============
+CG_AddLagometerSnapshotInfo
+
+Each time a snapshot is received, log its ping time and
+the number of snapshots that were dropped before it.
+
+Pass NULL for a dropped packet.
+==============
+*/
 void __cdecl CG_AddLagometerSnapshotInfo(snapshot_s *snap)
 {
     if (snap)
     {
+        // add this snapshot's info
         lagometer.snapshotSamples[lagometer.snapshotCount & 0x7F] = snap->ping;
         lagometer.snapshotFlags[lagometer.snapshotCount & 0x7F] = snap->snapFlags;
     }
     else
     {
+        // dropped packet
         lagometer.snapshotSamples[lagometer.snapshotCount & 0x7F] = -1;
     }
     ++lagometer.snapshotCount;
@@ -789,6 +808,11 @@ void __cdecl CG_DrawPingAnalysis(int localClientNum)
     }
 }
 
+/*
+==============
+CG_DrawLagometer
+==============
+*/
 void __cdecl CG_DrawLagometer(int localClientNum)
 {
     float v1; // [esp+30h] [ebp-64h]
@@ -825,6 +849,9 @@ void __cdecl CG_DrawLagometer(int localClientNum)
     if (cg_drawLagometer->current.enabled && !cgs->localServer)
     {
         scrPlace = &scrPlaceView[localClientNum];
+        //
+        // draw the graph
+        //
         UI_DrawHandlePic(scrPlace, -55.0f, -140.0f, 48.0f, 48.0f, 3, 3, 0, cgMedia.lagometerMaterial);
         v17 = -55.0f;
         ay = -140.0f;
@@ -832,6 +859,8 @@ void __cdecl CG_DrawLagometer(int localClientNum)
         v16 = 48.0f;
         range = (float)48.0f / 3.0f;
         mid = (float)-140.0f + range;
+
+        // draw the frame interpoalte / extrapolate graph
         for (a = 0; aw > (float)a; ++a)
         {
             vd = (float)lagometer.frameSamples[(LOBYTE(lagometer.frameCount) - 1 - (_BYTE)a) & 0x7F];
@@ -858,6 +887,8 @@ void __cdecl CG_DrawLagometer(int localClientNum)
             }
         }
         rangea = v16 / 2.0f;
+
+        // draw the snapshot latency / drop graph
         for (aa = 0; aw > (float)aa; ++aa)
         {
             vb = (float)lagometer.snapshotSamples[(LOBYTE(lagometer.snapshotCount) - 1 - (_BYTE)aa) & 0x7F];
@@ -867,13 +898,14 @@ void __cdecl CG_DrawLagometer(int localClientNum)
                 {
                     v4 = ay + v16 - rangea;
                     v3 = v17 + aw - (double)aa;
+                    // RED for dropped snapshots
                     CL_DrawStretchPic(scrPlace, v3, v4, 1.0f, rangea, 3, 3, 0.0f, 0.0f, 0.0f, 0.0f, colorRed, cgMedia.whiteMaterial);
                 }
             }
             else
             {
                 if ((lagometer.snapshotFlags[(LOBYTE(lagometer.snapshotCount) - 1 - (_BYTE)aa) & 0x7F] & 1) != 0)
-                    hcolor = colorYellow;
+                    hcolor = colorYellow;	// YELLOW for rate delay
                 else
                     hcolor = colorGreen;
                 vscalea = rangea / 900.0f;
@@ -900,6 +932,13 @@ bool __cdecl CL_IsServerRestarting(int localClientNum)
     return CL_GetLocalClientConnection(localClientNum)->isServerRestarting;
 
 }
+/*
+==============
+CG_DrawDisconnect
+
+Should we draw something differnet for long lag vs no packets?
+==============
+*/
 void __cdecl CG_DrawDisconnect(int localClientNum)
 {
     Material *disconnectMaterial; // [esp+24h] [ebp-48h]
@@ -915,16 +954,20 @@ void __cdecl CG_DrawDisconnect(int localClientNum)
     if (!CL_IsServerRestarting(localClientNum))
     {
         cgameGlob = CG_GetLocalClientGlobals(localClientNum);
+        // draw the phone jack if we are completely past our buffers
         cmdNum = CL_GetCurrentCmdNumber(localClientNum) - 127;
         CL_GetUserCmd(localClientNum, cmdNum, &cmd);
+        // special check for map_restart // bk 0102165 - FIXME
         if (cmd.serverTime > cgameGlob->nextSnap->ps.commandTime && cmd.serverTime <= cgameGlob->time)
         {
             scrPlace = &scrPlaceView[localClientNum];
+            // also add text in center of screen
             s = UI_SafeTranslateString("CGAME_CONNECTIONINTERUPTED");
             font = UI_GetFontHandle(scrPlace, 0, 0.5);
             w = UI_TextWidth(s, 0, font, 0.5);
             x = (float)((640 - w) / 2);
             UI_DrawText(scrPlace, s, 0x7FFFFFFF, font, x, 100.0, 0, 0, 0.5, colorWhite, 3);
+            // blink the icon
             if (((cgameGlob->time >> 9) & 1) == 0)
             {
                 disconnectMaterial = Material_RegisterHandle("net_disconnect", IMAGE_TRACK_HUD);

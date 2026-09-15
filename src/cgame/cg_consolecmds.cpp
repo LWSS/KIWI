@@ -22,6 +22,13 @@ int __cdecl CG_CheatsOK(const char *cmdName)
     return 0;
 }
 
+/*
+=============
+CG_Viewpos_f
+
+Debugging command to print the current position
+=============
+*/
 void CG_Viewpos_f()
 {
     if (cgArray[0].nextSnap)
@@ -62,6 +69,8 @@ void CG_ScoresDown_f()
 {
     if (cgArray[0].nextSnap)
     {
+        // leave the current scores up if they were already
+        // displayed, but if this is the first hit, clear them out
         if (!cgArray[0].showScores)
         {
             cgArray[0].showScores = 1;
@@ -537,6 +546,14 @@ cmd_function_s printentities_VAR;
 cmd_function_s VisionSetNaked_VAR;
 cmd_function_s VisionSetNight_VAR;
 
+/*
+=================
+CG_InitConsoleCommands
+
+Let the client system know about all of our commands
+so it can perform tab completion
+=================
+*/
 void __cdecl CG_InitConsoleCommands()
 {
     Cmd_AddCommandInternal("viewpos", CG_Viewpos_f, &CG_Viewpos_f_VAR);
@@ -561,6 +578,10 @@ void __cdecl CG_InitConsoleCommands()
     Cmd_AddCommandInternal("updateGlowTweaks", UpdateGlowTweaks_f, &UpdateGlowTweaks_f_VAR);
     Cmd_AddCommandInternal("updateFilmTweaks", UpdateFilmTweaks_f, &UpdateFilmTweaks_f_VAR);
     Cmd_AddCommandInternal("playrumble", CG_PlayRumble_f, &CG_PlayRumble_f_VAR);
+    //
+    // the game server will interpret these commands, which will be automatically
+    // forwarded to the server after they are not recognized locally
+    //
     Cmd_AddCommandInternal("ai_history", 0, &ai_history_VAR);
     Cmd_AddCommandInternal("kill", 0, &kill_VAR);
     Cmd_AddCommandInternal("give", 0, &give_VAR);

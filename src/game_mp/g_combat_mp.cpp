@@ -80,6 +80,11 @@ void __cdecl G_ParseHitLocDmgTable()
         Com_Error(ERR_DROP, "Error parsing hitloc damage table %s", "info/mp_lochit_dmgtable");
 }
 
+/*
+==================
+LookAtKiller
+==================
+*/
 void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *attacker)
 {
     float dir[3]; // [esp+0h] [ebp-18h] BYREF
@@ -116,6 +121,11 @@ int __cdecl G_MeansOfDeathFromScriptParam(uint scrParam)
     return 0;
 }
 
+/*
+==================
+player_die
+==================
+*/
 void __cdecl player_die(
     gentity_s *self,
     gentity_s *inflictor,
@@ -161,6 +171,8 @@ void __cdecl player_die(
             hitLoc,
             psTimeOffset,
             deathAnimDuration);
+        // send updated scores to any clients that are following this one,
+        // or they would get stale scoreboards
         for (i = 0; i < level.maxclients; ++i)
         {
             client = &level.clients[i];
@@ -171,7 +183,7 @@ void __cdecl player_die(
                 Cmd_Score_f(&g_entities[i]);
             }
         }
-        self->takedamage = 1;
+        self->takedamage = 1;	// can still be gibbed
         self->r.contents = CONTENTS_CORPSE;
         self->r.currentAngles[2] = 0.0;
         LookAtKiller(self, inflictor, attacker);
@@ -342,6 +354,29 @@ uint __cdecl G_GetWeaponIndexForEntity(const gentity_s *ent)
     return g_entities[client->ps.viewlocked_entNum].s.weapon;
 }
 
+/*
+============
+G_Damage
+
+targ		entity that is being damaged
+inflictor	entity that is causing the damage
+attacker	entity that caused the inflictor to damage targ
+	example: targ=monster, inflictor=rocket, attacker=player
+
+dir			direction of the attack for knockback
+point		point at which the damage is being inflicted, used for headshots
+damage		amount of damage being inflicted
+knockback	force to be applied against targ as a result of the damage
+
+inflictor, attacker, dir, and point can be NULL for environmental effects
+
+dflags		these flags are used to control how T_Damage works
+	DAMAGE_RADIUS			damage was indirect (from a nearby explosion)
+	DAMAGE_NO_ARMOR			armor does not protect from this damage
+	DAMAGE_NO_KNOCKBACK		do not affect velocity, just view angles
+	DAMAGE_NO_PROTECTION	kills godmode, armor, everything
+============
+*/
 void __cdecl G_Damage(
     gentity_s *targ,
     gentity_s *inflictor,
@@ -382,6 +417,7 @@ void __cdecl G_Damage(
 
             Vec3NormalizeTo(dir, localdir);
 
+            // check for godmode
             if ((targ->flags & 1) == 0)
             {
                 if (damage < 1)
@@ -390,6 +426,7 @@ void __cdecl G_Damage(
                     damage = targ->health - 1;
                 if (g_debugDamage->current.enabled)
                     Com_Printf(CON_CHANNEL_SERVER, "target:%i health:%i damage:%i\n", targ->s.number, targ->health, damage);
+                // do the damage
                 targ->health -= damage;
                 DamageNotify(scr_const.damage, targ, attacker, dir, point, damage, mod, dFlags, modelIndex, partName);
                 if (targ->health > 0)
@@ -461,6 +498,14 @@ void __cdecl DamageNotify(
     Scr_Notify(targ, notify, 9u);
 }
 
+/*
+============
+CanDamage
+
+Returns qtrue if the inflictor can directly damage the target.  Used for
+explosions and melee attacks.
+============
+*/
 double __cdecl CanDamage(
     gentity_s *targ,
     gentity_s *inflictor,
@@ -592,8 +637,12 @@ double __cdecl CanDamage(
             absMaxs[1] = targ->r.absmax[1];
             absMaxs[2] = targ->r.absmax[2];
         }
+        // use the midpoint of the bounds instead of the origin, because
+        // bmodels may have their origin is 0,0,0
         Vec3Add(absMins, absMaxs, dest[0]);
         Vec3Scale(dest[0], 0.5, dest[0]);
+        // this should probably check in the plane of projection,
+        // rather than in world coordinate, and also include Z
         Vec3Sub(centerPos, dest[0], v);
         Vec3Normalize(v);
         v1[0] = -v[1];
@@ -844,6 +893,11 @@ double __cdecl G_GetRadiusDamageDistanceSquared(const float *damageOrigin, genti
     return Vec3LengthSq(v);
 }
 
+/*
+============
+G_RadiusDamage
+============
+*/
 int __cdecl G_RadiusDamage(
     float *origin,
     gentity_s *inflictor,
@@ -892,6 +946,7 @@ int __cdecl G_RadiusDamage(
         ent = &g_entities[entityList[j]];
         if (ent != ignore && ent->takedamage && (!ent->client || !level.bPlayerIgnoreRadiusDamage))
         {
+            // find the distance from the edge of the bounding box
             RadiusDamageDistanceSquared = G_GetRadiusDamageDistanceSquared(origin, ent);
             if (v18 > RadiusDamageDistanceSquared)
             {
@@ -903,6 +958,8 @@ int __cdecl G_RadiusDamage(
                     if (LogAccuracyHit(ent, attacker))
                         v27 = 1;
                     Vec3Sub(ent->r.currentOrigin, origin, diff);
+                    // push the center of mass higher than the origin so players
+                    // get knocked into the air more
                     diff[2] = diff[2] + 24.0;
                     v14 = (fInnerDamage - fOuterDamage) * (1.0 - v12 / radius) + fOuterDamage;
                     G_Damage(ent, inflictor, attacker, diff, origin, (v14 * v23), DAMAGE_RADIUS | DAMAGE_NO_KNOCKBACK, mod, weapon, HITLOC_NONE, 0, 0, 0);

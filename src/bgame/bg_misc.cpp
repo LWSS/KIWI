@@ -1234,6 +1234,11 @@ char *__cdecl BG_GetEntityTypeName(int eType)
     return va("Event %s (%i)", eventnames[eType - ET_EVENTS], eType - ET_EVENTS);
 }
 
+/*
+===============
+BG_FindItemForWeapon
+===============
+*/
 const gitem_s *__cdecl BG_FindItemForWeapon(uint weapon, int model)
 {
 
@@ -1252,11 +1257,21 @@ const gitem_s *__cdecl G_FindItem(const char *pickupName, int model)
         return 0;
 }
 
+/*
+============
+BG_PlayerTouchesItem
+
+Items can be picked up without actually touching their physical bounds to make
+grabbing them easier
+============
+*/
 bool __cdecl BG_PlayerTouchesItem(const playerState_s *ps, const entityState_s *item, int atTime)
 {
     float origin[3]; // [esp+0h] [ebp-Ch] BYREF
 
     BG_EvaluateTrajectory(&item->lerp.pos, atTime, origin);
+
+    // we are ignoring ducked differences here
     return ps->origin[0] - origin[0] <= 36.0
         && ps->origin[0] - origin[0] >= -36.0
         && ps->origin[1] - origin[1] <= 36.0
@@ -1276,6 +1291,14 @@ bool __cdecl BG_PlayerCanPickUpWeaponType(const WeaponDef *weapDef, const player
     return weapDef->offhandClass != OFFHAND_CLASS_SMOKE_GRENADE || ps->offhandSecondary == PLAYER_OFFHAND_SECONDARY_SMOKE;
 }
 
+/*
+================
+BG_CanItemBeGrabbed
+
+Returns false if the item should not be picked up.
+This needs to be the same for client side prediction and server use.
+================
+*/
 bool __cdecl BG_CanItemBeGrabbed(const entityState_s *ent, const playerState_s *ps, int touched)
 {
     int weapIdx; // [esp+0h] [ebp-8h]
@@ -1400,6 +1423,11 @@ bool __cdecl BG_PlayerHasRoomForEntAllAmmoTypes(const entityState_s *ent, const 
     return !weapDef->altWeaponIndex || BG_GetMaxPickupableAmmo(ps, weapDef->altWeaponIndex);
 }
 
+/*
+================
+BG_EvaluateTrajectory
+================
+*/
 void __cdecl BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, float *result)
 {
     float v3; // [esp+Ch] [ebp-7Ch]
@@ -1433,13 +1461,13 @@ void __cdecl BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, float *re
         break;
     case TR_LINEAR:
     case TR_FIRST_RAGDOLL:
-        deltaTimea = (double)(atTime - tr->trTime) * EQUAL_EPSILON;
+        deltaTimea = (double)(atTime - tr->trTime) * EQUAL_EPSILON; // milliseconds to seconds
         Vec3Mad(tr->trBase, deltaTimea, tr->trDelta, result);
         break;
     case TR_LINEAR_STOP:
         if (atTime > tr->trDuration + tr->trTime)
             atTime = tr->trDuration + tr->trTime;
-        deltaTime = (double)(atTime - tr->trTime) * EQUAL_EPSILON;
+        deltaTime = (double)(atTime - tr->trTime) * EQUAL_EPSILON; // milliseconds to seconds
         if (deltaTime < 0.0)
             deltaTime = 0.0;
         Vec3Mad(tr->trBase, deltaTime, tr->trDelta, result);
@@ -1452,9 +1480,9 @@ void __cdecl BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, float *re
         break;
     case TR_GRAVITY:
     case TR_RAGDOLL_GRAVITY:
-        deltaTimec = (double)(atTime - tr->trTime) * EQUAL_EPSILON;
+        deltaTimec = (double)(atTime - tr->trTime) * EQUAL_EPSILON; // milliseconds to seconds
         Vec3Mad(tr->trBase, deltaTimec, tr->trDelta, result);
-        result[2] = result[2] - deltaTimec * 400.0 * deltaTimec;
+        result[2] = result[2] - deltaTimec * 400.0 * deltaTimec; // FIXME: local gravity...
         break;
     case TR_ACCELERATE:
         if (atTime > tr->trDuration + tr->trTime)
@@ -1484,6 +1512,13 @@ void __cdecl BG_EvaluateTrajectory(const trajectory_t *tr, int atTime, float *re
     iassert(!IS_NAN((tr->trDelta)[0]) && !IS_NAN((tr->trDelta)[1]) && !IS_NAN((tr->trDelta)[2]));
 }
 
+/*
+================
+BG_EvaluateTrajectoryDelta
+
+For determining velocity at a given time
+================
+*/
 void __cdecl BG_EvaluateTrajectoryDelta(const trajectory_t *tr, int atTime, float *result)
 {
     float scale; // [esp+Ch] [ebp-60h]
@@ -1521,16 +1556,16 @@ void __cdecl BG_EvaluateTrajectoryDelta(const trajectory_t *tr, int atTime, floa
     case TR_SINE:
         deltaTime = (double)(atTime - tr->trTime) / (double)tr->trDuration;
         v5 = deltaTime * 3.141592741012573 + deltaTime * 3.141592741012573;
-        v4 = cos(v5);
+        v4 = cos(v5); // derivative of sin = cos
         phase = v4 * 0.5;
         Vec3Scale(tr->trDelta, phase, result);
         goto LABEL_22;
     case TR_GRAVITY:
-        deltaTimea = (double)(atTime - tr->trTime) * EQUAL_EPSILON;
+        deltaTimea = (double)(atTime - tr->trTime) * EQUAL_EPSILON; // milliseconds to seconds
         *result = tr->trDelta[0];
         result[1] = tr->trDelta[1];
         result[2] = tr->trDelta[2];
-        result[2] = result[2] - deltaTimea * 800.0;
+        result[2] = result[2] - deltaTimea * 800.0; // FIXME: local gravity...
         goto LABEL_22;
     case TR_ACCELERATE:
         if (atTime > tr->trDuration + tr->trTime)
@@ -1567,6 +1602,13 @@ void __cdecl BG_EvaluateTrajectoryDelta(const trajectory_t *tr, int atTime, floa
     }
 }
 
+/*
+===============
+BG_AddPredictableEventToPlayerstate
+
+Handles the sequence numbers
+===============
+*/
 void __cdecl BG_AddPredictableEventToPlayerstate(entity_event_t newEvent, uint eventParm, playerState_s *ps)
 {
     if (newEvent)
@@ -1595,6 +1637,14 @@ void __cdecl BG_AddPredictableEventToPlayerstate(entity_event_t newEvent, uint e
     }
 }
 
+/*
+========================
+BG_PlayerStateToEntityState
+
+This is done after each set of usercmd_t on the server,
+and after local prediction on the client
+========================
+*/
 void __cdecl BG_PlayerStateToEntityState(playerState_s *ps, entityState_s *s, int snap, uint8_t handler)
 {
     BG_PlayerToEntitySetTrajectory(ps, s, snap);
@@ -1768,7 +1818,8 @@ void __cdecl BG_PlayerToEntitySetMisc(playerState_s *ps, entityState_s *s)
     s->legsAnim = ps->legsAnim;
     s->torsoAnim = ps->torsoAnim;
     s->lerp.u.player.leanf = ps->leanf;
-    s->clientNum = ps->clientNum;
+    s->clientNum = ps->clientNum; // ET_PLAYER looks here instead of at number
+    // so corpses can also reference the proper config
     if ((ps->eFlags & 0x300) != 0)
         s->otherEntityNum = ps->viewlocked_entNum;
     if ((ps->otherFlags & 6) != 0)

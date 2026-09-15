@@ -15,6 +15,16 @@
 #include <client/cl_input.h>
 #include <universal/profile.h>
 
+/*
+===============
+P_DamageFeedback
+
+Called just before a snapshot is sent to the given player.
+Totals up all damage and generates both the player_state_t
+damage values to that client for pain blends and kicks, and
+global pain sound events for all clients.
+===============
+*/
 void __cdecl P_DamageFeedback(gentity_s *player)
 {
     gclient_s *client; // r31
@@ -48,7 +58,9 @@ void __cdecl P_DamageFeedback(gentity_s *player)
             G_DebugCircle(viewOrigin, 10.0, colorYellow, 0, 0, 0);
         }
         client->ps.damageCount = 0;
+        // total points of damage shot at the player this frame
         damage_blood = client->damage_blood;
+        // didn't take any damage
         if (damage_blood > 0)
         {
             maxHealth = client->pers.maxHealth;
@@ -73,6 +85,10 @@ void __cdecl P_DamageFeedback(gentity_s *player)
                 client->ps.aimSpreadScale = v9;
                 if (v9 > 255.0)
                     client->ps.aimSpreadScale = 255.0;
+                // send the information to the client
+
+                // world damage (falling, slime, etc) uses a special code
+                // to make the blend blob centered instead of positional
                 if (client->damage_fromWorld)
                 {
                     client->damage_fromWorld = 0;
@@ -87,6 +103,9 @@ void __cdecl P_DamageFeedback(gentity_s *player)
                 }
                 damageEvent = client->ps.damageEvent;
                 client->ps.damageCount = v7;
+                //
+                // clear totals
+                //
                 client->damage_blood = 0;
                 client->ps.damageEvent = damageEvent + 1;
             }
@@ -94,6 +113,11 @@ void __cdecl P_DamageFeedback(gentity_s *player)
     }
 }
 
+/*
+===============
+G_SetClientSound
+===============
+*/
 void __cdecl G_SetClientSound(gentity_s *ent)
 {
     ent->s.loopSound = 0;
@@ -127,6 +151,7 @@ void __cdecl G_TouchEnts(gentity_s *ent, int numtouch, int *touchents)
                     ++v9;
                 } while (v8 < v6);
             }
+            // duplicated
             if (v8 == v6)
             {
                 v10 = &g_entities[*v7];
@@ -150,6 +175,11 @@ void __cdecl G_TouchEnts(gentity_s *ent, int numtouch, int *touchents)
     }
 }
 
+/*
+==============
+ClientImpacts
+==============
+*/
 void __cdecl ClientImpacts(gentity_s *ent, pmove_t *pm)
 {
     G_TouchEnts(ent, pm->numtouch, pm->touchents);
@@ -332,6 +362,14 @@ void __cdecl AttemptLiveGrenadePickup(gentity_s *clientEnt)
     }
 }
 
+/*
+================
+ClientEvents
+
+Events will be passed on to the clients for presentation,
+but any server game effects are handled here
+================
+*/
 void __cdecl ClientEvents(gentity_s *ent, int oldEventSequence)
 {
     gclient_s *client; // r23
@@ -569,6 +607,17 @@ void __cdecl G_PlayerStateToEntityStateExtrapolate(playerState_s *ps, entityStat
     s->groundEntityNum = groundEntityNum;
 }
 
+/*
+==============
+ClientThink_real
+
+This will be called once for each client frame, which will
+usually be a couple times for each server frame on fast clients.
+
+If "g_synchronousClients 1" is set, this will be called exactly
+once for each server frame, which makes for smooth demo recording.
+==============
+*/
 void __cdecl ClientThink_real(gentity_s *ent)
 {
     gclient_s *client; // r30
@@ -610,6 +659,7 @@ void __cdecl ClientThink_real(gentity_s *ent)
 
     client = ent->client;
     iassert(client->pers.connected == CON_CONNECTED);
+    // mark the time, so the connection sprite can be removed
     p_cmd = &ent->client->pers.cmd;
     if (client->bFrozen || client->linkAnglesLocked)
         v5 = client->ps.pm_flags | 0x800;
@@ -637,11 +687,13 @@ void __cdecl ClientThink_real(gentity_s *ent)
 		client->ps.pm_type = ent->tagInfo ? PM_NORMAL_LINKED : PM_NORMAL;
 	}
     v7 = floor((g_gravity->current.value + 0.5f));
+    // set up for pmove
     eventSequence = client->ps.eventSequence;
     v9 = (float)(client->ps.aimSpreadScale * (float)0.0039215689);
     client->ps.gravity = (int)(float)*(double *)&v7;
     integer = g_speed->current.integer;
     client->currentAimSpreadScale = v9;
+    // set speed
     client->ps.speed = integer;
     memset(&v39, 0, sizeof(v39));
     v39.ps = &client->ps;
@@ -656,10 +708,12 @@ void __cdecl ClientThink_real(gentity_s *ent)
     //Profile_Begin(27);
     Pmove(&v39);
     //Profile_EndInternal(0);
+    // save results of pmove
     v12 = ent->client;
     if (v12->ps.eventSequence != eventSequence)
         ent->r.eventTime = level.time;
     G_PlayerStateToEntityStateExtrapolate(&v12->ps, &ent->s, v12->ps.commandTime, 1);
+    // use the snapped origin for linking so it matches client predicted versions
     ent->r.currentOrigin[0] = ent->s.lerp.pos.trBase[0];
     ent->r.currentOrigin[1] = ent->s.lerp.pos.trBase[1];
     ent->r.currentOrigin[2] = ent->s.lerp.pos.trBase[2];
@@ -674,10 +728,13 @@ void __cdecl ClientThink_real(gentity_s *ent)
     ent->r.maxs[0] = v15;
     ent->r.maxs[1] = v16;
     ent->r.maxs[2] = v17;
+    // execute client events
     ClientEvents(ent, eventSequence);
+    // link entity now, after any personal teleporters have been used
     SV_LinkEntity(ent);
     v18 = ent->client;
     numtouch = v39.numtouch;
+    // NOTE: now copy the exact origin over otherwise clients can be snapped into solid
     ent->r.currentOrigin[0] = v18->ps.origin[0];
     ent->r.currentOrigin[1] = v18->ps.origin[1];
     ent->r.currentOrigin[2] = v18->ps.origin[2];
@@ -685,6 +742,7 @@ void __cdecl ClientThink_real(gentity_s *ent)
     ent->r.currentAngles[1] = 0.0;
     ent->r.currentAngles[2] = 0.0;
     ent->r.currentAngles[1] = ent->client->ps.viewangles[1];
+    // touch other objects
     G_TouchEnts(ent, numtouch, v39.touchents);
     time = level.time;
     if (level.time >= client->lastTouchTime + 500)
@@ -692,8 +750,10 @@ void __cdecl ClientThink_real(gentity_s *ent)
         client->inControlTime = level.time;
         time = level.time;
     }
+    // save results of triggers and client events
     if (ent->client->ps.eventSequence != eventSequence)
         ent->r.eventTime = time;
+    // swap and latch button actions
     p_buttons = &client->buttons;
     p_oldbuttons = &client->oldbuttons;
     buttons = client->buttons;
@@ -774,10 +834,19 @@ LABEL_35:
         client->ps.pm_flags &= ~0x10000u;
         v35 = level.time;
     }
+    // check for respawning
+    // wait for the attack button to be pressed
     if (client->ps.pm_type >= PM_DEAD && v35 > client->respawnTime)
         respawn(ent);
 }
 
+/*
+==================
+ClientThink
+
+A new command has arrived from the client
+==================
+*/
 void __cdecl ClientThink(int clientNum)
 {
     gentity_s *v2; // r31
@@ -792,6 +861,15 @@ void __cdecl ClientThink(int clientNum)
         G_UpdateHeadHitEnt(v2);
 }
 
+/*
+==============
+ClientEndFrame
+
+Called at the end of each server frame for each connected client
+A fast client will have multiple ClientThink for each ClientEdFrame,
+while a slow client may have multiple ClientEndFrame between ClientThink.
+==============
+*/
 void __cdecl ClientEndFrame(gentity_s *ent)
 {
     gclient_s *client; // r11
@@ -849,11 +927,13 @@ void __cdecl ClientEndFrame(gentity_s *ent)
         Player_UpdateLookAtEntity(ent);
         Player_UpdateCursorHints(ent);
     }
+    // apply all the damage taken this frame
     P_DamageFeedback(ent);
     ent->client->ps.moveSpeedScaleMultiplier = ent->client->pers.moveSpeedScaleMultiplier;
-    ent->client->ps.stats[STAT_HEALTH] = ent->health;
+    ent->client->ps.stats[STAT_HEALTH] = ent->health; // FIXME: get rid of ent->health...
     v8 = ent->client;
     ent->s.loopSound = 0;
+    // set the latest infor
     G_PlayerStateToEntityStateExtrapolate(&v8->ps, &ent->s, v8->ps.commandTime, 1);
     ent->client->buttonsSinceLastFrame = 0;
 }

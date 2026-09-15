@@ -545,6 +545,13 @@ void __cdecl CG_InitView(int localClientNum)
     FX_SetNextUpdateCamera(localClientNum, &cgameGlob->refdef, zfar);
 }
 
+/*
+===============
+CG_CalcViewValues
+
+Sets cg.refdef view values
+===============
+*/
 void __cdecl CG_CalcViewValues(int localClientNum)
 {
     float f; // [esp+40h] [ebp-10h]
@@ -565,7 +572,10 @@ void __cdecl CG_CalcViewValues(int localClientNum)
     }
     else
     {
+        // calculate size of 3D view
         CG_CalcVrect(localClientNum);
+
+        // intermission view
         if (cgameGlob->predictedPlayerState.pm_type == PM_INTERMISSION)
         {
             cgameGlob->refdef.vieworg[0] = cgameGlob->predictedPlayerState.origin[0];
@@ -614,6 +624,7 @@ void __cdecl CG_CalcViewValues(int localClientNum)
             cgameGlob->refdefViewAngles[1] = cgameGlob->predictedPlayerState.viewangles[1];
             cgameGlob->refdefViewAngles[2] = cgameGlob->predictedPlayerState.viewangles[2];
 
+            // add error decay
             if (cg_errorDecay->current.value > 0.0)
             {
                 f = (cg_errorDecay->current.value - (double)(cgameGlob->time - cgameGlob->predictedErrorTime))
@@ -625,23 +636,33 @@ void __cdecl CG_CalcViewValues(int localClientNum)
             }
             CG_CalcTurretViewValues(localClientNum);
 
+            // offset for local bobbing and kicks
             if (!cgameGlob->renderingThirdPerson)
                 CG_OffsetFirstPersonView(cgameGlob);
 
             CG_ShakeCamera(localClientNum);
 
+            // position eye reletive to origin
             AnglesToAxis(cgameGlob->refdefViewAngles, cgameGlob->refdef.viewaxis);
             CG_ApplyViewAnimation(localClientNum);
 
+            // back away from character
             if (cgameGlob->renderingThirdPerson)
                 CG_OffsetThirdPersonView(cgameGlob);
 
             CG_PerturbCamera(cgameGlob);
+            // field of view
             CG_CalcFov(localClientNum);
         }
     }
 }
 
+/*
+===============
+CG_OffsetThirdPersonView
+
+===============
+*/
 void __cdecl CG_OffsetThirdPersonView(cg_s *cgameGlob)
 {
     float scale; // [esp+0h] [ebp-80h]
@@ -664,13 +685,14 @@ void __cdecl CG_OffsetThirdPersonView(cg_s *cgameGlob)
     focusAngles[0] = cgameGlob->refdefViewAngles[0];
     focusAngles[1] = cgameGlob->refdefViewAngles[1];
     focusAngles[2] = cgameGlob->refdefViewAngles[2];
+    // if dead, look at killer
     if (cgameGlob->predictedPlayerState.pm_type >= PM_DEAD)
     {
         focusAngles[1] = (float)cgameGlob->predictedPlayerState.stats[STAT_DEAD_YAW];
         viewAngles[1] = (float)cgameGlob->predictedPlayerState.stats[STAT_DEAD_YAW];
     }
     if (focusAngles[0] > 45.0)
-        focusAngles[0] = 45.0;
+        focusAngles[0] = 45.0;		// don't go too far overhead
     AngleVectors(focusAngles, forward, 0, 0);
     Vec3Mad(cgameGlob->refdef.vieworg, 512.0, forward, focusPoint);
     view[0] = cgameGlob->refdef.vieworg[0];
@@ -682,13 +704,17 @@ void __cdecl CG_OffsetThirdPersonView(cg_s *cgameGlob)
     AngleVectors(viewAngles, forward, right, up);
     scale = -cg_thirdPersonRange->current.value;
     Vec3Mad(view, scale, forward, view);
+    // trace a ray from the origin to the viewpoint to make sure the view isn't
+    // in a solid block.  Use an 8 by 8 block to prevent the view from near clipping anything
     ThirdPersonViewTrace(cgameGlob, cgameGlob->refdef.vieworg, view, 2065, cgameGlob->refdef.vieworg);
+
+    // select pitch to look at focus point from vieword
     Vec3Sub(focusPoint, cgameGlob->refdef.vieworg, focusPoint);
     v4 = focusPoint[1] * focusPoint[1] + focusPoint[0] * focusPoint[0];
     v3 = sqrt(v4);
     focusDist = v3;
     if (v3 < 1.0)
-        focusDist = 1.0;
+        focusDist = 1.0;	// should never happen
     v2 = atan2(focusPoint[2], focusDist);
     viewAngles[0] = -RAD2DEG( v2 );
     AnglesToAxis(viewAngles, cgameGlob->refdef.viewaxis);
@@ -719,6 +745,8 @@ void __cdecl ThirdPersonViewTrace(cg_s *cgameGlob, float *start, float *end, int
     {
         Vec3Lerp(start, end, trace.fraction, testEnd);
         testEnd[2] = (1.0 - trace.fraction) * 32.0 + testEnd[2];
+        // try another trace to this position, because a tunnel may have the ceiling
+        // close enogh that this is poking out
         CG_TraceCapsule(
             &trace,
             start,
@@ -731,6 +759,13 @@ void __cdecl ThirdPersonViewTrace(cg_s *cgameGlob, float *start, float *end, int
     }
 }
 
+/*
+=================
+CG_CalcVrect
+
+Sets the coordinates of the rendered window
+=================
+*/
 void __cdecl CG_CalcVrect(int localClientNum)
 {
     cg_s *cgameGlob;
@@ -773,6 +808,12 @@ void __cdecl CG_SmoothCameraZ(cg_s *cgameGlob)
     }
 }
 
+/*
+===============
+CG_OffsetFirstPersonView
+
+===============
+*/
 void __cdecl CG_OffsetFirstPersonView(cg_s *cgameGlob)
 {
     int v1; // [esp+14h] [ebp-54h]
@@ -802,6 +843,7 @@ void __cdecl CG_OffsetFirstPersonView(cg_s *cgameGlob)
         vs.weapIdleTime = &cgameGlob->weapIdleTime;
         BG_CalculateViewAngles(&vs, angles);
         Vec3Add(cgameGlob->refdefViewAngles, angles, cgameGlob->refdefViewAngles);
+        // add view height
         cgameGlob->refdef.vieworg[2] = cgameGlob->refdef.vieworg[2] + cgameGlob->predictedPlayerState.viewHeightCurrent;
 
         delta = BG_GetVerticalBobFactor(
@@ -810,6 +852,7 @@ void __cdecl CG_OffsetFirstPersonView(cg_s *cgameGlob)
             cgameGlob->xyspeed,
             bg_bobMax->current.value);
 
+        // add bob height
         cgameGlob->refdef.vieworg[2] += delta;
 
         deltaB = BG_GetHorizontalBobFactor(
@@ -820,6 +863,7 @@ void __cdecl CG_OffsetFirstPersonView(cg_s *cgameGlob)
 
         AngleVectors(cgameGlob->refdefViewAngles, 0, vRight, 0);
         Vec3Mad(cgameGlob->refdef.vieworg, deltaB, vRight, cgameGlob->refdef.vieworg);
+        // add fall height
         delta = (float)(cgameGlob->time - cgameGlob->landTime);
         if (delta <= 0.0 || delta >= 150.0)
         {
@@ -846,11 +890,19 @@ void __cdecl CG_OffsetFirstPersonView(cg_s *cgameGlob)
     }
 }
 
+/*
+====================
+CG_CalcFov
+
+Fixed fov at intermissions, otherwise account for fov variable and zooms.
+====================
+*/
 void __cdecl CG_CalcFov(int localClientNum)
 {
     float fov_x; // [esp+4h] [ebp-4h]
 
     fov_x = CG_GetViewFov(localClientNum);
+    // set it
     CG_UpdateFov(localClientNum, fov_x);
 }
 
@@ -1249,6 +1301,13 @@ void __cdecl CL_SyncGpu(int(__cdecl *WorkCallback)(uint64_t))
     R_SyncGpu(WorkCallback);
 }
 
+/*
+=================
+CG_DrawActiveFrame
+
+Generates and draws a game scene and status information at the given time.
+=================
+*/
 int __cdecl CG_DrawActiveFrame(
     int localClientNum,
     int serverTime,
@@ -1273,7 +1332,8 @@ int __cdecl CG_DrawActiveFrame(
 
     prevState = 0;
     iassert(Sys_IsMainThread());
-    
+
+    // clear all the render lists
     R_ClearScene(localClientNum);
     FX_BeginUpdate(localClientNum);
     CG_SetCollWorldLocalClientNum(localClientNum);
@@ -1302,6 +1362,7 @@ int __cdecl CG_DrawActiveFrame(
     bgs = &cgameGlob->bgs;
     if (cgameGlob->snap)
         prevState = cgameGlob->snap->ps.pm_type;
+    // set up cg.snap and possibly cg.nextSnap
     CG_ProcessSnapshots(localClientNum);
     if (cgameGlob->renderScreen)
     {
@@ -1348,10 +1409,12 @@ int __cdecl CG_DrawActiveFrame(
                     cgameGlob->shellshock.parms,
                     cgameGlob->shellshock.startTime,
                     cgameGlob->shellshock.duration);
+                // decide on third person view
                 CG_UpdateThirdPerson(localClientNum);
                 CG_ClearHudGrenades();
                 CG_UpdateEntInfo(localClientNum);
                 AimTarget_ClearTargetList(localClientNum);
+                // build the render lists
                 if (CG_AddPacketEntities(localClientNum))
                     viewlocked_entNum = cgameGlob->predictedPlayerState.viewlocked_entNum;
                 else
@@ -1386,15 +1449,18 @@ int __cdecl CG_DrawActiveFrame(
                 CL_SyncGpu(0);
                 CL_Input(localClientNum);
                 KISAK_NULLSUB();
+                // update cg.predictedPlayerState
                 CG_PredictPlayerState(localClientNum);
                 KISAK_NULLSUB();
                 CG_UpdateViewWeaponAnim(localClientNum);
                 KISAK_NULLSUB();
+                // build cg.refdef
                 CG_CalcViewValues(localClientNum);
                 KISAK_NULLSUB();
                 zfara = R_GetFarPlaneDist();
                 FX_SetNextUpdateCamera(localClientNum, &cgameGlob->refdef, zfara);
                 R_UpdateSpotLightEffect(&fxUpdateCmd);
+                // update audio positions
                 SND_SetListener(
                     localClientNum,
                     cgameGlob->nextSnap->ps.clientNum,
@@ -1457,6 +1523,7 @@ int __cdecl CG_DrawActiveFrame(
                         }
                     }
                 }
+                // actually issue the rendering calls
                 CG_DrawActive(localClientNum);
                 iassert(bgs == &cgameGlob->bgs);
                 bgs = 0;

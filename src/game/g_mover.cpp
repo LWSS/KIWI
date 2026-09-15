@@ -35,6 +35,11 @@ void __cdecl TRACK_g_mover()
     track_static_alloc_internal(hintStrings, 20, "hintStrings", 9);
 }
 
+/*
+============
+G_TestEntityPosition
+============
+*/
 gentity_s *__cdecl G_TestEntityPosition(gentity_s *ent, float *vOrigin)
 {
     int passEntityNum; // [esp+0h] [ebp-38h]
@@ -75,6 +80,11 @@ gentity_s *__cdecl G_TestEntityPosition(gentity_s *ent, float *vOrigin)
         return 0;
 }
 
+/*
+================
+G_CreateRotationMatrix
+================
+*/
 void __cdecl G_CreateRotationMatrix(const float *angles, float (*matrix)[3])
 {
     AngleVectors(angles, (float *)matrix, &(*matrix)[3], &(*matrix)[6]);
@@ -83,6 +93,11 @@ void __cdecl G_CreateRotationMatrix(const float *angles, float (*matrix)[3])
     (*matrix)[5] = -(*matrix)[5];
 }
 
+/*
+================
+G_TransposeMatrix
+================
+*/
 void __cdecl G_TransposeMatrix(float (*matrix)[3], float (*transpose)[3])
 {
     int j; // [esp+4h] [ebp-8h]
@@ -95,6 +110,13 @@ void __cdecl G_TransposeMatrix(float (*matrix)[3], float (*transpose)[3])
     }
 }
 
+/*
+==================
+G_TryPushingEntity
+
+Returns qfalse if the move is blocked
+==================
+*/
 int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move, float *amove)
 {
     float *origin; // [esp+0h] [ebp-ACh]
@@ -113,6 +135,8 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
     float y; // [esp+A8h] [ebp-4h]
 
     Vec3Add(check->r.currentOrigin, move, vOrigin);
+    // try moving the contacted entity
+    // figure movement due to the pusher's amove
     G_CreateRotationMatrix(amove, transpose);
     G_TransposeMatrix(transpose, matrix);
     Vec3Sub(vOrigin, pusher->r.currentOrigin, org);
@@ -121,6 +145,7 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
     org2[2] = org[2];
     G_RotatePoint(org2, matrix);
     Vec3Sub(org2, org, move2);
+    // add movement
     Vec3Add(vOrigin, move2, vOrigin);
     if (G_TestEntityPosition(check, vOrigin))
     {
@@ -134,8 +159,12 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
         if (check->r.maxs[0] / 2.0 <= z)
         {
         LABEL_42:
+            // if it is ok to leave in the old position, do it
+            // this is only relevent for riding entities, not pushed
+            // Sliding trapdoors can cause this.
             if (G_TestEntityPosition(check, check->r.currentOrigin))
             {
+                // blocked
                 return 0;
             }
             else
@@ -187,8 +216,10 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
                 if (!G_TestEntityPosition(check, org2))
                     break;
             }
+            // may have pushed them off an edge
             if (check->s.groundEntityNum != pusher->s.number)
                 check->s.groundEntityNum = ENTITYNUM_NONE;
+            // pushed ok
             check->r.currentOrigin[0] = org2[0];
             check->r.currentOrigin[1] = org2[1];
             check->r.currentOrigin[2] = org2[2];
@@ -197,6 +228,7 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
             check->s.lerp.pos.trBase[2] = org2[2];
             if (check->client)
             {
+                // make sure the client's view rotates when on a rotating mover
                 check->client->ps.delta_angles[1] = check->client->ps.delta_angles[1] + amove[1];
                 origin = check->client->ps.origin;
                 *origin = org2[0];
@@ -218,8 +250,10 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
     }
     else
     {
+        // may have pushed them off an edge
         if (check->s.groundEntityNum != pusher->s.number)
             check->s.groundEntityNum = ENTITYNUM_NONE;
+        // pushed ok
         check->r.currentOrigin[0] = vOrigin[0];
         check->r.currentOrigin[1] = vOrigin[1];
         check->r.currentOrigin[2] = vOrigin[2];
@@ -228,6 +262,7 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
         check->s.lerp.pos.trBase[2] = vOrigin[2];
         if (check->client)
         {
+            // make sure the client's view rotates when on a rotating mover
             check->client->ps.delta_angles[1] = check->client->ps.delta_angles[1] + amove[1];
             v6 = check->client->ps.origin;
             *v6 = vOrigin[0];
@@ -253,6 +288,11 @@ int __cdecl G_TryPushingEntity(gentity_s *check, gentity_s *pusher, float *move,
     }
 }
 
+/*
+=================
+G_MoverTeam
+=================
+*/
 void __cdecl G_MoverTeam(gentity_s *ent)
 {
     float *v2; // [esp+Ch] [ebp-60h]
@@ -276,7 +316,11 @@ void __cdecl G_MoverTeam(gentity_s *ent)
         if (!Com_IsRagdollTrajectory(&ent->s.lerp.pos))
         {
             obstacle = 0;
+            // make sure all team slaves can move before commiting
+            // any moves or calling any think functions
+            // if the move is blocked, all moved objects will be backed out
             pushed_p = pushed;
+            // get current position
             BG_EvaluateTrajectory(&ent->s.lerp.pos, level.time, origin);
             BG_EvaluateTrajectory(&ent->s.lerp.apos, level.time, angles);
             Vec3Sub(origin, ent->r.currentOrigin, move);
@@ -294,6 +338,8 @@ void __cdecl G_MoverTeam(gentity_s *ent)
                     }
                 }
 #endif
+                // the move succeeded
+                // call the reached function if time is at or past end point
                 if (ent->s.lerp.pos.trType)
                 {
                     if (level.time >= ent->s.lerp.pos.trDuration + ent->s.lerp.pos.trTime)
@@ -313,8 +359,10 @@ void __cdecl G_MoverTeam(gentity_s *ent)
                     }
                 }
             }
+            // move was blocked
             else
             {
+                // go back to the previous position
                 for (p = pushed_p - 1; p >= pushed; --p)
                 {
                     check = p->ent;
@@ -355,6 +403,7 @@ void __cdecl G_MoverTeam(gentity_s *ent)
                 BG_EvaluateTrajectory(&ent->s.lerp.pos, level.time, ent->r.currentOrigin);
                 BG_EvaluateTrajectory(&ent->s.lerp.apos, level.time, ent->r.currentAngles);
                 SV_LinkEntity(ent);
+                // if the pusher has a "blocked" function, call it
                 blocked = entityHandlers[ent->handler].blocked;
                 if (blocked)
                     blocked(ent, obstacle);
@@ -363,6 +412,15 @@ void __cdecl G_MoverTeam(gentity_s *ent)
     }
 }
 
+/*
+============
+G_MoverPush
+
+Objects need to be moved back on a failed push,
+otherwise riders would continue to slide.
+If qfalse is returned, *obstacle will be the blocking entity
+============
+*/
 char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s **obstacle)
 {
     float *origin; // [esp+8h] [ebp-208Ch]
@@ -405,6 +463,8 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
                 maxs[i] = outMaxs[i];
         }
     }
+    // mins/maxs are the bounds at the destination
+    // totalMins / totalMaxs are the bounds for the entire move
     if (pusher->r.currentAngles[0] == 0.0
         && pusher->r.currentAngles[1] == 0.0
         && pusher->r.currentAngles[2] == 0.0
@@ -438,20 +498,24 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
             maxPos[i] = maxPos[i] + move[i];
     }
 
+    // unlink the pusher so we don't get it in the entityList
     SV_UnlinkEntity(pusher);
 #ifdef KISAK_MP // KISAKTODO: flag fixes
     v9 = CM_AreaEntities(minPos, maxPos, entityList, MAX_GENTITIES, 0x6000180);
 #elif KISAK_SP
     v9 = CM_AreaEntities(minPos, maxPos, entityList, MAX_GENTITIES, 0x2000180);
 #endif
+    // move the pusher to it's final position
     Vec3Add(pusher->r.currentOrigin, move, pusher->r.currentOrigin);
     Vec3Add(pusher->r.currentAngles, amove, pusher->r.currentAngles);
     SV_LinkEntity(pusher);
     v10 = 0;
+    // see if any solid entities are inside the final position
     for (j = 0; j < v9; ++j)
     {
         ent = &g_entities[entityList[j]];
 
+        // only push items and players
         if ((ent->s.eType == ET_MISSILE
                 || ent->s.eType == ET_ITEM
                 || ent->s.eType == ET_PLAYER
@@ -460,13 +524,17 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
                 || ent->s.eType == ET_ACTOR_CORPSE
 #endif
                 || ent->physicsObject)
+            // if the entity is standing on the pusher, it will definitely be moved
             && (ent->s.groundEntityNum == pusher->s.number
+                // see if the ent needs to be tested
                 || maxBound[0] > (double)ent->r.absmin[0]
                 && maxBound[1] > (double)ent->r.absmin[1]
                 && maxBound[2] > (double)ent->r.absmin[2]
                 && minBound[0] < (double)ent->r.absmax[0]
                 && minBound[1] < (double)ent->r.absmax[1]
                 && minBound[2] < (double)ent->r.absmax[2]
+                // see if the ent's bbox is inside the pusher's final position
+                // this does allow a fast moving object to pass through a thin entity...
                 && G_TestEntityPosition(ent, ent->r.currentOrigin) == pusher))
         {
             v23[v10++] = entityList[j];
@@ -492,6 +560,7 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
         if (ent->s.eType == ET_MISSILE)
             Vec3Copy(ent->missile.surfaceNormal, pushed_p->surfaceNormal);
 
+        // the entity needs to be pushed
         if (G_TryPushingEntity(ent, pusher, move, amove)
             || ent->s.eType == ET_ITEM
             || ent->s.eType == ET_MISSILE
@@ -504,8 +573,12 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
         }
         else
         {
+            // the move was blocked an entity
+
+            // bobbing entities are instant-kill and never get blocked
             if (pusher->s.lerp.pos.trType != TR_SINE && pusher->s.lerp.apos.trType != TR_SINE)
             {
+                // save off the obstacle so we can call the block function (crush, etc)
                 *obstacle = ent;
                 v18 = 0;
                 break;
@@ -525,6 +598,11 @@ char __cdecl G_MoverPush(gentity_s *pusher, float *move, float *amove, gentity_s
     return v18;
 }
 
+/*
+================
+G_RunMover
+================
+*/
 void __cdecl G_RunMover(gentity_s *ent)
 {
 #ifdef KISAK_MP
@@ -532,10 +610,12 @@ void __cdecl G_RunMover(gentity_s *ent)
     {
         G_GeneralLink(ent);
     }
+    // if stationary at one of the positions, don't move anything
     else if (ent->s.lerp.pos.trType || ent->s.lerp.apos.trType)
     {
         G_MoverTeam(ent);
     }
+    // check think function
     G_RunThink(ent);
 #elif KISAK_SP
     if (ent->scripted)
@@ -577,6 +657,7 @@ void __cdecl G_RunMover(gentity_s *ent)
     else
         G_MoverTeam(ent);
 
+    // check think function
     G_RunThink(ent);
 #endif
 }
@@ -759,6 +840,11 @@ void trigger_use_shared(gentity_s *self)
 }
 #endif
 
+/*
+================
+G_RotatePoint
+================
+*/
 void __cdecl G_RotatePoint(float *point, float (*matrix)[3])
 {
     float tvec[3]; // [esp+0h] [ebp-Ch] BYREF

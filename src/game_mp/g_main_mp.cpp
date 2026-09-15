@@ -221,6 +221,11 @@ int __cdecl G_IsServerGameSystem(int clientNum)
     return 1;
 }
 
+/*
+============
+G_InitGame
+============
+*/
 void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepersist)
 {
     com_parse_mark_t *v4; // edx
@@ -235,6 +240,8 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     Com_Printf(CON_CHANNEL_SERVER, "gamedate: %s\n", __DATE__);
     Swap_Init();
     EntHandle::Init();
+
+    // set some level globals
     memset((uint8_t *)&level, 0, sizeof(level));
     level.initializing = 1;
     level.time = levelTime;
@@ -308,23 +315,34 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     Info_SetValueForKey(buffer, "winner", "0");
     SV_SetConfigstring(19, buffer);
 
+    // initialize all entities for this game
     memset(g_entities, 0, sizeof(g_entities));
     level.gentities = g_entities;
+
+    // initialize all clients for this game
     level.maxclients = g_maxclients->current.integer;
     memset(g_clients, 0, sizeof(g_clients));
     level.clients = g_clients;
+
+    // set client fields on player ents
     for (i = 0; i < level.maxclients; ++i)
         g_entities[i].client = &level.clients[i];
 
+    // always leave room for the max number of clients,
+    // even if they aren't all used, so numbers inside that
+    // range are NEVER anything but clients
     level.num_entities = 72;
     level.firstFreeEnt = 0;
     level.lastFreeEnt = 0;
+
+    // let the server system know where the entites are
     SV_LocateGameData(level.gentities, level.num_entities, sizeof(gentity_s), &level.clients->ps, sizeof(gclient_s));
 
     G_ParseHitLocDmgTable();
     BG_LoadPenetrationDepthTable();
     G_VehiclesInit(restart);
     G_InitTurrets();
+    // parse the key/value pairs and spawn gentities
     G_SpawnEntitiesFromString();
     G_VehiclesSetupSpawnedEnts();
     G_setfog("0");
@@ -814,6 +832,11 @@ void __cdecl G_PrintFastFileErrors(const char *fastfile)
     }
 }
 
+/*
+=================
+G_ShutdownGame
+=================
+*/
 void __cdecl G_ShutdownGame(int freeScripts)
 {
     int file; // [esp+0h] [ebp-4h]
@@ -896,6 +919,15 @@ void __cdecl SendScoreboardMessageToAllIntermissionClients()
     }
 }
 
+/*
+============
+CalculateRanks
+
+Recalculates the score ranks of all players
+This will be called on every client connect, begin, disconnect, death,
+and team change.
+============
+*/
 void __cdecl CalculateRanks()
 {
     int i; // [esp+0h] [ebp-4h]
@@ -912,9 +944,16 @@ void __cdecl CalculateRanks()
         }
     }
     qsort(level.sortedClients, level.numConnectedClients, 4u, (int(__cdecl *)(const void *, const void *))SortRanks);
+
+    // if we are at the intermission, send the new info to everyone
     level.bUpdateScoresForIntermission = 1;
 }
 
+/*
+=============
+SortRanks
+=============
+*/
 int __cdecl SortRanks(uint *a, uint *b)
 {
     gclient_s *cb; // [esp+0h] [ebp-8h]
@@ -922,10 +961,12 @@ int __cdecl SortRanks(uint *a, uint *b)
 
     ca = &level.clients[*a];
     cb = &level.clients[*b];
+    // then connecting clients
     if (ca->sess.connected == CON_CONNECTING)
         return 1;
     if (cb->sess.connected == CON_CONNECTING)
         return -1;
+    // then spectators
     if (ca->sess.cs.team == TEAM_SPECTATOR && cb->sess.cs.team == TEAM_SPECTATOR)
     {
         if (ca >= cb)
@@ -941,6 +982,7 @@ int __cdecl SortRanks(uint *a, uint *b)
     {
         return -1;
     }
+    // then sort by score
     else if (ca->sess.score <= cb->sess.score)
     {
         if (ca->sess.score >= cb->sess.score)
@@ -961,12 +1003,23 @@ int __cdecl SortRanks(uint *a, uint *b)
     }
 }
 
+/*
+=============
+ExitLevel
+
+When the intermission has been exited, the server is either killed
+or moved to a new level based on the "nextmap" cvar
+
+=============
+*/
 void __cdecl ExitLevel()
 {
     int i; // [esp+4h] [ebp-4h]
     int ia; // [esp+4h] [ebp-4h]
 
     Cbuf_AddText(0, "map_rotate\n");
+
+    // reset all the scores so we don't enter the intermission again
     level.teamScores[TEAM_AXIS] = 0;
     level.teamScores[TEAM_ALLIES] = 0;
     for (i = 0; i < g_maxclients->current.integer; ++i)
@@ -974,6 +1027,8 @@ void __cdecl ExitLevel()
         if (level.clients[i].sess.connected == CON_CONNECTED)
             level.clients[i].sess.score = 0;
     }
+    // change all client states to connecting, so the early players into the
+    // next level will know the others aren't done reconnecting
     for (ia = 0; ia < g_maxclients->current.integer; ++ia)
     {
         if (level.clients[ia].sess.connected == CON_CONNECTED)
@@ -982,6 +1037,13 @@ void __cdecl ExitLevel()
     G_LogPrintf("ExitLevel: executed\n");
 }
 
+/*
+=================
+G_LogPrintf
+
+Print to the logfile with a time stamp if it is open
+=================
+*/
 void G_LogPrintf(const char *fmt, ...)
 {
     char string[1024]; // [esp+10h] [ebp-818h] BYREF
@@ -1005,6 +1067,11 @@ void G_LogPrintf(const char *fmt, ...)
     }
 }
 
+/*
+==================
+CheckVote
+==================
+*/
 void __cdecl CheckVote()
 {
     const char *v0; // eax
@@ -1030,6 +1097,7 @@ void __cdecl CheckVote()
             if (level.voteYes <= (int)(v3 + 0.4999999990686774f) + level.voteNo)
                 goto LABEL_11;
         LABEL_9:
+            // execute the command, then remove the vote
             v1 = va("%c \"GAME_VOTEPASSED\"", 101);
             SV_GameSendServerCommand(-1, SV_CMD_CAN_IGNORE, v1);
             level.voteExecuteTime = level.time + 3000;
@@ -1038,12 +1106,14 @@ void __cdecl CheckVote()
             SV_SetConfigstring(13, (char *)"");
             return;
         }
+        // ATVI Q3 1.32 Patch #9, WNF
         passCount = level.numVotingClients / 2 + 1;
         if (level.voteYes >= passCount)
             goto LABEL_9;
         if (level.voteNo > level.numVotingClients - passCount)
         {
         LABEL_11:
+            // same behavior as a timeout
             v2 = va("%c \"GAME_VOTEFAILED\"", 101);
             SV_GameSendServerCommand(-1, SV_CMD_CAN_IGNORE, v2);
             goto LABEL_13;
@@ -1096,6 +1166,13 @@ void __cdecl G_UpdateHudElemsToClients()
     }
 }
 
+/*
+=============
+G_RunThink
+
+Runs thinking code for this frame if necessary
+=============
+*/
 void __cdecl G_RunThink(gentity_s *ent)
 {
     void(__cdecl * think)(gentity_s *); // [esp+0h] [ebp-8h]
@@ -1153,6 +1230,13 @@ void __cdecl CheckTeamStatus()
     }
 }
 
+/*
+================
+G_RunFrame
+
+Advances the non-player objects in the world
+================
+*/
 void __cdecl G_RunFrame(int levelTime)
 {
     trigger_info_t *v1; // ecx
@@ -1285,6 +1369,9 @@ void __cdecl G_RunFrame(int levelTime)
     SV_ResetSkeletonCache();
     {
         PROF_SCOPED("G_RunFrameForEntity");
+        //
+        // go through all allocated objects
+        //
         iassert(level.currentEntityThink == -1);
         ent = g_entities;
         level.currentEntityThink = 0;
@@ -1307,6 +1394,7 @@ void __cdecl G_RunFrame(int levelTime)
     }
     {
         PROF_SCOPED("ClientEndFrame");
+        // perform final fixups on the players
         ent = g_entities;
         i = 0;
         while (i < level.maxclients)
@@ -1323,7 +1411,9 @@ void __cdecl G_RunFrame(int levelTime)
             ++ent;
         }
     }
+    // update to team status?
     CheckTeamStatus();
+    // cancel vote if timed out
     if (g_oldVoting->current.enabled)
         CheckVote();
     SendScoreboardMessageToAllIntermissionClients();
@@ -1657,6 +1747,11 @@ void __cdecl G_AddDebugString(const float *xyz, const float *color, float scale,
     CL_AddDebugString(xyz, color, scale, text, 1, duration);
 }
 
+/*
+==============
+OnSameTeam
+==============
+*/
 bool __cdecl OnSameTeam(struct gentity_s *ent1, struct gentity_s *ent2)
 {
     if (!ent1->client || !ent2->client)

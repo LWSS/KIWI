@@ -361,6 +361,13 @@ void __cdecl UI_DrawTopBottom(
         sharedUiInfo.assets.whiteMaterial);
 }
 
+/*
+================
+UI_DrawRect
+
+Coordinates are 640*480 virtual values
+=================
+*/
 void __cdecl UI_DrawRect(
     const ScreenPlacement *scrPlace,
     float x,
@@ -691,12 +698,18 @@ Font_s *__cdecl UI_GetFontHandle(const ScreenPlacement *scrPlace, int fontEnum, 
     }
 }
 
+/*
+=================
+UI_MouseEvent
+=================
+*/
 void __cdecl UI_MouseEvent(int localClientNum, int x, int y)
 {
     BOOL v3; // [esp+0h] [ebp-8h]
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
 
+    // update mouse screen position
     uiInfoArray.uiDC.cursor.x = x / scrPlaceFull.scaleVirtualToFull[0];
     uiInfoArray.uiDC.cursor.y = y / scrPlaceFull.scaleVirtualToFull[1];
     v3 = uiInfoArray.uiDC.cursor.x >= 0.0
@@ -707,6 +720,7 @@ void __cdecl UI_MouseEvent(int localClientNum, int x, int y)
     CL_ShowSystemCursor(uiInfoArray.uiDC.isCursorVisible == 0);
     if (uiInfoArray.uiDC.isCursorVisible)
     {
+        // region test the active menu items
         if (Menu_Count(&uiInfoArray.uiDC) > 0)
             Display_MouseMove(&uiInfoArray.uiDC);
     }
@@ -750,11 +764,21 @@ void __cdecl UI_DrawBuildNumber(int localClientNum)
     UI_DrawText(&scrPlaceView[localClientNum], v2, 64, scale, x, y, 3, 0, value, colorMdGrey, 0);
 }
 
+/*
+====================
+LAN_GetServerStatus
+====================
+*/
 int __cdecl LAN_GetServerStatus(char *serverAddress, char *serverStatus, int maxLen)
 {
     return CL_ServerStatus(serverAddress, serverStatus, maxLen);
 }
 
+/*
+==================
+UI_SortServerStatusInfo
+==================
+*/
 void __cdecl UI_SortServerStatusInfo(serverStatusInfo_t *info)
 {
     const char *v1; // eax
@@ -764,6 +788,8 @@ void __cdecl UI_SortServerStatusInfo(serverStatusInfo_t *info)
     int index; // [esp+24h] [ebp-8h]
     int i; // [esp+28h] [ebp-4h]
 
+    // FIXME: if "gamename" == "baseq3" or "missionpack" then
+    // replace the gametype number by FFA, CTF etc.
     index = 0;
     for (i = 0; serverStatusDvars[i].name; ++i)
     {
@@ -771,6 +797,7 @@ void __cdecl UI_SortServerStatusInfo(serverStatusInfo_t *info)
         {
             if (info->lines[j][1] && !*info->lines[j][1] && !I_stricmp(serverStatusDvars[i].name, info->lines[j][0]))
             {
+                // swap lines
                 tmp1 = info->lines[index][0];
                 tmp2 = info->lines[index][3];
                 info->lines[index][0] = info->lines[j][0];
@@ -809,6 +836,11 @@ void __cdecl UI_SortServerStatusInfo(serverStatusInfo_t *info)
     }
 }
 
+/*
+==================
+UI_GetServerStatusInfo
+==================
+*/
 int __cdecl UI_GetServerStatusInfo(char *serverAddress, serverStatusInfo_t *info)
 {
     char *v3;    // eax
@@ -835,6 +867,7 @@ int __cdecl UI_GetServerStatusInfo(char *serverAddress, serverStatusInfo_t *info
             info->lines[info->numLines][1] = "";
             info->lines[info->numLines][2] = "";
             info->lines[info->numLines++][3] = (const char *)info;
+            // get the cvars
             do
             {
                 if (!p)
@@ -870,16 +903,20 @@ int __cdecl UI_GetServerStatusInfo(char *serverAddress, serverStatusInfo_t *info
                 p = v4 + 1;
                 info->lines[info->numLines++][3] = v4 + 1;
             } while (info->numLines < 128);
+            // get the player list
             if (info->numLines < 125)
             {
+                // empty line
                 info->lines[info->numLines][0] = "";
                 info->lines[info->numLines][1] = "";
                 info->lines[info->numLines][2] = "";
                 info->lines[info->numLines++][3] = "";
+                // header
                 info->lines[info->numLines][0] = "@EXE_SV_INFO_NUM";
                 info->lines[info->numLines][1] = "@EXE_SV_INFO_SCORE";
                 info->lines[info->numLines][2] = "@EXE_SV_INFO_PING";
                 info->lines[info->numLines++][3] = "@EXE_SV_INFO_NAME";
+                // parse players
                 i = 0;
                 len = 0;
                 while (p && *p)
@@ -948,6 +985,11 @@ int __cdecl UI_GetServerStatusInfo(char *serverAddress, serverStatusInfo_t *info
 
 int numFound;
 int numTimeOuts;
+/*
+==================
+UI_BuildFindPlayerList
+==================
+*/
 void UI_BuildFindPlayerList()
 {
     const char *v1;          // eax
@@ -970,21 +1012,29 @@ void UI_BuildFindPlayerList()
             UI_UpdateDisplayServers(uiInfo);
             for (i = 0; i < 16; ++i)
             {
+                // if this pending server is valid
+                // try to get the server status for this server
                 if (sharedUiInfo.pendingServerStatus.server[i].valid && UI_GetServerStatusInfo(sharedUiInfo.pendingServerStatus.server[i].adrstr, &info))
                 {
                     ++numFound;
+                    // parse through the server status lines
                     for (j = 0; j < info.numLines; ++j)
                     {
+                        // should have ping info
                         if (info.lines[j][2])
                         {
                             if (*info.lines[j][2])
                             {
+                                // clean string first
                                 I_strncpyz(dest, info.lines[j][3], 34);
                                 I_CleanStr(dest);
+                                // if the player name is a substring
                                 if (stristr(dest, uiInfo->findPlayerName))
                                 {
+                                    // add to found server list if we have space (always leave space for a line with the number found)
                                     if (uiInfo->numFoundPlayerServers >= 15)
                                     {
+                                        // can't add any more so we're done
                                         sharedUiInfo.pendingServerStatus.num = sharedUiInfo.serverStatus.numDisplayServers;
                                     }
                                     else
@@ -1009,17 +1059,22 @@ void UI_BuildFindPlayerList()
                         "searching %d/%d...",
                         sharedUiInfo.pendingServerStatus.num,
                         numFound);
+                    // retrieved the server status so reuse this spot
                     sharedUiInfo.pendingServerStatus.server[i].valid = 0;
                 }
+                // if empty pending slot or timed out
                 if (!sharedUiInfo.pendingServerStatus.server[i].valid || sharedUiInfo.pendingServerStatus.server[i].startTime < uiInfo->uiDC.realTime - ui_serverStatusTimeOut->current.integer)
                 {
                     if (sharedUiInfo.pendingServerStatus.server[i].valid)
                     {
                         ++numTimeOuts;
                     }
+                    // reset server status request for this address
                     UI_GetServerStatusInfo(sharedUiInfo.pendingServerStatus.server[i].adrstr, 0);
+                    // reuse pending slot
                     sharedUiInfo.pendingServerStatus.server[i].valid = 0;
                     UI_UpdateDisplayServers(uiInfo);
+                    // if we didn't try to get the status of all servers in the main browser yet
                     if (sharedUiInfo.pendingServerStatus.num < sharedUiInfo.serverStatus.numDisplayServers)
                     {
                         sharedUiInfo.pendingServerStatus.server[i].startTime = uiInfo->uiDC.realTime;
@@ -1049,6 +1104,7 @@ void UI_BuildFindPlayerList()
                 ;
             if (i >= 16)
             {
+                // add a line that shows the number of servers found
                 if (uiInfo->numFoundPlayerServers)
                 {
                     if (uiInfo->numFoundPlayerServers == 2)
@@ -1083,12 +1139,18 @@ void UI_BuildFindPlayerList()
             }
             else
             {
+                // if still trying to retrieve server status info
                 uiInfo->nextFindPlayerRefresh = uiInfo->uiDC.realTime + 25;
             }
         }
     }
 }
 
+/*
+=================
+UI_Refresh
+=================
+*/
 void __cdecl UI_Refresh(int localClientNum)
 {
     float x; // [esp+20h] [ebp-18h]
@@ -1099,9 +1161,13 @@ void __cdecl UI_Refresh(int localClientNum)
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (Menu_Count(&uiInfoArray.uiDC) > 0)
     {
+        // paint all the menus
         Menu_PaintAll(&uiInfoArray.uiDC);
+        // refresh server browser list
         UI_DoServerRefresh(&uiInfoArray);
+        // refresh server status
         UI_BuildServerStatus(&uiInfoArray, 0);
+        // refresh find player list
         UI_BuildFindPlayerList();
         if (CL_AllLocalClientsDisconnected())
         {
@@ -1109,6 +1175,7 @@ void __cdecl UI_Refresh(int localClientNum)
             if (clientUIActives[0].connectionState == CA_DISCONNECTED)
                 UI_DrawBuildNumber(localClientNum);
         }
+        // draw cursor
         if (uiInfoArray.uiDC.isCursorVisible)
         {
             if (!Dvar_GetBool("cl_bypassMouseInput") && UI_GetActiveMenu(localClientNum) != UIMENU_SCOREBOARD)
@@ -1128,6 +1195,11 @@ void __cdecl UI_Refresh(int localClientNum)
     }
 }
 
+/*
+====================
+LAN_SaveServersToCache
+====================
+*/
 void __cdecl LAN_SaveServersToCache()
 {
     int version; // [esp+8h] [ebp-10h] BYREF
@@ -1161,6 +1233,11 @@ void __cdecl LAN_SaveServersToCache()
     }
 }
 
+/*
+=================
+UI_Shutdown
+=================
+*/
 void __cdecl UI_Shutdown(int localClientNum)
 {
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
@@ -1509,6 +1586,7 @@ char __cdecl UI_DrawRecordLevel(int localClientNum, rectDef_s *rect)
     return 1;
 }
 
+// ui_gameType assumes gametype 0 is -1 ALL and will not show
 void __cdecl UI_DrawGameType(
     int localClientNum,
     const rectDef_s *rect,
@@ -2020,8 +2098,10 @@ bool __cdecl UI_OwnerDrawVisible(__int16 flags)
     bool vis; // [esp+0h] [ebp-4h]
 
     vis = 1;
+    // this assumes you only put this type of display flag on something showing in the proper context
     if ((flags & 4) != 0)
         vis = ui_netSource->current.integer == 2;
+    // this assumes you only put this type of display flag on something showing in the proper context
     if ((flags & 0x1000) != 0 && ui_netSource->current.integer == 2)
         return 0;
     return vis;
@@ -2035,6 +2115,7 @@ int __cdecl UI_GameType_HandleKey(int flags, float *special, int key, int resetM
     if (key != K_MOUSE1 && key != K_MOUSE2 && key != K_ENTER && key != K_KP_ENTER)
         return 0;
     oldCount = UI_MapCountByGameType();
+    // hard coded mess here
     if (key != K_MOUSE2)
     {
         nextGameType = ui_gametype->current.integer + 1;
@@ -2315,9 +2396,9 @@ void __cdecl UI_Update(const char *name)
                 {
                     Dvar_SetIntByName("cl_maxpackets", 15);
                     if (rate < 4000)
-                        Dvar_SetIntByName("cl_packetdup", 1);
+                        Dvar_SetIntByName("cl_packetdup", 1); // favor lower bandwidth
                     else
-                        Dvar_SetIntByName("cl_packetdup", 2);
+                        Dvar_SetIntByName("cl_packetdup", 2); // favor less prediction errors when there's packet loss
                 }
                 else
                 {
@@ -2346,6 +2427,11 @@ void UI_SelectActivePlayerProfile()
         UI_SelectPlayerProfileIndex(selIndex);
 }
 
+/*
+====================
+LAN_AddServer
+====================
+*/
 int __cdecl LAN_AddServer(int source, char *name, char *address)
 {
     const char *v3; // eax
@@ -2402,6 +2488,7 @@ void __cdecl UI_AddServerToFavoritesList(char *pszName, char *pszAddress)
             {
                 if (res == -1)
                 {
+                    // list full
                     v5 = UI_SafeTranslateString("EXE_FAVORITELISTFULL");
                     Com_Printf(CON_CHANNEL_UI, "%s\n", v5);
                     Dvar_SetStringByName("ui_favorite_message", "@EXE_FAVORITELISTFULL");
@@ -2414,6 +2501,7 @@ void __cdecl UI_AddServerToFavoritesList(char *pszName, char *pszAddress)
                 }
                 else
                 {
+                    // successfully added
                     v7 = UI_SafeTranslateString("EXE_FAVORITEADDED");
                     v8 = va("%s\n", v7);
                     Com_Printf(CON_CHANNEL_UI, v8, pszAddress);
@@ -2422,6 +2510,7 @@ void __cdecl UI_AddServerToFavoritesList(char *pszName, char *pszAddress)
             }
             else
             {
+                // server already in the list
                 v4 = UI_SafeTranslateString("EXE_FAVORITEINLIST");
                 Com_Printf(CON_CHANNEL_UI, "%s\n", v4);
                 Dvar_SetStringByName("ui_favorite_message", "@EXE_FAVORITEINLIST");
@@ -2442,6 +2531,11 @@ void __cdecl UI_AddServerToFavoritesList(char *pszName, char *pszAddress)
     }
 }
 
+/*
+====================
+LAN_RemoveServer
+====================
+*/
 void __cdecl LAN_RemoveServer(int source, char *addr)
 {
     const char *v2; // eax
@@ -2499,6 +2593,11 @@ int __cdecl UI_GetPlayerProfileListIndexFromName(const char *name)
     return -1;
 }
 
+/*
+===============
+UI_LoadMods
+===============
+*/
 void UI_LoadMods()
 {
     int numdirs;        // [esp+20h] [ebp-818h]
@@ -2615,6 +2714,11 @@ void UI_DeletePlayerProfile()
     }
 }
 
+/*
+====================
+LAN_GetServerAddressString
+====================
+*/
 void __cdecl LAN_GetServerAddressString(int source, uint n, char *buf, int buflen)
 {
     const char *v4; // eax
@@ -3010,10 +3114,12 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
                                                                                                                         }
                                                                                                                         else if (Int_Parse((const char **)args, &i))
                                                                                                                         {
+                                                                                                                            // if same column we're already sorting on then flip the direction
                                                                                                                             if (i == sharedUiInfo.serverStatus.sortKey)
                                                                                                                             {
                                                                                                                                 sharedUiInfo.serverStatus.sortDir = sharedUiInfo.serverStatus.sortDir == 0;
                                                                                                                             }
+                                                                                                                            // make sure we sort again
                                                                                                                             UI_ServersSort(i, 1);
                                                                                                                         }
                                                                                                                     }
@@ -3314,6 +3420,11 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
     }
 }
 
+/*
+=================
+UI_ServersSort
+=================
+*/
 void __cdecl UI_ServersSort(int column, int force)
 {
     if (force || sharedUiInfo.serverStatus.sortKey != column)
@@ -3327,6 +3438,11 @@ void __cdecl UI_ServersSort(int column, int force)
     }
 }
 
+/*
+=================
+UI_ServersQsortCompare
+=================
+*/
 int __cdecl UI_ServersQsortCompare(const void *arg1, const void *arg2)
 {
     return LAN_CompareServers(
@@ -3460,6 +3576,11 @@ void __cdecl UI_CloseMenuOnDvar(
         Menus_CloseByName(&uiInfo->uiDC, menuName);
 }
 
+/*
+==================
+UI_RemoveServerFromDisplayList
+==================
+*/
 void __cdecl UI_RemoveServerFromDisplayList(int num)
 {
     int j; // [esp+0h] [ebp-8h]
@@ -3480,6 +3601,11 @@ void __cdecl UI_RemoveServerFromDisplayList(int num)
 }
 
 int numclean;
+/*
+==================
+UI_BuildServerDisplayList
+==================
+*/
 void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
 {
     char *String;         // eax
@@ -3513,10 +3639,12 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
 
     if (force || uiInfo->uiDC.realTime > sharedUiInfo.serverStatus.nextDisplayRefresh)
     {
+        // if we shouldn't reset
         if (force == 2)
         {
             force = 0;
         }
+        // do motd updates here too
         String = (char *)Dvar_GetString("cl_motdString");
         I_strncpyz((char *)sharedUiInfo.serverStatus.motd, String, 1024);
         len = strlen((char *)sharedUiInfo.serverStatus.motd);
@@ -3540,13 +3668,17 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
         if (force)
         {
             numclean = 0;
+            // clear number of displayed servers
             UI_ClearDisplayedServers();
             if (sharedUiInfo.serverStatus.currentServer >= 0)
             {
+                // set list box index to zero
                 Menu_SetFeederSelection(&uiInfo->uiDC, 0, 2, 0, 0);
             }
+            // mark all servers as visible so we store ping updates for them
             LAN_MarkServerDirty(ui_netSource->current.integer, 0xFFFFFFFF, 1u);
         }
+        // get the server count (comes from the master)
         count = LAN_GetServerCount(ui_netSource->current.integer);
         if (!LAN_WaitServerResponse(ui_netSource->current.integer) && (ui_netSource->current.integer || count))
         {
@@ -3554,9 +3686,11 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
             dirty = 0;
             for (i = 0; i < count; ++i)
             {
+                // if we already got info for this server
                 if (LAN_ServerIsDirty(ui_netSource->current.integer, i))
                 {
                     dirty = 1;
+                    // get the ping for this server
                     ping = LAN_GetServerPing(ui_netSource->current.integer, i);
                     if (ping > 0 || ui_netSource->current.integer == 2)
                     {
@@ -3613,11 +3747,14 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
                         }
                         if ((ui_browserFriendlyfire->current.integer < 0 || (v11 = Info_ValueForKey(info, "ff"), atoi(v11) == ui_browserFriendlyfire->current.integer)) && (ui_browserKillcam->current.integer < 0 || (v12 = Info_ValueForKey(info, "kc"), atoi(v12) == ui_browserKillcam->current.integer)) && (ui_browserShowPunkBuster->current.integer < 0 || (v13 = Info_ValueForKey(info, "pb"), atoi(v13) == ui_browserShowPunkBuster->current.integer)) && (!*sharedUiInfo.joinGameTypes[ui_joinGameType->current.integer].gameTypeName || (gameType = sharedUiInfo.joinGameTypes[ui_joinGameType->current.integer].gameType, v14 = Info_ValueForKey(info, "gametype"), !I_stricmp(v14, gameType))) && (ui_serverFilterType <= 0 || (basedir = serverFilters[ui_serverFilterType].basedir, v15 = Info_ValueForKey(info, "game"), !I_stricmp(v15, basedir))))
                         {
+                            // make sure we never add a favorite server twice
                             if (ui_netSource->current.integer == 2)
                             {
                                 UI_RemoveServerFromDisplayList(i);
                             }
+                            // insert the server into the list
                             UI_BinaryServerInsertion(i);
+                            // done with this server
                             if (ping > 0)
                             {
                                 LAN_MarkServerDirty(ui_netSource->current.integer, i, 0);
@@ -3636,12 +3773,18 @@ void __cdecl UI_BuildServerDisplayList(uiInfo_s *uiInfo, int force)
         }
         else
         {
+            // still waiting on a response from the master
             UI_ClearDisplayedServers();
             sharedUiInfo.serverStatus.nextDisplayRefresh = uiInfo->uiDC.realTime + 500;
         }
     }
 }
 
+/*
+==================
+UI_BinaryServerInsertion
+==================
+*/
 void __cdecl UI_BinaryServerInsertion(uint num)
 {
     int offset; // [esp+0h] [ebp-10h]
@@ -3649,6 +3792,7 @@ void __cdecl UI_BinaryServerInsertion(uint num)
     int res;    // [esp+8h] [ebp-8h]
     int mid;    // [esp+Ch] [ebp-4h]
 
+    // use binary search to insert server
     len = sharedUiInfo.serverStatus.numDisplayServers;
     mid = sharedUiInfo.serverStatus.numDisplayServers;
     offset = 0;
@@ -3677,11 +3821,13 @@ void __cdecl UI_BinaryServerInsertion(uint num)
                 "res == -LAN_CompareServers( ui_netSource->current.integer, sharedUiInfo.serverStatus.sortKey, sharedUiInfo.serve"
                 "rStatus.sortDir, sharedUiInfo.serverStatus.displayServers[offset + mid], num )");
         }
+        // if equal
         if (!res)
         {
             UI_InsertServerIntoDisplayList(num, mid + offset);
             return;
         }
+        // if larger
         if (res > 0)
         {
             offset += mid;
@@ -3695,6 +3841,11 @@ void __cdecl UI_BinaryServerInsertion(uint num)
     UI_InsertServerIntoDisplayList(num, offset);
 }
 
+/*
+==================
+UI_InsertServerIntoDisplayList
+==================
+*/
 void __cdecl UI_InsertServerIntoDisplayList(uint num, int position)
 {
     int i;    // [esp+0h] [ebp-8h]
@@ -3785,6 +3936,11 @@ int UI_ClearDisplayedServers()
     return result;
 }
 
+/*
+==================
+UI_BuildServerStatus
+==================
+*/
 void __cdecl UI_BuildServerStatus(uiInfo_s *uiInfo, int force)
 {
     if (!uiInfo->nextFindPlayerRefresh)
@@ -3793,6 +3949,7 @@ void __cdecl UI_BuildServerStatus(uiInfo_s *uiInfo, int force)
         {
             Menu_SetFeederSelection(&uiInfo->uiDC, 0, 13, 0, 0);
             sharedUiInfo.serverStatusInfo.numLines = 0;
+            // reset all server status requests
             LAN_GetServerStatus(0, 0, 0);
         }
         else if (!sharedUiInfo.nextServerStatusRefresh || sharedUiInfo.nextServerStatusRefresh > uiInfo->uiDC.realTime)
@@ -3815,6 +3972,11 @@ void __cdecl UI_BuildServerStatus(uiInfo_s *uiInfo, int force)
     }
 }
 
+/*
+==================
+UI_MapCountByGameType
+==================
+*/
 int __cdecl UI_MapCountByGameType()
 {
     int c;    // [esp+0h] [ebp-Ch]
@@ -3835,6 +3997,11 @@ int __cdecl UI_MapCountByGameType()
     return c;
 }
 
+/*
+==================
+UI_FeederCount
+==================
+*/
 int __cdecl UI_FeederCount(int localClientNum, float feederID)
 {
     if (feederID == 4.0)
@@ -3894,6 +4061,11 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
     }
 }
 
+/*
+===============
+UI_BuildPlayerList
+===============
+*/
 void __cdecl UI_BuildPlayerList(int localClientNum)
 {
     const char *info; // [esp+0h] [ebp-C44h]
@@ -4482,11 +4654,13 @@ void __cdecl UI_Pause(int localClientNum, int b)
 {
     if (b)
     {
+        // pause the game and set the ui keycatcher
         Dvar_SetIntByName("cl_paused", 1);
         Key_SetCatcher(localClientNum, 16);
     }
     else
     {
+        // unpause the game and clear the ui keycatcher
         Key_RemoveCatcher(localClientNum, -17);
         Key_ClearStates(localClientNum);
         Dvar_SetIntByName("cl_paused", 0);
@@ -4584,6 +4758,11 @@ BOOL __cdecl LAN_LoadCachedServersInternal(int fileIn)
     return 0;
 }
 
+/*
+====================
+LAN_LoadCachedServers
+====================
+*/
 void __cdecl LAN_LoadCachedServers()
 {
     int fileIn; // [esp+0h] [ebp-8h] BYREF
@@ -4601,6 +4780,11 @@ void __cdecl LAN_LoadCachedServers()
     }
 }
 
+/*
+=================
+UI_Init
+=================
+*/
 void __cdecl UI_Init(int localClientNum)
 {
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
@@ -4615,6 +4799,7 @@ void __cdecl UI_Init(int localClientNum)
     String_Init();
     Menu_Setup(&uiInfoArray.uiDC);
 
+    // get static data (glconfig, media)
     CL_GetScreenDimensions(&uiInfoArray.uiDC.screenWidth, &uiInfoArray.uiDC.screenHeight, &uiInfoArray.uiDC.screenAspect);
     if (480 * uiInfoArray.uiDC.screenWidth <= 640 * uiInfoArray.uiDC.screenHeight)
         uiInfoArray.uiDC.bias = 0.0;
@@ -4870,6 +5055,11 @@ void UI_AssetCache()
 }
 
 int bypassKeyClear;
+/*
+=================
+UI_KeyEvent
+=================
+*/
 void __cdecl UI_KeyEvent(int localClientNum, int key, int down)
 {
     menuDef_t *menu; // [esp+8h] [ebp-4h]
@@ -4929,6 +5119,8 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
     const char *bufb; // [esp+40h] [ebp-4h]
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+    // this should be the ONLY way the menu system is brought up
+    // enusure minumum menu data is cached
     if (Menu_Count(&uiInfoArray.uiDC) <= 0)
         return 0;
     iassert(menu != UIMENU_SCRIPT_POPUP);
@@ -5038,17 +5230,20 @@ void __cdecl UI_ReadableSize(char *buf, uint bufsize, int value)
         {
             if (value <= 1024)
             {
+                // bytes
                 v4 = UI_SafeTranslateString("EXE_BYTES");
                 Com_sprintf(buf, bufsize, "%d %s", value, v4);
             }
             else
             {
+                // kilos
                 v3 = UI_SafeTranslateString("EXE_KILOBYTE");
                 Com_sprintf(buf, bufsize, "%d %s", value / 1024, v3);
             }
         }
         else
         {
+            // megs
             Com_sprintf(buf, bufsize, "%d", value / 0x100000);
             v6 = UI_SafeTranslateString("EXE_MEGABYTE");
             Com_sprintf(
@@ -5061,6 +5256,7 @@ void __cdecl UI_ReadableSize(char *buf, uint bufsize, int value)
     }
     else
     {
+        // gigs
         Com_sprintf(buf, bufsize, "%d", value / 0x40000000);
         v5 = UI_SafeTranslateString("EXE_GIGABYTE");
         Com_sprintf(
@@ -5084,11 +5280,13 @@ void __cdecl UI_PrintTime(char *buf, uint bufsize, int time)
     {
         if (time <= 60)
         {
+            // secs
             v5 = UI_SafeTranslateString("EXE_SECONDS");
             Com_sprintf(buf, bufsize, "%d %s", time, v5);
         }
         else
         {
+            // mins
             v7 = UI_SafeTranslateString("EXE_SECONDS");
             v4 = UI_SafeTranslateString("EXE_MINUTES");
             Com_sprintf(buf, bufsize, "%d %s %d %s", time / 60, v4, time % 60, v7);
@@ -5096,6 +5294,7 @@ void __cdecl UI_PrintTime(char *buf, uint bufsize, int time)
     }
     else
     {
+        // in the hours range
         v6 = UI_SafeTranslateString("EXE_MINUTES");
         v3 = UI_SafeTranslateString("EXE_HOURS");
         Com_sprintf(buf, bufsize, "%d %s %d %s", time / 3600, v3, time % 3600 / 60, v6);
@@ -5235,9 +5434,11 @@ void __cdecl UI_DisplayDownloadInfo(char *downloadName, float centerPoint, float
         else
             xferRate = 0;
         UI_ReadableSize(xferRateBuf, 0x40u, xferRate);
+        // Extrapolate estimated completion time
         if (downloadSize && xferRate)
         {
             timeleft = 0;
+            // We do it in K (/1024) because we'd overflow around 4MB
             tleEstimates[tleIndex++] = downloadSize / xferRate
                 - downloadSize / xferRate * (downloadCount / 1024) / (downloadSize / 1024);
             if (tleIndex >= 80)
@@ -5296,6 +5497,14 @@ void __cdecl UI_DisplayDownloadInfo(char *downloadName, float centerPoint, float
     }
 }
 
+/*
+========================
+UI_DrawConnectScreen
+
+This will also be overlaid on the cgame info screen during loading
+to prevent it from blinking away too rapidly on local or lan games.
+========================
+*/
 void __cdecl UI_DrawConnectScreen(int localClientNum)
 {
     char *v1; // eax
@@ -5340,6 +5549,7 @@ void __cdecl UI_DrawConnectScreen(int localClientNum)
     scale = 0.5;
     font = UI_GetFontHandle(&scrPlaceFull, 6, 0.5);
     iassert(font);
+    // see what information we should display
     CL_GetClientState(localClientNum, &cstate);
     if (cls.wwwDlInProgress && legacyHacks.cl_downloadName[0])
     {
@@ -5397,6 +5607,7 @@ void __cdecl UI_DrawConnectScreen(int localClientNum)
             Text_PaintCenter(&scrPlaceFull, centerPoint, headerYPos, font, scale, colorWhite, text, 0);
             displayConnectionInfo = 0;
         }
+        // print any server info (server full, bad version, etc)
         if (cstate.connState < CA_CONNECTED)
         {
             index = 0;
@@ -5533,10 +5744,16 @@ double __cdecl UI_GetBlurRadius(int localClientNum)
     return uiInfoArray.uiDC.blurRadiusOut;
 }
 
+/*
+=================
+UI_StopServerRefresh
+=================
+*/
 void UI_StopServerRefresh()
 {
     int count; // [esp+0h] [ebp-4h]
 
+    // not currently refreshing
     if (sharedUiInfo.serverStatus.refreshActive)
     {
         sharedUiInfo.serverStatus.refreshActive = 0;
@@ -5556,6 +5773,11 @@ void UI_StopServerRefresh()
     }
 }
 
+/*
+=================
+UI_DoServerRefresh
+=================
+*/
 void __cdecl UI_DoServerRefresh(uiInfo_s *uiInfo)
 {
     bool wait; // [esp+0h] [ebp-4h]
@@ -5577,13 +5799,16 @@ void __cdecl UI_DoServerRefresh(uiInfo_s *uiInfo)
         if (uiInfo->uiDC.realTime >= sharedUiInfo.serverStatus.refreshTime || !wait)
         {
             UI_UpdateDisplayServers(uiInfo);
+            // if still trying to retrieve pings
             if (LAN_UpdateDirtyPings((netsrc_t)uiInfo->uiDC.localClientNum, ui_netSource->current.unsignedInt))
             {
                 sharedUiInfo.serverStatus.refreshTime = uiInfo->uiDC.realTime + 1000;
             }
             else if (!wait)
             {
+                // get the last servers in the list
                 UI_BuildServerDisplayList(uiInfo, 2);
+                // stop the refresh
                 UI_StopServerRefresh();
             }
             UI_BuildServerDisplayList(uiInfo, 0);
@@ -5591,6 +5816,11 @@ void __cdecl UI_DoServerRefresh(uiInfo_s *uiInfo)
     }
 }
 
+/*
+=================
+UI_StartServerRefresh
+=================
+*/
 void __cdecl UI_StartServerRefresh(int localClientNum, int full)
 {
     char *v2;          // eax
@@ -5621,8 +5851,11 @@ void __cdecl UI_StartServerRefresh(int localClientNum, int full)
     {
         sharedUiInfo.serverStatus.refreshActive = 1;
         sharedUiInfo.serverStatus.nextDisplayRefresh = uiInfoArray.uiDC.realTime + 1000;
+        // clear number of displayed servers
         UI_ClearDisplayedServers();
+        // mark all servers as visible so we store ping updates for them
         LAN_MarkServerDirty(ui_netSource->current.integer, 0xFFFFFFFF, 1u);
+        // reset all the pings
         LAN_ResetPings(ui_netSource->current.integer);
         if (ui_netSource->current.integer)
         {

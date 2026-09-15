@@ -4,6 +4,11 @@
 #include <string.h>
 #include <qcommon/qcommon.h>
 
+/*
+============
+Com_Filter
+============
+*/
 char __cdecl Com_Filter(const char *filter, char *name, int casesensitive)
 {
     const char *v3; // eax
@@ -119,6 +124,11 @@ char __cdecl Com_Filter(const char *filter, char *name, int casesensitive)
     return 1;
 }
 
+/*
+============
+Com_FilterPath
+============
+*/
 char __cdecl Com_FilterPath(const char *filter, const char *name, int casesensitive)
 {
     char new_filter[64]; // [esp+0h] [ebp-88h] BYREF
@@ -144,6 +154,11 @@ char __cdecl Com_FilterPath(const char *filter, const char *name, int casesensit
     return Com_Filter(new_filter, new_name, casesensitive);
 }
 
+/*
+============
+Com_HashKey
+============
+*/
 int __cdecl Com_HashKey(const char *string, int maxlen)
 {
     int hash; // [esp+0h] [ebp-8h]
@@ -155,6 +170,11 @@ int __cdecl Com_HashKey(const char *string, int maxlen)
     return (hash >> 20) ^ hash ^ (hash >> 10);
 }
 
+/*
+================
+Com_RealTime
+================
+*/
 int __cdecl Com_RealTime(qtime_s *qtime)
 {
     __int64 t; // [esp+0h] [ebp-10h] BYREF
@@ -185,9 +205,9 @@ static void __cdecl Com_Prefetch(const char *s, signed int bytes)
     uint i; // ecx
 
     v3 = bytes;
-    if (bytes > 4096)
+    if (bytes > 4096) // clamp to 4kB
         v3 = 4096;
-    for (i = (uint)(v3 + 31) >> 5; i; --i)
+    for (i = (uint)(v3 + 31) >> 5; i; --i) // number of cache lines
         s += 32;
 }
 

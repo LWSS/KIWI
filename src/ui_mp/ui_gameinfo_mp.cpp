@@ -11,6 +11,11 @@
 int ui_numArenas;
 char *ui_arenaInfos[64];
 
+/*
+===============
+UI_ParseInfos
+===============
+*/
 int __cdecl UI_ParseInfos(const char *buf, int max, char **infos)
 {
     uint8_t *v3; // eax
@@ -55,6 +60,7 @@ int __cdecl UI_ParseInfos(const char *buf, int max, char **infos)
         }
         Com_Printf(CON_CHANNEL_UI, "Unexpected end of info file\n");
     LABEL_14:
+        //NOTE: extra space for arena number
         v8 = strlen(va("%d", 64));
         v3 = UI_Alloc(strlen(info) + v8 + 6, 1);
         infos[count] = (char *)v3;
@@ -72,6 +78,11 @@ int __cdecl UI_ParseInfos(const char *buf, int max, char **infos)
     }
 }
 
+/*
+===============
+UI_LoadArenas
+===============
+*/
 void __cdecl UI_LoadArenas()
 {
     sharedUiInfo.mapCount = 0;
@@ -83,6 +94,7 @@ void __cdecl UI_LoadArenas()
         map->mapName = String_Alloc(Info_ValueForKey(ui_arenaInfos[n], "longname"));
         map->imageName = String_Alloc(va("loadscreen_%s", map->mapLoadName));
         map->levelShot = Material_RegisterHandle(map->imageName, IMAGE_TRACK_UI);
+        // determine type
         const char *gameTypes = Info_ValueForKey(ui_arenaInfos[n], "gametype");
         map->typeBits = -1;
         if (gameTypes && *gameTypes)
@@ -123,6 +135,7 @@ void UI_LoadArenasFromFile_LoadObj()
     uint v9;            // [esp+24B4h] [ebp-4h]
 
     ui_numArenas = 0;
+    // get all arenas from .arena files
     fileCount = FS_GetFileList("mp", "arena", FS_LIST_PURE_ONLY, listbuf, sizeof(listbuf));
     v3 = listbuf;
     v8 = 0;
@@ -155,6 +168,11 @@ void UI_LoadArenasFromFile_LoadObj()
     }
 }
 
+/*
+===============
+UI_LoadArenasFromFile
+===============
+*/
 void UI_LoadArenasFromFile()
 {
     if (IsFastFileLoad())

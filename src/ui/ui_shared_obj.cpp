@@ -173,6 +173,12 @@ void __cdecl PrintSourceStack(const script_s *scriptstack)
         Com_PrintWarning(CON_CHANNEL_PARSERSCRIPT, "  From file %s, line %d\n", scriptstacka->filename, scriptstacka->line);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void SourceError(source_s *source, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
@@ -186,6 +192,12 @@ void SourceError(source_s *source, const char *str, ...)
     va_end(va);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_PushScript(source_s *source, script_s *script)
 {
     script_s *s; // [esp+0h] [ebp-4h]
@@ -198,6 +210,7 @@ void __cdecl PC_PushScript(source_s *source, script_s *script)
             return;
         }
     }
+    //push the script on the script stack
     script->next = source->scriptstack;
     source->scriptstack = script;
 }
@@ -208,6 +221,12 @@ union UIParserAllocationHeader
     double alignment;
 };
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 uint *__cdecl GetMemory(uint size)
 {
     if (size > INT_MAX - sizeof(UIParserAllocationHeader))
@@ -223,6 +242,12 @@ uint *__cdecl GetMemory(uint size)
     return (uint *)(ptr + 1);
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 void __cdecl FreeMemory(char *ptr)
 {
     UIParserAllocationHeader *header = (UIParserAllocationHeader *)ptr - 1;
@@ -233,6 +258,12 @@ void __cdecl FreeMemory(char *ptr)
 }
 
 int numtokens;
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 token_s *__cdecl PC_CopyToken(token_s *token)
 {
     token_s *t;
@@ -252,16 +283,31 @@ token_s *__cdecl PC_CopyToken(token_s *token)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_FreeToken(token_s *token)
 {
     FreeMemory(token->string);
     --numtokens;
 }
 
+//============================================================================
+// Reads spaces, tabs, C-like comments etc.
+// When a newline character is found the scripts line counter is increased.
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadWhiteSpace(script_s *script)
 {
     while (1)
     {
+        //skip white space
         while (*script->script_p <= 32)
         {
             if (!*script->script_p)
@@ -270,8 +316,10 @@ int __cdecl PS_ReadWhiteSpace(script_s *script)
                 ++script->line;
             ++script->script_p;
         }
+        //skip comments
         if (*script->script_p != 47)
             break;
+        //comments //
         if (script->script_p[1] == 47)
         {
             ++script->script_p;
@@ -286,6 +334,7 @@ int __cdecl PS_ReadWhiteSpace(script_s *script)
         }
         else
         {
+            //comments /* */
             if (script->script_p[1] != 42)
                 return 1;
             ++script->script_p;
@@ -305,6 +354,12 @@ int __cdecl PS_ReadWhiteSpace(script_s *script)
     return 1;
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 void ScriptError(script_s *script, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
@@ -320,6 +375,12 @@ void ScriptError(script_s *script, const char *str, ...)
     va_end(va);
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 void ScriptWarning(script_s *script, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
@@ -335,6 +396,14 @@ void ScriptWarning(script_s *script, const char *str, ...)
     va_end(va);
 }
 
+//============================================================================
+// Reads an escape character.
+//
+// Parameter:				script		: script to read from
+//								ch				: place to store the read escape character
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadEscapeCharacter(script_s *script, char *ch)
 {
     char c; // [esp+4h] [ebp-Ch]
@@ -346,6 +415,8 @@ int __cdecl PS_ReadEscapeCharacter(script_s *script, char *ch)
     int i; // [esp+Ch] [ebp-4h]
     int ia; // [esp+Ch] [ebp-4h]
 
+    //step over the leading '\\'
+    //determine the escape character
     switch (*++script->script_p)
     {
     case '"':
@@ -386,7 +457,7 @@ int __cdecl PS_ReadEscapeCharacter(script_s *script, char *ch)
         i = 0;
         val = 0;
         break;
-    default:
+    default: //NOTE: decimal ASCII code, NOT octal
         if (*script->script_p < 48 || *script->script_p > 57)
             ScriptError(script, "unknown escape char");
         ia = 0;
@@ -440,11 +511,24 @@ int __cdecl PS_ReadEscapeCharacter(script_s *script, char *ch)
     }
     c = val;
 LABEL_38:
+    //step over the escape character or the last digit of the number
     ++script->script_p;
+    //store the escape character
     *ch = c;
+    //succesfully read escape character
     return 1;
 }
 
+//============================================================================
+// Reads C-like string. Escape characters are interpretted.
+// Quotes are included with the string.
+// Reads two strings with a white space between them as one string.
+//
+// Parameter:				script		: script to read from
+//								token			: buffer to store the string
+// Returns:					qtrue when a string was read succesfully
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadString(script_s *script, token_s *token, int quote)
 {
     int tmpline; // [esp+0h] [ebp-Ch]
@@ -456,6 +540,7 @@ int __cdecl PS_ReadString(script_s *script, token_s *token, int quote)
         token->type = 1;
     else
         token->type = 2;
+    //leading quote
     token->string[0] = *script->script_p;
     len = 1;
     ++script->script_p;
@@ -465,6 +550,7 @@ int __cdecl PS_ReadString(script_s *script, token_s *token, int quote)
         {
             while (1)
             {
+                //minus 2 because trailing double quote and zero have to be appended
                 if (len >= 1022)
                 {
                     ScriptError(script, "string longer than MAX_TOKEN = %d", 1024);
@@ -495,11 +581,13 @@ int __cdecl PS_ReadString(script_s *script, token_s *token, int quote)
             }
             token->string[len++] = *script->script_p++;
         }
+        //step over the double quote
         ++script->script_p;
         if ((script->flags & 4) != 0)
             break;
         tmpscript_p = script->script_p;
         tmpline = script->line;
+        //read unusefull stuff between possible two following strings
         if (!PS_ReadWhiteSpace(script))
         {
             script->script_p = tmpscript_p;
@@ -512,11 +600,14 @@ int __cdecl PS_ReadString(script_s *script, token_s *token, int quote)
             script->line = tmpline;
             break;
         }
+        //step over the new leading double quote
         ++script->script_p;
     }
+    //trailing quote
     token->string[len] = quote;
     lena = len + 1;
     token->string[lena] = 0;
+    //the sub type is the length of the string
     token->subtype = lena;
     return 1;
 }
@@ -531,6 +622,7 @@ void __cdecl NumberValue(char *string, __int16 subtype, uint *intvalue, long dou
     dotfound = 0;
     *intvalue = 0;
     *floatvalue = 0.0;
+    //floating point number
     if ((subtype & 0x800) != 0)
     {
         while (*string)
@@ -563,6 +655,7 @@ void __cdecl NumberValue(char *string, __int16 subtype, uint *intvalue, long dou
     }
     else if ((subtype & 0x100) != 0)
     {
+        //step over the leading 0x or 0X
         for (stringa = string + 2; *stringa; ++stringa)
         {
             *intvalue *= 16;
@@ -582,18 +675,26 @@ void __cdecl NumberValue(char *string, __int16 subtype, uint *intvalue, long dou
     }
     else if ((subtype & 0x200) != 0)
     {
+        //step over the first zero
         for (stringb = string + 1; *stringb; ++stringb)
             *intvalue = *stringb + 8 * *intvalue - 48;
         *floatvalue = (double)*intvalue;
     }
     else if ((subtype & 0x400) != 0)
     {
+        //step over the leading 0b or 0B
         for (stringc = string + 2; *stringc; ++stringc)
             *intvalue = *stringc + 2 * *intvalue - 48;
         *floatvalue = (double)*intvalue;
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadNumber(script_s *script, token_s *token)
 {
     int v3; // edx
@@ -608,11 +709,13 @@ int __cdecl PS_ReadNumber(script_s *script, token_s *token)
 
     len = 0;
     token->type = 3;
+    //check for a hexadecimal number
     if (*script->script_p == 48 && (script->script_p[1] == 120 || script->script_p[1] == 88))
     {
         token->string[0] = *script->script_p++;
         token->string[1] = *script->script_p;
         len = 2;
+        //hexadecimal
         for (c = *++script->script_p; c >= 48 && c <= 57 || c >= 97 && c <= 102 || c == 65; c = *script->script_p)
         {
             token->string[len++] = *script->script_p++;
@@ -625,11 +728,13 @@ int __cdecl PS_ReadNumber(script_s *script, token_s *token)
         token->subtype |= 0x100u;
         goto LABEL_41;
     }
+    //check for a binary number
     if (*script->script_p == 48 && (script->script_p[1] == 98 || script->script_p[1] == 66))
     {
         token->string[0] = *script->script_p++;
         token->string[1] = *script->script_p;
         len = 2;
+        //binary
         for (ca = *++script->script_p; ca == 48 || ca == 49; ca = *script->script_p)
         {
             token->string[len++] = *script->script_p++;
@@ -642,6 +747,7 @@ int __cdecl PS_ReadNumber(script_s *script, token_s *token)
         token->subtype |= 0x400u;
         goto LABEL_41;
     }
+    //decimal or octal integer or floating point number
     dot = 0;
     octal = *script->script_p == 48;
     while (1)
@@ -676,12 +782,14 @@ LABEL_41:
     for (i = 0; i < 2; ++i)
     {
         cc = *script->script_p;
-        if ((cc == 108 || cc == 76) && (token->subtype & 0x2000) == 0)
+        //check for a LONG number
+        if ((cc == 108 || cc == 76) && (token->subtype & 0x2000) == 0) // bk001204 - brackets
         {
             ++script->script_p;
             token->subtype |= 0x2000u;
         }
-        else if ((cc == 117 || cc == 85) && (token->subtype & 0x4800) == 0)
+        //check for an UNSIGNED number
+        else if ((cc == 117 || cc == 85) && (token->subtype & 0x4800) == 0) // bk001204 - brackets
         {
             ++script->script_p;
             token->subtype |= 0x4000u;
@@ -694,6 +802,12 @@ LABEL_41:
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadPrimitive(script_s *script, token_s *token)
 {
     int len; // [esp+8h] [ebp-4h]
@@ -709,10 +823,18 @@ int __cdecl PS_ReadPrimitive(script_s *script, token_s *token)
         token->string[len++] = *script->script_p++;
     }
     token->string[len] = 0;
+    //copy the token into the script structure
     memcpy(&script->token, token, sizeof(script->token));
+    //primitive reading successfull
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadName(script_s *script, token_s *token)
 {
     char c; // [esp+3h] [ebp-5h]
@@ -731,10 +853,17 @@ int __cdecl PS_ReadName(script_s *script, token_s *token)
         c = *script->script_p;
     } while (c >= 97 && c <= 122 || c >= 65 && c <= 90 || c >= 48 && c <= 57 || c == 95);
     token->string[len] = 0;
+    //the sub type is the length of the name
     token->subtype = len;
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadPunctuation(script_s *script, token_s *token)
 {
     punctuation_s *punc; // [esp+10h] [ebp-Ch]
@@ -750,6 +879,7 @@ int __cdecl PS_ReadPunctuation(script_s *script, token_s *token)
             strncpy(token->string, p, 0x400u);
             script->script_p += len;
             token->type = 5;
+            //sub type is the number of the punctuation
             token->subtype = punc->n;
             return 1;
         }
@@ -757,6 +887,12 @@ int __cdecl PS_ReadPunctuation(script_s *script, token_s *token)
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PS_ReadToken(script_s *script, token_s *token)
 {
     if (script->tokenavailable)
@@ -765,16 +901,23 @@ int __cdecl PS_ReadToken(script_s *script, token_s *token)
         memcpy(token, &script->token, sizeof(token_s));
         return 1;
     }
+    //save script pointer
     script->lastscript_p = script->script_p;
+    //save line counter
     script->lastline = script->line;
+    //clear the token stuff
     memset((uint8_t *)token, 0, sizeof(token_s));
+    //start of the white space
     script->whitespace_p = script->script_p;
     token->whitespace_p = script->script_p;
+    //read unusefull stuff
     if (!PS_ReadWhiteSpace(script))
         return 0;
     script->endwhitespace_p = script->script_p;
     token->endwhitespace_p = script->script_p;
+    //line the token is on
     token->line = script->line;
+    //number of lines crossed before token
     token->linescrossed = script->line - script->lastline;
     if (*script->script_p == 34)
     {
@@ -803,21 +946,37 @@ int __cdecl PS_ReadToken(script_s *script, token_s *token)
             if (!PS_ReadName(script, token))
                 return 0;
         }
+        //check for punctuations
         else if (!PS_ReadPunctuation(script, token))
         {
             ScriptError(script, "can't read token");
             return 0;
         }
     }
+    //copy the token into the script structure
     memcpy(&script->token, token, sizeof(script->token));
+    //succesfully read a token
     return 1;
 }
 
+//============================================================================
+// returns true if at the end of the script
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 BOOL __cdecl EndOfScript(script_s *script)
 {
     return script->script_p >= script->end_p;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void SourceWarning(source_s *source, const char *str, ...)
 {
     char text[1028]; // [esp+4h] [ebp-408h] BYREF
@@ -836,6 +995,12 @@ void SourceWarning(source_s *source, const char *str, ...)
     va_end(va);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl FreeScript(script_s *script)
 {
     if (script->punctuationtable)
@@ -843,6 +1008,12 @@ void __cdecl FreeScript(script_s *script)
     FreeMemory(script->filename);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ReadSourceToken(source_s *source, token_s *token)
 {
     token_s *t; // [esp+8h] [ebp-10h]
@@ -856,6 +1027,7 @@ int __cdecl PC_ReadSourceToken(source_s *source, token_s *token)
             return 1;
         if (EndOfScript(source->scriptstack))
         {
+            //remove all indents of the script
             while (source->indentstack && source->indentstack->script == source->scriptstack)
             {
                 SourceWarning(source, "missing #endif");
@@ -864,17 +1036,26 @@ int __cdecl PC_ReadSourceToken(source_s *source, token_s *token)
         }
         if (!source->scriptstack->next)
             return 0;
+        //remove the script and return to the last one
         script = source->scriptstack;
         source->scriptstack = script->next;
         FreeScript(script);
     }
+    //copy the already available token
     memcpy(token, source->tokens, sizeof(token_s));
+    //free the read token
     t = source->tokens;
     source->tokens = t->next;
     PC_FreeToken(t);
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_PopIndent(source_s *source, int *type, parseSkip_t *skip)
 {
     indent_s *indent; // [esp+0h] [ebp-4h]
@@ -884,6 +1065,7 @@ void __cdecl PC_PopIndent(source_s *source, int *type, parseSkip_t *skip)
     indent = source->indentstack;
     if (indent)
     {
+        //must be an indent from the current script
         if (source->indentstack->script == source->scriptstack)
         {
             *type = indent->type;
@@ -895,6 +1077,12 @@ void __cdecl PC_PopIndent(source_s *source, int *type, parseSkip_t *skip)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_UnreadSourceToken(source_s *source, token_s *token)
 {
     token_s *v2; // eax
@@ -905,6 +1093,12 @@ int __cdecl PC_UnreadSourceToken(source_s *source, token_s *token)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ReadDefineParms(source_s *source, define_s *define, token_s **parms, int maxparms)
 {
     token_s *t; // [esp+50h] [ebp-454h]
@@ -934,6 +1128,7 @@ int __cdecl PC_ReadDefineParms(source_s *source, define_s *define, token_s **par
         SourceError(source, "define %s missing parms", define->name);
         return 0;
     }
+    //read the define parameters
     done = 0;
     numparms = 0;
     indent = 0;
@@ -999,6 +1194,12 @@ LABEL_11:
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_StringizeTokens(token_s *tokens, token_s *token)
 {
     token->type = 1;
@@ -1015,25 +1216,42 @@ int __cdecl PC_StringizeTokens(token_s *tokens, token_s *token)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_MergeTokens(token_s *t1, token_s *t2)
 {
+    //merging of a name with a name or number
     if (t1->type == 4 && (t2->type == 4 || t2->type == 3))
     {
         strcat(t1->string, t2->string);
         return 1;
     }
+    //merging of two strings
     else if (t1->type == 1 && t2->type == 1)
     {
+        //remove trailing double quote
         t1->string[strlen(t1->string) - 1] = 0;
+        //concat without leading double quote
         strcat(t1->string, &t2->string[1]);
         return 1;
     }
     else
     {
+        //FIXME: merging of two number of the same sub type
         return 0;
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_NameHash(char *name)
 {
     int hash; // [esp+0h] [ebp-8h]
@@ -1045,6 +1263,12 @@ int __cdecl PC_NameHash(char *name)
     return ((uint16_t)(hash >> 20) ^ (uint16_t)(hash ^ (hash >> 10))) & 0x3FF;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_AddDefineToHash(define_s *define, define_s **definehash)
 {
     int hash; // [esp+0h] [ebp-4h]
@@ -1054,6 +1278,12 @@ void __cdecl PC_AddDefineToHash(define_s *define, define_s **definehash)
     definehash[hash] = define;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 define_s *__cdecl PC_FindHashedDefine(define_s **definehash, char *name)
 {
     define_s *d; // [esp+14h] [ebp-8h]
@@ -1066,6 +1296,13 @@ define_s *__cdecl PC_FindHashedDefine(define_s **definehash, char *name)
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					number of the parm
+//								if no parm found with the given name -1 is returned
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_FindDefineParm(define_s *define, const char *name)
 {
     int i; // [esp+14h] [ebp-8h]
@@ -1081,6 +1318,12 @@ int __cdecl PC_FindDefineParm(define_s *define, const char *name)
     return -1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_FreeDefine(define_s *define)
 {
     token_s *t; // [esp+0h] [ebp-8h]
@@ -1088,19 +1331,28 @@ void __cdecl PC_FreeDefine(define_s *define)
     token_s *next; // [esp+4h] [ebp-4h]
     token_s *nexta; // [esp+4h] [ebp-4h]
 
+    //free the define parameters
     for (t = define->parms; t; t = next)
     {
         next = t->next;
         PC_FreeToken(t);
     }
+    //free the define tokens
     for (ta = define->tokens; ta; ta = nexta)
     {
         nexta = ta->next;
         PC_FreeToken(ta);
     }
+    //free the define
     FreeMemory((char *)define);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ExpandBuiltinDefine(
     source_s *source,
     token_s *deftoken,
@@ -1170,6 +1422,12 @@ int __cdecl PC_ExpandBuiltinDefine(
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ExpandDefine(
     source_s *source,
     token_s *deftoken,
@@ -1196,8 +1454,10 @@ int __cdecl PC_ExpandDefine(
         return PC_ExpandBuiltinDefine(source, deftoken, define, firsttoken, lasttoken);
     if (define->numparms && !PC_ReadDefineParms(source, define, parms, 128))
         return 0;
+    //empty list at first
     first = 0;
     last = 0;
+    //create a list with tokens of the expanded define
     for (dt = define->tokens; dt; dt = dt->next)
     {
         parmnum = -1;
@@ -1211,6 +1471,7 @@ int __cdecl PC_ExpandDefine(
             }
             else
             {
+                //the stringizing operator must be followed by a define parameter
                 if (dt->next)
                     parmnuma = PC_FindDefineParm(define, dt->next->string);
                 else
@@ -1220,7 +1481,9 @@ int __cdecl PC_ExpandDefine(
                     SourceWarning(source, "stringizing operator without define parameter");
                     continue;
                 }
+                //step over the stringizing operator
                 dt = dt->next;
+                //stringize the define parameter tokens
                 if (!PC_StringizeTokens(parms[parmnuma], &token))
                 {
                     SourceError(source, "can't stringize tokens");
@@ -1228,6 +1491,7 @@ int __cdecl PC_ExpandDefine(
                 }
                 ta = PC_CopyToken(&token);
             }
+            //add the token to the list
             ta->next = 0;
             if (last)
                 last->next = ta;
@@ -1240,6 +1504,7 @@ int __cdecl PC_ExpandDefine(
             for (pt = parms[parmnum]; pt; pt = pt->next)
             {
                 t = PC_CopyToken(pt);
+                //add the token to the list
                 t->next = 0;
                 if (last)
                     last->next = t;
@@ -1249,6 +1514,7 @@ int __cdecl PC_ExpandDefine(
             }
         }
     }
+    //check for the merging operator
     tb = first;
     while (tb)
     {
@@ -1270,8 +1536,10 @@ int __cdecl PC_ExpandDefine(
             tb = tb->next;
         }
     }
+    //store the first and last token of the list
     *firsttoken = first;
     *lasttoken = last;
+    //free all the parameter tokens
     for (i = 0; i < define->numparms; ++i)
     {
         for (pt = parms[i]; pt; pt = nextpt)
@@ -1283,6 +1551,12 @@ int __cdecl PC_ExpandDefine(
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_ConvertPath(char *path)
 {
     char v1; // dl
@@ -1291,6 +1565,7 @@ void __cdecl PC_ConvertPath(char *path)
     char *ptr; // [esp+10h] [ebp-4h]
     char *ptra; // [esp+10h] [ebp-4h]
 
+    //remove double path seperators
     ptr = path;
     while (*ptr)
     {
@@ -1309,6 +1584,7 @@ void __cdecl PC_ConvertPath(char *path)
             ++ptr;
         }
     }
+    //set OS dependent path seperators
     for (ptra = path; *ptra; ++ptra)
     {
         if (*ptra == 47 || *ptra == 92)
@@ -1316,6 +1592,12 @@ void __cdecl PC_ConvertPath(char *path)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl StripDoubleQuotes(char *string)
 {
     char v1; // dl
@@ -1336,6 +1618,12 @@ void __cdecl StripDoubleQuotes(char *string)
         string[strlen(string) - 1] = 0;
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 uint8_t *__cdecl GetClearedMemory(uint size)
 {
     uint8_t *ptr; // [esp+0h] [ebp-4h]
@@ -1345,6 +1633,12 @@ uint8_t *__cdecl GetClearedMemory(uint size)
     return ptr;
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuations)
 {
     punctuation_s *lastp; // [esp+20h] [ebp-10h]
@@ -1352,15 +1646,18 @@ void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuat
     punctuation_s *newp;  // [esp+28h] [ebp-8h]
     punctuation_s *p;     // [esp+2Ch] [ebp-4h]
 
+    //get memory for the table
     if (!script->punctuationtable)
     {
         script->punctuationtable = (punctuation_s **)GetMemory(256 * sizeof(punctuation_s *));
     }
     memset(script->punctuationtable, 0, 256 * sizeof(punctuation_s *));
+    //add the punctuations in the list to the punctuation table
     for (i = 0; punctuations[i].p; ++i)
     {
         newp = &punctuations[i];
         lastp = 0;
+        //sort the punctuations in this table entry on length (longer punctuations first)
         for (p = script->punctuationtable[*newp->p]; p; p = p->next)
         {
             if (strlen(p->p) < strlen(newp->p))
@@ -1393,12 +1690,24 @@ void __cdecl PS_CreatePunctuationTable(script_s *script, punctuation_s *punctuat
     }
 }
 
+//===========================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
 void __cdecl SetScriptPunctuations(script_s *script)
 {
     PS_CreatePunctuationTable(script, default_punctuations);
     script->punctuations = default_punctuations;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 script_s *__cdecl LoadScriptFile(const char *filename)
 {
     char v2;           // [esp+3h] [ebp-61h]
@@ -1427,9 +1736,13 @@ script_s *__cdecl LoadScriptFile(const char *filename)
     buffer->buffer = buffer[1].filename;
     buffer->buffer[length] = 0;
     buffer->length = length;
+    //pointer in script buffer
     buffer->script_p = buffer->buffer;
+    //pointer in script buffer before reading token
     buffer->lastscript_p = buffer->buffer;
+    //pointer to end of script buffer
     buffer->end_p = &buffer->buffer[length];
+    //set if there's a token available in script->token
     buffer->tokenavailable = 0;
     buffer->line = 1;
     buffer->lastline = 1;
@@ -1440,6 +1753,12 @@ script_s *__cdecl LoadScriptFile(const char *filename)
     return buffer;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_include(source_s *source)
 {
     if (source->skip > 0)
@@ -1527,11 +1846,23 @@ int __cdecl PC_Directive_include(source_s *source)
     PC_PushScript(source, script);
     return 1;
 }
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 bool __cdecl PC_WhiteSpaceBeforeToken(token_s *token)
 {
     return token->endwhitespace_p - token->whitespace_p > 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_ClearTokenWhiteSpace(token_s *token)
 {
     token->whitespace_p = 0;
@@ -1539,6 +1870,12 @@ void __cdecl PC_ClearTokenWhiteSpace(token_s *token)
     token->linescrossed = 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_undef(source_s *source)
 {
     define_s *lastdefine; // [esp+14h] [ebp-444h]
@@ -1590,6 +1927,14 @@ int __cdecl PC_Directive_undef(source_s *source)
     }
 }
 
+//============================================================================
+// reads a token from the current line, continues reading on the next
+// line only if a backslash '\' is encountered.
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ReadLine(source_s *source, token_s *token, bool expandDefines)
 {
     int crossline; // [esp+14h] [ebp-8h]
@@ -1622,6 +1967,12 @@ int __cdecl PC_ReadLine(source_s *source, token_s *token, bool expandDefines)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ExpandDefineIntoSource(source_s *source, token_s *deftoken, define_s *define)
 {
     token_s *firsttoken; // [esp+0h] [ebp-8h] BYREF
@@ -1640,6 +1991,12 @@ int __cdecl PC_ExpandDefineIntoSource(source_s *source, token_s *deftoken, defin
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_define(source_s *source)
 {
     char v2;           // [esp+7Bh] [ebp-45Dh]
@@ -1667,6 +2024,7 @@ int __cdecl PC_Directive_define(source_s *source)
         SourceError(source, "expected name after #define, found %s", token.string);
         return 0;
     }
+    //check if the define already exists
     define = PC_FindHashedDefine(source->definehash, token.string);
     if (define)
     {
@@ -1676,6 +2034,7 @@ int __cdecl PC_Directive_define(source_s *source)
             return 0;
         }
         SourceWarning(source, "redefinition of %s", token.string);
+        //unread the define name before executing the #undef directive
         PC_UnreadSourceToken(source, &token);
         if (!PC_Directive_undef(source))
         {
@@ -1683,6 +2042,7 @@ int __cdecl PC_Directive_define(source_s *source)
         }
         PC_FindHashedDefine(source->definehash, token.string);
     }
+    //allocate define
     definea = (define_s *)GetMemory(sizeof(define_s) + strlen(token.string) + 1);
     definea->name = 0;
     definea->flags = 0;
@@ -1702,6 +2062,7 @@ int __cdecl PC_Directive_define(source_s *source)
         p_token = (token_s *)((char *)p_token + 1);
         ++name;
     } while (v2);
+    //add the define to the source
     PC_AddDefineToHash(definea, source->definehash);
     if (!PC_ReadLine(source, &token, 0))
     {
@@ -1710,6 +2071,7 @@ int __cdecl PC_Directive_define(source_s *source)
     if (PC_WhiteSpaceBeforeToken(&token) || strcmp(token.string, "("))
     {
     LABEL_37:
+        //read the defined stuff
         last = 0;
         do
         {
@@ -1733,6 +2095,7 @@ int __cdecl PC_Directive_define(source_s *source)
                 last = ta;
             }
         } while (PC_ReadLine(source, &token, 0));
+        //check for merge operators at the beginning or end
         if (!last || strcmp(definea->tokens->string, "##") && strcmp(last->string, "##"))
         {
             return 1;
@@ -1740,6 +2103,7 @@ int __cdecl PC_Directive_define(source_s *source)
         SourceError(source, "define with misplaced ##");
         return 0;
     }
+    //read the define parameters
     last = 0;
     if (PC_CheckTokenString(source, ")"))
     {
@@ -1767,6 +2131,7 @@ int __cdecl PC_Directive_define(source_s *source)
             SourceError(source, "two of the same define parameters");
             return 0;
         }
+        //add the define parm
         t = PC_CopyToken(&token);
         PC_ClearTokenWhiteSpace(t);
         t->next = 0;
@@ -1780,6 +2145,7 @@ int __cdecl PC_Directive_define(source_s *source)
         }
         last = t;
         ++definea->numparms;
+        //read next token
         if (!PC_ReadLine(source, &token, 0))
         {
             SourceError(source, "define parameters not terminated");
@@ -1789,11 +2155,17 @@ int __cdecl PC_Directive_define(source_s *source)
         {
             goto LABEL_35;
         }
-    } while (!strcmp(token.string, ","));
+    } while (!strcmp(token.string, ",")); //then it must be a comma
     SourceError(source, "define not terminated");
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:			-
+// Returns:				-
+// Changes Globals:		-
+//============================================================================
 script_s *__cdecl LoadScriptMemory(char *ptr, int length, const char *name)
 {
     char v4; // [esp+3h] [ebp-15h]
@@ -1811,9 +2183,13 @@ script_s *__cdecl LoadScriptMemory(char *ptr, int length, const char *name)
     buffer->buffer = buffer[1].filename;
     buffer->buffer[length] = 0;
     buffer->length = length;
+    //pointer in script buffer
     buffer->script_p = buffer->buffer;
+    //pointer in script buffer before reading token
     buffer->lastscript_p = buffer->buffer;
+    //pointer to end of script buffer
     buffer->end_p = &buffer->buffer[length];
+    //set if there's a token available in script->token
     buffer->tokenavailable = 0;
     buffer->line = 1;
     buffer->lastline = 1;
@@ -1822,6 +2198,12 @@ script_s *__cdecl LoadScriptMemory(char *ptr, int length, const char *name)
     return buffer;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 define_s *__cdecl PC_DefineFromString(char *string)
 {
     source_s src;     // [esp+10h] [ebp-4E8h] BYREF
@@ -1832,11 +2214,14 @@ define_s *__cdecl PC_DefineFromString(char *string)
     int res;          // [esp+4F4h] [ebp-4h]
 
     script = LoadScriptMemory(string, strlen(string), "*extern");
+    //create a new source
     memset((uint8_t *)&src, 0, sizeof(src));
     strncpy(src.filename, "*extern", 0x40u);
     src.scriptstack = script;
     src.definehash = (define_s **)GetClearedMemory(1024 * sizeof(define_s *));
+    //create a define from the source
     res = PC_Directive_define(&src);
+    //free any tokens if left
     for (t = src.tokens; t; t = src.tokens)
     {
         src.tokens = src.tokens->next;
@@ -1857,6 +2242,7 @@ define_s *__cdecl PC_DefineFromString(char *string)
     {
         return def;
     }
+    //free the define is created
     if (src.defines)
     {
         PC_FreeDefine(def);
@@ -1864,6 +2250,12 @@ define_s *__cdecl PC_DefineFromString(char *string)
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_AddDefine(source_s *source, char *string)
 {
     define_s *define; // [esp+0h] [ebp-4h]
@@ -1875,20 +2267,29 @@ int __cdecl PC_AddDefine(source_s *source, char *string)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 define_s *__cdecl PC_CopyDefine(source_s *source, define_s *define)
 {
     define_s *copy = (define_s *)GetClearedMemory(sizeof(define_s) + strlen(define->name) + 1);
+    //copy the define name
     copy->name = (char *)(copy + 1);
     strcpy(copy->name, define->name);
     copy->flags = define->flags;
     copy->builtin = define->builtin;
     copy->numparms = define->numparms;
+    //copy the define tokens
     token_s **tail = &copy->tokens;
     for (token_s *token = define->tokens; token; token = token->next)
     {
         *tail = PC_CopyToken(token);
         tail = &(*tail)->next;
     }
+    //copy the define parameters
     tail = &copy->parms;
     for (token_s *token = define->parms; token; token = token->next)
     {
@@ -1899,6 +2300,12 @@ define_s *__cdecl PC_CopyDefine(source_s *source, define_s *define)
 }
 
 define_s *globaldefines;
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_AddGlobalDefinesToSource(source_s *source)
 {
     define_s *newdefine; // [esp+0h] [ebp-8h]
@@ -1911,6 +2318,12 @@ void __cdecl PC_AddGlobalDefinesToSource(source_s *source)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_if_def(source_s *source, int type)
 {
     define_s *d; // [esp+0h] [ebp-440h]
@@ -1938,6 +2351,12 @@ int __cdecl PC_Directive_if_def(source_s *source, int type)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_PushIndent(source_s *source, int type, parseSkip_t skip)
 {
     indent_s *indent; // [esp+0h] [ebp-4h]
@@ -1951,16 +2370,34 @@ void __cdecl PC_PushIndent(source_s *source, int type, parseSkip_t skip)
     source->indentstack = indent;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_ifdef(source_s *source)
 {
     return PC_Directive_if_def(source, 8);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_ifndef(source_s *source)
 {
     return PC_Directive_if_def(source, 16);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_else(source_s *source)
 {
     parseSkip_t skip; // [esp+0h] [ebp-8h] BYREF
@@ -1987,6 +2424,12 @@ int __cdecl PC_Directive_else(source_s *source)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_endif(source_s *source)
 {
     parseSkip_t skip; // [esp+0h] [ebp-8h] BYREF
@@ -2161,6 +2604,7 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
             else
                 firstvalue = v;
             lastvalue = v;
+            //last token was a value
             lastwasvalue = 1;
             negativevalue = 0;
             break;
@@ -2210,6 +2654,7 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
                 if (!brace || (tokens = tokens->next) != 0 && !strcmp(tokens->string, ")"))
                 {
                     brace = 0;
+                    // defined() creates a value
                     lastwasvalue = 1;
                 }
                 else
@@ -2245,6 +2690,7 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
                     error = 1;
                 }
             }
+            //check for invalid operators on floating point values
             else if (!integer
                 && (tokens->subtype == 35
                     || tokens->subtype == 28
@@ -2366,17 +2812,25 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
     gotquestmarkvalue = 0;
     questmarkintvalue = 0;
     questmarkfloatvalue = 0.0;
+    //while there are operators
     while (!error && firstoperator)
     {
         v = firstvalue;
         for (o = firstoperator;
             o->next
+            //if the current operator is nested deeper in parentheses
+            //than the next operator
             && o->parentheses <= o->next->parentheses
+            //if the current and next operator are nested equally deep in parentheses
+            //if the priority of the current operator is equal or higher
+            //than the priority of the next operator
             && (o->parentheses != o->next->parentheses || o->priority < o->next->priority);
             o = o->next)
         {
+            //if the arity of the operator isn't equal to 1
             if (o->op != 36 && o->op != 35)
                 v = v->next;
+            //if there's no value or no next value
             if (!v)
             {
                 SourceError(source, "mising values in #if/#elif");
@@ -2517,8 +2971,10 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
         if (error)
             break;
         lastoperatortype = o->op;
+        //if not an operator with arity 1
         if (o->op != 36 && o->op != 35)
         {
+            //remove the second value if not question mark operator
             if (o->op != 43)
                 v = v->next;
             if (v->prev)
@@ -2530,6 +2986,7 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
             else
                 lastvalue = v->prev;
         }
+        //remove the operator
         if (o->prev)
             o->prev->next = o->next;
         else
@@ -2557,6 +3014,12 @@ int __cdecl PC_EvaluateTokens(source_s *source, token_s *tokens, int *intvalue, 
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_DollarEvaluate(source_s *source, int *intvalue, double *floatvalue, int integer)
 {
     token_s *t; // [esp+14h] [ebp-454h]
@@ -2617,6 +3080,7 @@ int __cdecl PC_DollarEvaluate(source_s *source, int *intvalue, double *floatvalu
             }
             else
             {
+                //then it must be a define
                 define = PC_FindHashedDefine(source->definehash, token.string);
                 if (!define)
                 {
@@ -2628,6 +3092,7 @@ int __cdecl PC_DollarEvaluate(source_s *source, int *intvalue, double *floatvalu
             }
             continue;
         }
+        //can't evaluate the token
         if (token.type != 3 && token.type != 5)
         {
             SourceError(source, "can't evaluate %s", token.string);
@@ -2661,6 +3126,12 @@ int __cdecl PC_DollarEvaluate(source_s *source, int *intvalue, double *floatvalu
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_elif(source_s *source)
 {
     parseSkip_t skip; // [esp+0h] [ebp-Ch] BYREF
@@ -2691,6 +3162,12 @@ int __cdecl PC_Directive_elif(source_s *source)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Evaluate(source_s *source, int *intvalue, double *floatvalue, int integer)
 {
     token_s *t; // [esp+14h] [ebp-450h]
@@ -2741,6 +3218,7 @@ int __cdecl PC_Evaluate(source_s *source, int *intvalue, double *floatvalue, int
                 }
                 else
                 {
+                    //then it must be a define
                     define = PC_FindHashedDefine(source->definehash, token.string);
                     if (!define)
                     {
@@ -2753,6 +3231,7 @@ int __cdecl PC_Evaluate(source_s *source, int *intvalue, double *floatvalue, int
             }
             else
             {
+                //can't evaluate the token
                 if (token.type != 3 && token.type != 5)
                 {
                     SourceError(source, "can't evaluate %s", token.string);
@@ -2788,6 +3267,12 @@ int __cdecl PC_Evaluate(source_s *source, int *intvalue, double *floatvalue, int
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_if(source_s *source)
 {
     int value; // [esp+4h] [ebp-4h] BYREF
@@ -2798,12 +3283,24 @@ int __cdecl PC_Directive_if(source_s *source)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_line(source_s *source)
 {
     SourceError(source, "#line directive not supported");
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_error(source_s *source)
 {
     token_s token; // [esp+0h] [ebp-438h] BYREF
@@ -2816,6 +3313,12 @@ int __cdecl PC_Directive_error(source_s *source)
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_pragma(source_s *source)
 {
     token_s token; // [esp+0h] [ebp-438h] BYREF
@@ -2826,6 +3329,12 @@ int __cdecl PC_Directive_pragma(source_s *source)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl UnreadSignToken(source_s *source)
 {
     token_s token; // [esp+0h] [ebp-438h] BYREF
@@ -2840,6 +3349,12 @@ void __cdecl UnreadSignToken(source_s *source)
     PC_UnreadSourceToken(source, &token);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_eval(source_s *source)
 {
     token_s token; // [esp+0h] [ebp-438h] BYREF
@@ -2860,6 +3375,12 @@ int __cdecl PC_Directive_eval(source_s *source)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_Directive_evalfloat(source_s *source)
 {
     float v2; // [esp+8h] [ebp-448h]
@@ -2889,12 +3410,15 @@ int __cdecl PC_ReadDirective(source_s *source)
     token_s token; // [esp+14h] [ebp-438h] BYREF
     int i; // [esp+448h] [ebp-4h]
 
+    //read the directive name
     if (PC_ReadSourceToken(source, &token))
     {
+        //directive name must be on the same line
         if (token.linescrossed <= 0)
         {
             if (token.type == 4)
             {
+                //find the precompiler directive
                 for (i = 0; directives[i].name; ++i)
                 {
                     if (!strcmp(directives[i].name, token.string))
@@ -2918,6 +3442,12 @@ int __cdecl PC_ReadDirective(source_s *source)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_DollarDirective_evalint(source_s *source)
 {
     token_s token; // [esp+0h] [ebp-438h] BYREF
@@ -2940,6 +3470,12 @@ int __cdecl PC_DollarDirective_evalint(source_s *source)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_DollarDirective_evalfloat(source_s *source)
 {
     float v2; // [esp+18h] [ebp-448h]
@@ -2971,12 +3507,15 @@ int __cdecl PC_ReadDollarDirective(source_s *source)
     token_s token; // [esp+14h] [ebp-438h] BYREF
     int i; // [esp+448h] [ebp-4h]
 
+    //read the directive name
     if (PC_ReadSourceToken(source, &token))
     {
+        //directive name must be on the same line
         if (token.linescrossed <= 0)
         {
             if (token.type == 4)
             {
+                //find the precompiler directive
                 for (i = 0; dollardirectives[i].name; ++i)
                 {
                     if (!strcmp(dollardirectives[i].name, token.string))
@@ -3001,6 +3540,12 @@ int __cdecl PC_ReadDollarDirective(source_s *source)
     }
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ReadToken(source_s *source, token_s *token)
 {
     token_s newtoken; // [esp+54h] [ebp-438h] BYREF
@@ -3016,17 +3561,21 @@ int __cdecl PC_ReadToken(source_s *source, token_s *token)
                 {
                     if (!PC_ReadSourceToken(source, token))
                         return 0;
+                    //check for precompiler directives
                     if (token->type != 5 || token->string[0] != 35 || token->string[1])
                         break;
+                    //read the precompiler directive
                     if (!PC_ReadDirective(source))
                         return 0;
                 }
                 if (token->type != 5 || token->string[0] != 36)
                     break;
+                //read the precompiler directive
                 if (!PC_ReadDollarDirective(source))
                     return 0;
             }
         } while (source->skip);
+        // recursively concatenate strings that are behind each other still resolving defines
         if (token->type == 1 && PC_ReadToken(source, &newtoken))
         {
             if (newtoken.type == 1)
@@ -3049,33 +3598,56 @@ int __cdecl PC_ReadToken(source_s *source, token_s *token)
         }
         if (token->type != 4)
             break;
+        //check if the name is a define macro
         define = PC_FindHashedDefine(source->definehash, token->string);
         if (!define)
             break;
+        //expand the defined macro
         if (!PC_ExpandDefineIntoSource(source, token, define))
             return 0;
     }
+    //copy token for unreading
     memcpy(&source->token, token, sizeof(source->token));
+    //found a token
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_CheckTokenString(source_s *source, const char *string)
 {
     token_s tok; // [esp+14h] [ebp-438h] BYREF
 
     if (!PC_ReadToken(source, &tok))
         return 0;
+    //if the token is available
     if (!strcmp(tok.string, string))
         return 1;
     PC_UnreadSourceToken(source, &tok);
     return 0;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl PC_UnreadToken(source_s *source, token_s *token)
 {
     PC_UnreadSourceToken(source, token);
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 source_s *__cdecl LoadSourceFile(char *filename)
 {
     source_s *source; // [esp+0h] [ebp-8h]
@@ -3101,6 +3673,12 @@ source_s *__cdecl LoadSourceFile(char *filename)
 }
 
 source_s *sourceFiles[64];
+//============================================================================
+//
+// Parameter:			-
+// Returns:				-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_LoadSourceHandle(char *filename, const char **builtinDefines)
 {
     source_s *source; // [esp+0h] [ebp-Ch]
@@ -3123,6 +3701,12 @@ int __cdecl PC_LoadSourceHandle(char *filename, const char **builtinDefines)
     return i;
 }
 
+//============================================================================
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//============================================================================
 void __cdecl FreeSource(source_s *source)
 {
     script_s *script; // [esp+0h] [ebp-14h]
@@ -3131,18 +3715,21 @@ void __cdecl FreeSource(source_s *source)
     token_s *token; // [esp+Ch] [ebp-8h]
     int i; // [esp+10h] [ebp-4h]
 
+    //free all the scripts
     while (source->scriptstack)
     {
         script = source->scriptstack;
         source->scriptstack = script->next;
         FreeScript(script);
     }
+    //free all the tokens
     while (source->tokens)
     {
         token = source->tokens;
         source->tokens = token->next;
         PC_FreeToken(token);
     }
+    //free all defines
     for (i = 0; i < 1024; ++i)
     {
         while (source->definehash[i])
@@ -3152,6 +3739,7 @@ void __cdecl FreeSource(source_s *source)
             PC_FreeDefine(define);
         }
     }
+    //free all indents
     while (source->indentstack)
     {
         indent = source->indentstack;
@@ -3160,9 +3748,16 @@ void __cdecl FreeSource(source_s *source)
     }
     if (source->definehash)
         FreeMemory((char *)source->definehash);
+    //free the source itself
     FreeMemory(source->filename);
 }
 
+//============================================================================
+//
+// Parameter:			-
+// Returns:				-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_FreeSourceHandle(int handle)
 {
     if (handle < 1 || handle >= 64)
@@ -3174,6 +3769,12 @@ int __cdecl PC_FreeSourceHandle(int handle)
     return 1;
 }
 
+//============================================================================
+//
+// Parameter:			-
+// Returns:				-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_ReadTokenHandle(int handle, pc_token_s *pc_token)
 {
     char v3; // [esp+3h] [ebp-449h]
@@ -3236,6 +3837,12 @@ int __cdecl PC_ReadLineHandle(int handle, pc_token_s *pc_token)
     return ret;
 }
 
+//============================================================================
+//
+// Parameter:			-
+// Returns:				-
+// Changes Globals:		-
+//============================================================================
 int __cdecl PC_SourceFileAndLine(int handle, char *filename, int *line)
 {
     char v4; // cl
@@ -3280,6 +3887,11 @@ int __cdecl PC_SourceFileAndLine(int handle, char *filename, int *line)
     return 1;
 }
 
+/*
+=================
+PC_String_Parse
+=================
+*/
 int __cdecl PC_String_Parse(int handle, const char **out)
 {
     pc_token_s token; // [esp+0h] [ebp-418h] BYREF
@@ -3290,6 +3902,11 @@ int __cdecl PC_String_Parse(int handle, const char **out)
     return 1;
 }
 
+/*
+=================
+PC_Int_Parse
+=================
+*/
 int __cdecl PC_Int_Parse(int handle, int *i)
 {
     pc_token_s token; // [esp+0h] [ebp-418h] BYREF
@@ -3320,6 +3937,11 @@ int __cdecl PC_Int_Parse(int handle, int *i)
     }
 }
 
+/*
+=================
+PC_SourceError
+=================
+*/
 void PC_SourceError(int handle, char *format, ...)
 {
     static char string_3[4096];
@@ -4199,6 +4821,11 @@ int __cdecl PC_Int_Expression_Parse(int handle, int *i)
     return 1;
 }
 
+/*
+=================
+PC_Float_Parse
+=================
+*/
 int __cdecl PC_Float_Parse(int handle, float *f)
 {
     pc_token_s token; // [esp+0h] [ebp-418h] BYREF
@@ -4230,6 +4857,11 @@ int __cdecl PC_Float_Parse(int handle, float *f)
     }
 }
 
+/*
+=================
+PC_Rect_Parse
+=================
+*/
 int __cdecl PC_Rect_Parse(int handle, rectDef_s *r)
 {
     if (!PC_Float_Parse(handle, &r->x)
@@ -4374,6 +5006,11 @@ int __cdecl PC_Int_ParseLine(int handle, int *i)
     }
 }
 
+/*
+=================
+PC_Script_Parse
+=================
+*/
 int __cdecl PC_Script_Parse(int handle, const char **out)
 {
     char *v3; // eax
@@ -4381,6 +5018,8 @@ int __cdecl PC_Script_Parse(int handle, const char **out)
     pc_token_s pc_token; // [esp+1430h] [ebp-418h] BYREF
 
     memset((uint8_t *)dst, 0, sizeof(dst));
+    // scripts start with { and have ; separated command lists.. commands are command, arg..
+    // basically we want everything between the { } as it will be interpreted at run time
     if (!PC_ReadTokenHandle(handle, &pc_token))
         return 0;
     if (I_stricmp(pc_token.string, "{"))
@@ -4416,6 +5055,11 @@ int __cdecl PC_Script_Parse(int handle, const char **out)
     return 0;
 }
 
+/*
+=================
+PC_Color_Parse
+=================
+*/
 int __cdecl PC_Color_Parse(int handle, float (*c)[4])
 {
     float f; // [esp+0h] [ebp-8h] BYREF
@@ -4937,6 +5581,11 @@ const KeywordHashEntry<itemDef_s, 256, 3855> *__cdecl KeywordHash_Find_itemDef_s
         return key;
 }
 
+/*
+===============
+Item_Parse
+===============
+*/
 int __cdecl Item_Parse(int handle, itemDef_s *item)
 {
     const KeywordHashEntry<itemDef_s, 256, 3855> *key; // [esp+0h] [ebp-41Ch]
@@ -4983,6 +5632,8 @@ void __cdecl Menu_FreeItemMemory(itemDef_s *item)
     free_expression(&item->forecolorAExp);
 }
 
+// Item_InitControls
+// init's special control types
 void __cdecl Item_InitControls(itemDef_s *item)
 {
     listBoxDef_s *listPtr; // [esp+0h] [ebp-4h]
@@ -5110,6 +5761,7 @@ int __cdecl MenuParse_allowedBinding(menuDef_t *menu, int handle)
     return PC_String_Parse(handle, &menu->allowedBinding);
 }
 
+// style <integer>
 int __cdecl ItemParse_style(itemDef_s *item, int handle)
 {
     return PC_Int_Parse(handle, &item->window.style);
@@ -5125,11 +5777,13 @@ int __cdecl ItemParse_ownerdrawFlag(itemDef_s *item, int handle)
     return 1;
 }
 
+// name <string>
 int __cdecl ItemParse_name(itemDef_s *item, int handle)
 {
     return PC_String_Parse(handle, &item->window.name);
 }
 
+// name <string>
 int __cdecl ItemParse_focusSound(itemDef_s *item, int handle)
 {
     const char *temp; // [esp+0h] [ebp-4h] BYREF
@@ -5140,6 +5794,7 @@ int __cdecl ItemParse_focusSound(itemDef_s *item, int handle)
     return 1;
 }
 
+// text <string>
 int __cdecl ItemParse_text(itemDef_s *item, int handle)
 {
     return PC_String_Parse(handle, &item->text);
@@ -5194,11 +5849,13 @@ int __cdecl ItemParse_textcinematicsubtitle(itemDef_s *item, int handle)
     return 1;
 }
 
+// group <string>
 int __cdecl ItemParse_group(itemDef_s *item, int handle)
 {
     return PC_String_Parse(handle, &item->window.group);
 }
 
+// rect <rectangle>
 int __cdecl ItemParse_rect(itemDef_s *item, int handle)
 {
     return PC_Rect_Parse(handle, &item->window.rectClient);
@@ -5218,12 +5875,18 @@ int __cdecl ItemParse_origin(itemDef_s *item, int handle)
     return 1;
 }
 
+// decoration
 int __cdecl ItemParse_decoration(itemDef_s *item, int handle)
 {
     Window_SetStaticFlags(&item->window, item->window.staticFlags | 0x100000);
     return 1;
 }
 
+/*
+===============
+Item_ValidateTypeData
+===============
+*/
 void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
 {
     editFieldDef_s *editDef; // [esp+0h] [ebp-4h]
@@ -5274,6 +5937,7 @@ void __cdecl Item_ValidateTypeData(itemDef_s *item, int handle)
     }
 }
 
+// notselectable
 int __cdecl ItemParse_notselectable(itemDef_s *item, int handle)
 {
     listBoxDef_s *listPtr; // [esp+0h] [ebp-4h]
@@ -5313,18 +5977,21 @@ int __cdecl ItemParse_usePaging(itemDef_s *item, int handle)
     return 1;
 }
 
+// auto wrapped
 int __cdecl ItemParse_autowrapped(itemDef_s *item, int handle)
 {
     Window_SetStaticFlags(&item->window, item->window.staticFlags | 0x800000);
     return 1;
 }
 
+// horizontalscroll
 int __cdecl ItemParse_horizontalscroll(itemDef_s *item, int handle)
 {
     Window_SetStaticFlags(&item->window, item->window.staticFlags | 0x200000);
     return 1;
 }
 
+// type <integer>
 int __cdecl ItemParse_type(itemDef_s *item, int handle)
 {
     if (!PC_Int_Parse(handle, &item->type))
@@ -5333,6 +6000,8 @@ int __cdecl ItemParse_type(itemDef_s *item, int handle)
     return 1;
 }
 
+// elementwidth, used for listbox image elements
+// uses textalignx for storage
 int __cdecl ItemParse_elementwidth(itemDef_s *item, int handle)
 {
     listBoxDef_s *listPtr; // [esp+0h] [ebp-4h]
@@ -5342,6 +6011,8 @@ int __cdecl ItemParse_elementwidth(itemDef_s *item, int handle)
     return listPtr && PC_Float_Parse(handle, &listPtr->elementWidth) != 0;
 }
 
+// elementheight, used for listbox image elements
+// uses textaligny for storage
 int __cdecl ItemParse_elementheight(itemDef_s *item, int handle)
 {
     listBoxDef_s *listPtr; // [esp+0h] [ebp-4h]
@@ -5356,6 +6027,8 @@ int __cdecl ItemParse_special(itemDef_s *item, int handle)
     return PC_Float_Parse(handle, &item->special) != 0;
 }
 
+// elementtype, used to specify what type of elements a listbox contains
+// uses textstyle for storage
 int __cdecl ItemParse_elementtype(itemDef_s *item, int handle)
 {
     listBoxDef_s *listPtr; // [esp+0h] [ebp-4h]
@@ -5367,6 +6040,7 @@ int __cdecl ItemParse_elementtype(itemDef_s *item, int handle)
     return listPtr && PC_Int_Parse(handle, &listPtr->elementStyle) != 0;
 }
 
+// columns sets a number of columns and an x pos and width per..
 int __cdecl ItemParse_columns(itemDef_s *item, int handle)
 {
     int pos; // [esp+0h] [ebp-1Ch] BYREF
@@ -5602,6 +6276,11 @@ int __cdecl ItemParse_action(itemDef_s *item, int handle)
     return PC_Script_Parse(handle, &item->action) != 0;
 }
 
+/*
+===============
+ItemParse_accept
+===============
+*/
 int __cdecl ItemParse_accept(itemDef_s *item, int handle)
 {
     return PC_Script_Parse(handle, &item->onAccept) != 0;
@@ -6236,6 +6915,11 @@ void __cdecl KeywordHash_Validate_itemDef_s_256_3855_(const KeywordHashEntry<ite
     }
 }
 
+/*
+===============
+Item_SetupKeywordHash
+===============
+*/
 void __cdecl Item_SetupKeywordHash()
 {
     KeywordHash_Validate_itemDef_s_256_3855_(itemParseKeywords, 71);
@@ -6314,6 +6998,11 @@ void __cdecl KeywordHash_Add_menuDef_t_128_128_(
     table[hash] = key;
 }
 
+/*
+===============
+Menu_SetupKeywordHash
+===============
+*/
 void __cdecl Menu_SetupKeywordHash()
 {
     KeywordHash_Validate_menuDef_t_128_128_(menuParseKeywords, 36);
@@ -6348,6 +7037,11 @@ const KeywordHashEntry<menuDef_t, 128, 128> *__cdecl KeywordHash_Find_menuDef_t_
         return key;
 }
 
+/*
+===============
+Menu_Parse
+===============
+*/
 int __cdecl Menu_Parse(int handle, menuDef_t *menu)
 {
     const KeywordHashEntry<menuDef_t, 128, 128> *key; // [esp+0h] [ebp-41Ch]
@@ -6400,6 +7094,11 @@ void __cdecl Menu_PostParse(menuDef_t *menu)
     Menu_UpdatePosition(0, menu);
 }
 
+/*
+===============
+Menu_New
+===============
+*/
 char __cdecl Menu_New(int handle, int imageTrack)
 {
     menuDef_t *menu; // [esp+0h] [ebp-4h]

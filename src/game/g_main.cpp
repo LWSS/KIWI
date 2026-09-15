@@ -1060,6 +1060,11 @@ void __cdecl G_PrintAllFastFileErrors()
     G_PrintFastFileErrors(sv_mapname->current.string);
 }
 
+/*
+============
+G_InitGame
+============
+*/
 void __cdecl G_InitGame(
     unsigned int randomSeed,
     int restart,
@@ -1091,6 +1096,8 @@ void __cdecl G_InitGame(
     Swap_Init();
     EntHandle::Init();
     SentientHandle::Init();
+
+    // set some level globals
     memset(&level, 0, sizeof(level));
     level.cachedTagMat.entnum = ENTITYNUM_NONE;
     level.cachedEntTargetTagMat.entnum = ENTITYNUM_NONE;
@@ -1190,9 +1197,12 @@ void __cdecl G_InitGame(
             Com_Error(ERR_DROP, "Save game saved with different script files");
     }
     ProfLoad_End();
+    // initialize all entities for this game
     memset(g_entities, 0, sizeof(g_entities));
     level.gentities = g_entities;
     g_entities[ENTITYNUM_NONE].flags |= FL_OBSTACLE;
+
+    // initialize all clients for this game
     level.maxclients = 1;
     memset(g_clients, 0, sizeof(g_clients));
     level.clients = g_clients;
@@ -1202,6 +1212,7 @@ void __cdecl G_InitGame(
     G_InitActors();
     maxclients = level.maxclients;
     clients = level.clients;
+    // set client fields on player ents
     if (level.maxclients > 0)
     {
         v22 = level.clients;
@@ -1213,9 +1224,14 @@ void __cdecl G_InitGame(
             p_client += 157;
         } while (maxclients);
     }
+    // always leave room for the max number of clients,
+    // even if they aren't all used, so numbers inside that
+    // range are NEVER anything but clients
     level.num_entities = 1;
     level.firstFreeEnt = 0;
     level.lastFreeEnt = 0;
+
+    // let the server system know where the entites are
     SV_LocateGameData(level.gentities, 1, sizeof(gentity_s), &clients->ps, sizeof(gclient_s));
     G_ParseHitLocDmgTable();
     BG_LoadPenetrationDepthTable();
@@ -1225,6 +1241,7 @@ void __cdecl G_InitGame(
     Path_PreSpawnInitPaths();
     if (!restart)
         G_DropPathnodesToFloor();
+    // parse the key/value pairs and spawn gentities
     ProfLoad_Begin("G_SpawnEntitiesFromString");
     G_SpawnEntitiesFromString();
     ProfLoad_End();
@@ -1270,6 +1287,11 @@ LABEL_43:
     level.initializing = 0;
 }
 
+/*
+=================
+G_ShutdownGame
+=================
+*/
 void __cdecl G_ShutdownGame(int clearScripts)
 {
     unsigned __int8 v2; // r11
@@ -1476,6 +1498,13 @@ void __cdecl G_ApplyEntityEq(gentity_s *ent)
     }
 }
 
+/*
+=============
+G_RunThink
+
+Runs thinking code for this frame if necessary
+=============
+*/
 void __cdecl G_RunThink(gentity_s *ent)
 {
     int nextthink; // r10
@@ -2232,6 +2261,13 @@ void __cdecl ShowEntityInfo()
     }
 }
 
+/*
+================
+G_RunFrame
+
+Advances the non-player objects in the world
+================
+*/
 int __cdecl G_RunFrame(ServerFrameExtent extent, int timeCap)
 {
     int currentIndex; // r5
@@ -2434,6 +2470,7 @@ int __cdecl G_RunFrame(ServerFrameExtent extent, int timeCap)
     level.currentEntityThink = 0;
     {
         PROF_SCOPED("update ents");
+        // go through all allocated objects
         currentEntityThink = level.currentEntityThink;
         v23 = level.num_entities;
         for (m = &g_entities[level.currentEntityThink]; currentEntityThink < v23; ++m)
@@ -2473,6 +2510,7 @@ int __cdecl G_RunFrame(ServerFrameExtent extent, int timeCap)
     {
         PROF_SCOPED("update client");
 
+        // perform final fixups on the players
         for (int i = 0; i < level.maxclients; i++)
         {
             gentity_s *ent = &g_entities[i];

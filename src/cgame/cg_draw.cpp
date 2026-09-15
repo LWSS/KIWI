@@ -24,6 +24,14 @@ void __cdecl TRACK_cg_draw()
     track_static_alloc_internal(s_screenFade, sizeof(s_screenFade), "s_screenFade", 9);
 }
 
+/*
+==============
+CG_CenterPrint
+
+Called for important messages that should stay in the center of the screen
+for a few moments
+==============
+*/
 void __cdecl CG_CenterPrint(int localClientNum, const char *str)
 {
     CenterPrint *v3; // r30
@@ -36,6 +44,11 @@ void __cdecl CG_CenterPrint(int localClientNum, const char *str)
     v3->time = cgArray[0].time;
 }
 
+/*
+===================
+CG_DrawCenterString
+===================
+*/
 void __cdecl CG_DrawCenterString(
     int localClientNum,
     const rectDef_s *rect,
@@ -1100,6 +1113,11 @@ void DrawViewmodelInfo(int localClientNum)
     }
 }
 
+/*
+=================
+CG_Draw2D
+=================
+*/
 void __cdecl CG_Draw2D(int localClientNum)
 {
     snapshot_s *nextSnap; // r29
@@ -1109,6 +1127,7 @@ void __cdecl CG_Draw2D(int localClientNum)
 
     CG_UpdateTimeScale(localClientNum);
 
+    // if we are taking a levelshot for the menu, don't draw anything
     if (cgArray[0].predictedPlayerState.pm_type != PM_MPVIEWER && cgArray[0].cubemapShot == CUBEMAPSHOT_NONE)
     {
         nextSnap = cgArray[0].nextSnap;
@@ -1132,6 +1151,7 @@ void __cdecl CG_Draw2D(int localClientNum)
             if (cg_drawHUD->current.enabled && hud_drawHUD->current.enabled)
             {
                 CG_DrawDamageDirectionIndicators(localClientNum);
+                // don't draw any status if dead or the scoreboard is being explicitly shown
                 if (nextSnap->ps.pm_type < PM_DEAD)
                 {
                     if (!cg_drawFriendlyFireCrosshair->current.enabled || !(unsigned __int8)CG_DrawFriendlyFire(cgArray))
@@ -1164,6 +1184,13 @@ void __cdecl CG_Draw2D(int localClientNum)
     }
 }
 
+/*
+=====================
+CG_DrawActive
+
+Perform all drawing needed to completely fill the screen
+=====================
+*/
 void __cdecl CG_DrawActive(int localClientNum)
 {
     double zoomSensitivity; // fp1
@@ -1183,6 +1210,7 @@ void __cdecl CG_DrawActive(int localClientNum)
         cgArray[0].gunZOfs);
     CL_SetExtraButtons(localClientNum, cgArray[0].extraButtons);
     cgArray[0].extraButtons = 0;
+    // draw 3D view
     CL_RenderScene(&cgArray[0].refdef);
 }
 

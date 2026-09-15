@@ -31,6 +31,11 @@ void __cdecl TRACK_sv_init()
     track_static_alloc_internal(g_sv_clients, sizeof(g_sv_clients), "g_sv_clients", 9);
 }
 
+/*
+===============
+SV_GetConfigstring
+===============
+*/
 void __cdecl SV_GetConfigstring(unsigned int index, char *buffer, int bufferSize)
 {
     if (bufferSize < 1)
@@ -91,17 +96,33 @@ void __cdecl SV_AddReliableCommand(client_t *cl, int index, const char *cmd)
     cl->reliableCommands.header.rover += v8 + 1;
 }
 
+/*
+===============
+SV_Startup
+
+Called when a host starts a map when it wasn't running
+one before.  Successive map or map_restart commands will
+NOT cause this to be called, unless the game is exited to
+the menu system first.
+===============
+*/
 void __cdecl SV_Startup()
 {
     if (svs.initialized)
         Com_Error(ERR_FATAL, "SV_Startup() - already initialized");
 
     svs.clients = g_sv_clients;
+    // we don't need nearly as many when playing locally
     svs.numSnapshotEntities = MAX_GENTITIES;
     svs.initialized = 1;
     Dvar_SetBool(com_sv_running, 1);
 }
 
+/*
+================
+SV_ClearServer
+================
+*/
 void __cdecl SV_ClearServer()
 {
     if (svs.clients)
@@ -191,6 +212,13 @@ bool __cdecl SV_Loaded()
     return sv.state == SS_GAME;
 }
 
+/*
+===============
+SV_Init
+
+Only called at main exe startup, not for each game
+===============
+*/
 void __cdecl SV_Init()
 {
     const char *v0; // r5
@@ -254,6 +282,14 @@ void __cdecl SV_Init()
         "Slow down server frame time to allow good client frame rate with server bound.");
 }
 
+/*
+================
+SV_Shutdown
+
+Called when each game quits,
+before Sys_Quit or Sys_Error
+================
+*/
 void __cdecl SV_Shutdown(const char *finalmsg)
 {
     if (com_sv_running && com_sv_running->current.enabled)
@@ -265,15 +301,24 @@ void __cdecl SV_Shutdown(const char *finalmsg)
         SV_ShutdownGameProgs();
         SaveMemory_CleanupSaveMemory();
         SaveMemory_ShutdownSaveSystem();
+        // free current level
         SV_ClearServer();
+        // free server static data
         Com_Memset(&svs, 0, sizeof(serverStatic_t));
         Dvar_SetBool(com_sv_running, 0);
         Dvar_SetFloat(com_timescale, 1.0);
         Com_Printf(CON_CHANNEL_SERVER, "---------------------------\n");
+
+        // disconnect any local clients
         CL_Disconnect(0);
     }
 }
 
+/*
+===============
+SV_SetConfigstring
+===============
+*/
 void __cdecl SV_SetConfigstring(unsigned int index, const char *val)
 {
     unsigned int v4; // r31
@@ -305,13 +350,18 @@ void __cdecl SV_SetConfigstring(unsigned int index, const char *val)
             ++v6;
             ++v5;
         } while (!v7);
+        // don't bother broadcasting an update if no change
         if (v7)
         {
+            // change the string in sv
             SL_RemoveRefToString(sv.configstrings[v4]);
             v8 = (int)index < 1114 ? SL_GetString_(val, 0, MT_TYPE_CONFIG_STRING) : SL_GetLowercaseString_(val, 0, MT_TYPE_CONFIG_STRING);
             sv.configstrings[v4] = v8;
+            // send it to all the clients if we aren't
+            // spawning a new server
             if (sv.state == SS_GAME)
             {
+                // send the data to all relevent clients
                 clients = svs.clients;
                 if (svs.clients->state == 1)
                 {
@@ -321,6 +371,7 @@ void __cdecl SV_SetConfigstring(unsigned int index, const char *val)
                     v12 = v10 - val - 1;
                     if (v12 < 1000)
                     {
+                        // standard cs, just send it
                         SV_SendServerCommand(svs.clients, "cs %i %s", index, val);
                     }
                     else
@@ -402,6 +453,15 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
     }
 }
 
+/*
+================
+SV_SpawnServer
+
+Change the server to a new map, taking all connected
+clients along with it.
+This is NOT called for map_restart
+================
+*/
 void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 {
     int startTime; // r21
@@ -466,17 +526,21 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 
         CL_ShutdownAll(false);
 
+        // shut down the existing game if it is running
         SV_ShutdownGameProgs();
         SaveMemory_CleanupSaveMemory();
         SaveMemory_ShutdownSaveSystem();
         Com_Printf(CON_CHANNEL_SERVER, "------ Server Initialization ------\n");
         Com_Printf(CON_CHANNEL_SERVER, "Server: %s\n", mapname);
+
+        // wipe the entire per-level structure
         SV_ClearServer();
     }
 
 
     {
         PROF_SCOPED("Shutdown file system");
+        // get a new checksum feed and restart the file system
         // MP ADD
         if (!IsFastFileLoad())
         {
@@ -527,9 +591,13 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 
     UI_LoadIngameMenus();
     svs.nextSnapshotEntities = 0;
+
+    // set nextmap to the same map, but it may be overriden
+    // by the game startup or another console command
     Dvar_SetString(nextmap, "map_restart");
 
     iassert(!strstr(mapname, "\\"));
+    // set serverinfo visible name
     Dvar_SetString(sv_mapname, mapname);
 
     {
@@ -570,6 +638,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
         PROF_SCOPED("Init game");
         //sv_FrameTime = -3000;
         //sv_initialized = 1;
+        // load and spawn all other entities
         SV_InitGameProgs(seed, savegame, &save);
     }
 
@@ -579,6 +648,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
     SCR_UpdateLoadScreen();
     {
         PROF_SCOPED("Save system info");
+        // save systeminfo and serverinfo strings
         SV_SaveSystemInfo();
     }
 
@@ -587,6 +657,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
     SCR_UpdateLoadScreen();
     {
         PROF_SCOPED("Send client game state");
+        // send the new gamestate to all connected clients
         SV_SendClientGameState(svs.clients);
     }
     
@@ -624,6 +695,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
     SCR_UpdateLoadScreen();
 
     Dvar_SetInt(cl_paused, 1);
+    // allocate the snapshot entities on the hunk
     SV_InitSnapshot();
     saveError = 0;
     if (!savegame)

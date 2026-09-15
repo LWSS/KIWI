@@ -35,6 +35,11 @@ void __cdecl Com_InitParseInfo(parseInfo_t *pi)
     pi->backup_text = 0;
 }
 
+/*
+===================
+Com_BeginParseSession
+===================
+*/
 void __cdecl Com_BeginParseSession(const char *filename)
 {
     parseInfo_t *pi; // [esp+0h] [ebp-Ch]
@@ -73,6 +78,11 @@ ParseThreadInfo *__cdecl Com_GetParseThreadInfo()
     return 0;
 }
 
+/*
+===================
+Com_EndParseSession
+===================
+*/
 void __cdecl Com_EndParseSession()
 {
     ParseThreadInfo *parse; // [esp+0h] [ebp-4h]
@@ -120,6 +130,11 @@ void __cdecl Com_SetParseNegativeNumbers(int negativeNumbers)
     parse->parseInfo[parse->parseInfoNum].negativeNumbers = negativeNumbers != 0;
 }
 
+/*
+===================
+Com_GetCurrentParseLine
+===================
+*/
 int __cdecl Com_GetCurrentParseLine()
 {
     ParseThreadInfo *parse; // [esp+4h] [ebp-4h]
@@ -165,6 +180,13 @@ void Com_ScriptErrorDrop(const char *msg, ...)
     }
 }
 
+/*
+===================
+Com_ScriptError
+
+Prints the script name and line number in the message
+===================
+*/
 void Com_ScriptError(const char *msg, ...)
 {
     char string[4096];                // [esp+0h] [ebp-1010h] BYREF
@@ -190,6 +212,14 @@ void Com_ScriptError(const char *msg, ...)
     }
 }
 
+/*
+===================
+Com_UngetToken
+
+Calling this will make the next Com_Parse return
+the current token instead of advancing the pointer
+===================
+*/
 void __cdecl Com_UngetToken()
 {
     parseInfo_t *pi; // [esp+0h] [ebp-8h]
@@ -294,6 +324,11 @@ const char *__cdecl Com_GetLastTokenPos()
     return Com_GetParseThreadInfo()->tokenPos;
 }
 
+/*
+===================
+Com_Parse
+===================
+*/
 parseInfo_t *__cdecl Com_Parse(const char **data_p)
 {
     parseInfo_t *pi; // [esp+0h] [ebp-8h]
@@ -310,6 +345,7 @@ parseInfo_t *__cdecl Com_Parse(const char **data_p)
     return Com_ParseExt(data_p, 1);
 }
 
+// multiple character punctuation tokens
 const char *punctuation[15] =
 {
     "+=",
@@ -328,6 +364,19 @@ const char *punctuation[15] =
     "!=",
     NULL // 14
 };
+/*
+==============
+Com_ParseExt
+
+Parse a token out of a string
+Will never return NULL, just empty strings.
+An empty string will only be returned at end of file.
+
+If "allowLineBreaks" is qtrue then an empty
+string will be returned if the next token is
+a newline.
+==============
+*/
 parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
 {
     int j; // [esp+14h] [ebp-24h]
@@ -349,6 +398,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
     data = *data_p;
     len = 0;
     pi->token[0] = 0;
+    // make sure incoming data is valid
     if (!data)
     {
         *data_p = 0;
@@ -358,10 +408,12 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
     pi->backup_text = *data_p;
     if (pi->csv)
         return Com_ParseCSV(data_p, allowLineBreaks);
+    // skip any leading whitespace
     while (1)
     {
         while (1)
         {
+            // skip whitespace
             data = SkipWhitespace(data, &hasNewLines);
             if (!data)
             {
@@ -371,11 +423,13 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
             if (hasNewLines && !allowLineBreaks)
                 return pi;
             c = *data;
+            // skip double slash comments
             if (*data != 47 || data[1] != 47)
                 break;
             while (*data && *data != 10)
                 ++data;
         }
+        // skip /* */ comments
         if (c != 47 || data[1] != 42)
             break;
         while (*data && (*data != 42 || data[1] != 47))
@@ -387,8 +441,10 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
         if (*data)
             data += 2;
     }
+    // a real token to parse
     parse->prevTokenPos = parse->tokenPos;
     parse->tokenPos = data;
+    // handle quoted strings
     if (c == 34)
     {
         if (pi->keepStringQuotes)
@@ -399,6 +455,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
             ca = *data++;
             if (ca == 92 && (*data == 34 || *data == 92))
             {
+                // allow quoted strings to use \" to indicate the " character
                 ca = *data++;
             }
             else
@@ -432,6 +489,8 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
         *data_p = data;
         return pi;
     }
+    // check for a number
+    // is this parsing of negative numbers going to cause expression problems
     else if (c >= 48 && c <= 57
         || pi->negativeNumbers && c == 45 && data[1] >= 48 && data[1] <= 57
         || c == 46 && data[1] >= 48 && data[1] <= 57)
@@ -442,6 +501,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
                 pi->token[len++] = c;
             c = *++data;
         } while (*data >= 48 && c <= 57 || c == 46);
+        // parse the exponent
         if (c == 101 || c == 69)
         {
             if (len < 1023)
@@ -466,6 +526,8 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
         *data_p = data;
         return pi;
     }
+    // check for a regular word
+    // we still allow forward and back slashes in name tokens for pathnames
     else if (c >= 97 && c <= 122 || c >= 65 && c <= 90 || c == 95 || c == 47 || c == 92)
     {
         do
@@ -482,6 +544,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
     }
     else
     {
+        // check for multi-character punctuation token
         for (punc = punctuation; *punc; ++punc)
         {
             l = strlen(*punc);
@@ -489,6 +552,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
                 ;
             if (j == l)
             {
+                // a valid multi-character punctuation
                 memcpy((uint8_t *)pi, (uint8_t *)*punc, l);
                 pi->token[l] = 0;
                 data += l;
@@ -496,6 +560,7 @@ parseInfo_t *__cdecl Com_ParseExt(const char **data_p, int allowLineBreaks)
                 return pi;
             }
         }
+        // single character punctuation
         pi->token[0] = *data;
         pi->token[1] = 0;
         *data_p = ++data;
@@ -594,6 +659,11 @@ parseInfo_t *__cdecl Com_ParseCSV(const char **data_p, int allowLineBreaks)
     return pi;
 }
 
+/*
+===================
+Com_ParseOnLine
+===================
+*/
 parseInfo_t *__cdecl Com_ParseOnLine(const char **data_p)
 {
     parseInfo_t *pi; // [esp+0h] [ebp-8h]
@@ -612,6 +682,11 @@ parseInfo_t *__cdecl Com_ParseOnLine(const char **data_p)
     return Com_ParseExt(data_p, 0);
 }
 
+/*
+==================
+Com_MatchToken
+==================
+*/
 int __cdecl Com_MatchToken(const char **buf_p, const char *match, int warning)
 {
     parseInfo_t *token; // [esp+14h] [ebp-4h]
@@ -626,6 +701,15 @@ int __cdecl Com_MatchToken(const char **buf_p, const char *match, int warning)
     return 0;
 }
 
+/*
+=================
+Com_SkipBracedSection
+
+The next token should be an open brace.
+Skips until a matching close brace is found.
+Internal brace depths are properly skipped.
+=================
+*/
 int __cdecl Com_SkipBracedSection(const char **program, uint startDepth, int iMaxNesting)
 {
     int bNestingExceeded; // [esp+4h] [ebp-8h]
@@ -653,6 +737,11 @@ int __cdecl Com_SkipBracedSection(const char **program, uint startDepth, int iMa
     return bNestingExceeded;
 }
 
+/*
+=================
+Com_SkipRestOfLine
+=================
+*/
 void __cdecl Com_SkipRestOfLine(const char **data)
 {
     int c; // [esp+0h] [ebp-10h]

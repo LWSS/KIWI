@@ -526,11 +526,20 @@ void __cdecl SV_FastRestart_f()
         SV_CheckLoadGame();
 }
 
+/*
+================
+SV_MapRestart_f
+
+Completely restarts a level, but doesn't send a new gamestate to the clients.
+This allows fair starts with variable load times.
+================
+*/
 void __cdecl SV_MapRestart_f()
 {
     CL_FlushDebugServerData();
     CL_UpdateDebugServerData();
     CL_ShutdownDebugData();
+    // restart the map the slow way
     sv_map_restart = 1;
     sv_loadScripts = 1;
     if (!com_sv_running->current.enabled)
@@ -965,6 +974,8 @@ void SV_SaveGame_f()
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_ccmds.cpp", 874, 0, "%s", "com_sv_running");
         v0 = com_sv_running;
     }
+    // check server is running
+    //
     if (v0->current.enabled && sv.state == SS_GAME)
     {
         if (sv_cheats->current.enabled)
@@ -975,6 +986,8 @@ void SV_SaveGame_f()
             }
             else
             {
+                // check args...
+                //
                 SV_Cmd_ArgvBuffer(1, sv.cmd, 1024);
                 cmd = sv.cmd;
                 while (*cmd++)
@@ -1017,11 +1030,24 @@ void __cdecl SV_SaveGameLastCommit_f()
         SV_DisplaySaveErrorUI();
 }
 
+/*
+==================
+SV_RemoveOperatorCommands
+==================
+*/
 void __cdecl SV_RemoveOperatorCommands()
 {
+	// removing these won't let the server start again
     ;
 }
 
+/*
+==================
+SV_Map_f
+
+Restart the server on a different map
+==================
+*/
 void SV_Map_f()
 {
     char *hasSVG; // r3
@@ -1047,9 +1073,14 @@ void SV_Map_f()
             G_SaveError(ERR_DROP, SAVE_ERROR_MISSING_DEVICE, "Unable to extract map string name from save");
         }
     }
+    // set the cheat value
+    // if the level was started with "map <levelname>", then
+    // cheats will not be allowed.  If started with "devmap <levelname>"
+    // then cheats will be allowed
     Dvar_SetBool(sv_cheats, 1);
     CL_ShutdownDemo();
     FS_ConvertPath(mapname);
+    // start up the map
     SV_SpawnServer(mapname, savegame);
     ShowLoadErrorsSummary(mapname, com_errorPrintsCount);
 }
@@ -1123,6 +1154,11 @@ cmd_function_s SV_FastRestart_f_VAR;
 
 
 static int initialized_0 = 0;
+/*
+==================
+SV_AddOperatorCommands
+==================
+*/
 void __cdecl SV_AddOperatorCommands()
 {
     if (!initialized_0)

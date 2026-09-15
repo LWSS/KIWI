@@ -47,6 +47,11 @@ void __cdecl G_DumpConfigStrings(int start, int max)
     }
 }
 
+/*
+================
+G_FindConfigstringIndex
+================
+*/
 int __cdecl G_FindConfigstringIndex(const char *name, int start, int max, int create, const char *errormsg)
 {
     unsigned int String; // r3
@@ -1670,6 +1675,21 @@ void __cdecl G_PrintEntities()
     }
 }
 
+/*
+=================
+G_Spawn
+
+Either finds a free entity, or allocates a new one.
+
+  The slots from 0 to MAX_CLIENTS-1 are always reserved for clients, and will
+never be used by anything else.
+
+Try to avoid reusing an entity that was recently freed, because it
+can cause the client to think the entity morphed into something else
+instead of being removed and recreated, which can cause interpolated
+angles and bad trails.
+=================
+*/
 gentity_s *__cdecl G_Spawn()
 {
     gentity_s *e; // r30
@@ -1677,6 +1697,7 @@ gentity_s *__cdecl G_Spawn()
     e = level.firstFreeEnt;
     if (level.firstFreeEnt)
     {
+        // reuse this slot
         level.firstFreeEnt = level.firstFreeEnt->nextFree;
         if (!level.firstFreeEnt)
             level.lastFreeEnt = 0;
@@ -1690,8 +1711,10 @@ gentity_s *__cdecl G_Spawn()
             Scr_Error("G_Spawn: no free entities");
             Com_Error(ERR_DROP, "G_Spawn: no free entities");
         }
+        // open up a new slot
         e = &level.gentities[level.num_entities++];
         //SV_LocateGameData(level.gentities, level.num_entities, sizeof(gentity_s), &level.clients->ps, 46104);
+        // let the server system know that there are more entities
         SV_LocateGameData(level.gentities, level.num_entities, sizeof(gentity_s), &level.clients->ps, sizeof(playerState_s));
     }
     G_InitGentity(e);
@@ -1818,6 +1841,15 @@ void __cdecl G_LoadFreeEntities(unsigned __int8 *buf)
     }
 }
 
+/*
+===============
+G_AddPredictableEvent
+
+Use for non-pmove events that would also be predicted on the
+client side: jumppads and item pickups
+Adds an event+parm and twiddles the event counter
+===============
+*/
 void __cdecl G_AddPredictableEvent(gentity_s *ent, entity_event_t event, unsigned int eventParm)
 {
     gclient_s *client; // r5
@@ -1827,6 +1859,13 @@ void __cdecl G_AddPredictableEvent(gentity_s *ent, entity_event_t event, unsigne
         BG_AddPredictableEventToPlayerstate(event, eventParm, &client->ps);
 }
 
+/*
+===============
+G_AddEvent
+
+Adds an event+parm and twiddles the event counter
+===============
+*/
 void __cdecl G_AddEvent(gentity_s *ent, unsigned int event, unsigned int eventParm)
 {
     unsigned __int8 v3; // r30
@@ -1843,6 +1882,7 @@ void __cdecl G_AddEvent(gentity_s *ent, unsigned int event, unsigned int eventPa
     }
     iassert(ent->s.eType < ET_EVENTS);
     client = ent->client;
+    // clients need to add the event in playerState_t instead of entityState_t
     if (client)
     {
         client->ps.events[client->ps.eventSequence & 3] = v3;
@@ -1940,6 +1980,13 @@ void __cdecl G_PlaySoundAlias(gentity_s *ent, unsigned __int16 index)
         G_AddEvent(ent, EV_SOUND_ALIAS, index);
 }
 
+/*
+================
+G_SetOrigin
+
+Sets the pos trajectory for a fixed position
+================
+*/
 void __cdecl G_SetOrigin(gentity_s *ent, float *origin)
 {
     nanassertvec3(origin);
@@ -2625,6 +2672,13 @@ void __cdecl G_EntUnlinkFree(gentity_s *ent)
     G_EntUnlink(ent);
 }
 
+/*
+=================
+G_FreeEntity
+
+Marks the entity as free
+=================
+*/
 void __cdecl G_FreeEntity(gentity_s *ed)
 {
     animscripted_s *scripted; // r3
@@ -2663,6 +2717,7 @@ void __cdecl G_FreeEntity(gentity_s *ed)
         }
         G_EntUnlink(tagChildren);
     }
+    // unlink from world
     SV_UnlinkEntity(ed);
     if (ed->s.number == level.cachedTagMat.entnum)
         level.cachedTagMat.entnum = ENTITYNUM_NONE;

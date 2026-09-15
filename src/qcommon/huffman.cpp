@@ -5,6 +5,7 @@
 
 int bloc;
 
+/* Receive one bit from the input file (buffered) */
 int __cdecl get_bit(const uint8_t *fin)
 {
     int t; // [esp+0h] [ebp-4h]
@@ -14,6 +15,7 @@ int __cdecl get_bit(const uint8_t *fin)
     return t;
 }
 
+/* Get a symbol */
 bool __cdecl Huff_offsetReceive(nodetype *node, int *ch, const uint8_t *fin, int *offset, int maxOffset)
 {
     bloc = *offset;
@@ -40,6 +42,7 @@ bool __cdecl Huff_offsetReceive(nodetype *node, int *ch, const uint8_t *fin, int
     *ch = 0;
     *offset = bloc;
     return false;
+//		Com_Error(ERR_DROP, "Illegal tree!\n");
 }
 
 void __cdecl huffman_send(nodetype *node, nodetype *child, uint8_t *fout)
@@ -55,6 +58,7 @@ void __cdecl huffman_send(nodetype *node, nodetype *child, uint8_t *fout)
     }
 }
 
+/* Add a bit to the output file (buffered) */
 void __cdecl add_bit(char bit, uint8_t *fout)
 {
     if ((bloc & 7) == 0)
@@ -93,6 +97,7 @@ void __cdecl Huff_Init(huffman_t *huff)
 {
     //Com_Memset((uint *)huff, 0, 19476);
     Com_Memset((uint *)huff, 0, sizeof(huffman_t));
+    // Initialize the tree & list with the NYT node
     huff->compressDecompress.loc[256] = &huff->compressDecompress.nodeList[huff->compressDecompress.blocNode++];
     huff->compressDecompress.tree = huff->compressDecompress.loc[256];
     huff->compressDecompress.tree->symbol = 256;

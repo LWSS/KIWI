@@ -114,7 +114,9 @@ void __cdecl IN_KeyDown(kbutton_t *b)
     if (*c)
         k = atoi(c);
     else
-        k = -1;
+        k = -1; // typed manually at the console for continuous down
+
+    // repeating key
     if (k != b->down[0] && k != b->down[1])
     {
         if (b->down[0])
@@ -130,8 +132,11 @@ void __cdecl IN_KeyDown(kbutton_t *b)
         {
             b->down[0] = k;
         }
+
+        // still down
         if (!b->active)
         {
+            // save timestamp for partial frame summing
             ca = Cmd_Argv(2);
             b->downtime = atoi(ca);
             b->active = 1;
@@ -151,6 +156,7 @@ void __cdecl IN_KeyUp(kbutton_t *b)
     c = Cmd_Argv(1);
     if (!*c)
     {
+        // typed manually at the console, assume for unsticking, so clear all
         b->down[1] = 0;
         b->down[0] = 0;
         b->active = 0;
@@ -164,12 +170,15 @@ void __cdecl IN_KeyUp(kbutton_t *b)
     else
     {
         if (b->down[1] != k)
-            return;
+            return; // key up without coresponding down (menu pass through)
         b->down[1] = 0;
     }
+
+    // some other key is still holding it down
     if (!b->down[0] && !b->down[1])
     {
         b->active = 0;
+        // save timestamp for partial frame summing
         ca = Cmd_Argv(2);
         uptime = atoi(ca);
         if (uptime)
@@ -181,6 +190,13 @@ void __cdecl IN_KeyUp(kbutton_t *b)
     }
 }
 
+/*
+===============
+CL_KeyState
+
+Returns the fraction of the frame that the key was down
+===============
+*/
 float __cdecl CL_KeyState(kbutton_t *key)
 {
     bool active = key->active;
@@ -188,6 +204,7 @@ float __cdecl CL_KeyState(kbutton_t *key)
     key->msec = 0;
     if (active)
     {
+        // still down
         unsigned int downtime = key->downtime;
         if (downtime)
             msec += com_frameTime - downtime;
@@ -731,6 +748,13 @@ void __cdecl IN_NightVisionUp()
     IN_KeyUp(&kb[KEY_NIGHTVISION]);
 }
 
+/*
+================
+CL_AdjustAngles
+
+Moves the local angle positions
+================
+*/
 void CL_AdjustAngles()
 {
     float speed;
@@ -812,6 +836,13 @@ void __cdecl CL_AddCurrentStanceToCmd(usercmd_s *cmd)
 }
 
 #ifdef KISAK_MP
+/*
+================
+CL_KeyMove
+
+Sets the usercmd_t based on key states
+================
+*/
 void __cdecl CL_KeyMove(usercmd_s *cmd)
 {
     int		forward, side, up;
@@ -841,6 +872,11 @@ void __cdecl CL_KeyMove(usercmd_s *cmd)
     else
         cmd->buttons &= ~BUTTON_ADS;
 
+    //
+    // adjust for speed key / running
+    // the walking flag is to keep animations consistant
+    // even during acceleration and develeration
+    //
     if (kb[KEY_SPRINT].active || kb[KEY_SPRINT].wasPressed)
     {
         cmd->buttons |= BUTTON_SPRINT;
@@ -884,6 +920,13 @@ static bool s_scriptWasNoCrouch;
 static bool s_scriptSuppressProne;
 static bool s_scriptSuppressCrouch;
 
+/*
+================
+CL_KeyMove
+
+Sets the usercmd_t based on key states
+================
+*/
 void __cdecl CL_KeyMove(usercmd_s *cmd)
 {
     int		forward, side, up;
@@ -931,6 +974,11 @@ void __cdecl CL_KeyMove(usercmd_s *cmd)
     else
         cmd->buttons &= ~BUTTON_ADS;
 
+    //
+    // adjust for speed key / running
+    // the walking flag is to keep animations consistant
+    // even during acceleration and develeration
+    //
     if (kb[KEY_SPRINT].active || kb[KEY_SPRINT].wasPressed)
     {
         cmd->buttons |= BUTTON_SPRINT;
@@ -1105,6 +1153,7 @@ void __cdecl CL_GetMouseMovement(clientActive_t *cl, float *mx, float *my)
     iassert(mx);
     iassert(my);
 
+    // allow mouse smoothing
     if (m_filter->current.enabled)
     {
         *mx = (double)(cl->mouseDx[1] + cl->mouseDx[0]) * 0.5f;
@@ -1121,6 +1170,11 @@ void __cdecl CL_GetMouseMovement(clientActive_t *cl, float *mx, float *my)
     cl->mouseDy[cl->mouseIndex] = 0;
 }
 
+/*
+=================
+CL_MouseMove
+=================
+*/
 void __cdecl CL_MouseMove(usercmd_s *cmd)
 {
 #if 0
@@ -1244,6 +1298,7 @@ void __cdecl CL_MouseMove(usercmd_s *cmd)
     float cap; // [esp+DCh] [ebp-8h]
     float accelSensitivity; // [esp+E0h] [ebp-4h]
 
+    // allow mouse smoothing
     CL_GetMouseMovement(clients, &mx, &my);
     if (frame_msec)
     {
@@ -1251,6 +1306,7 @@ void __cdecl CL_MouseMove(usercmd_s *cmd)
         v8 = sqrt(v15);
         rate = v8 / (double)frame_msec;
         accelSensitivity = rate * cl_mouseAccel->current.value + cl_sensitivity->current.value;
+        // scale by FOV
         accelSensitivity = accelSensitivity * clients[0].cgameFOVSensitivityScale;
         if (rate != 0.0 && cl_showMouseRate->current.enabled)
             Com_Printf(CON_CHANNEL_CLIENT, "%f : %f\n", rate, accelSensitivity);
@@ -1260,6 +1316,7 @@ void __cdecl CL_MouseMove(usercmd_s *cmd)
             my = my * accelSensitivity;
             if (mx != 0.0 || my != 0.0)
             {
+                // add mouse X/Y movement to cmd
                 if (kb[KEY_STRAFE].active)
                 {
                     cmd->rightmove = ClampChar(SnapFloatToInt(mx * m_side->current.value) + cmd->rightmove);
@@ -1349,8 +1406,18 @@ static void __cdecl CL_UpdateCmdButton(int localClientNum, int *cmdButtons, int 
     kb[kbButton].wasPressed = 0;
 }
 
+/*
+==============
+CL_CmdButtons
+==============
+*/
 void __cdecl CL_CmdButtons(usercmd_s *cmd)
 {
+    //
+    // figure button bits
+    // send a button bit even if the key was pressed and released in
+    // less than a frame
+    //
     CL_UpdateCmdButton(&cmd->buttons, 14, BUTTON_ATTACK);
     CL_UpdateCmdButton(&cmd->buttons, 15, BUTTON_BREATH);
     CL_UpdateCmdButton(&cmd->buttons, 16, BUTTON_FRAG);
@@ -1396,12 +1463,20 @@ void __cdecl CL_SetUsercmdButtonsWeapons(int buttons, int weapon, int offhand)
     }
 }
 
+/*
+==============
+CL_FinishMove
+==============
+*/
 void __cdecl CL_FinishMove(usercmd_s *cmd)
 {
     int buttons; // r9
 
+    // copy the state that the cgame is currently sending
     cmd->weapon = clients[0].cgameUserCmdWeapon;
     cmd->offHandIndex = clients[0].cgameUserCmdOffHandIndex;
+    // send the current server time so the amount of movement
+    // can be determined without allowing cheating
     cmd->serverTime = clients[0].serverTime;
     cmd->angles[0] = (unsigned __int16)(int)(clients[0].viewangles[0] * (float)182.04445);
     cmd->angles[1] = (unsigned __int16)(int)(clients[0].viewangles[1] * (float)182.04445);
@@ -1578,21 +1653,30 @@ int __cdecl CG_HandleLocationSelectionInput(int localClientNum, usercmd_s *cmd)
     }
 }
 
+/*
+=================
+CL_CreateCmd
+=================
+*/
 void __cdecl CL_CreateCmd(usercmd_s *result)
 {
     float oldAngles; // fp31
 
     oldAngles = clients[0].viewangles[0];
+    // keyboard angle adjustment
     CL_AdjustAngles();
     memset(result, 0, sizeof(usercmd_s));
     if (!Key_IsCatcherActive(0, 8) || !(unsigned __int8)CG_HandleLocationSelectionInput(0, result))
     {
         CL_CmdButtons(result);
+        // get basic movement from keyboard
         CL_KeyMove(result);
+        // get basic movement from mouse
         CL_MouseMove(result);
         // KISAKTODO
         //if (GPad_IsActive(CL_ControllerIndexFromClientNum(0)))
         //    CL_GamepadMove(result);
+        // check to make sure the angles haven't wrapped
         if (clients[0].viewangles[0] - oldAngles <= 90.0)
         {
             if (oldAngles - clients[0].viewangles[0] > 90.0)
@@ -1603,15 +1687,24 @@ void __cdecl CL_CreateCmd(usercmd_s *result)
             clients[0].viewangles[0] = oldAngles + 90.0;
         }
     }
+    // store out the final values
     CL_FinishMove(result);
 }
 
+/*
+=================
+CL_CreateNewCommands
+
+Create a new usercmd_t structure for this frame
+=================
+*/
 void CL_CreateNewCommands()
 {
     usercmd_s *v0; // r3
     _BYTE v1[56]; // [sp+50h] [-80h] BYREF
     usercmd_s v2; // [sp+90h] [-40h] BYREF
 
+    // no need to create usercmds until we have a gamestate
     if (clientUIActives[0].connectionState != CA_ACTIVE)
         MyAssertHandler(
             "c:\\trees\\cod3\\cod3src\\src\\client\\cl_input.cpp",
@@ -1620,9 +1713,12 @@ void CL_CreateNewCommands()
             "%s",
             "CL_GetLocalClientConnectionState( ONLY_LOCAL_CLIENT_NUM ) == CA_ACTIVE");
     frame_msec = com_frameTime - old_com_frameTime;
+    // if running less than 5fps, truncate the extra time to prevent
+    // unexpected moves after a hitch
     if ((unsigned int)(com_frameTime - old_com_frameTime) > 0xC8)
         frame_msec = 200;
     old_com_frameTime = com_frameTime;
+    // generate a command for this frame
     CL_CreateCmd(&v2);
     memcpy(v1, &v2, sizeof(v1));
     Sys_EnterCriticalSection(CRITSECT_CLIENT_CMD);
@@ -1643,6 +1739,7 @@ void __cdecl CL_WritePacket()
     usercmd_s *v8; // r30
 
     Sys_EnterCriticalSection(CRITSECT_CLIENT_CMD);
+    // write any unacknowledged clientCommands
     while (1)
     {
         reliableAcknowledge = clientConnections[0].reliableAcknowledge;
@@ -1679,6 +1776,7 @@ void __cdecl CL_WritePacket()
     {
         v5 = v4;
         v6 = cmdNumber - v4 + 1;
+        // write all the commands, including the predicted command
         do
         {
             v7 = v6 & 0x3F;
@@ -1916,6 +2014,11 @@ cmd_function_s IN_NightVisionDown_VAR;
 cmd_function_s IN_NightVisionUp_VAR;
 
 
+/*
+============
+CL_InitInput
+============
+*/
 void __cdecl CL_InitInput()
 {
     const char *v0; // r5
@@ -2027,6 +2130,11 @@ void __cdecl CL_ShowSystemCursor(bool show)
     IN_ShowSystemCursor(show);
 }
 
+/*
+=================
+CL_MouseEvent
+=================
+*/
 int __cdecl CL_MouseEvent(int x, int y, int dx, int dy)
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-8h]

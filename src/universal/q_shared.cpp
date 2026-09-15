@@ -136,7 +136,7 @@ char* QDECL va(const char* format, ...) {
     int         len;
 
     info = (va_info_t *)Sys_GetValue(1);
-    buf = info->va_string[info->index];
+    buf = info->va_string[info->index]; // in case va is called by nested functions
     info->index = (info->index + 1) % 2;
 
     va_start(argptr, format);
@@ -238,6 +238,11 @@ const char *__cdecl Com_GetExtensionSubString(const char *filename)
     return substr;
 }
 
+/*
+============
+Com_StripExtension
+============
+*/
 void __cdecl Com_StripExtension(char *in, char *out)
 {
     const char *extension; // [esp+0h] [ebp-4h]
@@ -248,15 +253,24 @@ void __cdecl Com_StripExtension(char *in, char *out)
     *out = 0;
 }
 
+/*
+==================
+Com_DefaultExtension
+==================
+*/
 void __cdecl Com_DefaultExtension(char *path, uint maxSize, const char *extension)
 {
     char *src; // [esp+10h] [ebp-4Ch]
     char oldPath[68]; // [esp+14h] [ebp-48h] BYREF
 
+    //
+    // if path doesn't have a .EXT, append extension
+    // (extension should include the .)
+    //
     for (src = &path[strlen(path) - 1]; *src != 47 && src != path; --src)
     {
         if (*src == 46)
-            return;
+            return; // it has an extension
     }
     I_strncpyz(oldPath, path, 64);
     Com_sprintf(path, maxSize, "%s%s", oldPath, extension);
@@ -346,8 +360,14 @@ void __cdecl Swap_InitBigEndian()
     //LittleFloatWrite = (int(__cdecl *)(float))FloatWriteSwap;
 }
 
+/*
+================
+Swap_Init
+================
+*/
 void __cdecl Swap_Init()
 {
+    // set the byte swapping variables in a portable manner
     Swap_InitLittleEndian();
 }
 
@@ -567,6 +587,15 @@ void __cdecl Com_InitThreadData(int threadContext)
 }
 
 static int valueindex;
+/*
+===============
+Info_ValueForKey
+
+Searches the string for the given
+key and returns the associated value, or an empty string.
+FIXME: overflow check?
+===============
+*/
 const char *__cdecl Info_ValueForKey(const char *s, const char *key)
 {
     char *v3; // [esp+0h] [ebp-2010h]
@@ -578,6 +607,8 @@ const char *__cdecl Info_ValueForKey(const char *s, const char *key)
     if (!s || !key)
         return "";
 
+    // use two buffers so compares
+    // work without stomping on each other
     valueindex ^= 1u;
 
     if (*s == 92)
@@ -628,6 +659,13 @@ const char *__cdecl Info_ValueForKey(const char *s, const char *key)
     return "";
 }
 
+/*
+===================
+Info_NextPair
+
+Used to itterate through all the key/value pairs in an info string
+===================
+*/
 void __cdecl Info_NextPair(const char **head, char *key, char *value)
 {
     char *o; // [esp+0h] [ebp-8h]
@@ -660,6 +698,11 @@ void __cdecl Info_NextPair(const char **head, char *key, char *value)
     *head = sa;
 }
 
+/*
+===================
+Info_RemoveKey
+===================
+*/
 void __cdecl Info_RemoveKey(char *s, const char *key)
 {
     char *v2; // eax
@@ -702,6 +745,7 @@ void __cdecl Info_RemoveKey(char *s, const char *key)
             if (!*s)
                 return;
         }
+        // remove this part
         v5 = s;
         v4 = start;
         do
@@ -712,6 +756,11 @@ void __cdecl Info_RemoveKey(char *s, const char *key)
     }
 }
 
+/*
+===================
+Info_RemoveKey_Big
+===================
+*/
 void __cdecl Info_RemoveKey_Big(char *s, const char *key)
 {
     char *v2; // eax
@@ -757,6 +806,7 @@ void __cdecl Info_RemoveKey_Big(char *s, const char *key)
             if (!*s)
                 return;
         }
+        // remove this part
         v5 = s;
         v4 = v8;
         do
@@ -767,6 +817,14 @@ void __cdecl Info_RemoveKey_Big(char *s, const char *key)
     }
 }
 
+/*
+==================
+Info_Validate
+
+Some characters are illegal in info strings because they
+can mess up the server's parsing
+==================
+*/
 bool __cdecl Info_Validate(const char *s)
 {
     const char *v1; // eax
@@ -784,6 +842,13 @@ bool __cdecl Info_Validate(const char *s)
     return v3 == 0;
 }
 
+/*
+==================
+Info_SetValueForKey
+
+Changes or adds a key/value pair
+==================
+*/
 void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
 {
     const char *v3;        // eax
@@ -866,6 +931,13 @@ void __cdecl Info_SetValueForKey(char *s, const char *key, const char *value)
     }
 }
 
+/*
+==================
+Info_SetValueForKey_Big
+
+Changes or adds a key/value pair
+==================
+*/
 void __cdecl Info_SetValueForKey_Big(char *s, const char *key, const char *value)
 {
     int j;

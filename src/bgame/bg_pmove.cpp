@@ -193,11 +193,21 @@ void __cdecl PM_playerTrace(
     }
 }
 
+/*
+===============
+PM_AddEvent
+===============
+*/
 void __cdecl PM_AddEvent(playerState_s *ps, entity_event_t newEvent)
 {
     BG_AddPredictableEventToPlayerstate(newEvent, 0, ps);
 }
 
+/*
+===============
+PM_AddTouchEnt
+===============
+*/
 void __cdecl PM_AddTouchEnt(pmove_t *pm, int entityNum)
 {
     int i; // [esp+0h] [ebp-4h]
@@ -208,16 +218,25 @@ void __cdecl PM_AddTouchEnt(pmove_t *pm, int entityNum)
 
         if (pm->numtouch != 32)
         {
+            // see if it is already added
             for (i = 0; i < pm->numtouch; ++i)
             {
                 if (pm->touchents[i] == entityNum)
                     return;
             }
+            // add it
             pm->touchents[pm->numtouch++] = entityNum;
         }
     }
 }
 
+/*
+==================
+PM_ClipVelocity
+
+Slide off of the impacting surface
+==================
+*/
 void __cdecl PM_ClipVelocity(const float *in, const float *normal, float *out)
 {
     float scale; // [esp+0h] [ebp-14h]
@@ -450,6 +469,7 @@ void __cdecl PM_FootstepEvent(pmove_t *pm, pml_t *pml, char iOldBobCycle, char i
 
     iassert(ps);
 
+    // if we just crossed a cycle boundary, play an apropriate footstep event
     if ((((uint8_t)(iNewBobCycle + 64) ^ (uint8_t)(iOldBobCycle + 64)) & 0x80) != 0)
     {
         if (ps->groundEntityNum == ENTITYNUM_NONE)
@@ -483,6 +503,7 @@ void __cdecl PM_FootstepEvent(pmove_t *pm, pml_t *pml, char iOldBobCycle, char i
                 BG_AddPredictableEventToPlayerstate(EV_FOOTSTEP_RUN, iSurfaceType, ps);
             }
         }
+        // on ground will only play sounds if running
         else if (bFootStep)
         {
             BG_AddPredictableEventToPlayerstate(PM_FootstepType(ps, pml), PM_GroundSurfaceType(pml), ps);
@@ -532,6 +553,7 @@ bool __cdecl PM_ShouldMakeFootsteps(pmove_t *pm)
     if (iStance == PM_STANCE_PRONE)
         return false;
 
+    // ducked characters never play footsteps
     if (iStance == PM_STANCE_CROUCH)
         return false;
 
@@ -660,6 +682,14 @@ void __cdecl PM_UpdateLean(
     }
 }
 
+/*
+================
+PM_UpdateViewAngles
+
+This can be used as another entry point when only the viewangles
+are being updated isntead of a full move
+================
+*/
 void __cdecl PM_UpdateViewAngles(playerState_s *ps, float msec, usercmd_s *cmd, uint8_t handler)
 {
     float angle; // [esp+10h] [ebp-10h]
@@ -669,7 +699,7 @@ void __cdecl PM_UpdateViewAngles(playerState_s *ps, float msec, usercmd_s *cmd, 
 #ifdef KISAK_MP
     if (ps->pm_type == PM_INTERMISSION)
     {
-        return;
+        return; // no view changes at all
     }
 #endif
     if (ps->pm_type >= PM_DEAD)
@@ -737,6 +767,7 @@ void __cdecl PM_UpdateViewAngles_Clamp(playerState_s *ps, usercmd_s *cmd)
 
     minPitch = player_view_pitch_up->current.value;
     maxPitch = player_view_pitch_down->current.value;
+    // circularly clamp the angles with deltas
     for (i = 0; i < 3; ++i)
     {
         v7 = ps->delta_angles[i] + (double)cmd->angles[i] * 0.0054931640625;
@@ -744,6 +775,7 @@ void __cdecl PM_UpdateViewAngles_Clamp(playerState_s *ps, usercmd_s *cmd)
         v5 = v8 + 0.5;
         v4 = floor(v5);
         temp = (v8 - v4) * 360.0;
+        // don't let the player look up or down more than 90 degrees
         if (!i)
         {
             if (maxPitch >= (double)temp)
@@ -1606,6 +1638,13 @@ void __cdecl PM_MeleeChargeClear(playerState_s *ps)
     ps->meleeChargeTime = 0;
 }
 
+/*
+================
+Pmove
+
+Can be called by either the server or the client
+================
+*/
 void __cdecl Pmove(pmove_t *pm)
 {
     int msec; // [esp+38h] [ebp-Ch]
@@ -1616,11 +1655,15 @@ void __cdecl Pmove(pmove_t *pm)
     iassert(ps);
 
     finalTime = pm->cmd.serverTime;
+    // should not happen
     if (finalTime >= ps->commandTime)
     {
         if (finalTime > ps->commandTime + 1000)
             ps->commandTime = finalTime - 1000;
+        // clear results
         pm->numtouch = 0;
+        // chop the move up if it is too long, to prevent framerate
+        // dependent behavior
         while (ps->commandTime != finalTime)
         {
             msec = finalTime - ps->commandTime;
@@ -1636,6 +1679,11 @@ void __cdecl Pmove(pmove_t *pm)
     }
 }
 
+/*
+================
+PmoveSingle
+================
+*/
 void __cdecl PmoveSingle(pmove_t *pm)
 {
     int v1; // ecx
@@ -1712,7 +1760,7 @@ void __cdecl PmoveSingle(pmove_t *pm)
     }
     ps->pm_flags &= ~PMF_NO_PRONE;
     if (ps->pm_type >= PM_DEAD)
-        pm->tracemask &= ~CONTENTS_PLAYER;
+        pm->tracemask &= ~CONTENTS_PLAYER; // corpses can fly through bodies
     if ((ps->pm_flags & PMF_PRONE) == 0 || BG_UsingSniperScope(ps))
     {
         ps->pm_flags &= ~PMF_PRONEMOVE_OVERRIDDEN;
@@ -1762,6 +1810,7 @@ void __cdecl PmoveSingle(pmove_t *pm)
     ps->eFlags = v1;
     ps->eFlags &= ~0x40u;
 
+    // set the firing flag for continuous beam weapons
     if (
 #ifdef KISAK_MP
         ps->pm_type != PM_INTERMISSION && 
@@ -1774,9 +1823,12 @@ void __cdecl PmoveSingle(pmove_t *pm)
         ps->eFlags |= 0x40u;
     }
 
+    // clear the respawned flag if attack and use are cleared
     if (ps->pm_type < PM_DEAD && (pm->cmd.buttons & (BUTTON_ATTACK | BUTTON_PRONE)) == 0)
         ps->pm_flags &= ~PMF_RESPAWNED;
+    // clear all pmove local vars
     memset((uint8_t *)&pml, 0, sizeof(pml));
+    // determine the time
     pml.msec = pm->cmd.serverTime - ps->commandTime;
     if (pml.msec >= 1)
     {
@@ -1788,17 +1840,21 @@ void __cdecl PmoveSingle(pmove_t *pm)
         pml.msec = 1;
     }
     ps->commandTime = pm->cmd.serverTime;
+    // save old org in case we get stuck
     pml.previous_origin[0] = ps->origin[0];
     pml.previous_origin[1] = ps->origin[1];
     pml.previous_origin[2] = ps->origin[2];
+    // save old velocity for crashlanding
     pml.previous_velocity[0] = ps->velocity[0];
     pml.previous_velocity[1] = ps->velocity[1];
     pml.previous_velocity[2] = ps->velocity[2];
     pml.frametime = (double)pml.msec * EQUAL_EPSILON;
     PM_AdjustAimSpreadScale(pm, &pml);
     msec = (float)pml.msec;
+    // update the viewangles
     PM_UpdateViewAngles(ps, msec, &pm->cmd, pm->handler);
     AngleVectors(ps->viewangles, pml.forward, pml.right, pml.up);
+    // decide if backpedaling animations should be used
     if (pm->cmd.forwardmove >= 0)
     {
         if (pm->cmd.forwardmove > 0 || !pm->cmd.forwardmove && pm->cmd.rightmove)
@@ -1911,7 +1967,9 @@ void __cdecl PmoveSingle(pmove_t *pm)
                 PM_UpdateAimDownSightFlag(pm, &pml);
                 PM_UpdateSprint(pm, &pml);
                 PM_UpdatePlayerWalkingFlag(pm);
+                // set mins, maxs, and viewheight
                 PM_CheckDuck(pm, &pml);
+                // set groundentity
                 {
                     PROF_SCOPED("PM_GroundTrace");
                     PM_GroundTrace(pm, &pml);
@@ -1961,10 +2019,12 @@ void __cdecl PmoveSingle(pmove_t *pm)
                     }
                     else if (pml.walking)
                     {
+                        // walking on ground
                         PM_WalkMove(pm, &pml);
                     }
                     else
                     {
+                        // airborne
                         PM_AirMove(pm, &pml);
                     }
                 }
@@ -1973,6 +2033,7 @@ void __cdecl PmoveSingle(pmove_t *pm)
                     PROF_SCOPED("PM_GroundTrace");
                     PM_GroundTrace(pm, &pml);
                 }
+                // footstep events / legs animations
                 {
                     PROF_SCOPED("PM_Footsteps");
                     PM_Footsteps(pm, &pml);
@@ -2007,6 +2068,7 @@ void __cdecl PmoveSingle(pmove_t *pm)
                 v11 = ps->oldVelocity;
                 ps->oldVelocity[0] = ps->oldVelocity[0] + velocityChange[0];
                 oldVelocity[1] = v11[1] + velocityChange[1];
+                // snap some parts of playerstate to save network bandwidth
                 Sys_SnapVector(ps->velocity);
             }
         }
@@ -2160,6 +2222,13 @@ bool __cdecl PM_CanStand(playerState_s *ps, pmove_t *pm)
     return !trace.allsolid;
 }
 
+/*
+===================
+PM_FlyMove
+
+Only with the flight powerup
+===================
+*/
 void __cdecl PM_FlyMove(pmove_t *pm, pml_t *pml)
 {
     float wishdir[3] = { 0 }; // [esp+20h] [ebp-40h] BYREF
@@ -2175,8 +2244,12 @@ void __cdecl PM_FlyMove(pmove_t *pm, pml_t *pml)
     playerState_s* ps = pm->ps; // [esp+5Ch] [ebp-4h]
     iassert(ps);
 
+    // normal slowdown
     PM_Friction(ps, pml);
     scale = PM_CmdScale(ps, &pm->cmd);
+    //
+    // user intentions
+    //
     if (scale == 0.0)
     {
         wishvel[0] = 0.0;
@@ -2208,6 +2281,13 @@ void __cdecl PM_FlyMove(pmove_t *pm, pml_t *pml)
     PM_StepSlideMove(pm, pml, 0);
 }
 
+/*
+==================
+PM_Friction
+
+Handles both ground friction and water friction
+==================
+*/
 void __cdecl PM_Friction(playerState_s *ps, pml_t *pml)
 {
     float scale = 0; // [esp+8h] [ebp-2Ch]
@@ -2226,7 +2306,7 @@ void __cdecl PM_Friction(playerState_s *ps, pml_t *pml)
     vec[1] = ps->velocity[1];
     vec[2] = ps->velocity[2];
     if (pml->walking)
-        vec[2] = 0.0;
+        vec[2] = 0.0; // ignore slope movement
 
     speed = Vec3Length(vec);
 
@@ -2237,6 +2317,8 @@ void __cdecl PM_Friction(playerState_s *ps, pml_t *pml)
         {
             drop = player_meleeChargeFriction->current.value * pml->frametime;
         }
+        // apply ground friction
+        // if getting knocked back, no friction
         else if (pml->walking && (pml->groundTrace.surfaceFlags & SURF_SLICK) == 0 && (ps->pm_flags & PMF_TIME_KNOCKBACK) == 0)
         {
             if (stopspeed->current.value <= (double)speed)
@@ -2262,6 +2344,7 @@ void __cdecl PM_Friction(playerState_s *ps, pml_t *pml)
         if (ps->pm_type == PM_SPECTATOR)
             drop = speed * 5.0 * pml->frametime + drop;
 #endif
+        // scale the velocity
         newspeed = speed - drop;
         if (newspeed < 0.0)
             newspeed = 0.0;
@@ -2271,11 +2354,19 @@ void __cdecl PM_Friction(playerState_s *ps, pml_t *pml)
     else
     {
         *vel = 0.0;
-        ps->velocity[1] = 0.0;
+        ps->velocity[1] = 0.0; // allow sinking underwater
+        // FIXME: still have z friction underwater?
         ps->velocity[2] = 0.0;
     }
 }
 
+/*
+==============
+PM_Accelerate
+
+Handles user intended acceleration
+==============
+*/
 void __cdecl PM_Accelerate(playerState_s *ps, const pml_t *pml, const float *wishdir, float wishspeed, float accel)
 {
     float value; // [esp+Ch] [ebp-44h]
@@ -2494,6 +2585,11 @@ float __cdecl PM_CmdScale(playerState_s *ps, usercmd_s *cmd)
     return scale;
 }
 
+/*
+===================
+PM_AirMove
+===================
+*/
 void __cdecl PM_AirMove(pmove_t *pm, pml_t *pml)
 {
     float wishdir[3]; // [esp+40h] [ebp-50h] BYREF
@@ -2514,6 +2610,7 @@ void __cdecl PM_AirMove(pmove_t *pm, pml_t *pml)
     memcpy(&cmd, &pm->cmd, sizeof(cmd));
     float scale = PM_CmdScale(ps, &cmd); // [esp+64h] [ebp-2Ch]
 
+    // project moves down to flat plane
     pml->forward[2] = 0.0;
     pml->right[2] = 0.0;
     Vec3Normalize(pml->forward);
@@ -2529,15 +2626,28 @@ void __cdecl PM_AirMove(pmove_t *pm, pml_t *pml)
     float wishspeed = Vec3Normalize(wishdir); // [esp+58h] [ebp-38h]
 
     wishspeed = wishspeed * scale;
+    // not on ground, so little effect on velocity
     PM_Accelerate(ps, pml, wishdir, wishspeed, 1.0);
 
+    // we may have a ground plane that is very steep, even
+    // though we don't have a groundentity
+    // slide along the steep plane
     if (pml->groundPlane)
         PM_ClipVelocity(ps->velocity, pml->groundTrace.normal, ps->velocity);
 
     PM_StepSlideMove(pm, pml, 1);
+    // set the movementDir so clients can rotate the legs for strafing
     PM_SetMovementDir(pm, pml);
 }
 
+/*
+================
+PM_SetMovementDir
+
+Determine the rotation of the legs reletive
+to the facing dir
+================
+*/
 void __cdecl PM_SetMovementDir(pmove_t *pm, pml_t *pml)
 {
     float v2; // [esp+8h] [ebp-3Ch]
@@ -2620,6 +2730,11 @@ void __cdecl PM_SetMovementDir(pmove_t *pm, pml_t *pml)
     }
 }
 
+/*
+===================
+PM_WalkMove
+===================
+*/
 void __cdecl PM_WalkMove(pmove_t *pm, pml_t *pml)
 {
     float fmove; // [esp+20h] [ebp-58h]
@@ -2646,6 +2761,7 @@ void __cdecl PM_WalkMove(pmove_t *pm, pml_t *pml)
 
     if (Jump_Check(pm, pml))
     {
+        // jumped away
         PM_AirMove(pm, pml);
     }
     else
@@ -2661,6 +2777,7 @@ void __cdecl PM_WalkMove(pmove_t *pm, pml_t *pml)
         if (ps->damageTimer <= 0)
             ps->damageTimer = 0;
 #endif
+        // project moves down to flat plane
         pml->forward[2] = 0.0;
         pml->right[2] = 0.0;
         Vec2Normalize(pml->forward);
@@ -2673,6 +2790,8 @@ void __cdecl PM_WalkMove(pmove_t *pm, pml_t *pml)
         PM_ProjectVelocity(wishdir, pml->groundTrace.normal, wishdir);
         iStance = PM_GetEffectiveStance(ps);
 
+        // when a player gets hit, they temporarily lose
+        // full control, which allows them to be moved a bit
         if ((pml->groundTrace.surfaceFlags & SURF_SLICK) != 0 || (ps->pm_flags & PMF_TIME_KNOCKBACK) != 0)
         {
             acceleration = 1.0;
@@ -2698,11 +2817,14 @@ void __cdecl PM_WalkMove(pmove_t *pm, pml_t *pml)
         if ((pml->groundTrace.surfaceFlags & SURF_SLICK) != 0 || (ps->pm_flags & PMF_TIME_KNOCKBACK) != 0)
             ps->velocity[2] = ps->velocity[2] - (double)ps->gravity * pml->frametime;
 
+        // slide along the ground plane
         PM_ProjectVelocity(ps->velocity, pml->groundTrace.normal, ps->velocity);
 
+        // don't do anything if standing still
         if (ps->velocity[0] != 0.0 || ps->velocity[1] != 0.0)
             PM_StepSlideMove(pm, pml, 0);
 
+        // set the movementDir so clients can rotate the legs for strafing
         PM_SetMovementDir(pm, pml);
     }
 }
@@ -2840,6 +2962,11 @@ double __cdecl PM_CmdScaleForStance(const pmove_t *pm)
     }
 }
 
+/*
+==============
+PM_DeadMove
+==============
+*/
 void __cdecl PM_DeadMove(playerState_s *ps, pml_t *pml)
 {
     float forwarda; // [esp+1Ch] [ebp-4h]
@@ -2849,6 +2976,7 @@ void __cdecl PM_DeadMove(playerState_s *ps, pml_t *pml)
 
     if (pml->walking)
     {
+        // extra friction
         forwarda = Vec3Length(ps->velocity);
 
         forward = forwarda - 20.0;
@@ -2866,6 +2994,11 @@ void __cdecl PM_DeadMove(playerState_s *ps, pml_t *pml)
     }
 }
 
+/*
+===============
+PM_NoclipMove
+===============
+*/
 void __cdecl PM_NoclipMove(pmove_t *pm, pml_t *pml)
 {
     float value; // [esp+14h] [ebp-60h]
@@ -2890,17 +3023,19 @@ void __cdecl PM_NoclipMove(pmove_t *pm, pml_t *pml)
 
     ps->viewHeightTarget = 60;
 
+    // friction
     speed = Vec3Length(ps->velocity);
     if (speed >= 1.0)
     {
         drop = 0.0;
-        curFriction = friction->current.value * 1.5;
+        curFriction = friction->current.value * 1.5; // extra friction
         if (stopspeed->current.value <= (double)speed)
             value = speed;
         else
             value = stopspeed->current.value;
         wishdir[3] = value;
         drop = value * curFriction * pml->frametime + drop;
+        // scale the velocity
         newspeed = speed - drop;
         if (newspeed < 0.0)
             newspeed = 0.0;
@@ -2921,6 +3056,7 @@ void __cdecl PM_NoclipMove(pmove_t *pm, pml_t *pml)
         umove = umove + 127.0;
     if ((pm->cmd.buttons & BUTTON_LEAN_LEFT) != 0)
         umove = umove - 127.0;
+    // accelerate
     scale = PM_MoveScale(ps, fmove, smove, umove);
     for (int i = 0; i < 3; ++i) // [esp+64h] [ebp-10h]
         wishvel[i] = pml->forward[i] * fmove + pml->right[i] * smove + pml->up[i] * umove;
@@ -2930,6 +3066,7 @@ void __cdecl PM_NoclipMove(pmove_t *pm, pml_t *pml)
     wishspeed = Vec3Normalize(wishdir);
     wishspeed = wishspeed * scale;
     PM_Accelerate(ps, pml, wishdir, wishspeed, 9.0);
+    // move
     Vec3Mad(ps->origin, pml->frametime, ps->velocity, ps->origin);
 }
 
@@ -3018,6 +3155,11 @@ void __cdecl PM_UFOMove(pmove_t *pm, pml_t *pml)
     Vec3Mad(ps->origin, pml->frametime, ps->velocity, ps->origin);
 }
 
+/*
+=============
+PM_GroundTrace
+=============
+*/
 void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
 {
     double v2; // st7
@@ -3052,6 +3194,7 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
     PM_playerTrace(pm, &trace, start, pm->mins, pm->maxs, point, ps->clientNum, pm->tracemask);
     memcpy(&pml->groundTrace, &trace, sizeof(pml->groundTrace));
 
+    // do something corrective if the trace starts in a solid...
     if (!trace.allsolid || PM_CorrectAllSolid(pm, pml, &trace))
     {
         if (trace.startsolid)
@@ -3068,6 +3211,7 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
             }
             memcpy(&pml->groundTrace, &trace, sizeof(pml->groundTrace));
         }
+        // if the trace didn't hit anything, we are in free fall
         if (trace.fraction == 1.0)
         {
             PM_GroundTraceMissed(pm, pml);
@@ -3076,6 +3220,7 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
         {
             iassert(trace.normal[0] || trace.normal[1] || trace.normal[2]);
 
+            // check if getting thrown off the ground
             if ((ps->pm_flags & PMF_LADDER) != 0 || ps->velocity[2] <= 0.0 || Vec3Dot(ps->velocity, trace.normal) <= 10.0)
             {
                 if (trace.walkable)
@@ -3083,14 +3228,18 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
                     pml->groundPlane = 1;
                     pml->almostGroundPlane = 1;
                     pml->walking = 1;
+                    // just hit the ground
                     if (ps->groundEntityNum == ENTITYNUM_NONE)
                         PM_CrashLand(ps, pml);
                     EntityHitId = Trace_GetEntityHitId(&trace);
                     ps->groundEntityNum = EntityHitId;
                     PM_AddTouchEnt(pm, ps->groundEntityNum);
                 }
+                // slopes that are too steep will not be considered onground
                 else
                 {
+                    // FIXME: if they can't slide down the slope, let them
+                    // walk (sharp crevices)
                     ps->groundEntityNum = ENTITYNUM_NONE;
                     pml->groundPlane = 1;
                     pml->almostGroundPlane = 1;
@@ -3101,6 +3250,7 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
 #ifdef KISAK_MP
             else
             {
+                // go into jump animation
                 if (pm->cmd.forwardmove < 0)
                     BG_AnimScriptEvent(ps, ANIM_ET_JUMPBK, 0, 0);
                 else
@@ -3115,6 +3265,13 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
     }
 }
 
+/*
+=================
+PM_CrashLand
+
+Check for hard landings that generate sound events
+=================
+*/
 void __cdecl PM_CrashLand(playerState_s *ps, pml_t *pml)
 {
     int v6; // [esp+8h] [ebp-50h]
@@ -3136,6 +3293,7 @@ void __cdecl PM_CrashLand(playerState_s *ps, pml_t *pml)
 
     iassert(ps);
 
+    // calculate the exact velocity on landing
     dist = pml->previous_origin[2] - ps->origin[2];
 
     vel = pml->previous_velocity[2];
@@ -3152,6 +3310,8 @@ void __cdecl PM_CrashLand(playerState_s *ps, pml_t *pml)
 
         if (bg_fallDamageMinHeight->current.value < (float)bg_fallDamageMaxHeight->current.value)
         {
+            // SURF_NODAMAGE is used for bounce pads where you don't ever
+            // want to take damage or play a crunch sound
             if (bg_fallDamageMinHeight->current.value >= (float)fallHeight
                 || (pml->groundTrace.surfaceFlags & SURF_NODAMAGE) != 0
                 || ps->pm_type >= PM_DEAD)
@@ -3200,6 +3360,8 @@ void __cdecl PM_CrashLand(playerState_s *ps, pml_t *pml)
         }
 
         surfaceType = PM_GroundSurfaceType(pml);
+
+        // create a local entity event to play the sound
         if (damage)
         {
             if (damage >= 100 || (pml->groundTrace.surfaceFlags & SURF_SLICK) != 0)
@@ -3287,6 +3449,11 @@ entity_event_t __cdecl PM_DamageLandingForSurface(pml_t *pml)
         return EV_NONE;
 }
 
+/*
+=============
+PM_CorrectAllSolid
+=============
+*/
 int __cdecl PM_CorrectAllSolid(pmove_t *pm, pml_t *pml, trace_t *trace)
 {
     float point[3] = { 0 }; // [esp+1Ch] [ebp-Ch] BYREF
@@ -3296,6 +3463,7 @@ int __cdecl PM_CorrectAllSolid(pmove_t *pm, pml_t *pml, trace_t *trace)
     playerState_s* ps = pm->ps; // [esp+18h] [ebp-10h]
     iassert(ps);
 
+    // jitter around
     for (uint i = 0; i < 0x1A; ++i) // [esp+14h] [ebp-14h]
     {
         Vec3Add(ps->origin, CorrectSolidDeltas[i], point);
@@ -3321,6 +3489,13 @@ int __cdecl PM_CorrectAllSolid(pmove_t *pm, pml_t *pml, trace_t *trace)
     return 0;
 }
 
+/*
+=============
+PM_GroundTraceMissed
+
+The ground trace didn't hit a surface, so we are in freefall
+=============
+*/
 void __cdecl PM_GroundTraceMissed(pmove_t *pm, pml_t *pml)
 {
     trace_t trace; // [esp+10h] [ebp-3Ch] BYREF
@@ -3342,6 +3517,9 @@ void __cdecl PM_GroundTraceMissed(pmove_t *pm, pml_t *pml)
     }
     else
     {
+        // we just transitioned into freefall
+        // if they aren't in a jumping animation and the ground is a ways away, force into it
+        // if we didn't do the trace, the player would be backflipping down staircases
         point[0] = ps->origin[0];
         point[1] = ps->origin[1];
         point[2] = ps->origin[2];
@@ -3402,6 +3580,13 @@ bool __cdecl PM_IsPlayerFrozenByWeapon(const playerState_s *ps)
     return ps->weaponstate == WEAPON_FIRING && ps->weapon && BG_GetWeaponDef(ps->weapon)->freezeMovementWhenFiring != 0;
 }
 
+/*
+==============
+PM_CheckDuck
+
+Sets mins, maxs, and pm->ps->viewheight
+==============
+*/
 void __cdecl PM_CheckDuck(pmove_t *pm, pml_t *pml)
 {
     double v2; // st7
@@ -3605,6 +3790,7 @@ void __cdecl PM_CheckDuck(pmove_t *pm, pml_t *pml)
                     }
                     if ((pm->cmd.buttons & BUTTON_PRONE) == 0 || (ps->pm_flags & PMF_RESPAWNED) != 0)
                     {
+                        // duck
                         if ((pm->cmd.buttons & BUTTON_CROUCH) != 0)
                         {
                             if ((ps->pm_flags & PMF_PRONE) != 0)
@@ -3696,8 +3882,10 @@ void __cdecl PM_CheckDuck(pmove_t *pm, pml_t *pml)
 #endif
                             }
                         }
+                        // stand up if possible
                         else if ((ps->pm_flags & PMF_DUCKED) != 0)
                         {
+                            // try to stand up
                             pmoveHandlers[pm->handler].trace(
                                 &trace,
                                 ps->origin,
@@ -4115,6 +4303,11 @@ double __cdecl PM_ViewHeightTableLerp(int iFrac, viewLerpWaypoint_s *pTable, flo
     }
 }
 
+/*
+===============
+PM_Footsteps
+===============
+*/
 void __cdecl PM_Footsteps(pmove_t *pm, pml_t *pml)
 {
     scriptAnimMoveTypes_t StanceIdleAnim; // eax
@@ -4140,6 +4333,10 @@ void __cdecl PM_Footsteps(pmove_t *pm, pml_t *pml)
 #endif
     if (ps->pm_type < PM_DEAD)
     {
+        //
+        // calculate speed and cycle to be used for
+        // all cyclic walking effects
+        //
         pm->xyspeed = Vec2Length(ps->velocity);
         if ((ps->eFlags & 0x300) != 0)
         {
@@ -4175,12 +4372,14 @@ void __cdecl PM_Footsteps(pmove_t *pm, pml_t *pml)
 #endif
                     fMaxSpeed = PM_GetMaxSpeed(pm, walking, sprinting);
                     bobmove = PM_GetBobMove(stanceFrontBack, pm->xyspeed, fMaxSpeed, walking, sprinting);
+                    // check for footstep / splash sounds
                     old = ps->bobCycle;
                     ps->bobCycle = (uint8_t)(int)((double)old + (double)pml->msec * bobmove);
                     Footsteps = PM_ShouldMakeFootsteps(pm);
                     PM_FootstepEvent(pm, pml, old, ps->bobCycle, Footsteps);
                 }
 #ifdef KISAK_MP
+                // if not trying to move
                 else
                 {
                     PM_Footstep_NotTryingToMove(pm);
@@ -4241,7 +4440,7 @@ void __cdecl PM_Footsteps_NotMoving(pmove_t *pm, int stance)
 {
 #ifdef KISAK_SP
     if (pm->xyspeed < 1.0)
-        pm->ps->bobCycle = 0;
+        pm->ps->bobCycle = 0; // start at beginning of cycle again
 #elif KISAK_MP
     int EffectiveStance; // eax
     scriptAnimMoveTypes_t flinch_anim; // [esp+0h] [ebp-18h]
@@ -4253,7 +4452,7 @@ void __cdecl PM_Footsteps_NotMoving(pmove_t *pm, int stance)
 
     ps = pm->ps;
     if (pm->xyspeed < 1.0)
-        ps->bobCycle = 0;
+        ps->bobCycle = 0; // start at beginning of cycle again
     turnAdjust = 0;
     if (ps->clientNum >= 64)
         ci = 0;
@@ -4572,6 +4771,11 @@ void __cdecl PM_FoliageSounds(pmove_t *pm)
     }
 }
 
+/*
+================
+PM_DropTimers
+================
+*/
 void __cdecl PM_DropTimers(playerState_s *ps, pml_t *pml)
 {
 #ifdef KISAK_SP
@@ -4581,6 +4785,7 @@ void __cdecl PM_DropTimers(playerState_s *ps, pml_t *pml)
 
     iassert(ps);
     pm_time = ps->pm_time;
+    // drop misc timing counter
     if (pm_time)
     {
         msec = pml->msec;
@@ -4600,6 +4805,7 @@ void __cdecl PM_DropTimers(playerState_s *ps, pml_t *pml)
 #elif KISAK_MP
     iassert(ps);
 
+    // drop misc timing counter
     if (ps->pm_time)
     {
         if (pml->msec < ps->pm_time)
@@ -4614,6 +4820,7 @@ void __cdecl PM_DropTimers(playerState_s *ps, pml_t *pml)
             ps->pm_time = 0;
         }
     }
+    // drop animation counter
     if (ps->legsTimer > 0)
     {
         ps->legsTimer -= pml->msec;

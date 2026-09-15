@@ -235,6 +235,14 @@ void __cdecl CL_DumpReliableCommands(clientConnection_t *clc)
     }
 }
 
+/*
+======================
+CL_AddReliableCommand
+
+The given command will be transmitted to the server, and is gauranteed to
+not have future usercmd_t executed before it is executed
+======================
+*/
 void __cdecl CL_AddReliableCommand(int localClientNum, const char *cmd)
 {
     int reliableSequence; // r11
@@ -243,6 +251,8 @@ void __cdecl CL_AddReliableCommand(int localClientNum, const char *cmd)
     {
         Sys_EnterCriticalSection(CRITSECT_CLIENT_CMD);
         reliableSequence = clientConnections[0].reliableSequence;
+        // if we would be losing an old command that hasn't been acknowledged,
+        // we must drop the connection
         if (clientConnections[0].reliableSequence - clientConnections[0].reliableAcknowledge > 256)
         {
             CL_DumpReliableCommands(clientConnections);
@@ -596,6 +606,15 @@ void __cdecl CL_MapLoading_StartCinematic(const char *mapname, float volume)
     R_Cinematic_StartPlayback(movieName, 5, volume);
 }
 
+/*
+=====================
+CL_MapLoading
+
+A local server is starting to load a map, so update the
+screen to let the user know about it, then dump all client
+memory on the hunk from cgame, ui, and renderer
+=====================
+*/
 void __cdecl CL_MapLoading(const char *mapname)
 {
     // KISAKTODO: (SP): could use more touchups
@@ -604,11 +623,12 @@ void __cdecl CL_MapLoading(const char *mapname)
     Con_Close(0);
     clientUIActives[0].keyCatchers = 0;
     clientUIActives[0].displayHUDWithKeycatchUI = 0;
+    // if we are already connected to the local host, stay connected
     I_strncpyz(cls.servername, "localhost", 256);
-    
+
     iassert(CL_GetLocalClientConnectionState(0) == CA_MAP_RESTART);
 
-    clientUIActives[0].connectionState = CA_LOADING;
+    clientUIActives[0].connectionState = CA_LOADING;		// so the connect screen is drawn
     CL_MapLoading_StartCinematic(mapname, (float)(snd_cinematicVolumeScale->current.value * snd_volume->current.value));
     UI_DrawConnectScreen();
     //Live_SetCurrentMapname(mapname);
@@ -627,6 +647,13 @@ void __cdecl CL_ResetSkeletonCache()
     clients[0].skelMemPos = 0;
 }
 
+/*
+=====================
+CL_ClearState
+
+Called before parsing a gamestate
+=====================
+*/
 void __cdecl CL_ClearState()
 {
     int configStringIndex;
@@ -639,16 +666,28 @@ void __cdecl CL_ClearState()
         if (clients[0].configstrings[configStringIndex])
             SL_RemoveRefToString(clients[0].configstrings[configStringIndex]);
     }
+    // wipe the client connection
     memset(clients, 0, sizeof(clients));
     Com_ClientDObjClearAllSkel();
     memset(clientConnections, 0, sizeof(clientConnections));
 }
 
+/*
+=====================
+CL_Disconnect
+
+Called when a connection, demo, or cinematic is being terminated.
+Goes from a connected state to either a menu state or a console state
+Sends a disconnect message to the server
+This is also called on Com_Error and Com_Quit, so it shouldn't cause any errors
+=====================
+*/
 void __cdecl CL_Disconnect(int localClientNum)
 {
     if (clientUIActives[0].isRunning)
     {
         SCR_StopCinematic(localClientNum);
+        // shutting down the client so enter full screen ui mode
         CL_SetLocalClientConnectionState(localClientNum, CA_DISCONNECTED);
         SND_DisconnectListener(localClientNum);
         //CL_ResetLastGamePadEventTime(); // KISAKTODO
@@ -657,12 +696,22 @@ void __cdecl CL_Disconnect(int localClientNum)
     }
 }
 
+/*
+===================
+CL_ForwardCommandToServer
+
+adds the current command line as a clientCommand
+things like godmode, noclip, etc, are commands directed to the server,
+so when they are typed in at the console, they will need to be forwarded.
+===================
+*/
 void __cdecl CL_ForwardCommandToServer(int localClientNum, const char *string)
 {
     const char *cmd; // r31
 
     cmd = Cmd_Argv(0);
 
+    // ignore key up commands
     if (*cmd != '-')
     {
         if (cls.demoplaying || clientUIActives[0].connectionState == CA_DISCONNECTED || *cmd == '+')
@@ -680,6 +729,11 @@ void __cdecl CL_ForwardCommandToServer(int localClientNum, const char *string)
     }
 }
 
+/*
+==================
+CL_ForwardToServer_f
+==================
+*/
 void __cdecl CL_ForwardToServer_f()
 {
     char v0[1032]; // [sp+50h] [-410h] BYREF
@@ -688,6 +742,7 @@ void __cdecl CL_ForwardToServer_f()
     {
         Com_Printf(CON_CHANNEL_DONT_FILTER, "Not connected to a server.\n");
     }
+    // don't forward the first argument
     else if (Cmd_Argc() > 1)
     {
         Cmd_ArgsBuffer(1, v0, 1024);
@@ -718,6 +773,13 @@ void __cdecl CL_InitLoad(const char *mapname)
     clientUIActives[0].connectionState = CA_MAP_RESTART;
 }
 
+/*
+=================
+CL_PacketEvent
+
+A packet has arrived from the main event loop
+=================
+*/
 void __cdecl CL_PacketEvent(msg_t *msg, int serverMessageSequence)
 {
     int readcount; // r27
@@ -732,11 +794,17 @@ void __cdecl CL_PacketEvent(msg_t *msg, int serverMessageSequence)
             "%s",
             "msg->cursize >= 4 && *(int *)msg->data != -1");
     MSG_BeginReading(msg);
+    // the header is different lengths for reliable and unreliable messages
     readcount = msg->readcount;
     messageNum = clients[0].snap.messageNum;
+    // track the last message received so it can be returned in
+    // client messages, allowing the server to detect a dropped
+    // gamestate
     clientConnections[0].serverMessageSequence = serverMessageSequence;
     clientConnections[0].lastPacketTime = cls.realtime;
     CL_ParseServerMessage(msg);
+    // we don't know if it is ok to save a demo message until
+    // after we have parsed the frame
     if (cls.demorecording)
     {
         CL_WriteDemoMessage(msg, readcount);
@@ -766,6 +834,12 @@ void __cdecl CheckForConsoleGuidePause(int localClientNum)
 #endif
 }
 
+/*
+==================
+CL_Frame
+
+==================
+*/
 void __cdecl CL_Frame(int localClientNum, int msec)
 {
     int v14; // r29
@@ -847,14 +921,21 @@ bool __cdecl CL_IsUIActive(const int localClientNum)
     return (clientUIActives[0].keyCatchers & 0x10) != 0;
 }
 
+/*
+============
+CL_InitRenderer
+============
+*/
 void __cdecl CL_InitRenderer()
 {
     iassert(!cls.rendererStarted);
     cls.rendererStarted = 1;
+    // this sets up the renderer and calls R_Init
     R_BeginRegistration(&cls.vidConfig);
     ScrPlace_SetupUnsafeViewport(&scrPlaceFullUnsafe, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
     ScrPlace_SetupViewport(&scrPlaceFull, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
     ScrPlace_SetupViewport(scrPlaceView, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
+    // load character sets
     cls.whiteMaterial = Material_RegisterHandle("white", IMAGE_TRACK_UI);
     cls.consoleMaterial = Material_RegisterHandle("console", IMAGE_TRACK_UI);
     cls.consoleFont = R_RegisterFont("fonts/consoleFont", IMAGE_TRACK_UI);
@@ -983,6 +1064,14 @@ void CL_InitDevGui()
     CL_CreateDevGui();
 }
 
+/*
+============================
+CL_StartHunkUsers
+
+After the server has cleared the hunk, these will need to be restarted
+This is the only place that any of these functions are called from
+============================
+*/
 void __cdecl CL_StartHunkUsers()
 {
     if (clientUIActives[0].isRunning)
@@ -1031,6 +1120,11 @@ static void CL_SetFastFileNames(GfxConfiguration *config, bool dedicatedServer)
     config->modFastFileName = DB_ModFileExists() != 0 ? "mod" : NULL;
 }
 
+/*
+============
+CL_InitRef
+============
+*/
 void __cdecl CL_InitRef()
 {
     GfxConfiguration config; // [sp+50h] [-20h] BYREF
@@ -1039,6 +1133,7 @@ void __cdecl CL_InitRef()
     SetupGfxConfig(&config);
     CL_SetFastFileNames(&config, 0);
     R_ConfigureRenderer(&config);
+    // unpause so the cgame definately gets a snapshot and renders a frame
     Dvar_SetInt(cl_paused, 0);
 }
 
@@ -1325,6 +1420,12 @@ void CL_Pause_f()
 }
 
 static int recursive;
+/*
+===============
+CL_Shutdown
+
+===============
+*/
 void __cdecl CL_Shutdown(int localClientNum)
 {
     iassert(Sys_IsMainThread());
@@ -1546,13 +1647,20 @@ void __cdecl CL_ShutdownRenderer(int destroyWindow)
     //Con_ShutdownClientAssets(); // nullsub
 }
 
+/*
+=====================
+CL_ShutdownAll
+=====================
+*/
 void __cdecl CL_ShutdownAll(bool destroyWindow)
 {
     R_SyncRenderThread();
     CL_ShutdownHunkUsers();
 
+    // shutdown the renderer
     if (cls.rendererStarted)
     {
+        // don't destroy window or context
         CL_ShutdownRenderer(destroyWindow);
         iassert(!cls.rendererStarted);
     }
@@ -1589,6 +1697,16 @@ void __cdecl CL_Disconnect_f()
     CL_DisconnectLocalClient();
 }
 
+/*
+=================
+CL_Vid_Restart_f
+
+Restart the video subsystem
+
+we also have to reload the UI and CGame because the renderer
+doesn't know what graphics to reload
+=================
+*/
 void __cdecl CL_Vid_Restart_f()
 {
     if (com_sv_running->current.enabled)
@@ -1601,6 +1719,7 @@ void __cdecl CL_Vid_Restart_f()
         CL_ShutdownHunkUsers();
         CL_ShutdownRef();
         cls.rendererStarted = 0;
+        // clear the whole hunk
         Com_Restart();
         Dvar_RegisterInt("loc_language", 0, (DvarLimits)0xE00000000LL, DVAR_ARCHIVE | DVAR_LATCH, "The current language locale");
         Dvar_RegisterBool("loc_translate", true, DVAR_LATCH, "Turn on string translation");
@@ -1616,6 +1735,15 @@ void __cdecl CL_Vid_Restart_f()
     }
 }
 
+/*
+=================
+CL_Snd_Restart_f
+
+Restart the sound subsystem
+The cgame and game must also be forced to restart because
+handles will be invalid
+=================
+*/
 void __cdecl CL_Snd_Restart_f()
 {
     if (com_sv_running->current.enabled)
@@ -1631,6 +1759,11 @@ void __cdecl CL_Snd_Restart_f()
     }
 }
 
+/*
+============
+CL_ShutdownRef
+============
+*/
 void __cdecl CL_ShutdownRef()
 {
     R_SyncRenderThread();
@@ -1735,6 +1868,11 @@ cmd_function_s CL_DecAnimWeight_f_VAR;
 cmd_function_s XModelDumpInfo_VAR;
 cmd_function_s CL_StopControllerRumbles_VAR;
 
+/*
+====================
+CL_Init
+====================
+*/
 void __cdecl CL_Init(int localClientNum)
 {
     int v21; // r28
@@ -1748,10 +1886,14 @@ void __cdecl CL_Init(int localClientNum)
     srand(Sys_MillisecondsRaw());
     Con_Init();
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
-    clientUIActives[0].connectionState = CA_DISCONNECTED;
+    clientUIActives[0].connectionState = CA_DISCONNECTED;	// no longer CA_UNINITIALIZED
     //CL_ResetLastGamePadEventTime(); // KISAKTODO
     cls.realtime = 0;
     CL_InitInput();
+
+    //
+    // register our variables
+    //
     cl_noprint = Dvar_RegisterBool("cl_noprint", 0, 0, "Print nothing to the console");
     cl_shownet = Dvar_RegisterInt("cl_shownet", 0, -2, 4, 0, "Display network debugging information");
     cl_avidemo = Dvar_RegisterInt("cl_avidemo", 0, 0, 0x7FFFFFFF, 0, "AVI demo frames per second");

@@ -38,6 +38,15 @@ uint16_t __cdecl Trace_GetDynEntHitId(const trace_t *trace, DynEntityDrawType *d
     }
 }
 
+/*
+===================
+CM_TempBoxModel
+
+To keep everything totally uniform, bounding boxes are turned into small
+BSP trees instead of being compared directly.
+Capsules are handled differently though.
+===================
+*/
 uint __cdecl CM_TempBoxModel(const float *mins, const float *maxs, int contents)
 {
     float *v4; // [esp+0h] [ebp-18h]
@@ -87,6 +96,11 @@ bool __cdecl CM_ClipHandleIsValid(uint handle)
     return handle < cm.numSubModels || handle == 4095;
 }
 
+/*
+==================
+CM_ClipHandleToModel
+==================
+*/
 cmodel_t *__cdecl CM_ClipHandleToModel(uint handle)
 {
     const char *v2; // eax
@@ -112,6 +126,11 @@ int __cdecl CM_ContentsOfModel(uint handle)
     return v1->leaf.terrainContents | v1->leaf.brushContents;
 }
 
+/*
+==================
+CM_BoxTrace
+==================
+*/
 void __cdecl CM_BoxTrace(
     trace_t *results,
     const float *start,
@@ -121,11 +140,17 @@ void __cdecl CM_BoxTrace(
     uint model,
     int brushmask)
 {
+    // fill in a default trace
     memset((uint8_t *)results, 0, sizeof(trace_t));
-    results->fraction = 1.0;
+    results->fraction = 1.0; // assume it goes the entire distance until shown otherwise
     CM_Trace(results, start, end, mins, maxs, model, brushmask);
 }
 
+/*
+==================
+CM_Trace
+==================
+*/
 void __cdecl CM_Trace(
     trace_t *results,
     const float *start,
@@ -144,7 +169,7 @@ void __cdecl CM_Trace(
     int i; // [esp+150h] [ebp-14h]
     float end_[4]; // [esp+154h] [ebp-10h] BYREF
 
-    iassert(cm.numNodes);
+    iassert(cm.numNodes); // map not loaded, shouldn't happen
     iassert(mins);
     iassert(maxs);
     iassert(!IS_NAN(end[0]) && !IS_NAN(end[1]) && !IS_NAN(end[2]));
@@ -152,7 +177,11 @@ void __cdecl CM_Trace(
     PROF_SCOPED("CM_Trace");
 
     cmod = CM_ClipHandleToModel(model);
+    // set basic parms
     tw.contents = brushmask;
+    // adjust so that mins and maxs are always symetric, which
+    // avoids some complications with plane expanding of rotated
+    // bmodels
     for (i = 0; i < 3; ++i)
     {
         iassert( maxs[i] >= mins[i] );
@@ -178,6 +207,9 @@ void __cdecl CM_Trace(
 
     tw.boundingRadius = Vec3Length(tw.size);
     tw.offsetZ = tw.size[2] - tw.radius;
+    //
+    // calculate bounds
+    //
     for (i = 0; i < 2; ++i)
     {
         if (tw.extents.end[i] <= tw.extents.start[i])
@@ -208,6 +240,9 @@ void __cdecl CM_Trace(
     oldSurfaceFlags = results->surfaceFlags;
     oldFrac = results->fraction;
     results->surfaceFlags = SURF_INVALID;
+    //
+    // check for position test special case
+    //
     if (*end == *start && end[1] == start[1] && end[2] == start[2])
     {
         tw.isPoint = 0;
@@ -236,11 +271,17 @@ void __cdecl CM_Trace(
         iassert( tw.size[0] >= 0 );
         iassert( tw.size[1] >= 0 );
         iassert( tw.size[2] >= 0 );
+        //
+        // check for point special case
+        //
         tw.isPoint = tw.size[0] + tw.size[1] + tw.size[2] == 0.0;
         iassert( tw.offsetZ >= 0 );
         tw.radiusOffset[0] = tw.radius;
         tw.radiusOffset[1] = tw.radius;
         tw.radiusOffset[2] = tw.radius + tw.offsetZ;
+        //
+        // general sweeping through world
+        //
         if (model)
         {
             if (model == 4095)
@@ -286,16 +327,22 @@ void __cdecl CM_GetTraceThreadInfo(TraceThreadInfo *threadInfo)
     iassert( threadInfo );
     value = (TraceThreadInfo *)Sys_GetValue(3);
     iassert( value );
-    ++value->checkcount.global;
+    ++value->checkcount.global; // for multi-check avoidance
     *threadInfo = *value;
     iassert(threadInfo->checkcount.partitions || cm.partitionCount == 0);
 }
 
+/*
+================
+CM_TestInLeaf
+================
+*/
 void __cdecl CM_TestInLeaf(traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
 {
     if (((tw->contents & leaf->brushContents) == 0 || !CM_TestInLeafBrushNode(tw, leaf, trace))
         && (tw->contents & leaf->terrainContents) != 0)
     {
+        // test against all patches
         CM_MeshTestInLeaf(tw, leaf, trace);
     }
 }
@@ -329,6 +376,7 @@ void __cdecl CM_TestInLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_s *n
         {
             if (node->leafBrushCount > 0)
             {
+                // test box position against all brushes in the leaf
                 brushes = node->data.leaf.brushes;
                 for (k = 0; k < node->leafBrushCount; ++k)
                 {
@@ -363,6 +411,11 @@ void __cdecl CM_TestInLeafBrushNode_r(const traceWork_t *tw, cLeafBrushNode_s *n
     }
 }
 
+/*
+================
+CM_TestBoxInBrush
+================
+*/
 void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *trace)
 {
     float v3; // [esp+0h] [ebp-58h]
@@ -375,6 +428,7 @@ void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *
 
     nanassertvec3(tw->extents.start);
     nanassertvec3(tw->extents.end);
+    // special test for axial
     if (brush->maxs[0] > (double)tw->bounds[0][0]
         && brush->maxs[1] > (double)tw->bounds[0][1]
         && brush->maxs[2] > (double)tw->bounds[0][2]
@@ -392,17 +446,21 @@ void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *
             iassert( !IS_NAN(tw->radius) );
             nanassertvec3(plane->normal);
             iassert( !IS_NAN(tw->offsetZ) );
+            // find the closest point on the capsule to the plane
             v4 = tw->offsetZ * plane->normal[2];
             v3 = I_fabs(v4);
+            // adjust the plane distance apropriately for radius
             dist = plane->dist + tw->radius + v3;
             iassert( !IS_NAN(dist) );
             d1 = Vec3Dot(tw->extents.start, plane->normal) - dist;
             iassert( !IS_NAN(d1) );
+            // if completely in front of face, no intersection
             if (d1 > 0.0)
                 return;
             --i;
             ++side;
         }
+        // inside this brush
         trace->startsolid = 1;
         trace->allsolid = 1;
         trace->fraction = 0.0;
@@ -411,6 +469,13 @@ void __cdecl CM_TestBoxInBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *
     }
 }
 
+/*
+==================
+CM_TestCapsuleInCapsule
+
+capsule inside capsule check
+==================
+*/
 void __cdecl CM_TestCapsuleInCapsule(const traceWork_t *tw, trace_t *trace)
 {
     float v2; // [esp+0h] [ebp-88h]
@@ -450,6 +515,7 @@ void __cdecl CM_TestCapsuleInCapsule(const traceWork_t *tw, trace_t *trace)
     radius = v3;
     offs = halfheight - v3;
     r = (tw->radius + v3) * (tw->radius + v3);
+    // check if any of the spheres overlap
     p1[0] = offset[0];
     p1[1] = offset[1];
     p1[2] = offset[2] + offs;
@@ -485,10 +551,13 @@ void __cdecl CM_TestCapsuleInCapsule(const traceWork_t *tw, trace_t *trace)
     fTotalHalfHeight = offs + tw->size[2] - tw->radius;
     iassert( fTotalHalfHeight >= 0 );
     v2 = I_fabs(fHeightDiff);
+    // if between cylinder up and lower bounds
     if (fTotalHalfHeight >= v2)
     {
+        // 2d coordinates
         p1[2] = 0.0;
         top[2] = 0.0;
+        // if the cylinders overlap
         Vec3Sub(top, p1, tmp);
         if (r > Vec3LengthSq(tmp))
         {
@@ -501,6 +570,11 @@ void __cdecl CM_TestCapsuleInCapsule(const traceWork_t *tw, trace_t *trace)
     }
 }
 
+/*
+==================
+CM_PositionTest
+==================
+*/
 void __cdecl CM_PositionTest(traceWork_t *tw, trace_t *trace)
 {
     leafList_s ll; // [esp+0h] [ebp-834h] BYREF
@@ -509,6 +583,7 @@ void __cdecl CM_PositionTest(traceWork_t *tw, trace_t *trace)
 
     if (!trace->allsolid)
     {
+        // identify the leafs we are touching
         Vec3Sub(tw->extents.start, tw->size, ll.bounds[0]);
         Vec3Add(tw->extents.start, tw->size, ll.bounds[1]);
         for (i = 0; i < 3; ++i)
@@ -522,6 +597,7 @@ void __cdecl CM_PositionTest(traceWork_t *tw, trace_t *trace)
         ll.lastLeaf = 0;
         ll.overflowed = 0;
         CM_BoxLeafnums_r(&ll, 0);
+        // test the contents of the leafs
         if (ll.count)
         {
             for (i = 0; i < ll.count && !trace->allsolid; ++i)
@@ -530,12 +606,27 @@ void __cdecl CM_PositionTest(traceWork_t *tw, trace_t *trace)
     }
 }
 
+/*
+===============================================================================
+
+TRACING
+
+===============================================================================
+*/
+
+
+/*
+================
+CM_TraceThroughLeaf
+================
+*/
 void __cdecl CM_TraceThroughLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *trace)
 {
     int k; // [esp+60h] [ebp-4h]
 
     if (trace->fraction != 0.0)
     {
+        // trace line against all brushes in the leaf
         if ((tw->contents & leaf->brushContents) != 0)
         {
             PROF_SCOPED("CM_TraceBrush"); 
@@ -549,6 +640,7 @@ void __cdecl CM_TraceThroughLeaf(const traceWork_t *tw, cLeaf_t *leaf, trace_t *
             return;
 
         PROF_SCOPED("CM_TraceTerrain");
+        // trace line against all patches in the leaf
         for (k = 0; k < leaf->collAabbCount && trace->fraction != 0.0; ++k)
             CM_TraceThroughAabbTree(tw, &cm.aabbTrees[k + leaf->firstCollAabbIndex], trace);
         return;
@@ -721,6 +813,11 @@ void __cdecl CM_TraceThroughLeafBrushNode_r(
     }
 }
 
+/*
+================
+CM_TraceThroughBrush
+================
+*/
 void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_t *trace)
 {
     float v3; // [esp+8h] [ebp-100h]
@@ -833,6 +930,11 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
         }
         break;
     }
+    //
+    // compare the trace against all planes of the brush
+    // find the latest time the trace crosses a plane towards the interior
+    // and the earliest time the trace crosses a plane towards the exterior
+    //
     side = brush->sides;
     i = brush->numsides;
     iassert( i >= 0 );
@@ -845,19 +947,24 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
             iassert( !IS_NAN(tw->radius) );
             nanassertvec3(plane->normal);
             iassert( !IS_NAN(tw->offsetZ) );
+            // find the closest point on the capsule to the plane
             v11 = tw->offsetZ * plane->normal[2];
             v5 = I_fabs(v11);
             offsetDotNormal = v5;
+            // adjust the plane distance apropriately for radius
             dist = plane->dist + tw->radius + v5;
             iassert( !IS_NAN(dist) );
             d1a = Vec3Dot(tw->extents.start, plane->normal) - dist;
             d2 = Vec3Dot(tw->extents.end, plane->normal) - dist;
-            iassert( !IS_NAN(d1) );
+            iassert( !IS_NAN(d1a) );
             iassert( !IS_NAN(d2) );
+            // crosses face
             if (d1a <= 0.0)
             {
+                // if it doesn't cross the plane, the plane isn't relevent
                 if (d2 > 0.0)
                 {
+                    // leave
                     delta = d1a - d2;
                     iassert( delta < 0 );
                     if (d1a > leaveFrac * delta)
@@ -871,6 +978,7 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
             }
             else
             {
+                // if completely in front of face, no intersection with the entire brush
                 v4 = 0.125 - d1a;
                 if (v4 < 0.0)
                     v3 = 0.125;
@@ -879,7 +987,8 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
                 if (v3 <= (double)d2)
                     return;
                 if (d2 > 0.0)
-                    allsolid = 0;
+                    allsolid = 0; // endpoint is not in solid
+                // enter
                 delta = d1a - d2;
                 iassert( !IS_NAN(delta) );
                 iassert( delta > 0 );
@@ -904,6 +1013,10 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
         }
         break;
     }
+    //
+    // all planes have been checked, and the trace was not
+    // completely outside the brush
+    //
     trace->contents = brush->contents;
     if (leadside)
     {
@@ -926,6 +1039,7 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
     }
     else
     {
+        // original point was inside brush
         trace->startsolid = 1;
         if (allsolid)
         {
@@ -936,6 +1050,13 @@ void __cdecl CM_TraceThroughBrush(const traceWork_t *tw, cbrush_t *brush, trace_
     }
 }
 
+/*
+================
+CM_TraceCapsuleThroughCapsule
+
+capsule vs. capsule collision (not rotated)
+================
+*/
 void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace)
 {
     float v2; // [esp+Ch] [ebp-A4h]
@@ -959,6 +1080,7 @@ void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace
     int i; // [esp+A0h] [ebp-10h]
     float bottom[3]; // [esp+A4h] [ebp-Ch] BYREF
 
+    // test trace bounds vs. capsule bounds
     v8 = tw->threadInfo.box_model->maxs[0] + 1.0;
     if (tw->bounds[0][0] <= (double)v8)
     {
@@ -977,6 +1099,7 @@ void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace
                         v3 = tw->threadInfo.box_model->mins[2] - 1.0;
                         if (tw->bounds[1][2] >= (double)v3)
                         {
+                            // top origin and bottom origin of each sphere at start and end of trace
                             starttop[0] = tw->extents.start[0];
                             starttop[1] = tw->extents.start[1];
                             starttop[2] = tw->extents.start[2] + tw->offsetZ;
@@ -989,6 +1112,7 @@ void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace
                             endbottom[0] = tw->extents.end[0];
                             endbottom[1] = tw->extents.end[1];
                             endbottom[2] = tw->extents.end[2] - tw->offsetZ;
+                            // calculate top and bottom of the capsule spheres to collide with
                             for (i = 0; i < 3; ++i)
                             {
                                 offset[i] = (tw->threadInfo.box_model->mins[i] + tw->threadInfo.box_model->maxs[i]) * 0.5;
@@ -1009,6 +1133,7 @@ void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace
                             bottom[0] = offset[0];
                             bottom[1] = offset[1];
                             bottom[2] = offset[2] - offs;
+                            // test for collision between the spheres
                             if (top[2] >= (double)startbottom[2])
                             {
                                 if (bottom[2] > (double)starttop[2]
@@ -1022,6 +1147,7 @@ void __cdecl CM_TraceCapsuleThroughCapsule(const traceWork_t *tw, trace_t *trace
                             {
                                 return;
                             }
+                            // test for collisions between the cylinders
                             if (CM_TraceCylinderThroughCylinder(tw, offset, offs, radius, trace))
                             {
                                 if (top[2] >= (double)endbottom[2])
@@ -1257,6 +1383,16 @@ int __cdecl CM_TraceCylinderThroughCylinder(
     }
 }
 
+/*
+==================
+CM_TraceThroughTree
+
+Traverse all the contacted leafs from the start to the end position.
+If the trace is a point, they will be exactly in order, but for larger
+trace volumes it is possible to hit something in a later leaf with
+a smaller intercept fraction.
+==================
+*/
 void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1_, const float *p2, trace_t *trace)
 {
     float v5; // [esp+8h] [ebp-7Ch]
@@ -1289,8 +1425,13 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
     p1[3] = p1_[3];
     while (num >= 0)
     {
+        //
+        // find the point distances to the seperating plane
+        // and the offset for the size of the box
+        //
         node = &cm.nodes[num];
         plane = node->plane;
+        // adjust the plane distance apropriately for mins/maxs
         if (node->plane->type >= 3u)
         {
             t1 = Vec3Dot(plane->normal, p1) - plane->dist;
@@ -1306,6 +1447,7 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
             t2 = p2[plane->type] - plane->dist;
             offset = tw->size[plane->type] + 0.125;
         }
+        // see which sides we need to consider
         v14 = t2 - t1;
         if (v14 < 0.0)
             v13 = t2;
@@ -1320,8 +1462,10 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
                 v11 = t1;
             if (v11 > -offset)
             {
+                // already hit something nearer
                 if (p1[3] >= (double)trace->fraction)
                     return;
+                // put the crosspoint SURFACE_CLIP_EPSILON pixels on the near side
                 diff = t2 - t1;
                 v10 = I_fabs(diff);
                 absDiff = v10;
@@ -1343,6 +1487,7 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
                     side = diff >= 0.0;
                 }
                 iassert( frac >= 0 );
+                // move up to the node
                 v8 = 1.0 - frac;
                 if (v8 < 0.0)
                     v7 = 1.0;
@@ -1354,6 +1499,7 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
                 mid[3] = (p2[3] - p1[3]) * v7 + p1[3];
                 CM_TraceThroughTree(tw, node->children[side], p1, mid, trace);
                 iassert( (frac2 <= 1.0f) );
+                // go past the node
                 v6 = frac2 - 0.0;
                 if (v6 < 0.0)
                     v5 = 0.0;
@@ -1376,6 +1522,7 @@ void __cdecl CM_TraceThroughTree(const traceWork_t *tw, int num, const float *p1
             num = node->children[0];
         }
     }
+    // if < 0, we are in a leaf node
     CM_TraceThroughLeaf(tw, &cm.leafs[-1 - num], trace);
 }
 
@@ -1414,6 +1561,9 @@ void __cdecl CM_TransformedBoxTraceRotated(
 
     iassert( mins );
     iassert( maxs );
+    // adjust so that mins and maxs are always symetric, which
+    // avoids some complications with plane expanding of rotated
+    // bmodels
     for (i = 0; i < 3; ++i)
     {
         symetricSize[2][i] = (mins[i] + maxs[i]) * 0.5;
@@ -1422,20 +1572,38 @@ void __cdecl CM_TransformedBoxTraceRotated(
         start_l[i] = start[i] + symetricSize[2][i];
         end_l[i] = end[i] + symetricSize[2][i];
     }
+    // subtract origin offset
     Vec3Sub(start_l, origin, start_l);
     Vec3Sub(end_l, origin, end_l);
     halfheight = symetricSize[1][2];
+    // rotation on trace line (start-end) instead of rotating the bmodel
+    // NOTE: This is still incorrect for bounding boxes because the actual bounding
+    //		 box that is swept through the model is not rotated. We cannot rotate
+    //		 the bounding box or the bmodel because that would make all the brush
+    //		 bevels invalid.
+    //		 However this is correct for capsules since a capsule itself is rotated too.
     G_RotatePoint(start_l, matrix);
     G_RotatePoint(end_l, matrix);
     oldFraction = results->fraction;
+    // sweep the box through the model
     CM_Trace(results, start_l, end_l, symetricSize[0], symetricSize[1], model, brushmask);
+    // if the bmodel was rotated and there was a collision
     if (oldFraction > (double)results->fraction)
     {
+        // rotation of bmodel collision plane
         G_TransposeMatrix(matrix, transpose);
         G_RotatePoint(results->normal, transpose);
     }
 }
 
+/*
+==================
+CM_TransformedBoxTrace
+
+Handles offseting and rotation of the end points for moving and
+rotating entities
+==================
+*/
 void __cdecl CM_TransformedBoxTrace(
     trace_t *results,
     const float *start,
@@ -1461,6 +1629,9 @@ void __cdecl CM_TransformedBoxTrace(
     iassert( maxs );
     if (*angles == 0.0 && angles[1] == 0.0 && angles[2] == 0.0)
     {
+        // adjust so that mins and maxs are always symetric, which
+        // avoids some complications with plane expanding of rotated
+        // bmodels
         for (i = 0; i < 3; ++i)
         {
             symetricSize[2][i] = (mins[i] + maxs[i]) * 0.5;
@@ -1469,6 +1640,7 @@ void __cdecl CM_TransformedBoxTrace(
             start_l[i] = start[i] + symetricSize[2][i];
             end_l[i] = end[i] + symetricSize[2][i];
         }
+        // subtract origin offset
         Vec3Sub(start_l, origin, start_l);
         Vec3Sub(end_l, origin, end_l);
         halfwidth = symetricSize[1][0];
@@ -1485,10 +1657,12 @@ void __cdecl CM_TransformedBoxTrace(
                 v8);
         }
         oldFraction = results->fraction;
+        // sweep the box through the model
         CM_Trace(results, start_l, end_l, symetricSize[0], symetricSize[1], model, brushmask);
     }
     else
     {
+        // rotate start and end into the models frame of reference
         AnglesToAxis(angles, matrix);
         CM_TransformedBoxTraceRotated(results, start, end, mins, maxs, model, brushmask, origin, matrix);
     }
@@ -1745,8 +1919,8 @@ int __cdecl CM_SightTraceThroughBrush(const traceWork_t *tw, cbrush_t *brush)
         iassert( !IS_NAN(dist) );
         d1a = Vec3Dot(tw->extents.start, plane->normal) - dist;
         d2a = Vec3Dot(tw->extents.end, plane->normal) - dist;
-        iassert( !IS_NAN(d1) );
-        iassert( !IS_NAN(d2) );
+        iassert( !IS_NAN(d1a) );
+        iassert( !IS_NAN(d2a) );
         if (d1a <= 0.0)
         {
             if (d2a > 0.0)

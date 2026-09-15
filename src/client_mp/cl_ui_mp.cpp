@@ -39,6 +39,11 @@ bool __cdecl CL_AllowPopup(int localClientNum)
     return !CL_GetLocalClientConnection(localClientNum)->demoplaying && connstate == CA_ACTIVE;
 }
 
+/*
+====================
+LAN_ResetPings
+====================
+*/
 void __cdecl LAN_ResetPings(int source)
 {
     int i; // [esp+4h] [ebp-Ch]
@@ -72,6 +77,11 @@ void __cdecl LAN_ResetPings(int source)
     }
 }
 
+/*
+====================
+LAN_GetServerCount
+====================
+*/
 int __cdecl LAN_GetServerCount(int source)
 {
     switch (source)
@@ -94,6 +104,11 @@ int __cdecl LAN_WaitServerResponse(int source)
         return 0;
 }
 
+/*
+====================
+LAN_GetServerInfo
+====================
+*/
 void __cdecl LAN_GetServerInfo(int source, uint n, char *buf, int buflen)
 {
     const char *v4; // eax
@@ -183,6 +198,11 @@ void __cdecl LAN_GetServerInfo(int source, uint n, char *buf, int buflen)
     }
 }
 
+/*
+====================
+LAN_GetServerPing
+====================
+*/
 int __cdecl LAN_GetServerPing(int source, uint n)
 {
     serverInfo_t *server; // [esp+4h] [ebp-4h]
@@ -210,6 +230,11 @@ int __cdecl LAN_GetServerPing(int source, uint n)
         return -1;
 }
 
+/*
+====================
+LAN_GetServerPtr
+====================
+*/
 serverInfo_t *__cdecl LAN_GetServerPtr(int source, uint n)
 {
     if (source)
@@ -262,6 +287,11 @@ int __cdecl LAN_CompareHostname(const char *hostName1, const char *hostName2)
         return I_stricmp(hostName1, hostName2);
 }
 
+/*
+====================
+LAN_CompareServers
+====================
+*/
 int __cdecl LAN_CompareServers(int source, int sortKey, int sortDir, uint s1, uint s2)
 {
     char *v6; // eax
@@ -441,6 +471,11 @@ int __cdecl LAN_UpdateDirtyPings(int localClientNum, uint source)
     return CL_UpdateDirtyPings(localClientNum, source);
 }
 
+/*
+====================
+Key_KeynumToStringBuf
+====================
+*/
 void __cdecl Key_KeynumToStringBuf(int keynum, char *buf, int buflen)
 {
     char *v3; // eax
@@ -473,6 +508,11 @@ int __cdecl CL_GetClientName(int localClientNum, int index, char *buf, int size)
     return 0;
 }
 
+/*
+====================
+CL_ShutdownUI
+====================
+*/
 int __cdecl CL_ShutdownUI()
 {
     int localClientNum; // [esp+0h] [ebp-4h]
@@ -487,11 +527,17 @@ int __cdecl CL_ShutdownUI()
     return 1;
 }
 
+/*
+====================
+CL_InitUI
+====================
+*/
 void __cdecl CL_InitUI()
 {
     int localClientNum; // [esp+0h] [ebp-8h]
     int remoteScreenUpdateNesting; // [esp+4h] [ebp-4h]
 
+    // init for this gamestate
     for (localClientNum = 0; localClientNum < 1; ++localClientNum)
         UI_Init(localClientNum);
     UI_Component_Init();

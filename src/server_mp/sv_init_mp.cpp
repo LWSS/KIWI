@@ -45,6 +45,11 @@ const dvar_t *sv_wwwDlDisconnected;
 const dvar_t *sv_loadMyChanges;
 const dvar_t *sv_clientArchive;
 
+/*
+===============
+SV_SetConfigstring
+===============
+*/
 void __cdecl SV_SetConfigstring(int index, const char *val)
 {
     uint16_t v2; // [esp+20h] [ebp-444h]
@@ -66,18 +71,23 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
     {
         if (!val)
             val = (char *)"";
+        // don't bother broadcasting an update if no change
         if (strcmp(val, SL_ConvertToString(sv.configstrings[index])))
         {
+            // change the string in sv
             SL_RemoveRefToString(sv.configstrings[index]);
             caseSensitive = index < 821;
             v2 = index < 821 ? SL_GetString_(val, 0, MT_TYPE_CONFIG_STRING) : SL_GetLowercaseString_(val, 0, MT_TYPE_CONFIG_STRING);
             sv.configstrings[index] = v2;
+            // send it to all the clients if we aren't
+            // spawning a new server
             if (SV_Loaded() || sv.restarting)
             {
                 len = strlen(val);
                 snprintf(buf, ARRAYSIZE(buf), "%i", index);
                 overhead = &buf[strlen(buf) + 1] - &buf[1] + 4;
                 maxChunk = 1024 - overhead;
+                // send the data to all relevent clients
                 i = 0;
                 client = svs.clients;
                 while (i < sv_maxclients->current.integer)
@@ -86,6 +96,7 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
                     {
                         if (len <= maxChunk)
                         {
+                            // standard cs, just send it
                             SV_SendServerCommand(client, SV_CMD_RELIABLE, "%c %i %s", 100, index, val);
                         }
                         else
@@ -119,6 +130,11 @@ void __cdecl SV_SetConfigstring(int index, const char *val)
     else iassert(!val);
 }
 
+/*
+===============
+SV_GetConfigstring
+===============
+*/
 void __cdecl SV_GetConfigstring(uint index, char *buffer, int bufferSize)
 {
     if (bufferSize < 1)
@@ -182,6 +198,11 @@ void __cdecl SV_SetConfigValueForKey(int start, int max, char *key, char *value)
     SV_SetConfigstring(ia + max + start, value);
 }
 
+/*
+===============
+SV_SetUserinfo
+===============
+*/
 void __cdecl SV_SetUserinfo(int index, char *val)
 {
     const char *v2; // eax
@@ -195,6 +216,11 @@ void __cdecl SV_SetUserinfo(int index, char *val)
     I_strncpyz(svs.clients[index].name, v2, 16);
 }
 
+/*
+===============
+SV_GetUserinfo
+===============
+*/
 void __cdecl SV_GetUserinfo(int index, char *buffer, int bufferSize)
 {
     if (bufferSize < 1)
@@ -204,6 +230,15 @@ void __cdecl SV_GetUserinfo(int index, char *buffer, int bufferSize)
     I_strncpyz(buffer, svs.clients[index].userinfo, bufferSize);
 }
 
+/*
+================
+SV_CreateBaseline
+
+Entity baselines are used to compress non-delta messages
+to the clients -- only the fields that differ from the
+baseline will be transmitted
+================
+*/
 void __cdecl SV_CreateBaseline()
 {
     float *absmax; // [esp+8h] [ebp-18h]
@@ -217,6 +252,7 @@ void __cdecl SV_CreateBaseline()
         if (svent->r.linked)
         {
             svent->s.number = entnum;
+            // take current state as baseline
             memcpy(&sv.svEntities[entnum].baseline, svent, 0xF4u);
             sv.svEntities[entnum].baseline.r.svFlags = svent->r.svFlags;
             sv.svEntities[entnum].baseline.r.clientMask[0] = svent->r.clientMask[0];
@@ -235,10 +271,16 @@ void __cdecl SV_CreateBaseline()
     }
 }
 
+/*
+===============
+SV_BoundMaxClients
+===============
+*/
 void __cdecl SV_BoundMaxClients(int minimum)
 {
     DvarLimits v1; // [esp-10h] [ebp-14h]
 
+    // get the current maxclients value
     v1.integer.max = Dvar_RegisterInt(
         "ui_maxclients",
         32,
@@ -257,11 +299,22 @@ void __cdecl SV_BoundMaxClients(int minimum)
         Dvar_SetInt((dvar_s *)sv_maxclients, minimum);
 }
 
+/*
+===============
+SV_Startup
+
+Called when a host starts a map when it wasn't running
+one before.  Successive map or map_restart commands will
+NOT cause this to be called, unless the game is exited to
+the menu system first.
+===============
+*/
 void __cdecl SV_Startup()
 {
     iassert(!svs.initialized);
     SV_BoundMaxClients(1);
     iassert(sv_maxclients->current.integer <= 64);
+    // we don't need nearly as many when playing locally
     svs.numSnapshotEntities = 172032;
     svs.numSnapshotClients = sv_maxclients->current.integer * 32 * sv_maxclients->current.integer;
     svs.sv_lastTimeMasterServerCommunicated = svs.time;
@@ -269,6 +322,11 @@ void __cdecl SV_Startup()
     Dvar_SetBool((dvar_s *)com_sv_running, 1);
 }
 
+/*
+================
+SV_ClearServer
+================
+*/
 void __cdecl SV_ClearServer()
 {
     int i; // [esp+0h] [ebp-4h]
@@ -298,6 +356,11 @@ void __cdecl SV_InitDvar()
     Dvar_ResetScriptInfo();
 }
 
+/*
+==================
+SV_ChangeMaxClients
+==================
+*/
 void __cdecl SV_ChangeMaxClients()
 {
     int oldMaxClients; // [esp+0h] [ebp-10h]
@@ -308,6 +371,7 @@ void __cdecl SV_ChangeMaxClients()
     int count; // [esp+Ch] [ebp-4h]
     int counta; // [esp+Ch] [ebp-4h]
 
+    // get the highest client number in use
     count = 0;
     for (i = 0; i < sv_maxclients->current.integer; ++i)
     {
@@ -316,9 +380,12 @@ void __cdecl SV_ChangeMaxClients()
     }
     counta = count + 1;
     oldMaxClients = sv_maxclients->current.integer;
+    // never go below the highest client number in use
     SV_BoundMaxClients(counta);
+    // if still the same
     if (sv_maxclients->current.integer != oldMaxClients)
     {
+        // copy the clients to hunk memory
         oldClients = (client_t *)Hunk_AllocateTempMemory(sizeof(client_t) * counta, "SV_ChangeMaxClients");
         for (ia = 0; ia < counta; ++ia)
         {
@@ -331,13 +398,22 @@ void __cdecl SV_ChangeMaxClients()
                 memcpy(&oldClients[ia], &svs.clients[ia], sizeof(client_t));
             }
         }
+        // free old clients arrays
+        // allocate new clients
         Com_Memset(svs.clients, 0, sizeof(client_t) * sv_maxclients->current.integer);
+
+        // copy the clients over
         for (ib = 0; ib < counta; ++ib)
         {
             if (oldClients[ib].header.state >= CS_CONNECTED)
                 memcpy(&svs.clients[ib], &oldClients[ib], sizeof(svs.clients[ib]));
         }
+
+        // free the old clients on the hunk
         Hunk_FreeTempMemory((char*)oldClients);
+
+        // allocate new snapshot entities
+        // we don't need nearly as many when playing locally
         svs.numSnapshotEntities = 172032;
         svs.numSnapshotClients = sv_maxclients->current.integer * 32 * sv_maxclients->current.integer;
     }
@@ -383,6 +459,15 @@ void __cdecl SV_SetExpectedHunkUsage(char *mapname)
     }
 }
 
+/*
+================
+SV_SpawnServer
+
+Change the server to a new map, taking all connected
+clients along with it.
+This is NOT called for map_restart
+================
+*/
 void __cdecl SV_SpawnServer(char *mapname)
 {
     const char *denied; // [esp+18h] [ebp-B0h]
@@ -465,9 +550,14 @@ void __cdecl SV_SpawnServer(char *mapname)
             CL_ShutdownAll(false);
         }
 
+        // make sure all the client stuff is unloaded
+        // shut down the existing game if it is running
         SV_ShutdownGameProgs();
         Com_Printf(CON_CHANNEL_SERVER, "------ Server Initialization ------\n");
         Com_Printf(CON_CHANNEL_SERVER, "Server: %s\n", mapname);
+
+        // clear the whole hunk because we're (re)loading the server
+        // wipe the entire per-level structure
         SV_ClearServer();
     }
 
@@ -481,15 +571,18 @@ void __cdecl SV_SpawnServer(char *mapname)
         }
         if (!mapIsPreloaded)
             Com_Restart();
+        // check for maxclients change
         if (com_sv_running->current.enabled)
             SV_ChangeMaxClients();
         else
+            // init client structures and svs.numSnapshotEntities
             SV_Startup();
     }
 
 
     I_strncpyz(sv.gametype, sv_gametype->current.string, 64);
 
+    // get a new checksum feed and restart the file system
     srand(Sys_MillisecondsRaw());
     sv.checksumFeed = Sys_Milliseconds() ^ (rand() ^ (rand() << 16));
     FS_Restart(0, sv.checksumFeed);
@@ -538,9 +631,18 @@ void __cdecl SV_SpawnServer(char *mapname)
     svs.nextSnapshotEntities = 0;
     svs.nextSnapshotClients = 0;
     SV_InitArchivedSnapshot();
+    // allocate the snapshot entities on the hunk
     SV_InitSnapshot();
+
+    // toggle the server bit so clients can detect that a
+    // server has changed
     svs.snapFlagServerBit ^= 4u;
+
+    // set nextmap to the same map, but it may be overriden
+    // by the game startup or another console command
     Dvar_SetString((dvar_s *)nextmap, (char*)"map_restart");
+
+    // make sure we are not paused
     Dvar_SetInt((dvar_s *)cl_paused, 0);
 
     Com_GetBspFilename(filename, 0x40u, mapname);
@@ -557,6 +659,7 @@ void __cdecl SV_SpawnServer(char *mapname)
     if (!IsFastFileLoad())
         Com_UnloadBsp();
     CM_LinkWorld();
+    // serverid should be different each time
     sv_serverId_value = (uint8_t)(sv_serverId_value + 16);
     if ((sv_serverId_value & 0xF0) == 0)
         sv_serverId_value += 16;
@@ -571,20 +674,27 @@ void __cdecl SV_SpawnServer(char *mapname)
 
     {
         PROF_SCOPED("Init game");
+        // load and spawn all other entities
         SV_InitGameProgs(savepersist);
     }
 
+    // run a few frames to allow everything to settle
     for (i = 0; i < 3; ++i)
     {
         svs.time += 100;
         SV_RunFrame();
     }
+
+    // create a baseline for more efficient communications
     SV_CreateBaseline();
     for (i = 0; i < sv_maxclients->current.integer; ++i)
     {
         if (svs.clients[i].header.state >= CS_CONNECTED)
         {
+            // connect the client again
             denied = ClientConnect(i, svs.clients[i].scriptId);
+            // this generally shouldn't happen, because the client
+            // was connected before the level change
             if (denied)
                 SV_DropClient(&svs.clients[i], denied, 1);
             else
@@ -606,6 +716,8 @@ void __cdecl SV_SpawnServer(char *mapname)
             ++clienta;
         }
     }
+    // the server sends these to the clients so they will only
+    // load pk3s also loaded at the server
     if (sv_pure->current.enabled)
     {
         p = FS_LoadedIwdChecksums();
@@ -620,6 +732,8 @@ void __cdecl SV_SpawnServer(char *mapname)
         Dvar_SetString((dvar_s *)sv_iwds, (char *)"");
         Dvar_SetString((dvar_s *)sv_iwdNames, (char *)"");
     }
+    // the server sends these to the clients so they can figure
+    // out which pk3s should be auto-downloaded
     p = FS_ReferencedIwdChecksums();
     Dvar_SetString((dvar_s *)sv_referencedIwds, (char *)p);
     p = FS_ReferencedIwdNames();
@@ -628,8 +742,11 @@ void __cdecl SV_SpawnServer(char *mapname)
     Dvar_SetString((dvar_s *)sv_referencedFFCheckSums, (char *)p);
     p = DB_ReferencedFFNameList();
     Dvar_SetString((dvar_s *)sv_referencedFFNames, (char *)p);
+    // save systeminfo and serverinfo strings
     SV_SaveSystemInfo();
     sv.state = SS_GAME;
+
+    // send a heartbeat now so the master will get up to date info
     SV_Heartbeat_f();
     ProfLoad_Deactivate();
     Com_Printf(CON_CHANNEL_SERVER, "-----------------------------------\n");
@@ -659,6 +776,13 @@ bool __cdecl SV_Loaded()
     return sv.state == SS_GAME;
 }
 
+/*
+===============
+SV_Init
+
+Only called at main exe startup, not for each game
+===============
+*/
 void __cdecl SV_Init()
 {
     DvarLimits min; // [esp+4h] [ebp-18h]
@@ -845,6 +969,14 @@ void __cdecl SV_DropAllClients()
     }
 }
 
+/*
+================
+SV_Shutdown
+
+Called when each game quits,
+before Sys_Quit or Sys_Error
+================
+*/
 void __cdecl SV_Shutdown(const char *finalmsg)
 {
     int client; // [esp+0h] [ebp-4h]
@@ -861,19 +993,33 @@ void __cdecl SV_Shutdown(const char *finalmsg)
         SV_DropAllClients();
         SV_WriteEntityFieldNumbers();
         SV_FreeClients();
+        // free current level
         SV_ClearServer();
         Dvar_SetBool((dvar_s *)com_sv_running, 0);
+
+        // disconnect any local clients
         for (client = 0; client < 1; ++client)
         {
             if (CL_IsLocalClientActive(client))
                 CL_Disconnect(client);
         }
+        // free server static data
         memset(&svs, 0, sizeof(svs));
         bgs = 0;
         Com_Printf(CON_CHANNEL_SERVER, "---------------------------\n");
     }
 }
 
+/*
+==================
+SV_FinalMessage
+
+Used by SV_Shutdown to send a final message to all
+connected clients before the server goes down.  The messages are sent immediately,
+not just stuck on the outgoing message list, because the server is going
+to totally exit after returning from this function.
+==================
+*/
 void __cdecl SV_FinalMessage(const char *message)
 {
     int j; // [esp+0h] [ebp-38h]
@@ -883,6 +1029,7 @@ void __cdecl SV_FinalMessage(const char *message)
     int i; // [esp+34h] [ebp-4h]
 
     translationForReason = SEH_StringEd_GetString(message) != 0;
+    // send it twice, ignoring rate
     for (j = 0; j < 2; ++j)
     {
         i = 0;
@@ -891,8 +1038,10 @@ void __cdecl SV_FinalMessage(const char *message)
         {
             if (client->header.state >= CS_CONNECTED)
             {
+                // don't send a disconnect to a local client
                 if (client->header.netchan.remoteAddress.type != NA_LOOPBACK)
                     SV_SendDisconnect(client, client->header.state, message, translationForReason, client->name);
+                // force a snapshot to be sent
                 client->nextSnapshotTime = -1;
                 SV_SetServerStaticHeader();
                 SV_BeginClientSnapshot(client, &msg);

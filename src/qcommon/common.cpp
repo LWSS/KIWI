@@ -194,6 +194,7 @@ void QDECL Com_PrintMessage(int channel, const char* msg, int error)
 	}
 	else
 	{
+		// echo to console if we're not a dedicated server
 		if (channel != CON_CHANNEL_LOGFILEONLY
 #ifdef KISAK_MP
             && com_dedicated && !com_dedicated->current.integer
@@ -205,12 +206,14 @@ void QDECL Com_PrintMessage(int channel, const char* msg, int error)
 		}
 		if (*msg == 94 && msg[1])
 			msg += 2;
+		// echo to dedicated console and early console
 		if (channel != CON_CHANNEL_LOGFILEONLY
 			&& (!com_filter_output || !com_filter_output->current.enabled
 				|| Con_IsChannelVisible(CON_DEST_CONSOLE, channel, 3)))
 		{
 			Sys_Print(msg);
 		}
+		// logfile
 		if (channel != CON_CHANNEL_CONSOLEONLY && com_logfile && com_logfile->current.integer)
 			Com_LogPrintMessage(channel, msg);
 	}
@@ -323,6 +326,16 @@ void __cdecl Debug_Frame(int localClientNum)
 #endif
 }
 
+/*
+=============
+Com_Printf
+
+Both client and server can use this, and it will output
+to the apropriate place.
+
+A raw string should NEVER be passed as fmt, because of "%f" type crashers.
+=============
+*/
 void QDECL Com_Printf(int channel, const char* fmt, ...)
 {
 	char string[4100];
@@ -463,12 +476,20 @@ void Com_OpenLogFile()
     }
 }
 
+/*
+================
+Com_DPrintf
+
+A Com_Printf that only shows up if the "developer" cvar is set
+================
+*/
 void Com_DPrintf(int channel, const char* fmt, ...)
 {
     char string[4100]; // [esp+4h] [ebp-1008h] BYREF
     va_list va; // [esp+101Ch] [ebp+10h] BYREF
 
     va_start(va, fmt);
+    // don't confuse non-developers with techie stuff...
     if (com_developer)
     {
         if (com_developer->current.integer)
@@ -522,6 +543,11 @@ void Com_PrintWarning(int channel, const char *fmt, ...)
     Com_PrintMessage(channel, dest, 2);
 }
 
+/*
+=================
+Com_Shutdown
+=================
+*/
 void __cdecl Com_Shutdown(const char* finalmsg)
 {
     Com_ShutdownInternal(finalmsg);
@@ -656,6 +682,14 @@ void __cdecl  Com_ErrorAbort()
     Sys_Error("%s", com_errorMessage);
 }
 
+/*
+=============
+Com_Error
+
+Both client and server can use this, and it will
+do the apropriate things.
+=============
+*/
 void Com_Error(errorParm_t code, const char* fmt, ...)
 {
     jmp_buf * Value; // eax
@@ -738,6 +772,14 @@ void Com_Error(errorParm_t code, const char* fmt, ...)
     }
 }
 
+/*
+=============
+Com_Quit_f
+
+Both client and server can use this, and it will
+do the apropriate things.
+=============
+*/
 void __cdecl  Com_Quit_f()
 {
     int localClientNum; // [esp+0h] [ebp-4h]
@@ -748,6 +790,7 @@ void __cdecl  Com_Quit_f()
     Scr_Cleanup();
     Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
     GScr_Shutdown();
+    // don't try to shutdown if we are in a recursive error
     if (!com_errorEntered)
     {
         Com_ClearTempMemory();
@@ -777,6 +820,13 @@ void Com_ClearTempMemory()
     Hunk_ClearTempMemoryHigh();
 }
 
+/*
+==================
+Com_ParseCommandLine
+
+Break it up into multiple console lines
+==================
+*/
 void __cdecl Com_ParseCommandLine(char* commandLine)
 {
     iassert( commandLine );
@@ -784,6 +834,8 @@ void __cdecl Com_ParseCommandLine(char* commandLine)
     com_numConsoleLines = 1;
     while (*commandLine)
     {
+        // look for a + seperating character
+        // if commandLine came from a file, we might have real line seperators
         if (*commandLine == 43 || *commandLine == 10)
         {
             if (com_numConsoleLines == 32)
@@ -795,6 +847,14 @@ void __cdecl Com_ParseCommandLine(char* commandLine)
     }
 }
 
+/*
+===================
+Com_SafeMode
+
+Check for "safe" on the command line, which will
+skip loading of q3config.cfg
+===================
+*/
 int __cdecl Com_SafeMode()
 {
     const char* v0; // eax
@@ -828,6 +888,17 @@ void __cdecl Com_ForceSafeMode()
     com_safemode = 1;
 }
 
+/*
+===============
+Com_StartupVariable
+
+Searches for command line parameters that are set commands.
+If match is not NULL, only that cvar will be looked for.
+That is necessary because cddir and basedir need to be set
+before the filesystem is started, but all other sets shouls
+be after execing the config and default.
+===============
+*/
 void __cdecl Com_StartupVariable(const char* match)
 {
     const char* v1; // eax
@@ -961,6 +1032,13 @@ void __cdecl Com_ServerPacketEvent()
 }
 #endif
 
+/*
+=================
+Com_EventLoop
+
+Returns last event time
+=================
+*/
 void __cdecl Com_EventLoop()
 {
     sysEvent_t result; // [esp+4h] [ebp-48h] BYREF
@@ -974,10 +1052,12 @@ void __cdecl Com_EventLoop()
 
         switch (ev.evType)
         {
+        // if no more events are available
         case SE_NONE:
         {
             iassert(!ev.evPtr);
 #ifdef KISAK_MP
+            // manually send packet events for the loopback channel
             Com_ClientPacketEvent();
             Com_ServerPacketEvent();
 #endif
@@ -999,6 +1079,7 @@ void __cdecl Com_EventLoop()
         {
             iassert(ev.evPtr);
             Cbuf_AddText(0, (const char *)ev.evPtr);
+            // free any block data
             Com_FreeEvent((char *)ev.evPtr);
             Cbuf_AddText(0, "\n");
             break;
@@ -1006,6 +1087,7 @@ void __cdecl Com_EventLoop()
 
         default:
             iassert(!ev.evPtr);
+            // bk001129 - was ev.evTime
             Com_Error(ERR_FATAL, "Com_EventLoop: bad event type %i", ev.evType);
             break;
         }
@@ -1068,6 +1150,11 @@ void __cdecl Com_ExecStartupConfigs(int localClientNum, const char* configFile)
     Cbuf_Execute(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
 }
 
+/*
+=================
+Com_Init
+=================
+*/
 void __cdecl Com_Init(char* commandLine)
 {
     jmp_buf* Value; // eax
@@ -1082,6 +1169,7 @@ void __cdecl Com_Init(char* commandLine)
     }
     Com_Init_Try_Block_Function(commandLine);
     v3 = (jmp_buf *)Sys_GetValue(2);
+    // add + commands from command line
     if (!setjmp(*v3))
         Com_AddStartupCommands();
     if (com_errorEntered)
@@ -1235,12 +1323,24 @@ void Com_ErrorCleanup()
     com_errorEntered = 0;
 }
 
+/*
+=================
+Com_AddStartupCommands
+
+Adds command line parameters as script statements
+Commands are seperated by + signs
+
+Returns qtrue if any late commands were added, which
+will keep the demoloop from immediately starting
+=================
+*/
 void Com_AddStartupCommands()
 {
     int v0; // eax
     int i; // [esp+0h] [ebp-414h]
     char localBuffer[1036]; // [esp+4h] [ebp-410h] BYREF
 
+    // quote every token, so args with semicolons can work
     for (i = 0; i < com_numConsoleLines; ++i)
     {
         iassert( com_consoleLines[i] );
@@ -1269,13 +1369,19 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     uint initStartTime; // [esp+18h] [ebp-4h]
 
     Com_Printf(CON_CHANNEL_SYSTEM, "%s %s build %s %s\n", "KIWI", "1.0", CPUSTRING, __DATE__);
+    // prepare enough of the subsystems to handle
+    // cvar and command buffer management
     Com_ParseCommandLine(commandLine);
     SL_Init();
     Swap_Init();
     Cbuf_Init();
     Cmd_Init();
     Dvar_AddCommands();
+    // override anything from the config files with command line args
     Com_StartupVariable(0);
+    //
+    // init commands and vars
+    //
     Com_InitDvars();
     CCS_InitConstantConfigStrings();
     initStartTime = 0;
@@ -1289,6 +1395,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     }
     if (IsFastFileLoad())
         Com_InitXAssets();
+    // done early so bind command exists
     CL_InitKeyCommands();
     FS_InitFilesystem();
     Con_InitChannels();
@@ -1310,6 +1417,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
 #else
     Com_CheckSetRecommended(0);
 #endif
+    // override anything from the config files with command line args
     Com_StartupVariable(0);
     if (!IsFastFileLoad())
         SEH_UpdateLanguageInfo();
@@ -1317,8 +1425,11 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     if (com_dedicated->current.integer)
         CL_InitDedicated();
 #endif
+    // allocate the stack based hunk allocator
     Com_InitHunkMemory();
     Hunk_InitDebugMemory();
+    // if any archived cvars are modified after this, we will trigger a writing
+    // of the config file
     dvar_modifiedFlags &= ~1u;
     com_codeTimeScale = 1.0;
     // (SP)
@@ -1352,7 +1463,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     shortversion = Dvar_RegisterString("shortversion", "1.0", DVAR_ROM | DVAR_SERVERINFO, "Short game version");
     Sys_Init();
 #ifdef KISAK_MP
-    Netchan_Init(__rdtsc());
+    Netchan_Init(__rdtsc()); // pick a port value that should be nice and random
 #endif
     Scr_InitVariables();
     Scr_Init();
@@ -1380,7 +1491,11 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     CL_InitOnceForAllClients();
     CL_Init(0);
 #endif
+    // set com_frameTime so that if a map is started on the
+    // command line it will still be able to count on com_frameTime
+    // being random enough for a serverid
     com_frameTime = Sys_Milliseconds();
+    // override anything from the config files with command line args
     Com_StartupVariable(0);
 
 #ifdef KISAK_MP
@@ -1430,6 +1545,14 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
     Com_DvarDump(CON_CHANNEL_LOGFILEONLY, 0);
 }
 
+/*
+=============
+Com_Error_f
+
+Just throw a fatal error to
+test error shutdown procedures
+=============
+*/
 void __cdecl Com_Error_f()
 {
     if (Cmd_Argc() <= 1)
@@ -1438,6 +1561,14 @@ void __cdecl Com_Error_f()
         Com_Error(ERR_DROP, "Testing drop error");
 }
 
+/*
+=============
+Com_Freeze_f
+
+Just freeze in place for a given number of seconds to test
+error recovery
+=============
+*/
 void __cdecl Com_Freeze_f()
 {
     const char* v0; // eax
@@ -1640,6 +1771,13 @@ void __cdecl Com_WriteDefaultsToFile(char* filename)
     }
 }
 
+/*
+===============
+Com_WriteConfig_f
+
+Write the config file to a specific name
+===============
+*/
 void __cdecl Com_WriteConfig_f()
 {
     char* v0; // eax
@@ -1981,10 +2119,19 @@ void __cdecl Com_Frame_Try_Block_Function()
 #endif
 }
 
+/*
+===============
+Com_WriteConfiguration
+
+Writes key bindings and archived cvars to config file if modified
+===============
+*/
 void __cdecl Com_WriteConfiguration(int localClientNum)
 {
     char configFile[68]; // [esp+0h] [ebp-48h] BYREF
 
+    // if we are quiting without fully initializing, make sure
+    // we don't write out anything
     if (com_fullyInitialized && (dvar_modifiedFlags & 1) != 0)
     {
         dvar_modifiedFlags &= ~1u;
@@ -2000,6 +2147,11 @@ void __cdecl Com_WriteConfiguration(int localClientNum)
     }
 }
 
+/*
+================
+Com_ModifyMsec
+================
+*/
 int __cdecl Com_ModifyMsec(int msec)
 {
     int clampTime; // [esp+18h] [ebp-Ch]
@@ -2007,6 +2159,9 @@ int __cdecl Com_ModifyMsec(int msec)
     bool useTimescale; // [esp+23h] [ebp-1h]
 
     originalMsec = msec;
+    //
+    // modify time for debugging values
+    //
     if (com_fixedtime->current.integer)
     {
         msec = com_fixedtime->current.integer;
@@ -2022,12 +2177,16 @@ int __cdecl Com_ModifyMsec(int msec)
         useTimescale = 1;
     }
 
+    // don't let it scale below 1 msec
     if (msec < 1)
         msec = 1;
 
 #ifdef KISAK_MP
     if (com_dedicated->current.integer)
     {
+        // dedicated servers don't want to clamp for a much longer
+        // period, because it would mess up all the client's views
+        // of time.
         if (msec > 500 && msec < 500000)
             Com_PrintWarning(CON_CHANNEL_SYSTEM, "Hitch warning: %i msec frame time\n", msec);
         clampTime = 5000;
@@ -2037,10 +2196,15 @@ int __cdecl Com_ModifyMsec(int msec)
     if (com_sv_running->current.enabled)
 #endif
     {
+        // for local single player gaming
+        // we may want to clamp the time to prevent players from
+        // flying off edges when something hitches.
         clampTime = com_maxFrameTime->current.integer;
     }
     else
     {
+        // clients of remote servers do not want to clamp time, because
+        // it would skew their view of the server's time temporarily
         clampTime = 5000;
     }
 
@@ -2132,6 +2296,11 @@ void __cdecl Com_CheckSyncFrame()
     DB_Update();
 }
 
+/*
+=================
+Com_Frame
+=================
+*/
 void __cdecl Com_Frame()
 {
 #ifdef TRACY_ENABLE
@@ -2144,6 +2313,7 @@ void __cdecl Com_Frame()
 
     if (setjmp(*(jmp_buf *)Value))
     {
+        // an ERR_DROP was thrown
         Profile_Recover(1);
     }
     else
@@ -2226,6 +2396,11 @@ void __cdecl Com_Close()
     Hunk_ShutdownDebugMemory();
 }
 
+/*
+==================
+Field_Clear
+==================
+*/
 void __cdecl Field_Clear(field_t* edit)
 {
     memset((uint8_t*)edit->buffer, 0, sizeof(edit->buffer));

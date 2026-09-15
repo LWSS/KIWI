@@ -20,6 +20,11 @@ int svsHeaderValid;
 msg_t g_archiveMsg;
 uint8_t tempServerMsgBuf[131072];
 
+/*
+==================
+SV_WriteSnapshotToClient
+==================
+*/
 void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
 {
     int v2; // edx
@@ -58,20 +63,27 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
     memset(&snapInfo, 0, sizeof(SnapshotInfo_s));
     snapInfo.clientNum = clientNum;
     snapInfo.client = &client->header;
+    // this is the snapshot we are creating
     remoteFrame = &client->frames[client->header.netchan.outgoingSequence & 0x1F];
     remoteFrame->serverTime = svsHeader.time;
     frame = remoteFrame;
     if (!remoteFrame)
         MyAssertHandler(".\\server_mp\\sv_snapshot_mp.cpp", 523, 0, "%s", "frame");
+
+    // try to use a previous frame as the source for delta compressing the snapshot
+    // client is asking for a retransmit
     if (client->header.deltaMessage > 0 && client->header.state == CS_ACTIVE)
     {
+        // client hasn't gotten a good message through in a long time
         if (client->header.netchan.outgoingSequence - client->header.deltaMessage < 29)
         {
+            // we have a valid snapshot to delta from
             v2 = client->header.deltaMessage & 0x1F;
             oldframe = &client->frames[v2];
             iassert(oldframe);
             lastframe = client->header.netchan.outgoingSequence - client->header.deltaMessage;
             lastServerTime = oldframe->serverTime;
+            // the snapshot's entities may still have rolled off the buffer, though
             if (oldframe->first_entity < svsHeader.nextSnapshotEntities - svsHeader.numSnapshotEntities)
             {
                 Com_PrintWarning(
@@ -118,8 +130,15 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
         lastServerTime = 0;
     }
     SV_PacketDataIsHeader(clientNum, msg);
+    // NOTE, MRE: now sent at the start of every message from server to client
+    // let the client know which reliable clientCommands we have received
     MSG_WriteByte(msg, 6u);
+
+    // send over the current server time so the client can drift
+    // its view of time to try to match
     MSG_WriteLong(msg, svsHeader.time);
+
+    // what we are delta'ing from
     MSG_WriteByte(msg, lastframe);
     snapInfo.snapshotDeltaTime = lastServerTime;
     snapFlags = svsHeader.snapFlagServerBit;
@@ -141,6 +160,7 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
     MSG_WriteByte(msg, snapFlags);
     bitsUsed = MSG_GetUsedBitCount(msg);
     SV_PacketDataIsUnknown(clientNum, msg);
+    // delta encode the playerstate
     if (oldframe)
     {
         MSG_WriteDeltaPlayerstate(&snapInfo, msg, svsHeader.time, &oldframe->ps, &frame->ps);
@@ -160,10 +180,12 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
         from_first_client = 0;
     }
     SV_PacketDataIsUnknown(clientNum, msg);
+    // delta encode the entities
     SV_EmitPacketEntities(&snapInfo, from_num_entities, from_first_entity, frame->num_entities, frame->first_entity, msg);
     SV_PacketDataIsUnknown(clientNum, msg);
     SV_EmitPacketClients(&snapInfo, from_num_clients, from_first_client, frame->num_clients, frame->first_client, msg);
     SV_PacketDataIsUnknown(clientNum, msg);
+    // padding for rate debugging
     for (i = 0; i < sv_padPackets->current.integer; ++i)
         MSG_WriteByte(msg, 0);
 }
@@ -470,6 +492,13 @@ void __cdecl SV_EmitPacketClients(
     SV_TrackPacketData(snapInfo->clientNum, ANALYZE_SNAPSHOT_ALLCLIENTS, 0, 0, bitsStart, msg);
 }
 
+/*
+==================
+SV_UpdateServerCommandsToClient
+
+(re)send all server commands the client hasn't acknowledged yet
+==================
+*/
 void __cdecl SV_UpdateServerCommandsToClient(client_t *client, msg_t *msg)
 {
     int bitsUsed; // [esp+0h] [ebp-8h]
@@ -478,6 +507,7 @@ void __cdecl SV_UpdateServerCommandsToClient(client_t *client, msg_t *msg)
     if (client->reliableAcknowledge + 1 < client->reliableSequence && sv_debugReliableCmds->current.enabled)
         Com_Printf(CON_CHANNEL_SERVER, "Client %s has the following un-ack'd reliable commands:\n", client->name);
     bitsUsed = MSG_GetUsedBitCount(msg);
+    // write any unacknowledged serverCommands
     for (i = client->reliableAcknowledge + 1; i <= client->reliableSequence; ++i)
     {
         SV_PacketDataIsHeader(client - svs.clients, msg);
@@ -975,6 +1005,19 @@ int __cdecl SV_GetCurrentClientInfo(int clientNum, playerState_s *ps, clientStat
     return 1;
 }
 
+/*
+=============
+SV_BuildClientSnapshot
+
+Decides which entities are going to be visible to the client, and
+copies off the playerstate and areabits.
+
+This properly handles multiple recursive portals, but the render
+currently doesn't.
+
+For viewing through other player's eyes, clent can be something other than client->gentity
+=============
+*/
 void __cdecl SV_BuildClientSnapshot(client_t *client)
 {
     clientState_s *ClientState; // eax
@@ -996,7 +1039,9 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
     cachedClient_s *v20; // [esp+1168h] [ebp-4h]
     client_t *clients; // [esp+1174h] [ebp+8h]
 
+    // this is the frame we are creating
     v5 = &client->frames[client->header.netchan.outgoingSequence & 0x1F];
+    // clear everything in this snapshot
     v5->num_entities = 0;
     v5->num_clients = 0;
     if (client->gentity)
@@ -1017,12 +1062,14 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
                 else
                     v3 = 0;
                 v19 = v3;
+                // grab the current playerState_t
                 memcpy(&v5->ps, SV_GameClientNum(clientNum), sizeof(playerState_s));
                 clientNum = v5->ps.clientNum;
                 if ((uint)clientNum >= 0x400)
                 {
                     Com_Error(ERR_DROP, "SV_BuildClientSnapshot: bad gEnt");
                 }
+                // find the client's viewpoint
                 Vec3Copy(v5->ps.origin, position);
                 position[2] += v5->ps.viewHeightCurrent;
                 AddLeanToPosition(position, v5->ps.viewangles[1], v5->ps.leanf, 16.0, 20.0);
@@ -1139,6 +1186,11 @@ void __cdecl SV_BuildClientSnapshot(client_t *client)
     }
 }
 
+/*
+===============
+SV_AddEntitiesVisibleFromPoint
+===============
+*/
 void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotEntityNumbers_t *eNums)
 {
     const char *v3; // eax
@@ -1166,6 +1218,7 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
             if (e >= sv.num_entities)
                 return;
             ent = SV_GentityNum(e);
+            // never send entities that aren't linked in
             if (ent->r.linked)
             {
                 if (ent->s.number != e)
@@ -1182,12 +1235,15 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
                 }
                 if (e != clientNum)
                 {
+                    // broadcast entities are always sent
                     if (ent->r.broadcastTime)
                     {
                         if (ent->r.broadcastTime < 0 || ent->r.broadcastTime - svs.time >= 0)
                             goto LABEL_36;
                         ent->r.broadcastTime = 0;
                     }
+                    // entities can be flagged to explicitly not be sent to the client
+                    // entities can be flagged to be sent to a given mask of clients
                     else if ((ent->r.svFlags & 1) != 0 || (ent->r.clientMask[clientNum >> 5] & (1 << (clientNum & 0x1F))) != 0)
                     {
                         continue;
@@ -1195,6 +1251,7 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
                     if ((ent->r.svFlags & 0x18) != 0)
                         goto LABEL_36;
                     svEnt = SV_SvEntityForGentity(ent);
+                    // check individual leafs
                     if (!svEnt->numClusters)
                         goto LABEL_36;
                     l = 0;
@@ -1204,18 +1261,22 @@ void __cdecl SV_AddEntitiesVisibleFromPoint(float *org, int clientNum, snapshotE
                         if (((1 << (l & 7)) & clientpvs[l >> 3]) != 0)
                             break;
                     }
+                    // if we haven't found it to be visible,
+                    // check overflow clusters that coudln't be stored
                     if (i != svEnt->numClusters)
                         goto LABEL_39;
                     if (svEnt->lastCluster)
                     {
                         while (l <= svEnt->lastCluster && ((1 << (l & 7)) & clientpvs[l >> 3]) == 0)
                             ++l;
+                        // not visible
                         if (l != svEnt->lastCluster)
                         {
                         LABEL_39:
                             if (fogOpaqueDistSqrd == 0.0 || !BoxDistSqrdExceeds(ent->r.absmin, ent->r.absmax, org, fogOpaqueDistSqrd))
                             {
                             LABEL_36:
+                                // add it
                                 SV_AddArchivedEntToSnapshot(e, eNums);
                                 continue;
                             }
@@ -1295,6 +1356,13 @@ void __cdecl SV_AddArchivedEntToSnapshot(int e, snapshotEntityNumbers_t *eNums)
 }
 
 uint8_t svCompressedBuf[131072];
+/*
+=======================
+SV_SendMessageToClient
+
+Called by SV_SendClientSnapshot and SV_SendClientGameState
+=======================
+*/
 void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
 {
     int v2; // [esp+Ch] [ebp-30h]
@@ -1329,10 +1397,13 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
         iassert(!client->dropReason);
         iassert(client->header.state == CS_ZOMBIE);
     }
+    // record information about the message
     client->frames[client->header.netchan.outgoingSequence & 0x1F].messageSize = compressedSize;
     client->frames[client->header.netchan.outgoingSequence & 0x1F].messageSent = Sys_Milliseconds();
     client->frames[client->header.netchan.outgoingSequence & 0x1F].messageAcked = -1;
     lastFrame = client->header.netchan.outgoingSequence - client->header.deltaMessage;
+
+    // send the datagram
     SV_Netchan_Transmit(client, svCompressedBuf, compressedSize);
     if (client->header.state == CS_ACTIVE && client->header.deltaMessage >= 0 && lastFrame >= 29)
     {
@@ -1349,6 +1420,10 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
     else
     {
         client->snapshotBackoffCount = 0;
+        // set nextSnapshotTime based on rate and requested number of updates
+
+        // local clients get snapshots every frame
+        // added sv_lanForceRate check
         if (client->header.netchan.remoteAddress.type == NA_LOOPBACK
             || Sys_IsLANAddress(client->header.netchan.remoteAddress))
         {
@@ -1356,6 +1431,7 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
         }
         else
         {
+            // normal rate / snapshotMsec calculation
             rateMsec = SV_RateMsec(client, compressedSize);
             if (rateMsec >= client->snapshotMsec)
             {
@@ -1367,6 +1443,11 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
                 client->header.rateDelayed = 0;
             }
             client->nextSnapshotTime = rateMsec + svs.time;
+
+            // don't pile up empty snapshots while connecting
+            // a gigantic connection message may have already put the nextSnapshotTime
+            // more than a second away, so don't shorten it
+            // do shorten if client is downloading
             if (client->header.state != CS_ACTIVE && !client->downloadName[0] && client->nextSnapshotTime < svs.time + 1000)
                 client->nextSnapshotTime = svs.time + 1000;
             sv.bpsTotalBytes += compressedSize;
@@ -1374,10 +1455,19 @@ void __cdecl SV_SendMessageToClient(msg_t *msg, client_t *client)
     }
 }
 
+/*
+====================
+SV_RateMsec
+
+Return the number of msec a given size message is supposed
+to take to clear, based on the current rate
+====================
+*/
 int __cdecl SV_RateMsec(client_t *client, int messageSize)
 {
     int rate; // [esp+0h] [ebp-8h]
 
+    // individual messages will never be larger than fragment size
     if (messageSize > 1500)
         messageSize = 1500;
     rate = client->rate;
@@ -1485,6 +1575,14 @@ int __cdecl SV_WWWRedirectClient(client_t *cl, msg_t *msg)
     }
 }
 
+/*
+==================
+SV_WriteDownloadToClient
+
+Check to see if the client wants a file, open it if needed and start pumping the client
+Fill up msg with data
+==================
+*/
 void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
 {
     int v2; // edx
@@ -1493,13 +1591,16 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
     int blockspersnap; // [esp+40Ch] [ebp-8h]
     int curindex; // [esp+410h] [ebp-4h]
 
+    // Nothing being downloaded
     if (cl->downloadName[0] && !cl->clientDownloadingWWW)
     {
         if (cl->download)
         {
         LABEL_20:
+            // Perform any reads that we need to
             while (cl->downloadCurrentBlock - cl->downloadClientBlock < 8 && cl->downloadSize != cl->downloadCount)
             {
+                // Load in next block
                 curindex = cl->downloadCurrentBlock % 8;
                 if (!cl->downloadBlocks[curindex])
                     cl->downloadBlocks[curindex] = (byte*)Z_Malloc(2048, "SV_WriteDownloadToClient", 9);
@@ -1512,13 +1613,20 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
                 cl->downloadCount += cl->downloadBlockSize[curindex];
                 ++cl->downloadCurrentBlock;
             }
+            // Check to see if we have eof condition and add the EOF block
             if (cl->downloadCount == cl->downloadSize
                 && !cl->downloadEOF
                 && cl->downloadCurrentBlock - cl->downloadClientBlock < 8)
             {
                 cl->downloadBlockSize[cl->downloadCurrentBlock++ % 8] = 0;
-                cl->downloadEOF = 1;
+                cl->downloadEOF = 1;  // We have added the EOF block
             }
+
+            // Loop up to window size times based on how many blocks we can fit in the
+            // client snapMsec and rate
+
+            // based on the rate, how many bytes can we fit in the snapMsec time of the client
+            // normal rate / snapshotMsec calculation
             rate = cl->rate;
             if (sv_maxRate->current.integer)
             {
@@ -1533,34 +1641,47 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
                 blockspersnap = 1;
             if (blockspersnap < 0)
                 blockspersnap = 1;
+            // Write out the next section of the file, if we have already reached our window,
+            // automatically start retransmitting
             while (1)
             {
                 v2 = blockspersnap--;
+                // Nothing to transmit
                 if (!v2 || cl->downloadClientBlock == cl->downloadCurrentBlock)
                     break;
+                // We have transmitted the complete window, should we start resending?
                 if (cl->downloadXmitBlock == cl->downloadCurrentBlock)
                 {
+                    //FIXME:  This uses a hardcoded one second timeout for lost blocks
+                    //the timeout should be based on client rate somehow
                     if (svs.time - cl->downloadSendTime <= 1000)
                         return;
                     cl->downloadXmitBlock = cl->downloadClientBlock;
                 }
+                // Send current block
                 curindex = cl->downloadXmitBlock % 8;
                 MSG_WriteByte(msg, 5u);
                 MSG_WriteLong(msg, cl->downloadXmitBlock);
+                // block zero is special, contains file size
                 if (!cl->downloadXmitBlock)
                     MSG_WriteLong(msg, cl->downloadSize);
                 MSG_WriteShort(msg, cl->downloadBlockSize[curindex]);
+                // Write the block
                 if (cl->downloadBlockSize[curindex])
                     MSG_WriteData(msg, cl->downloadBlocks[curindex], cl->downloadBlockSize[curindex]);
                 Com_DPrintf(CON_CHANNEL_SERVER, "clientDownload: %d : writing block %d\n", cl - svs.clients, cl->downloadXmitBlock);
+                // Move on to the next block
+                // It will get sent with next snap shot.  The rate will keep us in line.
                 ++cl->downloadXmitBlock;
                 cl->downloadSendTime = svs.time;
             }
         }
         else
         {
+            // We open the file here
             if (sv_allowDownload->current.enabled)
             {
+                // cannot auto-download file
                 if (FS_iwIwd(cl->downloadName, (char*)"main"))
                 {
                     Com_Printf(
@@ -1574,6 +1695,8 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
                 }
                 Com_Printf(CON_CHANNEL_SERVER, "clientDownload: %d : beginning \"%s\"\n", cl - svs.clients, cl->downloadName);
                 cl->downloadSize = FS_SV_FOpenFileRead(cl->downloadName, &cl->download);
+                // NOTE TTimo this is NOT supposed to happen unless bug in our filesystem scheme?
+                //   if the pk3 is referenced, it must have been found somewhere in the filesystem
                 if (cl->downloadSize <= 0)
                 {
                     Com_Printf(CON_CHANNEL_SERVER, "clientDownload: %d : \"%s\" file not found on server\n", cl - svs.clients, cl->downloadName);
@@ -1591,6 +1714,7 @@ void __cdecl SV_WriteDownloadToClient(client_t *cl, msg_t *msg)
                     if (SV_WWWRedirectClient(cl, msg))
                         return;
                 }
+                // Init
                 cl->downloadingWWW = 0;
                 cl->downloadXmitBlock = 0;
                 cl->downloadClientBlock = 0;
@@ -1823,6 +1947,11 @@ void __cdecl SV_SendClientVoiceData(client_t *client)
     //LargeLocal::~LargeLocal(&msg_buf_large_local);
 }
 
+/*
+=======================
+SV_SendClientMessages
+=======================
+*/
 void __cdecl SV_SendClientMessages()
 {
     float comp_ratio; // [esp+C0h] [ebp-94h]
@@ -1850,19 +1979,25 @@ void __cdecl SV_SendClientMessages()
     sv.ubpsTotalBytes = 0;
     memset((uint8_t *)valid, 0, sizeof(valid));
     maxclients = sv_maxclients->current.integer;
+    // send a message to each connected client
     i = 0;
     c = svs.clients;
     while (i < maxclients)
     {
+        // not connected
+        // not time yet
         if (c->header.state && svs.time >= c->nextSnapshotTime)
         {
             ++numclients;
+            // send additional message fragments if the last message
+            // was too large to send at once
             if (c->header.netchan.unsentFragments)
             {
                 c->nextSnapshotTime = svs.time
                     + SV_RateMsec(c, c->header.netchan.unsentLength - c->header.netchan.unsentFragmentStart);
                 SV_Netchan_TransmitNextFragment(c, &c->header.netchan);
             }
+            // generate and send a new message
             else
             {
                 valid[i] = 1;

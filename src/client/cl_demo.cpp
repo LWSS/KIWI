@@ -370,19 +370,36 @@ void __cdecl CL_ReadDemoSnapshotData()
     CL_ReadDemoDObjs();
 }
 
+/*
+====================
+CL_WriteDemoMessage
+
+Dumps the current net message, prefixed by the length
+====================
+*/
 void __cdecl CL_WriteDemoMessage(msg_t *msg, int headerBytes)
 {
     int v4; // r28
     unsigned int v5[12]; // [sp+50h] [-30h] BYREF
 
+    // write the packet sequence
     v5[0] = clientConnections[0].serverMessageSequence;
     FS_Write((const char*)v5, 4, cls.demofile);
+
+    // skip the packet sequencing information
     v5[0] = msg->cursize - headerBytes;
     v4 = v5[0];
     FS_Write((const char *)v5, 4, cls.demofile);
     FS_Write((const char *)&msg->data[headerBytes], v4, cls.demofile);
 }
 
+/*
+====================
+CL_StopRecord_f
+
+stop recording a demo
+====================
+*/
 void __cdecl CL_StopRecord_f()
 {
     void *demobuf; // r3
@@ -390,6 +407,7 @@ void __cdecl CL_StopRecord_f()
 
     if (cls.demorecording)
     {
+        // finish up
         v1[0] = -1;
         FS_Write((const char *)v1, 4, cls.demofile);
         FS_Write((const char *)v1, 4, cls.demofile);
@@ -412,6 +430,15 @@ void __cdecl CL_StopRecord_f()
     }
 }
 
+/*
+====================
+CL_Record_f
+
+record <demoname>
+
+Begins recording a demo from the current position
+====================
+*/
 void __cdecl CL_Record_f()
 {
     int nesting; // r7
@@ -459,15 +486,19 @@ void __cdecl CL_Record_f()
             }
             else
             {
+                // scan for a free demo name
                 for (i = 0; i <= 9999; ++i)
                 {
                     Com_sprintf(v14, 64, "demo%04i", i);
                     Com_sprintf(v15, 256, "demos/%s.spd", v14);
                     v11[0] = FS_ReadFile(v15, 0);
                     if (v11[0] <= 0)
-                        break;
+                        break;	// file doesn't exist
                 }
             }
+
+            // open the demo file
+
             Com_Printf(CON_CHANNEL_DONT_FILTER, "recording to %s.\n", v15);
             cls.demofile = FS_FOpenFileWrite(v15);
             if (cls.demofile)
@@ -476,8 +507,13 @@ void __cdecl CL_Record_f()
                 iassert(!cls.demobuf);
                 cls.demobuf = Z_VirtualAlloc(0x100000, "demo", 0);
                 I_strncpyz(cls.demoName, v14, 64);
+                // write out the gamestate message
                 MSG_Init(&v13, v16, 0x4000);
+
+                // NOTE, MRE: all server->client messages now acknowledge
                 MSG_WriteLong(&v13, clientConnections[0].serverCommands.header.sent);
+
+                // configstrings
                 for (configStringIndex = 0; configStringIndex < MAX_CONFIGSTRINGS; ++configStringIndex)
                 {
                     iassert(clients[0].configstrings[configStringIndex]);
@@ -498,11 +534,14 @@ void __cdecl CL_Record_f()
                 MemFile_StartSegment(&v12, -1);
                 FS_Write((const char *)&v12.bytesUsed, 4, cls.demofile);
                 FS_Write((const char *)v12.buffer, v12.bytesUsed, cls.demofile);
+                // write it to the demo file
                 v11[0] = 0;
                 FS_Write((const char *)v11, 4, cls.demofile);
                 v11[0] = v13.cursize;
                 FS_Write((const char *)v11, 4, cls.demofile);
                 FS_Write((const char *)v13.data, v13.cursize, cls.demofile);
+
+                // the rest of the demo file will be copied from net messages
             }
             else
             {
@@ -572,6 +611,14 @@ void CL_DemoPlaybackStartup()
     }
 }
 
+/*
+====================
+CL_PlayDemo_f
+
+demo <demoname>
+
+====================
+*/
 void __cdecl CL_PlayDemo_f()
 {
     int nesting; // r7
@@ -604,6 +651,7 @@ void __cdecl CL_PlayDemo_f()
             CL_Disconnect(v2);
             v3 = Cmd_Argv(1);
             I_strncpyz(cls.demoName, v3, 64);
+            // check for an extension .dm_?? (?? is protocol)
             Com_StripExtension(cls.demoName, cls.demoName);
             cls.demoPending = 1;
             v4 = Cmd_Argv(0);
@@ -625,6 +673,7 @@ void __cdecl CL_CheckStartPlayingDemo()
     {
         cls.demoPending = 0;
         Com_sprintf(buf, 256, "demos/%s.spd", cls.demoName);
+        // open the demo file
         FS_FOpenFileRead(buf, &cls.demofile);
         if (!cls.demofile)
         {
@@ -636,6 +685,14 @@ void __cdecl CL_CheckStartPlayingDemo()
     }
 }
 
+/*
+==================
+CL_NextDemo
+
+Called when a demo or cinematic finishes
+If the "nextdemo" cvar is set, that command will be issued
+==================
+*/
 void __cdecl CL_NextDemo()
 {
     const char *String; // r31
@@ -682,6 +739,11 @@ int __cdecl CL_TimeDemoPlaying()
 }
 
 // local variable allocation has failed, the output may be wrong!
+/*
+=================
+CL_DemoCompleted
+=================
+*/
 void CL_DemoCompleted()
 {
     //__int64 v1; // r9 OVERLAPPED
@@ -736,11 +798,16 @@ int __cdecl CL_GetDemoMessage(msg_t *buf, unsigned __int8 *bufData, int bufDataS
     iassert(bufDataSize > 0);
     if (!cls.demofile)
         goto LABEL_17;
+    // get the sequence number
     if (FS_Read((byte*)&v8, 4, cls.demofile) != 4)
         goto LABEL_17;
     clientConnections[0].serverMessageSequence = v8;
+
+    // init the message
     MSG_Init(buf, bufData, bufDataSize);
     p_cursize = &buf->cursize;
+
+    // get the length
     if (FS_Read((byte*)&buf->cursize, 4, cls.demofile) != 4 || *p_cursize == -1)
         goto LABEL_17;
     if (*p_cursize > buf->maxsize)
@@ -758,6 +825,11 @@ int __cdecl CL_GetDemoMessage(msg_t *buf, unsigned __int8 *bufData, int bufDataS
     return result;
 }
 
+/*
+=================
+CL_ReadDemoMessage
+=================
+*/
 void __cdecl CL_ReadDemoMessage()
 {
     msg_t v0; // [sp+50h] [-4040h] BYREF

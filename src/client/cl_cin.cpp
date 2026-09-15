@@ -9,13 +9,21 @@
 
 bool cin_skippable;
 
+/*
+==================
+CIN_PlayCinematic
+
+==================
+*/
 int __cdecl CIN_PlayCinematic(int localClientNum, char *arg)
 {
     float volume; // [esp+4h] [ebp-4h]
 
     iassert(arg);
     volume = SND_GetVolumeNormalized() * snd_cinematicVolumeScale->current.value;
+    // let the background thread start reading ahead
     R_Cinematic_StartPlayback(arg, 5u, volume);
+    // close the menu
     if (cls.uiStarted)
         UI_SetActiveMenu(localClientNum, UIMENU_NONE);
     Con_Close(localClientNum);
@@ -43,6 +51,12 @@ void __cdecl CL_PlayUnskippableCinematic_f()
     cin_skippable = 0;
 }
 
+/*
+==================
+SCR_DrawCinematic
+
+==================
+*/
 void __cdecl SCR_DrawCinematic(int localClientNum)
 {
     if (R_Cinematic_IsNextReady())
@@ -53,6 +67,11 @@ void __cdecl SCR_DrawCinematic(int localClientNum)
         R_Cinematic_DrawStretchPic_Letterboxed();
 }
 
+/*
+==================
+SCR_StopCinematic
+==================
+*/
 void __cdecl SCR_StopCinematic(int localClientNum)
 {
     const char *v1; // eax

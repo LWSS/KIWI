@@ -301,6 +301,7 @@ void __cdecl MSG_WriteBits(msg_t *msg, int value, unsigned int bits)
 
     v3 = bits;
     iassert( (unsigned)bits <= 32 );
+    // this isn't an exact overflow check, but close enough
     if (msg->maxsize - msg->cursize >= 4)
     {
         for (; v3; ++msg->bit)
@@ -616,6 +617,7 @@ int __cdecl MSG_ReadString(msg_t *msg, char *buffer, int bufsize)
 
     for (i = 0; ; ++i)
     {
+        // use ReadByte so -1 is out of bounds
         readcount = msg->readcount;
         if (readcount >= msg->cursize)
         {
@@ -758,6 +760,11 @@ float __cdecl MSG_ReadDeltaFloat(msg_t *msg, double oldV)
     return *((float *)&v4 + 1);
 }
 
+/*
+=====================
+MSG_WriteDeltaUsercmd
+=====================
+*/
 void __cdecl MSG_WriteDeltaUsercmd(msg_t *msg, const usercmd_s *from, const usercmd_s *to)
 {
     unsigned int v6; // r5
@@ -1115,6 +1122,11 @@ void __cdecl MSG_WriteDeltaUsercmd(msg_t *msg, const usercmd_s *from, const user
     }
 }
 
+/*
+=====================
+MSG_ReadDeltaUsercmd
+=====================
+*/
 void __cdecl MSG_ReadDeltaUsercmd(msg_t *msg, const usercmd_s *from, usercmd_s *to)
 {
     int v6; // r28
@@ -1552,6 +1564,12 @@ void __cdecl MSG_ReadDeltaHudElems(msg_t *msg, hudelem_s *to, unsigned int count
     }
 }
 
+/*
+=============
+MSG_WriteDeltaPlayerstate
+
+=============
+*/
 void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
 {
     int bit; // r11
@@ -1646,6 +1664,7 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
         LODWORD(v12) = field->bits;
         if (field->bits)
         {
+            // integer
             v16 = *(int *)((char *)&to->commandTime + v11);
             v17 = field->bits;
             if ((int)v12 <= 0)
@@ -1680,10 +1699,12 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
         }
         else
         {
+            // float
             v13 = *(float *)((char *)&to->commandTime + v11);
             v14 = (int)v13;
             if ((float)v14 == v13 && (unsigned int)(v14 + 4096) < 0x2000)
             {
+                // send as small integer
                 MSG_WriteBits(msg, 0, 1u);
                 MSG_WriteBits(msg, v14 + 4096, 0xDu);
                 if (!v8)
@@ -1691,6 +1712,7 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
                 v15 = v14;
                 goto LABEL_30;
             }
+            // send as full floating point value
             MSG_WriteBits(msg, 1, 1u);
             MSG_WriteBits(msg, *(int *)((char *)&to->commandTime + v11), 0x20u);
             if (v8)
@@ -1718,6 +1740,7 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
         v21 += 4;
         v22 += 4;
     } while (v21 - 2 < 16);
+    // send the arrays
     if (v20)
     {
         MSG_WriteBits(msg, 1, 1u);
@@ -2066,6 +2089,11 @@ void __cdecl MSG_WriteDeltaPlayerstate(msg_t *msg, playerState_s *to)
     }
 }
 
+/*
+===================
+MSG_ReadDeltaPlayerstate
+===================
+*/
 void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
 {
     int bit; // r11
@@ -2167,6 +2195,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
     else
         v6 = 8 * readcount - 12;
 
+    // shownet 2/3 will interleave with other printed info, -2 will
+    // just print the delta records
     if (cl_shownet && ((integer = cl_shownet->current.integer, integer >= 2) || integer == -2))
     {
         print = 1;
@@ -2190,6 +2220,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
         v12 = field->bits;
         if (field->bits)
         {
+            // integer
             v15 = field->bits;
             //v16 = _cntlzw(v12) == 0;
             v16 = (v12 & 0x80000000u) != 0;
@@ -2229,6 +2260,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
         }
         if (!MSG_ReadBits(msg, 1u))
         {
+            // integral float
+            // bias to allow equal parts positive and negative
             Bits = MSG_ReadBits(msg, 0xDu) - 4096;
             *(float *)((char *)&to->commandTime + v11) = (float)Bits;
         LABEL_32:
@@ -2238,6 +2271,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
             }
             goto LABEL_34;
         }
+        // full floating point value
         *(int *)((char *)&to->commandTime + v11) = MSG_ReadBits(msg, 0x20u);
         if (print)
         {
@@ -2247,6 +2281,8 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
         --v9;
         ++field;
     } while (v9);
+    // read the arrays
+    // parse stats
     if (MSG_ReadBits(msg, 1u))
     {
         if (cl_shownet && cl_shownet->current.integer == 4)
@@ -2344,6 +2380,7 @@ void __cdecl MSG_ReadDeltaPlayerstate(msg_t *msg, playerState_s *to)
             v28 += 4;
         } while (v27 - 2 < 16);
     }
+    // parse ammo
     if (MSG_ReadBits(msg, 1u))
     {
         for (i = 78; i < 142; i += 16)

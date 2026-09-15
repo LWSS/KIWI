@@ -427,6 +427,11 @@ void Cmd_Dumpraw_f(void)
 }
 // avail end
 
+/*
+============
+Cmd_Init
+============
+*/
 void Cmd_Init()
 {
 	Cmd_ResetArgs(&cmd_args, &cmd_argsPrivate);
@@ -505,6 +510,11 @@ void __cdecl _Cmd_Wait_f()
     }
 }
 
+/*
+============
+Cbuf_Init
+============
+*/
 void __cdecl Cbuf_Init()
 {
     int  client; // [esp+0h] [ebp-4h]
@@ -523,6 +533,13 @@ void __cdecl Cbuf_Init()
     Sys_LeaveCriticalSection(CRITSECT_CBUF);
 }
 
+/*
+============
+Cbuf_AddText
+
+Adds command text at the end of the buffer, does NOT add a final \n
+============
+*/
 void __cdecl Cbuf_AddText(int  localClientNum, const char *text)
 {
     CmdText *cmd_text; // [esp+0h] [ebp-8h]
@@ -568,6 +585,14 @@ int  __cdecl strlen_noncrt(const char *str)
     return count;
 }
 
+/*
+============
+Cbuf_InsertText
+
+Adds command text immediately after the current command
+Adds a \n to the text
+============
+*/
 void __cdecl Cbuf_InsertText(int  localClientNum, const char *text)
 {
     uint v2; // [esp+4h] [ebp-1Ch]
@@ -581,9 +606,12 @@ void __cdecl Cbuf_InsertText(int  localClientNum, const char *text)
     length = v2 + 1;
     if ((int )(cmd_text->cmdsize + v2 + 1) <= cmd_text->maxsize)
     {
+        // move the existing command text
         for (i = cmd_text->cmdsize - 1; i >= 0; --i)
             cmd_text->data[length + i] = cmd_text->data[i];
+        // copy the new text in
         memcpy(cmd_text->data, (uint8_t *)text, v2);
+        // add a \n
         cmd_text->data[v2] = 10;
         cmd_text->cmdsize += length;
         Sys_LeaveCriticalSection(CRITSECT_CBUF);
@@ -727,6 +755,11 @@ void __cdecl Cbuf_ExecuteBuffer(int  localClientNum, int  controllerIndex, const
     }
 }
 
+/*
+============
+Cbuf_Execute
+============
+*/
 void __cdecl Cbuf_Execute(int  localClientNum, int  controllerIndex)
 {
     PROF_SCOPED("Cbuf_Execute");
@@ -752,15 +785,19 @@ void __cdecl Cbuf_ExecuteInternal(int  localClientNum, int  controllerIndex)
     {
         if (cmd_wait)
         {
+            // skip out while text still remains in buffer, leaving it
+            // for next frame
             --cmd_wait;
             break;
         }
+        // find a \n or ; line break
         src = v3->data;
         v2 = 0;
         for (count = 0; count < v3->cmdsize; ++count)
         {
             if (src[count] == 34)
                 ++v2;
+            // don't break if inside a quoted string
             if ((v2 & 1) == 0 && src[count] == 59 || src[count] == 10 || src[count] == 13)
                 break;
         }
@@ -768,6 +805,9 @@ void __cdecl Cbuf_ExecuteInternal(int  localClientNum, int  controllerIndex)
             count = 4095;
         memcpy((uint8_t *)dst, src, count);
         dst[count] = 0;
+        // delete the text from the command buffer and move remaining commands down
+        // this is necessary because commands (exec) can insert data at the
+        // beginning of the text buffer
         if (count == v3->cmdsize)
         {
             v3->cmdsize = 0;
@@ -778,6 +818,7 @@ void __cdecl Cbuf_ExecuteInternal(int  localClientNum, int  controllerIndex)
             v3->cmdsize -= counta;
             memmove(src, &src[counta], v3->cmdsize);
         }
+        // execute the command line
         Sys_LeaveCriticalSection(CRITSECT_CBUF);
         Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, dst);
         Sys_EnterCriticalSection(CRITSECT_CBUF);
@@ -826,6 +867,14 @@ void __cdecl SVCmd_ArgvBuffer(int  arg, char *buffer, int  bufferLength)
     I_strncpyz(buffer, v3, bufferLength);
 }
 
+/*
+============
+Cmd_ArgsBuffer
+
+The interpreted versions use this because
+they can't have pointers returned to them
+============
+*/
 void __cdecl Cmd_ArgsBuffer(int  start, char *buffer, int  bufLength)
 {
     const char *src; // [esp+0h] [ebp-14h]
@@ -924,33 +973,39 @@ int  __cdecl Cmd_TokenizeStringInternal(char *text_in, int  max_tokens, const ch
     int  argc; // [esp+40h] [ebp-4h]
 
     iassert( text_in );
+    // clear previous args
     argc = 0;
     text = (uint8_t *)text_in;
     while (1)
     {
         while (1)
         {
+            // skip whitespace
             while (1)
             {
                 if (!*text)
-                    return argc;
+                    return argc; // all tokens parsed
                 if (!Cmd_IsWhiteSpaceChar(*text))
                     break;
                 ++text;
             }
+            // skip // comments
             if (*text == 47 && text[1] == 47)
-                return argc;
+                return argc; // all tokens parsed
+            // skip /* */ comments
             if (*text != 47 || text[1] != 42)
-                break;
+                break; // we are ready to parse a token
             for (texta = (const char *)(text + 2); *texta && (*texta != 42 || texta[1] != 47); ++texta)
                 ;
             if (!*texta)
-                return argc;
+                return argc; // all tokens parsed
             text = (uint8_t *)(texta + 2);
         }
         argv[argc++] = &argsPriv->textPool[argsPriv->totalUsedTextPool];
+        // this is usually something malicious
         if (!--max_tokens)
             break;
+        // handle quoted strings
         if (*text == 34)
         {
             for (textb = (const char *)(text + 1); *textb && *textb != 34; ++textb)
@@ -971,13 +1026,15 @@ int  __cdecl Cmd_TokenizeStringInternal(char *text_in, int  max_tokens, const ch
                 v8 = 8190;
             argsPriv->totalUsedTextPool = v8;
             if (!*textb)
-                return argc;
+                return argc; // all tokens parsed
             text = (uint8_t *)(textb + 1);
             if (!*text)
                 return argc;
         }
         else
         {
+            // regular token
+            // skip until whitespace, quote, or command
             do
             {
                 argsPriv->textPool[argsPriv->totalUsedTextPool] = *text;
@@ -994,7 +1051,7 @@ int  __cdecl Cmd_TokenizeStringInternal(char *text_in, int  max_tokens, const ch
                     else
                         v6 = 8190;
                     argsPriv->totalUsedTextPool = v6;
-                    return argc;
+                    return argc; // all tokens parsed
                 }
             } while (!Cmd_IsWhiteSpaceChar(*text) && (*text != 47 || text[1] != 47 && text[1] != 42));
             argsPriv->textPool[argsPriv->totalUsedTextPool] = 0;
@@ -1065,6 +1122,16 @@ void __cdecl AssertCmdArgsConsistency(const CmdArgs *args, const CmdArgsPrivate 
     vassert(totalUsedTextPool == argsPriv->totalUsedTextPool, "%i, %i", totalUsedTextPool, argsPriv->totalUsedTextPool);
 }
 
+/*
+============
+Cmd_TokenizeString
+
+Parses the given string into command line tokens.
+The text is copied to a seperate buffer and 0 characters
+are inserted in the apropriate place, The argv array
+will point into this temporary buffer.
+============
+*/
 void __cdecl Cmd_TokenizeString(char *text_in)
 {
     Cmd_TokenizeStringWithLimit(text_in, 512 - cmd_argsPrivate.totalUsedArgvPool);
@@ -1101,6 +1168,11 @@ void __cdecl SV_Cmd_EndTokenizedString()
     Cmd_EndTokenizedStringKernel(&sv_cmd_args, &sv_cmd_argsPrivate);
 }
 
+/*
+============
+Cmd_RemoveCommand
+============
+*/
 void __cdecl Cmd_RemoveCommand(const char *cmdName)
 {
     cmd_function_s **back; // [esp+14h] [ebp-8h]
@@ -1109,6 +1181,7 @@ void __cdecl Cmd_RemoveCommand(const char *cmdName)
     for (back = &cmd_functions; ; back = (cmd_function_s **)*back)
     {
         cmd = *back;
+        // command wasn't active
         if (!*back)
             break;
         if (!strcmp(cmdName, cmd->name))
@@ -1237,6 +1310,11 @@ void __cdecl SV_Cmd_ExecuteString(int  localClientNum, int  controllerIndex, cha
     Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, text);
 }
 
+/*
+============
+Cmd_List_f
+============
+*/
 void __cdecl Cmd_List_f()
 {
     const char *match; // [esp+0h] [ebp-Ch]
@@ -1259,6 +1337,11 @@ void __cdecl Cmd_List_f()
     Com_Printf(CON_CHANNEL_DONT_FILTER, "%i commands\n", i);
 }
 
+/*
+===============
+Cmd_Exec_f
+===============
+*/
 void __cdecl Cmd_Exec_f()
 {
     char *v0; // eax

@@ -341,6 +341,7 @@ void __cdecl IN_MouseEvent(int mstate)
 		diff = s_wmv.oldButtonState ^ mstate;
 		if (s_wmv.oldButtonState != mstate)
 		{
+			// perform button actions
 			for (button = 0; button < MAX_MOUSE_BUTTONS; ++button)
 			{
 				if ((diff & (1 << button)) != 0)
@@ -472,6 +473,7 @@ IN_Init
 */
 void __cdecl IN_Init()
 {
+	// mouse variables
 	in_mouse = Dvar_RegisterBool("in_mouse", 1, DVAR_ARCHIVE | DVAR_LATCH, "Initialize the mouse drivers");
 	IN_Startup();
 }
@@ -517,6 +519,7 @@ void __cdecl IN_Frame()
 		if (in_appactive)
 		{
 			IN_ActivateMouse(0);
+			// post events to the system que
 			IN_MouseMove();
 		}
 		else

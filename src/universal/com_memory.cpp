@@ -57,6 +57,13 @@ void __cdecl Hunk_AddAsset(XAssetHeader header, void *data)
     list->assets[list->assetCount++] = header;
 }
 
+/*
+===============
+Com_TouchMemory
+
+Touch all known used data to make sure it is paged in
+===============
+*/
 void Com_TouchMemory()
 {
     int sum; // [esp+4h] [ebp-10h]
@@ -68,9 +75,9 @@ void Com_TouchMemory()
     iassert(Sys_IsMainThread());
     start = Sys_Milliseconds();
     sum = 0;
-    for (i = 0; i < hunk_low.permanent >> 2; i += 64)
+    for (i = 0; i < hunk_low.permanent >> 2; i += 64) // only need to touch each page
         sum += *(_DWORD *)&s_hunkData[4 * i];
-    for (ia = (s_hunkTotal - hunk_high.permanent) >> 2; ia < hunk_high.permanent >> 2; ia += 64)
+    for (ia = (s_hunkTotal - hunk_high.permanent) >> 2; ia < hunk_high.permanent >> 2; ia += 64) // only need to touch each page
         sum += *(_DWORD *)&s_hunkData[4 * ia];
     end = Sys_Milliseconds();
     Com_Printf(CON_CHANNEL_SYSTEM, "Com_TouchMemory: %i msec. Using sum: %d\n", end - start, sum);
@@ -243,14 +250,24 @@ void __cdecl Com_TempMeminfo_f()
     Com_Printf(CON_CHANNEL_DONT_FILTER, "Related commands: meminfo, imagelist, gfx_world, gfx_model, cg_drawfps, com_statmon, tempmeminfo\n");
 }
 
+/*
+=================
+Com_InitHunkMemory
+=================
+*/
 void Com_InitHunkMemory()
 {
     iassert(Sys_IsMainThread());
     iassert(!s_hunkData);
 
+    // make sure the file system has allocated and "not" freed any temp blocks
+    // this allows the config and product id files ( journal files too ) to be loaded
+    // by the file system without redunant routines in the file system utilizing different
+    // memory systems
     if (FS_LoadStack())
         Com_Error(ERR_FATAL, "Hunk initialization failed. File system load stack not zero");
 
+    // allocate the stack based hunk allocator
     if (!IsFastFileLoad())
     {
 #ifdef KISAK_PURE
@@ -276,6 +293,11 @@ void Com_InitHunkMemory()
     Cmd_AddCommandInternal("tempmeminfo", Com_TempMeminfo_f, &Com_TempMeminfo_f_VAR);
 }
 
+/*
+=================
+Com_Meminfo_f
+=================
+*/
 void __cdecl Com_Meminfo_f()
 {
     iassert(Sys_IsMainThread());
@@ -432,6 +454,13 @@ void __cdecl Hunk_ClearToMarkLow(int mark)
     track_hunk_ClearToMarkLow(mark);
 }
 
+/*
+=================
+Hunk_Clear
+
+The server calls this before shutting down or loading a new map
+=================
+*/
 void Hunk_Clear()
 {
     iassert(Sys_IsMainThread());
@@ -452,6 +481,13 @@ int __cdecl Hunk_Used()
     return hunk_high.permanent + hunk_low.permanent;
 }
 
+/*
+=================
+Hunk_Alloc
+
+Allocate permanent (until the hunk is cleared) memory
+=================
+*/
 uint8_t* __cdecl Hunk_Alloc(uint size, const char* name, int type)
 {
 #ifdef KISAK_MP
@@ -600,6 +636,15 @@ uint8_t *__cdecl Hunk_AllocLowAlign(uint size, int alignment, const char *name, 
     return buf;
 }
 
+/*
+=================
+Hunk_AllocateTempMemory
+
+This is used by the file loading system.
+Multiple files can be loaded in temporary memory.
+When the files-in-use count reaches zero, all temp memory will be deleted
+=================
+*/
 uint *__cdecl Hunk_AllocateTempMemory(int size, const char *name)
 {
     hunkHeader_t *hdr; // [esp+0h] [ebp-18h]
@@ -613,6 +658,10 @@ uint *__cdecl Hunk_AllocateTempMemory(int size, const char *name)
 #ifdef KISAK_MP
     iassert(Sys_IsMainThread());
 #endif
+    // return a Z_Malloc'd block if the hunk has not been initialized
+    // this allows the config and product id files ( journal files too ) to be loaded
+    // by the file system without redunant routines in the file system utilizing different
+    // memory systems
     if (!s_hunkData)
     {
         return (uint *)Z_Malloc(size, name, 10);
@@ -654,9 +703,15 @@ uint *__cdecl Hunk_AllocateTempMemory(int size, const char *name)
     hdr->size = hunk_low.temp - prev_temp;
     track_temp_alloc(hdr->size, hunk_high.temp + hunk_low.temp, hunk_low.permanent, name);
     hdr->name = name;
+    // don't bother clearing, because we are going to load a file over it
     return (uint *)bufa;
 }
 
+/*
+==================
+Hunk_FreeTempMemory
+==================
+*/
 void __cdecl Hunk_FreeTempMemory(char *buf)
 {
     hunkHeader_t *hdr; // [esp+0h] [ebp-10h]
@@ -676,6 +731,8 @@ void __cdecl Hunk_FreeTempMemory(char *buf)
             Com_Error(ERR_FATAL, "Hunk_FreeTempMemory: bad magic");
         }
         hdr->magic = -1991018349;
+        // this only works if the files are freed in stack order,
+        // otherwise the memory will stay around until Hunk_ClearTempMemory
         if (hdr != (hunkHeader_t *)&s_hunkData[(hunk_low.temp - hdr->size + 15) & 0xFFFFFFF0])
         {
             MyAssertHandler(
@@ -696,10 +753,23 @@ void __cdecl Hunk_FreeTempMemory(char *buf)
     }
     else
     {
+        // free with Z_Free if the hunk has not been initialized
+        // this allows the config and product id files ( journal files too ) to be loaded
+        // by the file system without redunant routines in the file system utilizing different
+        // memory systems
         Z_Free(buf, 10);
     }
 }
 
+/*
+=================
+Hunk_ClearTempMemory
+
+The temp space is no longer needed.  If we have left more
+touched but unused memory on this side, have future
+permanent allocs use this side.
+=================
+*/
 void Hunk_ClearTempMemory()
 {
     uint8_t *endBuf;   // [esp+0h] [ebp-Ch]
@@ -1023,6 +1093,11 @@ static void __cdecl Z_MallocFailed(int size)
     Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 593);
 }
 
+/*
+========================
+Z_Malloc
+========================
+*/
 void* Z_Malloc(int size, const char* name, int type)
 {
     uint* buf; // [esp+0h] [ebp-4h]
@@ -1035,6 +1110,11 @@ void* Z_Malloc(int size, const char* name, int type)
     return buf;
 }
 
+/*
+========================
+Z_Free
+========================
+*/
 void __cdecl Z_Free(void *ptr, int type)
 {
     if (ptr)

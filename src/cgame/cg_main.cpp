@@ -848,6 +848,13 @@ void CG_RegisterPhysicsSounds()
     CG_RegisterPhysicsSounds_FastFile();
 }
 
+/*
+=================
+CG_RegisterSounds
+
+called during a precache command
+=================
+*/
 void __cdecl CG_RegisterSounds()
 {
     cgMedia.landDmgSound = Com_FindSoundAlias("land_damage");
@@ -915,6 +922,13 @@ void __cdecl RegisterNightVisionAssets(int localClientNum)
     }
 }
 
+/*
+=================
+CG_RegisterGraphics
+
+This function may execute for a couple of minutes with a slow disk.
+=================
+*/
 void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
 {
     int i; // r29
@@ -971,10 +985,12 @@ void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
     SCR_UpdateLoadScreen();
     SCR_UpdateLoadScreen();
     ProfLoad_Begin("Register items");
+    // only register the items that the server says we need
     CG_RegisterItems(localClientNum);
     ProfLoad_End();
     SCR_UpdateLoadScreen();
     ProfLoad_Begin("Register server models");
+    // register all the server specified models
     for (i = 1; i < 512; ++i)
     {
         ConfigString = CL_GetConfigString(localClientNum, i + CS_MODELS);
@@ -1201,6 +1217,12 @@ int __cdecl CG_PlaySoundAliasAsMasterByName(int localClientNum, SndEntHandle ent
     return playbackId;
 }
 
+/*
+=================
+CG_LoadHudMenu
+
+=================
+*/
 void __cdecl CG_LoadHudMenu(int localClientNum)
 {
     MenuList *Menus; // r3
@@ -1314,6 +1336,14 @@ void __cdecl CL_LoadSoundAliases(const char *loadspec)
     Com_LoadSoundAliases(loadspec, "all_sp", SASYS_CGAME);
 }
 
+/*
+=================
+CG_Init
+
+Called after every level change or subsystem restart
+Will perform callbacks to make the loading info screen update.
+=================
+*/
 void __cdecl CG_Init(int localClientNum, int savegame)
 {
     const char *v5; // r10
@@ -1326,6 +1356,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     cg_s *cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     cgs_t *cgs = CG_GetLocalClientStaticGlobals(localClientNum);
 
+    // clear everything
     memset(cgs, 0, sizeof(cgs_t));
     memset(&cgDC, 0, sizeof(cgDC));
     memset(cg_weaponsArray[localClientNum], 0, sizeof(weaponInfo_s[128]));
@@ -1346,6 +1377,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     CG_DrawInformation(localClientNum);
     SCR_UpdateLoadScreen();
 
+    // load a few needed things before we do any screen updates
     cgMedia.whiteMaterial = Material_RegisterHandle("white", IMAGE_TRACK_HUD);
     cgMedia.friendlyFireMaterial = Material_RegisterHandle("hudfriendlyfire", IMAGE_TRACK_HUD);
     cgMedia.smallDevFont = CL_RegisterFont("fonts/smalldevfont", IMAGE_TRACK_DEBUG);
@@ -1372,6 +1404,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     CG_InitConsoleCommands();
     CG_InitViewDimensions(localClientNum);
 
+    // check version
     if (strcmp(CL_GetConfigString(localClientNum, CS_GAME_VERSION), "cod-sp"))
         Com_Error(ERR_DROP, "Client/Server game mismatch");
 
@@ -1390,6 +1423,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
 
     SCR_UpdateLoadScreen();
     ProfLoad_Begin("Load world");
+    // load the new map
     LoadWorld(cgs->mapname, savegame);
     ProfLoad_End();
     SCR_UpdateLoadScreen();
@@ -1414,7 +1448,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     SCR_UpdateLoadScreen();
 
     ProfLoad_Begin("Load hud menus");
-    CG_LoadHudMenu(localClientNum);
+    CG_LoadHudMenu(localClientNum);      // load new hud stuff
     ProfLoad_End();
 
     SCR_UpdateLoadScreen();
@@ -1485,6 +1519,13 @@ void __cdecl CG_FreeWeapons(int localClientNum)
     memset(cg_weaponsArray[localClientNum], 0, sizeof(weaponInfo_s[128]));
 }
 
+/*
+=================
+CG_Shutdown
+
+Called before every level change or subsystem restart
+=================
+*/
 void __cdecl CG_Shutdown(int localClientNum)
 {
     int i; // r30
@@ -1492,6 +1533,8 @@ void __cdecl CG_Shutdown(int localClientNum)
     int ragdollHandle; // r3
     dxBody *physObjId; // r4
 
+    // some mods may need to do cleanup work here,
+    // like closing files or archiving session data
     R_TrackStatistics(0);
     SND_FadeAllSounds(1.0, 0);
     //CG_StopAllRumbles(localClientNum); // KISAKTODO

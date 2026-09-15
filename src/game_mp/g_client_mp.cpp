@@ -11,6 +11,11 @@
 #include <script/scr_vm.h>
 
 
+/*
+==================
+SetClientViewAngle
+==================
+*/
 void __cdecl SetClientViewAngle(gentity_s *ent, const float *angle)
 {
     double v2; // st7
@@ -106,6 +111,7 @@ void __cdecl SetClientViewAngle(gentity_s *ent, const float *angle)
             }
         }
     }
+    // set the delta angle
     for (i = 0; i < 3; ++i)
     {
         v18 = newAngle[i] - (float)ent->client->sess.cmd.angles[i] * 0.0054931640625f;
@@ -139,6 +145,17 @@ void __cdecl G_GetPlayerViewOrigin(const playerState_s *ps, float *origin)
     }
 }
 
+/*
+===========
+ClientUserinfoChanged
+
+Called from ClientConnect when the player first connects and
+directly by the server system when the player updates a userinfo variable.
+
+The game can override any of the settings and call trap_SetUserinfo
+if desired.
+============
+*/
 void __cdecl ClientUserinfoChanged(uint clientNum)
 {
     gclient_s *client; // [esp+0h] [ebp-814h]
@@ -152,14 +169,21 @@ void __cdecl ClientUserinfoChanged(uint clientNum)
     client = ent->client;
     bcassert(clientNum, 0x40);
     SV_GetUserinfo(clientNum, userinfo, 1024);
+
+    // check for malformed or illegal info strings
     if (!Info_Validate(userinfo))
         strcpy(userinfo, "\\name\\badinfo");
+
+    // check for local client
     client->sess.localClient = SV_IsLocalClient(clientNum);
+
+    // check the item prediction
     s = Info_ValueForKey(userinfo, "cg_predictItems");
     if (atoi(s))
         client->sess.predictItemPickup = 1;
     else
         client->sess.predictItemPickup = 0;
+    // set name
     if (client->sess.connected == CON_CONNECTED && level.manualNameChange)
     {
         s = Info_ValueForKey(userinfo, "name");
@@ -180,6 +204,11 @@ void __cdecl ClientUserinfoChanged(uint clientNum)
     ci->team = client->sess.cs.team;
 }
 
+/*
+===========
+ClientCleanName
+============
+*/
 void __cdecl ClientCleanName(const char *in, char *out, int outSize)
 {
     char v3; // [esp+3h] [ebp-11h]
@@ -189,6 +218,7 @@ void __cdecl ClientCleanName(const char *in, char *out, int outSize)
     int spaces; // [esp+10h] [ebp-4h]
     int outSizea; // [esp+24h] [ebp+10h]
 
+    //save room for trailing null byte
     outSizea = outSize - 1;
     len = 0;
     colorlessLen = 0;
@@ -200,15 +230,19 @@ void __cdecl ClientCleanName(const char *in, char *out, int outSize)
         v3 = *in++;
         if (!v3)
             break;
+        // don't allow leading spaces
         if (*p || v3 != 32)
         {
+            // check colors
             if (v3 == 94)
             {
+                // solo trailing carat is not a color prefix
                 if (*in)// KISAK: a name ending in '^' must not skip past the terminator
                     ++in;
             }
             else
             {
+                // don't allow too many consecutive spaces
                 if (v3 != 32)
                 {
                     spaces = 0;
@@ -227,10 +261,31 @@ void __cdecl ClientCleanName(const char *in, char *out, int outSize)
         }
     }
     *out = 0;
+    // don't allow empty names
     if (!*p || !colorlessLen)
         I_strncpyz(p, "UnnamedPlayer", outSizea);
 }
 
+/*
+===========
+ClientConnect
+
+Called when a player begins connecting to the server.
+Called again for every map change or tournement restart.
+
+The session information will be valid after exit.
+
+Return NULL if the client should be allowed, otherwise return
+a string with the reason for denial.
+
+Otherwise, the client will be sent the current gamestate
+and will eventually get to ClientBegin.
+
+firstTime will be qtrue the very first time a client connects
+to the server machine, but qfalse on map changes and tournement
+restarts.
+============
+*/
 char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
 {
     gclient_s *client; // [esp+14h] [ebp-418h]
@@ -261,6 +316,7 @@ char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
     client->sess.killCamEntity = -1;
     G_InitGentity(ent);
     ent->handler = ENT_HANDLER_NULL;
+    // they can connect
     ent->client = client;
     ent->s.clientNum = clientNum;
     client->sess.cs.clientIndex = clientNum;
@@ -269,14 +325,18 @@ char *__cdecl ClientConnect(uint clientNum, uint16_t scriptPersId)
     client->ps.moveSpeedScaleMultiplier = client->sess.moveSpeedScaleMultiplier;
     iassert(!client->ps.eFlags);
     iassert(!ent->r.svFlags);
+    // get and distribute relevent paramters
     ClientUserinfoChanged(clientNum);
     SV_GetUserinfo(clientNum, userinfo, 1024);
+    // we don't check password for bots and local client
+    // check for a password
     if (client->sess.localClient
         || (value = Info_ValueForKey(userinfo, "password"), !*(_BYTE *)g_password->current.string)
         || !I_stricmp(g_password->current.string, "none")
         || !strcmp(g_password->current.string, value))
     {
         Scr_PlayerConnect(ent);
+        // count current clients and rank for scoreboard
         CalculateRanks();
         return 0;
     }
@@ -292,6 +352,15 @@ void __cdecl ClientClearFields(gclient_s *client)
     client->useHoldEntity.setEnt(NULL);
 }
 
+/*
+===========
+ClientBegin
+
+called when a client has finished connecting, and is ready
+to be placed into the level.  This will happen every level load,
+and on transition between teams, but doesn't happen on respawns
+============
+*/
 void __cdecl ClientBegin(int clientNum)
 {
     gclient_s *client; // [esp+0h] [ebp-4h]
@@ -299,10 +368,20 @@ void __cdecl ClientBegin(int clientNum)
     client = &level.clients[clientNum];
     client->sess.connected = CON_CONNECTED;
     client->ps.pm_type = PM_SPECTATOR;
+    // count current clients and rank for scoreboard
     CalculateRanks();
     Scr_Notify(&g_entities[clientNum], scr_const.begin, 0);
 }
 
+/*
+===========
+ClientSpawn
+
+Called every time a client is placed fresh in the world:
+after the first ClientBegin, and after each respawn
+Initializes all non-persistant parts of playerState
+============
+*/
 void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float *spawn_angles)
 {
     gclient_s *client; // [esp+14h] [ebp-12Ch]
@@ -344,15 +423,20 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     ent->r.maxs[1] = 15.0f;
     ent->r.maxs[2] = 70.0f;
     iFlags = client->ps.eFlags & 0x100002;
+
+    // clear everything but the persistant data
+
     memcpy(&savedSess, &client->sess, sizeof(savedSess));
     savedSpawnCount = client->ps.stats[STAT_SPAWN_COUNT];
     savedServerTime = client->lastServerTime;
     ClientClearFields(client);
-    memset((uint8_t *)client, 0, sizeof(gclient_s));
+    memset((uint8_t *)client, 0, sizeof(gclient_s)); // bk FIXME: Com_Memset?
     memcpy(&client->sess, &savedSess, sizeof(client->sess));
     client->lastServerTime = savedServerTime;
     client->spectatorClient = -1;
+    // increment the spawncount so the client will detect the respawn
     client->ps.stats[STAT_SPAWN_COUNT] = savedSpawnCount + 1;
+    // clear entity values
     client->ps.stats[STAT_MAX_HEALTH] = client->sess.maxHealth;
     client->ps.eFlags = iFlags;
     client->sess.cs.clientIndex = index;
@@ -360,6 +444,7 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     client->ps.clientNum = index;
     client->ps.viewlocked_entNum = ENTITYNUM_NONE;
     SV_GetUsercmd(client - level.clients, &client->sess.cmd);
+    // toggle the teleport bit so the client knows to not lerp
     client->ps.eFlags ^= 2u;
     client->ps.viewHeightTarget = 60;
     client->ps.viewHeightCurrent = 60.0;
@@ -374,6 +459,7 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     client->ps.origin[0] = *spawn_origin;
     client->ps.origin[1] = spawn_origin[1];
     client->ps.origin[2] = spawn_origin[2];
+    // the respawned flag will be cleared after the attack and jump keys come up
     client->ps.pm_flags |= PMF_RESPAWNED;
     SetClientViewAngle(ent, spawn_angles);
     client->inactivityTime = level.time + 1000 * g_inactivity->current.integer;
@@ -383,13 +469,25 @@ void __cdecl ClientSpawn(gentity_s *ent, const float *spawn_origin, const float 
     level.clientIsSpawning = 1;
     client->lastSpawnTime = level.time;
     client->sess.cmd.serverTime = level.time;
+    // run a client frame to drop exactly to the floor,
+    // initialize animations and other things
     client->ps.commandTime = level.time - 100;
+    // run the presend to set anything else
     ClientEndFrame(ent);
     ClientThink_real(ent, &client->sess.cmd);
     level.clientIsSpawning = 0;
+    // clear entity state values
     BG_PlayerStateToEntityState(&client->ps, &ent->s, 1, 1u);
 }
 
+/*
+===========
+ClientDisconnect
+
+Called when a player drops from the server.
+Will not be called between levels.
+============
+*/
 void __cdecl ClientDisconnect(int clientNum)
 {
     gclient_s *client; // [esp+0h] [ebp-Ch]

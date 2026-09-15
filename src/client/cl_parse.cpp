@@ -285,6 +285,12 @@ void __cdecl SHOWNET(msg_t *msg, char *s)
         Com_Printf(CON_CHANNEL_CLIENT, "%3i %3i:%s\n", msg->readcount - 1, msg->cursize, s);
 }
 
+/*
+==================
+CL_ParsePacketEntities
+
+==================
+*/
 void __cdecl CL_ParsePacketEntities(clientActive_t *cl, msg_t *msg, clSnapshot_t *newframe)
 {
     int *p_parseEntitiesNum; // r30
@@ -297,6 +303,7 @@ void __cdecl CL_ParsePacketEntities(clientActive_t *cl, msg_t *msg, clSnapshot_t
     parseEntitiesNum = cl->parseEntitiesNum;
     newframe->numEntities = 0;
     newframe->parseEntitiesNum = parseEntitiesNum;
+    // read the entity index number
     for (i = MSG_ReadBits(msg, 12); i != ENTITYNUM_NONE; i = MSG_ReadBits(msg, 12))
     {
         bcassert(i, 0x880);
@@ -305,27 +312,55 @@ void __cdecl CL_ParsePacketEntities(clientActive_t *cl, msg_t *msg, clSnapshot_t
     }
 }
 
+/*
+================
+CL_ParseSnapshot
+
+If the snapshot is parsed properly, it will be copied to
+cl.snap and saved in cl.snapshots[].  If the snapshot is invalid
+for any reason, no changes to the state will be made at all.
+================
+*/
 void __cdecl CL_ParseSnapshot(msg_t *msg)
 {
+    // read in the new snapshot to a temporary buffer
+    // we will only copy to cl.snap if it is valid
     memset(&clients[0].snap, 0, sizeof(clSnapshot_t));
+
+    // we will have read any new server commands in this
+    // message before we got to svc_snapshot
     clients[0].snap.serverCommandNum = clientConnections[0].serverCommands.header.sequence;
     clients[0].snap.serverTime = MSG_ReadLong(msg);
     clients[0].snap.messageNum = clientConnections[0].serverMessageSequence;
     clients[0].snap.snapFlags = MSG_ReadByte(msg);
-    clients[0].snap.valid = 1;
+    clients[0].snap.valid = 1;		// uncompressed frame
+
+    // read playerinfo
     if (cl_shownet->current.integer >= 2)
         Com_Printf(CON_CHANNEL_CLIENT, "%3i %3i:%s\n", msg->readcount - 1, msg->cursize, "playerstate");
     MSG_ReadDeltaPlayerstate(msg, &clients[0].snap.ps);
+
+    // read packet entities
     if (cl_shownet->current.integer >= 2)
         Com_Printf(CON_CHANNEL_CLIENT, "%3i %3i:%s\n", msg->readcount - 1, msg->cursize, "packet entities");
     CL_ParsePacketEntities(clients, msg, &clients[0].snap);
+
+    // if not valid, dump the entire thing now that it has
+    // been properly read
     if (!clients[0].snap.valid)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\client\\cl_parse.cpp", 128, 0, "%s", "cl->snap.valid");
+
+    // save the frame off in the backup array for later delta comparisons
     clients[0].snapshots[0] = clients[0].snap;
     if (cl_shownet->current.integer == 3)
         Com_Printf(CON_CHANNEL_CLIENT, "   snapshot:%i\n", clients[0].snap.messageNum);
 }
 
+/*
+==================
+CL_ParseGamestate
+==================
+*/
 void __cdecl CL_ParseGamestate(char *configstrings)
 {
     int configStringIndex;
@@ -337,6 +372,7 @@ void __cdecl CL_ParseGamestate(char *configstrings)
         CG_SetTime(com_time);
         CL_SetFrametime(0, 0);
     }
+    // parse all the configstrings and baselines
     for (configStringIndex = 0; configStringIndex < MAX_CONFIGSTRINGS; ++configStringIndex)
     {
         memcpy(&incoming, configstrings + configStringIndex * sizeof(uint16_t), sizeof(uint16_t));
@@ -392,6 +428,14 @@ void __cdecl CL_RecordServerCommands(serverCommands_s *serverCommands)
     CL_WriteDemoMessage(&v3, 0);
 }
 
+/*
+=====================
+CL_ParseCommandString
+
+Command strings are just saved off until cgame asks for them
+when it transitions a snapshot
+=====================
+*/
 void __cdecl CL_ParseCommandString(serverCommands_s *serverCommands)
 {
     int sequence; // r11
@@ -421,6 +465,7 @@ void __cdecl CL_ParseCommandString(serverCommands_s *serverCommands)
             "clc->serverCommands.header.sequence - serverCommands->header.sequence <= 0");
         sequence = clientConnections[0].serverCommands.header.sequence;
     }
+    // see if we have already executed stored it off
     if (sequence != serverCommands->header.sequence)
     {
         clientConnections[0].serverCommands.header.rover = serverCommands->header.rover;
@@ -439,6 +484,11 @@ void __cdecl CL_ParseCommandString(serverCommands_s *serverCommands)
     }
 }
 
+/*
+=====================
+CL_ParseServerMessage
+=====================
+*/
 void __cdecl CL_ParseServerMessage(msg_t *msg)
 {
     int integer; // r11
@@ -458,6 +508,7 @@ void __cdecl CL_ParseServerMessage(msg_t *msg)
         Com_Printf(CON_CHANNEL_CLIENT, "------------------\n");
     }
     v3 = 0;
+    // parse the message
     while (1)
     {
         if (msg->readcount > msg->cursize)

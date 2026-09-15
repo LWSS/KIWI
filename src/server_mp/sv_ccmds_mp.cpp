@@ -208,6 +208,13 @@ char *__cdecl SV_GetMapBaseName(char *mapname)
     return FS_GetMapBaseName(mapname);
 }
 
+/*
+==================
+SV_Heartbeat_f
+
+Also called by SV_DropClient, SV_DirectConnect, and SV_SpawnServer
+==================
+*/
 void __cdecl SV_Heartbeat_f()
 {
     svs.nextHeartbeatTime = 0x80000000;
@@ -286,6 +293,11 @@ void __cdecl SV_ScriptDebugger_f()
     }
 }
 
+/*
+==================
+SV_AddOperatorCommands
+==================
+*/
 void __cdecl SV_AddOperatorCommands()
 {
     static int initialized_0 = 0;
@@ -369,6 +381,13 @@ char __cdecl SV_CheckMapExists(const char *map)
     return 0;
 }
 
+/*
+==================
+SV_Map_f
+
+Restart the server on a different map
+==================
+*/
 void __cdecl SV_Map_f()
 {
     const char *v0; // eax
@@ -400,8 +419,12 @@ void __cdecl SV_Map_f()
             return;
         }
         basename = SV_GetMapBaseName(map);
+        // save the map name here cause on a map restart we reload the q3config.cfg
+        // and thus nuke the arguments of the map command
         I_strncpyz(mapname, (char *)basename, 64);
         I_strlwr(mapname);
+        // make sure the level exists before trying to change, so that
+        // a typo at the server console won't end the game
         if (IsFastFileLoad())
         {
             iassert(fs_gameDirVar);
@@ -416,7 +439,12 @@ void __cdecl SV_Map_f()
             return;
         }
         FS_ConvertPath(mapname);
+        // start up the map
         SV_SpawnServer(mapname);
+        // set the cheat value
+        // if the level was started with "map <levelname>", then
+        // cheats will not be allowed.  If started with "devmap <levelname>"
+        // then cheats will be allowed
         v2 = SV_Cmd_Argv(0);
         cheat = I_stricmp(v2, "devmap") == 0;
         Dvar_SetBool((dvar_s *)sv_cheats, cheat);
@@ -446,6 +474,14 @@ void __cdecl ShowLoadErrorsSummary(const char *mapName, uint count)
     }
 }
 
+/*
+================
+SV_MapRestart_f
+
+Completely restarts a level, but doesn't send a new gamestate to the clients.
+This allows fair starts with variable load times.
+================
+*/
 void __cdecl SV_MapRestart_f()
 {
     SV_MapRestart(0);
@@ -466,19 +502,24 @@ void __cdecl SV_MapRestart(int fast_restart)
 
     Com_SyncThreads();
     track_hunk_ClearToStart();
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         SV_SetGametype();
         I_strncpyz(sv.gametype, sv_gametype->current.string, 64);
         savepersist = G_GetSavePersist();
+        // check for changes in variables that can't just be restarted
+        // check for maxclients change
         if (sv_maxclients->modified || I_stricmp(sv.gametype, sv_gametype->current.string) || !fast_restart)
         {
             G_SetSavePersist(0);
             String = (char *)Dvar_GetString("mapname");
             I_strncpyz(mapname, String, 64);
             FS_ConvertPath(mapname);
+            // restart the map the slow way
             SV_SpawnServer(mapname);
         }
+        // make sure we aren't restarting twice in the same frame
         else if (com_frameTime != sv.start_frameTime)
         {
             for (i = 0; i < sv_maxclients->current.integer; ++i)
@@ -490,26 +531,41 @@ void __cdecl SV_MapRestart(int fast_restart)
             SV_InitDvar();
             SV_InitArchivedSnapshot();
             SV_InitSnapshot();
+            // toggle the server bit so clients can detect that a
+            // map_restart has happened
             svs.snapFlagServerBit ^= 4u;
+
+            // generate a new serverid
+            // TTimo - don't update restartedserverId there, otherwise we won't deal correctly with multiple map_restart
             sv_serverId_value = (((_BYTE)sv_serverId_value + 1) & 0xF) + (sv_serverId_value & 0xF0);
             Dvar_SetInt((dvar_s *)sv_serverid, sv_serverId_value);
             sv.start_frameTime = com_frameTime;
             sv.state = SS_LOADING;
             sv.restarting = 1;
+            // reset all the vm data in place without changing memory allocation
             SV_RestartGameProgs(savepersist);
+
+            // run a few frames to allow everything to settle
             for (ia = 0; ia < 3; ++ia)
             {
                 svs.time += 100;
                 SV_RunFrame();
             }
+
+            // connect and begin all the clients
             for (ib = 0; ib < sv_maxclients->current.integer; ++ib)
             {
                 clienta = &svs.clients[ib];
                 if (clienta->header.state >= CS_CONNECTED)
                 {
                     v2 = va("%c", savepersist != 0 ? 110 : 66);
+                    // add the map_restart command
                     SV_AddServerCommand(clienta, SV_CMD_RELIABLE, v2);
+
+                    // connect the client again, without the firstTime flag
                     denied = ClientConnect(ib, clienta->scriptId);
+                    // this generally shouldn't happen, because the client
+                    // was connected before the level change
                     if (denied)
                     {
                         SV_DropClient(clienta, denied, 1);
@@ -755,10 +811,19 @@ int __cdecl SV_KickClient(client_t *cl, char *playerName, int maxPlayerNameLen, 
     }
 }
 
+/*
+==================
+SV_Ban_f
+
+Ban a user from being able to play on this server through the auth
+server
+==================
+*/
 void __cdecl SV_Ban_f()
 {
     client_t *PlayerByName; // [esp+0h] [ebp-4h]
 
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         if (SV_Cmd_Argc() == 2)
@@ -778,10 +843,19 @@ void __cdecl SV_Ban_f()
     }
 }
 
+/*
+==================
+SV_BanNum_f
+
+Ban a user from being able to play on this server through the auth
+server
+==================
+*/
 void __cdecl SV_BanNum_f()
 {
     client_t *PlayerByNum; // [esp+0h] [ebp-4h]
 
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         if (SV_Cmd_Argc() == 2)
@@ -916,6 +990,11 @@ void __cdecl SV_TempBanNum_f()
     }
 }
 
+/*
+================
+SV_Status_f
+================
+*/
 void __cdecl SV_Status_f()
 {
     int ClientScore; // eax
@@ -927,6 +1006,7 @@ void __cdecl SV_Status_f()
     const char *s; // [esp+24h] [ebp-Ch]
     int i; // [esp+28h] [ebp-8h]
 
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         Com_Printf(CON_CHANNEL_DONT_FILTER, "map: %s\n", sv_mapname->current.string);
@@ -988,6 +1068,13 @@ void __cdecl SV_Status_f()
     }
 }
 
+/*
+===========
+SV_Serverinfo_f
+
+Examine the serverinfo string
+===========
+*/
 void __cdecl SV_Serverinfo_f()
 {
     char *v0; // eax
@@ -997,6 +1084,13 @@ void __cdecl SV_Serverinfo_f()
     Info_Print(v0);
 }
 
+/*
+===========
+SV_Systeminfo_f
+
+Examine or change the serverinfo string
+===========
+*/
 void __cdecl SV_Systeminfo_f()
 {
     char *v0; // eax
@@ -1006,10 +1100,18 @@ void __cdecl SV_Systeminfo_f()
     Info_Print(v0);
 }
 
+/*
+===========
+SV_DumpUser_f
+
+Examine all a users info strings FIXME: move to game
+===========
+*/
 void __cdecl SV_DumpUser_f()
 {
     client_t *PlayerByName; // [esp+0h] [ebp-4h]
 
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         if (SV_Cmd_Argc() == 2)
@@ -1033,6 +1135,11 @@ void __cdecl SV_DumpUser_f()
     }
 }
 
+/*
+=================
+SV_KillServer_f
+=================
+*/
 void __cdecl SV_KillServer_f()
 {
     Com_Shutdown("EXE_SERVERKILLED");
@@ -1121,10 +1228,16 @@ void __cdecl SV_AddDedicatedCommands()
 }
 
 const char aC_5[] = "%c \""; // idb
+/*
+==================
+SV_ConSay_f
+==================
+*/
 void __cdecl SV_ConSay_f()
 {
     char text[1028]; // [esp+0h] [ebp-408h] BYREF
 
+    // make sure server is running
     if (com_sv_running->current.enabled)
     {
         if (SV_Cmd_Argc() >= 2)

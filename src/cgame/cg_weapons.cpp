@@ -97,6 +97,13 @@ int __cdecl CG_WeaponDObjHandle(int weaponNum)
     return weaponNum + MAX_GENTITIES;
 }
 
+/*
+=================
+CG_RegisterWeapon
+
+The server says this item is used on this level
+=================
+*/
 void __cdecl CG_RegisterWeapon(int localClientNum, uint weaponNum)
 {
     weaponInfo_s *weapInfo; // [esp+18h] [ebp-28h]
@@ -389,6 +396,13 @@ void __cdecl CG_UpdateHandViewmodels(int localClientNum, XModel *handModel)
     }
 }
 
+/*
+=================
+CG_RegisterItemVisuals
+
+The server says this item is used on this level
+=================
+*/
 void __cdecl CG_RegisterItemVisuals(int localClientNum, uint weapIdx)
 {
     int modelIdx; // [esp+4h] [ebp-4h]
@@ -1540,6 +1554,13 @@ static void CalculateWeaponAxis(cg_s *cgameGlob, float (*axis)[3])
 #endif // KISAK_SP
 
 // KISAKTODO: would like to have this function more like blops, it's cleaner
+/*
+==============
+CG_AddViewWeapon
+
+Add the weapon, and flash for the player's view
+==============
+*/
 void __cdecl CG_AddViewWeapon(int localClientNum)
 {
     int v3; // [esp+Ch] [ebp-12Ch]
@@ -1566,12 +1587,15 @@ void __cdecl CG_AddViewWeapon(int localClientNum)
     ps = &cgameGlob->predictedPlayerState;
     cgameGlob->refdef.dof.viewModelStart = 0.0f;
     cgameGlob->refdef.dof.viewModelEnd = 0.0f;
+    // don't display if dead
+    // no gun if in third person view or a camera is active
 #ifdef KISAK_MP
     if (ps->pm_type != PM_SPECTATOR && ps->pm_type != PM_INTERMISSION && !cgameGlob->renderingThirdPerson)
 #elif KISAK_SP
     if (ps->pm_type != PM_UFO && ps->pm_type != PM_NOCLIP && ps->pm_type != PM_DEAD)
 #endif
     {
+        // allow the gun to be completely removed
         if (cgameGlob->cubemapShot || !cg_drawGun->current.enabled || CG_GetWeapReticleZoom(cgameGlob, &fZoom))
             drawgun = 0;
 #ifdef KISAK_SP
@@ -1596,6 +1620,7 @@ void __cdecl CG_AddViewWeapon(int localClientNum)
 #ifdef KISAK_SP
                 CalculateWeaponPosition_BobOffset(cgameGlob);
                 CalculateWeaponPosition_Sway(cgameGlob);
+                // set up gun position
                 CalculateWeaponPosition(cgameGlob, placement.base.origin);
                 Vec3Mad(placement.base.origin, cg_gun_x->current.value, cgameGlob->viewModelAxis[0], placement.base.origin);
                 Vec3Mad(placement.base.origin, cg_gun_y->current.value, cgameGlob->viewModelAxis[1], placement.base.origin);
@@ -1603,6 +1628,7 @@ void __cdecl CG_AddViewWeapon(int localClientNum)
                 CalculateWeaponAxis(cgameGlob, axis);
                 AxisToQuat(axis, placement.base.quat);
                 placement.scale = 1.0f;
+                // add everything onto the hand
                 CG_AddPlayerWeapon(localClientNum, &placement, ps, &cgameGlob->predictedPlayerEntity, drawgun);
 #else
                 CalculateWeaponPosition_Sway(cgameGlob);
@@ -1678,6 +1704,7 @@ void __cdecl CG_AddViewWeapon(int localClientNum)
                 vGunSpeed[2] = ws.vGunSpeed[2];
 
                 placement.scale = 1.0f;
+                // add everything onto the hand
                 CG_AddPlayerWeapon(localClientNum, &placement, ps, &cgameGlob->predictedPlayerEntity, drawgun);
 #endif
             }
@@ -1986,6 +2013,11 @@ void __cdecl CalculateWeaponPostion_PositionToADS(cg_s *cgameGlob, playerState_s
     }
 }
 
+/*
+===============
+CG_NextWeapon_f
+===============
+*/
 void __cdecl CG_NextWeapon_f()
 {
     cg_s *cgameGlob;
@@ -2021,6 +2053,11 @@ bool __cdecl WeaponCycleAllowed(cg_s *cgameGlob)
     return (cgameGlob->predictedPlayerState.eFlags & 0x20000) == 0;
 }
 
+/*
+===============
+CG_PrevWeapon_f
+===============
+*/
 void __cdecl CG_PrevWeapon_f()
 {
     cg_s *cgameGlob;
@@ -2037,6 +2074,13 @@ void __cdecl CG_PrevWeapon_f()
     }
 }
 
+/*
+===================
+CG_OutOfAmmoChange
+
+The current weapon has just run out of ammo
+===================
+*/
 void __cdecl CG_OutOfAmmoChange(int localClientNum)
 {
     uint bitNum; // [esp+0h] [ebp-14h]
@@ -2441,6 +2485,13 @@ void __cdecl CG_EjectWeaponBrass(int localClientNum, const entityState_s *ent, i
     }
 }
 
+/*
+================
+CG_FireWeapon
+
+Caused by an EV_FIRE_WEAPON event
+================
+*/
 void __cdecl CG_FireWeapon(
     int localClientNum,
     centity_s *cent,
@@ -2473,6 +2524,8 @@ void __cdecl CG_FireWeapon(
             weapInfo = CG_GetLocalClientWeaponInfo(0, weapon);
             weaponDef = BG_GetWeaponDef(weapon);
             iassert(weaponDef);
+            // mark the entity as muzzle flashing, so when it is added it will
+            // append the flash to the weapon model
             cent->bMuzzleFlash = 1;
             iassert(localClientNum == 0);
             cgameGlob = CG_GetLocalClientGlobals(localClientNum);;
@@ -2512,11 +2565,13 @@ void __cdecl CG_FireWeapon(
             if (p_nextState->eType == ET_HELICOPTER)
             {
                 WeaponFlash(localClientNum, p_nextState->number, weapon, 0, tagName);
+                // do brass ejection
                 CG_EjectWeaponBrass(localClientNum, p_nextState, event);
                 Veh_IncTurretBarrelRoll(localClientNum, p_nextState->number, heli_barrelRotation->current.value);
             }
 #endif
 
+            // play a sound
             firesound = weaponDef->fireSound;
             if (isPlayer && weaponDef->fireSoundPlayer)
                 firesound = weaponDef->fireSoundPlayer;

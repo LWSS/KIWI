@@ -12,21 +12,39 @@
 #endif
 
 
+/*
+================
+SV_ClipHandleForEntity
+
+Returns a headnode that can be used for testing or clipping to a
+given entity.  If the entity is a bsp model, the headnode will
+be returned, otherwise a custom box tree will be constructed.
+================
+*/
 uint __cdecl SV_ClipHandleForEntity(const gentity_s *ent)
 {
 #ifdef KISAK_MP
+    // explicit hulls in the BSP model
     if (ent->r.bmodel)
         return ent->s.index.brushmodel;
     else
+        // create a temp tree from bounding box sizes
         return CM_TempBoxModel(ent->r.mins, ent->r.maxs, ent->r.contents);
 #elif KISAK_SP
+    // explicit hulls in the BSP model
     if (ent->r.bmodel)
         return ent->s.index.item;
     else
+        // create a temp tree from bounding box sizes
         return CM_TempBoxModel(ent->r.mins, ent->r.maxs, ent->r.contents);
 #endif
 }
 
+/*
+===============
+SV_UnlinkEntity
+===============
+*/
 void __cdecl SV_UnlinkEntity(gentity_s *gEnt)
 {
     svEntity_s *ent; // [esp+30h] [ebp-4h]
@@ -41,6 +59,11 @@ void __cdecl SV_UnlinkEntity(gentity_s *gEnt)
 float actorLocationalMins[3] = { -64.0f, -64.0f, -32.0f };
 float actorLocationalMaxs[3] = { 64.0f, 64.0f, 72.0f };
 
+/*
+===============
+SV_LinkEntity
+===============
+*/
 void __cdecl SV_LinkEntity(gentity_s *gEnt)
 {
 #ifdef KISAK_MP
@@ -72,22 +95,26 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     iassert(gEnt->r.inuse);
 
     ent = SV_SvEntityForGentity(gEnt);
+    // encode the size into the entityState_t for client prediction
     if (gEnt->r.bmodel)
     {
-        gEnt->s.solid = 0xFFFFFF;
+        gEnt->s.solid = 0xFFFFFF;		// a solid_box will never create this value
     }
     else if ((gEnt->r.contents & 0x2000001) != 0)
     {
+        // assume that x/y are equal and symetric
         i = (int)gEnt->r.maxs[0];
         if (i < 1)
             i = 1;
         if (i > 255)
             i = 255;
+        // z is not symetric
         j = (int)(1.0 - gEnt->r.mins[2]);
         if (j < 1)
             j = 1;
         if (j > 255)
             j = 255;
+        // and z maxs can be negative...
         k = (int)(gEnt->r.maxs[2] + 32.0);
         if (k < 1)
             k = 1;
@@ -99,6 +126,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     {
         gEnt->s.solid = 0;
     }
+    // get the position
     angles = gEnt->r.currentAngles;
     origin = gEnt->r.currentOrigin;
     if ((COERCE_UNSIGNED_INT(gEnt->r.currentAngles[0]) & 0x7F800000) == 0x7F800000
@@ -114,8 +142,10 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     }
     nanassertvec3(origin);
     SnapAngles(angles);
+    // set the abs box
     if (!gEnt->r.bmodel || *angles == 0.0 && angles[1] == 0.0 && angles[2] == 0.0)
     {
+        // normal
         Vec3Add(origin, gEnt->r.mins, gEnt->r.absmin);
         Vec3Add(origin, gEnt->r.maxs, gEnt->r.absmax);
     }
@@ -132,6 +162,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     }
     else
     {
+        // expand for rotation
         max = RadiusFromBounds(gEnt->r.mins, gEnt->r.maxs);
         for (n = 0; n < 3; ++n)
         {
@@ -139,20 +170,27 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
             gEnt->r.absmax[n] = origin[n] + max;
         }
     }
+    // because movement is clipped an epsilon away from an actual edge,
+    // we must fully check even when bounding boxes don't quite touch
     gEnt->r.absmin[0] = gEnt->r.absmin[0] - 1.0;
     gEnt->r.absmin[1] = gEnt->r.absmin[1] - 1.0;
     gEnt->r.absmin[2] = gEnt->r.absmin[2] - 1.0;
     gEnt->r.absmax[0] = gEnt->r.absmax[0] + 1.0;
     gEnt->r.absmax[1] = gEnt->r.absmax[1] + 1.0;
     gEnt->r.absmax[2] = gEnt->r.absmax[2] + 1.0;
+
+    // link to PVS leafs
     ent->numClusters = 0;
     ent->lastCluster = 0;
     if ((gEnt->r.svFlags & 0x19) == 0)
     {
+        //get all leafs, including solids
         {
             PROF_SCOPED("SV_LinkEntity_BoxLeafnums");
             num_leafs = CM_BoxLeafnums(gEnt->r.absmin, gEnt->r.absmax, leafs, 128, &lastLeaf);
         }
+        // if none of the leafs were inside the map, the
+        // entity is outside the world and can be considered unlinked
         if (!num_leafs)
         {
             {
@@ -161,6 +199,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
             }
             return;
         }
+        // store as many explicit clusters as we can
         for (i = 0; i < num_leafs; ++i)
         {
             cluster = CM_LeafCluster(leafs[i]);
@@ -171,12 +210,14 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
                     break;
             }
         }
+        // store off a last cluster if we need to
         if (i != num_leafs)
         {
             v1 = CM_LeafCluster(lastLeaf);
             ent->lastCluster = v1;
         }
     }
+    // link it in
     gEnt->r.linked = 1;
     PROF_SCOPED("CM_LinkEntity_Part2");
     if (gEnt->r.contents)
@@ -238,14 +279,18 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
 
     k = SV_SvEntityForGentity(gEnt);
 
+    // encode the size into the entityState_t for client prediction
     if (gEnt->r.bmodel)
     {
-        gEnt->s.solid = 0xFFFFFF;
+        gEnt->s.solid = 0xFFFFFF;		// a solid_box will never create this value
     }
     else if ((gEnt->r.contents & 0x200C001) != 0)
     {
+        // assume that x/y are equal and symetric
         int p0 = CLAMP(gEnt->r.maxs[0], 1, 255);
+        // z is not symetric
         int p1 = CLAMP(1.0f - gEnt->r.mins[2], 1, 255);
+        // and z maxs can be negative...
         int p2 = CLAMP((int)(float)(gEnt->r.maxs[2] + 32.0f), 1, 255);
 
         gEnt->s.solid = (uint)p0 | ((uint)p1 << 8) | (p2 << 16);
@@ -255,6 +300,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
         gEnt->s.solid = 0;
     }
 
+    // get the position
     origin = gEnt->r.currentOrigin;
     angles = gEnt->r.currentAngles;
     iassert(!IS_NAN((angles)[0]) && !IS_NAN((angles)[1]) && !IS_NAN((angles)[2]));
@@ -267,11 +313,13 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     absmin = gEnt->r.absmin;
     absmax = gEnt->r.absmax;
 
+    // set the abs box
     if (gEnt->r.bmodel)
     {
         if (gEnt->r.currentAngles[0] != 0.0)
         {
         LABEL_35:
+            // expand for rotation
             radius = RadiusFromBounds(gEnt->r.mins, gEnt->r.maxs);
 
             absmin[0] = origin[0] - radius;
@@ -304,6 +352,7 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
         }
     }
 
+    // normal
     absmin[0] = origin[0] + mins[0];
     absmin[1] = mins[1] + origin[1];
     absmin[2] = mins[2] + origin[2];
@@ -313,6 +362,8 @@ void __cdecl SV_LinkEntity(gentity_s *gEnt)
     absmax[2] = maxs[2] + origin[2];
 
 LABEL_37:
+    // because movement is clipped an epsilon away from an actual edge,
+    // we must fully check even when bounding boxes don't quite touch
     absmin[0] -= 1.0f;
     absmin[1] -= 1.0f;
     absmin[2] -= 1.0f;
@@ -834,6 +885,14 @@ void __cdecl SV_SetupIgnoreEntParams(IgnoreEntParams *ignoreEntParams, int baseE
     ignoreEntParams->ignoreParent = 0;
 }
 
+/*
+==================
+SV_Trace
+
+Moves the given mins/maxs volume through the world from start to end.
+passEntityNum and entities owned by passEntityNum are explicitly not checked.
+==================
+*/
 void __cdecl SV_Trace(
     trace_t *results,
     const float *start,
@@ -873,6 +932,7 @@ void __cdecl SV_Trace(
 
     PROF_SCOPED("SV_Trace");
 
+    // clip to world
     CM_BoxTrace(results, start, end, mins, maxs, 0, contentmask);
 
     iassert(!IS_NAN(results->fraction));
@@ -891,6 +951,7 @@ void __cdecl SV_Trace(
         results->hitType = TRACE_HITTYPE_ENTITY;
         results->hitId = ENTITYNUM_WORLD;
     }
+    // blocked immediately by the world
     if (results->fraction == 0.0)
         goto LABEL_35;
 
@@ -917,6 +978,10 @@ void __cdecl SV_Trace(
         clip.extents.end[0] = end[0];
         clip.extents.end[1] = end[1];
         clip.extents.end[2] = end[2];
+        // create the bounding box of the entire move
+        // we can limit it to the part of the move not
+        // already clipped off by the world, which can be
+        // a significant savings for line of sight and shot traces
         CM_CalcTraceExtents(&clip.extents);
         clip.ignoreEntParams = ignoreEntParams;
         clip.bLocational = locational;
@@ -958,6 +1023,7 @@ void __cdecl SV_Trace(
                     v14);
             }
         }
+        // clip to other solid entities
         CM_PointTraceToEntities(&clip, results);
     }
     else
@@ -1015,7 +1081,12 @@ void __cdecl SV_Trace(
         Vec3Scale(delta, 0.5, delta);
         Vec3Add(start, delta, result.extents.start);
         Vec3Add(end, delta, result.extents.end);
+        // create the bounding box of the entire move
+        // we can limit it to the part of the move not
+        // already clipped off by the world, which can be
+        // a significant savings for line of sight and shot traces
         CM_CalcTraceExtents(&result.extents);
+        // clip to other solid entities
         CM_ClipMoveToEntities(&result, results);
     }
 }
@@ -1237,6 +1308,11 @@ int __cdecl SV_SightTraceToEntity(float *start, float *mins, float *maxs, float 
         return 0;
 }
 
+/*
+=============
+SV_PointContents
+=============
+*/
 int __cdecl SV_PointContents(float *p, int passEntityNum, int contentmask)
 {
     int v3; // eax
@@ -1247,13 +1323,16 @@ int __cdecl SV_PointContents(float *p, int passEntityNum, int contentmask)
     int v9; // [esp+1010h] [ebp-8h]
     int i; // [esp+1014h] [ebp-4h]
 
+    // get base contents from world
     v6 = CM_PointContents(p, 0);
+    // or in contents from all the other entities
     v9 = CM_AreaEntities(p, p, entityList, 1024, contentmask);
     for (i = 0; i < v9; ++i)
     {
         if (entityList[i] != passEntityNum)
         {
             ent = SV_GentityNum(entityList[i]);
+            // might intersect, so do an exact clip
             model = SV_ClipHandleForEntity(ent);
             v3 = CM_TransformedPointContents(p, model, ent->r.currentOrigin, ent->r.currentAngles);
             v6 |= v3;

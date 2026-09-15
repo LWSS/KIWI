@@ -580,6 +580,7 @@ void __cdecl SP_worldspawn()
     if (I_stricmp(s, "worldspawn"))
         Com_Error(ERR_DROP, "SP_worldspawn: The first entity isn't worldspawn");
 
+    // make some data visible to connecting client
     SV_SetConfigstring(2, (char*)"cod");
     G_LevelSpawnString("ambienttrack", "", &s);
 
@@ -593,8 +594,9 @@ void __cdecl SP_worldspawn()
     }
 
     G_LevelSpawnString("message", "", &s);
-    SV_SetConfigstring(3, (char *)s);
-    SV_SetConfigstring(10, (char *)g_motd->current.string);
+    SV_SetConfigstring(3, (char *)s);				// map specific message
+
+    SV_SetConfigstring(10, (char *)g_motd->current.string);		// message of the day
     G_LevelSpawnString("gravity", "800", &s);
 
     iassert(g_gravity);
@@ -623,16 +625,35 @@ void __cdecl SP_worldspawn()
     iassert(!g_entities[ENTITYNUM_WORLD].r.ownerNum.isDefined());
 }
 
+/*
+==============
+G_SpawnEntitiesFromString
+
+Parses textual entity definitions out of an entstring and spawns gentities.
+==============
+*/
 void __cdecl G_SpawnEntitiesFromString()
 {
+    // the worldspawn is not an actual entity, but it still
+    // has a "spawn" function to perform any global setup
+    // needed by a level (setting configstrings or cvars, etc)
     if (!G_ParseSpawnVars(&level.spawnVar))
         Com_Error(ERR_DROP, "SpawnEntities: no entities");
     SP_worldspawn();
+    // parse ents
     while (G_ParseSpawnVars(&level.spawnVar))
         G_CallSpawn();
     G_ResetEntityParsePoint();
 }
 
+/*
+===============
+G_CallSpawn
+
+Finds the spawn function for the entity and calls it,
+returning qfalse if not found
+===============
+*/
 void G_CallSpawn()
 {
     const gitem_s *item; // [esp+0h] [ebp-10h]
@@ -647,6 +668,7 @@ void G_CallSpawn()
     {
         if (strncmp(classname, "dyn_", 4u))
         {
+            // check item spawn functions
             item = G_GetItemForClassname(classname, 0);
             if (item)
             {
@@ -656,6 +678,7 @@ void G_CallSpawn()
             }
             else
             {
+                // check normal spawn functions
                 spawnFunc = G_FindSpawnFunc(classname, s_bspOrDynamicSpawns, 6);
                 if (!spawnFunc)
                     spawnFunc = G_FindSpawnFunc(classname, s_bspOnlySpawns, 14);
@@ -663,6 +686,7 @@ void G_CallSpawn()
                 {
                     ent = G_Spawn();
                     G_ParseEntityFields(ent);
+                    // found it
                     if (spawnFunc)
                         spawnFunc(ent);
                 }

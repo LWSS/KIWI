@@ -154,6 +154,11 @@ uintptr_t Win_InitThreads()
 
 // *(_DWORD *)(*(_DWORD *)(*((_DWORD *)NtCurrentTeb()->ThreadLocalStoragePointer + _tls_index) + 4)
 
+/*
+==============
+Sys_Mkdir
+==============
+*/
 void __cdecl Sys_Mkdir(const char *path)
 {
     _mkdir(path);
@@ -344,6 +349,7 @@ char **__cdecl Sys_ListFiles(
         {
             extension = "";
         }
+        // passing a slash as extension will find directories
         if (*extension != 47 || extension[1])
         {
             flag = 16;
@@ -361,6 +367,7 @@ char **__cdecl Sys_ListFiles(
         {
             Com_sprintf(search, 0x100u, "%s\\*", directory);
         }
+        // search
         nfiles = 0;
         findhandle = _findfirst64i32(search, &findinfo);
         if (findhandle == -1)
@@ -386,6 +393,7 @@ char **__cdecl Sys_ListFiles(
             } while (_findnext64i32(findhandle, &findinfo) != -1);
             (*list)[nfiles] = 0;
             _findclose(findhandle);
+            // return a copy of the list
             *numfiles = nfiles;
             if (nfiles)
             {
@@ -412,6 +420,11 @@ char **__cdecl Sys_ListFiles(
 
 
 char cwd[256];
+/*
+==============
+Sys_Cwd
+==============
+*/
 char *__cdecl Sys_Cwd()
 {
     _getcwd(cwd, 255);
@@ -419,6 +432,11 @@ char *__cdecl Sys_Cwd()
     return cwd;
 }
 
+/*
+==============
+Sys_DefaultCDPath
+==============
+*/
 const char *__cdecl Sys_DefaultCDPath()
 {
     return "";

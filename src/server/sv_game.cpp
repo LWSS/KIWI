@@ -58,6 +58,11 @@ gentity_s *__cdecl SV_GEntityForSvEntity(svEntity_s *svEnt)
     return SV_GentityNum(svEnt - sv.svEntities);
 }
 
+/*
+==================
+SV_EntityContact
+==================
+*/
 bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentity_s *gEnt)
 {
     uint model; // [esp+8h] [ebp-40h]
@@ -121,6 +126,7 @@ bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentit
     }
     else
     {
+        // check for exact collision
         model = SV_ClipHandleForEntity(gEnt);
         CM_TransformedBoxTraceExternal(
             &trace,
@@ -136,6 +142,11 @@ bool __cdecl SV_EntityContact(const float *mins, const float *maxs, const gentit
     }
 }
 
+/*
+===============
+SV_GetServerinfo
+===============
+*/
 void __cdecl SV_GetServerinfo(char *buffer, int bufferSize)
 {
     if (bufferSize < 1)
@@ -144,6 +155,11 @@ void __cdecl SV_GetServerinfo(char *buffer, int bufferSize)
     I_strncpyz(buffer, Dvar_InfoString(0, 4), bufferSize);
 }
 
+/*
+===============
+SV_LocateGameData
+===============
+*/
 void __cdecl SV_LocateGameData(
     gentity_s *gEnts,
     int numGEntities,
@@ -158,6 +174,11 @@ void __cdecl SV_LocateGameData(
     sv.gameClientSize = sizeofGameClient;
 }
 
+/*
+===============
+SV_GetUsercmd
+===============
+*/
 void __cdecl SV_GetUsercmd(int clientNum, usercmd_s *cmd)
 {
     iassert(clientNum >= 0);
@@ -495,6 +516,13 @@ void __cdecl SV_track_shutdown()
     track_shutdown(2);
 }
 
+/*
+====================
+SV_GameCommand
+
+See if the current console command is claimed by the game
+====================
+*/
 int __cdecl SV_GameCommand()
 {
     if (sv.state == SS_GAME)
@@ -542,6 +570,13 @@ static void SV_ShutdownGameVM(int clearScripts)
     SV_FreeReliableCommandsForClient(svs.clients);
 }
 
+/*
+===============
+SV_ShutdownGameProgs
+
+Called every time a map changes
+===============
+*/
 void __cdecl SV_ShutdownGameProgs()
 {
     iassert(Sys_IsMainThread());
@@ -559,6 +594,13 @@ void __cdecl SV_ShutdownGameProgs()
     }
 }
 
+/*
+==================
+SV_InitGameVM
+
+Called for both a full init and a restart
+==================
+*/
 void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame **save, int loadScripts)
 {
     iassert(save);
@@ -568,6 +610,7 @@ void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame 
         SV_StartMap(randomSeed);
     }
 
+    // start the entity parsing at the beginning
     G_ResetEntityParsePoint();
     if (!++sv.skelTimeStamp)
         sv.skelTimeStamp = 1;
@@ -578,6 +621,7 @@ void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame 
     {
         PROF_SCOPED("Init game");
         Sys_LoadingKeepAlive();
+        // init for this gamestate
         G_InitGame(randomSeed, restart, sv.checksum, loadScripts, savegame, save);
         Sys_LoadingKeepAlive();
     }
@@ -610,6 +654,13 @@ void __cdecl SV_InitGameVM(uint randomSeed, int restart, int savegame, SaveGame 
     }
 }
 
+/*
+===================
+SV_RestartGameProgs
+
+Called on a map_restart, but not on a normal map change
+===================
+*/
 void __cdecl SV_RestartGameProgs(uint randomSeed, int savegame, SaveGame **save, int loadScripts)
 {
     iassert(Sys_IsMainThread());
@@ -626,6 +677,13 @@ void __cdecl SV_RestartGameProgs(uint randomSeed, int savegame, SaveGame **save,
     SV_InitGameVM(randomSeed, 1, savegame, save, loadScripts);
 }
 
+/*
+===============
+SV_InitGameProgs
+
+Called on a normal map change, not on a map_restart
+===============
+*/
 void __cdecl SV_InitGameProgs(uint randomSeed, int savegame, SaveGame **save)
 {
     iassert(save);
@@ -634,6 +692,13 @@ void __cdecl SV_InitGameProgs(uint randomSeed, int savegame, SaveGame **save)
 }
 
 
+/*
+=================
+SV_SetBrushModel
+
+sets mins and maxs for inline bmodels
+=================
+*/
 bool SV_SetBrushModel(gentity_s *ent)
 {
     uint index; // r3
@@ -782,6 +847,13 @@ void __cdecl SV_SetMapCenter(float *mapCenter)
     SV_SetConfigstring(12, v1);
 }
 
+/*
+===============
+SV_GameDropClient
+
+Disconnects the client with a message
+===============
+*/
 void __cdecl SV_GameDropClient(int clientNum, const char *reason)
 {
     vassert((sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64), "(sv_maxclients->current.integer) = %i", sv_maxclients->current.integer);
@@ -838,20 +910,40 @@ void __cdecl SV_SetGametype()
     Dvar_SetString((dvar_s *)sv_gametype, gametype);
 }
 
+/*
+==================
+SV_InitGameVM
+
+Called for both a full init and a restart
+==================
+*/
 void __cdecl SV_InitGameVM(int restart, int savepersist)
 {
     uint v2; // eax
     int i; // [esp+0h] [ebp-4h]
 
+    // start the entity parsing at the beginning
     G_ResetEntityParsePoint();
     SV_ResetSkeletonCache();
+    // use the current msec count for a random seed
     v2 = Sys_MillisecondsRaw();
+    // init for this gamestate
     G_InitGame(svs.time, v2, restart, savepersist);
     vassert((sv_maxclients->current.integer >= 1 && sv_maxclients->current.integer <= 64), "(sv_maxclients->current.integer) = %i", sv_maxclients->current.integer);
+    // clear all gentity pointers that might still be set from
+    // a previous level
+    // https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=522
     for (i = 0; i < sv_maxclients->current.integer; ++i)
         svs.clients[i].gentity = 0;
 }
 
+/*
+===============
+SV_GameSendServerCommand
+
+Sends a command string to a client
+===============
+*/
 void __cdecl SV_GameSendServerCommand(int clientNum, svscmd_type type, const char *text)
 {
     if (clientNum == -1)
@@ -866,6 +958,13 @@ void __cdecl SV_GameSendServerCommand(int clientNum, svscmd_type type, const cha
     }
 }
 
+/*
+=================
+SV_SetBrushModel
+
+sets mins and maxs for inline bmodels
+=================
+*/
 bool __cdecl SV_SetBrushModel(gentity_s *ent)
 {
     float mins[3]; // [esp+8h] [ebp-18h] BYREF
@@ -895,6 +994,13 @@ bool __cdecl SV_SetBrushModel(gentity_s *ent)
     return 1;
 }
 
+/*
+===============
+SV_ShutdownGameProgs
+
+Called every time a map changes
+===============
+*/
 void __cdecl SV_ShutdownGameProgs()
 {
     Com_SyncThreads();
@@ -907,12 +1013,26 @@ void __cdecl SV_ShutdownGameProgs()
     }
 }
 
+/*
+===============
+SV_InitGameProgs
+
+Called on a normal map change, not on a map_restart
+===============
+*/
 void __cdecl SV_InitGameProgs(int savepersist)
 {
     gameInitialized = 1;
     SV_InitGameVM(0, savepersist);
 }
 
+/*
+===================
+SV_RestartGameProgs
+
+Called on a map_restart, but not on a normal map change
+===================
+*/
 void __cdecl SV_RestartGameProgs(int savepersist)
 {
     Com_SyncThreads();
@@ -924,6 +1044,13 @@ void __cdecl SV_RestartGameProgs(int savepersist)
 #endif // KISAK_MP
 
 #ifdef KISAK_SP
+/*
+===============
+SV_GameSendServerCommand
+
+Sends a command string to a client
+===============
+*/
 void SV_GameSendServerCommand(int clientNum, const char *text)
 {
     if (clientNum == -1)

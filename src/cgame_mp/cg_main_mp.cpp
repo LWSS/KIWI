@@ -1238,6 +1238,13 @@ void __cdecl CG_BoldGameMessage(int localClientNum, const char *msg)
     CL_ConsolePrint(localClientNum, 3, msg, 0, cg_gameBoldMessageWidth->current.integer, 0);
 }
 
+/*
+=================
+CG_RegisterSounds
+
+called during a precache command
+=================
+*/
 void __cdecl CG_RegisterSounds()
 {
     cgMedia.landDmgSound = Com_FindSoundAlias("land_damage");
@@ -1660,6 +1667,14 @@ void __cdecl CL_LoadSoundAliases(const char *loadspec)
     Com_LoadSoundAliases(loadspec, "all_mp", SASYS_CGAME);
 }
 
+/*
+=================
+CG_Init
+
+Called after every level change or subsystem restart
+Will perform callbacks to make the loading info screen update.
+=================
+*/
 void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommandSequence, int clientNum)
 {
     PROF_SCOPED("CG_Init");
@@ -1671,6 +1686,7 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
     cg_s *cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     cgs_t *cgs = CG_GetLocalClientStaticGlobals(localClientNum);
     CL_GetLocalClientConnection(localClientNum);
+    // clear everything
     memset(cgs, 0, sizeof(cgs_t));
     memset(cgameGlob, 0, sizeof(cg_s));
     memset(&cgDC[localClientNum], 0, sizeof(UiContext));
@@ -1713,6 +1729,7 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
         UI_LoadIngameMenus(localClientNum);
     }
     SCR_UpdateLoadScreen();
+    // load a few needed things before we do any screen updates
     cgMedia.whiteMaterial = Material_RegisterHandle("white", IMAGE_TRACK_HUD);
     cgMedia.smallDevFont = CL_RegisterFont("fonts/smallDevFont", IMAGE_TRACK_DEBUG);
     cgMedia.bigDevFont = CL_RegisterFont("fonts/bigDevFont", IMAGE_TRACK_DEBUG);
@@ -1747,6 +1764,7 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
     CG_AntiBurnInHUD_RegisterDvars();
     CG_InitConsoleCommands();
     CG_InitViewDimensions(localClientNum);
+    // check version
     s = CL_GetConfigString(localClientNum, 2);
     if (strcmp(s, "cod"))
         Com_Error(ERR_DROP, "Client/Server game mismatch: %s/%s", "cod", s);
@@ -1780,6 +1798,7 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
         GScr_LoadConsts();
         BG_LoadPenetrationDepthTable();
     }
+    // load the new map
     CG_LoadingString(localClientNum, "collision map");
     CL_CM_LoadMap(cgs->mapname);
     Menu_Setup(&cgDC[localClientNum]);
@@ -1804,12 +1823,14 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
 
     CG_RegisterGraphics(localClientNum, mapname);
     CG_LoadingString(localClientNum, "clients");
-    CG_LoadHudMenu(localClientNum);
+    CG_LoadHudMenu(localClientNum);      // load new hud stuff
     CG_InitEntities(localClientNum);
     CG_InitLocalEntities(localClientNum);
     DynEntCl_InitEntities(localClientNum);
-    cgameGlob->isLoading = 0;
+    cgameGlob->isLoading = 0;	// future players will be deferred
+    // Make sure we have update values (scores)
     CG_SetConfigValues(localClientNum);
+    // remove the last loading update
     CG_LoadingString(localClientNum, "");
     CG_NorthDirectionChanged(localClientNum);
     if (!g_mapLoaded)
@@ -1839,6 +1860,13 @@ clientConnection_t *__cdecl CL_GetLocalClientConnection(int localClientNum)
     return clientConnections;
 }
 
+/*
+=================
+CG_RegisterGraphics
+
+This function may execute for a couple of minutes with a slow disk.
+=================
+*/
 void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
 {
     PROF_SCOPED("CG_RegisterGraphics");
@@ -1897,12 +1925,14 @@ void __cdecl CG_RegisterGraphics(int localClientNum, const char *mapname)
     cgMedia.balloonMaterial = Material_RegisterHandle("headicontalkballoon", IMAGE_TRACK_HUD);
     CG_RegisterScoreboardGraphics();
     CG_LoadingString(localClientNum, " - items");
+    // only register the items that the server says we need
     CG_RegisterItems(localClientNum);
     CG_LoadingString(localClientNum, " - inline models");
 
     cgs = CG_GetLocalClientStaticGlobals(localClientNum);
     
     CG_LoadingString(localClientNum, " - server models");
+    // register all the server specified models
     for (i = 1; i < 512; ++i)
     {
         modelName = CL_GetConfigString(localClientNum, i + 830);
@@ -1958,6 +1988,12 @@ int __cdecl CG_PlayAnimScriptSoundAlias(int clientIndex, snd_alias_list_t *alias
     return CG_PlayClientSoundAlias(clientIndex, aliasList);
 }
 
+/*
+=================
+CG_LoadHudMenu
+
+=================
+*/
 void __cdecl CG_LoadHudMenu(int localClientNum)
 {
     menuDef_t *menu; // [esp+4h] [ebp-Ch]
@@ -2106,6 +2142,13 @@ void __cdecl CG_FreeWeapons(int localClientNum)
     memset((uint8_t *)cg_weaponsArray[localClientNum], 0, sizeof(weaponInfo_s[128]));
 }
 
+/*
+=================
+CG_Shutdown
+
+Called before every level change or subsystem restart
+=================
+*/
 void __cdecl CG_Shutdown(int localClientNum)
 {
     centity_s *cent; // [esp+Ch] [ebp-Ch]
@@ -2113,6 +2156,8 @@ void __cdecl CG_Shutdown(int localClientNum)
 
     cg_s *cgameGlob = CG_GetLocalClientGlobals(localClientNum);
 
+    // some mods may need to do cleanup work here,
+    // like closing files or archiving session data
     R_TrackStatistics(0);
     SND_FadeAllSounds(1.0, 0);
     for (entnum = 0; entnum < 1024; ++entnum)

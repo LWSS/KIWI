@@ -48,6 +48,17 @@ void __cdecl CG_ShutdownEntity(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+==================
+CG_SetInitialSnapshot
+
+This will only happen on the very first snapshot, or
+on tourney restarts.  All other times will use
+CG_TransitionSnapshot instead.
+
+FIXME: Also called by map_restart?
+==================
+*/
 void __cdecl CG_SetInitialSnapshot(int localClientNum, snapshot_s *snap)
 {
     float clientViewAxis[3][3]; // [esp+10h] [ebp-34h] BYREF
@@ -75,6 +86,8 @@ void __cdecl CG_SetInitialSnapshot(int localClientNum, snapshot_s *snap)
         iassert(!CG_GetEntity(localClientNum, i)->nextValid);
     }
     SND_FadeAllSounds(1.0, 0);
+    // set our local weapon selection pointer to
+    // what the server has indicated the current weapon is
     CG_Respawn(localClientNum);
     CG_RestartSmokeGrenades(localClientNum);
     CG_ClearEntityCollWorld(localClientNum);
@@ -92,6 +105,13 @@ void __cdecl CG_ExtractTransPlayerState(const playerState_s *ps, transPlayerStat
     transPs->events[3] = ps->events[3];
 }
 
+/*
+===================
+CG_SetNextSnap
+
+A new snapshot has just been read in from the client system.
+===================
+*/
 void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
 {
     const char *v4; // eax
@@ -119,6 +139,7 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     if (cgameGlob->nextSnap)
     {
+        // clear the currentValid flag for all entities in the existing snapshot
         for (num = 0; num < cgameGlob->nextSnap->numEntities; ++num)
         {
             v17 = &cgameGlob->nextSnap->entities[num];
@@ -142,6 +163,7 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
         iassert(cgameGlob->snap);
         CG_UpdateViewOffset(localClientNum);
         CG_SetFrameInterpolation(localClientNum);
+        // execute any server string commands before transitioning entities
         CG_ExecuteNewServerCommands(localClientNum, snap->serverCommandSequence);
         CG_CheckOpenWaitingScriptMenu(localClientNum);
         memset((uint8_t *)clientIndex, 0, sizeof(clientIndex));
@@ -206,6 +228,8 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
             cent->nextState.number = (uint16_t)entnum;
             BG_PlayerStateToEntityState(&snap->ps, &cent->nextState, 0, 0);
             cent->nextValid = 1;
+            // if the next frame is a teleport for the playerstate, we
+            // can't interpolate during demos
             if (!cgameGlob->mapRestart
                 && snap->ps.stats[STAT_SPAWN_COUNT] == cgameGlob->snap->ps.stats[STAT_SPAWN_COUNT]
                 && entnum == cgameGlob->snap->ps.clientNum)
@@ -247,6 +271,8 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
             centInPrevSnapshot[cgameGlob->snap->ps.clientNum >> 5] &= ~(0x80000000 >> (cgameGlob->snap->ps.clientNum & 0x1F));
             CG_ResetEntity(localClientNum, cent, 1);
         }
+        // if changing follow mode, don't interpolate
+        // if changing server restarts, don't interpolate
         else if (cgameGlob->mapRestart
             || snap->ps.stats[STAT_SPAWN_COUNT] != cgameGlob->snap->ps.stats[STAT_SPAWN_COUNT]
             || entnum != cgameGlob->snap->ps.clientNum)
@@ -254,6 +280,7 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
             memcpy((uint8_t *)&cgameGlob->snap->ps, (uint8_t *)&snap->ps, sizeof(cgameGlob->snap->ps));
             CG_Respawn(localClientNum);
         }
+        // check for extrapolation errors
         for (num = 0; num < snap->numEntities; ++num)
         {
             v17 = &snap->entities[num];
@@ -272,6 +299,8 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
                 MyAssertHandler(".\\cgame_mp\\cg_snapshot_mp.cpp", 619, 0, "%s\n\t%s", "!cent->nextValid", v4);
             }
             cent->nextValid = 1;
+            // if this frame is a teleport, or the entity wasn't in the
+            // previous frame, don't interpolate
             if ((centInPrevSnapshot[entnum >> 5] & (0x80000000 >> (entnum & 0x1F))) != 0)
             {
                 if (((v17->lerp.eFlags ^ cent->currentState.eFlags) & 2) != 0)
@@ -325,8 +354,13 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
         for (num = 0; num < snap->numEntities; ++num)
         {
             cent = CG_GetEntity(localClientNum, snap->entities[num].number);
+            // check for events
             CG_CheckEvents(localClientNum, cent);
         }
+
+        // check for playerstate transition events
+        // if we are not doing client side movement prediction for any
+        // reason, then the client events and view changes will be issued now
         if (cgameGlob->demoType
             || (cgameGlob->nextSnap->ps.otherFlags & 2) != 0
             || cg_nopredict->current.enabled
@@ -362,6 +396,11 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
     }
 }
 
+/*
+==================
+CG_ResetEntity
+==================
+*/
 void __cdecl CG_ResetEntity(int localClientNum, centity_s *cent, int newEntity)
 {
     float *v3; // [esp+Ch] [ebp-30h]
@@ -541,6 +580,25 @@ void __cdecl CG_TransitionKillcam(int localClientNum)
     }
 }
 
+/*
+============
+CG_ProcessSnapshots
+
+We are trying to set up a renderable view, so determine
+what the simulated time is, and try to get snapshots
+both before and after that time if available.
+
+If we don't have a valid cg.snap after exiting this function,
+then a 3D game view cannot be rendered.  This should only happen
+right after the initial connection.  After cg.snap has been valid
+once, it will never turn invalid.
+
+Even if cg.snap is valid, cg.nextSnap may not be, if the snapshot
+hasn't arrived yet (it becomes an extrapolating situation instead
+of an interpolating one)
+
+============
+*/
 void __cdecl CG_ProcessSnapshots(int localClientNum)
 {
     snapshot_s *snap; // [esp+34h] [ebp-8h]
@@ -552,19 +610,29 @@ void __cdecl CG_ProcessSnapshots(int localClientNum)
     PROF_SCOPED("CG_ProcessSnapshots");
 
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
+    // see what the latest snapshot the client system has is
     CL_GetCurrentSnapshotNumber(localClientNum, &n, &cgameGlob->latestSnapshotTime);
     if (n != cgameGlob->latestSnapshotNum)
     {
+        // this should never happen
         if (n < cgameGlob->latestSnapshotNum)
             Com_Error(ERR_DROP, "G_ProcessSnapshots: n < cgameGlob->latestSnapshotNum");
         cgameGlob->latestSnapshotNum = n;
     }
     cgameGlob->bgs.latestSnapshotTime = cgameGlob->latestSnapshotTime;
+
+    // If we have yet to receive a snapshot, check for it.
+    // Once we have gotten the first snapshot, cg.snap will
+    // always have valid data for the rest of the game
     while (!cgameGlob->snap)
     {
         snap = CG_ReadNextSnapshot(localClientNum);
+        // we can't continue until we get a snapshot
         if (!snap)
             return;
+
+        // set our weapon selection to what
+        // the playerstate is currently using
         if ((snap->snapFlags & 2) == 0)
         {
             CG_SetInitialSnapshot(localClientNum, snap);
@@ -576,13 +644,21 @@ void __cdecl CG_ProcessSnapshots(int localClientNum)
         }
     }
     CG_SetFrameInterpolation(localClientNum);
+
+    // loop until we either have a valid nextSnap with a serverTime
+    // greater than cg.time to interpolate towards, or we run
+    // out of available snapshots
     while (1)
     {
         while (1)
         {
+            // if we don't have a nextframe, try and read a new one in
             if (cgameGlob->nextSnap != cgameGlob->snap && cgameGlob->cubemapShot == CUBEMAPSHOT_NONE)
                 goto LABEL_25;
             snapa = CG_ReadNextSnapshot(localClientNum);
+
+            // if we still don't have a nextframe, we will just have to
+            // extrapolate
             if (!snapa)
                 goto LABEL_28;
             iassert(cgameGlob->nextSnap);
@@ -592,20 +668,27 @@ void __cdecl CG_ProcessSnapshots(int localClientNum)
             CG_SetNextSnap(localClientNum, snapa);
             CG_TransitionSnapshot(localClientNum);
         }
+        // if time went backwards, we have a level restart
         if (snapa->serverTime - cgameGlob->nextSnap->serverTime < 0)
             Com_Error(ERR_DROP, "CG_ProcessSnapshots: Server time went backwards");
         CG_SetNextSnap(localClientNum, snapa);
     LABEL_25:
+        // if our time is < nextFrame's, we have a nice interpolating state
         if (cgameGlob->time - cgameGlob->snap->serverTime >= 0 && cgameGlob->time - cgameGlob->nextSnap->serverTime < 0)
             break;
+
+        // we have passed the transition from nextFrame to frame
         CG_TransitionSnapshot(localClientNum);
     }
 LABEL_28:
     if (CG_ItemListLocalClientNum() != localClientNum)
         CG_BuildItemList(localClientNum, cgameGlob->nextSnap);
+
+    // assert our valid conditions upon exiting
     iassert(cgameGlob->snap);
     if (cgameGlob->time - cgameGlob->snap->serverTime < 0)
     {
+        // this can happen right after a vid_restart
         cgameGlob->time = cgameGlob->snap->serverTime;
         cgameGlob->bgs.time = cgameGlob->time;
     }
@@ -613,6 +696,13 @@ LABEL_28:
     iassert(cgameGlob->nextSnap == cgameGlob->snap || cgameGlob->nextSnap->serverTime - cgameGlob->time > 0);
 }
 
+/*
+===================
+CG_TransitionSnapshot
+
+The transition point from snap to nextSnap has passed
+===================
+*/
 void __cdecl CG_TransitionSnapshot(int localClientNum)
 {
     centity_s *cent; // [esp+Ch] [ebp-18h]
@@ -652,6 +742,7 @@ void __cdecl CG_TransitionSnapshot(int localClientNum)
     {
         iassert(!(!cgArray[0].bgs.clientinfo[ia].infoValid && Com_GetClientDObj(ia, localClientNum)));
     }
+    // move nextSnap to snap and do the transitions
     cgameGlob->snap = cgameGlob->nextSnap;
     if ((cgameGlob->nextSnap->ps.otherFlags & 6) != 0)
     {
@@ -665,6 +756,16 @@ void __cdecl CG_TransitionSnapshot(int localClientNum)
     }
 }
 
+/*
+========================
+CG_ReadNextSnapshot
+
+This is the only place new snapshots are requested
+This may increment cgs.processedSnapshotNum multiple
+times if the client system fails to return a
+valid snapshot.
+========================
+*/
 snapshot_s *__cdecl CG_ReadNextSnapshot(int localClientNum)
 {
     snapshot_s *dest; // [esp+Ch] [ebp-4h]
@@ -682,13 +783,29 @@ snapshot_s *__cdecl CG_ReadNextSnapshot(int localClientNum)
             cgs->processedSnapshotNum);
     while (cgs->processedSnapshotNum < cgameGlob->latestSnapshotNum)
     {
+        // decide which of the two slots to load it into
         dest = &cgameGlob->activeSnapshots[cgameGlob->snap == cgameGlob->activeSnapshots];
+
+        // try to read the snapshot from the client system
+        // if it succeeded, return
         if (CL_GetSnapshot(localClientNum, ++cgs->processedSnapshotNum, dest))
         {
             CG_AddLagometerSnapshotInfo(dest);
             return dest;
         }
+
+        // a GetSnapshot will return failure if the snapshot
+        // never arrived, or  is so old that its entities
+        // have been shoved off the end of the circular
+        // buffer in the client system.
+
+        // record as a dropped packet
         CG_AddLagometerSnapshotInfo(0);
+
+        // If there are additional snapshots, continue trying to
+        // read them.
     }
+
+    // nothing left to read
     return 0;
 }

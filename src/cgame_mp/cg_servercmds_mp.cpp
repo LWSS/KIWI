@@ -122,6 +122,13 @@ void __cdecl CG_ParseFog(int localClientNum)
     }
 }
 
+/*
+================
+CG_SetConfigValues
+
+Called on load to set the initial values from configure strings
+================
+*/
 void __cdecl CG_SetConfigValues(int localClientNum)
 {
     const char *ConfigString; // eax
@@ -193,6 +200,17 @@ void __cdecl CG_RegisterServerMaterial(int localClientNum, int configStringIndex
         Material_RegisterHandle(materialName, IMAGE_TRACK_HUD);
 }
 
+/*
+===============
+CG_MapRestart
+
+The server has issued a map_restart, so the next snapshot
+is completely new and should not be interpolated to.
+
+A tournement restart will clear everything, but doesn't
+require a reload of all the media
+===============
+*/
 void __cdecl CG_MapRestart(int localClientNum, int savepersist)
 {
     cg_s *cgameGlob;
@@ -372,6 +390,14 @@ void __cdecl CG_MenuShowNotify(int localClientNum, int menuToShow)
     }
 }
 
+/*
+=================
+CG_ServerCommand
+
+The string has been tokenized and can be retrieved with
+Cmd_Argc() / Cmd_Argv()
+=================
+*/
 void __cdecl CG_ServerCommand(int localClientNum)
 {
     CG_DeployServerCommand(localClientNum);
@@ -671,6 +697,12 @@ void __cdecl CG_DeployServerCommand(int localClientNum)
     }
 }
 
+/*
+=================
+CG_ParseScores
+
+=================
+*/
 void __cdecl CG_ParseScores(int localClientNum)
 {
     const char *v1; // eax
@@ -831,6 +863,12 @@ bool __cdecl CG_ClientScoreIsBetter(score_t *scoreA, score_t *scoreB)
     return 0;
 }
 
+/*
+================
+CG_ConfigStringModified
+
+================
+*/
 void __cdecl CG_ConfigStringModified(int localClientNum)
 {
     const char *v1; // eax
@@ -847,7 +885,10 @@ void __cdecl CG_ConfigStringModified(int localClientNum)
     cgameGlob = CG_GetLocalClientGlobals(localClientNum);
     v1 = Cmd_Argv(1);
     num = atoi(v1);
+    // look up the individual string that was modified
     str = CL_GetConfigString(localClientNum, num);
+
+    // do something with it if necessary
     switch (num)
     {
     case 2258:
@@ -993,6 +1034,12 @@ void __cdecl CG_UpdateVoteString(int localClientNum, const char *rawVoteString)
     I_strncpyz(cgs->voteString, v2, 256);
 }
 
+/*
+=======================
+CG_AddToTeamChat
+
+=======================
+*/
 void __cdecl CG_AddToTeamChat(int localClientNum, const char *str)
 {
     char *ls; // [esp+8h] [ebp-18h]
@@ -1061,6 +1108,7 @@ void __cdecl CG_AddToTeamChat(int localClientNum, const char *str)
     }
     else
     {
+        // team chat disabled, dump into normal chat
         cgs->teamLastChatPos = 0;
         cgs->teamChatPos = 0;
     }
@@ -1123,6 +1171,11 @@ void __cdecl CG_OpenScriptMenu(int localClientNum)
     }
 }
 
+/*
+=================
+CG_RemoveChatEscapeChar
+=================
+*/
 void __cdecl CG_RemoveChatEscapeChar(char *text)
 {
     int l; // [esp+0h] [ebp-8h]
@@ -1377,6 +1430,14 @@ void __cdecl CG_SetScriptMainMenu(cg_s *cgameGlob, char *text)
     I_strncpyz(cgameGlob->scriptMainMenu, text, 256);
 }
 
+/*
+====================
+CG_ExecuteNewServerCommands
+
+Execute all of the server commands that were received along
+with this this snapshot.
+====================
+*/
 void __cdecl CG_ExecuteNewServerCommands(int localClientNum, int latestSequence)
 {
     int nesting; // [esp+4h] [ebp-4h]

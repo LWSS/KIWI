@@ -60,6 +60,14 @@ void __cdecl CG_PlayBoltedEffect(
     }
 }
 
+/*
+==============
+CG_EntityEvent
+
+An entity has an event value
+also called by CG_CheckPlayerstateEvents
+==============
+*/
 void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
 {
     const char *ConfigString; // eax
@@ -162,6 +170,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                 CG_PlayEntitySoundAlias(localClientNum, ent->number, *(&cgMedia.landSound[event - EV_LANDING_FIRST] + offset));
             if (clientNum == cgameGlob->predictedPlayerState.clientNum)
             {
+                // smooth landing z changes
                 cgameGlob->landChange = 0.0 - (double)eventParm;
                 cgameGlob->landTime = cgameGlob->time;
             }
@@ -187,6 +196,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     viewDip = 24;
                 if (viewDip > 0)
                 {
+                    // smooth landing z changes
                     cgameGlob->landChange = 0.0 - (double)viewDip;
                     cgameGlob->landTime = cgameGlob->time;
                 }
@@ -218,7 +228,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         ent->lerp.pos.trBase[0], ent->lerp.pos.trBase[1], ent->lerp.pos.trBase[2], playbackId);
                 return;
             }
-            case EV_SOUND_ALIAS_AS_MASTER:
+            case EV_SOUND_ALIAS_AS_MASTER:	// play from the player's head so it never diminishes
                 if (ent->eventParm)
                 {
                     CG_PlaySoundAliasAsMasterByName(localClientNum,
@@ -262,7 +272,7 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                 return;
             case EV_ITEM_PICKUP:
             case EV_AMMO_PICKUP:
-                index = ent->eventParm;
+                index = ent->eventParm;		// player predicted
                 if (index >= 1 && index < 128)
                 {
                     itemWeapDef = BG_GetWeaponDef(index);
@@ -280,10 +290,14 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                         else
                             CG_PlayEntitySoundAlias(localClientNum, ent->number, itemWeapDef->ammoPickupSound);
                     }
+                    // show icon and name on status bar
                     if (isPlayerView)
                         CG_ItemPickup(localClientNum, index);
                 }
                 return;
+            //
+            // weapon events
+            //
             case EV_NOAMMO:
                 if (!BG_WeaponIsClipOnly(weaponIdx) && !weaponDef->cancelAutoHolsterWhenEmpty)
                 {
@@ -594,6 +608,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     CG_PlaySoundAlias(localClientNum, ENTITYNUM_WORLD, position, weaponDef->projExplosionSound);
 
                 return;
+            //
+            // missile impacts
+            //
             case EV_ROCKET_EXPLODE:
                 goto $LN48_1;
             case EV_ROCKET_EXPLODE_NOMARKS:
@@ -906,6 +923,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                 if (isPlayerView)
                     CG_SetInvalidCmdHint(cgameGlob, INVALID_CMD_LOCKON_REQUIRED);
                 return;
+            //
+            // movement generated events
+            //
             case EV_FOOTSTEP_SPRINT:
                 if (cg_footsteps->current.enabled)
                 {
@@ -982,6 +1002,11 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
 }
 
 #ifdef KISAK_MP
+/*
+=============
+CG_Obituary
+=============
+*/
 void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
 {
     const char *v2; // eax
@@ -1106,6 +1131,7 @@ void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
         playerCI = &cgameGlob->bgs.clientinfo[cgameGlob->clientNum];
         if (playerCI->infoValid)
         {
+            // check for double client messages
             if (attacker < 0x40)
             {
                 attackerCI = &cgameGlob->bgs.clientinfo[attacker];
@@ -1126,6 +1152,7 @@ void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
             {
                 attackerName[0] = 0;
             }
+            // check for kill messages from the current clientNum
             else if (attacker == ps->clientNum)
             {
                 if (!cgameGlob->inKillCam)
@@ -1137,6 +1164,7 @@ void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
                     CG_PriorityCenterPrint(localClientNum, locMsg, 0);
                 }
             }
+            // check for kill messages about the current clientNum
             else if (target == ps->clientNum && attackerCI && !cgameGlob->inKillCam)
             {
                 // KISAKTODO: double check the string literals here in va() `CGAME_...`
@@ -1146,6 +1174,7 @@ void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
 					locMsg = va("CGAME_YOUWEREKILLED\x15%s", attackerName);
                 CG_PriorityCenterPrint(localClientNum, locMsg, 0);
             }
+            // print the text message as well
             if (!cgameGlob->inKillCam)
                 CL_DeathMessagePrint(
                     localClientNum,
@@ -1161,6 +1190,13 @@ void __cdecl CG_Obituary(int localClientNum, const entityState_s *ent)
     }
 }
 #endif
+/*
+================
+CG_ItemPickup
+
+A new item was picked up this frame
+================
+*/
 void __cdecl CG_ItemPickup(int localClientNum, int weapIndex)
 {
     WeaponDef *weapDef;
@@ -1168,6 +1204,7 @@ void __cdecl CG_ItemPickup(int localClientNum, int weapIndex)
 
     weapDef = BG_GetWeaponDef(weapIndex);
 
+    // see if it should be the grabbed weapon
     if (weapDef->weapClass != WEAPCLASS_ITEM)
     {
         cgameGlob = CG_GetLocalClientGlobals(localClientNum);
@@ -1176,6 +1213,7 @@ void __cdecl CG_ItemPickup(int localClientNum, int weapIndex)
             if (!cgameGlob->equippedOffHand)
                 CG_SetEquippedOffHand(localClientNum, weapIndex);
         }
+        // select it immediately
         else if (!cgameGlob->weaponSelect)
         {
             CG_SelectWeaponIndex(localClientNum, weapIndex);
@@ -1372,6 +1410,12 @@ void __cdecl CG_StopWeaponSound(
     }
 }
 
+/*
+==============
+CG_CheckEvents
+
+==============
+*/
 void __cdecl CG_CheckEvents(int localClientNum, centity_s *cent)
 {
     int v2; // [esp+0h] [ebp-14h]
@@ -1380,8 +1424,10 @@ void __cdecl CG_CheckEvents(int localClientNum, centity_s *cent)
     uint8_t oldEventParm; // [esp+Fh] [ebp-5h]
     int i; // [esp+10h] [ebp-4h]
 
+    // check for event-only entities
     if (cent->nextState.eType <= ET_EVENTS)
     {
+        // check for events riding with another entity
         if (cent->nextState.eventSequence)
         {
             previousEventSequence = cent->previousEventSequence;
@@ -1394,6 +1440,7 @@ void __cdecl CG_CheckEvents(int localClientNum, centity_s *cent)
                 cent->previousEventSequence = cent->nextState.eventSequence - 4;
             if (cent->previousEventSequence < cent->nextState.eventSequence)
             {
+                // calculate the position at exactly the frame time
                 CG_CalcEntityLerpPositions(localClientNum, cent);
                 oldEventParm = cent->nextState.eventParm;
                 for (i = cent->previousEventSequence; i != cent->nextState.eventSequence; ++i)
@@ -1421,11 +1468,13 @@ void __cdecl CG_CheckEvents(int localClientNum, centity_s *cent)
     {
         iassert(!cent->nextState.eventSequence);
 
+        // already fired
         if (!cent->previousEventSequence)
         {
             cent->previousEventSequence = 1;
             BG_GetEntityTypeName(cent->nextState.eType);
             KISAK_NULLSUB();
+            // calculate the position at exactly the frame time
             CG_CalcEntityLerpPositions(localClientNum, cent);
             CG_EntityEvent(localClientNum, cent, cent->nextState.eType - ET_EVENTS);
         }

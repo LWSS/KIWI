@@ -67,6 +67,14 @@ cmd_function_s VisionSetNaked_VAR;
 cmd_function_s VisionSetNight_VAR;
 
 
+/*
+=================
+CG_InitConsoleCommands
+
+Let the client system know about all of our commands
+so it can perform tab completion
+=================
+*/
 void __cdecl CG_InitConsoleCommands()
 {
     Cmd_AddCommandInternal("viewpos", CG_Viewpos_f, &CG_Viewpos_f_VAR);
@@ -87,6 +95,10 @@ void __cdecl CG_InitConsoleCommands()
     Cmd_AddCommandInternal("restartsmokegrenades", CG_RestartSmokeGrenades_f, &CG_RestartSmokeGrenades_f_VAR);
     Cmd_AddCommandInternal("updateGlowTweaks", UpdateGlowTweaks_f, &UpdateGlowTweaks_f_VAR);
     Cmd_AddCommandInternal("updateFilmTweaks", UpdateFilmTweaks_f, &UpdateFilmTweaks_f_VAR);
+    //
+    // the game server will interpret these commands, which will be automatically
+    // forwarded to the server after they are not recognized locally
+    //
     Cmd_AddCommandInternal("mr", 0, &mr_VAR);
     Cmd_AddCommandInternal("kill", 0, &kill_VAR);
     Cmd_AddCommandInternal("give", 0, &give_VAR);
@@ -115,6 +127,13 @@ void __cdecl CG_InitConsoleCommands()
     Cmd_AddCommandInternal("VisionSetNight", 0, &VisionSetNight_VAR);
 }
 
+/*
+=============
+CG_Viewpos_f
+
+Debugging command to print the current position
+=============
+*/
 void __cdecl CG_Viewpos_f()
 {
     const cg_s *cgameGlob;
@@ -172,8 +191,13 @@ void __cdecl CG_ScoresDown(int localClientNum)
     }
     else
     {
+        // the scores are more than two seconds out of data,
+        // so request new ones
         cgameGlob->scoresRequestTime = cgameGlob->time;
         CL_AddReliableCommand(localClientNum, "score");
+
+        // leave the current scores up if they were already
+        // displayed, but if this is the first hit, clear them out
         if (!CG_IsScoreboardDisplayed(localClientNum))
         {
             cgameGlob->numScores = 0;

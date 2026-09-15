@@ -116,6 +116,11 @@ void __cdecl Touch_Item_Auto(gentity_s *ent, gentity_s *other, int bTouched)
     Touch_Item(ent, other, bTouched);
 }
 
+/*
+===============
+Touch_Item
+===============
+*/
 void __cdecl Touch_Item(gentity_s *ent, gentity_s *other, int touched)
 {
     char *Guid; // eax
@@ -133,10 +138,12 @@ void __cdecl Touch_Item(gentity_s *ent, gentity_s *other, int touched)
         ent->active = 0;
         if (other->client)
         {
+            // dead people can't pickup
             if (other->health >= 1 && !level.clientIsSpawning)
             {
                 weapIndex = ent->s.index.brushmodel % 128;
                 item = &bg_itemlist[ent->s.index.brushmodel];
+                // the same pickup rules are used for client side and server side
                 if (BG_CanItemBeGrabbed(&ent->s, &other->client->ps, touched))
                 {
 #ifdef KISAK_MP
@@ -149,9 +156,11 @@ void __cdecl Touch_Item(gentity_s *ent, gentity_s *other, int touched)
 #endif
                     iassert(item);  
                     iassert(item->giType == IT_WEAPON);
+                    // call the item-specific pickup function
                     pickedUp = WeaponPickup(ent, other, (int*)&pickupEvent, touched);
 
 #ifdef KISAK_MP
+                    // play the normal pickup sound
                     if (pickupEvent)
                     {
                         if (other->client->sess.predictItemPickup)
@@ -166,6 +175,7 @@ void __cdecl Touch_Item(gentity_s *ent, gentity_s *other, int touched)
                         G_FreeEntity(ent);
                     }
 #elif KISAK_SP
+                    // play the normal pickup sound
                     if (pickupEvent)
                         G_AddEvent(other, pickupEvent, weapIndex);
                     if (pickedUp)
@@ -612,6 +622,13 @@ void __cdecl G_GetItemClassname(const gitem_s *item, uint16_t *out)
     G_SetConstString(out, classname);
 }
 
+/*
+================
+Drop_Item
+
+Spawns an item and tosses it forward
+================
+*/
 gentity_s *__cdecl Drop_Item(gentity_s *ent, const gitem_s *item, float angle, int novelocity)
 {
     float velocity[3]; // [esp+10h] [ebp-24h] BYREF
@@ -621,7 +638,7 @@ gentity_s *__cdecl Drop_Item(gentity_s *ent, const gitem_s *item, float angle, i
     angles[0] = ent->r.currentAngles[0];
     angles[1] = ent->r.currentAngles[1] + angle;
 
-    angles[0] = 0.0;
+    angles[0] = 0.0; // always forward
     angles[2] = 0.0;
 
     if (novelocity)
@@ -659,6 +676,13 @@ gentity_s *__cdecl Drop_Item(gentity_s *ent, const gitem_s *item, float angle, i
     return LaunchItem(item, vPos, angles, velocity, ent->s.number);
 }
 
+/*
+================
+LaunchItem
+
+Spawns an item and tosses it forward
+================
+*/
 gentity_s *__cdecl LaunchItem(const gitem_s *item, float *origin, float *angles, float *velocity, int ownerNum)
 {
     char *Name; // eax
@@ -997,6 +1021,14 @@ int __cdecl TransferRandomAmmoToWeaponEntity(gentity_s *weaponEnt, int transferW
     return total;
 }
 
+/*
+================
+FinishSpawningItem
+
+Traces down to find where an item should rest, instead of letting them
+free fall from their spawn points
+================
+*/
 void __cdecl FinishSpawningItem(gentity_s *ent)
 {
     float v4; // [esp+10h] [ebp-BCh]
@@ -1018,10 +1050,12 @@ void __cdecl FinishSpawningItem(gentity_s *ent)
 
     if ((ent->spawnflags & 1) != 0)
     {
+        // suspended
         G_SetOrigin(ent, ent->r.currentOrigin);
     }
     else
     {
+        // drop to floor
         item = &bg_itemlist[ent->s.index.brushmodel];
         iassert(item->giType == IT_WEAPON);
         mins[0] = -1.0;
@@ -1059,6 +1093,7 @@ void __cdecl FinishSpawningItem(gentity_s *ent)
             G_FreeEntity(ent);
             return;
         }
+        // allow to ride movers
         ent->s.groundEntityNum = Trace_GetEntityHitId(&tr);
         g_entities[ent->s.groundEntityNum].flags |= FL_GROUND_ENT;
         Vec3Lerp(start, dest, tr.fraction, endpos);
@@ -1081,9 +1116,16 @@ void __cdecl FinishSpawningItem(gentity_s *ent)
     SV_LinkEntity(ent);
 }
 
+/*
+==============
+ClearRegisteredItems
+==============
+*/
 void __cdecl ClearRegisteredItems()
 {
     memset((uint8_t *)itemRegistered, 0, sizeof(itemRegistered));
+
+    // players always start with the base weapon
     itemRegistered[0] = 1;
 }
 
@@ -1108,6 +1150,14 @@ void __cdecl SaveRegisteredWeapons()
 }
 #endif
 
+/*
+===============
+SaveRegisteredItems
+
+Write the needed items to a config string
+so the client will know which ones to precache
+===============
+*/
 void __cdecl SaveRegisteredItems()
 {
     char string[128]; // [esp+0h] [ebp-98h] BYREF
@@ -1200,6 +1250,16 @@ int __cdecl IsItemRegistered(uint iItemIndex)
     return itemRegistered[iItemIndex];
 }
 
+/*
+============
+G_SpawnItem
+
+Sets the clipping size and plants the object on the floor.
+
+Items can't be immediately dropped to floor, because they might
+be on an entity that hasn't spawned yet.
+============
+*/
 void __cdecl G_SpawnItem(gentity_s *ent, const gitem_s *item)
 {
     char *Name; // eax
@@ -1250,6 +1310,8 @@ void __cdecl G_SpawnItem(gentity_s *ent, const gitem_s *item)
     if (level.spawnVar.spawnVarsValid)
     {
         G_SetAngle(ent, ent->r.currentAngles);
+        // some movers spawn on the second frame, so delay item
+        // spawns until the third frame so they can ride trains
         ent->nextthink = level.time + 100;
         ent->handler = ENT_HANDLER_ITEM_INIT;
     }
@@ -1268,6 +1330,11 @@ void __cdecl G_SpawnItem(gentity_s *ent, const gitem_s *item)
     }
 }
 
+/*
+================
+G_RunItem
+================
+*/
 void __cdecl G_RunItem(gentity_s *ent)
 {
     int passEntityNum; // [esp+10h] [ebp-ACh]
@@ -1292,6 +1359,7 @@ void __cdecl G_RunItem(gentity_s *ent)
     //if (ent->s.eType == ET_PLAYER_CORPSE)
     //    MyAssertHandler(".\\game\\g_items.cpp", 1465, 0, "%s", "ent->s.eType != ET_PLAYER_CORPSE");
 
+    // if groundentity has been set to -1, it may have been pushed off an edge
     if ((ent->s.groundEntityNum == ENTITYNUM_NONE || level.gentities[ent->s.groundEntityNum].s.lerp.pos.trType)
         && ent->s.lerp.pos.trType != TR_GRAVITY
         && ent->s.lerp.pos.trType != TR_RAGDOLL_GRAVITY
@@ -1335,6 +1403,7 @@ void __cdecl G_RunItem(gentity_s *ent)
     }
     if (ent->s.lerp.pos.trType && !ent->tagInfo)
     {
+        // get current position
         BG_EvaluateTrajectory(&ent->s.lerp.pos, level.time + 50, origin);
         diff[5] = origin[0];
         if ((LODWORD(origin[0]) & 0x7F800000) == 0x7F800000
@@ -1348,6 +1417,7 @@ void __cdecl G_RunItem(gentity_s *ent)
                 "%s",
                 "!IS_NAN((origin)[0]) && !IS_NAN((origin)[1]) && !IS_NAN((origin)[2])");
         }
+        // trace a line from the previous position to the current position
         mask = G_ItemClipMask(ent);
         iassert(!( ent->r.contents & mask ));
         Vec3Sub(origin, ent->r.currentOrigin, diff);
@@ -1398,8 +1468,11 @@ void __cdecl G_RunItem(gentity_s *ent)
             ent->r.currentOrigin[1] = endpos[1];
             ent->r.currentOrigin[2] = endpos[2];
         }
-        SV_LinkEntity(ent);
+        SV_LinkEntity(ent); // FIXME: avoid this for stationary?
+
+        // check think function
         G_RunThink(ent);
+        // if it is in a nodrop volume, remove it
         if (ent->r.inuse && tr.fraction < 0.009999999776482582)
         {
             if (tr.normal[2] <= 0.0 || (contents = SV_PointContents(ent->r.currentOrigin, -1, 0x80000000)) != 0)
@@ -1418,6 +1491,7 @@ void __cdecl G_RunItem(gentity_s *ent)
     }
     else
     {
+        // check think function
         G_RunThink(ent);
     }
 }

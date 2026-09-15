@@ -236,6 +236,7 @@ void __cdecl Item_SetScreenCoords(int localClientNum, itemDef_s *item, float x, 
         }
         textRect = Item_GetTextRect(localClientNum, item);
         newRect = *textRect;
+        // force the text rects to recompute
         newRect.w = 0.0;
         newRect.h = 0.0;
         Item_SetTextRect(localClientNum, item, &newRect);
@@ -296,11 +297,21 @@ multiDef_s *__cdecl Item_GetMultiDef(itemDef_s *item)
     return item->typeData.multi;
 }
 
+/*
+===============
+UI_Alloc
+===============
+*/
 uint8_t *__cdecl UI_Alloc(uint size, int alignment)
 {
     return Hunk_AllocAlign(size, alignment, "UI_Alloc", 34);
 }
 
+/*
+=================
+String_Init
+=================
+*/
 void __cdecl String_Init()
 {
     memset((uint8_t *)g_strHandle, 0, sizeof(g_strHandle));
@@ -356,6 +367,11 @@ const char *__cdecl String_Alloc(const char *p)
     return (const char *)s;
 }
 
+/*
+================
+return a hash value for the string
+================
+*/
 int __cdecl hashForString(const char *str)
 {
     int hash; // [esp+0h] [ebp-Ch]
@@ -367,6 +383,11 @@ int __cdecl hashForString(const char *str)
     return hash & 0x7FF;
 }
 
+/*
+=================
+Int_Parse
+=================
+*/
 int __cdecl Int_Parse(const char **p, int *i)
 {
     parseInfo_t *token; // [esp+0h] [ebp-4h]
@@ -378,6 +399,11 @@ int __cdecl Int_Parse(const char **p, int *i)
     return 1;
 }
 
+/*
+=================
+Float_Parse
+=================
+*/
 int __cdecl Float_Parse(const char **p, float *f)
 {
     parseInfo_t *token; // [esp+0h] [ebp-4h]

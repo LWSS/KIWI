@@ -44,6 +44,11 @@ int __cdecl CheatsOkInternal(gentity_s *ent)
     }
 }
 
+/*
+==================
+CheatsOk
+==================
+*/
 int __cdecl CheatsOk(gentity_s *ent)
 {
     int ok; // r31
@@ -56,6 +61,11 @@ int __cdecl CheatsOk(gentity_s *ent)
 }
 
 char line[1024];
+/*
+==================
+ConcatArgs
+==================
+*/
 char *__cdecl ConcatArgs(int start)
 {
     size_t v2; // r30
@@ -103,6 +113,13 @@ char *__cdecl ConcatArgs(int start)
     return result;
 }
 
+/*
+==================
+SanitizeString
+
+Remove case and control characters
+==================
+*/
 void __cdecl SanitizeString(char *in, char *out)
 {
     char *v2; // r31
@@ -118,7 +135,7 @@ void __cdecl SanitizeString(char *in, char *out)
         {
             if (v5 == 27)
             {
-                v2 += 2;
+                v2 += 2; // skip color code
             }
             else
             {
@@ -215,6 +232,13 @@ void __cdecl Cmd_RemoveCorpse_f()
     G_GetFreeActorCorpseIndex(0);
 }
 
+/*
+==================
+Cmd_Give_f
+
+Give items to a client
+==================
+*/
 void __cdecl Cmd_Give_f(gentity_s *ent)
 {
     int ok; // r31
@@ -299,6 +323,7 @@ void __cdecl Cmd_Give_f(gentity_s *ent)
     LABEL_31:
         if (I_strnicmp(v7, "allammo", 7) || !v5)
         {
+            // spawn a specific item right on the player
             if (!v10)
             {
                 level.initializing = 1;
@@ -639,6 +664,11 @@ void __cdecl Cmd_UFO_f(gentity_s *ent)
     }
 }
 
+/*
+=================
+Cmd_Kill_f
+=================
+*/
 void __cdecl Cmd_Kill_f(gentity_s *ent)
 {
     gclient_s *client; // r5
@@ -653,6 +683,11 @@ void __cdecl Cmd_Kill_f(gentity_s *ent)
     }
 }
 
+/*
+==================
+Cmd_Where_f
+==================
+*/
 void __cdecl Cmd_Where_f(gentity_s *ent)
 {
     gclient_s *client; // r11
@@ -664,6 +699,11 @@ void __cdecl Cmd_Where_f(gentity_s *ent)
     }
 }
 
+/*
+=================
+Cmd_SetViewpos_f
+=================
+*/
 void __cdecl Cmd_SetViewpos_f(gentity_s *ent)
 {
     int ok; // r31
@@ -963,6 +1003,11 @@ void Cmd_VisionSetNight_f()
     SV_SetConfigstring(CS_VISIONSET_NIGHT, va("\"%s\" %i", v5, v7));
 }
 
+/*
+=================
+ClientCommand
+=================
+*/
 void __cdecl ClientCommand(int clientNum, const char *s)
 {
     gentity_s *v3; // r30

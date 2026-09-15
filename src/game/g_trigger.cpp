@@ -46,7 +46,7 @@ int __cdecl InitTrigger(gentity_s *self)
         model = self->model;
         v4 = self->s.lerp.eFlags | 1;
         self->r.svFlags = 1;
-        self->r.contents = 1079771144;
+        self->r.contents = 1079771144;		// replaces the -1 from trap_SetBrushModel
         self->s.lerp.eFlags = v4;
         if (!model)
             self->s.lerp.eFlags = v4 | 0x20;
@@ -95,6 +95,8 @@ void __cdecl InitSentientTrigger(gentity_s *self)
 
 void __cdecl multi_trigger(gentity_s *ent, gentity_s *activator)
 {
+    // we can't just remove (self) here, because this is a touch function
+    // called while looping through area links...
     if ((ent->spawnflags & 0x40) != 0)
         G_FreeEntityDelay(ent);
 }

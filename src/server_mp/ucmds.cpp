@@ -124,13 +124,28 @@ void __cdecl SV_RetransmitDownload_f(client_t *cl)
         cl->downloadXmitBlock = cl->downloadClientBlock;
 }
 
+/*
+==================
+SV_DoneDownload_f
+
+Downloads are finished
+==================
+*/
 void __cdecl SV_DoneDownload_f(client_t *cl)
 {
     Com_DPrintf(CON_CHANNEL_DONT_FILTER, "clientDownload: %s Done\n", cl->name);
     SV_Download_Clear(cl);
+    // resend the game state to update any clients that entered during the download
     SV_SendClientGameState(cl);
 }
 
+/*
+==================
+SV_StopDownload_f
+
+Abort a download if in progress
+==================
+*/
 void __cdecl SV_StopDownload_f(client_t *cl)
 {
     if (cl->downloadName[0])
@@ -139,11 +154,24 @@ void __cdecl SV_StopDownload_f(client_t *cl)
     SV_Download_Clear(cl);
 }
 
+/*
+=================
+SV_ResetPureClient_f
+=================
+*/
 void __cdecl SV_ResetPureClient_f(client_t *cl)
 {
     cl->pureAuthentic = 0;
 }
 
+/*
+==================
+SV_NextDownload_f
+
+The argument will be the last acknowledged block from the client, it should be
+the same as cl->downloadClientBlock
+==================
+*/
 void __cdecl SV_NextDownload_f(client_t *cl)
 {
     const char *v1; // eax
@@ -154,6 +182,7 @@ void __cdecl SV_NextDownload_f(client_t *cl)
     if (block == cl->downloadClientBlock)
     {
         Com_DPrintf(CON_CHANNEL_DONT_FILTER, "clientDownload: %d : client acknowledge of block %d\n", cl - svs.clients, block);
+        // Find out if we are done.  A zero-length block indicates EOF
         if (cl->downloadBlockSize[cl->downloadClientBlock % 8])
         {
             cl->downloadSendTime = svs.time;
@@ -165,18 +194,28 @@ void __cdecl SV_NextDownload_f(client_t *cl)
             SV_CloseDownload(cl);
         }
     }
+    // We aren't getting an acknowledge for the correct block, drop the client
+    // FIXME: this is bad... the client will never parse the disconnect message
+    //			because the cgame isn't loaded yet
     else
     {
         SV_DropClient(cl, "broken download", 1);
     }
 }
 
+/*
+==================
+SV_BeginDownload_f
+==================
+*/
 void __cdecl SV_BeginDownload_f(client_t *cl)
 {
 	const char *v1; // eax
 
+	// Init
 	SV_CloseDownload(cl);
 	cl->downloading = 1;
+	// We open the file here
 	v1 = SV_Cmd_Argv(1);
 	I_strncpyz(cl->downloadName, v1, 64);
 }

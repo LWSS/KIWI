@@ -129,6 +129,11 @@ int __cdecl CG_GetRenderFlagForRefEntity(__int16 eFlags)
     return result;
 }
 
+/*
+==================
+CG_General
+==================
+*/
 void __cdecl CG_General(int localClientNum, centity_s *cent)
 {
     entityState_s *p_nextState; // r31
@@ -136,17 +141,24 @@ void __cdecl CG_General(int localClientNum, centity_s *cent)
     float lightingOrigin[3];
 
     p_nextState = &cent->nextState;
+    // if set to invisible, skip
     if ((cent->nextState.lerp.eFlags & 0x20) == 0)
     {
         obj = Com_GetClientDObj(cent->nextState.number, 0);
         if (obj)
         {
             CG_LockLightingOrigin(cent, lightingOrigin);
+            // add to refresh list
             R_AddDObjToScene(obj, &cent->pose, p_nextState->number, CG_GetRenderFlagForRefEntity(p_nextState->lerp.eFlags), lightingOrigin, 0.0f);
         }
     }
 }
 
+/*
+==================
+CG_Item
+==================
+*/
 void __cdecl CG_Item(centity_s *cent)
 {
     entityState_s *p_nextState; // r31
@@ -162,6 +174,7 @@ void __cdecl CG_Item(centity_s *cent)
     if (cent->nextState.index.item >= 0x800u)
         Com_Error(ERR_DROP, "Bad item index %i on entity", cent->nextState.index);
 
+    // if set to invisible, skip
     if ((p_nextState->lerp.eFlags & 0x20) == 0)
     {
         v3 = p_nextState->index.item;
@@ -182,6 +195,7 @@ void __cdecl CG_Item(centity_s *cent)
             lightingOrigin[2] = cent->pose.origin[2];
 
             RenderFlagForRefEntity = CG_GetRenderFlagForRefEntity(p_nextState->lerp.eFlags);
+            // add to refresh list
             R_AddDObjToScene(obj, &cent->pose, p_nextState->number, RenderFlagForRefEntity, lightingOrigin, 0.0f);
         }
     }
@@ -221,6 +235,13 @@ void __cdecl CG_AddEntityLoopSound(int localClientNum, const centity_s *cent)
     CG_PlaySoundAliasByName(localClientNum, cent->nextState.number, origin, ConfigString);
 }
 
+/*
+==================
+CG_EntityEffects
+
+Add continuous entity effects, like local entity emission and lighting
+==================
+*/
 void __cdecl CG_EntityEffects(int localClientNum, centity_s *cent)
 {
     if (cent->nextState.loopSound)
@@ -295,6 +316,11 @@ bool __cdecl JavelinSoftLaunch(WeaponDef *weapDef, cg_s *cgameGlob, entityState_
         && cgameGlob->time - s1->lerp.u.missile.launchTime <= weapDef->projIgnitionDelay;
 }
 
+/*
+===============
+CG_Missile
+===============
+*/
 void __cdecl CG_Missile(int localClientNum, centity_s *cent)
 {
     WeaponDef *WeaponDef; // r27
@@ -314,9 +340,11 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
         CG_GetLocalClientWeaponInfo(localClientNum, cent->nextState.weapon);
         WeaponDef = BG_GetWeaponDef(cent->nextState.weapon);
         projectileSound = WeaponDef->projectileSound;
+        // add missile sound
         if (projectileSound)
             CG_PlaySoundAlias(localClientNum, cent->nextState.number, cent->pose.origin, projectileSound);
         ClientDObj = Com_GetClientDObj(cent->nextState.number, 0);
+        // create the render entity
 		if (!ClientDObj && WeaponDef->projectileModel)
 		{
 			DObjModel_s dobjModel;
@@ -327,6 +355,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
 		}
         if (ClientDObj)
         {
+            // add trails
             if (!cent->bTrailMade
                 && (WeaponDef->guidedMissileType != MISSILE_GUIDANCE_JAVELIN
                     || cgArray[0].time - cent->nextState.lerp.u.missile.launchTime > WeaponDef->projIgnitionDelay))
@@ -351,6 +380,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
             lightingOrigin[2] = cent->pose.origin[2];
             lightingOrigin[2] = lightingOrigin[2] + 4.0;
             // lwss end
+            // add to refresh list, possibly with quad glow
             R_AddDObjToScene(ClientDObj, &cent->pose, cent->nextState.number, RenderFlagForRefEntity, lightingOrigin, 0.0f);
             CG_AddHudGrenade(cgArray, cent);
         }
@@ -468,6 +498,13 @@ void __cdecl CG_ScriptMover(int localClientNum, centity_s *cent)
     }
 }
 
+/*
+=========================
+CG_AdjustPositionForMover
+
+Also called by client movement prediction code
+=========================
+*/
 void __cdecl CG_AdjustPositionForMover(
     int localClientNum,
     float *in,
@@ -524,6 +561,8 @@ void __cdecl CG_AdjustPositionForMover(
             outDeltaAngles[1] = v19;
             outDeltaAngles[2] = v22;
         }
+
+        // FIXME: origin change when on a rotating object
     }
     else
     {
@@ -1209,6 +1248,12 @@ void __cdecl CG_CalcEntityRagdollPositions(int localClientNum, centity_s *cent)
         CG_UpdateRagdollPose(cent);
 }
 
+/*
+===============
+CG_CalcEntityLerpPositions
+
+===============
+*/
 void __cdecl CG_CalcEntityLerpPositions(int localClientNum, centity_s *cent)
 {
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
@@ -1737,6 +1782,12 @@ void __cdecl CG_AddPacketEntity(unsigned int localClientNum, unsigned int entnum
     }
 }
 
+/*
+===============
+CG_AddPacketEntities
+
+===============
+*/
 int __cdecl CG_AddPacketEntities(int localClientNum)
 {
     int viewlocked_entNum; // r24
@@ -1758,6 +1809,7 @@ int __cdecl CG_AddPacketEntities(int localClientNum)
     v3 = 0;
     nextSnap = cgArray[0].nextSnap;
     v5 = 0;
+    // add each entity sent over by the server
     if (cgArray[0].nextSnap->numEntities > 0)
     {
         do

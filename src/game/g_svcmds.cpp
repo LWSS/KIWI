@@ -14,6 +14,11 @@ ipFilter_s ipFilters[1024];
 int numIPFilters;
 
 #ifdef KISAK_MP
+/*
+=================
+G_ProcessIPBans
+=================
+*/
 void __cdecl G_ProcessIPBans()
 {
     char *v0; // eax
@@ -37,10 +42,16 @@ void __cdecl G_ProcessIPBans()
     }
 }
 
+/*
+=================
+AddIP
+=================
+*/
 void __cdecl AddIP(char *str)
 {
     int i; // [esp+0h] [ebp-4h]
 
+    // free spot
     for (i = 0; i < numIPFilters && ipFilters[i].compare != -1; ++i)
         ;
     if (i == numIPFilters)
@@ -58,6 +69,11 @@ void __cdecl AddIP(char *str)
 }
 #endif
 
+/*
+=================
+StringToFilter
+=================
+*/
 int __cdecl StringToFilter(char *s, ipFilter_s *f)
 {
     uint8_t v3; // al
@@ -97,6 +113,11 @@ int __cdecl StringToFilter(char *s, ipFilter_s *f)
 }
 
 #ifdef KISAK_MP
+/*
+=================
+UpdateIPBans
+=================
+*/
 void UpdateIPBans()
 {
     uint b; // [esp+20h] [ebp-410h]
@@ -122,6 +143,11 @@ void UpdateIPBans()
     Dvar_SetString((dvar_s *)g_banIPs, iplist);
 }
 
+/*
+=================
+Svcmd_AddIP_f
+=================
+*/
 void __cdecl Svcmd_AddIP_f()
 {
     char str[1028]; // [esp+0h] [ebp-408h] BYREF
@@ -137,6 +163,11 @@ void __cdecl Svcmd_AddIP_f()
     }
 }
 
+/*
+=================
+Svcmd_RemoveIP_f
+=================
+*/
 void __cdecl Svcmd_RemoveIP_f()
 {
     char str[1024]; // [esp+0h] [ebp-410h] BYREF
@@ -169,6 +200,11 @@ void __cdecl Svcmd_RemoveIP_f()
 
 #endif
 
+/*
+===================
+Svcmd_EntityList_f
+===================
+*/
 void __cdecl Svcmd_EntityList_f()
 {
     const char *EntityTypeName; // eax
@@ -193,6 +229,11 @@ void __cdecl Svcmd_EntityList_f()
     }
 }
 
+/*
+=================
+ConsoleCommand
+=================
+*/
 int __cdecl ConsoleCommand()
 {
 #ifdef KISAK_MP

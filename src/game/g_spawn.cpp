@@ -700,6 +700,7 @@ void __cdecl SP_worldspawn()
     if (I_stricmp(classname, "worldspawn"))
         Com_Error(ERR_DROP, "SP_worldspawn: the first entity isn't worldspawn");
 
+    // make some data visible to connecting client
     SV_SetConfigstring(CS_GAME_VERSION, "cod-sp");
 
     const char *ambienttrack;
@@ -711,7 +712,7 @@ void __cdecl SP_worldspawn()
 
     const char *message;
     G_SpawnString(&level.spawnVar, "message", "", &message);
-    SV_SetConfigstring(CS_MESSAGE, message);
+    SV_SetConfigstring(CS_MESSAGE, message);				// map specific message
 
     const char *gravity;
     G_SpawnString(&level.spawnVar, "gravity", "800", &gravity);
@@ -910,6 +911,14 @@ void __cdecl G_ParseEntityFields(gentity_s *ent, int ignoreModel)
     G_SetAngle(ent, ent->r.currentAngles);
 }
 
+/*
+===============
+G_CallSpawn
+
+Finds the spawn function for the entity and calls it,
+returning qfalse if not found
+===============
+*/
 void G_CallSpawn()
 {
     gentity_s *ent; // r31
@@ -950,6 +959,7 @@ void G_CallSpawn()
         }
         else
         {
+            // check item spawn functions
             item = G_GetItemForClassname(classname, 0);
             if (item)
             {
@@ -959,6 +969,7 @@ void G_CallSpawn()
             }
             else
             {
+                // check normal spawn functions
                 spawnFunc = G_FindSpawnFunc(classname, s_bspOrDynamicSpawns, ARRAY_COUNT(s_bspOrDynamicSpawns));
 
                 if (!spawnFunc && level.spawnVar.spawnVarsValid)
@@ -975,6 +986,7 @@ void G_CallSpawn()
                 G_ParseEntityFields(ent, 0);
                 G_PrintBadModelMessage(ent);
                 G_DObjUpdate(ent);
+                // found it
                 spawnFunc(ent);
             }
         }
@@ -1153,11 +1165,22 @@ void __cdecl Scr_GetGenericField(unsigned __int8 *b, fieldtype_t type, int ofs)
     }
 }
 
+/*
+==============
+G_SpawnEntitiesFromString
+
+Parses textual entity definitions out of an entstring and spawns gentities.
+==============
+*/
 void __cdecl G_SpawnEntitiesFromString()
 {
+    // the worldspawn is not an actual entity, but it still
+    // has a "spawn" function to perform any global setup
+    // needed by a level (setting configstrings or cvars, etc)
     if (!G_ParseSpawnVars(&level.spawnVar))
         Com_Error(ERR_DROP, "SpawnEntities: no entities");
     SP_worldspawn();
+    // parse ents
     while (G_ParseSpawnVars(&level.spawnVar))
         G_CallSpawn();
     G_ResetEntityParsePoint();

@@ -156,6 +156,15 @@ void __cdecl CL_DeltaClient(
     ++frame->numClients;
 }
 
+/*
+==================
+CL_SystemInfoChanged
+
+The systeminfo configstring has been changed, so parse
+new information out of it.  This will happen at every
+gamestate, and possibly during gameplay.
+==================
+*/
 void __cdecl CL_SystemInfoChanged(int localClientNum)
 {
     const char *v1; // eax
@@ -181,7 +190,9 @@ void __cdecl CL_SystemInfoChanged(int localClientNum)
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     systemInfo = &LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.stringOffsets[1]];
     v1 = Info_ValueForKey(systemInfo, "sv_serverid");
+    // when the serverId changes, any further messages we send to the server will use this new serverId
     LocalClientGlobals->serverId = atoi(v1);
+    // don't set any vars when playing a demo
     if (CL_GetLocalClientConnection(localClientNum)->demoplaying)
     {
         //LargeLocal::~LargeLocal(&value_large_local);
@@ -210,6 +221,7 @@ void __cdecl CL_SystemInfoChanged(int localClientNum)
         FS_ServerSetReferencedFFs((char *)s, (char*)t);
         if (!com_sv_running->current.enabled)
         {
+            // scan through all the variables in the systeminfo and locally set cvars to match
             s = systemInfo;
             while (s)
             {
@@ -219,6 +231,7 @@ void __cdecl CL_SystemInfoChanged(int localClientNum)
                 Dvar_SetFromStringByName((const char *)key, (char *)value);
             }
         }
+        // check pure server string
         cl_connectedToPureServer = Dvar_GetBool("sv_pure");
         //LargeLocal::~LargeLocal(&value_large_local);
         //LargeLocal::~LargeLocal(&key_large_local);
@@ -277,6 +290,14 @@ void __cdecl CL_ParseWWWDownload(int localClientNum, msg_t *msg)
     }
 }
 
+/*
+=================
+CL_BeginDownload
+
+Requests a file to download from the server.  Stores it in the current
+game directory.
+=================
+*/
 void __cdecl CL_BeginDownload(char *localName, char *remoteName)
 {
     const char *v2; // eax
@@ -299,6 +320,13 @@ void __cdecl CL_BeginDownload(char *localName, char *remoteName)
     CL_AddReliableCommand(0, v2);
 }
 
+/*
+=================
+CL_NextDownload
+
+A download completed or failed
+=================
+*/
 void __cdecl CL_NextDownload(int localClientNum)
 {
     char *localName; // [esp+24h] [ebp-Ch]
@@ -308,10 +336,13 @@ void __cdecl CL_NextDownload(int localClientNum)
     uint8_t *sc; // [esp+28h] [ebp-8h]
     char *remoteName; // [esp+2Ch] [ebp-4h]
 
+    // We are looking to start a download here
     CL_GetLocalClientConnection(localClientNum);
     if (!cls.downloadList[0])
         goto LABEL_11;
     iassert(!com_sv_running->current.enabled);
+    // format is:
+    //  @remotename@localname@remotename@localname, etc.
     s = cls.downloadList;
     if (cls.downloadList[0] == '@')
         s = &cls.downloadList[1];
@@ -329,10 +360,13 @@ void __cdecl CL_NextDownload(int localClientNum)
         }
         else
         {
+            // point at the nul byte
             sc = (uint8_t *)&localName[strlen(localName)];
         }
         CL_BeginDownload(localName, remoteName);
         cls.downloadRestart = 1;
+
+        // move over the rest
         memmove((uint8_t *)cls.downloadList, sc, strlen((const char *)sc) + 1);
     }
     else
@@ -343,6 +377,13 @@ void __cdecl CL_NextDownload(int localClientNum)
 }
 
 char parseDownloadData[2048];
+/*
+=====================
+CL_ParseDownload
+
+A download message has been received from the server
+=====================
+*/
 void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
 {
     int block; // [esp+0h] [ebp-Ch]
@@ -365,6 +406,7 @@ void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
     }
     else
     {
+        // block zero is special, contains file size
         if (!block)
         {
             cls.downloadSize = MSG_ReadLong(msg);
@@ -381,6 +423,7 @@ void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
             Com_Error(ERR_DROP, "CL_ParseDownload: invalid download block size %i", size);
             return;
         }
+        // read the data
         if (size > 0)
         {
             MSG_ReadData(msg, (uint8_t *)parseDownloadData, size);
@@ -400,6 +443,7 @@ void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
                 CL_AddReliableCommand(localClientNum, "stopdl");
                 return;
             }
+            // open the file if not opened yet
             cls.download = FS_SV_FOpenFileWrite(cls.downloadTempName);
             if (cls.download)
             {
@@ -410,19 +454,31 @@ void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
                 ++cls.downloadBlock;
                 cls.downloadCount += size;
                 legacyHacks.cl_downloadCount = cls.downloadCount;
+                // A zero length block means EOF
                 if (!size)
                 {
                     if (cls.download)
                     {
                         FS_FCloseFile(cls.download);
                         cls.download = 0;
+
+                        // rename the file
                         FS_SV_Rename(cls.downloadTempName, cls.downloadName);
                     }
                     cls.downloadName[0] = 0;
                     cls.downloadTempName[0] = 0;
+                    // So UI gets access to it
                     legacyHacks.cl_downloadName[0] = 0;
+
+                    // send intentions now
+                    // We need this because without it, we would hold the last nextdl and then start
+                    // loading right away. If we take a while to load, the server is happily trying
+                    // to send us that last block over and over.
+                    // Write it twice to help make sure we acknowledge the download
                     CL_WritePacket(localClientNum);
                     CL_WritePacket(localClientNum);
+
+                    // get another file if needed
                     CL_NextDownload(localClientNum);
                 }
             }
@@ -446,6 +502,11 @@ void __cdecl CL_ParseDownload(int localClientNum, msg_t *msg)
 }
 
 uint8_t msgCompressed_buf[0x20000];
+/*
+=====================
+CL_ParseServerMessage
+=====================
+*/
 void __cdecl CL_ParseServerMessage(int localClientNum, msg_t *msg)
 {
     if (cl_shownet->current.integer == 1)
@@ -475,6 +536,7 @@ void __cdecl CL_ParseServerMessage(int localClientNum, msg_t *msg)
         return;
     }
 
+    // parse the message
     while (2)
     {
         if (msgCompressed.overflowed)
@@ -502,6 +564,7 @@ void __cdecl CL_ParseServerMessage(int localClientNum, msg_t *msg)
                 Com_Printf(CON_CHANNEL_CLIENT, "%3i:BAD CMD %i\n", msgCompressed.readcount - 1, cmd);
         }
 
+        // other commands
         switch (cmd)
         {
             case svc_nop:
@@ -531,6 +594,15 @@ void __cdecl CL_ParseServerMessage(int localClientNum, msg_t *msg)
 }
 
 clSnapshot_t newSnap;
+/*
+================
+CL_ParseSnapshot
+
+If the snapshot is parsed properly, it will be copied to
+cl.snap and saved in cl.snapshots[].  If the snapshot is invalid
+for any reason, no changes to the state will be made at all.
+================
+*/
 void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
 {
     const char *v2; // eax
@@ -545,7 +617,16 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     clc = CL_GetLocalClientConnection(localClientNum);
+
+    // get the reliable sequence acknowledge number
+    // NOTE: now sent with all server to client messages
+
+    // read in the new snapshot to a temporary buffer
+    // we will only copy to cl.snap if it is valid
     memset((uint8_t *)&newSnap, 0, sizeof(newSnap));
+
+    // we will have read any new server commands in this
+    // message before we got to svc_snapshot
     newSnap.serverCommandNum = clc->serverCommandSequence;
     newSnap.serverTime = MSG_ReadLong(msg);
     newSnap.messageNum = clc->serverMessageSequence;
@@ -555,15 +636,23 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
     else
         newSnap.deltaNum = -1;
     newSnap.snapFlags = MSG_ReadByte(msg);
+
+    // If the frame is delta compressed from data that we
+    // no longer have available, we must suck up the rest of
+    // the frame, but not use it, then ask for a non-compressed
+    // message
     if (newSnap.deltaNum > 0)
     {
         old = &LocalClientGlobals->snapshots[newSnap.deltaNum & 0x1F];
         if (!old->valid)
         {
+            // should never happen
             Com_PrintError(CON_CHANNEL_CLIENT, "Delta from invalid frame (not supposed to happen!).\n");
             MSG_Discard(msg);
             return;
         }
+        // The frame that the server did the delta from
+        // is too old, so we can't reconstruct it properly.
         if (LocalClientGlobals->snapshots[newSnap.deltaNum & 0x1F].messageNum != newSnap.deltaNum)
         {
             Com_DPrintf(CON_CHANNEL_CLIENT, "Delta frame too old.\n");
@@ -582,15 +671,17 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
             MSG_Discard(msg);
             return;
         }
-        newSnap.valid = 1;
+        newSnap.valid = 1;	// valid delta parse
     }
     else
     {
-        newSnap.valid = 1;
+        newSnap.valid = 1;		// uncompressed frame
         old = 0;
-        clc->demowaiting = 0;
+        clc->demowaiting = 0;	// we can start recording now
     }
     serverTimeBackup = LocalClientGlobals->serverTime;
+
+    // read playerinfo
     SHOWNET(msg, (char *)"playerstate");
     if (old)
         MSG_ReadDeltaPlayerstate(localClientNum, msg, newSnap.serverTime, &old->ps, &newSnap.ps, 1);
@@ -605,25 +696,35 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
         MyAssertHandler(".\\client_mp\\cl_parse_mp.cpp", 669, 0, "%s\n\t%s", "serverTimeBackup == cl->serverTime", v2);
     }
     MSG_ClearLastReferencedEntity(msg);
+    // read packet entities
     SHOWNET(msg, (char *)"packet entities");
     CL_ParsePacketEntities(LocalClientGlobals, msg, newSnap.serverTime, old, &newSnap);
     MSG_ClearLastReferencedEntity(msg);
     SHOWNET(msg, (char*)"packet clients");
     CL_ParsePacketClients(LocalClientGlobals, msg, newSnap.serverTime, old, &newSnap);
+    // if not valid, dump the entire thing now that it has
+    // been properly read
     if (msg->overflowed)
     {
         newSnap.valid = 0;
     }
     else if (newSnap.valid)
     {
+        // clear the valid flags of any snapshots between the last
+        // received and this one, so if there was a dropped packet
+        // it won't look like something valid to delta from next
+        // time we wrap around in the buffer
         oldMessageNum = LocalClientGlobals->snap.messageNum + 1;
         if (newSnap.messageNum - oldMessageNum >= 32)
             oldMessageNum = newSnap.messageNum - 31;
         while (oldMessageNum < newSnap.messageNum)
             LocalClientGlobals->snapshots[oldMessageNum++ & 0x1F].valid = 0;
         LocalClientGlobals->oldSnapServerTime = LocalClientGlobals->snap.serverTime;
+
+        // copy to the current good spot
         memcpy((uint8_t *)&LocalClientGlobals->snap, (uint8_t *)&newSnap, sizeof(LocalClientGlobals->snap));
         LocalClientGlobals->snap.ping = 999;
+        // calculate ping time
         for (i = 0; i < 32; ++i)
         {
             packetNum = ((uint8_t)clc->netchan.outgoingSequence - 1 - (_BYTE)i) & 0x1F;
@@ -633,6 +734,7 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
                 break;
             }
         }
+        // save the frame off in the backup array for later delta comparisons
         memcpy(
             (uint8_t *)&LocalClientGlobals->snapshots[LocalClientGlobals->snap.messageNum & 0x1F],
             (uint8_t *)&LocalClientGlobals->snap,
@@ -648,6 +750,12 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
     }
 }
 
+/*
+==================
+CL_ParsePacketEntities
+
+==================
+*/
 void __cdecl CL_ParsePacketEntities(
     clientActive_t *cl,
     msg_t *msg,
@@ -667,6 +775,8 @@ void __cdecl CL_ParsePacketEntities(
 
     newframe->parseEntitiesNum = cl->parseEntitiesNum;
     newframe->numEntities = 0;
+
+    // delta from the entities present in oldframe
     oldindex = 0;
     oldstate = 0;
     if (!oldframe)
@@ -687,6 +797,7 @@ void __cdecl CL_ParsePacketEntities(
     }
     while (!msg->overflowed)
     {
+        // read the entity index number
         newnum = MSG_ReadEntityIndex(msg, 0xAu);
 
         //vassert(newnum >= 0 && newnum < (1 << 10), "(newnum) = %i", newnum); // LWSS: changed to an actual error
@@ -797,6 +908,14 @@ void __cdecl CL_ParsePacketEntities(
         Com_Printf(CON_CHANNEL_CLIENT, "Entities in packet: %i\n", newframe->numEntities);
 }
 
+/*
+==================
+CL_DeltaEntity
+
+Parses deltas from the given base and adds the resulting entity
+to the current frame
+==================
+*/
 void __cdecl CL_DeltaEntity(
     clientActive_t *cl,
     msg_t *msg,
@@ -805,8 +924,11 @@ void __cdecl CL_DeltaEntity(
     uint newnum,
     const entityState_s *old)
 {
+    // entity was delta removed
     if (!MSG_ReadDeltaEntity(msg, time, old, &cl->parseEntities[cl->parseEntitiesNum & 0x7FF], newnum))
     {
+        // save the parsed entity state into the big circular buffer so
+        // it can be used as the source for a later delta
         ++cl->parseEntitiesNum;
         ++frame->numEntities;
     }
@@ -942,6 +1064,14 @@ void __cdecl CL_ParsePacketClients(
         Com_Printf(CON_CHANNEL_CLIENT, "Clients in packet: %i\n", newframe->numClients);
 }
 
+/*
+=================
+CL_InitDownloads
+
+After receiving a valid game state, we valid the cgame and local zip files here
+and determine if we need to download them
+=================
+*/
 void __cdecl CL_InitDownloads(int localClientNum)
 {
     char *v1; // eax
@@ -1004,20 +1134,30 @@ void __cdecl CL_InitDownloads(int localClientNum)
     CL_DownloadsComplete(localClientNum);
 }
 
+/*
+==================
+CL_ParseGamestate
+==================
+*/
 void __cdecl CL_ParseGamestate(int localClientNum, msg_t *msg)
 {
     Con_Close(localClientNum);
 
     clientConnection_t *clc = CL_GetLocalClientConnection(localClientNum);
     clc->connectPacketCount = 0;
+
+    // wipe local client state
     CL_ClearState(localClientNum);
     MSG_ClearLastReferencedEntity(msg);
     Vec3Clear(cls.mapCenter);
+    // a gamestate always marks a server command sequence
     clc->serverCommandSequence = MSG_ReadLong(msg);
 
     clientActive_t *cl = CL_GetLocalClientGlobals(localClientNum);
+    // leave a 0 at the beginning for uninitialized configstrings
     cl->gameState.dataCount = 1;
 
+    // parse all the configstrings and baselines
     while (1)
     {
         int cmd = MSG_ReadByte(msg);
@@ -1068,6 +1208,7 @@ void __cdecl CL_ParseGamestate(int localClientNum, msg_t *msg)
                     uint len = strlen(s);
                     if ((int)(len + cl->gameState.dataCount + 1) > MAX_GAMESTATE_CHARS)
                         Com_Error(ERR_DROP, "MAX_GAMESTATE_CHARS exceeded");
+                    // append it to the gameState string buffer
                     cl->gameState.stringOffsets[configStringIndex] = cl->gameState.dataCount;
                     memcpy(&cl->gameState.stringData[cl->gameState.dataCount], s, len + 1);
                     cl->gameState.dataCount += len + 1;
@@ -1130,30 +1271,46 @@ END_LOOP:
     }
     // LWSS END
 
+    // read the checksum feed
     clc->checksumFeed = MSG_ReadLong(msg);
 
     if (IsFastFileLoad())
         DB_SyncXAssets();
 
+    // parse serverId and other cvars
     CL_SystemInfoChanged(localClientNum);
     cls.gameDirChanged = fs_gameDirVar->modified;
 
+    // reinitialize the filesystem if the game directory has changed
     if (FS_NeedRestart(clc->checksumFeed))
         FS_Restart(localClientNum, clc->checksumFeed);
 
     if (net_lanauthorize->current.enabled || !Sys_IsLANAddress(clc->serverAddress))
         CL_RequestAuthorization(localClientNum);
 
+    // This used to call CL_StartHunkUsers, but now we enter the download state before loading the
+    // cgame
     CL_InitDownloads(localClientNum);
+
+    // make sure the game starts
     Dvar_SetInt(cl_paused, 0);
 }
 
+/*
+=====================
+CL_ParseCommandString
+
+Command strings are just saved off until cgame asks for them
+when it transitions a snapshot
+=====================
+*/
 void __cdecl CL_ParseCommandString(int localClientNum, msg_t *msg)
 {
     int seq = MSG_ReadLong(msg);
     char *s = MSG_ReadString(msg);
     clientConnection_t *clc = CL_GetLocalClientConnection(localClientNum);
 
+    // see if we have already executed stored it off
     if (clc->serverCommandSequence < seq)
     {
         clc->serverCommandSequence = seq;

@@ -62,6 +62,11 @@ void __cdecl CG_ClearCenterPrint(int localClientNum)
 {
     s_centerPrint[localClientNum].time = 0;
 }
+/*
+===================
+CG_DrawCenterString
+===================
+*/
 void __cdecl CG_DrawCenterString(
     int localClientNum,
     const rectDef_s* rect,
@@ -116,6 +121,11 @@ void __cdecl CG_ClearOverheadFade()
     memset((uint8_t *)overheadFade, 0, sizeof(overheadFade));
 }
 
+/*
+=================
+CG_Draw2D
+=================
+*/
 void __cdecl CG_Draw2D(int localClientNum)
 {
     bool drawHud; // [esp+37h] [ebp-Dh]
@@ -127,6 +137,7 @@ void __cdecl CG_Draw2D(int localClientNum)
 
     cgameGlob = CG_GetLocalClientGlobals(0);
 
+    // if we are taking a levelshot for the menu, don't draw anything
     if (cgameGlob->cubemapShot == CUBEMAPSHOT_NONE && cg_draw2D->current.enabled)
     {
         if (debugOverlay->current.integer == 1)
@@ -170,6 +181,7 @@ void __cdecl CG_Draw2D(int localClientNum)
                 {
                     CG_DrawNightVisionOverlay(localClientNum);
                     CG_ScanForCrosshairEntity(localClientNum);
+                    // don't draw any status if dead or the scoreboard is being explicitly shown
                     if (ps->pm_type < PM_DEAD)
                         CG_DrawCrosshair(localClientNum);
                     if (drawHud)
@@ -321,6 +333,11 @@ void __cdecl CG_DrawChatMessages(int localClientNum)
     }
 }
 
+/*
+=================
+CG_ScanForCrosshairEntity
+=================
+*/
 void __cdecl CG_ScanForCrosshairEntity(int localClientNum)
 {
     centity_s *Entity; // eax
@@ -385,6 +402,7 @@ void __cdecl CG_ScanForCrosshairEntity(int localClientNum)
                 }
             }
             Vec3Lerp(start, end, trace.fraction, contactEnd);
+            // if the player is in fog, don't show it
             vis = FX_GetClientVisibility(localClientNum, start, contactEnd);
             if (vis >= 0.2000000029802322)
             {
@@ -394,6 +412,7 @@ void __cdecl CG_ScanForCrosshairEntity(int localClientNum)
                     cgameGlob->crosshairClientNum = hitEntId;
                     cgameGlob->crosshairClientStartTime = cgameGlob->time;
                 }
+                // update the fade timer
                 cgameGlob->crosshairClientLastTime = cgameGlob->time;
             }
         }
@@ -696,6 +715,11 @@ void __cdecl CG_DrawSay(int localClientNum)
     Con_DrawSay(localClientNum, (int)cg_hudSayPosition->current.value, (int)cg_hudSayPosition->current.vector[1] + 24);
 }
 
+/*
+=================
+CG_DrawVote
+=================
+*/
 void __cdecl CG_DrawVote(int localClientNum)
 {
     char *v1; // eax
@@ -919,6 +943,11 @@ void __cdecl CG_DrawSpectatorMessage(int localClientNum)
     }
 }
 
+/*
+=================
+CG_DrawFollow
+=================
+*/
 int __cdecl CG_DrawFollow(int localClientNum)
 {
     Font_s* font; // [esp+24h] [ebp-4Ch]
@@ -1260,6 +1289,11 @@ bool __cdecl CG_CanSeeFriendlyHead(int localClientNum, const centity_s *cent)
     return vis >= 0.2000000029802322;
 }
 
+/*
+=====================
+CG_DrawCrosshairNames
+=====================
+*/
 void __cdecl CG_DrawCrosshairNames(int localClientNum)
 {
     int entityIndex; // [esp+4h] [ebp-1Ch]
@@ -1282,6 +1316,7 @@ void __cdecl CG_DrawCrosshairNames(int localClientNum)
                 if (cgameGlob->bgs.clientinfo[cgameGlob->crosshairClientNum].infoValid)
                 {
                     nextSnap = cgameGlob->nextSnap;
+                    // scan the known entities to see if the crosshair is sighted on one
                     for (entityIndex = 0; entityIndex < nextSnap->numEntities; ++entityIndex)
                     {
                         cent = CG_GetEntity(localClientNum, nextSnap->entities[entityIndex].number);
@@ -1307,6 +1342,7 @@ void __cdecl CG_DrawCrosshairNames(int localClientNum)
                                     cg_enemyNameFadeIn->current.integer,
                                     cg_enemyNameFadeOut->current.integer);
                             }
+                            // draw the name of the player being looked at
                             CG_DrawOverheadNames(localClientNum, cent, alpha);
                             return;
                         }
@@ -1403,6 +1439,13 @@ void __cdecl DrawViewmodelInfo(int localClientNum)
     }
 }
 
+/*
+=====================
+CG_DrawActive
+
+Perform all drawing needed to completely fill the screen
+=====================
+*/
 void __cdecl CG_DrawActive(int localClientNum)
 {
     float angles[3]; // [esp+8h] [ebp-10h] BYREF
@@ -1423,6 +1466,7 @@ void __cdecl CG_DrawActive(int localClientNum)
     CL_SetUserCmdWeapons(localClientNum, cgameGlob->weaponSelect, cgameGlob->equippedOffHand);
     CL_SetExtraButtons(localClientNum, cgameGlob->extraButtons);
     cgameGlob->extraButtons = 0;
+    // draw 3D view
     CL_RenderScene(&cgameGlob->refdef);
 }
 

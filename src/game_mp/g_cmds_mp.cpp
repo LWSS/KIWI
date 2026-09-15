@@ -102,11 +102,23 @@ void __cdecl SendScoreboard(gentity_s *ent)
     }
 }
 
+/*
+==================
+Cmd_Score_f
+
+Request current scoreboard information
+==================
+*/
 void __cdecl Cmd_Score_f(gentity_s *ent)
 {
     SendScoreboard(ent);
 }
 
+/*
+==================
+CheatsOk
+==================
+*/
 int __cdecl CheatsOk(gentity_s *ent)
 {
     const char *v1; // eax
@@ -134,6 +146,11 @@ int __cdecl CheatsOk(gentity_s *ent)
 }
 
 char line[1024];
+/*
+==================
+ConcatArgs
+==================
+*/
 char *__cdecl ConcatArgs(int start)
 {
     uint v1; // kr00_4
@@ -178,6 +195,13 @@ void __cdecl G_setfog(const char *fogstring)
     }
 }
 
+/*
+==================
+Cmd_Give_f
+
+Give items to a client
+==================
+*/
 void __cdecl Cmd_Give_f(gentity_s *ent)
 {
     WeaponDef *weapDef; // [esp+18h] [ebp-20h]
@@ -240,6 +264,7 @@ void __cdecl Cmd_Give_f(gentity_s *ent)
                             if (give_all)
                             {
                             LABEL_48:
+                                // spawn a specific item right on the player
                                 if (!give_all)
                                 {
                                     level.initializing = 1;
@@ -513,6 +538,11 @@ void __cdecl Cmd_UFO_f(gentity_s *ent)
     }
 }
 
+/*
+=================
+Cmd_Kill_f
+=================
+*/
 void __cdecl Cmd_Kill_f(gentity_s *ent)
 {
     iassert(ent->client);
@@ -530,6 +560,14 @@ void __cdecl Cmd_Kill_f(gentity_s *ent)
     }
 }
 
+/*
+=================
+StopFollowing
+
+If the client being followed leaves the game, or you just want to drop
+to free floating spectator mode
+=================
+*/
 void __cdecl StopFollowing(gentity_s *ent)
 {
     gclient_s *client; // [esp+14h] [ebp-84h]
@@ -586,6 +624,11 @@ void __cdecl StopFollowing(gentity_s *ent)
     }
 }
 
+/*
+=================
+Cmd_FollowCycle_f
+=================
+*/
 int __cdecl Cmd_FollowCycle_f(gentity_s *ent, int dir)
 {
     int v3; // [esp+0h] [ebp-2FE0h]
@@ -611,11 +654,14 @@ int __cdecl Cmd_FollowCycle_f(gentity_s *ent, int dir)
             clientNum = 0;
         if (clientNum < 0)
             clientNum = level.maxclients - 1;
+        // can only follow connected clients
         if (SV_GetArchivedClientInfo(clientNum, &ent->client->sess.archiveTime, &ps, &v5))
         {
             iassert(ps.otherFlags & POF_PLAYER);
+            // can't follow another spectator
             if (G_ClientCanSpectateTeam(ent->client, v5.team))
             {
+                // this is good, we can use it
                 ent->client->spectatorClient = clientNum;
                 ent->client->sess.sessionState = SESS_STATE_SPECTATOR;
                 return 1;
@@ -632,6 +678,11 @@ bool __cdecl G_IsPlaying(gentity_s *ent)
     return ent->client->sess.sessionState == SESS_STATE_PLAYING;
 }
 
+/*
+==================
+G_Say
+==================
+*/
 void __cdecl G_Say(gentity_s *ent, gentity_s *target, int mode, char *chatText)
 {
     char *v4; // eax
@@ -673,6 +724,7 @@ void __cdecl G_Say(gentity_s *ent, gentity_s *target, int mode, char *chatText)
         G_LogPrintf("say;%s;%d;%s;%s\n", v4, v6, cleanname, chatText);
         color = 55;
     }
+    // don't let text be too long for malicious reasons
     I_strncpyz(text, chatText, 150);
     if (target)
     {
@@ -680,8 +732,11 @@ void __cdecl G_Say(gentity_s *ent, gentity_s *target, int mode, char *chatText)
     }
     else
     {
+        // echo the text to the console
         if (g_dedicated->current.integer)
             Com_Printf(CON_CHANNEL_SERVER, "%s%s\n", cleanname, text);
+
+        // send it to all the apropriate clients
         for (j = 0; j < level.maxclients; ++j)
         {
             other = &g_entities[j];
@@ -755,11 +810,21 @@ void __cdecl G_SayTo(
     }
 }
 
+/*
+==================
+Cmd_Where_f
+==================
+*/
 void __cdecl Cmd_Where_f(gentity_s *ent)
 {
     SV_GameSendServerCommand(ent - g_entities, SV_CMD_CAN_IGNORE, va("%c \"\x15%s\n\"", vtos(ent->r.currentOrigin)));
 }
 
+/*
+==================
+Cmd_CallVote_f
+==================
+*/
 void __cdecl Cmd_CallVote_f(gentity_s *ent)
 {
     const char *v1; // eax
@@ -824,6 +889,7 @@ void __cdecl Cmd_CallVote_f(gentity_s *ent)
             return;
         }
     }
+    // make sure it is a valid command to vote on
     SV_Cmd_ArgvBuffer(1, arg1, 256);
     SV_Cmd_ArgvBuffer(2, arg2, 256);
     SV_Cmd_ArgvBuffer(3, arg3, 256);
@@ -855,6 +921,7 @@ void __cdecl Cmd_CallVote_f(gentity_s *ent)
         SV_GameSendServerCommand(ent - g_entities, SV_CMD_CAN_IGNORE, v11);
         return;
     }
+    // if there is still a vote to be executed
     if (level.voteExecuteTime)
     {
         level.voteExecuteTime = 0;
@@ -908,6 +975,7 @@ void __cdecl Cmd_CallVote_f(gentity_s *ent)
         }
         goto LABEL_91;
     }
+    // special case for g_gametype, check for bad values
     if (!I_stricmp(arg1, "g_gametype"))
     {
         if (!Scr_IsValidGameType(arg2))
@@ -930,6 +998,7 @@ void __cdecl Cmd_CallVote_f(gentity_s *ent)
     LABEL_91:
         v20 = va("%c \"GAME_CALLEDAVOTE\x15%s\"", 101, ent->client->sess.cs.name);
         SV_GameSendServerCommand(-1, SV_CMD_CAN_IGNORE, v20);
+        // start the voting, the caller autoamtically votes yes
         level.voteTime = level.time + 30000;
         level.voteYes = 1;
         level.voteNo = 0;
@@ -1009,6 +1078,11 @@ void __cdecl Cmd_CallVote_f(gentity_s *ent)
         MyAssertHandler(".\\game_mp\\g_cmds_mp.cpp", 1271, 0, "unhandled callvote");
 }
 
+/*
+==================
+Cmd_Vote_f
+==================
+*/
 void __cdecl Cmd_Vote_f(gentity_s *ent)
 {
     const char *v1; // eax
@@ -1043,6 +1117,8 @@ void __cdecl Cmd_Vote_f(gentity_s *ent)
         SV_GameSendServerCommand(ent - g_entities, SV_CMD_CAN_IGNORE, v4);
         ent->client->ps.eFlags |= 0x100000u;
     }
+    // a majority will be determined in CheckVote, which will also account
+    // for players entering or leaving
     SV_Cmd_ArgvBuffer(1, msg, 64);
     if (msg[0] == 'y' || msg[0] == 'Y' || msg[0] == '1')
     {
@@ -1067,6 +1143,11 @@ void __cdecl Cmd_Vote_f(gentity_s *ent)
     }
 }
 
+/*
+=================
+Cmd_SetViewpos_f
+=================
+*/
 void __cdecl Cmd_SetViewpos_f(gentity_s *ent)
 {
     char buffer[1024]; // [esp+4h] [ebp-420h] BYREF
@@ -1150,6 +1231,11 @@ void __cdecl Cmd_MenuResponse_f(gentity_s *pEnt)
     Scr_Notify(pEnt, scr_const.menuresponse, 2u);
 }
 
+/*
+=================
+ClientCommand
+=================
+*/
 void __cdecl ClientCommand(int clientNum)
 {
     const char *v1; // eax
@@ -1157,6 +1243,7 @@ void __cdecl ClientCommand(int clientNum)
     char cmd[1028]; // [esp+4h] [ebp-408h] BYREF
 
     ent = &g_entities[clientNum];
+    // not fully in game yet
     if (ent->client)
     {
         SV_Cmd_ArgvBuffer(0, cmd, 1024);
@@ -1166,6 +1253,7 @@ void __cdecl ClientCommand(int clientNum)
             {
                 if (I_stricmp(cmd, "score"))
                 {
+                    // ignore all other commands when at intermission
                     if (ent->client->ps.pm_type != PM_INTERMISSION)
                     {
                         if (I_stricmp(cmd, "mr"))
@@ -1322,6 +1410,11 @@ void __cdecl ClientCommand(int clientNum)
     }
 }
 
+/*
+==================
+Cmd_Say_f
+==================
+*/
 void __cdecl Cmd_Say_f(gentity_s *ent, int mode, int arg0)
 {
     char *p; // [esp+0h] [ebp-4h]

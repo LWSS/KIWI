@@ -8,6 +8,17 @@
 #include <cstring>
 #include <qcommon/net_chan_mp.h>
 
+/*
+==============
+SV_Netchan_Decode
+
+	// first 12 bytes of the data are always:
+	long serverId;
+	long messageAcknowledge;
+	long reliableAcknowledge;
+
+==============
+*/
 void __cdecl SV_Netchan_Decode(client_t *client, uint8_t *data, int size)
 {
     int i, index;
@@ -16,8 +27,10 @@ void __cdecl SV_Netchan_Decode(client_t *client, uint8_t *data, int size)
     iassert(client->reliableSequence - client->reliableAcknowledge < MAX_RELIABLE_COMMANDS);
 
     string = (byte*)client->reliableCommandInfo[client->reliableAcknowledge & (MAX_RELIABLE_COMMANDS - 1)].cmd;
+    // xor the client challenge with the netchan sequence number
     key = client->challenge ^ (byte)client->serverId ^ client->messageAcknowledge;
 
+    // decode the data with this key
     for (i = 0, index = 0; i < size; i++)
     {
         if (!string[index])
@@ -35,14 +48,26 @@ void __cdecl SV_Netchan_Decode(client_t *client, uint8_t *data, int size)
     }
 }
 
+/*
+==============
+SV_Netchan_Encode
+
+	// first four bytes of the data are always:
+	long reliableAcknowledge;
+
+==============
+*/
 void __cdecl SV_Netchan_Encode(client_t *client, uint8_t *data, int size)
 {
     int i, index;
     byte key, * string;
 
+    // modify the key with the last received and with this message acknowledged client command
     string = (byte*)client->lastClientCommandString;
+    // xor the client challenge with the netchan sequence number
     key = client->challenge ^ client->header.netchan.outgoingSequence;
 
+    // encode the data with this key
     for (i = 0, index = 0; i < size; i++)
     {
         if (!string[index])
@@ -70,16 +95,27 @@ void __cdecl SV_Netchan_OutgoingSequenceIncremented(client_t *client, netchan_t 
     frame->first_client = svs.nextSnapshotClients;
 }
 
+/*
+=================
+SV_Netchan_TransmitNextFragment
+=================
+*/
 bool __cdecl SV_Netchan_TransmitNextFragment(client_t *client, netchan_t *chan)
 {
     bool res; // [esp+3h] [ebp-1h]
 
     res = Netchan_TransmitNextFragment(chan);
+    // the last fragment was transmitted, check wether we have queued messages
     if (!chan->unsentFragments)
         SV_Netchan_OutgoingSequenceIncremented(client, chan);
     return res;
 }
 
+/*
+===============
+SV_Netchan_Transmit
+================
+*/
 bool __cdecl SV_Netchan_Transmit(client_t *client, uint8_t *data, int length)
 {
     bool res; // [esp+3h] [ebp-1h]

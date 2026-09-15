@@ -66,13 +66,24 @@ double __cdecl CL_GetScreenAspectRatioDisplayPixel()
     return cls.vidConfig.aspectRatioDisplayPixel;
 }
 
+/*
+====================
+CL_GetUserCmd
+====================
+*/
 int __cdecl CL_GetUserCmd(int localClientNum, int cmdNumber, usercmd_s *ucmd)
 {
     clientActive_t *LocalClientGlobals; // [esp+8h] [ebp-4h]
 
+    // cmds[cmdNumber] is the last properly generated command
+
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
+    // can't return anything that we haven't created yet
     if (cmdNumber > LocalClientGlobals->cmdNumber)
         Com_Error(ERR_DROP, "CL_GetUserCmd: %i >= %i", cmdNumber, LocalClientGlobals->cmdNumber);
+
+    // the usercmd has been overwritten in the wrapping
+    // buffer because it is too far out of date
     if (cmdNumber <= LocalClientGlobals->cmdNumber - 128)
         return 0;
     memcpy(ucmd, &LocalClientGlobals->cmds[cmdNumber & 0x7F], sizeof(usercmd_s));
@@ -84,6 +95,11 @@ int __cdecl CL_GetCurrentCmdNumber(int localClientNum)
     return CL_GetLocalClientGlobals(localClientNum)->cmdNumber;
 }
 
+/*
+====================
+CL_GetCurrentSnapshotNumber
+====================
+*/
 void __cdecl CL_GetCurrentSnapshotNumber(int localClientNum, int *snapshotNumber, int *serverTime)
 {
     clientActive_t *LocalClientGlobals; // eax
@@ -93,6 +109,11 @@ void __cdecl CL_GetCurrentSnapshotNumber(int localClientNum, int *snapshotNumber
     *serverTime = LocalClientGlobals->snap.serverTime;
 }
 
+/*
+====================
+CL_GetSnapshot
+====================
+*/
 int __cdecl CL_GetSnapshot(int localClientNum, int snapshotNumber, snapshot_s *snapshot)
 {
     const char *v4; // eax
@@ -106,15 +127,23 @@ int __cdecl CL_GetSnapshot(int localClientNum, int snapshotNumber, snapshot_s *s
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     if (snapshotNumber > LocalClientGlobals->snap.messageNum)
         Com_Error(ERR_DROP, "CL_GetSnapshot: snapshotNumber > cl->snapshot.messageNum");
+    // if the frame has fallen out of the circular buffer, we can't return it
     if (LocalClientGlobals->snap.messageNum - snapshotNumber >= 32)
         return 0;
+
+    // if the frame is not valid, we can't return it
     clSnap = &LocalClientGlobals->snapshots[snapshotNumber & 0x1F];
     if (!clSnap->valid)
         return 0;
+
+    // if the entities in the frame have fallen out of their
+    // circular buffer, we can't return it
     if (LocalClientGlobals->parseEntitiesNum - clSnap->parseEntitiesNum >= 2048)
         return 0;
     if (LocalClientGlobals->parseClientsNum - clSnap->parseClientsNum >= 2048)
         return 0;
+
+    // write the snapshot
     snapshot->snapFlags = clSnap->snapFlags;
     snapshot->serverCommandSequence = clSnap->serverCommandNum;
     snapshot->ping = clSnap->ping;
@@ -163,6 +192,9 @@ int __cdecl CL_GetSnapshot(int localClientNum, int snapshotNumber, snapshot_s *s
             &snapshot->clients[i],
             &LocalClientGlobals->parseClients[((_WORD)i + (uint16_t)clSnap->parseClientsNum) & 0x7FF],
             sizeof(snapshot->clients[i]));
+
+    // FIXME: configstring changes and server commands!!!
+
     return 1;
 }
 
@@ -343,6 +375,11 @@ int __cdecl CL_CGameNeedsServerCommand(int localClientNum, int serverCommandNumb
     }
 }
 
+/*
+=====================
+CL_ConfigstringModified
+=====================
+*/
 void __cdecl CL_ConfigstringModified(int localClientNum)
 {
     const char *v1; // eax
@@ -363,13 +400,17 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
     index = atoi(v1);
     if ((uint)index >= 2442)
         Com_Error(ERR_DROP, "configstring > MAX_CONFIGSTRINGS");
+    // get everything after "cs <num>"
     s = Cmd_Argv(2);
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     old = &LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.stringOffsets[index]];
+    // unchanged
     if (strcmp(old, s))
     {
+        // build the new gameState_t
         memcpy(oldGs, &LocalClientGlobals->gameState, sizeof(gameState_t));
         memset((uint8_t *)&LocalClientGlobals->gameState, 0, sizeof(LocalClientGlobals->gameState));
+        // leave the first 0 for uninitialized strings
         LocalClientGlobals->gameState.dataCount = 1;
         for (i = 0; i < 2442; ++i)
         {
@@ -377,11 +418,13 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
                 dup = (char *)s;
             else
                 dup = &oldGs->stringData[oldGs->stringOffsets[i]];
+            // leave with the default empty string
             if (*dup)
             {
                 v2 = strlen(dup);
                 if ((int)(v2 + LocalClientGlobals->gameState.dataCount + 1) > 0x20000)
                     Com_Error(ERR_DROP, "MAX_GAMESTATE_CHARS exceeded");
+                // append it to the gameState string buffer
                 LocalClientGlobals->gameState.stringOffsets[i] = LocalClientGlobals->gameState.dataCount;
                 memcpy(
                     (uint8_t *)&LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.dataCount],
@@ -391,11 +434,19 @@ void __cdecl CL_ConfigstringModified(int localClientNum)
             }
         }
         if (index == 1)
+            // parse serverId and other cvars
             CL_SystemInfoChanged(localClientNum);
     }
     //LargeLocal::~LargeLocal(&oldGs_large_local);
 }
 
+/*
+====================
+CL_CM_LoadMap
+
+Just adds default parameters that cgame doesn't need to know about
+====================
+*/
 void __cdecl CL_CM_LoadMap(char *mapname)
 {
     int checksum; // [esp+0h] [ebp-4h] BYREF
@@ -410,6 +461,12 @@ void __cdecl CL_CM_LoadMap(char *mapname)
     }
 }
 
+/*
+====================
+CL_ShutdownCGame
+
+====================
+*/
 void __cdecl CL_ShutdownCGame(int localClientNum)
 {
     Com_UnloadSoundAliases(SASYS_CGAME);
@@ -697,6 +754,13 @@ void __cdecl CL_SetExpectedHunkUsage(const char *mapname)
     com_expectedHunkUsage = 0;
 }
 
+/*
+====================
+CL_InitCGame
+
+Should only be called by CL_StartHunkUsers
+====================
+*/
 void __cdecl CL_InitCGame(int localClientNum)
 {
     PROF_SCOPED("CL_InitCGame");
@@ -713,10 +777,12 @@ void __cdecl CL_InitCGame(int localClientNum)
 
     t1 = Sys_Milliseconds();
     SND_ErrorCleanup();
+    // put away the console
     Con_Close(localClientNum);
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     clientUIActive = clientUIActives;
+    // find the current mapname
     info = &LocalClientGlobals->gameState.stringData[LocalClientGlobals->gameState.stringOffsets[0]];
     v1 = Info_ValueForKey((char *)info, "mapname");
     I_strncpyz(mapname, v1, 64);
@@ -743,6 +809,9 @@ void __cdecl CL_InitCGame(int localClientNum)
     clientUIActive->cgameInitCalled = 1;
     cl_serverLoadingMap = 0;
     clc = CL_GetLocalClientConnection(localClientNum);
+    // init for this gamestate
+    // use the lastExecutedServerCommand instead of the serverCommandSequence
+    // otherwise server commands sent just before a gamestate are dropped
     CG_Init(localClientNum, clc->serverMessageSequence, clc->lastExecutedServerCommand, clc->clientNum);
     clientUIActive->cgameInitialized = 1;
     R_BeginRemoteScreenUpdate();
@@ -750,8 +819,14 @@ void __cdecl CL_InitCGame(int localClientNum)
     clientUIActives[localClientNum].connectionState = CA_PRIMED;
     t2 = Sys_Milliseconds();
     Com_Printf(CON_CHANNEL_CLIENT, "CL_InitCGame: %5.2f seconds\n", (double)(t2 - t1) / 1000.0);
+    // have the renderer touch all its images, so they are present
+    // on the card even if the driver does deferred loading
     R_EndRegistration();
+
+    // make sure everything is paged in
     Com_TouchMemory();
+
+    // clear anything that got printed
     Con_ClearNotify(localClientNum);
     Con_InitMessageBuffer();
     Con_InitGameMsgChannels();
@@ -765,12 +840,18 @@ void __cdecl CL_InitCGame(int localClientNum)
         DB_SyncXAssets();
 }
 
+/*
+==================
+CL_FirstSnapshot
+==================
+*/
 void __cdecl CL_FirstSnapshot(int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-8h]
     clientConnection_t *clc; // [esp+4h] [ebp-4h]
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
+    // ignore snapshots that don't have entities
     if ((LocalClientGlobals->snap.snapFlags & 2) == 0)
     {
         CG_RegisterSounds();
@@ -779,11 +860,16 @@ void __cdecl CL_FirstSnapshot(int localClientNum)
         clientUIActives[localClientNum].connectionState = CA_ACTIVE;
         clc->isServerRestarting = 0;
         UI_CloseAll(localClientNum);
+        // set the timedelta so we are exactly on this first frame
         LocalClientGlobals->serverTimeDelta = LocalClientGlobals->snap.serverTime - cls.realtime;
         LocalClientGlobals->oldServerTime = LocalClientGlobals->snap.serverTime;
         LocalClientGlobals->serverTime = LocalClientGlobals->snap.serverTime;
         clc->timeDemoBaseTime = LocalClientGlobals->snap.serverTime;
         Con_TimeJumped(localClientNum, LocalClientGlobals->serverTime);
+        // if this is the first frame of active play,
+        // execute the contents of activeAction now
+        // this is to allow scripting a timedemo to start right
+        // after loading
         if (*cl_activeAction->current.string)
         {
             Cbuf_AddText(localClientNum, cl_activeAction->current.string);
@@ -854,6 +940,14 @@ void __cdecl CL_UpdateTimeDemo(int localClientNum)
     LocalClientGlobals->serverTime = clc->timeDemoBaseTime + 50 * clc->timeDemoFrames;
 }
 
+/*
+==================
+CL_NextDemo
+
+Called when a demo or cinematic finishes
+If the "nextdemo" cvar is set, that command will be issued
+==================
+*/
 void __cdecl CL_NextDemo(int localClientNum)
 {
     char v[1028]; // [esp+0h] [ebp-408h] BYREF
@@ -873,6 +967,11 @@ void __cdecl CL_NextDemo(int localClientNum)
     }
 }
 
+/*
+=================
+CL_DemoCompleted
+=================
+*/
 void __cdecl CL_DemoCompleted(int localClientNum)
 {
     int time; // [esp+10h] [ebp-8h]
@@ -947,10 +1046,15 @@ void __cdecl CL_ReadDemoNetworkPacket(int localClientNum)
     //bufData = LargeLocal::GetBuf(&bufData_large_local);
     bufData = bufData_large_local.GetBuf();
     clc = CL_GetLocalClientConnection(localClientNum);
+    // get the sequence number
     if (FS_Read((uint8_t *)&s, 4u, clc->demofile) == 4)
     {
         clc->serverMessageSequence = s;
+
+        // init the message
         MSG_Init(&buf, bufData, 0x20000);
+
+        // get the length
         if (FS_Read((uint8_t *)&buf.cursize, 4u, clc->demofile) != 4 || buf.cursize == -1)
         {
             CL_DemoCompleted(localClientNum);
@@ -984,6 +1088,11 @@ void __cdecl CL_ReadDemoNetworkPacket(int localClientNum)
     }
 }
 
+/*
+=================
+CL_ReadDemoMessage
+=================
+*/
 void __cdecl CL_ReadDemoMessage(int localClientNum)
 {
     clientConnection_t *clc; // [esp+8h] [ebp-8h]
@@ -1015,19 +1124,29 @@ void __cdecl CL_ReadDemoMessage(int localClientNum)
     }
 }
 
+/*
+==================
+CL_SetCGameTime
+==================
+*/
 void __cdecl CL_SetCGameTime(int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-Ch]
     clientConnection_t *clc; // [esp+8h] [ebp-4h]
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+    // getting a valid frame message ends the connection process
     if (clientUIActives[0].connectionState == CA_ACTIVE)
     {
         LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
         clc = CL_GetLocalClientConnection(localClientNum);
     LABEL_16:
+        // if we have gotten to this point, cl.snap is guaranteed to be valid
         if (!LocalClientGlobals->snap.valid)
             Com_Error(ERR_DROP, "CL_SetCGameTime: !cl->snap.valid");
+
+        // allow pause in single player
+        // paused
         if (!sv_paused->current.integer || !cl_paused->current.integer || !com_sv_running->current.enabled)
         {
             if (LocalClientGlobals->snap.serverTime < LocalClientGlobals->oldFrameServerTime)
@@ -1038,12 +1157,20 @@ void __cdecl CL_SetCGameTime(int localClientNum)
                     CL_FirstSnapshot(localClientNum);
             }
             LocalClientGlobals->oldFrameServerTime = LocalClientGlobals->snap.serverTime;
+            // cl_freezeDemo is used to lock a demo in place for single frame advances
             if (!clc->demoplaying || !cl_freezeDemo->current.enabled)
             {
+                // get our current view of time
                 LocalClientGlobals->serverTime = LocalClientGlobals->serverTimeDelta + cls.realtime;
+
+                // guarantee that time will never flow backwards, even if
+                // serverTimeDelta made an adjustment or cl_timeNudge was changed
                 if (LocalClientGlobals->serverTime < LocalClientGlobals->oldServerTime)
                     LocalClientGlobals->serverTime = LocalClientGlobals->oldServerTime;
                 LocalClientGlobals->oldServerTime = LocalClientGlobals->serverTime;
+
+                // note if we are almost past the latest frame (without timeNudge),
+                // so we will try and adjust back a bit when the next snapshot arrives
                 if (LocalClientGlobals->serverTimeDelta + cls.realtime >= LocalClientGlobals->snap.serverTime - 5)
                 {
                     LocalClientGlobals->extrapolatedSnapshot = 1;
@@ -1051,16 +1178,29 @@ void __cdecl CL_SetCGameTime(int localClientNum)
                         Com_Printf(CON_CHANNEL_CLIENT, "Extrapolating snapshot!\n");
                 }
             }
+            // if we have gotten new snapshots, drift serverTimeDelta
+            // don't do this every frame, or a period of packet loss would
+            // make a huge adjustment
             if (LocalClientGlobals->newSnapshots)
                 CL_AdjustTimeDelta(localClientNum);
+
+            // if we are playing a demo back, we can just keep reading
+            // messages from the demo file until the cgame definately
+            // has valid snapshots to interpolate between
             if (clc->demoplaying)
             {
+                // a timedemo will always use a deterministic set of time samples
+                // no matter what speed machine it is run on,
+                // while a normal demo may have different time samples
+                // each time it is played back
                 if (clc->isTimeDemo)
                     CL_UpdateTimeDemo(localClientNum);
                 do
                 {
                     if (LocalClientGlobals->serverTime < LocalClientGlobals->snap.serverTime)
                         break;
+                    // feed another messag, which should change
+                    // the contents of cl.snap
                     CL_ReadDemoMessage(localClientNum);
                     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
                 } while (clientUIActives[0].connectionState == CA_ACTIVE);
@@ -1074,6 +1214,8 @@ void __cdecl CL_SetCGameTime(int localClientNum)
     clc = CL_GetLocalClientConnection(localClientNum);
     if (clc->demoplaying)
     {
+        // we shouldn't get the first snapshot on the same frame
+        // as the gamestate, because it causes a bad time skip
         if (!clc->firstDemoFrameSkipped)
         {
             clc->firstDemoFrameSkipped = 1;
@@ -1091,6 +1233,25 @@ void __cdecl CL_SetCGameTime(int localClientNum)
         goto LABEL_16;
 }
 
+/*
+=================
+CL_AdjustTimeDelta
+
+Adjust the clients view of server time.
+
+We attempt to have cl.serverTime exactly equal the server's view
+of time plus the timeNudge, but with variable latencies over
+the internet it will often need to drift a bit to match conditions.
+
+Our ideal time would be to have the adjusted time approach, but not pass,
+the very latest snapshot.
+
+Adjustments are only made when a new snapshot arrives with a rational
+latency, which keeps the adjustment process framerate independent and
+prevents massive overadjustment during times of significant packet loss
+or bursted delayed packets.
+=================
+*/
 void __cdecl CL_AdjustTimeDelta(int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+4h] [ebp-14h]
@@ -1101,6 +1262,8 @@ void __cdecl CL_AdjustTimeDelta(int localClientNum)
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     LocalClientGlobals->newSnapshots = 0;
+
+    // the delta never drifts when replaying a demo
     if (!CL_GetLocalClientConnection(localClientNum)->demoplaying)
     {
         snapInterval = LocalClientGlobals->snap.serverTime - LocalClientGlobals->oldSnapServerTime;
@@ -1121,6 +1284,11 @@ void __cdecl CL_AdjustTimeDelta(int localClientNum)
         {
             if (deltaCorrectionMagnitude <= 100)
             {
+                // slow drift adjust, only move 1 or 2 msec
+
+                // if any of the frames between this and the previous snapshot
+                // had to be extrapolated, nudge our sense of time back a little
+                // the granularity of +1 / -2 is too high for timescale modified frametimes
                 if (com_timescaleValue == 1.0)
                 {
                     if (LocalClientGlobals->extrapolatedSnapshot)
@@ -1135,12 +1303,14 @@ void __cdecl CL_AdjustTimeDelta(int localClientNum)
                     }
                     else
                     {
+                        // otherwise, move our sense of time forward to minimize total latency
                         ++LocalClientGlobals->serverTimeDelta;
                     }
                 }
             }
             else
             {
+                // fast adjust, cut the difference in half
                 if (cl_showTimeDelta->current.enabled)
                     Com_Printf(CON_CHANNEL_CLIENT, "<FAST> ");
                 LocalClientGlobals->serverTimeDelta = (idealDelta + LocalClientGlobals->serverTimeDelta) >> 1;
@@ -1148,6 +1318,7 @@ void __cdecl CL_AdjustTimeDelta(int localClientNum)
         }
         else
         {
+            // if the current time is WAY off, just correct to the current value
             Com_PrintWarning(
                 CON_CHANNEL_CLIENT,
                 "Cl_AdjustTimeDelta RESET: snap is %i, last snap was %i, walltime is %i, current delta is %i, old server time was"
@@ -1159,7 +1330,7 @@ void __cdecl CL_AdjustTimeDelta(int localClientNum)
                 LocalClientGlobals->oldServerTime,
                 LocalClientGlobals->serverTime);
             LocalClientGlobals->serverTimeDelta = LocalClientGlobals->snap.serverTime - cls.realtime - 5;
-            LocalClientGlobals->oldServerTime = LocalClientGlobals->snap.serverTime;
+            LocalClientGlobals->oldServerTime = LocalClientGlobals->snap.serverTime;	// FIXME: is this a problem for cgame?
             LocalClientGlobals->serverTime = LocalClientGlobals->snap.serverTime;
             if (cl_showTimeDelta->current.enabled)
                 Com_Printf(CON_CHANNEL_CLIENT, "<RESET> ");

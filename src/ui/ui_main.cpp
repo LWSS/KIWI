@@ -234,6 +234,13 @@ void __cdecl UI_DrawTopBottom(
 }
 
 
+/*
+================
+UI_DrawRect
+
+Coordinates are 640*480 virtual values
+=================
+*/
 void __cdecl UI_DrawRect(
     const ScreenPlacement *scrPlace,
     float x,
@@ -616,6 +623,11 @@ void __cdecl UI_UpdateTime(int realtime)
     }
 }
 
+/*
+=================
+UI_Shutdown
+=================
+*/
 void __cdecl UI_Shutdown()
 {
     Menus_CloseAll(&uiInfo.uiDC);
@@ -1007,6 +1019,11 @@ void __cdecl UI_OverrideCursorPos(int localClientNum, itemDef_s *item)
     //}
 }
 
+/*
+==================
+UI_FeederCount
+==================
+*/
 int __cdecl UI_FeederCount(int localClientNum, float feederID)
 {
 	if (feederID == 9.0f)
@@ -1123,11 +1140,13 @@ void __cdecl UI_Pause(int localClientNum, int b)
 {
     if (b)
     {
+        // pause the game and set the ui keycatcher
         Dvar_SetIntByName("cl_paused", 1);
         Key_SetCatcher(localClientNum, 16);
     }
     else
     {
+        // unpause the game and clear the ui keycatcher
         Key_RemoveCatcher(localClientNum, -17);
         Key_ClearStates(localClientNum);
         Dvar_SetIntByName("cl_paused", 0);
@@ -1222,6 +1241,11 @@ void __cdecl UI_MapLoadInfo(const char *filename)
 cmd_function_s UI_OpenMenu_f_VAR;
 cmd_function_s UI_CloseMenu_f_VAR;
 
+/*
+=================
+UI_Init
+=================
+*/
 void __cdecl UI_Init()
 {
     __int64 v0; // r10 OVERLAPPED
@@ -1250,6 +1274,7 @@ void __cdecl UI_Init()
     Menu_Setup(&uiInfo.uiDC);
 
 
+    // get static data (glconfig, media)
     CL_GetScreenDimensions(&uiInfo.uiDC.screenWidth, &uiInfo.uiDC.screenHeight, &uiInfo.uiDC.screenAspect);
     if (480 * uiInfo.uiDC.screenWidth <= 640 * uiInfo.uiDC.screenHeight)
         uiInfo.uiDC.bias = 0.0;
@@ -1284,6 +1309,11 @@ void __cdecl UI_Init()
     uiscript_debug = Dvar_RegisterInt("uiscript_debug", 0, 0, 2, 0, "spam debug info for the ui script");
 }
 
+/*
+=================
+UI_KeyEvent
+=================
+*/
 void __cdecl UI_KeyEvent(int localClientNum, int key, int down)
 {
     menuDef_t *Focused; // r30
@@ -1604,11 +1634,17 @@ void UI_LoadModsList()
 	}
 }
 
+/*
+=================
+UI_Refresh
+=================
+*/
 void __cdecl UI_Refresh()
 {
     UI_UpdateSaveUI();
     if (Menu_Count(&uiInfo.uiDC) > 0)
     {
+        // paint all the menus
         Menu_PaintAll(&uiInfo.uiDC);
         if (g_currentMenuType == UIMENU_PREGAME)
         {
@@ -2207,8 +2243,10 @@ void __cdecl UI_RunMenuScript(int localClientNum, const char **args, const char 
         if (String_Parse(args, column, sizeof(column)))
         {
             int col = atol(column);
+            // if same column we're already sorting on then flip the direction
             if (uiInfo.savegameStatus.sortKey == col)
                 uiInfo.savegameStatus.sortDir = !uiInfo.savegameStatus.sortDir;
+            // make sure we sort again
             UI_SavegameSort(col, 1);
         }
         return;
@@ -2392,6 +2430,8 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
     uiMenuCommand_t v4; // r11
     const char *String; // r3
 
+    // this should be the ONLY way the menu system is brought up
+    // enusure minumum menu data is cached
     if (Menu_Count(&uiInfo.uiDC) <= 0)
         return 0;
     if (menu == UIMENU_BRIEFING)
@@ -2498,6 +2538,14 @@ int __cdecl UI_SetActiveMenu(int localClientNum, uiMenuCommand_t menu)
     return result;
 }
 
+/*
+========================
+UI_DrawConnectScreen
+
+This will also be overlaid on the cgame info screen during loading
+to prevent it from blinking away too rapidly on local or lan games.
+========================
+*/
 void __cdecl UI_DrawConnectScreen()
 {
     if (Menu_Count(&uiInfo.uiDC) > 0 && g_currentMenuType != UIMENU_BRIEFING)
@@ -2785,8 +2833,14 @@ void __cdecl UI_OwnerDraw(
     }
 }
 
+/*
+=================
+UI_MouseEvent
+=================
+*/
 void __cdecl UI_MouseEvent(int localClientNum, int x, int y)
 {
+    // update mouse screen position
     uiInfo.uiDC.cursor.x = x / scrPlaceFull.scaleVirtualToFull[0];
     uiInfo.uiDC.cursor.y = y / scrPlaceFull.scaleVirtualToFull[1];
 
@@ -2801,6 +2855,7 @@ void __cdecl UI_MouseEvent(int localClientNum, int x, int y)
 
     if (uiInfo.uiDC.isCursorVisible)
     {
+        // region test the active menu items
         if (Menu_Count(&uiInfo.uiDC) > 0)
             Display_MouseMove(&uiInfo.uiDC);
     }

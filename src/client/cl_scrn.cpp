@@ -60,11 +60,27 @@ void __cdecl TRACK_cl_srcn()
     ;
 }
 
+/*
+==================
+SCR_DrawSmallStringExt
+
+Draws a multi-colored string with a drop shadow, optionally forcing
+to a fixed color.
+
+Coordinates are at 640 by 480 virtual resolution
+==================
+*/
 void __cdecl SCR_DrawSmallStringExt(unsigned int x, int y, const char *string, const float *setColor)
 {
+    // draw the colored text
     R_AddCmdDrawText(string, 0x7FFFFFFF, cls.consoleFont, x, y, 1.0f, 1.0f, 0.0f, setColor, 0);
 }
 
+/*
+==================
+SCR_Init
+==================
+*/
 void __cdecl SCR_Init()
 {
     scr_initialized = 1;
@@ -83,6 +99,11 @@ DemoType CL_GetDemoType()
         return (DemoType)CL_DemoPlaying();
 }
 
+/*
+=====================
+CL_CGameRendering
+=====================
+*/
 int __cdecl CL_CGameRendering()
 {
     int animFrametime; // r31
@@ -121,6 +142,13 @@ static void SCR_ClearScreen()
     R_AddCmdClearScreen(1, colorBlack, 1.0, 0);
 }
 
+/*
+==================
+SCR_DrawScreenField
+
+This will be called twice if rendering in stereo mode
+==================
+*/
 void __cdecl SCR_DrawScreenField(int refreshedUI)
 {
     connstate_t connectionState; // r31
@@ -137,7 +165,10 @@ void __cdecl SCR_DrawScreenField(int refreshedUI)
     }
     else
     {
+        // refresh to update the time
         UI_UpdateTime(cls.realtime);
+        // if the menu is going to cover the entire screen, we
+        // don't need to render anything under it
         if (!UI_IsFullscreen())
         {
             switch (connectionState)
@@ -152,6 +183,7 @@ void __cdecl SCR_DrawScreenField(int refreshedUI)
                 SCR_ClearScreen();
                 CL_DrawLogo();
                 goto LABEL_12;
+            // draw the game information screen and loading progress
             case CA_LOADING:
                 SCR_ClearScreen();
                 goto LABEL_14;
@@ -179,6 +211,7 @@ void __cdecl SCR_DrawScreenField(int refreshedUI)
             break;
         }
     LABEL_12:
+        // the menu draws next
         if (!refreshedUI && Key_IsCatcherActive(0, 16))
             LABEL_14 :
             UI_Refresh();
@@ -250,6 +283,14 @@ void SCR_UpdateFrame()
     //Profile_EndInternal(0);
 }
 
+/*
+==================
+SCR_UpdateScreen
+
+This is called every frame, and can also be called explicitly to flush
+text to the screen.
+==================
+*/
 void __cdecl SCR_UpdateScreen()
 {
     if (!updateScreenCalled)

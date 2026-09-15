@@ -197,8 +197,11 @@ void __cdecl CG_ConfigStringModifiedInternal(int localClientNum, unsigned int st
     shellshock_parms_t *ShellshockParms; // r3
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+    // look up the individual string that was modified
     ConfigString = CL_GetConfigString(localClientNum, stringIndex);
     v5 = ConfigString;
+
+    // do something with it if necessary
     if (stringIndex == CS_ITEMS)
     {
         CG_RegisterItems(localClientNum);
@@ -295,6 +298,12 @@ void __cdecl CG_ConfigStringModifiedInternal(int localClientNum, unsigned int st
     }
 }
 
+/*
+================
+CG_ConfigStringModified
+
+================
+*/
 void __cdecl CG_ConfigStringModified(int localClientNum)
 {
     CG_ConfigStringModifiedInternal(localClientNum, atol(Cmd_Argv(1)));
@@ -2104,12 +2113,28 @@ void __cdecl CG_DispatchServerCommand(int localClientNum)
     }
 }
 
+/*
+=================
+CG_ServerCommand
+
+The string has been tokenized and can be retrieved with
+Cmd_Argc() / Cmd_Argv()
+=================
+*/
 void __cdecl CG_ServerCommand(int localClientNum)
 {
     CG_DispatchServerCommand(localClientNum);
     Cmd_EndTokenizedString();
 }
 
+/*
+====================
+CG_ExecuteNewServerCommands
+
+Execute all of the server commands that were received along
+with this this snapshot.
+====================
+*/
 void __cdecl CG_ExecuteNewServerCommands(int localClientNum, int latestSequence)
 {
     int nesting; // r23

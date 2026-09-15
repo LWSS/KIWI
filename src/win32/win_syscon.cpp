@@ -234,6 +234,9 @@ void __cdecl Sys_CreateConsole(HMODULE hInstance)
 
     // create the input line
     s_wcd.hwndInputLine = CreateWindowExA(0, "edit", 0, 0x50800080u, 6, 400, 608, 20, s_wcd.hWnd, (HMENU)0x65, hInstance, 0);
+    //
+    // create the scrollbuffer
+    //
     s_wcd.hwndBuffer = CreateWindowExA(0, "edit", 0, 0x50A00844u, 6, 70, 606, 324, s_wcd.hWnd, (HMENU)0x64, hInstance, 0);
     SendMessageA(s_wcd.hwndBuffer, 0x30u, reinterpret_cast<WPARAM>(s_wcd.hfBufferFont), 0);
 
@@ -306,13 +309,22 @@ void __cdecl Conbuf_AppendText(const char *pMsg)
 	const char *source; // [esp+8028h] [ebp-8h]
 
 	iassert(s_wcd.hwndBuffer);
+	//
+	// if the message is REALLY long, use just the last portion of it
+	//
 	if (strlen(pMsg) <= 0x3FFF)
 		source = pMsg;
 	else
 		source = &pMsg[strlen(pMsg) - 0x3FFF];
 
+	//
+	// copy into an intermediate buffer
+	//
 	uint character_amount = Conbuf_CleanText(source, target, 0x8000);
 	s_totalChars += character_amount;
+	//
+	// replace selection instead of appending if we're overflowing
+	//
 	if (s_totalChars <= 0x4000)
 	{
 		SendMessageA(s_wcd.hwndBuffer, 0xB1u, 0xFFFFu, 0xFFFF);
@@ -323,6 +335,9 @@ void __cdecl Conbuf_AppendText(const char *pMsg)
 		s_totalChars = character_amount;
 	}
 
+	//
+	// put this text into the windows console
+	//
 	SendMessageA(s_wcd.hwndBuffer, 0xB6u, 0, 0xFFFF);
 	SendMessageA(s_wcd.hwndBuffer, 0xB7u, 0, 0);
 	SendMessageA(s_wcd.hwndBuffer, 0xC2u, 0, (LPARAM)target);

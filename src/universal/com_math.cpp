@@ -181,6 +181,13 @@ float bytedirs[162][3] =
 };
 
 
+/*
+=================
+AngleDelta
+
+returns the normalized delta from angle1 to angle2
+=================
+*/
 float __cdecl AngleDelta(float a1, float a2)
 {
     float v4; // [esp+Ch] [ebp-10h]
@@ -386,6 +393,7 @@ signed char ClampChar(int i) {
     return i;
 }
 
+// this isn't a real cheap function to call!
 uint8_t __cdecl DirToByte(const float *dir)
 {
     float d; // [esp+0h] [ebp-Ch]
@@ -596,6 +604,13 @@ void __cdecl Vec3RotateTranspose(const vec3r in, const mat3x3& matrix, vec3r out
     out[2] = in[0] * (matrix)[0][2] + in[1] * (matrix)[1][2] + in[2] * (matrix)[2][2];
 }
 
+/*
+===============
+RotatePointAroundVector
+
+This is not implemented very well...
+===============
+*/
 void __cdecl RotatePointAroundVector(float* dst, const float* dir, const float* point, float degrees)
 {
     mat3x3 m; // [esp+1Ch] [ebp-E0h] BYREF
@@ -881,6 +896,9 @@ void __cdecl Vec2NormalizeFast(float *v)
     Vec2Scale(v, invLength, v);
 }
 
+/*
+** assumes "src" is normalized
+*/
 void __cdecl PerpendicularVector(const float* src, float* dst)
 {
     int pos; // [esp+38h] [ebp-14h]
@@ -889,15 +907,24 @@ void __cdecl PerpendicularVector(const float* src, float* dst)
 
     iassert(Vec3IsNormalized(src));
 
+    /*
+    ** find the smallest magnitude axially aligned vector
+    */
     srcSq[0] = *src * *src;
     srcSq[1] = src[1] * src[1];
     srcSq[2] = src[2] * src[2];
     pos = srcSq[0] > srcSq[1];
     if (srcSq[pos] > srcSq[2])
         pos = 2;
+    /*
+    ** project the point onto the plane defined by src
+    */
     d = -src[pos];
     Vec3Scale(src, d, dst);
     dst[pos] = dst[pos] + 1.0;
+    /*
+    ** normalize the result
+    */
     Vec3Normalize(dst);
 }
 
@@ -1039,6 +1066,11 @@ void __cdecl MatrixSet44(mat4x4 &out, const vec3r origin, const mat3x3 &axis, fl
     out[3][3] = 1.0;
 }
 
+/*
+================
+MatrixMultiply
+================
+*/
 void __cdecl MatrixMultiply(const mat3x3 &in1, const mat3x3 &in2, mat3x3 &out)
 {
     iassert(&in1 != &out);
@@ -1701,6 +1733,13 @@ void __cdecl AnglesSubtract(float *v1, float *v2, float *v3)
     v3[2] = AngleDelta(v1[2], v2[2]);
 }
 
+/*
+=================
+AngleNormalize360
+
+returns angle normalized to the range [0 <= angle < 360]
+=================
+*/
 float __cdecl AngleNormalize360(float angle)
 {
     float v3; // [esp+Ch] [ebp-18h]
@@ -1718,6 +1757,13 @@ float __cdecl AngleNormalize360(float angle)
         return (result - 360.0);
 }
 
+/*
+=================
+AngleNormalize180
+
+returns angle normalized to the range [-180 < angle <= 180]
+=================
+*/
 float AngleNormalize180(float angle)
 {
     angle = fmodf(angle + 180.0f, 360.0f);
@@ -1726,12 +1772,24 @@ float AngleNormalize180(float angle)
     return angle - 180.0f;
 }
 
+/*
+=================
+AngleSubtract
+
+Always returns a value from -180 to 180
+=================
+*/
 float AngleSubtract(float a1, float a2)
 {
     float scaled = (a1 - a2) * 0.0027777778f;
     return (scaled - floorf(scaled + 0.5f)) * 360.0f;
 }
 
+/*
+=================
+RadiusFromBounds
+=================
+*/
 float __cdecl RadiusFromBounds(const float *mins, const float *maxs)
 {
     return sqrt(RadiusFromBoundsSq(mins, maxs));
@@ -2136,6 +2194,14 @@ int __cdecl ProjectedWindingContainsCoplanarPoint(
     return 1;
 }
 
+/*
+=====================
+PlaneFromPoints
+
+Returns false if the triangle is degenrate.
+The normal will point out of the clock for clockwise ordered points
+=====================
+*/
 int __cdecl PlaneFromPoints(float *plane, const float *v0, const float *v1, const float *v2)
 {
     float v5; // st7
@@ -2182,16 +2248,22 @@ void __cdecl ProjectPointOnPlane(const float *const f1, const float *const norma
 {
     float d; // [esp+28h] [ebp-4h]
 
-    iassert(Vec3IsNormalized(normal));
+    iassert(Vec3IsNormalized(normal)); // bk010122 - zero vectors get here
     d = -Vec3Dot(normal, f1);
     Vec3Mad(f1, d, normal, result);
 }
 
+/*
+=================
+SetPlaneSignbits
+=================
+*/
 void __cdecl SetPlaneSignbits(cplane_s *out)
 {
     int j; // [esp+0h] [ebp-8h]
     uint8_t bits; // [esp+7h] [ebp-1h]
 
+    // for fast box on planeside test
     bits = 0;
     for (j = 0; j < 3; ++j)
     {
@@ -2296,12 +2368,13 @@ void __cdecl Rand_Init(int seed)
     holdrand = seed;
 }
 
+// Returns a float min <= x < max (exclusive; will get max - 0.00001; but never max)
 float __cdecl flrand(float min, float max)
 {
     float result; // [esp+8h] [ebp-4h]
 
     holdrand = 214013 * holdrand + 2531011;
-    result = (holdrand >> 17);
+    result = (holdrand >> 17); // 0 - 32767 range
     return ((max - min) * result / 32768.0 + min);
 }
 
@@ -3386,6 +3459,12 @@ void __cdecl FinitePerspectiveMatrix(float (*mtx)[4], float tanHalfFovX, float t
 }
 
 // KISAKTODO: double check this function's logic
+/*
+===============
+LerpAngle
+
+===============
+*/
 float LerpAngle(float from, float to, float frac)
 {
     float delta = fmodf(to - from + 540.0f, 360.0f) - 180.0f;

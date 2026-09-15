@@ -132,6 +132,13 @@ void __cdecl CG_FxTest()
     }
 }
 
+/*
+=================
+CG_CalcVrect
+
+Sets the coordinates of the rendered window
+=================
+*/
 void __cdecl CG_CalcVrect(int localClientNum)
 {
     if (localClientNum)
@@ -662,6 +669,13 @@ float __cdecl CG_GetViewFov(int localClientNum)
 }
 
 
+/*
+====================
+CG_CalcFov
+
+Fixed fov at intermissions, otherwise account for fov variable and zooms.
+====================
+*/
 void __cdecl CG_CalcFov(int localClientNum)
 {
     //long double v2; // fp2
@@ -705,6 +719,7 @@ void __cdecl CG_CalcFov(int localClientNum)
     float fov_x = CG_GetViewFov(localClientNum);
 
     float tanHalfFov = tanf(DEG2RAD(fov_x) * 0.5f);
+    // set it
     cgameGlob->refdef.tanHalfFovX = tanHalfFov * 0.75f * cgs->viewAspect;
     cgameGlob->refdef.tanHalfFovY = tanHalfFov * 0.75f;
 #ifdef KISAK_XBOX
@@ -1335,6 +1350,13 @@ void __cdecl CG_UpdateSceneDepthOfField(cg_s *cgameGlob)
     cgameGlob->refdef.dof.farBlur = snap->ps.dofFarBlur;
 }
 
+/*
+===============
+CG_CalcViewValues
+
+Sets cg.refdef view values
+===============
+*/
 void __cdecl CG_CalcViewValues(int localClientNum)
 {
     double BlurRadius; // fp31
@@ -1368,6 +1390,7 @@ void __cdecl CG_CalcViewValues(int localClientNum)
         R_CalcCubeMapViewValues(&cgameGlob->refdef, cgameGlob->cubemapShot, cgameGlob->cubemapSize);
         return;
     }
+    // calculate size of 3D view
     CG_CalcVrect(localClientNum);
     cgameGlob->fBobCycle = BG_GetBobCycle(&cgameGlob->predictedPlayerState);
     cgameGlob->xyspeed = BG_GetSpeed(&cgameGlob->predictedPlayerState, cgameGlob->time);
@@ -1404,6 +1427,7 @@ void __cdecl CG_CalcViewValues(int localClientNum)
         cgameGlob->refdefViewAngles[1] = cgameGlob->predictedPlayerState.viewangles[1];
         cgameGlob->refdefViewAngles[2] = cgameGlob->predictedPlayerState.viewangles[2];
 
+        // add error decay
         if (cgameGlob->predictedPlayerState.pm_type != PM_NORMAL_LINKED
             && cgameGlob->predictedPlayerState.pm_type != PM_DEAD_LINKED
             && cg_errorDecay->current.value > 0.0)
@@ -1417,13 +1441,16 @@ void __cdecl CG_CalcViewValues(int localClientNum)
         }
 
         CalcTurretViewValues(localClientNum);
+        // offset for local bobbing and kicks
         OffsetFirstPersonView(localClientNum, cgArray);
         CG_ShakeCamera(localClientNum);
     }
 
+    // position eye reletive to origin
     AnglesToAxis(cgameGlob->refdefViewAngles, cgameGlob->refdef.viewaxis);
     CG_ApplyViewAnimation(localClientNum);
     CG_PerturbCamera(cgArray);
+    // field of view
     CG_CalcFov(localClientNum);
 
     if (cgameGlob->predictedPlayerState.pm_type == PM_MPVIEWER)
@@ -1448,6 +1475,13 @@ void __cdecl CG_InitView(int localClientNum)
     FX_SetNextUpdateCamera(localClientNum, &cgArray[0].refdef, FarPlaneDist);
 }
 
+/*
+=================
+CG_DrawActiveFrame
+
+Generates and draws a game scene and status information at the given time.
+=================
+*/
 int __cdecl CG_DrawActiveFrame(
     int localClientNum,
     int serverTime,
@@ -1472,6 +1506,7 @@ int __cdecl CG_DrawActiveFrame(
     FxCmd v32[9]; // [sp+50h] [-70h] BYREF
 
     //Profile_Begin(13);
+    // clear all the render lists
     R_ClearScene(localClientNum);
     FX_BeginUpdate(localClientNum);
     CG_SetCollWorldLocalClientNum(localClientNum);
@@ -1519,6 +1554,7 @@ int __cdecl CG_DrawActiveFrame(
             "cgameGlob->frametime - cgameGlob->animFrametime >= 0",
             v18);
     }
+    // set up cg.snap and possibly cg.nextSnap
     CG_ProcessSnapshots(localClientNum);
     if (!cgArray[0].snap)
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\cgame\\cg_view.cpp", 1425, 0, "%s", "cgameGlob->snap");
@@ -1574,6 +1610,7 @@ int __cdecl CG_DrawActiveFrame(
         cgArray[0].shellshock.duration);
     CG_ClearHudGrenades();
     CG_UpdateEntInfo(localClientNum);
+    // build the render lists
     if (CG_AddPacketEntities(localClientNum))
         viewlocked_entNum = cgArray[0].predictedPlayerState.viewlocked_entNum;
     else
@@ -1599,6 +1636,7 @@ int __cdecl CG_DrawActiveFrame(
     }
     {
         PROF_SCOPED("player state");
+        // update cg.predictedPlayerState
         CG_PredictPlayerState(localClientNum);
     }
     {
@@ -1607,6 +1645,7 @@ int __cdecl CG_DrawActiveFrame(
     }
     {
         PROF_SCOPED("view values");
+        // build cg.refdef
         CG_CalcViewValues(localClientNum);
     }
 
@@ -1616,6 +1655,7 @@ int __cdecl CG_DrawActiveFrame(
     FarPlaneDist = R_GetFarPlaneDist();
     FX_SetNextUpdateCamera(localClientNum, &cgArray[0].refdef, FarPlaneDist);
     R_UpdateSpotLightEffect(v32);
+    // update audio positions
     SND_SetListener(
         localClientNum,
         cgArray[0].nextSnap->ps.clientNum,
@@ -1648,6 +1688,7 @@ int __cdecl CG_DrawActiveFrame(
         cgArray[0].refdef.tanHalfFovX,
         cgArray[0].refdef.tanHalfFovY);
     //PIXEndNamedEvent();
+    // finish up the rest of the refdef
     cgArray[0].refdef.dof.nearStart = cgArray[0].snap->ps.dofNearStart;
     cgArray[0].refdef.dof.nearEnd = cgArray[0].snap->ps.dofNearEnd;
     cgArray[0].refdef.dof.farStart = cgArray[0].snap->ps.dofFarStart;
@@ -1671,6 +1712,7 @@ int __cdecl CG_DrawActiveFrame(
     Sys_AllowSendClientMessages();
     R_Cinematic_SetPaused((CinematicEnum)(cg_paused->current.integer != 0));
     //Profile_Begin(25);
+    // actually issue the rendering calls
     CG_DrawActive(localClientNum);
     //Profile_EndInternal(0);
     //Profile_EndInternal(0);

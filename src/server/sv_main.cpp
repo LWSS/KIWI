@@ -61,6 +61,13 @@ void __cdecl TRACK_sv_main()
 }
 
 char string_2[1024];
+/*
+===============
+SV_ExpandNewlines
+
+Converts newlines to "\n" so a line prints nicer
+===============
+*/
 char *__cdecl SV_ExpandNewlines(char *in)
 {
     unsigned int l; // [esp+0h] [ebp-4h]
@@ -276,10 +283,22 @@ void __cdecl SV_SetLastSaveName(const char *filename)
         Dvar_SetString(sv_lastSaveGame, filename);
 }
 
+/*
+======================
+SV_AddServerCommand
+
+The given command will be transmitted to the client, and is guaranteed to
+not have future snapshot_t executed before it is executed
+======================
+*/
 void __cdecl SV_AddServerCommand(client_t *client, const char *cmd)
 {
     int v4; // r4
 
+    // if we would be losing an old command that hasn't been acknowledged,
+    // we must drop the connection
+    // we check == instead of >= so a broadcast print added by SV_DropClient()
+    // doesn't cause a recursive drop client
     if (client->reliableCommands.header.sequence - client->reliableCommands.header.sent == 256)
     {
         SV_DumpServerCommands(client);
@@ -300,6 +319,15 @@ void __cdecl SV_AddServerCommand(client_t *client, const char *cmd)
 }
 
 unsigned __int8 tempServerCommandBuf[131072];
+/*
+=================
+SV_SendServerCommand
+
+Sends a reliable command string to be interpreted by
+the client game module: "cp", "print", "chat", etc
+A NULL client will broadcast to all clients
+=================
+*/
 void SV_SendServerCommand(client_t *cl, const char *fmt, ...)
 {
     client_t *clients;
@@ -324,6 +352,7 @@ void SV_SendServerCommand(client_t *cl, const char *fmt, ...)
         }
     }
 
+    // send the data to all relevent clients
     SV_AddServerCommand(clients, (const char*)tempServerCommandBuf);
 
 }
@@ -1132,6 +1161,14 @@ int __cdecl SV_ClientFrameRateFix(int msec)
     return result;
 }
 
+/*
+==================
+SV_Frame
+
+Player movement occurs as a result of packet events, which
+happen before SV_Frame is called
+==================
+*/
 int __cdecl SV_Frame(int msec)
 {
     int v1; // r27
@@ -1145,6 +1182,7 @@ int __cdecl SV_Frame(int msec)
     Hunk_CheckTempMemoryClear();
     Hunk_CheckTempMemoryHighClear();
     //PIXSetMarker(0xFFFFFFFF, "SV_Frame");
+    // the menu kills the server with this cvar
     if (!com_sv_running->current.enabled)
     {
     LABEL_6:
@@ -1170,6 +1208,7 @@ int __cdecl SV_Frame(int msec)
     }
     if ((unsigned __int8)SV_ForwardFrame())
         return v1;
+    // allow pause if only the local client is connected
     if (!cl_paused->current.integer)
     {
         timeResidual = sv.timeResidual;
@@ -1186,6 +1225,7 @@ int __cdecl SV_Frame(int msec)
         sv.partialFrametime = 50 - timeResidual;
         v1 = SV_ClientFrameRateFix(v1);
         sv.waitSnapshotTime = 0;
+        // run the game simulation in chunks
         SV_FrameInternal(v1);
         v7 = sv.timeResidual;
         if (sv.timeResidual >= 50)

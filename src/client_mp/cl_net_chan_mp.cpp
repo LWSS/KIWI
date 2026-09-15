@@ -8,6 +8,15 @@
 #include <qcommon/qcommon.h>
 #include <cgame_mp/cg_local_mp.h>
 
+/*
+==============
+CL_Netchan_Decode
+
+	// first four bytes of the data are always:
+	long reliableAcknowledge;
+
+==============
+*/
 void __cdecl CL_Netchan_Decode(uint8_t *data, int size)
 {
     int i, index;
@@ -16,10 +25,12 @@ void __cdecl CL_Netchan_Decode(uint8_t *data, int size)
     clientConnection_t* clc = CL_GetLocalClientConnection(0);
 
     string = (byte*)clc->reliableCommands[clc->reliableAcknowledge & (MAX_RELIABLE_COMMANDS - 1)];
+    // xor the client challenge with the netchan sequence number (need something that changes every message)
     key = clc->challenge ^ clc->serverMessageSequence;
 
     for (i = 0, index = 0; i < size; i++)
     {
+        // modify the key with the last sent and with this message acknowledged client command
         if (!string[index])
         {
             index = 0;
@@ -29,12 +40,24 @@ void __cdecl CL_Netchan_Decode(uint8_t *data, int size)
 
         // modify the key with the last sent and acknowledged server command
         key ^= string[index] << (i & 1);
+        // decode the data with this key
         data[i] ^= key;
 
         index++;
     }
 }
 
+/*
+==============
+CL_Netchan_Encode
+
+	// first 12 bytes of the data are always:
+	long serverId;
+	long messageAcknowledge;
+	long reliableAcknowledge;
+
+==============
+*/
 void __cdecl CL_Netchan_Encode(uint8_t *data, int size)
 {
     int i, index;
@@ -48,6 +71,7 @@ void __cdecl CL_Netchan_Encode(uint8_t *data, int size)
 
     for (i = 0, index = 0; i < size; i++)
     {
+        // modify the key with the last received now acknowledged server command
         if (!string[index])
         {
             index = 0;
@@ -57,17 +81,28 @@ void __cdecl CL_Netchan_Encode(uint8_t *data, int size)
 
         // modify the key with the last sent and acknowledged server command
         key ^= string[index] << (i & 1);
+        // encode the data with this key
         data[i] ^= key;
 
         index++;
     }
 }
 
+/*
+=================
+CL_Netchan_TransmitNextFragment
+=================
+*/
 void __cdecl CL_Netchan_TransmitNextFragment(netchan_t *chan)
 {
     Netchan_TransmitNextFragment(chan);
 }
 
+/*
+===============
+CL_Netchan_Transmit
+================
+*/
 void __cdecl CL_Netchan_Transmit(netchan_t *chan, uint8_t *data, int length)
 {
     CL_Netchan_Encode(data + 9, length - 9);

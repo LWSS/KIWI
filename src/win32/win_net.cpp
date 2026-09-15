@@ -426,10 +426,10 @@ char __cdecl Sys_SendPacket(int length, unsigned __int8 *data, netadr_t to)
     NetadrToSockadr(&to, &addr);
     if (usingSocks && to.type == NA_IP)
     {
-        socksBuf[0] = 0;
+        socksBuf[0] = 0; // reserved
         socksBuf[1] = 0;
-        socksBuf[2] = 0;
-        socksBuf[3] = 1;
+        socksBuf[2] = 0; // fragment (not fragmented)
+        socksBuf[3] = 1; // address type: IPV4
         *(_DWORD *)&socksBuf[4] = *(_DWORD *)&addr.sa_data[2];
         *(_WORD *)&socksBuf[8] = *(_WORD *)addr.sa_data;
 
@@ -452,11 +452,13 @@ char __cdecl Sys_SendPacket(int length, unsigned __int8 *data, netadr_t to)
         return 1;
     }
     err = WSAGetLastError();
+    // wouldblock is silent
     if (err == 10035)
     {
         return 1;
     }
     //	if (err == 10049 && (to.type == NA_BROADCAST || to.type == NA_BROADCAST_IPX))
+    // some PPP links do not allow broadcasts and return an error
     if (err == 10049 && (to.type == NA_BROADCAST))
     {
         return 1;
@@ -567,6 +569,7 @@ SOCKET __cdecl NET_IPSocket(const char *net_interface, int port)
         }
         return INVALID_SOCKET;
     }
+    // make it non-blocking
     else if (ioctlsocket(newsocket, 0x8004667E, (unsigned long *)&_true) == -1)
     {
         v4 = NET_ErrorString();
@@ -574,6 +577,7 @@ SOCKET __cdecl NET_IPSocket(const char *net_interface, int port)
         closesocket(newsocket);
         return INVALID_SOCKET;
     }
+    // make it broadcast capable
     else if (setsockopt(newsocket, 0xFFFF, 32, (const char *)&i, 4) == -1)
     {
         v5 = NET_ErrorString();
@@ -669,8 +673,10 @@ void __cdecl NET_OpenSocks(u_short port)
         Com_PrintError(CON_CHANNEL_SYSTEM, "NET_OpenSocks: connect: %s\n", v3);
         return;
     }
+    // send socks authentication handshake
     rfc1929 = net_socksUsername->current.string[0] || net_socksPassword->current.string[0];
-    buf[0] = 5;
+    buf[0] = 5; // SOCKS version
+    // method count
     if (rfc1929)
     {
         buf[1] = 2;
@@ -681,15 +687,16 @@ void __cdecl NET_OpenSocks(u_short port)
         buf[1] = 1;
         len = 3;
     }
-    buf[2] = 0;
+    buf[2] = 0; // method #1 - method id #00: no authentication
     if (rfc1929)
     {
-        buf[3] = 2;
+        buf[3] = 2; // method #2 - method id #02: username/password
     }
     if (send(socks_socket, (const char *)buf, len, 0) == -1)
     {
         goto LABEL_19;
     }
+    // get the response
     len = recv(socks_socket, (char *)buf, 64, 0);
     if (len == -1)
     {
@@ -704,8 +711,10 @@ void __cdecl NET_OpenSocks(u_short port)
         Com_Printf(CON_CHANNEL_SYSTEM, "NET_OpenSocks: request denied\n");
         return;
     }
+    // do username/password authentication if needed
     if (buf[1] == 2)
     {
+        // build the request
         v8 = strlen(net_socksUsername->current.string);
         v7 = strlen(net_socksPassword->current.string);
         if (v8 > 255 || v7 > 255)
@@ -715,7 +724,7 @@ void __cdecl NET_OpenSocks(u_short port)
             socks_socket = INVALID_SOCKET;
             return;
         }
-        buf[0] = 1;
+        buf[0] = 1; // username/password authentication version
         buf[1] = v8;
         if (v8)
         {
@@ -726,6 +735,7 @@ void __cdecl NET_OpenSocks(u_short port)
         {
             memcpy(&buf[v8 + 3], net_socksPassword->current.string, v7);
         }
+        // send it
         if (send(socks_socket, (const char *)buf, v8 + v7 + 3, 0) == -1)
         {
         LABEL_19:
@@ -734,6 +744,7 @@ void __cdecl NET_OpenSocks(u_short port)
             Com_PrintError(CON_CHANNEL_SYSTEM, "NET_OpenSocks: send: %s\n", v4);
             return;
         }
+        // get the response
         len = recv(socks_socket, (char *)buf, 64, 0);
         if (len == -1)
         {
@@ -751,18 +762,20 @@ void __cdecl NET_OpenSocks(u_short port)
             return;
         }
     }
-    buf[0] = 5;
-    buf[1] = 3;
-    buf[2] = 0;
-    buf[3] = 1;
+    // send the UDP associate request
+    buf[0] = 5; // SOCKS version
+    buf[1] = 3; // command: UDP associate
+    buf[2] = 0; // reserved
+    buf[3] = 1; // address type: IPV4
     *(_DWORD *)&buf[4] = 0;
-    *(_WORD *)&buf[8] = htons(port);
+    *(_WORD *)&buf[8] = htons(port); // port
     if (send(socks_socket, (const char *)buf, 10, 0) == -1)
     {
         WSAGetLastError();
         v5 = NET_ErrorString();
         Com_PrintError(CON_CHANNEL_SYSTEM, "NET_OpenSocks: send: %s\n", v5);
     }
+    // get the response
     len = recv(socks_socket, (char *)buf, 64, 0);
     if (len == -1)
     {
@@ -776,6 +789,7 @@ void __cdecl NET_OpenSocks(u_short port)
     {
         goto LABEL_46;
     }
+    // check completion code
     if (buf[1])
     {
         Com_Printf(CON_CHANNEL_SYSTEM, "NET_OpenSocks: request denied: %i\n", buf[1]);
@@ -893,6 +907,9 @@ void __cdecl NET_OpenIP()
 
     v0 = Dvar_RegisterString("net_ip", "localhost", DVAR_LATCH, "Network IP Address");
     port = Dvar_RegisterInt("net_port", 28960, 0xFFFF00000000LL, DVAR_LATCH, "Network port");
+    // automatically scan for a valid port, so multiple
+    // dedicated servers can be started without requiring
+    // a different net_port for each one
     for (i = 0;; ++i)
     {
         if (i >= 10)
@@ -942,6 +959,7 @@ SOCKET __cdecl NET_IPXSocket(int port)
         }
         return INVALID_SOCKET;
     }
+    // make it non-blocking
     else if (ioctlsocket(newsocket, -2147195266, (unsigned long *)&_true) == -1)
     {
         v3 = NET_ErrorString();
@@ -949,6 +967,7 @@ SOCKET __cdecl NET_IPXSocket(int port)
         closesocket(newsocket);
         return INVALID_SOCKET;
     }
+    // make it broadcast capable
     else if (setsockopt(newsocket, 0xFFFF, 32, (char *)&_true, 4) == -1)
     {
         v4 = NET_ErrorString();
@@ -1040,11 +1059,13 @@ void __cdecl NET_Config(int enableNetworking)
     int stop;      // [esp+4h] [ebp-8h]
     BOOL modified; // [esp+8h] [ebp-4h]
 
+    // get any latched changes to cvars
     modified = NET_GetDvars();
     if (net_noudp->current.enabled && net_noipx->current.enabled)
     {
         enableNetworking = 0;
     }
+    // if enable state is the same and no cvars were modified, we have nothing to do
     if (enableNetworking != networkingEnabled || modified)
     {
         if (enableNetworking == networkingEnabled)
@@ -1125,7 +1146,9 @@ void __cdecl NET_Init()
 	{
 		winsockInitialized = 1;
 		Com_Printf(CON_CHANNEL_SYSTEM, "Winsock Initialized\n");
+		// this is really just to get the cvars registered
 		NET_GetDvars();
+		//FIXME testing!
 		NET_Config(1);
 		NET_InitDebug();
 	}

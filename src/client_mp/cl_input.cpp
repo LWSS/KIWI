@@ -72,6 +72,11 @@ void __cdecl Scr_MouseEvent(int x, int y)
     UI_Component::MouseEvent(x, y);
 }
 
+/*
+=================
+CL_MouseEvent
+=================
+*/
 int __cdecl CL_MouseEvent(int x, int y, int dx, int dy)
 {
     clientActive_t *LocalClientGlobals; // [esp+0h] [ebp-8h]
@@ -139,6 +144,27 @@ void __cdecl CL_UpdateCmdButton(int localClientNum, int *cmdButtons, int kbButto
     kb[kbButton].wasPressed = 0;
 }
 
+/*
+===================
+CL_WritePacket
+
+Create and send the command packet to the server
+Including both the reliable commands and the usercmds
+
+During normal gameplay, a client packet will contain something like:
+
+4	sequence number
+2	qport
+4	serverid
+4	acknowledged sequence number
+4	clc.serverCommandSequence
+<optional reliable commands>
+1	clc_move or clc_moveNoDelta
+1	command count
+<count * usercmds>
+
+===================
+*/
 void __cdecl CL_WritePacket(int localClientNum)
 {
     int v1; // eax
@@ -172,6 +198,7 @@ void __cdecl CL_WritePacket(int localClientNum)
     clc = CL_GetLocalClientConnection(localClientNum);
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     connstate = clientUIActives[0].connectionState;
+    // don't send anything if playing back a demo
     if (clc->demoplaying || connstate == CA_CINEMATIC || connstate == CA_LOGO || connstate == CA_SENDINGSTATS)
     {
         //LargeLocal::~LargeLocal(&compressedBuf_large_local);
@@ -185,15 +212,25 @@ void __cdecl CL_WritePacket(int localClientNum)
         cmd = &nullcmd;
         memset(&buf, 0, sizeof(buf));
         MSG_Init(&buf, data, 2048);
+        // write the current serverId so the server
+        // can tell if this is from the current gameState
         MSG_WriteByte(&buf, LocalClientGlobals->serverId);
+        // write the last message we received, which can
+        // be used for delta compression, and is also used
+        // to tell if we dropped a gamestate
         MSG_WriteLong(&buf, clc->serverMessageSequence);
+        // write the last reliable message we received
         MSG_WriteLong(&buf, clc->serverCommandSequence);
+        // write any unacknowledged clientCommands
         for (i = clc->reliableAcknowledge + 1; i <= clc->reliableSequence; ++i)
         {
             MSG_WriteBits(&buf, 2, 3u);
             MSG_WriteLong(&buf, i);
             MSG_WriteString(&buf, clc->reliableCommands[i & 0x7F]);
         }
+        // we want to send all the usercmds that were generated in the last
+        // few packet, so even if a couple packets are dropped in a row,
+        // all the cmds will make it to the server
         oldPacketNum = (clc->netchan.outgoingSequence - 1 - cl_packetdup->current.integer) & 0x1F;
         count = LocalClientGlobals->cmdNumber - LocalClientGlobals->outPackets[oldPacketNum].p_cmdNumber;
         if (count > 32)
@@ -205,6 +242,7 @@ void __cdecl CL_WritePacket(int localClientNum)
         {
             if (cl_showSend->current.enabled)
                 Com_Printf(CON_CHANNEL_CLIENT, "(%i)", count);
+            // begin a client move command
             if (!clc->demowaiting
                 && !cl_nodelta->current.enabled
                 && LocalClientGlobals->snap.valid
@@ -216,9 +254,13 @@ void __cdecl CL_WritePacket(int localClientNum)
             {
                 MSG_WriteBits(&buf, 1, 3u);
             }
+            // write the command count
             MSG_WriteByte(&buf, count);
+            // use the checksum feed in the key
             key = clc->checksumFeed;
+            // also use the message acknowledge
             key ^= clc->serverMessageSequence;
+            // also use the last acknowledged server command in the key
             v1 = Com_HashKey(clc->serverCommands[clc->serverCommandSequence & 0x7F], 32);
             key ^= v1;
             if (cl_debugMessageKey->current.enabled)
@@ -238,6 +280,7 @@ void __cdecl CL_WritePacket(int localClientNum)
                     v8,
                     &v8[strlen(v8) + 1] - v7);
             }
+            // write all the commands, including the predicted command
             for (i = 0; i < count; ++i)
             {
                 cmd = &LocalClientGlobals->cmds[((uint8_t)LocalClientGlobals->cmdNumber - (_BYTE)count + (_BYTE)i + 1)
@@ -282,6 +325,9 @@ void __cdecl CL_WritePacket(int localClientNum)
             + 9;
         if (compressedSize < 9)
             Com_Error(ERR_DROP, "Overflow compressed msg buf in CL_WritePacket()");
+        //
+        // deliver the message
+        //
         packetNum = clc->netchan.outgoingSequence & 0x1F;
         LocalClientGlobals->outPackets[packetNum].p_realtime = cls.realtime;
         LocalClientGlobals->outPackets[packetNum].p_serverTime = oldcmd->serverTime;
@@ -293,32 +339,59 @@ void __cdecl CL_WritePacket(int localClientNum)
             Com_Printf(CON_CHANNEL_CLIENT, "%i to %s\n", compressedSize, v5);
         }
         CL_Netchan_Transmit(&clc->netchan, (uint8_t *)compressedBuf, compressedSize);
+        // clients never really should have messages large enough
+        // to fragment, but in case they do, fire them all off
+        // at once
+        // TTimo: this causes a packet burst, which is bad karma for winsock
         while (clc->netchan.unsentFragments)
             CL_Netchan_TransmitNextFragment(&clc->netchan);
         //LargeLocal::~LargeLocal(&compressedBuf_large_local);
     }
 }
 
+/*
+=================
+CL_SendCmd
+
+Called every frame to builds and sends a command packet to the server.
+=================
+*/
 void __cdecl CL_SendCmd(int localClientNum)
 {
+    // don't send a packet if the last packet was sent too recently
     if (CL_ReadyToSendPacket(localClientNum))
         CL_WritePacket(localClientNum);
 }
 
 bool __cdecl Sys_IsLANAddress(netadr_t adr);
+/*
+=================
+CL_ReadyToSendPacket
+
+Returns qfalse if we are over the maxpackets limit
+and should choke back the bandwidth a bit by not sending
+a packet this frame.  All the commands will still get
+delivered in the next packet, but saving a header and
+getting more delta compression will reduce total bandwidth.
+=================
+*/
 bool __cdecl CL_ReadyToSendPacket(int localClientNum)
 {
     int oldPacketNum; // [esp+Ch] [ebp-8h]
     clientConnection_t *clc; // [esp+10h] [ebp-4h]
 
     clc = CL_GetLocalClientConnection(localClientNum);
+    // don't send anything if playing back a demo
     if (clc->demoplaying)
         return 0;
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
     if (clientUIActives[0].connectionState == CA_CINEMATIC || clientUIActives[0].connectionState == CA_LOGO)
         return 0;
+    // If we are downloading, we send no less than 50ms between packets
     if (cls.downloadTempName[0] && cls.realtime - clc->lastPacketSentTime < 50)
         return 0;
+    // if we don't have a valid gamestate yet, only send
+    // one packet a second
     if (clientUIActives[0].connectionState != CA_ACTIVE
         && clientUIActives[0].connectionState != CA_PRIMED
         && !cls.downloadTempName[0]
@@ -326,11 +399,15 @@ bool __cdecl CL_ReadyToSendPacket(int localClientNum)
     {
         return 0;
     }
+    // send every frame for loopbacks
     if (clc->netchan.remoteAddress.type == NA_LOOPBACK)
         return 1;
+    // send every frame for LAN
     if (Sys_IsLANAddress(clc->netchan.remoteAddress))
         return 1;
+    // check for exceeding cl_maxpackets
     oldPacketNum = ((uint8_t)clc->netchan.outgoingSequence - 1) & 0x1F;
+    // the accumulated commands will go out in the next packet
     return cls.realtime - CL_GetLocalClientGlobals(localClientNum)->outPackets[oldPacketNum].p_realtime >= 1000 / cl_maxpackets->current.integer;
 }
 
@@ -341,6 +418,13 @@ void __cdecl CL_CreateCmdsDuringConnection(int localClientNum)
         CL_CreateNewCommands(localClientNum);
 }
 
+/*
+=================
+CL_CreateNewCommands
+
+Create a new usercmd_t structure for this frame
+=================
+*/
 void __cdecl CL_CreateNewCommands(int localClientNum)
 {
     usercmd_s result; // [esp+8h] [ebp-48h] BYREF
@@ -349,15 +433,22 @@ void __cdecl CL_CreateNewCommands(int localClientNum)
     int cmdNum; // [esp+4Ch] [ebp-4h]
 
     vassert((localClientNum == 0), "(localClientNum) = %i", localClientNum);
+    // no need to create usercmds until we have a gamestate
     if (clientUIActives[0].connectionState >= CA_PRIMED)
     {
         LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
+        // generate a command for this frame
         cmdNum = ++LocalClientGlobals->cmdNumber & 0x7F;
         memcpy(v2, CL_CreateCmd(&result, localClientNum), sizeof(v2));
         memcpy(&LocalClientGlobals->cmds[cmdNum], v2, sizeof(LocalClientGlobals->cmds[cmdNum]));
     }
 }
 
+/*
+=================
+CL_CreateCmd
+=================
+*/
 usercmd_s *__cdecl CL_CreateCmd(usercmd_s *result, int localClientNum)
 {
     clientActive_t *LocalClientGlobals; // [esp+Ch] [ebp-34h]
@@ -366,13 +457,17 @@ usercmd_s *__cdecl CL_CreateCmd(usercmd_s *result, int localClientNum)
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
     oldAngles = LocalClientGlobals->viewangles[0];
+    // keyboard angle adjustment
     CL_AdjustAngles(localClientNum);
     memset(&cmd, 0, sizeof(cmd));
     if (!Key_IsCatcherActive(localClientNum, 8) || !CG_HandleLocationSelectionInput(localClientNum, &cmd))
     {
         CL_CmdButtons(localClientNum, &cmd);
+        // get basic movement from keyboard
         CL_KeyMove(localClientNum, &cmd);
+        // get basic movement from mouse
         CL_MouseMove(localClientNum, &cmd);
+        // check to make sure the angles haven't wrapped
         if (LocalClientGlobals->viewangles[0] - oldAngles <= 90.0)
         {
             if (oldAngles - LocalClientGlobals->viewangles[0] > 90.0)
@@ -390,11 +485,19 @@ usercmd_s *__cdecl CL_CreateCmd(usercmd_s *result, int localClientNum)
             cmd.buttons &= ~BUTTON_SMOKE;
         }
     }
+    // store out the final values
     CL_FinishMove(localClientNum, &cmd);
     memcpy(result, &cmd, sizeof(usercmd_s));
     return result;
 }
 
+/*
+================
+CL_AdjustAngles
+
+Moves the local angle positions
+================
+*/
 void __cdecl CL_AdjustAngles(int localClientNum)
 {
     clientActive_t *client; // [esp+40h] [ebp-14h]
@@ -448,6 +551,13 @@ void __cdecl CL_AdjustAngles(int localClientNum)
     client->viewangles[PITCH] += CL_KeyState(&kb[KEY_LOOKDOWN]) * (speed * max);
 }
 
+/*
+===============
+CL_KeyState
+
+Returns the fraction of the frame that the key was down
+===============
+*/
 float __cdecl CL_KeyState(kbutton_t *key)
 {
     signed int msec; // [esp+Ch] [ebp-4h]
@@ -456,6 +566,7 @@ float __cdecl CL_KeyState(kbutton_t *key)
     key->msec = 0;
     if (key->active)
     {
+        // still down
         if (key->downtime)
             msec += com_frameTime - key->downtime;
         else
@@ -474,6 +585,13 @@ float __cdecl CL_KeyState(kbutton_t *key)
     return (float)((float)msec / (float)frame_msec);
 }
 
+/*
+================
+CL_KeyMove
+
+Sets the usercmd_t based on key states
+================
+*/
 void __cdecl CL_KeyMove(int localClientNum, usercmd_s *cmd)
 {
     int side; // [esp+3Ch] [ebp-10h]
@@ -517,6 +635,11 @@ void __cdecl CL_KeyMove(int localClientNum, usercmd_s *cmd)
     forward += (int)(CL_KeyState(&kb[KEY_FORWARD]) * 127.0f);
     forward -= (int)(CL_KeyState(&kb[KEY_BACK]) * 127.0f);
 
+    //
+    // adjust for speed key / running
+    // the walking flag is to keep animations consistant
+    // even during acceleration and develeration
+    //
     if (!kb[KEY_BACK].active)
     {
         if (kb[KEY_SPRINT].active || kb[KEY_SPRINT].wasPressed)
@@ -589,6 +712,11 @@ void __cdecl CL_AddCurrentStanceToCmd(int localClientNum, usercmd_s *cmd)
     cmd->buttons &= ~BUTTON_TEMP_STANCE;
 }
 
+/*
+=================
+CL_MouseMove
+=================
+*/
 void __cdecl CL_MouseMove(int localClientNum, usercmd_s *cmd)
 {
     float v2; // [esp+10h] [ebp-D4h]
@@ -616,6 +744,7 @@ void __cdecl CL_MouseMove(int localClientNum, usercmd_s *cmd)
     float accelSensitivity; // [esp+E0h] [ebp-4h]
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
+    // allow mouse smoothing
     CL_GetMouseMovement(LocalClientGlobals, &mx, &my);
     if (frame_msec)
     {
@@ -623,6 +752,7 @@ void __cdecl CL_MouseMove(int localClientNum, usercmd_s *cmd)
         v8 = sqrt(v15);
         rate = v8 / (double)frame_msec;
         accelSensitivity = rate * cl_mouseAccel->current.value + cl_sensitivity->current.value;
+        // scale by FOV
         accelSensitivity = accelSensitivity * LocalClientGlobals->cgameFOVSensitivityScale;
         if (rate != 0.0 && cl_showMouseRate->current.enabled)
             Com_Printf(CON_CHANNEL_CLIENT, "%f : %f\n", rate, accelSensitivity);
@@ -633,6 +763,7 @@ void __cdecl CL_MouseMove(int localClientNum, usercmd_s *cmd)
             if (mx != 0.0 || my != 0.0)
             {
                 kb = playersKb[localClientNum];
+                // add mouse X/Y movement to cmd
                 if (kb[KEY_STRAFE].active)
                 {
                     cmd->rightmove = ClampChar(SnapFloatToInt(mx * m_side->current.value) + cmd->rightmove);
@@ -710,6 +841,7 @@ void __cdecl CL_GetMouseMovement(clientActive_t *cl, float *mx, float *my)
     iassert(mx);
     iassert(my);
 
+    // allow mouse smoothing
     if (m_filter->current.enabled)
     {
         *mx = (double)(cl->mouseDx[1] + cl->mouseDx[0]) * 0.5f;
@@ -726,10 +858,20 @@ void __cdecl CL_GetMouseMovement(clientActive_t *cl, float *mx, float *my)
     cl->mouseDy[cl->mouseIndex] = 0;
 }
 
+/*
+==============
+CL_CmdButtons
+==============
+*/
 void __cdecl CL_CmdButtons(int localClientNum, usercmd_s *cmd)
 {
     clientActive_t *LocalClientGlobals; // [esp+8h] [ebp-Ch]
 
+    //
+    // figure button bits
+    // send a button bit even if the key was pressed and released in
+    // less than a frame
+    //
     CL_UpdateCmdButton(localClientNum, &cmd->buttons, 14, BUTTON_ATTACK);
     CL_UpdateCmdButton(localClientNum, &cmd->buttons, 15, BUTTON_BREATH);
     CL_UpdateCmdButton(localClientNum, &cmd->buttons, 16, BUTTON_FRAG);
@@ -763,6 +905,11 @@ void __cdecl CL_CmdButtons(int localClientNum, usercmd_s *cmd)
     iassert(cmd->buttons < (1 << BUTTON_BIT_COUNT));
 }
 
+/*
+==============
+CL_FinishMove
+==============
+*/
 void __cdecl CL_FinishMove(int localClientNum, usercmd_s *cmd)
 {
     int serverTime; // [esp+0h] [ebp-Ch]
@@ -770,8 +917,11 @@ void __cdecl CL_FinishMove(int localClientNum, usercmd_s *cmd)
     int i; // [esp+8h] [ebp-4h]
 
     LocalClientGlobals = CL_GetLocalClientGlobals(localClientNum);
+    // copy the state that the cgame is currently sending
     cmd->weapon = LocalClientGlobals->cgameUserCmdWeapon;
     cmd->offHandIndex = LocalClientGlobals->cgameUserCmdOffHandIndex;
+    // send the current server time so the amount of movement
+    // can be determined without allowing cheating
     if (LocalClientGlobals->serverTime - LocalClientGlobals->snap.serverTime > 5000)
         serverTime = LocalClientGlobals->snap.serverTime + 5000;
     else
@@ -967,6 +1117,11 @@ cmd_function_s IN_TalkUp_VAR;
 cmd_function_s IN_SprintDown_VAR;
 cmd_function_s IN_SprintUp_VAR;
 
+/*
+============
+CL_InitInput
+============
+*/
 void __cdecl CL_InitInput()
 {
     DvarLimits min; // [esp+4h] [ebp-10h]
@@ -1117,7 +1272,9 @@ void __cdecl IN_KeyDown(kbutton_t *b)
     if (*c)
         k = atoi(c);
     else
-        k = -1;
+        k = -1; // typed manually at the console for continuous down
+
+    // repeating key
     if (k != b->down[0] && k != b->down[1])
     {
         if (b->down[0])
@@ -1133,8 +1290,11 @@ void __cdecl IN_KeyDown(kbutton_t *b)
         {
             b->down[0] = k;
         }
+
+        // still down
         if (!b->active)
         {
+            // save timestamp for partial frame summing
             ca = Cmd_Argv(2);
             b->downtime = atoi(ca);
             b->active = 1;
@@ -1160,6 +1320,7 @@ void __cdecl IN_KeyUp(kbutton_t *b)
     c = Cmd_Argv(1);
     if (!*c)
     {
+        // typed manually at the console, assume for unsticking, so clear all
         b->down[1] = 0;
         b->down[0] = 0;
         b->active = 0;
@@ -1173,12 +1334,15 @@ void __cdecl IN_KeyUp(kbutton_t *b)
     else
     {
         if (b->down[1] != k)
-            return;
+            return; // key up without coresponding down (menu pass through)
         b->down[1] = 0;
     }
+
+    // some other key is still holding it down
     if (!b->down[0] && !b->down[1])
     {
         b->active = 0;
+        // save timestamp for partial frame summing
         ca = Cmd_Argv(2);
         uptime = atoi(ca);
         if (uptime)

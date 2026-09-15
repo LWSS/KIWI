@@ -104,6 +104,13 @@ void __cdecl G_ParseHitLocDmgTable()
     }
 }
 
+/*
+=================
+TossClientItems
+
+Toss the weapon and powerups for the killed player
+=================
+*/
 void __cdecl TossClientItems(gentity_s *self)
 {
     gclient_s *client; // r30
@@ -115,8 +122,14 @@ void __cdecl TossClientItems(gentity_s *self)
     gentity_s *v8; // r3
 
     client = self->client;
+    // drop the weapon if not a gauntlet or machinegun
     weapon = self->s.weapon;
     weaponstate = client->ps.weaponstate;
+
+    // make a special check to see if they are changing to a new
+    // weapon that isn't the mg or gauntlet.  Without this, a client
+    // can pick up a weapon, be killed, and not drop the weapon because
+    // their weapon change hasn't completed yet and they are still holding the MG.
     if (weaponstate == WEAPON_DROPPING || weaponstate == WEAPON_DROPPING_QUICK)
         weapon = client->pers.cmd.weapon;
     if (!client)
@@ -130,9 +143,11 @@ void __cdecl TossClientItems(gentity_s *self)
                 v5 = self->client;
                 if (v5->ps.ammo[BG_AmmoForWeapon(weapon)])
                 {
+                    // find the item type for this weapon
                     ItemForWeapon = BG_FindItemForWeapon(weapon, v5->ps.weaponmodels[weapon]);
                     if ((self->client->ps.eFlags & 0x300) == 0)
                     {
+                        // spawn the item
                         v8 = Drop_Item(self, ItemForWeapon, 0.0, 0);
                         if (v8)
                             v8->nextthink = 0;
@@ -143,6 +158,11 @@ void __cdecl TossClientItems(gentity_s *self)
     }
 }
 
+/*
+==================
+LookAtKiller
+==================
+*/
 void __cdecl LookAtKiller(gentity_s *self, gentity_s *inflictor, gentity_s *attacker)
 {
     double v3; // fp0
@@ -201,6 +221,11 @@ void use_trigger_use(gentity_s *ent, gentity_s *other, gentity_s *activator)
     ;
 }
 
+/*
+==================
+player_die
+==================
+*/
 void __cdecl player_die(
     gentity_s *self,
     gentity_s *inflictor,
@@ -265,7 +290,7 @@ void __cdecl player_die(
             number = ENTITYNUM_WORLD;
         self->sentient->lastAttacker = attacker;
         v22 = self->client;
-        self->takedamage = 1;
+        self->takedamage = 1; // can still be gibbed
         self->r.contents = CONTENTS_CORPSE;
         self->s.weapon = 0;
         if (v22->ps.pm_type != PM_DEAD_LINKED)
@@ -288,6 +313,7 @@ void __cdecl player_die(
                 0,
                 "%s",
                 "self->r.maxs[2] >= self->r.mins[2]");
+        // don't allow respawn until the death anim is done
         self->client->respawnTime = level.time + 1700;
         iassert(self->handler == ENT_HANDLER_CLIENT);
         self->handler = ENT_HANDLER_CLIENT_DEAD;
@@ -543,6 +569,29 @@ bool __cdecl G_ShouldTakeBulletDamage(gentity_s *targ, gentity_s *attacker)
         || attacker->actor->eState[attacker->actor->stateLevel] == AIS_SCRIPTEDANIM;
 }
 
+/*
+============
+G_Damage
+
+targ		entity that is being damaged
+inflictor	entity that is causing the damage
+attacker	entity that caused the inflictor to damage targ
+	example: targ=monster, inflictor=rocket, attacker=player
+
+dir			direction of the attack for knockback
+point		point at which the damage is being inflicted, used for headshots
+damage		amount of damage being inflicted
+knockback	force to be applied against targ as a result of the damage
+
+inflictor, attacker, dir, and point can be NULL for environmental effects
+
+dflags		these flags are used to control how T_Damage works
+	DAMAGE_RADIUS			damage was indirect (from a nearby explosion)
+	DAMAGE_NO_ARMOR			armor does not protect from this damage
+	DAMAGE_NO_KNOCKBACK		do not affect velocity, just view angles
+	DAMAGE_NO_PROTECTION	kills godmode, armor, everything
+============
+*/
 void __cdecl G_Damage(
     gentity_s *targ,
     gentity_s *inflictor,
@@ -680,8 +729,10 @@ void __cdecl G_Damage(
         knockbackDir[0] = 0.0f;
         knockbackDir[1] = 0.0f;
         knockbackDir[2] = 0.0f;
+        // figure momentum add, even if the damage won't be taken
         G_DamageKnockback(targ, attacker, dir, knockbackDir, damage, dflags, mod);
 
+        // check for godmode
         if ((targ->flags & 1) == 0)
         {
             if (damage < 1)
@@ -691,6 +742,7 @@ void __cdecl G_Damage(
             //v53 = a32;
             if (actor)
             {
+                // save some from armor
                 v54 = Actor_CheckDeathAllowed(actor, damage);
                 v55 = v54;
                 damage -= v54;
@@ -710,6 +762,9 @@ void __cdecl G_Damage(
             }
             if (client)
             {
+                // add to the damage inflicted on a player this frame
+                // the total will be turned into screen blends and view angle kicks
+                // at the end of the frame
                 client->damage_blood += damage;
                 if (dir)
                 {
@@ -734,6 +789,7 @@ void __cdecl G_Damage(
                     if (health - damage <= 0)
                         damage = health - 1;
                 }
+                // do the damage
                 v57 = targ->health;
                 targ->health = v57 - damage;
                 if (client && client->invulnerableEnabled)
@@ -1391,6 +1447,11 @@ void __cdecl G_FlashbangBlast(
     }
 }
 
+/*
+============
+G_RadiusDamage
+============
+*/
 int __cdecl G_RadiusDamage(
     float *origin,
     gentity_s *inflictor,
@@ -1451,6 +1512,7 @@ int __cdecl G_RadiusDamage(
             ent = &g_entities[*v49];
             if (ent != ignore && ent->takedamage && (!ent->client || !level.bPlayerIgnoreRadiusDamage))
             {
+                // find the distance from the edge of the bounding box
                 RadiusDamageDistanceSquared = G_GetRadiusDamageDistanceSquared(origin, ent);
                 if (RadiusDamageDistanceSquared < (radius * radius))
                 {
@@ -1469,6 +1531,8 @@ int __cdecl G_RadiusDamage(
 
                         dir[0] = ent->r.currentOrigin[0] - *origin;
                         dir[1] = (float)v57 - (float)v56;
+                        // push the center of mass higher than the origin so players
+                        // get knocked into the air more
                         dir[2] = (float)v58 + (float)24.0;
 
                         G_Damage(

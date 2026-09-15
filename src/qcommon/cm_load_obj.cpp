@@ -345,6 +345,11 @@ int __cdecl CM_GetPlaneCount()
 }
 
 
+/*
+=================
+CMod_LoadPlanes
+=================
+*/
 void __cdecl CMod_LoadPlanes()
 {
     char v0; // [esp+4h] [ebp-28h]
@@ -425,6 +430,12 @@ void CMod_LoadMaterials()
         cm.materials[matIndex].contentFlags &= 0xDFFFFFFB;
 }
 
+/*
+=================
+CMod_LoadNodes
+
+=================
+*/
 void CMod_LoadNodes()
 {
     int j; // [esp+0h] [ebp-1Ch]
@@ -455,6 +466,11 @@ void CMod_LoadNodes()
     }
 }
 
+/*
+=================
+CMod_LoadLeafSurfaces
+=================
+*/
 void CMod_LoadLeafSurfaces()
 {
     char *in; // [esp+8h] [ebp-8h]
@@ -646,6 +662,11 @@ MapEnts *__cdecl MapEnts_VirtualLoad(const char *name)
     return MapEnts_RealLoad(name);
 }
 
+/*
+=================
+CMod_LoadEntityString
+=================
+*/
 MapEnts *CMod_LoadEntityString()
 {
     MapEnts *result; // eax
@@ -655,6 +676,11 @@ MapEnts *CMod_LoadEntityString()
     return result;
 }
 
+/*
+=================
+CMod_LoadVisibility
+=================
+*/
 void CMod_LoadVisibility()
 {
     const char *v0; // eax
@@ -690,6 +716,14 @@ void CMod_LoadVisibility()
     }
 }
 
+/*
+===================
+CM_InitBoxHull
+
+Set up the planes and nodes so that the six floats of a bounding box
+can just be stored out and get a proper clipping hull structure.
+===================
+*/
 uint16_t *CM_InitBoxHull()
 {
     cLeafBrushNode_s *v0; // eax
@@ -754,6 +788,11 @@ void __cdecl CMod_LoadBrushRelated(uint version, bool usePvs)
     Hunk_UserDestroy(user);
 }
 
+/*
+=================
+CMod_LoadSubmodels
+=================
+*/
 uint CMod_LoadSubmodels()
 {
     uint result; // eax
@@ -786,7 +825,7 @@ uint CMod_LoadSubmodels()
             break;
         out = &cm.cmodels[bmodelIndex];
         for (j = 0; j < 3; ++j)
-        {
+        { // spread the mins / maxs by a pixel
             out->mins[j] = in->mins[j] - 1.0;
             out->maxs[j] = in->maxs[j] + 1.0;
             v4 = I_fabs(out->maxs[j]);
@@ -799,8 +838,10 @@ uint CMod_LoadSubmodels()
             extent[j] = v1;
         }
         out->radius = Vec3Length(extent);
+        // world model doesn't need other info
         if (bmodelIndex)
         {
+            // make a "leaf" just to hold the model's brushes and surfaces
             collAabbCount = in->numSurfaces;
             out->leaf.collAabbCount = collAabbCount;
             if (out->leaf.collAabbCount != collAabbCount)
@@ -834,6 +875,7 @@ void CMod_LoadSubmodelBrushNodes()
     for (bmodelIndex = 1; bmodelIndex < cm.numSubModels; ++bmodelIndex)
     {
         out = &cm.cmodels[bmodelIndex];
+        // make a "leaf" just to hold the model's brushes and surfaces
         numLeafBrushes = ina->numBrushes;
         indexes = (ushort*)CM_Hunk_Alloc(2 * numLeafBrushes, "CMod_LoadSubmodelBrushNodes", 26);
         contents = 0;
@@ -1171,6 +1213,12 @@ int __cdecl CMod_GetLeafTerrainContents(cLeaf_t *leaf)
     return contents;
 }
 
+/*
+=================
+CMod_LoadBrushes
+
+=================
+*/
 void CMod_LoadBrushes()
 {
     uint edgesCount; // [esp+8h] [ebp-60h] BYREF
@@ -1225,7 +1273,7 @@ void CMod_LoadBrushes()
     allocSizeBrushes = sizeof(cbrush_t) * (brushCount + 1);
     cm.brushes = (cbrush_t*)CM_Hunk_Alloc(allocSizeBrushes, "CMod_LoadBrushes", 26);
     cm.numBrushes = brushCount;
-    if (brushCount != brushCount)
+    if ((uint16_t)brushCount != brushCount)
         Com_Error(ERR_DROP, "CMod_LoadBrushes: cm.numBrushes exceeded");
     outBrush = cm.brushes;
     brushIter = 0;
@@ -1294,6 +1342,11 @@ void CMod_LoadBrushes()
     iassert(sideEdgeCountsCount == static_cast<uint>(inEdgeCounts - inEdgeCountsBase));
 }
 
+/*
+=================
+CMod_LoadLeafs
+=================
+*/
 void __cdecl CMod_LoadLeafs(bool usePvs)
 {
     cLeaf_t *out; // [esp+0h] [ebp-20h]
@@ -1449,6 +1502,11 @@ void CMod_LoadLeafBrushNodes_Version14()
     }
 }
 
+/*
+=================
+CMod_LoadLeafBrushes
+=================
+*/
 void CMod_LoadLeafBrushes()
 {
     uint16_t *out; // [esp+0h] [ebp-18h]

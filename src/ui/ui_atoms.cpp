@@ -51,7 +51,7 @@ void __cdecl UI_DrawHandlePic(
         s1 = 1.0;
     }
     else
-    {
+    { // flip about vertical
         w = -w;
         s0 = 1.0;
         s1 = 0.0;
@@ -62,7 +62,7 @@ void __cdecl UI_DrawHandlePic(
         t1 = 1.0;
     }
     else
-    {
+    { // flip about horizontal
         h = -h;
         t0 = 1.0;
         t1 = 0.0;
@@ -105,6 +105,13 @@ void __cdecl UI_FillRectPhysical(float x, float y, float width, float height, co
         CL_DrawStretchPicPhysical(x, y, width, height, 0.0, 0.0, 0.0, 0.0, color, sharedUiInfo.assets.whiteMaterial);
 }
 
+/*
+================
+UI_FillRect
+
+Coordinates are 640*480 virtual values
+=================
+*/
 void __cdecl UI_FillRect(
     const ScreenPlacement *scrPlace,
     float x,
