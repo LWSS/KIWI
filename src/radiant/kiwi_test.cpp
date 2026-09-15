@@ -5,6 +5,11 @@
 #include "stdafx.h"
 #include "kiwi_test.h"
 #include "kiwi_command.h"
+#include "kiwi_modelbrowser.h"
+#include "kiwi_droptrace.h"
+#include "kiwi_pick.h"
+#include "kiwi_ux.h"
+#include "kiwi_surfcache.h"
 #include "radiant_frame.h"
 #include "mainfrm.h"
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
@@ -29,6 +34,7 @@
 // Existing editor entry points.  Each declaration is kept beside the test-only
 // call site so this translation unit does not expose another editor API surface.
 extern entity_s entities;                                                   // entity.cpp:298
+extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
 extern int      modified;                                                   // map.cpp:67
 extern int      g_nUpdateBits;                                               // engine_stubs.cpp:773
 
@@ -728,6 +734,12 @@ static void ExecuteExpect( const ScriptLine &line )
         return;
     }
     const std::string subject = Lower( w[1] );
+    if ( subject == "tool" )
+    {
+        const char *name = KiwiCmd_Active() ? KiwiCmd_Active()->Name() : "none";
+        ExpectResult( line, w.size() == 3 && !_stricmp( name, w[2].c_str() ), name, w[2] );
+        return;
+    }
     MapCounts counts = CountMap();
     int expectedInt = 0;
     int actualInt = 0;
@@ -1241,13 +1253,15 @@ static void ExecuteLine( const ScriptLine &line )
         // KIWI: the Ctrl+Shift+P export without its dialog.  Writes <map>_ref.step/.obj
         // beside the map and prints the paths; never drives Plasticity in test mode.
         bool construction = false;
+        bool terrain = false;
         for ( size_t i = 1; i < w.size(); ++i )
         {
             if ( Lower( w[i] ) == "construction" ) { construction = true; continue; }
-            ScriptError( line, "plasticity_export accepts only the word 'construction'" );
+            if ( Lower( w[i] ) == "terrain" )      { terrain = true; continue; }
+            ScriptError( line, "plasticity_export accepts only the words 'construction' and 'terrain'" );
             return;
         }
-        if ( !KiwiPlastBridge_ExportNow( construction, false ) )
+        if ( !KiwiPlastBridge_ExportNow( construction, terrain, false ) )
             ScriptError( line, "plasticity_export wrote nothing (see console)" );
         return;
     }
@@ -1279,6 +1293,98 @@ static void ExecuteLine( const ScriptLine &line )
         for ( int i = 0; i < 3; ++i ) camera->angles[i] = value[i + 3];
         CamWnd_BuildMatrix();
         g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "model_pick_bvh" )
+    {
+        int count=0;
+        for ( selbrush_t *b=selected_brushes.next; b && b!=&selected_brushes; b=b->next )
+        {
+            if ( !KiwiDrop_IsModelEntity(b) || b->owner->prefab ) continue;
+            if ( !KiwiDrop_ValidateModelTree(b) )
+            { ScriptError(line,"cached model picking disagrees with exhaustive triangles");return; }
+            ++count;
+        }
+        if ( !count ) ScriptError(line,"model_pick_bvh requires selected model instances");
+        else LogFormat("PICK-BVH","%d models passed 243 rays each",count);
+        return;
+    }
+    if ( command == "facing_toggle_probe" )
+    {
+        // Warm cache first (script frames); either transition must age captures.
+        const bool before=KiwiUX_ShowFacingArrows();
+        const unsigned epoch=KiwiSurfCache_Epoch();
+        KiwiUX_SetShowFacingArrows(!before);
+        const bool changed=KiwiSurfCache_Epoch()!=epoch && KiwiUX_ShowFacingArrows()!=before;
+        KiwiUX_SetShowFacingArrows(before);
+        if ( !changed ) ScriptError(line,"facing toggle did not invalidate the entity render cache");
+        else LogFormat("FACING","toggle and full render-cache invalidation passed");
+        return;
+    }
+    if ( command == "prefab_insert" )
+    {
+        if ( w.size() != 2 || !KiwiModelBrowser_InsertPrefab( w[1].c_str() ) )
+            ScriptError( line, "prefab_insert failed" );
+        return;
+    }
+    if ( command == "toolkey" || command == "toolvalue" )
+    {
+        if ( !KiwiCmd_Active() || w.size() != 2 )
+        { ScriptError( line, "toolkey/toolvalue requires an active tool and one argument" ); return; }
+        if ( command == "toolkey" )
+        {
+            if ( w[1].size() != 1 ) { ScriptError( line, "toolkey requires one letter" ); return; }
+            KiwiCmd_KeyDown( toupper( (unsigned char)w[1][0] ), 0 );
+        }
+        else
+        {
+            float value;
+            if ( !ParseFloat( w[1], value ) ) { ScriptError( line, "toolvalue requires a number" ); return; }
+            KiwiCmd_Active()->NumericChanged( true, value );
+        }
+        return;
+    }
+    if ( command == "toolcommit" ) { KiwiCmd_Commit(); return; }
+    if ( command == "toolcancel" ) { KiwiCmd_Cancel(); return; }
+    if ( command == "prefab_probe" )
+    {
+        // Compare the new model-mode route with native recursive prefab picking
+        // across the placed bounds, then check selected exclusion for drag tracing.
+        selbrush_t *node = selected_brushes.next;
+        if ( !node || node == &selected_brushes || node->next != &selected_brushes
+          || !node->owner || !node->owner->prefab || !node->def )
+        { ScriptError( line, "prefab_probe requires exactly one loaded selected prefab" ); return; }
+        float lo[3], hi[3], angles[3], scale, origin[3];
+        if ( !KiwiDrop_GetModelInfo( node, lo, hi, angles, &scale, origin ) )
+        { ScriptError( line, "prefab bounds unavailable" ); return; }
+        int hits = 0;
+        for ( int x = 0; x < 17; ++x ) for ( int y = 0; y < 17; ++y )
+        {
+            float start[3] = { origin[0] + lo[0] + ( hi[0] - lo[0] ) * ( x + 0.5f ) / 17,
+                               origin[1] + lo[1] + ( hi[1] - lo[1] ) * ( y + 0.5f ) / 17,
+                               origin[2] + hi[2] + 128 };
+            const float dir[3] = { 0, 0, -1 };
+            edTrace_t native = {};
+            if ( !KiwiSelect_TracePrefab( node, start, dir, &native ) ) continue;
+            ++hits;
+            selbrush_t *picked = nullptr;
+            float distance;
+            if ( !KiwiDrop_PickModelMesh( start, dir, 262144, false, &picked, &distance, nullptr )
+              || picked != node || fabsf( distance - native.dist ) > 0.01f )
+            { ScriptError( line, "prefab model-mode pick did not return its outer instance" ); return; }
+            if ( KiwiDrop_PickModelMesh( start, dir, 262144, true, &picked, &distance, nullptr ) && picked == node )
+            { ScriptError( line, "prefab drag trace hit its own selection" ); return; }
+            ray_t ray;
+            for ( int i = 0; i < 3; ++i ) { ray.origin[i] = start[i]; ray.dir[i] = dir[i]; }
+            const bool wasModelsOnly = KiwiSel_ModelsOnly();
+            KiwiSel_SetModelsOnly( true );
+            const pick_result_t result = Pick( ray, SEL_MASK_OBJECT );
+            KiwiSel_SetModelsOnly( wasModelsOnly );
+            if ( !result.valid || result.item.brush != node )
+            { ScriptError( line, "unified models-only picker lost the prefab instance" ); return; }
+        }
+        if ( !hits ) ScriptError( line, "prefab probe found no child geometry" );
+        else LogFormat( "PREFAB", "%d recursive/model-mode picks agree", hits );
         return;
     }
     if ( command == "select" ) { ExecuteSelect( line ); return; }

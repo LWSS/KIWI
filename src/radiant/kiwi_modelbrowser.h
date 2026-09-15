@@ -14,3 +14,6 @@ bool KiwiModelBrowser_DispatchInstant( unsigned int cmdId );
 bool KiwiModelBrowser_CameraDropTarget( float imgMinX, float imgMinY );
 void KiwiModelBrowser_DrawGhost();
 void KiwiModelBrowser_ResetForNewMap();
+void KiwiModelBrowser_BuildFileMenu( void *frameMenu );
+// Synchronous command/test entry; path must be relative to project map_source.
+bool KiwiModelBrowser_InsertPrefab( const char *relativePath );

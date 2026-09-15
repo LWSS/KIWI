@@ -438,6 +438,11 @@ bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir, float
 static char sub_48CE60( float *outDist, float *outNormal, const float *org,
                         const float *dir, selbrush_t *brush )
 {
+    // KIWI: resident geometry + model-local BVH avoid extraction and a full
+    // triangle scan for each cursor ray, including recursive prefab children.
+    extern int KiwiDrop_TraceModelCached( selbrush_t *, const float *, const float *, float *, float * );
+    const int cached = KiwiDrop_TraceModelCached( brush, org, dir, outDist, outNormal );
+    if ( cached >= 0 ) return (char)cached;
     static byte vbuf[196612];   // v16  — extracted vertex bytes (4000h verts * 12)
     static byte ibuf[131072];   // v37  — extracted tri indices (10000h)
 
@@ -652,6 +657,19 @@ static char sub_48D240( const float *start, const float *dir, int contents,
         }
     }
     return (char)(intptr_t)face;                        // return (char)patch
+}
+
+// KIWI: expose native recursive prefab tracing to the model-mode picker.
+bool KiwiSelect_TracePrefab( selbrush_t *node, const float *start,
+                             const float *dir, edTrace_t *trace )
+{
+    if ( !node || !node->owner || !node->owner->prefab || !trace )
+        return false;
+    *trace = edTrace_t{};
+    trace->dist = 262144.0f;
+    return sub_48D240( start, dir, 0, node,
+        (const orientation_t *)world_orient_matrix, trace ) != 0
+        && trace->hit.brush != nullptr;
 }
 
 // ── sub_48D460 (0x48d460) — brush-list walker ─────────────────────────────────────

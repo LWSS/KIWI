@@ -15,6 +15,7 @@
 #include "kiwi_shadowcache.h"       // KiwiShadowCache_Invalidate
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
 #include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L face diagnostic
+#include "kiwi_ux.h"                // KIWI: unified facing-arrow visibility
 
 // faceVisuals_s / faceVis_s are now in qe3.h (moved so select.cpp can use them).
 // The static_asserts remain in qe3.h.
@@ -6557,6 +6558,10 @@ int g_drawBrushMeshTech = -1;
 
 void DrawAngles( int drawType, const orientation_t *orient, GfxColor *col )
 {
+    // KIWI: the master switch also gates legacy arrows, including forced selected
+    // passes and recursive prefab children. Keep the native secondary gates below.
+    if ( !KiwiUX_ShowFacingArrows() )
+        return;
     // `b` is the selbrush_t whose owner entity supplies the angles.  The binary passes it
     // in ECX (the DrawBrush call site below threads it through as the first explicit arg).
     selbrush_t *b = g_drawAnglesBrush;

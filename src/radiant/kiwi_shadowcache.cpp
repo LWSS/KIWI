@@ -228,6 +228,9 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
 
 void KiwiShadowCache_Shutdown()
 {
+    // BVHs borrow the geometry freed below; never retain them across map loads.
+    extern void KiwiDrop_ClearModelTrees();
+    KiwiDrop_ClearModelTrees();
     KiwiLightCache_Shutdown();
     for ( int i = 0; i < s_modelCount; ++i )
     {

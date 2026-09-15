@@ -20,6 +20,13 @@ struct kiwiDropHit_t
 bool KiwiDrop_BoundsValid( const float mins[3], const float maxs[3] );
 bool KiwiDrop_IsModelEntity( const selbrush_t *node );
 
+// -1: unavailable, use native fallback; 0: mesh miss; 1: nearest mesh hit.
+// Input ray and output normal use the entity's parent coordinate system.
+int KiwiDrop_TraceModelCached( selbrush_t *node, const float *start, const float *dir,
+                               float *outDist, float *outNormal );
+void KiwiDrop_ClearModelTrees();
+bool KiwiDrop_ValidateModelTree( selbrush_t *node ); // deterministic test-mode parity check
+
 // Uses resident state only; a missing XModel falls back to eclass bounds and null outModel.
 bool KiwiDrop_GetModelInfo( selbrush_t *node,
                             float mins[3], float maxs[3],

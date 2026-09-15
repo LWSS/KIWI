@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 #include <string.h>
+#include <commdlg.h>
 
 extern int         Sys_Printf( const char *fmt, ... );
 extern int         g_nUpdateBits;
@@ -46,6 +47,7 @@ extern void        Ed_EnsureCurrentMaterial_Kiwi();
 extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );
 extern ImGuiID     ImGuiShell_DockRoot();
 extern camera_s   *Ed_Camera();
+extern void        Radiant_SetProjectMapsPath( const char *mapPath );
 
 namespace
 {
@@ -291,6 +293,22 @@ namespace
             ImGui::TextDisabled( "bounds: loading" );
         }
 
+        // KIWI (2026-09-13): tri-count and details.  Only a READY tile asks (its model
+        // is resident by then), so hovering never loads a model.
+        kiwiModelStats_t stats;
+        if ( ready && !failed && KiwiEntThumb_ModelStats( row.name.c_str(), &stats ) )
+        {
+            ImGui::Text( "LOD 0: %i tris  %i verts  %i surface%s",
+                         stats.lod0Tris, stats.lod0Verts,
+                         stats.lod0Surfs, stats.lod0Surfs == 1 ? "" : "s" );
+            if ( stats.lods > 1 )
+                ImGui::Text( "%i LODs, %i tris in all", stats.lods, stats.totalTris );
+            ImGui::Text( "%i bone%s, %i collision surface%s", stats.bones, stats.bones == 1 ? "" : "s",
+                         stats.collSurfs, stats.collSurfs == 1 ? "" : "s" );
+            for ( int k = 0; k < stats.materialCount; ++k )
+                ImGui::TextDisabled( "%s %s", k == 0 ? "materials:" : "          ", stats.materials[k] );
+        }
+
         if ( failed )
             ImGui::TextDisabled( "preview failed; this model cannot be placed" );
         else if ( ready )
@@ -299,7 +317,7 @@ namespace
             ImGui::TextDisabled( "preview loading" );
         if ( !failed )
             ImGui::TextDisabled( "drag into the 3D view or double-click to place" );
-        ImGui::TextDisabled( "right-click: open in Explorer" );
+        ImGui::TextDisabled( "right-click: open in Explorer / delete from disk" );
         ImGui::EndTooltip();
     }
 
@@ -319,6 +337,60 @@ namespace
         ::PostMessageA( g_qeglobals.d_hwndMain, WM_COMMAND,
                         (WPARAM)(unsigned int)KIWI_CMD_MODEL_DROP, 0 );
         return true;
+    }
+
+    // Permanent delete (KIWI 2026-09-13).  Confirms with the full file list, deletes
+    // the loose files, drops the thumbnail, and rescans the list on the NEXT frame
+    // (s_models is being walked by the tile loop right now).
+    bool s_rescanPending = false;
+
+    void DeleteModelFromDisk( const char *modelName )
+    {
+        std::vector<std::string> loose, packed;
+        if ( !KiwiThumbCache_ResolveModelFiles( modelName, &loose, &packed ) )
+        {
+            Sys_Printf( "Models browser: '%s' is not on the search path; nothing to delete.\n", modelName );
+            return;
+        }
+        if ( loose.empty() )
+        {
+            Sys_Printf( "Models browser: '%s' has no loose files (packed in an IWD); nothing deleted.\n", modelName );
+            return;
+        }
+        std::string text = "PERMANENTLY delete the xmodel \"";
+        text += modelName;
+        text += "\" from disk?\n\nThese files will be deleted:\n";
+        for ( size_t i = 0; i < loose.size(); ++i )
+            text += "  " + loose[i] + "\n";
+        if ( !packed.empty() )
+        {
+            text += "\nLeft alone (packed in an IWD):\n";
+            for ( size_t i = 0; i < packed.size() && i < 8; ++i )
+                text += "  " + packed[i] + "\n";
+        }
+        text += "\nThis cannot be undone.";
+        const int answer = ::MessageBoxA( g_qeglobals.d_hwndMain, text.c_str(),
+                                          "Delete xmodel from disk",
+                                          MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 );
+        if ( answer != IDYES )
+            return;
+        int deleted = 0;
+        for ( size_t i = 0; i < loose.size(); ++i )
+        {
+            if ( ::DeleteFileA( loose[i].c_str() ) )
+            {
+                ++deleted;
+                Sys_Printf( "Models browser: deleted \"%s\".\n", loose[i].c_str() );
+            }
+            else
+                Sys_Printf( "Models browser: could not delete \"%s\" (Win32 error %lu).\n",
+                            loose[i].c_str(), (unsigned long)::GetLastError() );
+        }
+        Sys_Printf( "Models browser: '%s' - %i of %i file(s) deleted. Placed instances keep "
+                    "their resident copy until the editor restarts.\n",
+                    modelName, deleted, (int)loose.size() );
+        KiwiThumbCache_Invalidate( modelName );
+        s_rescanPending = true;
     }
 
     void DrawTile( const modelRow_t &row )
@@ -396,6 +468,12 @@ namespace
                 ImGui::MenuItem( "Open in Explorer", nullptr, false, false );
                 ImGui::TextDisabled( "not found on the search path" );
             }
+            // KIWI (2026-09-13, user: "right click permanent delete on xmodels ... with a
+            // confirm prompt"): the xmodel and the parts/surfs its header names, loose
+            // files only (IWD members are listed as untouchable), behind a Yes/No box.
+            ImGui::Separator();
+            if ( ImGui::MenuItem( "Delete from disk...", nullptr, false, found && loose ) )
+                DeleteModelFromDisk( row.name.c_str() );
             ImGui::EndPopup();
         }
 
@@ -496,19 +574,19 @@ namespace
         return true;
     }
 
-    void PerformDrop( const char *modelName, int imgX, int imgY,
-                      const float *latchedOrigin )
+    bool PerformDrop( const char *modelName, int imgX, int imgY,
+                      const float *latchedOrigin, bool prefab = false )
     {
         if ( !modelName || !modelName[0] )
         {
             Sys_Printf( "Models browser: the drop carried no model name.\n" );
-            return;
+            return false;
         }
-        if ( KiwiEntThumb_ModelFailed( modelName ) )
+        if ( !prefab && KiwiEntThumb_ModelFailed( modelName ) )
         {
             Sys_Printf( "Models browser: '%s' failed its preview load and was not placed.\n",
                         modelName );
-            return;
+            return false;
         }
 
         if ( KiwiEditorCommand *live = KiwiCmd_Active() )
@@ -529,15 +607,16 @@ namespace
             {
                 Sys_Printf( "Models browser: finish or cancel \"%s\" before placing a model.\n",
                             live->Name() );
-                return;
+                return false;
             }
         }
 
-        eclass_t *miscModel = Eclass_ForName( 0, "misc_model" );
+        const char *className = prefab ? "misc_prefab" : "misc_model";
+        eclass_t *miscModel = Eclass_ForName( 0, className );
         if ( !miscModel || *(int *)&miscModel->fixedsize == 0 )
         {
-            Sys_Printf( "Models browser: misc_model is not available.\n" );
-            return;
+            Sys_Printf( "Models browser: %s is not available.\n", className );
+            return false;
         }
 
         float origin[3];
@@ -553,7 +632,7 @@ namespace
                                     origin, modelMins, modelMaxs ) )
             {
                 Sys_Printf( "Models browser: the drop ray has no valid placement; nothing placed.\n" );
-                return;
+                return false;
             }
         }
 
@@ -564,9 +643,9 @@ namespace
         if ( !DropPlaceholder( miscModel, origin ) )
         {
             Undo_End();
-            return;
+            return false;
         }
-        CreateEntityFromName( "misc_model" );
+        CreateEntityFromName( className );
 
         entity_s_def *created = nullptr;
         selbrush_t *selected = selected_brushes.next;
@@ -585,17 +664,18 @@ namespace
 
         if ( !created )
         {
-            Sys_Printf( "Models browser: misc_model creation failed; no model key was written.\n" );
-            return;
+            Sys_Printf( "Models browser: %s creation failed; no model key was written.\n", className );
+            return false;
         }
 
         g_nUpdateBits = -1;
         char x[32], y[32], z[32];
-        Sys_Printf( "Placed misc_model '%s' at %s %s %s.\n", modelName,
+        Sys_Printf( "Placed %s '%s' at %s %s %s.\n", className, modelName,
                     KiwiFmt_Num( x, sizeof( x ), origin[0] ),
                     KiwiFmt_Num( y, sizeof( y ), origin[1] ),
                     KiwiFmt_Num( z, sizeof( z ), origin[2] ) );
         KiwiCmd_AfterPaste();
+        return true;
     }
 
     bool PayloadName( const ImGuiPayload *payload, std::string &out )
@@ -657,6 +737,12 @@ void KiwiModelBrowser_Draw()
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "Delete cached model/entity thumbnails; visible tiles reload lazily" );
         ImGui::Separator();
+
+        if ( s_rescanPending )
+        {
+            s_rescanPending = false;
+            EnumerateModels();               // a delete happened last frame
+        }
 
         std::vector<int> visible;
         visible.reserve( s_models.size() );
@@ -788,10 +874,105 @@ void KiwiModelBrowser_RegisterCommands()
 {
     KiwiThumbCache_Init();
     Radiant_RegisterCommand( "KiwiWindowModels", 0, 0, KIWI_CMD_WINDOW_MODELS );
+    Radiant_RegisterCommand( "KiwiInsertPrefab", 0, 0, KIWI_CMD_PREFAB_INSERT );
+}
+
+namespace
+{
+    std::string PrefabRoot()
+    {
+        if ( g_qeglobals.d_project_entity )
+            for ( epair_t *ep = g_qeglobals.d_project_entity->epairs; ep; ep = ep->next )
+                if ( !_stricmp( ep->key, "mapspath" ) && ep->value && ep->value[0] )
+                    return ep->value;
+        char exe[MAX_PATH] = {};
+        ::GetModuleFileNameA( nullptr, exe, MAX_PATH );
+        char *slash = strrchr( exe, '\\' );
+        if ( slash ) *slash = '\0';
+        return std::string( exe ) + "\\map_source";
+    }
+
+    std::string FullPrefabPath( const std::string &path )
+    {
+        char full[MAX_PATH] = {};
+        DWORD n = ::GetFullPathNameA( path.c_str(), MAX_PATH, full, nullptr );
+        if ( !n || n >= MAX_PATH ) return std::string();
+        for ( char *p = full; *p; ++p ) if ( *p == '\\' ) *p = '/';
+        return full;
+    }
+}
+
+bool KiwiModelBrowser_InsertPrefab( const char *relativePath )
+{
+    if ( !relativePath || !relativePath[0] ) return false;
+    std::string root = FullPrefabPath( PrefabRoot() );
+    if ( root.empty() ) return false;
+    if ( root.back() != '/' ) root += '/';
+    const std::string full = FullPrefabPath( root + relativePath );
+    extern char currentmap[];
+    const std::string current = FullPrefabPath( currentmap );
+    if ( full.size() <= root.size() || _strnicmp( full.c_str(), root.c_str(), root.size() )
+      || full.size() < 4 || _stricmp( full.c_str() + full.size() - 4, ".map" )
+      || !_stricmp( full.c_str(), current.c_str() )
+      || ::GetFileAttributesA( full.c_str() ) == INVALID_FILE_ATTRIBUTES )
+    {
+        Sys_Printf( "Insert Prefab: choose an existing .map inside map_source, other than the current map.\n" );
+        return false;
+    }
+    // File commands execute outside the ImGui frame, so the native model loader is safe.
+    const std::string name = full.substr( root.size() );
+    // New/unsaved maps may not have a project yet. The native loader must use
+    // exactly the same root that the chooser and path validation just used.
+    bool haveProjectRoot = false;
+    if ( g_qeglobals.d_project_entity )
+        for ( epair_t *ep = g_qeglobals.d_project_entity->epairs; ep; ep = ep->next )
+            if ( ep->key && !_stricmp( ep->key, "mapspath" ) && ep->value && ep->value[0] )
+                haveProjectRoot = true;
+    if ( !haveProjectRoot )
+        Radiant_SetProjectMapsPath( ( root + "__prefab_insert.map" ).c_str() );
+    ray_t ray;
+    camera_s *camera = Ed_Camera();
+    if ( !camera || !Pick_RayFromImagePos( camera->width / 2, camera->height / 2, &ray ) )
+        return false;
+    float origin[3], mins[3], maxs[3];
+    const float boxMin[3] = { -16, -16, -16 }, boxMax[3] = { 16, 16, 16 };
+    const float angles[3] = {};
+    if ( !KiwiDrop_ComputePlacement( ray, boxMin, boxMax, angles, 1, origin, mins, maxs ) )
+        return false;
+    return PerformDrop( name.c_str(), -1, -1, origin, true );
+}
+
+void KiwiModelBrowser_BuildFileMenu( void *frameMenu )
+{
+    HMENU file = ::GetSubMenu( (HMENU)frameMenu, 0 );
+    if ( !file || ::GetMenuState( file, KIWI_CMD_PREFAB_INSERT, MF_BYCOMMAND ) != (UINT)-1 ) return;
+    if ( !::InsertMenuA( file, 32844, MF_BYCOMMAND | MF_STRING, KIWI_CMD_PREFAB_INSERT, "Insert &Prefab..." ) )
+        ::AppendMenuA( file, MF_STRING, KIWI_CMD_PREFAB_INSERT, "Insert &Prefab..." );
 }
 
 bool KiwiModelBrowser_DispatchInstant( unsigned int cmdId )
 {
+    if ( cmdId == KIWI_CMD_PREFAB_INSERT )
+    {
+        char file[MAX_PATH] = {};
+        const std::string root = FullPrefabPath( PrefabRoot() );
+        OPENFILENAMEA ofn = {};
+        ofn.lStructSize = sizeof( ofn ); ofn.hwndOwner = g_qeglobals.d_hwndMain;
+        ofn.lpstrFilter = "Prefab maps (*.map)\0*.map\0\0";
+        ofn.lpstrTitle = "Insert Prefab - placed as one selectable object";
+        ofn.lpstrInitialDir = root.c_str(); ofn.lpstrFile = file; ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if ( ::GetOpenFileNameA( &ofn ) )
+        {
+            const std::string full = FullPrefabPath( file );
+            const std::string prefix = root + '/';
+            if ( !_strnicmp( full.c_str(), prefix.c_str(), prefix.size() ) )
+                KiwiModelBrowser_InsertPrefab( full.c_str() + prefix.size() );
+            else
+                Sys_Printf( "Insert Prefab: place the prefab and its dependencies inside %s first.\n", root.c_str() );
+        }
+        return true;
+    }
     if ( cmdId != (unsigned int)KIWI_CMD_MODEL_DROP )
         return false;
     if ( !s_pendHave )

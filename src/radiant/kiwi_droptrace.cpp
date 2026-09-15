@@ -17,8 +17,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <vector>
+#include <algorithm>
+#include <unordered_map>
 
 extern entity_s *world_entity;                                         // map.cpp
+extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
 extern void Test_Ray( float *start, float *dir, int contents,
                       edTrace_t *trace, int traceCount );              // select.cpp
 extern int Entity_GetVec3ForKey( entity_s_def *entity, float *out,
@@ -90,7 +93,7 @@ namespace
     bool RayBounds( const float origin[3], const float dir[3],
                     const float mins[3], const float maxs[3],
                     float *outDist, float outNormal[3],
-                    float *outLowerBound = 0 )
+                    float *outLowerBound = 0, float parallelEps = KDROP_RAY_EPS )
     {
         float nearDist = -FLT_MAX;
         float farDist = FLT_MAX;
@@ -99,7 +102,7 @@ namespace
 
         for ( int axis = 0; axis < 3; ++axis )
         {
-            if ( fabsf( dir[axis] ) < KDROP_RAY_EPS )
+            if ( fabsf( dir[axis] ) < parallelEps )
             {
                 if ( origin[axis] < mins[axis] || origin[axis] > maxs[axis] )
                     return false;
@@ -147,6 +150,84 @@ namespace
             outNormal[2] = normal[2];
         }
         return true;
+    }
+
+    // Model-local BVHs are shared by instances and survive object transforms.
+    // Their borrowed geometry is owned by KiwiShadowCache, whose teardown clears
+    // this table first. No per-frame extraction or per-instance triangle copy.
+    struct meshTree_t
+    {
+        struct node_t { float lo[3], hi[3]; int first, count, left, right; };
+        const float *verts = nullptr;
+        const unsigned short *indices = nullptr;
+        int indexCount = 0;
+        std::vector<int> order;
+        std::vector<node_t> nodes;
+        int Build( int first, int count )
+        {
+            node_t n = {};
+            n.first = first; n.count = count; n.left = n.right = -1;
+            for ( int k = 0; k < 3; ++k ) { n.lo[k] = FLT_MAX; n.hi[k] = -FLT_MAX; }
+            for ( int i = first; i < first + count; ++i )
+                for ( int c = 0; c < 3; ++c )
+                {
+                    const float *v = verts + 3 * indices[order[i] * 3 + c];
+                    for ( int k = 0; k < 3; ++k )
+                    { n.lo[k] = (std::min)( n.lo[k], v[k] ); n.hi[k] = (std::max)( n.hi[k], v[k] ); }
+                }
+            // Conservative padding protects flat surfaces and edge hits.
+            for ( int k = 0; k < 3; ++k ) { n.lo[k] -= .001f; n.hi[k] += .001f; }
+            const int id = (int)nodes.size(); nodes.push_back( n );
+            if ( count > 16 )
+            {
+                int axis = 0;
+                for ( int k = 1; k < 3; ++k )
+                    if ( n.hi[k] - n.lo[k] > n.hi[axis] - n.lo[axis] ) axis = k;
+                const int middle = first + count / 2;
+                auto center = [&]( int t ) {
+                    return verts[3 * indices[t*3] + axis] + verts[3 * indices[t*3+1] + axis] + verts[3 * indices[t*3+2] + axis];
+                };
+                std::nth_element( order.begin()+first, order.begin()+middle, order.begin()+first+count,
+                    [&]( int a, int b ) { return center(a) < center(b); } );
+                const int left = Build( first, middle-first );
+                const int right = Build( middle, first+count-middle );
+                nodes[id].left = left; nodes[id].right = right;
+            }
+            return id;
+        }
+        void Trace( int id, const float *start, const float *dir, float &best, float *normal ) const
+        {
+            const node_t &n = nodes[id]; float lower;
+            if ( !RayBounds( start, dir, n.lo, n.hi, nullptr, nullptr, &lower, 1.0e-20f ) || lower > best ) return;
+            if ( n.left >= 0 )
+            { Trace( n.left, start, dir, best, normal ); Trace( n.right, start, dir, best, normal ); return; }
+            for ( int j = n.first; j < n.first+n.count; ++j )
+            {
+                const int i = order[j]*3;
+                const float *a=verts+3*indices[i], *b=verts+3*indices[i+1], *c=verts+3*indices[i+2];
+                float dist;
+                if ( !PMESH_RaySegPick( c, b, dir, a, start, &dist, nullptr, nullptr )
+                  || !_finite(dist) || dist <= KDROP_RAY_EPS || dist >= best ) continue;
+                best = dist;
+                const float u[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]}, v[3]={c[0]-a[0],c[1]-a[1],c[2]-a[2]};
+                normal[0]=u[1]*v[2]-u[2]*v[1]; normal[1]=u[2]*v[0]-u[0]*v[2]; normal[2]=u[0]*v[1]-u[1]*v[0];
+            }
+        }
+    };
+    std::unordered_map<XModel *, meshTree_t> s_meshTrees;
+
+    void TraceMesh( XModel *model, const float *verts, const unsigned short *indices,
+                    int indexCount, const float *start, const float *dir, float &best, float *normal )
+    {
+        meshTree_t &tree = s_meshTrees[model];
+        if ( tree.verts != verts || tree.indices != indices || tree.indexCount != indexCount )
+        {
+            tree.verts=verts; tree.indices=indices; tree.indexCount=indexCount;
+            tree.order.resize(indexCount/3); tree.nodes.clear();
+            for ( int i=0; i<indexCount/3; ++i ) tree.order[i]=i;
+            if ( !tree.order.empty() ) tree.Build(0,(int)tree.order.size());
+        }
+        if ( !tree.nodes.empty() ) tree.Trace(0,start,dir,best,normal);
     }
 
     bool ModelMeshVisible( const selbrush_t *node )
@@ -252,6 +333,16 @@ namespace
                               const float start[3], const float dir[3],
                               float *outDist, float outNormal[3] )
     {
+        if ( candidate.owner->prefab )
+        {
+            edTrace_t trace = {};
+            if ( !KiwiSelect_TracePrefab( candidate.node, start, dir, &trace ) )
+                return false;
+            *outDist = trace.dist;
+            for ( int i = 0; i < 3; ++i )
+                outNormal[i] = trace.normal[i];
+            return NormalizeNormal( outNormal, dir );
+        }
         float relativeOrigin[3] = { start[0] - candidate.origin[0],
                                     start[1] - candidate.origin[1],
                                     start[2] - candidate.origin[2] };
@@ -270,24 +361,7 @@ namespace
         {
             float best = FLT_MAX;
             float bestLocalNormal[3] = { 0.0f, 0.0f, 1.0f };
-            for ( int i = 0; i + 2 < indexCount; i += 3 )
-            {
-                const float *a = verts + 3 * indices[i + 0];
-                const float *b = verts + 3 * indices[i + 1];
-                const float *c = verts + 3 * indices[i + 2];
-                float dist;
-                if ( PMESH_RaySegPick( c, b, localDir, a, localOrigin,
-                                       &dist, 0, 0 )
-                  && dist > KDROP_RAY_EPS && _finite( dist ) && dist < best )
-                {
-                    best = dist;
-                    const float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
-                    const float e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
-                    bestLocalNormal[0] = e1[1] * e2[2] - e1[2] * e2[1];
-                    bestLocalNormal[1] = e1[2] * e2[0] - e1[0] * e2[2];
-                    bestLocalNormal[2] = e1[0] * e2[1] - e1[1] * e2[0];
-                }
-            }
+            TraceMesh( candidate.model, verts, indices, indexCount, localOrigin, localDir, best, bestLocalNormal );
             if ( best < FLT_MAX )
             {
                 *outDist = best * candidate.scale;
@@ -333,6 +407,58 @@ namespace
     };
 }
 
+void KiwiDrop_ClearModelTrees()
+{
+    s_meshTrees.clear();
+}
+
+int KiwiDrop_TraceModelCached( selbrush_t *node, const float *start, const float *dir,
+                               float *outDist, float *outNormal )
+{
+    if ( !node || !node->owner || node->owner->prefab || !start || !dir || !outDist ) return -1;
+    modelCandidate_t candidate = {};
+    float angles[3];
+    if ( !KiwiDrop_GetModelInfo( node, candidate.mins, candidate.maxs, angles,
+                                &candidate.scale, candidate.origin, &candidate.model ) || !candidate.model ) return -1;
+    const float *v; const unsigned short *indices; int count;
+    if ( !KiwiShadowCache_ModelGeo(candidate.model,&v,&indices,&count) ) return -1;
+    candidate.owner=node->owner;candidate.node=node;candidate.meshVisible=true;
+    AnglesToAxis(angles,candidate.axis);
+    float distance,normal[3];
+    if ( !TraceModelCandidate(candidate,start,dir,&distance,normal) ) return 0;
+    *outDist=distance;
+    if ( outNormal ) for ( int k=0;k<3;++k ) outNormal[k]=normal[k];
+    return 1;
+}
+
+bool KiwiDrop_ValidateModelTree( selbrush_t *node )
+{
+    float lo[3],hi[3],angles[3],scale,origin[3];XModel *model=nullptr;
+    if ( !KiwiDrop_GetModelInfo(node,lo,hi,angles,&scale,origin,&model) || !model ) return false;
+    const float *v;const unsigned short *ix;int count;
+    if ( !KiwiShadowCache_ModelGeo(model,&v,&ix,&count) ) return false;
+    // Rays from all three principal directions include misses and interior holes.
+    for ( int axis=0;axis<3;++axis ) for ( int x=0;x<9;++x ) for ( int y=0;y<9;++y )
+    {
+        const int u=(axis+1)%3,w=(axis+2)%3;
+        float start[3],dir[3]={};dir[axis]=-1;
+        // Some near-parallel rays exercise conservative BVH slabs too.
+        dir[u]=(x%2) ? 1.0e-7f : 0.0f;
+        start[axis]=hi[axis]+128;start[u]=lo[u]+(hi[u]-lo[u])*(x+.5f)/9;
+        start[w]=lo[w]+(hi[w]-lo[w])*(y+.5f)/9;
+        float fast=FLT_MAX,slow=FLT_MAX,normal[3];
+        TraceMesh(model,v,ix,count,start,dir,fast,normal);
+        for ( int i=0;i+2<count;i+=3 )
+        {
+            float dist;
+            if ( PMESH_RaySegPick(v+3*ix[i+2],v+3*ix[i+1],dir,v+3*ix[i],start,&dist,nullptr,nullptr)
+              && _finite(dist) && dist>KDROP_RAY_EPS && dist<slow ) slow=dist;
+        }
+        if ( (fast==FLT_MAX)!=(slow==FLT_MAX) || (fast!=FLT_MAX && fabsf(fast-slow)>.001f) ) return false;
+    }
+    return true;
+}
+
 bool KiwiDrop_BoundsValid( const float mins[3], const float maxs[3] )
 {
     if ( !mins || !maxs )
@@ -365,6 +491,23 @@ bool KiwiDrop_GetModelInfo( selbrush_t *node,
     if ( !def || !KiwiDrop_IsModelEntity( node )
       || !mins || !maxs || !angles || !scale || !origin )
         return false;
+
+    // Prefabs have an oriented world-space proxy enclosing all their children.
+    // They are not XModels, and their native transform does not use modelscale.
+    if ( def->eclass && ( def->eclass->classtype & 0x10 ) != 0 )
+    {
+        if ( !node->def )
+            return false;
+        for ( int i = 0; i < 3; ++i )
+        {
+            origin[i] = def->origin[i];
+            mins[i] = node->def->mins[i] - origin[i];
+            maxs[i] = node->def->maxs[i] - origin[i];
+            angles[i] = 0.0f;
+        }
+        *scale = 1.0f;
+        return KiwiDrop_BoundsValid( mins, maxs );
+    }
 
     XModel *model = 0;
     bool haveBounds = false;

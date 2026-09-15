@@ -17,6 +17,7 @@
 #include "kiwi_selection.h"
 #include "kiwi_viewcube.h"
 #include "kiwi_windows.h"         // Native View-menu checkbox synchronization.
+#include "kiwi_surfcache.h"
 #include "radiant_registry.h"
 
 #include <imgui/imgui.h>
@@ -69,7 +70,17 @@ void KiwiUX_SetShowHover( bool on )    { Set( s_showHover, on ); g_nUpdateBits |
 bool KiwiUX_ShowTriCount()             { return Get( s_showTris ); }
 void KiwiUX_SetShowTriCount( bool on ) { Set( s_showTris, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_ShowFacingArrows()             { return Get( s_showFacing ); }
-void KiwiUX_SetShowFacingArrows( bool on ) { Set( s_showFacing, on ); g_nUpdateBits = -1; }
+void KiwiUX_SetShowFacingArrows( bool on )
+{
+    if ( Get( s_showFacing ) == on )
+        return;
+    Set( s_showFacing, on );
+    // Legacy prefab arrows are captured alongside entity geometry. Merely
+    // requesting a redraw replays them, and partial invalidation keeps clean
+    // segments: discard the complete capture when changing this draw policy.
+    KiwiSurfCache_InvalidateAll( "facing arrows" );
+    g_nUpdateBits = -1;
+}
 
 // Settings UI.
 void KiwiUX_DrawSettings()

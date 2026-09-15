@@ -3201,6 +3201,17 @@ namespace
             m_undoOpen = false;
             m_haveStartX = CursorPixels( &m_startX, &m_dummyY );
 
+            for ( selbrush_t *b = selected_brushes.next;
+                  b && b != &selected_brushes; b = b->next )
+            {
+                entity_s_def *def = b->owner ? (entity_s_def *)b->owner->def : nullptr;
+                if ( def && def->eclass && ( def->eclass->classtype & 0x10 ) )
+                {
+                    Sys_Printf( "Scale: native prefabs do not support instance scaling. Edit the prefab contents to resize them.\n" );
+                    return false;
+                }
+            }
+
             m_construct = m_refImage = false;
             m_pivotOverridden = false;
             m_pivotPlacing    = false;

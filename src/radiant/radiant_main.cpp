@@ -672,6 +672,9 @@ static bool Radiant_BootFrame( HWND frame )
         KiwiWindows_BuildViewMenu( s_hMenu );
         // KIWI: append before the launcher below performs the final DrawMenuBar.
         KiwiPlastBridge_BuildMenu( s_hMenu );
+        // KIWI: native prefab insertion shares the model placement/undo pipeline.
+        extern void KiwiModelBrowser_BuildFileMenu( void *frameMenu );
+        KiwiModelBrowser_BuildFileMenu( s_hMenu );
 
         // 4a-quater) KIWI-UX (ROUND BH, ITEM 5), user directive "Build and run needs
         //     to be in the win32 toolbar somewhere": a top-level, popup-less

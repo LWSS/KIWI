@@ -34,6 +34,8 @@
 
 extern int Sys_Printf( const char *fmt, ... );
 extern float *AnglesToAxis( float *angles, float ( *axisOut )[3] );
+extern selbrush_t active_brushes;                       // map.cpp (the unselected list)
+extern char FilterBrush( selbrush_t *a1, int a2 );      // filters.cpp:718 - hidden/filtered
 
 namespace
 {
@@ -61,6 +63,11 @@ namespace
     const int CONSTRUCTION_THICKNESS_MAX_MILLI = 4000;
     int s_exportConstruction = -1;
     int s_constructionThicknessMilli = -1;
+    // KIWI (2026-09-13, user: "terrain isn't exporting when pushing to plasticity"):
+    // the push is selection-driven and sculpted terrain is almost never part of the
+    // selection, so every visible terrain sheet rides along in the OBJ (one mesh per
+    // patch) when this preference is on - the default.
+    int s_exportTerrain = -1;
     bool s_dialogRequest = false;   // Ctrl+Shift+P owes the frame an OpenPopup
     bool s_dialogOpen = false;
 
@@ -123,6 +130,8 @@ namespace
         unsigned int constructionPrisms;    // one mitered prism per planar object
         unsigned int constructionBoxes;     // per-segment fallback boxes
         unsigned int constructionSkipped;   // objects/segments that built nothing
+        unsigned int terrainPatches;        // unselected terrain sheets added as OBJ meshes
+        unsigned int terrainSkipped;
         unsigned __int64 stepFaces;
         unsigned __int64 objFaces;
 
@@ -131,6 +140,7 @@ namespace
               stepBrushes( 0 ), patches( 0 ), models( 0 ), brushFallbacks( 0 ),
               constructionObjects( 0 ), constructionPrisms( 0 ),
               constructionBoxes( 0 ), constructionSkipped( 0 ),
+              terrainPatches( 0 ), terrainSkipped( 0 ),
               stepFaces( 0 ), objFaces( 0 ) {}
     };
 
@@ -756,6 +766,45 @@ namespace
         return true;
     }
 
+    // ---- Terrain sheets, selected or not (KIWI 2026-09-13) ----------------------
+    // Every visible PATCH_TERRAIN patch in the UNSELECTED list becomes one OBJ mesh
+    // (the evaluated render grid, like a selected patch).  Selected terrain is already
+    // handled by GatherObjects, so the two never double up.
+    bool TerrainNode( const selbrush_t *b )
+    {
+        return b && b->def && b->def->patch
+            && ( b->def->patch->type & PATCH_TERRAIN ) != 0
+            && b->owner && b->owner->def;
+    }
+
+    unsigned int VisibleTerrainCount()
+    {
+        unsigned int n = 0;
+        for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+            if ( TerrainNode( b ) && !FilterBrush( b, 0 ) )
+                ++n;
+        return n;
+    }
+
+    void GatherTerrain( std::vector<ObjObject> &objects, ExportStats &stats )
+    {
+        for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+        {
+            if ( !TerrainNode( b ) || FilterBrush( b, 0 ) )
+                continue;
+            ObjObject object;
+            if ( !ObjectName( b, 'p', object.name, "terrain" ) ||
+                 !BuildPatch( b->def->patch, object ) )
+            {
+                ++stats.terrainSkipped;
+                continue;
+            }
+            ++stats.terrainPatches;
+            stats.objFaces += (unsigned __int64)object.faces.size();
+            objects.push_back( object );
+        }
+    }
+
     // ---- Construction lines as tiny STEP prisms --------------------------------
     // Plasticity cannot import construction lines and the bridge cannot create
     // curves, so each visible construction object is swept into a square prism
@@ -1174,6 +1223,10 @@ namespace
                         "+ %u per-segment box(es) in the STEP; %u skipped.\n",
                         stats.constructionObjects, stats.constructionPrisms,
                         stats.constructionBoxes, stats.constructionSkipped );
+        if ( stats.terrainPatches || stats.terrainSkipped )
+            Sys_Printf( "Plasticity export: %u unselected terrain sheet(s) -> OBJ meshes; "
+                        "%u skipped (no evaluated grid).\n",
+                        stats.terrainPatches, stats.terrainSkipped );
     }
 
     bool ExportPaths( std::string &stepPath, std::string &objPath,
@@ -1602,6 +1655,23 @@ namespace
         s_exportConstruction = value;
         Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION, "PlasticityExportConstruction",
                                value );
+    }
+
+    bool ExportTerrainEnabled()
+    {
+        if ( s_exportTerrain < 0 )
+            s_exportTerrain = Radiant_ProfileGetInt( PLASTICITY_PREF_SECTION,
+                                                     "PlasticityExportTerrain", 1 ) ? 1 : 0;
+        return s_exportTerrain != 0;
+    }
+
+    void SetExportTerrainEnabled( bool enabled )
+    {
+        const int value = enabled ? 1 : 0;
+        if ( s_exportTerrain == value )
+            return;
+        s_exportTerrain = value;
+        Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION, "PlasticityExportTerrain", value );
     }
 
     int ClampThicknessMilli( int milli )
@@ -2412,7 +2482,7 @@ namespace
     // `handOff` false writes the files and only prints their paths (test mode);
     // true runs the auto-import, which itself falls back to Explorer when the
     // PlasticityAutoImport preference is off.
-    bool ExecuteExport( bool includeConstruction, bool handOff )
+    bool ExecuteExport( bool includeConstruction, bool includeTerrain, bool handOff )
     {
         std::string stepPath;
         std::string objPath;
@@ -2430,7 +2500,9 @@ namespace
         const bool gathered = GatherObjects( solids, objects, stats, error );
         if ( includeConstruction )
             GatherConstruction( ConstructionThickness(), solids, stats );
-        if ( !gathered && solids.empty() )
+        if ( includeTerrain )
+            GatherTerrain( objects, stats );
+        if ( !gathered && solids.empty() && objects.empty() )
         {
             Sys_Printf( "Plasticity export: %s.\n", error.c_str() );
             PrintExportStats( stats );
@@ -2563,6 +2635,23 @@ void KiwiPlastBridge_Draw()
     DrawConstructionOptions( conObjects, conSegments );
     const bool includeConstruction = ExportConstructionEnabled();
 
+    // KIWI (2026-09-13): terrain sheets, selected or not, as OBJ meshes.
+    const unsigned int terrainCount = VisibleTerrainCount();
+    {
+        bool includeTerrainOpt = ExportTerrainEnabled();
+        char tlabel[160];
+        _snprintf( tlabel, sizeof( tlabel ),
+                   "Include all terrain as meshes (%u visible unselected sheet(s))", terrainCount );
+        tlabel[sizeof( tlabel ) - 1] = '\0';
+        if ( ImGui::Checkbox( tlabel, &includeTerrainOpt ) )
+            SetExportTerrainEnabled( includeTerrainOpt );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Every visible terrain patch goes into the OBJ as one mesh\n"
+                               "(its evaluated render grid), whether or not it is selected.\n"
+                               "Selected terrain is exported either way." );
+    }
+    const bool includeTerrain = ExportTerrainEnabled();
+
     bool autoImport = AutoImportEnabled();
     if ( ImGui::Checkbox( "Auto-import into Plasticity", &autoImport ) )
         SetAutoImportEnabled( autoImport );
@@ -2572,7 +2661,8 @@ void KiwiPlastBridge_Draw()
     ImGui::Separator();
 
     const bool canSend = pathsOk &&
-                         ( selectedCount > 0 || ( includeConstruction && conObjects > 0 ) );
+                         ( selectedCount > 0 || ( includeConstruction && conObjects > 0 )
+                           || ( includeTerrain && terrainCount > 0 ) );
     const bool enter = ImGui::IsKeyPressed( ImGuiKey_Enter, false ) ||
                        ImGui::IsKeyPressed( ImGuiKey_KeypadEnter, false );
     ImGui::BeginDisabled( !canSend );
@@ -2589,12 +2679,12 @@ void KiwiPlastBridge_Draw()
     ImGui::EndPopup();
 
     if ( send )
-        ExecuteExport( includeConstruction, true );
+        ExecuteExport( includeConstruction, includeTerrain, true );
 }
 
-bool KiwiPlastBridge_ExportNow( bool includeConstruction, bool handOff )
+bool KiwiPlastBridge_ExportNow( bool includeConstruction, bool includeTerrain, bool handOff )
 {
-    return ExecuteExport( includeConstruction, handOff );
+    return ExecuteExport( includeConstruction, includeTerrain, handOff );
 }
 
 bool KiwiPlastBridge_CanPush()
@@ -2632,6 +2722,9 @@ bool KiwiPlastBridge_CanPush()
         if ( conObjects > 0 )
             return true;
     }
+    // So is a map whose terrain is the reference (KIWI 2026-09-13).
+    if ( ExportTerrainEnabled() && VisibleTerrainCount() > 0 )
+        return true;
     return false;
 }
 

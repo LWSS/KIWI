@@ -8,6 +8,9 @@
 
 struct IDirect3DTexture9;
 
+#include <string>
+#include <vector>
+
 typedef unsigned __int64 kiwiThumbSourceHash_t;
 
 enum kiwiThumbCacheFormat_t
@@ -55,6 +58,15 @@ bool KiwiThumbCache_Write( const char *xmodelName,
 bool KiwiThumbCache_ResolveModelSource( const char *xmodelName,
                                         char *outContainer, int containerSize,
                                         bool *outLoose );
+
+// KIWI (2026-09-13, "permanent delete on xmodels"): every file the asset is made of -
+// xmodel/<name> plus the xmodelparts/<lod> and xmodelsurfs/<lod> its header names -
+// resolved the loader's way.  Loose files land in `outLoose` as OS paths; IWD members
+// in `outPacked` as "qpath (in <iwd>)" (they cannot be deleted).  False when the
+// xmodel itself is not on the search path.
+bool KiwiThumbCache_ResolveModelFiles( const char *xmodelName,
+                                       std::vector<std::string> *outLoose,
+                                       std::vector<std::string> *outPacked );
 
 // Writers must invalidate after replacing xmodel/<name> or its parts/surfs;
 // otherwise the cached source hash is not recomputed until the next process start.

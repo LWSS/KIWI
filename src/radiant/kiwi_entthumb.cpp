@@ -19,6 +19,8 @@
 #include <gfx_d3d/r_scene.h>        // R_Ed_SetSceneParms / R_Ed_ProjectionWouldBeValid
 #include <gfx_d3d/r_rendercmds.h>   // R_BeginFrame/EndFrame, clear, MaterialTechniqueType
 #include <gfx_d3d/r_model.h>        // R_RegisterModel
+#include <gfx_d3d/r_material.h>     // Material::info.name (tooltip stats)
+#include <gfx_d3d/r_xsurface.h>     // XSurfaceGetNumTris / NumVerts (tooltip stats)
 #include <xanim/xmodel.h>           // XModel, XModelBad, XModelGetBounds
 #include <universal/com_math.h>     // AngleVectors
 #include <universal/q_parse.h>      // Com_GetParseThreadInfo / negativeNumbers
@@ -583,6 +585,60 @@ bool KiwiEntThumb_ModelFailed( const char *xmodelName )
     const std::string key = ModelCacheKey( xmodelName );
     kiwiTexCache_t::const_iterator it = s_cache.find( key );
     return it != s_cache.end() && it->second.failed;
+}
+
+bool KiwiEntThumb_ModelStats( const char *xmodelName, kiwiModelStats_t *out )
+{
+    if ( !xmodelName || !*xmodelName || !out )
+        return false;
+    memset( out, 0, sizeof( *out ) );
+    if ( KiwiEntThumb_ModelFailed( xmodelName ) )
+        return false;
+    XModel *model = RegisterGuarded( xmodelName );
+    if ( !model || XModelBad( model ) )
+        return false;
+
+    out->lods      = XModelGetNumLods( model );
+    out->bones     = XModelNumBones( model );
+    out->collSurfs = model->numCollSurfs;
+    for ( int lod = 0; lod < out->lods && lod < 4; ++lod )
+    {
+        const int surfCount = (int)XModelGetSurfCount( model, lod );
+        for ( int s = 0; s < surfCount; ++s )
+        {
+            const XSurface *surf = XModelGetSurface( model, lod, s );
+            if ( !surf )
+                continue;
+            const int tris  = XSurfaceGetNumTris( surf );
+            const int verts = XSurfaceGetNumVerts( surf );
+            out->totalTris += tris;
+            if ( lod == 0 )
+            {
+                ++out->lod0Surfs;
+                out->lod0Tris  += tris;
+                out->lod0Verts += verts;
+            }
+        }
+        if ( lod != 0 )
+            continue;
+        Material **skins = XModelGetSkins( model, 0 );
+        for ( int s = 0; skins && s < surfCount; ++s )
+        {
+            const Material *m = skins[s];
+            const char *name = ( m && m->info.name ) ? m->info.name : nullptr;
+            if ( !name || !name[0] )
+                continue;
+            bool dup = false;
+            for ( int k = 0; k < out->materialCount && !dup; ++k )
+                dup = ( _stricmp( out->materials[k], name ) == 0 );
+            if ( dup || out->materialCount >= 8 )
+                continue;
+            strncpy( out->materials[out->materialCount], name, sizeof( out->materials[0] ) - 1 );
+            out->materials[out->materialCount][sizeof( out->materials[0] ) - 1] = '\0';
+            ++out->materialCount;
+        }
+    }
+    return true;
 }
 
 void KiwiEntThumb_Tick()

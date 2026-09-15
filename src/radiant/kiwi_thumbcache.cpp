@@ -466,6 +466,68 @@ bool KiwiThumbCache_ResolveModelSource( const char *xmodelName,
     return true;
 }
 
+bool KiwiThumbCache_ResolveModelFiles( const char *xmodelName,
+                                       std::vector<std::string> *outLoose,
+                                       std::vector<std::string> *outPacked )
+{
+    if ( outLoose )  outLoose->clear();
+    if ( outPacked ) outPacked->clear();
+    const std::string model = NormalizeModelName( xmodelName );
+    if ( model.empty() || !fs_searchpaths )
+        return false;
+
+    std::vector<std::string> qpaths;
+    qpaths.push_back( std::string( "xmodel/" ) + model );
+
+    // The header names the LOD parts/surfs (the same parse the source hash uses).
+    void *buffer = nullptr;
+    const std::string modelQPath = qpaths[0];
+    const int fileSize = FS_ReadFile( modelQPath.c_str(), &buffer );
+    std::string lodNames[4];
+    std::set<std::string> materialNames;
+    float mins[3], maxs[3];
+    const bool parsed = fileSize > 0 && buffer &&
+                        ParseXModelHeader( buffer, (size_t)fileSize, lodNames, materialNames, mins, maxs );
+    if ( buffer )
+        FS_FreeFile( (char *)buffer );
+    if ( fileSize <= 0 )
+        return false;                       // not on the search path at all
+    if ( parsed )
+    {
+        for ( int i = 0; i < 4; ++i )
+        {
+            if ( lodNames[i].empty() )
+                continue;
+            bool dup = false;
+            for ( size_t k = 1; k < qpaths.size() && !dup; ++k )
+                dup = ( qpaths[k] == std::string( "xmodelparts/" ) + lodNames[i] );
+            if ( dup )
+                continue;
+            qpaths.push_back( std::string( "xmodelparts/" ) + lodNames[i] );
+            qpaths.push_back( std::string( "xmodelsurfs/" ) + lodNames[i] );
+        }
+    }
+
+    for ( size_t i = 0; i < qpaths.size(); ++i )
+    {
+        const sourceStamp_t stamp = ResolveSource( qpaths[i].c_str() );
+        if ( stamp.kind == sourceStamp_t::LOOSE )
+        {
+            if ( outLoose )
+            {
+                bool dup = false;
+                for ( size_t k = 0; k < outLoose->size() && !dup; ++k )
+                    dup = ( _stricmp( ( *outLoose )[k].c_str(), stamp.container.c_str() ) == 0 );
+                if ( !dup )
+                    outLoose->push_back( stamp.container );
+            }
+        }
+        else if ( stamp.kind == sourceStamp_t::IWD && outPacked )
+            outPacked->push_back( qpaths[i] + " (in " + stamp.container + ")" );
+    }
+    return true;
+}
+
 bool KiwiThumbCache_SourceHash( const char *xmodelName,
                                 kiwiThumbSourceHash_t *outHash,
                                 float outMins[3], float outMaxs[3],

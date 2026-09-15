@@ -32,6 +32,10 @@ namespace
 {
 
 const unsigned int KIWI_CONVERT_MENU_ID = 0xE501u;
+// KIWI (2026-09-13, user: "right click permanent delete on ... textures"): the
+// material file and the .iwi images it references, from every raw/main root, behind
+// a Yes/No box listing them.
+const unsigned int KIWI_DELETE_MENU_ID  = 0xE502u;
 
 struct HealthEntry
 {
@@ -725,10 +729,107 @@ void KiwiMatConvert_AppendTextureContextMenu( void *menu, qtexture_s *material )
                      ? MF_STRING : MF_STRING | MF_GRAYED;
     AppendMenuA( (HMENU)menu, flags, KIWI_CONVERT_MENU_ID,
                  "Convert to lit world material" );
+    const UINT delFlags = loaded && !Material_IsDefault( loaded ) && ValidMaterialName( material->name )
+                        ? MF_STRING : MF_STRING | MF_GRAYED;
+    AppendMenuA( (HMENU)menu, delFlags, KIWI_DELETE_MENU_ID,
+                 "Delete material + its images from disk..." );
+}
+
+namespace
+{
+    void CollectMaterialFiles( const char *name, Material *loaded, std::vector<std::string> &files )
+    {
+        std::vector<std::string> roots;
+        AddRoot( roots, fs_homepath ? fs_homepath->current.string : nullptr );
+        AddRoot( roots, fs_basepath ? fs_basepath->current.string : nullptr );
+        static const char *dirs[2] = { "raw", "main" };
+
+        std::vector<std::string> qpaths;
+        char q[160];
+        _snprintf( q, sizeof( q ), "materials/%s", name ); q[sizeof( q ) - 1] = '\0';
+        qpaths.push_back( q );
+        for ( int i = 0; loaded && i < loaded->textureCount; ++i )
+        {
+            const GfxImage *img = loaded->textureTable[i].u.image;
+            if ( !img || !img->name || !img->name[0] || img->name[0] == '$' )
+                continue;
+            _snprintf( q, sizeof( q ), "images/%s.iwi", img->name ); q[sizeof( q ) - 1] = '\0';
+            bool dup = false;
+            for ( size_t k = 0; k < qpaths.size() && !dup; ++k )
+                dup = ( _stricmp( qpaths[k].c_str(), q ) == 0 );
+            if ( !dup )
+                qpaths.push_back( q );
+        }
+
+        for ( size_t r = 0; r < roots.size(); ++r )
+            for ( int d = 0; d < 2; ++d )
+                for ( size_t k = 0; k < qpaths.size(); ++k )
+                {
+                    char os[MAX_OSPATH];
+                    FS_BuildOSPath( roots[r].c_str(), dirs[d], qpaths[k].c_str(), os );
+                    if ( !FileExists( os ) )
+                        continue;
+                    bool dup = false;
+                    for ( size_t f = 0; f < files.size() && !dup; ++f )
+                        dup = ( _stricmp( files[f].c_str(), os ) == 0 );
+                    if ( !dup )
+                        files.push_back( os );
+                }
+    }
+
+    void DeleteMaterialFromDisk( qtexture_s *material )
+    {
+        const char *name = material->name;
+        Material *loaded = LoadedMaterial( material );
+        std::vector<std::string> files;
+        CollectMaterialFiles( name, loaded, files );
+        if ( files.empty() )
+        {
+            Sys_Printf( "Texture browser: no loose raw/main file found for material '%s' "
+                        "(packed in an IWD or fastfile?); nothing deleted.\n", name );
+            MessageBoxA( g_qeglobals.d_hwndMain,
+                         "No loose raw/main material or image file was found for this material.\n"
+                         "Packed (IWD / fastfile) assets cannot be deleted from here.",
+                         "Delete material from disk", MB_OK | MB_ICONINFORMATION );
+            return;
+        }
+        std::string text = "PERMANENTLY delete the material \"";
+        text += name;
+        text += "\" and its images from disk?\n\nThese files will be deleted:\n";
+        for ( size_t i = 0; i < files.size(); ++i )
+            text += "  " + files[i] + "\n";
+        text += "\nOther materials that share one of these images will lose it.\nThis cannot be undone.";
+        const int answer = MessageBoxA( g_qeglobals.d_hwndMain, text.c_str(),
+                                        "Delete material from disk",
+                                        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 );
+        if ( answer != IDYES )
+            return;
+        int deleted = 0;
+        for ( size_t i = 0; i < files.size(); ++i )
+        {
+            if ( DeleteFileA( files[i].c_str() ) )
+            {
+                ++deleted;
+                Sys_Printf( "Texture browser: deleted \"%s\".\n", files[i].c_str() );
+            }
+            else
+                Sys_Printf( "Texture browser: could not delete \"%s\" (Win32 error %lu).\n",
+                            files[i].c_str(), (unsigned long)GetLastError() );
+        }
+        Sys_Printf( "Texture browser: material '%s' - %i of %i file(s) deleted. The loaded copy "
+                    "stays in the browser and on faces until the editor restarts.\n",
+                    name, deleted, (int)files.size() );
+    }
 }
 
 bool KiwiMatConvert_HandleTextureContextCommand( unsigned int command, qtexture_s *material )
 {
+    if ( command == KIWI_DELETE_MENU_ID )
+    {
+        if ( material && material->name && ValidMaterialName( material->name ) )
+            DeleteMaterialFromDisk( material );
+        return true;
+    }
     if ( command != KIWI_CONVERT_MENU_ID )
         return false;
     if ( !material || !material->name )

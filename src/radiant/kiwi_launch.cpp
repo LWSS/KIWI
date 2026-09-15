@@ -1283,6 +1283,14 @@ void DrawCancelPopup()
     ImGui::EndPopup();
 }
 
+// KIWI (2026-09-13, user: "the log does not autoscroll to bottom"): the old rule
+// followed the tail only on the frame a line arrived AND only when the view already
+// sat within 4 px of the bottom; a burst of lines moved the bottom faster than the
+// scroll and the follow was lost for good.  Now "Follow" is a sticky state: while it
+// is on the view pins to the end every frame; wheeling up over the log turns it off
+// and scrolling back to the bottom (or the checkbox) turns it on again.
+bool s_logFollow = true;
+
 void DrawLog()
 {
     if ( ImGui::Button( "Copy log" ) )
@@ -1292,15 +1300,27 @@ void DrawLog()
     {
         s_log.clear();
         s_logScrollPending = false;
+        s_logFollow = true;
     }
+    ImGui::SameLine();
+    ImGui::Checkbox( "Follow", &s_logFollow );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "Keep the newest line in view. Wheel up over the log to pause; scroll to the bottom to resume." );
     ImGui::SameLine();
     ImGui::TextDisabled( "%d KB", (int)( s_log.size() / 1024u ) );
 
     if ( ImGui::BeginChild( "##buildlog", ImVec2( 0.0f, 0.0f ), ImGuiChildFlags_Borders,
                             ImGuiWindowFlags_HorizontalScrollbar ) )
     {
-        const bool followTail = s_logScrollPending &&
-                                ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f;
+        // A wheel-up over the log releases the follow; reaching the bottom by hand
+        // (wheel, scrollbar drag, End) re-arms it.
+        const bool hovered = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows );
+        if ( s_logFollow && hovered && ImGui::GetIO().MouseWheel > 0.0f )
+            s_logFollow = false;
+        else if ( !s_logFollow && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f
+               && ImGui::GetScrollMaxY() > 0.0f )
+            s_logFollow = true;
+        const bool followTail = s_logFollow;
 
         std::vector<size_t> lineStarts;
         if ( !s_log.empty() )
@@ -1350,6 +1370,8 @@ void DrawLog()
         if ( mono )
             ImGui::PopFont();
 
+        // The clipper leaves the cursor at the end of the whole list, so this pins the
+        // last line to the bottom edge regardless of how many lines arrived this frame.
         if ( followTail )
             ImGui::SetScrollHereY( 1.0f );
         s_logScrollPending = false;

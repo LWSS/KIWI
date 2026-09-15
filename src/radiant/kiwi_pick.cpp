@@ -493,7 +493,9 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     {
         selbrush_t *modelNode = nullptr;
         float modelDist = 0.0f, modelNormal[3] = { 0.0f, 0.0f, 1.0f };
-        const float occluder = hb ? t.dist : FLT_MAX;   // an excluded/rejected hit still occludes
+        // A prefab belongs to the model pass. Its native recursive hit must not
+        // occlude itself at the same distance, especially in models-only mode.
+        const float occluder = hb && !( hb->owner && hb->owner->prefab ) ? t.dist : FLT_MAX;
         if ( KiwiDrop_PickModelMesh( start, dir, occluder, pExcl != nullptr,
                                      &modelNode, &modelDist, modelNormal ) )
         {

@@ -677,10 +677,11 @@ void Win_UpdateThreadLock()
     }
     else
     {
-        WinThreadLock threadLock = (WinThreadLock)sys_lockThreads->current.integer;
-        if (threadLock == THREAD_LOCK_NONE && R_IsUsingAdaptiveGpuSync())
-            threadLock = THREAD_LOCK_MINIMAL;
-        Win_SetThreadLock(threadLock);
+        // KISAK: retail forced THREAD_LOCK_MINIMAL whenever r_gpuSync was adaptive, pinning
+        // the main thread to logical CPU 0 and the backend to the LAST logical CPU. On hybrid
+        // Intel parts the last logical CPU is an E-core, so the D3D submission thread landed on
+        // the slowest core. Only sys_lockThreads pins now; adaptive sync no longer implies it.
+        Win_SetThreadLock((WinThreadLock)sys_lockThreads->current.integer);
     }
 }
 

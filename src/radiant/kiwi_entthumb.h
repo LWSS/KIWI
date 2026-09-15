@@ -23,6 +23,24 @@ bool KiwiEntThumb_GetModelBounds( const char *xmodelName,
                                   float outMins[3], float outMaxs[3] );
 bool KiwiEntThumb_ModelFailed( const char *xmodelName );
 
+// KIWI (2026-09-13, user: "show tri-count and details when mousing over xmodels"):
+// the resident model's numbers for the browser tooltip.  Registers through the same
+// guarded path the thumbnail uses (a hit on an already-loaded model is a hash lookup;
+// callers only ask once the tile's preview is ready, so nothing loads on hover).
+struct kiwiModelStats_t
+{
+    int  lods;
+    int  bones;
+    int  lod0Surfs;
+    int  lod0Tris;
+    int  lod0Verts;
+    int  totalTris;          // every LOD
+    int  collSurfs;
+    int  materialCount;      // LOD 0 skins, deduplicated
+    char materials[8][64];
+};
+bool KiwiEntThumb_ModelStats( const char *xmodelName, kiwiModelStats_t *out );
+
 // Render at most one pending thumbnail before ImGui composition. Model loading is
 // process-global and synchronous, so fixed and cost-based gaps space the work.
 void KiwiEntThumb_Tick();

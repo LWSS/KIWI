@@ -3944,8 +3944,11 @@ char __cdecl R_CreateDevice(const GfxWindowParms *wndParms)
     iassert( dx.device == NULL );
     dx.depthStencilFormat = (D3DFORMAT)R_GetDepthStencilFormat(D3DFMT_A8R8G8B8);
     R_SetD3DPresentParameters(&d3dpp, wndParms);
-    behavior = 70;
-    hr = R_CreateDeviceInternal(hwnd, 0x46u, &d3dpp);
+    // FPU_PRESERVE makes the runtime save/restore x87 state around every device call; the
+    // x64 build does all float math in SSE, so the flag buys nothing and costs per call.
+    //behavior = HARDWARE_VERTEXPROCESSING | MULTITHREADED | FPU_PRESERVE;
+    behavior = D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED;
+    hr = R_CreateDeviceInternal(hwnd, behavior, &d3dpp);
     r_glob.haveThreadOwnership = 1;
     if (hr >= 0)
     {

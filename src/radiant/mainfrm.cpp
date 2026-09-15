@@ -532,7 +532,8 @@ extern signed int LayerdMatWnd();
 // geometry + prefabs via misc_prefab "model" keys, which Prefab_Load resolves as
 // <project mapspath>\<name>.  Seed mapspath = the opened map's own directory (where the stock
 // prefab tree lives), matching the real editor's project mapspath (= the map_source dir).
-static void Radiant_SetProjectMapsPath( const char *mapPath )
+// KIWI: also used by prefab insertion before the first map has been opened.
+void Radiant_SetProjectMapsPath( const char *mapPath )
 {
     if ( !mapPath )
         return;
@@ -561,6 +562,18 @@ static void Radiant_SetProjectMapsPath( const char *mapPath )
         g_qeglobals.d_project_entity = proj;
     }
 
+    // KIWI: a nested map still resolves prefab names from map_source, as cod4map does.
+    // The old directory-only seed produced .../prefabs/kiwi/prefabs/kiwi/foo.map.
+    for ( char *p = dir; *p; ++p )
+    {
+        if ( ( p == dir || p[-1] == '/' || p[-1] == '\\' )
+          && !_strnicmp( p, "map_source", 10 )
+          && ( p[10] == '\0' || p[10] == '/' || p[10] == '\\' ) )
+        {
+            p[10] = '\0';
+            break;
+        }
+    }
     SetKeyValue( proj, "mapspath", dir );
 
     // The binary's QE_LoadProject parses cod4.prj's
@@ -1417,8 +1430,10 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
 // Each raise left a paragraph behind, and every one of them stated a row count that the next
 // round made stale.  The count is no longer tracked in prose: Radiant_RegisterCommand prints a
 // loud line when the block is full (CLEANUP, C-1), so the remaining margin reports itself.
-// 112 rows costs 112 * sizeof( RadiantCommand ) of BSS in each of the two arrays.
-#define RADIANT_COMMANDS_KIWI_EXTRA 112
+// KIWI: reserve room for all current extensions, including prefab insertion.
+// A full table otherwise drops command-palette and shortcut registration silently
+// from the user's perspective (only a startup console warning remains).
+#define RADIANT_COMMANDS_KIWI_EXTRA 192
 static RadiantCommand g_radiantCommands[ ARRAYSIZE( g_radiantCommandsDefault )
                                        + RADIANT_COMMANDS_KIWI_EXTRA ];
 // The registered-at-boot binding of each extension row, i.e. its "compiled-in default" -- the
