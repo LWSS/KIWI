@@ -22,6 +22,7 @@
 #include "kiwi_conselect.h"
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"
+#include "kiwi_terrain.h"
 #include "kiwi_transform.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
@@ -310,6 +311,18 @@ namespace
         return n;
     }
 
+    // An armed sculpt tool owns the camera's LMB, so its grammar replaces the
+    // pick/select prompts (kiwi_terrain.cpp KiwiTerrain_HudPrompts).
+    int BuildTerrainPrompts( chip_t *chips )
+    {
+        int n = 0;
+        const kiwiPrompt_t *p = 0;
+        const int count = KiwiTerrain_HudPrompts( &p );
+        for ( int i = 0; i < count && p; ++i )
+            AddChip( chips, &n, p[i].key ? p[i].key : "?", p[i].label ? p[i].label : "" );
+        return n;
+    }
+
     // Region selection is KIWI-owned and invisible to KiwiXform_DominantKind.
     int BuildRegionPrompts( chip_t *chips )
     {
@@ -586,8 +599,14 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
         const bool haveConSel   = !KiwiConSel_Empty();
         // Brush wins because classic commands act on it; region normally clears construction.
         const bool haveRegion   = KiwiRegion_HasSelection();
+        // An armed terrain tool comes first: bare LMB sculpts, so selection prompts
+        // would lie about what a click does.
+        if ( KiwiTerrain_IsArmed() )
+        {
+            nP = BuildTerrainPrompts( prompts );
+        }
         // Sun wins because clicking elsewhere clears it, making it the most recent target.
-        if ( KiwiSun_Selected() )
+        else if ( KiwiSun_Selected() )
         {
             nP = BuildSunPrompts( prompts );
             nV = BuildSunVerbs  ( verbs );

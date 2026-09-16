@@ -11,6 +11,7 @@
 
 #include "kiwi_modelbrowser.h"
 #include "kiwi_command.h"
+#include "kiwi_droptrace.h"     // KiwiDrop_IsModelEntity - "Swap in place" targets
 #include "kiwi_entthumb.h"
 #include "kiwi_thumbcache.h"
 #include "kiwi_fmt.h"
@@ -26,6 +27,7 @@
 #include <vector>
 #include <string.h>
 #include <commdlg.h>
+#include <imgui_internal.h>
 
 extern int         Sys_Printf( const char *fmt, ... );
 extern int         g_nUpdateBits;
@@ -40,7 +42,9 @@ extern void        CreateEntityFromName( const char *str );
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value );
 extern void        Undo_ClearRedo();
 extern void        Undo_GeneralStart( const char *operation );
+extern void        Undo_AddEntity_W( entity_s *e );                       // undo.cpp 0x45E990
 extern void        Undo_End();
+extern void        MarkMapModified();
 extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
                                              int commandId );
 extern void        Ed_EnsureCurrentMaterial_Kiwi();
@@ -344,6 +348,84 @@ namespace
     // (s_models is being walked by the tile loop right now).
     bool s_rescanPending = false;
 
+    // KIWI (2026-09-15, user: "Swap in place with new model ... mainly to facilitate
+    // reskins"): a single click picks a tile (accent frame); the button rewrites the
+    // "model" key of every selected misc_model to the picked name.  Every other key -
+    // origin, angles, modelscale, targetname, spawnflags - is untouched, so the new
+    // model lands exactly where the old one stood; Checkkey_Model / SetupModelInst
+    // rebuild the instance and its proxy box, and one undo record covers the batch.
+    std::string s_pickedModel;
+
+    int SelectedModelEntities( std::vector<entity_s_def *> *out )
+    {
+        if ( out )
+            out->clear();
+        int n = 0;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !b->owner || !b->owner->def || !KiwiDrop_IsModelEntity( b ) )
+                continue;
+            entity_s_def *def = (entity_s_def *)b->owner->def;
+            if ( def->eclass && ( def->eclass->classtype & 0x10 ) )
+                continue;                               // native prefabs are not xmodels
+            bool dup = false;
+            if ( out )
+                for ( size_t i = 0; i < out->size() && !dup; ++i )
+                    dup = ( ( *out )[i] == def );
+            if ( dup )
+                continue;
+            if ( out )
+                out->push_back( def );
+            ++n;
+        }
+        return n;
+    }
+
+    bool SwapSelectedModels( const char *modelName, char *err, size_t errSz )
+    {
+        if ( err && errSz ) err[0] = '\0';
+        if ( !modelName || !modelName[0] )
+        {
+            if ( err ) _snprintf( err, errSz, "no replacement model picked" );
+            return false;
+        }
+        std::vector<entity_s_def *> defs;
+        if ( SelectedModelEntities( &defs ) == 0 )
+        {
+            if ( err ) _snprintf( err, errSz, "no misc_model is selected in the 3D view" );
+            return false;
+        }
+        std::string name = modelName;
+        for ( size_t i = 0; i < name.size(); ++i )
+            if ( name[i] == '\\' ) name[i] = '/';
+        if ( !_strnicmp( name.c_str(), "xmodel/", 7 ) )
+            name.erase( 0, 7 );
+
+        Undo_ClearRedo();
+        Undo_GeneralStart( "swap model in place" );
+        int swapped = 0;
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            const char *old = nullptr;
+            for ( const epair_t *ep = defs[i]->epairs; ep && !old; ep = ep->next )
+                if ( ep->key && !_stricmp( ep->key, "model" ) )
+                    old = ep->value ? ep->value : "";
+            if ( old && !_stricmp( old, name.c_str() ) )
+                continue;                               // already that model
+            Undo_AddEntity_W( (entity_s *)defs[i] );
+            SetKeyValue( defs[i], "model", name.c_str() );   // Checkkey_Model + EntityAssignModel
+            ++swapped;
+        }
+        Undo_End();
+        MarkMapModified();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Models browser: swapped %i of %i selected model(s) to '%s' in place.\n",
+                    swapped, (int)defs.size(), name.c_str() );
+        if ( swapped == 0 && err )
+            _snprintf( err, errSz, "the selected model(s) already use '%s'", name.c_str() );
+        return swapped > 0;
+    }
+
     void DeleteModelFromDisk( const char *modelName )
     {
         std::vector<std::string> loose, packed;
@@ -477,10 +559,18 @@ namespace
             ImGui::EndPopup();
         }
 
+        // A plain click (no drag travel) picks the tile for "Swap in place".
+        if ( hovered && !failed && ImGui::IsMouseReleased( ImGuiMouseButton_Left )
+          && !ImGui::IsMouseDragPastThreshold( ImGuiMouseButton_Left ) )
+            s_pickedModel = row.name;
+        const bool picked = !s_pickedModel.empty() && NameEqual( s_pickedModel, row.name );
+
         ImDrawList *dl = ImGui::GetWindowDrawList();
         const ImVec2 boxMax( p0.x + KMODEL_TILE_W, p0.y + KMODEL_TILE_H );
         if ( hovered || active )
             dl->AddRectFilled( p0, p1, ImGui::GetColorU32( ImGuiCol_FrameBgHovered ), 3.0f );
+        if ( picked )
+            dl->AddRect( p0, p1, ImGui::GetColorU32( ImGuiCol_ButtonActive ), 3.0f, 0, 2.0f );
         if ( thumb && !failed )
         {
             const float side = KMODEL_TILE_H;
@@ -736,6 +826,37 @@ void KiwiModelBrowser_Draw()
             KiwiThumbCache_InvalidateAll();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "Delete cached model/entity thumbnails; visible tiles reload lazily" );
+
+        {
+            const int selectedModels = SelectedModelEntities( nullptr );
+            const bool canSwap = selectedModels > 0 && !s_pickedModel.empty();
+            ImGui::BeginDisabled( !canSwap );
+            if ( ImGui::Button( "Swap in place with new model" ) )
+            {
+                char err[256];
+                if ( !SwapSelectedModels( s_pickedModel.c_str(), err, sizeof( err ) ) )
+                    Sys_Printf( "Models browser: swap failed - %s.\n", err );
+            }
+            ImGui::EndDisabled();
+            if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+            {
+                if ( canSwap )
+                    ImGui::SetTooltip( "Replace the %i selected model(s) with '%s' at the same origin,\n"
+                                       "angles and scale; every other key is kept. Undoable.",
+                                       selectedModels, s_pickedModel.c_str() );
+                else
+                    ImGui::SetTooltip( "Select the model(s) to replace in the 3D view, then click a tile\n"
+                                       "here to pick the replacement." );
+            }
+            if ( !s_pickedModel.empty() )
+            {
+                ImGui::SameLine();
+                ImGui::TextDisabled( "picked: %s", s_pickedModel.c_str() );
+                ImGui::SameLine();
+                if ( ImGui::SmallButton( "x##unpick" ) )
+                    s_pickedModel.clear();
+            }
+        }
         ImGui::Separator();
 
         if ( s_rescanPending )
@@ -900,6 +1021,11 @@ namespace
         for ( char *p = full; *p; ++p ) if ( *p == '\\' ) *p = '/';
         return full;
     }
+}
+
+bool KiwiModelBrowser_SwapSelected( const char *modelName, char *err, size_t errSz )
+{
+    return SwapSelectedModels( modelName, err, errSz );
 }
 
 bool KiwiModelBrowser_InsertPrefab( const char *relativePath )

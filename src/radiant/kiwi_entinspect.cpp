@@ -8,6 +8,7 @@
 
 #include <ctype.h>
 #include <stdlib.h>
+#include <string.h>
 #include <map>
 
 extern eclass_t *g_eclass; // eclass.cpp:117
@@ -429,6 +430,41 @@ namespace
         parameter->dragMax = maximum;
         parameter->hasDragRange = true;
     }
+
+    // KIWI: cod4.def documents many defaults in prose rather than with a "default:"
+    // marker, e.g. misc_model "modelscale  scale multiplier (defaults to 1x, ...)".
+    // Without this the Inspector showed 0.000 for an absent modelscale, which reads
+    // as "scale zero / not editable" when the engine default is 1. Accepts
+    // "defaults to <num>", "default <num>", "default is <num>", "default of <num>";
+    // a trailing unit letter such as the "x" in "1x" is dropped.
+    bool DefaultFromProse( const std::string &description, std::string *value )
+    {
+        static const char *const markers[] = { "defaults to ", "default is ", "default of ", "default " };
+        const std::string lowered = LowerString( description );
+        for ( size_t m = 0; m < sizeof( markers ) / sizeof( markers[0] ); ++m )
+        {
+            size_t at = lowered.find( markers[m] );
+            if ( at == std::string::npos )
+                continue;
+            size_t cursor = at + strlen( markers[m] );
+            while ( cursor < lowered.size() && isspace( (unsigned char)lowered[cursor] ) )
+                ++cursor;
+            size_t end = cursor;
+            if ( end < lowered.size() && ( lowered[end] == '-' || lowered[end] == '+' ) )
+                ++end;
+            bool digits = false;
+            while ( end < lowered.size() && ( isdigit( (unsigned char)lowered[end] ) || lowered[end] == '.' ) )
+            {
+                digits = digits || isdigit( (unsigned char)lowered[end] );
+                ++end;
+            }
+            if ( !digits )
+                continue;
+            *value = lowered.substr( cursor, end - cursor );
+            return true;
+        }
+        return false;
+    }
 }
 
 KiwiEntParameter KiwiEntInspect_InferParameter( const char *name,
@@ -446,6 +482,17 @@ KiwiEntParameter KiwiEntInspect_InferParameter( const char *name,
     parameter.hasDragRange = false;
 
     const char *key = parameter.name.c_str();
+
+    // KIWI: fill a missing default from the prose, then from the engine's own
+    // hard defaults for keys whose absence has a well-defined meaning.
+    if ( parameter.defaultValue.empty() )
+    {
+        std::string prose;
+        if ( DefaultFromProse( parameter.description, &prose ) )
+            parameter.defaultValue = prose;
+        else if ( EqualNoCase( key, "modelscale" ) )
+            parameter.defaultValue = "1";   // entity.cpp: absent or <= 0 -> 1.0
+    }
 
     // KIWI: explicit well-known keys take precedence over prose/default heuristics.
     if ( EqualNoCase( key, "_color" ) || EqualNoCase( key, "suncolor" ) ||

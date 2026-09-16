@@ -46,6 +46,11 @@ bool KiwiTerrain_CanJoinSelected();
 int  KiwiTerrain_JoinSelected();
 
 bool KiwiTerrain_IsArmed();
+// Viewport hint strip (kiwi_hints.cpp): the armed tool's key grammar as chips, so
+// "V / Ctrl+LMB pick the height under the cursor" is on screen while sculpting and
+// not only in the panel. Static storage; 0 when not armed.
+struct kiwiPrompt_t;
+int  KiwiTerrain_HudPrompts( const kiwiPrompt_t **out );
 bool KiwiTerrain_HandleDown( int imgX, int imgY, bool shift, bool ctrl );
 void KiwiTerrain_HandleDrag( int imgX, int imgY );
 void KiwiTerrain_HandleUp();

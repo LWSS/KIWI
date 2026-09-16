@@ -45,7 +45,10 @@ namespace
     const float KGZ_RING_PIX      = 55.0f * KGZ_GROW;
     const float KGZ_VIEW_RING_MUL = 0.80f / 0.70f;
     const float KGZ_SCALE_BOX_PIX = KGZ_AXIS_PIX * 0.10f;
-    const float KGZ_SCALE_BALL_PIX = KGZ_AXIS_PIX * 0.10f;
+    // KIWI (2026-09-15, user: "uniform scale should be the default, I don't see a way to
+    // do it with the gizmo"): the uniform ball is the scale gizmo's main handle, so it
+    // is drawn nearly twice as large as the axis boxes.
+    const float KGZ_SCALE_BALL_PIX = KGZ_AXIS_PIX * 0.17f;
 
     const float KGZ_LINE_PIX       = 2.0f;
     const float KGZ_LINE_HOVER_PIX = 3.0f;

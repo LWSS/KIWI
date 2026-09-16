@@ -79,8 +79,10 @@ extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   /
 namespace
 {
     // Transform tuning. R changes only from ring or numeric input.
-    const float KX_SCALE_PER_PIXEL = 0.005f;   // S
     const float KX_SCALE_MIN       = 0.01f;    // S clamp
+    // S: the smallest lever (pixels from the pivot at the grab) the factor is measured
+    // against, so grabbing the uniform ball at the pivot still needs real travel per x2.
+    const float KX_SCALE_LEVER_MIN_PIX = 40.0f;
     const float KX_ANGLE_STEP      = 5.0f;     // R snap increment, degrees
     // Shared with the face-push/extrude delete threshold.
     const float KX_EPS             = KXPUSH_EPS;
@@ -3180,14 +3182,71 @@ namespace
             return true;
         }
 
-        void Rebase() override
+        // KIWI (2026-09-15, user: "when scaling an xmodel, moving the mouse without
+        // interacting with the gizmo should do nothing; uniform scale should be the
+        // default"): the cursor maps to a factor ONLY while a gizmo handle is held (or a
+        // value is typed).  The mapping is Plasticity's: the pixel measure of the cursor
+        // about the pivot on screen - radial distance for the uniform ball and the plane
+        // squares, the signed projection on the axis' screen direction for an axis box -
+        // and the factor grows in proportion to it from the reference latched at the grab
+        // (Dref pixels of travel doubles it; Dref is the latch measure, floored so a grab
+        // on the ball, which sits AT the pivot, still has a usable lever).
+        bool MeasureCursor( float *outMeasure ) const
         {
-            // Rebase the horizontal-pixel mapping at the current factor.
             int x, y;
             if ( !CursorPixels( &x, &y ) )
+                return false;
+            const float dx = (float)x - m_grabPivotX, dy = (float)y - m_grabPivotY;
+            if ( m_con == CON_AXIS && m_grabAxisOk )
+                *outMeasure = dx * m_grabAxisDX + dy * m_grabAxisDY;
+            else
+                *outMeasure = sqrtf( dx * dx + dy * dy );
+            return true;
+        }
+
+        void LatchGrab()
+        {
+            m_grabHave = false;
+            if ( !Pick_WorldToImage( m_pivot, &m_grabPivotX, &m_grabPivotY ) )
                 return;
-            m_startX     = x - (int)( ( m_factor - 1.0f ) / KX_SCALE_PER_PIXEL );
-            m_haveStartX = true;
+            m_grabAxisOk = false;
+            if ( m_con == CON_AXIS )
+            {
+                float alongAxis[3], fx, fy;
+                Copy3( m_pivot, alongAxis );
+                alongAxis[m_axis] += 64.0f * KiwiCam_WorldPerPixel( m_pivot );
+                if ( Pick_WorldToImage( alongAxis, &fx, &fy ) )
+                {
+                    float ax = fx - m_grabPivotX, ay = fy - m_grabPivotY;
+                    const float len = sqrtf( ax * ax + ay * ay );
+                    if ( len > 1.0e-3f )
+                    {
+                        m_grabAxisDX = ax / len;
+                        m_grabAxisDY = ay / len;
+                        m_grabAxisOk = true;
+                    }
+                }
+            }
+            if ( !MeasureCursor( &m_grabRef ) )
+                return;
+            m_grabFactor = m_factor;
+            m_grabHave   = true;
+        }
+
+        void Rebase() override
+        {
+            // Resume / grab / constraint change: continue from the current factor.
+            LatchGrab();
+        }
+
+        void HandleGrab( bool held ) override
+        {
+            if ( m_grabbed == held )
+                return;
+            m_grabbed = held;
+            if ( held )
+                LatchGrab();
+            UpdateHud();
         }
 
         bool Begin() override
@@ -3199,7 +3258,8 @@ namespace
             m_hasNum   = false;
             m_invalid  = false;
             m_undoOpen = false;
-            m_haveStartX = CursorPixels( &m_startX, &m_dummyY );
+            m_grabbed  = false;
+            m_grabHave = false;
 
             for ( selbrush_t *b = selected_brushes.next;
                   b && b != &selected_brushes; b = b->next )
@@ -3403,6 +3463,8 @@ namespace
             if ( con == CON_FREE )
             {
                 m_con = CON_FREE;
+                if ( m_grabbed )
+                    LatchGrab();              // the measure changes meaning: re-latch
                 Recompute();
                 return;
             }
@@ -3410,15 +3472,20 @@ namespace
                 return;
             m_con  = con;
             m_axis = axis;
+            if ( m_grabbed )
+                LatchGrab();
             Recompute();
         }
 
         void Recompute() override
         {
-            float f = m_factor;
-            int x, y;
-            if ( m_haveStartX && CursorPixels( &x, &y ) )
-                f = 1.0f + (float)( x - m_startX ) * KX_SCALE_PER_PIXEL;
+            float f = m_factor;                               // idle: nothing moves it
+            float measure;
+            if ( m_grabbed && m_grabHave && MeasureCursor( &measure ) )
+            {
+                const float ref = ( m_grabRef > KX_SCALE_LEVER_MIN_PIX ) ? m_grabRef : KX_SCALE_LEVER_MIN_PIX;
+                f = m_grabFactor * ( ref + ( measure - m_grabRef ) ) / ref;
+            }
 
             if ( m_hasNum )
                 f = NumRaw();                                 // exact factor
@@ -3504,6 +3571,13 @@ namespace
                 return;
             }
             const char *tail = m_pivotOverridden ? "  [pivot moved]" : "";
+            // Idle HUD names the only two scale sources: a held handle or a typed value.
+            if ( !m_grabbed && !m_hasNum && fabsf( m_factor - 1.0f ) <= KX_EPS )
+            {
+                SetHud( "%s  uniform  drag the centre ball (uniform), an axis box or a plane square / type a value%s",
+                        What(), tail );
+                return;
+            }
             if ( m_con == CON_AXIS )
                 SetHud( "%s  axis %s  x%.3f%s", What(), AxisName( m_axis ), (double)m_factor, tail );
             else if ( m_con == CON_PLANE )
@@ -3515,9 +3589,15 @@ namespace
         float m_pivot[3]   = { 0.0f, 0.0f, 0.0f };
         float m_factor     = 1.0f;
         float m_applied[3] = { 1.0f, 1.0f, 1.0f };
-        int   m_startX     = 0;
-        int   m_dummyY     = 0;
-        bool  m_haveStartX = false;
+        bool  m_grabbed    = false;       // a gizmo handle is held: the cursor maps
+        bool  m_grabHave   = false;       // LatchGrab succeeded (pivot on screen)
+        float m_grabPivotX = 0.0f;        // the pivot's image pixel at the latch
+        float m_grabPivotY = 0.0f;
+        bool  m_grabAxisOk = false;       // CON_AXIS: the axis' screen direction is usable
+        float m_grabAxisDX = 1.0f;
+        float m_grabAxisDY = 0.0f;
+        float m_grabRef    = 0.0f;        // cursor measure at the latch
+        float m_grabFactor = 1.0f;        // factor at the latch
         bool  m_construct  = false;       // the construction store owns this gesture
         bool  m_refImage   = false;       // the reference-image store owns it
         bool  m_pivotOverridden = false;  // scaling about a session (V) pivot

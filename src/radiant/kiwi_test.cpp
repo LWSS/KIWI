@@ -1327,6 +1327,14 @@ static void ExecuteLine( const ScriptLine &line )
             ScriptError( line, "prefab_insert failed" );
         return;
     }
+    if ( command == "model_swap" )
+    {
+        // KIWI: the Models tab's "Swap in place with new model" on the current selection.
+        char err[256] = { 0 };
+        if ( w.size() != 2 || !KiwiModelBrowser_SwapSelected( w[1].c_str(), err, sizeof( err ) ) )
+            ScriptError( line, "model_swap failed: %s", err[0] ? err : "usage: model_swap <xmodel>" );
+        return;
+    }
     if ( command == "toolkey" || command == "toolvalue" )
     {
         if ( !KiwiCmd_Active() || w.size() != 2 )

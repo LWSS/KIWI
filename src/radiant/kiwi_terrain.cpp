@@ -26,6 +26,7 @@
 #include <gfx_d3d/r_gfx.h>
 #include <gfx_d3d/r_material.h>
 #include <gfx_d3d/r_rendercmds.h>   // TECHNIQUE_UNLIT, R_AddCmdSetMaterialColor - the weight overlay
+#include <gfx_d3d/r_state.h>        // GFXS1_POLYGON_OFFSET_MASK - the blend twins' decal offset is cleared
 #include "kiwi_refimage.h"          // KiwiRefImage_Count - the overlay only matters over pictures
 
 #include "kiwi_command.h"
@@ -689,6 +690,28 @@ namespace
         return s_tool == KTER_TEXTURE && ( s_paintBase || s_paintMaterial[0] != 0 );
     }
 
+    // KIWI FIX (2026-09-15, user: "the railroad track isn't showing over the terrain;
+    // it does in height-colour mode"): the l_sm_b0c0* templates the layer-run materials
+    // are cloned from are DECALS, and their state bits carry a polygon offset that pulls
+    // the run toward the camera. A model lying on the terrain (rails, a road piece) is
+    // then behind the offset run and vanishes; the heat view has no layer runs, which is
+    // why it showed there. A layer run is the SAME grid as the opaque base run, so it
+    // needs no offset at all: clear it and make the depth test LESSEQUAL so the coplanar
+    // run still passes over its own base. stateBitsTable is per material
+    // (Material_SetStateBits copies it), and these materials are editor-only.
+    void StripDecalOffset( Material *m )
+    {
+        if ( !m || !m->stateBitsTable )
+            return;
+        for ( int e = 0; e < (int)m->stateBitsCount; ++e )
+        {
+            unsigned int &bits1 = m->stateBitsTable[e].loadBits[1];
+            bits1 &= ~(unsigned int)GFXS1_POLYGON_OFFSET_MASK;
+            if ( !( bits1 & GFXS1_DEPTHTEST_DISABLE ) )
+                bits1 = ( bits1 & ~(unsigned int)GFXS1_DEPTHTEST_MASK ) | GFXS1_DEPTHTEST_LESSEQUAL;
+        }
+    }
+
     // Preview twin: "kiwi_blend_<name>", an alpha-blend (l_sm_b0c0[n0][s0]) material over
     // the SAME images, written once through the material writer and loaded by the
     // renderer.  Editor-only; the .map never references it.
@@ -754,6 +777,8 @@ namespace
             else if ( !twin )
                 _snprintf( err, sizeof( err ), "Material_Load('%s') failed", twinName );
         }
+        if ( twin )
+            StripDecalOffset( twin );
         if ( !twin )
         {
             Sys_Printf( "Terrain Sculpt: no blend preview for '%s' (%s); the layer draws opaque in the camera.\n",
@@ -870,6 +895,7 @@ namespace
             }
             else if ( !s_mat )
                 _snprintf( err, sizeof( err ), "Material_Load('kiwi_weight') failed" );
+            StripDecalOffset( s_mat );      // same decal template, same coplanar run
         }
         if ( !s_mat )
             Sys_Printf( "Terrain Sculpt: no weight-view material (%s); painted layers show their blended texture instead.\n",
@@ -1302,6 +1328,25 @@ namespace
         NoteDirty( def, true );
     }
 
+    // Is point p (XY) on the straight segment q0-q1 within KTER_WELD?  *outT = 0..1.
+    bool OnSegment( const float *p, const float *q0, const float *q1, float *outT )
+    {
+        const float dx = q1[0] - q0[0], dy = q1[1] - q0[1];
+        const float len2 = dx * dx + dy * dy;
+        if ( len2 < 1e-4f )
+            return false;
+        float t = ( ( p[0] - q0[0] ) * dx + ( p[1] - q0[1] ) * dy ) / len2;
+        if ( t < -0.001f || t > 1.001f )
+            return false;
+        if ( t < 0.0f ) t = 0.0f;
+        if ( t > 1.0f ) t = 1.0f;
+        const float ex = p[0] - ( q0[0] + dx * t ), ey = p[1] - ( q0[1] + dy * t );
+        if ( ex * ex + ey * ey > KTER_WELD * KTER_WELD )
+            return false;
+        *outT = t;
+        return true;
+    }
+
     void StitchSeams()
     {
         if ( s_targets.empty() || s_dirtyDefs.empty() )
@@ -1370,44 +1415,89 @@ namespace
                             Q->xyz[2] = z;
                         }
                     }
-                    continue;
                 }
-                // Pass 2: no partner — conform to the neighbour border segment P lies on.
-                for ( size_t o = 0; o < all.size(); ++o )
+            }
+        }
+
+        // Pass 2 (T-junctions), after EVERY weld so the segment ends are final.
+        // KIWI FIX (2026-09-15, user: "make the smooth tool fix these gaps"): the old
+        // pass only conformed the STROKED patch's partnerless points to its neighbours'
+        // segments. Sculpt or smooth the COARSE side of a coarse/fine seam and the fine
+        // neighbour's in-between points were never touched: they kept their old heights
+        // under the coarse patch's straight edge, and the crack showed as the dark
+        // slivers and long thin wedges along the seam. Both directions now conform:
+        //   (a) a stroked patch's border point with no coincident partner takes the
+        //       height of the neighbour segment it lies on;
+        //   (b) a neighbour's border point lying inside one of the stroked patch's
+        //       border segments takes that segment's height (neighbour undo-marked).
+        for ( size_t a = 0; a < all.size(); ++a )
+        {
+            if ( !all[a].target )
+                continue;
+            patchMesh_t *A = all[a].def;
+            int ai[64], aj[64];
+            const int an = BorderRing( A, ai, aj );
+            for ( size_t o = 0; o < all.size(); ++o )
+            {
+                if ( o == a )
+                    continue;
+                const float *amins = all[a].node->def->mins, *amaxs = all[a].node->def->maxs;
+                const float *bmins = all[o].node->def->mins, *bmaxs = all[o].node->def->maxs;
+                if ( amaxs[0] < bmins[0] - KTER_WELD || amins[0] > bmaxs[0] + KTER_WELD
+                  || amaxs[1] < bmins[1] - KTER_WELD || amins[1] > bmaxs[1] + KTER_WELD )
+                    continue;
+                patchMesh_t *B = all[o].def;
+                int bi[64], bj[64];
+                const int bn = BorderRing( B, bi, bj );
+
+                // (a) A's partnerless points onto B's segments.
+                for ( int k = 0; k < an; ++k )
                 {
-                    if ( o == a )
+                    drawVert_t *P = &A->ctrl[ai[k]][aj[k]];
+                    bool partnered = false;
+                    for ( int m = 0; m < bn && !partnered; ++m )
+                    {
+                        const float *q = B->ctrl[bi[m]][bj[m]].xyz;
+                        partnered = fabsf( q[0] - P->xyz[0] ) <= KTER_WELD && fabsf( q[1] - P->xyz[1] ) <= KTER_WELD;
+                    }
+                    if ( partnered )
                         continue;
-                    const float *mins = all[o].node->def->mins, *maxs = all[o].node->def->maxs;
-                    if ( P->xyz[0] < mins[0] - KTER_WELD || P->xyz[0] > maxs[0] + KTER_WELD
-                      || P->xyz[1] < mins[1] - KTER_WELD || P->xyz[1] > maxs[1] + KTER_WELD )
-                        continue;
-                    patchMesh_t *B = all[o].def;
-                    int bi[64], bj[64];
-                    const int bn = BorderRing( B, bi, bj );
-                    bool done = false;
-                    for ( int m = 0; m < bn && !done; ++m )
+                    for ( int m = 0; m < bn; ++m )
                     {
                         const float *q0 = B->ctrl[bi[m]][bj[m]].xyz;
                         const float *q1 = B->ctrl[bi[( m + 1 ) % bn]][bj[( m + 1 ) % bn]].xyz;
-                        const float dx = q1[0] - q0[0], dy = q1[1] - q0[1];
-                        const float len2 = dx * dx + dy * dy;
-                        if ( len2 < 1e-4f )
-                            continue;
-                        float t = ( ( P->xyz[0] - q0[0] ) * dx + ( P->xyz[1] - q0[1] ) * dy ) / len2;
-                        if ( t < -0.001f || t > 1.001f )
-                            continue;
-                        if ( t < 0.0f ) t = 0.0f;
-                        if ( t > 1.0f ) t = 1.0f;
-                        const float ex = P->xyz[0] - ( q0[0] + dx * t ), ey = P->xyz[1] - ( q0[1] + dy * t );
-                        if ( ex * ex + ey * ey > KTER_WELD * KTER_WELD )
+                        float t;
+                        if ( !OnSegment( P->xyz, q0, q1, &t ) )
                             continue;
                         // P sits on B's edge between two of B's vertices: only B's straight
                         // segment can be honoured, so P takes its height there.
                         P->xyz[2] = q0[2] + ( q1[2] - q0[2] ) * t;
-                        done = true;
-                    }
-                    if ( done )
                         break;
+                    }
+                }
+
+                // (b) B's points inside A's segments (strictly between the ends).
+                for ( int m = 0; m < bn; ++m )
+                {
+                    drawVert_t *Q = &B->ctrl[bi[m]][bj[m]];
+                    for ( int k = 0; k < an; ++k )
+                    {
+                        const float *p0 = A->ctrl[ai[k]][aj[k]].xyz;
+                        const float *p1 = A->ctrl[ai[( k + 1 ) % an]][aj[( k + 1 ) % an]].xyz;
+                        if ( ( fabsf( p0[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p0[1] - Q->xyz[1] ) <= KTER_WELD )
+                          || ( fabsf( p1[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p1[1] - Q->xyz[1] ) <= KTER_WELD ) )
+                            continue;                       // an end: pass 1 welded it
+                        float t;
+                        if ( !OnSegment( Q->xyz, p0, p1, &t ) )
+                            continue;
+                        const float z = p0[2] + ( p1[2] - p0[2] ) * t;
+                        if ( fabsf( Q->xyz[2] - z ) > 0.001f )
+                        {
+                            TouchNeighbour( B, all[o].target );
+                            Q->xyz[2] = z;
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -3461,17 +3551,26 @@ void KiwiTerrain_Draw()
     {
         bool changed = false;
 
-        ImGui::SeparatorText( "Tool" );
-        for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
+        // KIWI (2026-09-15, user): two columns. LEFT = what changes with the tool
+        // (the brush and the tool's own settings); RIGHT = what never changes (tool
+        // pick, arm, display, chunks, flatten, density, scope). Fixed column widths
+        // keep the auto-resized window from oscillating; text wraps at the cell edge.
+        const float KTER_COL_LEFT  = 380.0f;
+        const float KTER_COL_RIGHT = 420.0f;
+        const bool  table = ImGui::BeginTable( "##terrain_columns", 2,
+                                               ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit );
+        if ( table )
         {
-            if ( i % 4 )
-                ImGui::SameLine();
-            if ( ImGui::RadioButton( KTER_TOOL_NAME[i], s_tool == i ) )
-            {
-                SetTool( i );
-                changed = true;
-            }
+            ImGui::TableSetupColumn( "##tool",   ImGuiTableColumnFlags_WidthFixed, KTER_COL_LEFT );
+            ImGui::TableSetupColumn( "##always", ImGuiTableColumnFlags_WidthFixed, KTER_COL_RIGHT );
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex( 0 );
         }
+        ImGui::PushTextWrapPos( 0.0f );
+        ImGui::PushItemWidth( 190.0f );
+
+        // ── LEFT: the current tool ────────────────────────────────────────────
+        ImGui::SeparatorText( KTER_TOOL_NAME[s_tool] );
         ImGui::TextDisabled( "%s", KTER_TOOL_HINT[s_tool] );
 
         if ( s_tool == KTER_GRASS )
@@ -3499,31 +3598,12 @@ void KiwiTerrain_Draw()
             if ( s_inner > s_outer )
                 s_inner = s_outer;
             changed |= ImGui::SliderFloat( "Strength", &s_strength, 0.01f, 2.0f, "%.2f" );
-            ImGui::TextDisabled( "[ ] or + / - resize (hold to repeat)   Ctrl+wheel resize   Shift+wheel strength" );
-            if ( ImGui::Checkbox( "Hide wireframe (Tab)", &s_hideWire ) )
-                g_nUpdateBits = -1;
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "While armed the patch wireframe is drawn only around the brush\n"
-                                   "(white = patches the stroke moves, grey = the rest). Tab hides it." );
-            if ( !s_hideWire )
-            {
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth( 100.0f );
-                changed |= ImGui::SliderFloat( "Wire reach", &s_wireReach, 1.0f, 4.0f, "x%.2f" );
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Wireframe radius as a multiple of the outer radius." );
-            }
-            if ( ImGui::Checkbox( "Height colours while armed", &s_heatmap ) )
-            {
-                Save();
-                HeatmapRefresh();
-            }
-            if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Height tools (Raise, Set height, Smooth, Noise, Trim) show every patch\n"
-                                   "as a blue -> green -> red gradient by height instead of its texture,\n"
-                                   "so relief reads at a glance. Texture / colour paint keep the real look." );
+            ImGui::TextDisabled( "Resize while sculpting: [ ] or + / - (hold to repeat), Ctrl+wheel.  "
+                                 "Strength: Shift+wheel." );
         }
 
+        if ( s_tool != KTER_GRASS )
+            ImGui::SeparatorText( "Settings" );
         switch ( s_tool )
         {
         case KTER_RAISE:
@@ -3598,8 +3678,73 @@ void KiwiTerrain_Draw()
             break;
         }
 
+        // ── RIGHT: everything that does not depend on the tool ────────────────
+        ImGui::PopItemWidth();
+        ImGui::PopTextWrapPos();
+        if ( table )
+            ImGui::TableSetColumnIndex( 1 );
+        ImGui::PushTextWrapPos( 0.0f );
+        ImGui::PushItemWidth( 190.0f );
+
+        ImGui::SeparatorText( "Tool" );
+        for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
+        {
+            if ( i % 2 )
+                ImGui::SameLine( 200.0f );
+            if ( ImGui::RadioButton( KTER_TOOL_NAME[i], s_tool == i ) )
+            {
+                SetTool( i );
+                changed = true;
+            }
+        }
+
+        ImGui::Spacing();
+        if ( ImGui::Button( s_armed ? "Disarm (Esc)"
+                                    : ( s_tool == KTER_GRASS ? "Scatter (LMB in camera)" : "Sculpt (LMB in camera)" ),
+                            ImVec2( -FLT_MIN, 0.0f ) ) )
+        {
+            if ( !s_armed )
+            {
+                s_softSelect = false;
+                SyncSoftSelect();
+            }
+            SetArmed( !s_armed );
+        }
+        if ( s_armed && s_tool != KTER_GRASS && s_tool != KTER_TRIM && !AnyTargetPatch() && !CreationAllowed() )
+            ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ),
+                                "No patch selected - select the terrain patch(es), tick 'Affect unselected',\n"
+                                "or tick 'Allow terrain creation' under Raise to sculpt on empty ground." );
+        if ( s_armed )
+            ImGui::TextColored( ImVec4( 0.42f, 0.92f, 0.48f, 1.0f ), "%s", s_status );
+        else
+            ImGui::TextDisabled( "%s", s_status );
+
         if ( s_tool != KTER_GRASS )
         {
+            ImGui::SeparatorText( "Display" );
+            if ( ImGui::Checkbox( "Hide wireframe (Tab)", &s_hideWire ) )
+                g_nUpdateBits = -1;
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "While armed the patch wireframe is drawn only around the brush\n"
+                                   "(white = patches the stroke moves, grey = the rest). Tab hides it." );
+            if ( !s_hideWire )
+            {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth( 100.0f );
+                changed |= ImGui::SliderFloat( "Wire reach", &s_wireReach, 1.0f, 4.0f, "x%.2f" );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Wireframe radius as a multiple of the outer radius." );
+            }
+            if ( ImGui::Checkbox( "Height colours while armed", &s_heatmap ) )
+            {
+                Save();
+                HeatmapRefresh();
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Height tools (Raise, Set height, Smooth, Noise, Trim) show every patch\n"
+                                   "as a blue -> green -> red gradient by height instead of its texture,\n"
+                                   "so relief reads at a glance. Texture / colour paint keep the real look." );
+
             ImGui::SeparatorText( "Chunks" );
             changed |= ImGui::SliderFloat( "Chunk size", &s_chunkSize, 256.0f, 8192.0f, "%.0f",
                                            ImGuiSliderFlags_Logarithmic );
@@ -3675,6 +3820,11 @@ void KiwiTerrain_Draw()
             }
         }
 
+        ImGui::PopItemWidth();
+        ImGui::PopTextWrapPos();
+        if ( table )
+            ImGui::EndTable();
+
         if ( changed )
         {
             Save();
@@ -3682,26 +3832,6 @@ void KiwiTerrain_Draw()
             RebuildRing();
             g_nUpdateBits |= W_CAMERA;
         }
-
-        ImGui::Separator();
-        if ( ImGui::Button( s_armed ? "Disarm (Esc)"
-                                    : ( s_tool == KTER_GRASS ? "Scatter (LMB in camera)" : "Sculpt (LMB in camera)" ) ) )
-        {
-            if ( !s_armed )
-            {
-                s_softSelect = false;
-                SyncSoftSelect();
-            }
-            SetArmed( !s_armed );
-        }
-        if ( s_armed && s_tool != KTER_GRASS && s_tool != KTER_TRIM && !AnyTargetPatch() && !CreationAllowed() )
-            ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ),
-                                "No patch selected - select the terrain patch(es), tick 'Affect unselected',\n"
-                                "or tick 'Allow terrain creation' under Raise to sculpt on empty ground." );
-        if ( s_armed )
-            ImGui::TextColored( ImVec4( 0.42f, 0.92f, 0.48f, 1.0f ), "%s", s_status );
-        else
-            ImGui::TextDisabled( "%s", s_status );
     }
     ImGui::End();
 
@@ -3776,6 +3906,85 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
 bool KiwiTerrain_IsArmed()
 {
     return s_armed;
+}
+
+// KIWI (2026-09-15, user: "I forgot how to prime the set-height tool to whatever's
+// under the cursor. Make this show up while I'm using the tool"): the armed tool's
+// grammar goes to the camera's bottom-left hint strip. Set height also shows its
+// live target so a pick is visibly confirmed without looking at the panel.
+static void HudAdd( kiwiPrompt_t *prompts, int *n, const char *key, const char *label )
+{
+    if ( *n >= 12 )
+        return;
+    prompts[*n].key   = key;
+    prompts[*n].label = label;
+    ++( *n );
+}
+
+int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
+{
+    static kiwiPrompt_t prompts[12];
+    static char         targetText[48];
+    static char         baseText[48];
+    if ( !out || !s_armed )
+        return 0;
+    int n = 0;
+    switch ( s_tool )
+    {
+    case KTER_RAISE:
+        HudAdd( prompts, &n, "LMB",       "Raise" );
+        HudAdd( prompts, &n, "Ctrl+LMB",  "Dig" );
+        HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
+        if ( CreationAllowed() )
+        {
+            KiwiUnits_Format( baseText, sizeof( baseText ), s_createZ );
+            HudAdd( prompts, &n, "V",    "Pick base height under cursor" );
+            HudAdd( prompts, &n, "Base", baseText );
+        }
+        break;
+    case KTER_SETHEIGHT:
+        KiwiUnits_Format( targetText, sizeof( targetText ), s_targetZ );
+        HudAdd( prompts, &n, "LMB",        "Snap to target" );
+        HudAdd( prompts, &n, "V",          "Pick height under cursor" );
+        HudAdd( prompts, &n, "Ctrl+LMB",   "Pick height under cursor" );
+        HudAdd( prompts, &n, "Target",     targetText );
+        HudAdd( prompts, &n, "Shift+LMB",  "Smooth" );
+        break;
+    case KTER_SMOOTH:
+        HudAdd( prompts, &n, "LMB", "Smooth" );
+        break;
+    case KTER_NOISE:
+        HudAdd( prompts, &n, "LMB",       "Add noise" );
+        HudAdd( prompts, &n, "Ctrl+LMB",  "Subtract" );
+        HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
+        break;
+    case KTER_TEXTURE:
+        HudAdd( prompts, &n, "LMB",       "Paint" );
+        HudAdd( prompts, &n, "Ctrl+LMB",  "Paint out" );
+        HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
+        HudAdd( prompts, &n, "I",         "Eyedropper" );
+        break;
+    case KTER_BLEND:
+        HudAdd( prompts, &n, "LMB", "Blend layers" );
+        break;
+    case KTER_GRASS:
+        HudAdd( prompts, &n, "LMB", "Scatter along stroke" );
+        break;
+    case KTER_TRIM:
+        HudAdd( prompts, &n, "LMB", "Remove chunks under brush" );
+        break;
+    default:
+        break;
+    }
+    if ( s_tool != KTER_GRASS )
+    {
+        HudAdd( prompts, &n, "[ ]",         "Radius" );
+        HudAdd( prompts, &n, "Ctrl+wheel",  "Radius" );
+        HudAdd( prompts, &n, "Shift+wheel", "Strength" );
+    }
+    HudAdd( prompts, &n, "Esc", "Disarm" );
+    *out = prompts;
+    return n;
 }
 
 bool KiwiTerrain_HandleDown( int imgX, int imgY, bool shift, bool ctrl )
