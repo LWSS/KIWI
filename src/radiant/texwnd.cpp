@@ -27,6 +27,7 @@
 #include "qe3.h"
 #include "prefs.h"                  // g_PrefsDlg->m_nTextureWindowScale / m_bTextureScrollbar
 #include "kiwi_matconvert.h"        // KIWI-UX: unlit conversion context menu + Shift+L scan hook
+#include "kiwi_mathdrcache.h"       // KIWI: boot-time material header cache (cold-start fix)
 
 #include <gfx_d3d/r_image.h>
 #include <gfx_d3d/r_material.h>
@@ -434,9 +435,15 @@ void Load_Materials( void )
         return;
     }
 
+    PROF_SCOPED( "Load_Materials" );
     int          numMaterials = 0;
     const char **names = FS_ListFiles( "materials", "", FS_LIST_ALL, &numMaterials );
     int          added = 0;
+
+    // KIWI (2026-09-19): the 40-byte headers come from one cache file while the material
+    // files are unchanged (size + write time) - kiwi_mathdrcache.h has the why.  A miss takes
+    // the binary's own open / read / close below and is then cached.
+    KiwiMatHdr_Begin( sizeof( MaterialInfoRaw ) );
 
     for ( int i = 0; i < numMaterials; ++i )
     {
@@ -445,15 +452,28 @@ void Load_Materials( void )
             continue;
 
         MaterialInfoRaw raw;
-        int             h = 0;
-        com_fileAccessed = 1;
-        FS_FOpenFileRead( va( "materials/%s", name ), &h );
-        if ( !h )
+        const kiwiMatHdr_t cached = KiwiMatHdr_Get( name, &raw );
+        if ( cached == KMATHDR_BAD )
             continue;
-        uint got = FS_Read( (uint8_t *)&raw, sizeof( raw ), h );
-        FS_FCloseFile( h );
-        if ( got != sizeof( raw ) )
-            continue;
+        if ( cached == KMATHDR_MISS )
+        {
+            int h = 0;
+            com_fileAccessed = 1;
+            FS_FOpenFileRead( va( "materials/%s", name ), &h );
+            if ( !h )
+            {
+                KiwiMatHdr_Put( name, nullptr );
+                continue;
+            }
+            uint got = FS_Read( (uint8_t *)&raw, sizeof( raw ), h );
+            FS_FCloseFile( h );
+            if ( got != sizeof( raw ) )
+            {
+                KiwiMatHdr_Put( name, nullptr );
+                continue;
+            }
+            KiwiMatHdr_Put( name, &raw );
+        }
 
         // Binary's nested-non-zero gate: skip materials that aren't browsable
         // (no usage/locale or a degenerate auto-scale that would div-by-zero the grid).
@@ -468,14 +488,23 @@ void Load_Materials( void )
             editorName[64] = '\0';
             I_strncat( editorName, sizeof( editorName ), "_editor" );
             MaterialInfoRaw editorRaw;
-            if ( Material_ReadEditorVariant( editorName, &editorRaw ) )
+            const kiwiMatHdr_t editorCached = KiwiMatHdr_Get( editorName, &editorRaw );
+            if ( editorCached == KMATHDR_HIT )
                 raw = editorRaw;
+            else if ( editorCached == KMATHDR_MISS )
+            {
+                const bool ok = Material_ReadEditorVariant( editorName, &editorRaw );
+                KiwiMatHdr_Put( editorName, ok ? &editorRaw : nullptr );
+                if ( ok )
+                    raw = editorRaw;
+            }
         }
 
         Material_ConvertToEditorMaterial( &raw, name );
         ++added;
     }
 
+    KiwiMatHdr_End();
     FS_FreeFileList( names );
     Sys_Printf( "Load_Materials: registered %d of %d materials into the texture browser\n",
                 added, numMaterials );

@@ -438,6 +438,34 @@ void KiwiThumbCache_Init()
                 (double)bytes / ( 1024.0 * 1024.0 ) );
 }
 
+// XModel_ReadHeader's order: u16 version (25), byte flags, mins[3], maxs[3], then the
+// physics-preset C string at byte 27.
+bool KiwiThumbCache_ModelPhysPreset( const char *xmodelName, std::string *outPreset )
+{
+    if ( outPreset )
+        outPreset->clear();
+    const std::string model = NormalizeModelName( xmodelName );
+    if ( model.empty() )
+        return false;
+    void *buffer = nullptr;
+    const int fileSize = FS_ReadFile( ( std::string( "xmodel/" ) + model ).c_str(), &buffer );
+    if ( fileSize <= 0 || !buffer )
+    {
+        if ( buffer )
+            FS_FreeFile( (char *)buffer );
+        return false;
+    }
+    const unsigned char *d = (const unsigned char *)buffer;
+    const int KHEAD = 2 + 1 + 24;
+    if ( fileSize > KHEAD && d[0] == 25 && d[1] == 0 && outPreset )
+    {
+        for ( int i = KHEAD; i < fileSize && d[i]; ++i )
+            outPreset->push_back( (char)d[i] );
+    }
+    FS_FreeFile( (char *)buffer );
+    return true;
+}
+
 bool KiwiThumbCache_ResolveModelSource( const char *xmodelName,
                                         char *outContainer, int containerSize,
                                         bool *outLoose )

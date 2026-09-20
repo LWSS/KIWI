@@ -15,6 +15,9 @@
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
 #include "kiwi_terrain.h"      // terrain verb: tool / set / arm / stroke (test mode)
 #include "kiwi_plastbridge.h"  // plasticity_export verb (test mode, no hand-off)
+#include "kiwi_construct.h"    // construct verb: a headless line / polyline
+#include "kiwi_conselect.h"    // ...selected for the verbs that act on construction
+#include "kiwi_barbwire.h"     // barbwire verb (test mode, no dialog)
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -1127,7 +1130,30 @@ static void ExecuteTerrain( const ScriptLine &line )
         UpdateSelection( -1, nullptr );
         return;
     }
-    ScriptError( line, "terrain verb must be tool, set, arm, or stroke" );
+    if ( verb == "tessellate" || verb == "split" )
+    {
+        // The panel's Tessellate (absolute cell size) / Split (chunk size) over the
+        // selection; the optional number sets the size first.
+        float size = 0.0f;
+        if ( w.size() > 3 || ( w.size() == 3 && !ParseFloat( w[2], size ) ) )
+        { ScriptError( line, "terrain %s [size]", verb.c_str() ); return; }
+        const bool did = verb == "tessellate" ? KiwiTerrain_TestTessellate( size )
+                                              : KiwiTerrain_TestSplit( size );
+        if ( !did )
+        { ScriptError( line, "terrain %s: nothing changed (select flat terrain sheets first)", verb.c_str() ); return; }
+        g_nUpdateBits = -1;
+        UpdateSelection( -1, nullptr );
+        return;
+    }
+    if ( verb == "stacked" )
+    {
+        // Select terrain lying on other terrain (the clean-up button); `expect selected N` follows.
+        KiwiTerrain_TestSelectStacked();
+        g_nUpdateBits = -1;
+        UpdateSelection( -1, nullptr );
+        return;
+    }
+    ScriptError( line, "terrain verb must be tool, set, arm, stroke, tessellate, split or stacked" );
 }
 
 static void ExecuteRefImage( const ScriptLine &line )
@@ -1254,14 +1280,17 @@ static void ExecuteLine( const ScriptLine &line )
         // beside the map and prints the paths; never drives Plasticity in test mode.
         bool construction = false;
         bool terrain = false;
+        int  atOrigin = -1;
         for ( size_t i = 1; i < w.size(); ++i )
         {
             if ( Lower( w[i] ) == "construction" ) { construction = true; continue; }
             if ( Lower( w[i] ) == "terrain" )      { terrain = true; continue; }
-            ScriptError( line, "plasticity_export accepts only the words 'construction' and 'terrain'" );
+            if ( Lower( w[i] ) == "origin" )       { atOrigin = 1; continue; }
+            if ( Lower( w[i] ) == "world" )        { atOrigin = 0; continue; }
+            ScriptError( line, "plasticity_export accepts only the words 'construction', 'terrain', 'origin' and 'world'" );
             return;
         }
-        if ( !KiwiPlastBridge_ExportNow( construction, terrain, false ) )
+        if ( !KiwiPlastBridge_ExportNow( construction, terrain, false, atOrigin ) )
             ScriptError( line, "plasticity_export wrote nothing (see console)" );
         return;
     }
@@ -1539,6 +1568,56 @@ static void ExecuteLine( const ScriptLine &line )
         // Patch_Thicken is its UI-independent core and owns its legacy undo record.
         Patch_Thicken( amount, (char)seam );
         g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "construct" )
+    {
+        // KIWI (2026-09-16): construct x y z x y z [x y z ...] [closed] - a world-space
+        // line (2 points) or polyline, added through the construction undo and left
+        // SELECTED so barbwire / offset / extrude verbs can act on it.
+        bool closed = false;
+        std::vector<std::string> nums;
+        for ( size_t i = 1; i < w.size(); ++i )
+        {
+            if ( Lower( w[i] ) == "closed" ) closed = true;
+            else nums.push_back( w[i] );
+        }
+        if ( nums.size() < 6 || nums.size() % 3 )
+        { ScriptError( line, "construct needs at least two x y z triples" ); return; }
+        kconObject_t o;
+        o.type   = nums.size() == 6 ? KCON_LINE : KCON_POLYLINE;
+        o.closed = closed && nums.size() >= 9;
+        for ( size_t i = 0; i < nums.size(); ++i )
+        {
+            float v = 0.0f;
+            if ( !ParseFloat( nums[i], v ) ) { ScriptError( line, "construct coordinate %d is not numeric", (int)i + 1 ); return; }
+            o.pts.push_back( v );
+        }
+        const int index = KiwiCon_AddWithUndo( o );
+        if ( index < 0 ) { ScriptError( line, "the construction store rejected the object" ); return; }
+        KiwiConSel_SelectObjects( &index, 1 );
+        LogFormat( "CONSTRUCT", "added #%d (%d points%s), selected", index, (int)nums.size() / 3,
+                   o.closed ? ", closed" : "" );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "barbwire" )
+    {
+        // KIWI (2026-09-16): barbwire [zoffset] [source-index] [strands] - lay along the
+        // selected construction objects with the persisted dialog options (no dialog).
+        kiwiBarbwireOpts_t opts;
+        KiwiBarbwire_GetOpts( &opts );
+        if ( w.size() > 4 ) { ScriptError( line, "barbwire [zoffset] [source-index] [strands]" ); return; }
+        if ( w.size() >= 2 && !ParseFloat( w[1], opts.zOffset ) )
+        { ScriptError( line, "barbwire zoffset is not numeric" ); return; }
+        if ( w.size() >= 3 && ( !ParseInt( w[2], opts.source ) || opts.source < 0
+                                || opts.source >= KiwiBarbwire_SourceCount() ) )
+        { ScriptError( line, "barbwire source index is out of range" ); return; }
+        if ( w.size() == 4 && ( !ParseInt( w[3], opts.strands ) || opts.strands < 0 || opts.strands > 16 ) )
+        { ScriptError( line, "barbwire strands must be 0..16" ); return; }
+        char err[256] = { 0 };
+        if ( !KiwiBarbwire_LayNow( opts, err, sizeof( err ) ) )
+            ScriptError( line, "barbwire failed: %s", err );
         return;
     }
     if ( command == "refimage" ) { ExecuteRefImage( line ); return; }

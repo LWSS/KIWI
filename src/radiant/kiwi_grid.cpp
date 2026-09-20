@@ -505,7 +505,7 @@ void KiwiGrid_Draw()
     // Ortho follows the grid overlay switch. Perspective additionally requires
     // its session opt-in; axes and snapping use independent switches.
     const bool ortho  = KiwiCam_Ortho();
-    const bool gridOn = KiwiUX_ShowGrid() && ( ortho || KiwiGrid_PerspGrid() );
+    const bool gridOn = KiwiUX_ShowGrid() && ( ortho ? KiwiGrid_OrthoGrid() : KiwiGrid_PerspGrid() );
     if ( !axesOn && !gridOn )
         return;
 
@@ -560,6 +560,31 @@ namespace
 
     // Perspective lattice is opt-in session state and is not persisted.
     bool s_perspGrid = false;
+
+    // KIWI (2026-09-19, user: "change the option to disable ground grid rendering so it
+    // shows up in Ortho mode too"): ortho had no switch of its own - the lattice button
+    // beside the projection toggle existed only in perspective, so over terrain flattened to
+    // the grid plane the lines could not be got rid of short of View > Show Grid (which also
+    // takes the perspective grid).  Default ON (ortho is where the grid is the workspace)
+    // and PERSISTED: someone who turns it off over terrain wants it to stay off.
+    int s_orthoGrid = -1;                   // -1 = not read from the profile yet
+}
+
+bool KiwiGrid_OrthoGrid()
+{
+    if ( s_orthoGrid < 0 )
+        s_orthoGrid = Radiant_ProfileGetInt( "KiwiUX", "OrthoGrid", 1 ) ? 1 : 0;
+    return s_orthoGrid != 0;
+}
+
+void KiwiGrid_SetOrthoGrid( bool on )
+{
+    if ( KiwiGrid_OrthoGrid() == on )
+        return;
+    s_orthoGrid = on ? 1 : 0;
+    Radiant_ProfileSetInt( "KiwiUX", "OrthoGrid", s_orthoGrid );
+    Sys_Printf( "Orthographic ground grid: %s.\n", on ? "ON" : "off (axes and grid snapping are unaffected)" );
+    g_nUpdateBits |= 1;
 }
 
 bool KiwiGrid_PerspGrid()

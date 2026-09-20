@@ -97,3 +97,13 @@ int Pick_CameraContents();
 // kindMask filters candidates at pick time, never by post-converting an object hit.
 // Resolution order is vertex → edge → area within their respective pixel radii.
 pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags = PICKF_NONE );
+
+// KIWI (2026-09-16, user: "the zoom just flies past the terrain ... make it so the zoom
+// doesn't clip through objects"): the CAMERA's solid trace.  Nearest visible surface
+// along the ray — brushes and patches through Test_Ray, then every resident xmodel by
+// its MESH regardless of the "selectable models" preference (a camera guard is not a
+// selection, so nothing here depends on what can be clicked).  Hidden/filtered geometry
+// is transparent, and a section cut clamps the start like Pick does.  `outDist` is
+// measured from `start`; false when nothing is in front.
+bool Pick_TraceSolid( const float start[3], const float dir[3], float *outDist,
+                      float outNormal[3] = 0 );

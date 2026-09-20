@@ -233,6 +233,7 @@ void KiwiWindows_BuildViewMenu( void *frameMenu )
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_ORTHO,     "&Orthographic Camera" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_TRIS, "Show &Triangle Count" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_FACING, "Show &Facing Arrows" );
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_LEAK_BG, "&Leak Finder Background (strobing)" );
     s_viewMenuBuilt = true;
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 
@@ -248,6 +249,7 @@ void KiwiWindows_SyncViewMenu()
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_ORTHO,     KiwiCam_Ortho() );   // projection check state
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_TRIS, KiwiUX_ShowTriCount() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_FACING, KiwiUX_ShowFacingArrows() );
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_LEAK_BG, KiwiUX_LeakBackground() );
 }
 
 // Command registration and dispatch.
@@ -273,6 +275,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiPerf",            0, 0, KIWI_CMD_PERF_HUD );         // perf HUD toggle
     Radiant_RegisterCommand( "KiwiViewShowTris",    0, 0, KIWI_CMD_VIEW_SHOW_TRIS );   // View > Show Triangle Count
     Radiant_RegisterCommand( "KiwiViewShowFacing",  0, 0, KIWI_CMD_VIEW_SHOW_FACING ); // View > Show Facing Arrows
+    Radiant_RegisterCommand( "KiwiViewLeakBackground", 0, 0, KIWI_CMD_VIEW_LEAK_BG );  // View > Leak Finder Background
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
@@ -317,6 +320,12 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     if ( cmdId == (unsigned int)KIWI_CMD_VIEW_SHOW_TRIS )
     {
         KiwiUX_SetShowTriCount( !KiwiUX_ShowTriCount() );
+        KiwiWindows_SyncViewMenu();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_VIEW_LEAK_BG )
+    {
+        KiwiUX_SetLeakBackground( !KiwiUX_LeakBackground() );
         KiwiWindows_SyncViewMenu();
         return true;
     }

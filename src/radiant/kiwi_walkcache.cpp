@@ -312,6 +312,27 @@ static void Walk_Abandon()
     KiwiWalkCache_Invalidate();
 }
 
+// KIWI (2026-09-17): the epoch the open session was recorded under.  A replay hands out RAW
+// selbrush_t pointers, and a DrawBrush it dispatches can itself free brushes - the first
+// draw of a map loads its models, and a model load rebuilds that entity's proxy brush
+// (Brush_Free + Brush_AddToList, both bump the epoch).  The session used to keep going on the
+// old recording, so a later sibling's node named freed memory: reproduced headless on
+// powerplant.map as an access violation in FilterBrush <- KiwiWalk_DrawChildren <-
+// DrawBrush_PrefabContents (n.brush->def == 0xDDDD...).  Once the epoch has moved, nothing
+// recorded may be dereferenced again: the session ends (no extra invalidate - the bump that
+// ended it already aged the recording) and every caller falls back to its live-list walk.
+static unsigned s_replayEpoch = 0;
+
+static bool Walk_SessionValid()
+{
+    if ( s_replay && s_replayEpoch != s_epoch )
+    {
+        s_replay  = nullptr;
+        s_curNode = -1;
+    }
+    return s_replay != nullptr;
+}
+
 bool KiwiWalk_BeginReplay( selbrush_t *listHead, const orientation_t *rootOrient, bool backward )
 {
     s_replay   = nullptr;
@@ -320,8 +341,9 @@ bool KiwiWalk_BeginReplay( selbrush_t *listHead, const orientation_t *rootOrient
     const KiwiWalk *w = KiwiWalkCache_Get( listHead, rootOrient );
     if ( !w || w->topLevelCount <= 0 )
         return false;
-    s_replay    = w;
-    s_topCursor = backward ? ( w->topLevelCount - 1 ) : 0;
+    s_replay      = w;
+    s_replayEpoch = s_epoch;
+    s_topCursor   = backward ? ( w->topLevelCount - 1 ) : 0;
     return true;
 }
 
@@ -334,7 +356,7 @@ void KiwiWalk_EndReplay()
 // Search from the cursor so filtered nodes may be skipped; a miss means an un-signaled change.
 bool KiwiWalk_TopLevel( const selbrush_t *brush )
 {
-    if ( !s_replay )
+    if ( !Walk_SessionValid() )
         return false;
     if ( s_backward )
     {
@@ -366,7 +388,7 @@ bool KiwiWalk_TopLevel( const selbrush_t *brush )
 
 int KiwiWalk_SpawnflagsBit( const selbrush_t *brush )
 {
-    if ( !s_replay || s_curNode < 0 )
+    if ( !Walk_SessionValid() || s_curNode < 0 )
         return -1;
     const KiwiWalkNode &n = s_replay->nodes[s_curNode];
     if ( n.brush != brush || !n.subtreeEnd )
@@ -376,7 +398,7 @@ int KiwiWalk_SpawnflagsBit( const selbrush_t *brush )
 
 bool KiwiWalk_PrefabEnter( const selbrush_t *bboxBrush, const orientation_t **orientOut )
 {
-    if ( !s_replay || s_curNode < 0 )
+    if ( !Walk_SessionValid() || s_curNode < 0 )
         return false;
     const KiwiWalkNode &n = s_replay->nodes[s_curNode];
     if ( n.brush != bboxBrush || !n.subtreeEnd || n.childOrient < 0
@@ -400,7 +422,7 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
                             GfxColor *col, char width, int drawFlags, const char *childPrefix,
                             xywndState_t *drawXY )
 {
-    if ( !s_replay || s_curNode < 0 )
+    if ( !Walk_SessionValid() || s_curNode < 0 )
         return;
     const int             myNode = s_curNode;
     const KiwiWalkNode   *nodes  = s_replay->nodes;
@@ -413,6 +435,11 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
 
     for ( int i = myNode + 1; i < end; )
     {
+        // A child's DrawBrush may have freed brushes (first-draw model loads): the remaining
+        // recorded pointers are then untrustworthy.  Stop; the rest of this prefab's children
+        // miss ONE frame and the next frame re-records.
+        if ( !Walk_SessionValid() )
+            return;
         const KiwiWalkNode &n = nodes[i];
         const int next = n.subtreeEnd ? n.subtreeEnd : i + 1;
         ++g_edPrefabBrushesWalked;
@@ -501,7 +528,7 @@ namespace
 
 unsigned long long KiwiWalk_SubtreeSignature( const selbrush_t *brush )
 {
-    if ( !s_replay || s_curNode < 0 || s_curNode >= s_replay->nodeCount )
+    if ( !Walk_SessionValid() || s_curNode < 0 || s_curNode >= s_replay->nodeCount )
         return 0;
     const KiwiWalkNode *nodes = s_replay->nodes;
     if ( nodes[s_curNode].brush != brush )

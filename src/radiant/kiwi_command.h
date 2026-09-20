@@ -153,6 +153,9 @@
 #define KIWI_CMD_VIEW_SHOW_FACING   34148   // View > Show Facing Arrows (selected-entity facing overlay)
 #define KIWI_CMD_SELMODE_MODELS     34149   // "Select Mode: Models only" (objects restricted to models)
 #define KIWI_CMD_PREFAB_INSERT      34150   // File > Insert Prefab (one native misc_prefab)
+#define KIWI_CMD_BARBWIRE           34151   // "Barbwire Along Construction..." (kiwi_barbwire)
+#define KIWI_CMD_PASTE_IN_PLACE     34152   // Ctrl+Shift+V  replace selected models by the clipboard group (kiwi_pasteplace)
+#define KIWI_CMD_VIEW_LEAK_BG       34153   // View > Leak Finder Background (strobing camera clear colour)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

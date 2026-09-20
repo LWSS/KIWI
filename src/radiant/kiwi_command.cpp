@@ -64,6 +64,8 @@
 #include "kiwi_outliner.h"
 #include "kiwi_windows.h"
 #include "kiwi_plastbridge.h"
+#include "kiwi_barbwire.h"              // KIWI: barbwire strips along construction curves
+#include "kiwi_pasteplace.h"            // KIWI: Ctrl+Shift+V paste group in place
 
 #include <string.h>
 
@@ -311,6 +313,8 @@ namespace
         { KIWI_CMD_SNAP_TOGGLE,    { "Snap Markers: Toggle",      "Grid",      0,                   nullptr } },
         { KIWI_CMD_SELFTEST,       { "UX: Modal Self-Test",       "KIWI",      0,                   nullptr } },
         { KIWI_CMD_PLASTICITY_PUSH,{ "Send Selection to Plasticity", "Export", SEL_MASK_OBJECT,     KiwiPlastBridge_CanPush } },
+        { KIWI_CMD_BARBWIRE,       { "Barbwire Along Construction...", "Construct", 0,           KiwiBarbwire_CanExecute } },
+        { KIWI_CMD_PASTE_IN_PLACE, { "Paste Group In Place (replace selected models)", "Duplicate", SEL_MASK_OBJECT, KiwiPastePlace_CanExecute } },
 
         { KIWI_CMD_MOVE,   { "Move (G)",   "Transform", SEL_MASK_EVERYTHING, KiwiXform_CanMove   } },
         { KIWI_CMD_ROTATE, { "Rotate (R)", "Transform", SEL_MASK_OBJECT,     KiwiXform_CanRotate } },
@@ -438,6 +442,7 @@ namespace
         { KIWI_CMD_WINDOW_REFIMAGES, { "Reference Images", "Windows", 0, nullptr    } },
         { KIWI_CMD_PERF_HUD,         { "Perf HUD",         "View",    0, nullptr    } },
         { KIWI_CMD_VIEW_SHOW_TRIS,   { "Show Triangle Count", "View", 0, nullptr    } },
+        { KIWI_CMD_VIEW_LEAK_BG,     { "Leak Finder Background (strobing)", "View", 0, nullptr } },
         { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
@@ -634,6 +639,8 @@ bool KiwiCmd_CanExecute( int commandId )
 void KiwiCmd_RegisterCommands()
 {
     KiwiPlastBridge_RegisterCommands(); // Ctrl+Shift+P selected reference export
+    KiwiBarbwire_RegisterCommands();    // barbwire along construction (unbound)
+    KiwiPastePlace_RegisterCommands();  // Ctrl+Shift+V paste group in place
     Radiant_RegisterCommand( "KiwiSelectModePoint",  0, 0, KIWI_CMD_SELMODE_POINT );
     Radiant_RegisterCommand( "KiwiSelectModeEdge",   0, 0, KIWI_CMD_SELMODE_EDGE );
     Radiant_RegisterCommand( "KiwiSelectModeFace",   0, 0, KIWI_CMD_SELMODE_FACE );
@@ -745,11 +752,14 @@ namespace
         case KIWI_CMD_WINDOW_REFIMAGES:                 // KIWI (REFIMG): panel toggle
         case KIWI_CMD_PERF_HUD:                         // a HUD toggle, not a verb
         case KIWI_CMD_VIEW_SHOW_TRIS:                   // View readout toggle
+        case KIWI_CMD_VIEW_LEAK_BG:                     // View toggle
         case KIWI_CMD_VIEW_SHOW_FACING:                 // View overlay toggle (facing arrows)
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
+        case KIWI_CMD_BARBWIRE:                        // opens a dialog, not a replayable verb
+        case KIWI_CMD_PASTE_IN_PLACE:                  // consumes its own selection; a repeat has no targets
         case KIWI_CMD_VIEW_SHOW_GRID:
         case KIWI_CMD_VIEW_SHOW_AXES:
         case KIWI_CMD_VIEW_ORTHO:
@@ -925,6 +935,10 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         if ( KiwiLaunch_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiPlastBridge_DispatchInstant( cmdId ) )
+            return true;
+        if ( KiwiBarbwire_DispatchInstant( cmdId ) )
+            return true;
+        if ( KiwiPastePlace_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiCaulk_DispatchInstant( cmdId ) )
             return true;

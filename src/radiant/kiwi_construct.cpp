@@ -52,6 +52,7 @@ extern int       g_nUpdateBits;                               // engine_stubs.cp
 extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:297
 extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
 extern void      Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
+extern bool      KiwiBarbwire_CanExecute();                   // kiwi_barbwire.cpp (panel button)
 
 namespace
 {
@@ -4500,6 +4501,19 @@ void KiwiCon_MenuItems()
         ImGui::SetTooltip( "Select a planar polyline or rect with corners.\n"
                            "Every corner rounds; select individual anchors\n"
                            "in Point mode (1) to round only those." );
+    ImGui::SameLine();
+
+    // KIWI (2026-09-16): barbwire strips swept along the selected curve(s).
+    const bool canWire = KiwiBarbwire_CanExecute();
+    ImGui::BeginDisabled( !canWire );
+    if ( ImGui::Button( "Barbwire" ) )
+        Radiant_ExecCommand( KIWI_CMD_BARBWIRE );
+    ImGui::EndDisabled();
+    if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+        ImGui::SetTooltip( canWire ? "Sweep CoD4 barbwire strands along the selected\n"
+                                     "line / polyline / spline / arc / circle as xmodels."
+                                   : "Select a construction line, polyline, spline,\n"
+                                     "arc or circle first (click it in any mode)." );
 
     static const row_t KPLANES[5] =
     {

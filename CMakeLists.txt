@@ -13,6 +13,24 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 
+# KIWI (2026-09-17, user: "further optimize the performance"): Debug builds compile the
+# C++ standard library with iterator debugging OFF.  MEASURED, not assumed: a stack sample
+# of the live editor put 60 % of its hottest function inside std::_Lockit - the global lock
+# the debug STL takes on every checked iterator / push_back (_ITERATOR_DEBUG_LEVEL 2).  Level 0
+# keeps _DEBUG, asserts and the debug heap; it only removes the per-operation container
+# checks, which is where KIWI's vector/map-heavy editor code spends its Debug time.
+#
+# It MUST be solution-wide: MSVC stamps the level into every C++ object (#pragma
+# detect_mismatch) and refuses to link objects that disagree (LNK2038), and TracyClient is one
+# static library shared by the game, the editor and the tools.  Every prebuilt library this
+# solution links is a C / COM import library, so nothing outside our own objects carries a
+# level.  Changing it rebuilds everything once.  -DKIWI_DEBUG_FAST_STL=OFF restores checked
+# iterators (do that to hunt a container-misuse bug; an out-of-range [] then asserts again).
+option(KIWI_DEBUG_FAST_STL "Debug: build the C++ standard library without iterator debugging (_ITERATOR_DEBUG_LEVEL=0)" ON)
+if(KIWI_DEBUG_FAST_STL)
+    add_compile_definitions($<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>)
+endif()
+
 # Set this to match the folder name in scripts/platform
 # This will handle the path overrides if needed
 set(KISAK_PLATFORM win32)

@@ -5837,6 +5837,26 @@ void CamWnd_OnSize( HWND hwnd, int cx, int cy )
         R_Hwnd_Resize( (HWND__ *)hwnd, cx, cy );
 }
 
+// KIWI (2026-09-18, user: "an ON/OFF option to turn the background a strobing pink/green (or
+// whatever colors the engine uses for this would be a bonus!!) so I can see leaks in terrain
+// easier").  View > Leak Finder Background.  The CADENCE is the engine's own: r_clear "blink"
+// (gfx_d3d/r_utils.cpp R_ClearScreen) swaps r_clearColor / r_clearColor2 on
+// `Sys_Milliseconds() & 0x200`, i.e. every 512 ms.  The COLOURS are not the engine's: its
+// dev defaults are sky blue (0.5 0.75 1) and orange (1 0.5 0) - picked to stand out inside a
+// lit level, and both read as sky / dirt over open terrain - so this uses magenta / green,
+// neither of which any terrain material resembles.  While it is on the camera must keep
+// drawing, or the strobe freezes on whichever colour the last repaint had.
+static const float *Cam_ClearColor()
+{
+    extern bool KiwiUX_LeakBackground();                   // kiwi_ux.cpp
+    if ( !KiwiUX_LeakBackground() )
+        return g_qeglobals.d_savedinfo.colors[4];          // COLOR_CAMERABACK
+    static const float s_magenta[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
+    static const float s_green[4]   = { 0.0f, 1.0f, 0.0f, 1.0f };
+    g_nUpdateBits |= W_CAMERA;                             // keep the frames coming
+    return ( ::GetTickCount() & 0x200 ) == 0 ? s_magenta : s_green;
+}
+
 // The CCamWnd::OnPaint pipeline — the DC (CPaintDC / BeginPaint) belongs to the shell, not here.
 void CamWnd_Paint( HWND hwnd )
 {
@@ -5858,7 +5878,7 @@ void CamWnd_Paint( HWND hwnd )
 
     R_BeginFrame();
     R_BeginSharedCmdList();
-    R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
+    R_AddCmdClearScreen( 7, Cam_ClearColor(), 1.0f, 0 );   // COLOR_CAMERABACK, or the leak strobe
     static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     R_AddCmdSetMaterialColor( s_white );
 
@@ -5890,7 +5910,7 @@ void CamWnd_RenderToRT( int w, int h )
     {
         R_BeginFrame();
         R_BeginSharedCmdList();
-        R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[4], 1.0f, 0 );   // COLOR_CAMERABACK
+        R_AddCmdClearScreen( 7, Cam_ClearColor(), 1.0f, 0 );   // COLOR_CAMERABACK, or the leak strobe
         static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         R_AddCmdSetMaterialColor( s_white );
     }

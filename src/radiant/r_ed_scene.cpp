@@ -1918,7 +1918,11 @@ static int Editor_DrawMergedInstanceRun(const editorSurf_s *surfs, int first, in
 // sharing (vb, material, techType).  DEGRADE, NEVER WRONG: any failure leaves the table
 // absent and the tess path in charge.
 #define ED_MESHRUN_MAX_INDICES 0x7FC0            // the tess batcher's own cap, kept
-#define ED_MESHRUN_IB_MAX_INDICES ( 4 * 1024 * 1024 )   // 8 MB of uint16 — a hard ceiling
+// KIWI (2026-09-17): was 4 M indices (8 MB).  A tessellated, layer-painted terrain draws every
+// patch once per layer run, so powerplant went past 4 M with "not even 500k tris" of geometry -
+// and the refusal below was retried from scratch EVERY FRAME (see s_edRunsRefused*).  32 MB of
+// MANAGED uint16 is nothing next to the vertex pools; the refusal memo is the real safety net.
+#define ED_MESHRUN_IB_MAX_INDICES ( 16 * 1024 * 1024 )  // 32 MB of uint16 — a hard ceiling
 
 struct EdMeshRun
 {
@@ -1940,6 +1944,37 @@ static int      s_edRunsKey    = 0;  // the surf-cache build serial this table w
 static int      s_edRunsFirst  = 0;  // and the window it was built over
 static int      s_edRunsAmount = 0;
 static unsigned s_edRunsSig    = 0;  // ...and what that window CONTAINED
+
+// KIWI (2026-09-17, user: "when i open the editor it's lagging, same zone ... not even 500k
+// tri's"; sampled live: 48 of 60 main-thread samples inside Editor_BuildMeshRuns with nothing
+// being edited).  A build that FAILS (the window needs more indices than the IB ceiling, the
+// IB cannot be created or locked) used to return with s_edRunsKey == 0, so the very next frame
+// saw "no table for this window" and built the whole staging array again - ~100 ms of per-index
+// push_back under the debug CRT - only to fail identically.  Every frame, forever: 10 fps in a
+// static scene.  Heat colours "fixed" it only because they drop the painted-layer runs and the
+// window shrank back under the ceiling.  The refused window is remembered exactly like a built
+// one, so a failure costs ONE build; the tess path draws it until the window really changes.
+static int      s_edRunsRefusedKey    = 0;
+static int      s_edRunsRefusedFirst  = 0;
+static int      s_edRunsRefusedAmount = 0;
+static unsigned s_edRunsRefusedSig    = 0;
+static bool     s_edRunsRefusedSaid   = false;
+
+static void Editor_MeshRunsRefuse( int index, int amount, int runsKey, unsigned sig, const char *why, int total )
+{
+    s_edRuns.clear();
+    s_edRunsKey           = 0;
+    s_edRunsRefusedKey    = runsKey;
+    s_edRunsRefusedFirst  = index;
+    s_edRunsRefusedAmount = amount;
+    s_edRunsRefusedSig    = sig;
+    if ( !s_edRunsRefusedSaid ) {
+        s_edRunsRefusedSaid = true;
+        Sys_Printf( "KIWI mesh runs: the camera window was refused (%s; %i indices, ceiling %i) - it draws "
+                    "through the batched path instead.  Reported once.\n",
+                    why, total, (int)ED_MESHRUN_IB_MAX_INDICES );
+    }
+}
 
 // THE SIGNATURE IS THE SAFETY NET: the build serial alone is not enough, because the cached
 // block is only PART of the flush window and a world face can move between its resident-surf
@@ -2147,8 +2182,15 @@ static void Editor_BuildMeshRuns( int index, int amount, int runsKey, unsigned s
                     break;
                 }
             }
-            for ( int k = 0; k < ic; ++k )
-                s_edRunStaging.push_back( (uint16_t)( mFirst + itab[k] ) );
+            // One resize + raw writes: per-index push_back took a debug-iterator lock each
+            // time (std::_Lockit was 60 % of this function in the 2026-09-17 live sample).
+            if ( ic > 0 ) {
+                const size_t at = s_edRunStaging.size();
+                s_edRunStaging.resize( at + (size_t)ic );
+                uint16_t *out = &s_edRunStaging[at];
+                for ( int k = 0; k < ic; ++k )
+                    out[k] = (uint16_t)( mFirst + itab[k] );
+            }
             const int last = mFirst + (int)m->vertCount - 1;
             if ( last > run.maxVert )
                 run.maxVert = last;
@@ -2176,13 +2218,18 @@ static void Editor_BuildMeshRuns( int index, int amount, int runsKey, unsigned s
         s_edRunsSig    = sig;
         return;
     }
-    if ( !Editor_EnsureRunIB( total ) ) { s_edRuns.clear(); return; }
+    if ( !Editor_EnsureRunIB( total ) ) {
+        Editor_MeshRunsRefuse( index, amount, runsKey, sig,
+                               total > ED_MESHRUN_IB_MAX_INDICES ? "over the index ceiling"
+                                                                 : "the index buffer could not be created", total );
+        return;
+    }
 
     void *dst = nullptr;
     // D3DLOCK_DISCARD is illegal on a MANAGED buffer; a plain full lock is the documented
     // way to rewrite one, and it happens on a REBUILD, not per frame.
     if ( s_edRunIB->Lock( 0, (unsigned)( 2 * total ), &dst, 0 ) < 0 || !dst ) {
-        s_edRuns.clear();
+        Editor_MeshRunsRefuse( index, amount, runsKey, sig, "the index buffer could not be locked", total );
         return;
     }
     memcpy( dst, &s_edRunStaging[0], (size_t)total * 2 );
@@ -2250,8 +2297,11 @@ static void RB_DrawEditorSkinnedCached_Sub(int index, int amount, int runsKey)
     bool useRuns = false;
     if (runsKey && KiwiSurfCache_Enabled() && dx.device && !dx.deviceLost) {
         const unsigned sig = Editor_MeshWindowSignature(index, amount);
-        if (s_edRunsKey != runsKey || s_edRunsFirst != index ||
-            s_edRunsAmount != amount || s_edRunsSig != sig)
+        // A window already REFUSED is not rebuilt until it changes (see s_edRunsRefused*).
+        const bool refused = s_edRunsRefusedKey == runsKey && s_edRunsRefusedFirst == index &&
+                             s_edRunsRefusedAmount == amount && s_edRunsRefusedSig == sig;
+        if (!refused && (s_edRunsKey != runsKey || s_edRunsFirst != index ||
+            s_edRunsAmount != amount || s_edRunsSig != sig))
             Editor_BuildMeshRuns(index, amount, runsKey, sig);
         useRuns = (s_edRunsKey == runsKey && s_edRunsFirst == index &&
                    s_edRunsAmount == amount && s_edRunsSig == sig);

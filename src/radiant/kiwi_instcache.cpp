@@ -29,13 +29,19 @@ namespace
 const unsigned KIWI_IC_PAGE_VERTS = 65536u;
 const unsigned KIWI_IC_PAGE_BYTES = KIWI_IC_PAGE_VERTS * 32u;      // 2 MB
 
-// Hard caps bound backing allocations at 96 MB of vertices and 48 MB of indices.
-const int      KIWI_IC_MAX_PAGES  = 48;
-const int      KIWI_IC_MAX_IDXBLK = 48;                            // x 1 MB
+// Hard caps bound the backing allocations.  KIWI (2026-09-17): the 96 MB / 48 MB caps and the
+// 32k table were sized for a 2 GB process, where this cache competed with the map for address
+// space.  x64 has no such pressure, so the ceilings are 8x: 768 MB of vertices, 384 MB of
+// indices, 262k instance surfaces.  Pages and blocks are still created ON DEMAND, so a map that
+// fitted before uses exactly what it used before; only a model-heavy map that used to hit
+// "vertex pool full" (and then drew the overflow one instance at a time, every frame) gains.
+const bool     KIWI_IC_X64        = sizeof( void * ) == 8;
+const int      KIWI_IC_MAX_PAGES  = KIWI_IC_X64 ? 384 : 48;
+const int      KIWI_IC_MAX_IDXBLK = KIWI_IC_X64 ? 384 : 48;        // x 1 MB
 const unsigned KIWI_IC_IDXBLK_BYTES = 1024u * 1024u;
 
 // Fixed open-addressed table; saturation falls back to per-instance drawing.
-const int      KIWI_IC_TABLE_SIZE = 32768;
+const int      KIWI_IC_TABLE_SIZE = KIWI_IC_X64 ? 262144 : 32768;
 const int      KIWI_IC_TABLE_MASK = KIWI_IC_TABLE_SIZE - 1;
 
 // Limit first-seen transforms per frame to spread map warmup.
@@ -93,8 +99,11 @@ bool                     s_poolFull;
 unsigned IC_Hash( const GfxScaledPlacement *inst, const XSurface *xsurf )
 {
     // Fold pointer alignment with odd avalanche constants; low address bits are nonuniform.
-    unsigned h = (unsigned)(uintptr_t)inst * 0x9E3779B1u;
-    h ^= (unsigned)(uintptr_t)xsurf * 0x85EBCA6Bu;
+    // x64: fold the HIGH half in first - truncating threw away the bits that tell apart
+    // blocks from different heap regions once the process spans more than 4 GB.
+    const uintptr_t pi = (uintptr_t)inst, px = (uintptr_t)xsurf;
+    unsigned h = (unsigned)( pi ^ ( (unsigned long long)pi >> 32 ) ) * 0x9E3779B1u;
+    h ^= (unsigned)( px ^ ( (unsigned long long)px >> 32 ) ) * 0x85EBCA6Bu;
     h ^= h >> 15;
     h *= 0x2545F491u;
     h ^= h >> 13;

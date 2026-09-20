@@ -2335,11 +2335,20 @@ done:
 // The binary's CString locals v108/v111 (copies of the remapped names) are write-only —
 // dead stores kept alive by CString refcounting — and are not reproduced.
 // ─────────────────────────────────────────────────────────────────────────────
+// KIWI: when set, the import runs INSIDE the caller's open undo record instead of opening
+// (and closing) its own "import buffer" one - the pasted entities / brushes are stamped with
+// the caller's id, so a command that pastes several times and edits the result is ONE
+// Ctrl+Z (kiwi_pasteplace.cpp).  The binary's behaviour is the flag's default, false.
+bool g_kiwiImportInCallerUndo = false;
+
 char *Map_ImportBuffer( const char **text, int version )
 {
     Select_Deselect( 1 );
-    Undo_ClearRedo();
-    Undo_GeneralStart( "import buffer" );
+    if ( !g_kiwiImportInCallerUndo )
+    {
+        Undo_ClearRedo();
+        Undo_GeneralStart( "import buffer" );
+    }
     g_qeglobals.d_parsed_brushes = 0;
 
     // ── Auto-target seed + script_link number census (IDB 0x487db0-0x488035).
@@ -2660,6 +2669,7 @@ char *Map_ImportBuffer( const char **text, int version )
 
     g_nUpdateBits = -1;
     modified      = 1;
-    Undo_End();
+    if ( !g_kiwiImportInCallerUndo )
+        Undo_End();
     return nullptr;
 }

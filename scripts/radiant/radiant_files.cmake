@@ -372,6 +372,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_entbrowser.cpp"
     "${SRC_DIR}/radiant/kiwi_modelbrowser.h" # KIWI: static-xmodel browser + misc_model drop
     "${SRC_DIR}/radiant/kiwi_modelbrowser.cpp"
+    "${SRC_DIR}/radiant/kiwi_barbwire.h"     # KIWI (2026-09-16): barbwire strands swept along construction curves
+    "${SRC_DIR}/radiant/kiwi_barbwire.cpp"
 
     # ROUND AV — the REAL 3D thumbnails round AU scoped out.  USER DIRECTIVE: "I
     # would really like 3d previews in the entities viewer, try to get that to
@@ -523,6 +525,19 @@ set(RADIANT_SRCS
     # records + immediate command bytes) is cached.  The camera still renders every frame.
     "${SRC_DIR}/radiant/kiwi_surfcache.h"
     "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
+
+    # Boot: the texture browser's 40-byte material headers from one cache file instead of
+    # opening all ~4,300 material files (the cold-start 20 s).
+    "${SRC_DIR}/radiant/kiwi_mathdrcache.h"
+    "${SRC_DIR}/radiant/kiwi_mathdrcache.cpp"
+
+    # Ctrl+Shift+V: replace selected models by the clipboard group, posed onto each of them.
+    "${SRC_DIR}/radiant/kiwi_pasteplace.h"
+    "${SRC_DIR}/radiant/kiwi_pasteplace.cpp"
+
+    # Unit-vector packing for editor VB uploads without the shipped 256-scale brute force.
+    "${SRC_DIR}/radiant/kiwi_pack.h"
+    "${SRC_DIR}/radiant/kiwi_pack.cpp"
 
     # ── Phase 2 — editor-only renderer files (OPUS stubs) ────────────────────
     # These have no kisak equivalents; fresh decompile + OPUS queue items.

@@ -574,3 +574,64 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
 
     return r;
 }
+
+// KIWI (2026-09-16): the camera's solid trace (kiwi_pick.h).  Same walker and section
+// clamp as Pick()'s area pass, but models are ALWAYS meshed - the wheel used to punch
+// through props because Pick() honours the "selectable models" preference, and a miss
+// (sky, or a prop the preference hid) anchored the dolly on the standoff distance.
+bool Pick_TraceSolid( const float start[3], const float dir[3], float *outDist,
+                      float outNormal[3] )
+{
+    if ( outDist )
+        *outDist = 0.0f;
+    if ( !start || !dir )
+        return false;
+
+    float s[3] = { start[0], start[1], start[2] };
+    float d[3] = { dir[0],   dir[1],   dir[2]   };
+    KiwiSection_ClampRayStart( s, d );
+    // Distances come back relative to the clamped start; report them from `start`.
+    const float clampOff = ( s[0] - start[0] ) * d[0] + ( s[1] - start[1] ) * d[1]
+                         + ( s[2] - start[2] ) * d[2];
+
+    // 0x400 keeps the walker off the model PROXY boxes; the mesh pass below sees the
+    // models themselves, preference or not.
+    const int contents = Pick_CameraContents() | 0x400;
+    edTrace_t t;
+    {
+        selUnmask_t unmask;                     // selected geometry is solid too
+        unmask.Begin();
+        Test_Ray( s, d, contents, &t, 1 );
+    }
+
+    bool  have = false;
+    float dist = 0.0f;
+    float normal[3] = { 0.0f, 0.0f, 1.0f };
+    if ( t.hit.brush && t.dist > 0.0f && t.dist < 262144.0f )
+    {
+        have = true;
+        dist = t.dist;
+        normal[0] = t.normal[0]; normal[1] = t.normal[1]; normal[2] = t.normal[2];
+    }
+
+    selbrush_t *modelNode = nullptr;
+    float modelDist = 0.0f, modelNormal[3] = { 0.0f, 0.0f, 1.0f };
+    if ( KiwiDrop_PickModelMesh( s, d, have ? dist : FLT_MAX, false,
+                                 &modelNode, &modelDist, modelNormal )
+      && modelDist > 0.0f && ( !have || modelDist < dist ) )
+    {
+        have = true;
+        dist = modelDist;
+        normal[0] = modelNormal[0]; normal[1] = modelNormal[1]; normal[2] = modelNormal[2];
+    }
+
+    if ( !have )
+        return false;
+    if ( outDist )
+        *outDist = dist + clampOff;
+    if ( outNormal )
+    {
+        outNormal[0] = normal[0]; outNormal[1] = normal[1]; outNormal[2] = normal[2];
+    }
+    return true;
+}

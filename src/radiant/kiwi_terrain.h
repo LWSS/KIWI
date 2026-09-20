@@ -58,7 +58,9 @@ void KiwiTerrain_HandleAbort();
 bool KiwiTerrain_HandleEscape();
 // Esc / + / - / Ctrl+wheel radius, Shift+wheel strength.  True = consumed.
 bool KiwiTerrain_HandleKey( int vk );
-bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl );
+// Armed wheel: Ctrl = radius, Shift = strength, Alt = the tool's own value (Set height:
+// the target Z, 8 units a notch, 1 with Shift; every other sculpt tool: strength).
+bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl, bool alt = false );
 
 void KiwiTerrain_Hover( int imgX, int imgY, bool over );
 void KiwiTerrain_DrawWorld();
@@ -70,11 +72,14 @@ void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float im
 // -kiwitest entry points (kiwi_test.cpp `terrain` verb): the tool by name (raise,
 // setheight, smooth, noise, texture, colour, grass, trim), a setting by name (outer,
 // inner, strength, speed, falloff, shape, chunk, expand, basez, cells, surfaces,
-// targetz, unselected, terrainonly), arming, and one whole stroke: a vertical ray
+// targetz, unselected, carry, terrainonly), arming, and one whole stroke: a vertical ray
 // through (x, y) resolved like the camera cursor, held for `seconds`, then released.
 bool KiwiTerrain_TestSetTool( const char *name );
 bool KiwiTerrain_TestSet( const char *key, float value );
 // Texture paint's brush material ("base" = erase to base).
 bool KiwiTerrain_TestSetPaintMaterial( const char *name );
+bool KiwiTerrain_TestTessellate( float cell );     // 0 = keep the panel's cell size
+bool KiwiTerrain_TestSplit( float chunk );         // 0 = keep the panel's chunk size
+int  KiwiTerrain_TestSelectStacked();              // selects terrain lying on other terrain; count
 void KiwiTerrain_TestArm( bool armed );
 bool KiwiTerrain_TestStroke( float x, float y, float seconds, bool shift, bool ctrl );

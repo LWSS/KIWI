@@ -824,6 +824,16 @@ void KiwiSnap_SetShowMarkers( bool on )
     Radiant_ProfileSetInt( KSNAP_SECTION, "SnapMarkers", v );
 }
 
+bool KiwiSnap_LastEdgeDir( float out[3] )
+{
+    if ( !s_haveEdgeDir )
+        return false;
+    out[0] = s_edgeDir[0];
+    out[1] = s_edgeDir[1];
+    out[2] = s_edgeDir[2];
+    return true;
+}
+
 const char *KiwiSnap_TypeName( snap_type_t t )
 {
     switch ( t )

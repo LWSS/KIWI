@@ -935,7 +935,8 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
     // Armed paint tools take the modified wheel (radius / strength, size / rotation).
     {
         const bool shift = ImGui::GetIO().KeyShift, ctrl = ImGui::GetIO().KeyCtrl;
-        if ( KiwiTerrain_HandleWheel( steps, shift, ctrl ) || KiwiDecal_HandleWheel( steps, shift, ctrl ) )
+        const bool alt = ImGui::GetIO().KeyAlt;      // terrain: Alt+wheel = the tool's own value
+        if ( KiwiTerrain_HandleWheel( steps, shift, ctrl, alt ) || KiwiDecal_HandleWheel( steps, shift, ctrl ) )
             return true;
     }
     KiwiCam_Dolly( steps, imgX, imgY );

@@ -80,6 +80,11 @@ enum koutKind_t
     KOUT_CON_OBJECT,            // one construction object
     KOUT_IMAGE_GROUP,           // an image-group folder (KIWI 2026-09-10)
     KOUT_IMAGE,                 // one reference image
+    // KIWI (2026-09-16, user: "barbwire needs to go into its own group in the outliner
+    // (under Models)"): a fixed folder inside Models holding every entity that carries the
+    // `kiwi_barbwire` epair (kiwi_barbwire.cpp).  Section-like: its eye and click cover
+    // every member; it is not a drop target and cannot be renamed.
+    KOUT_BARBWIRE_FOLDER,
 };
 
 struct koutRow_t
@@ -110,6 +115,7 @@ const unsigned KOUT_KEY_MODELS   = 0xF0000005u;
 
 const unsigned KOUT_KEY_IMAGES = 0xF0000006u;
 const unsigned KOUT_KEY_TERRAIN = 0xF0000007u;
+const unsigned KOUT_KEY_BARBWIRE = 0xF0000008u;   // the Barbwire folder inside Models
 
 // Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
 // out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
@@ -329,6 +335,14 @@ unsigned SectionKey( koutKind_t kind )
     }
 }
 
+// A misc_model laid by the barbwire tool (kiwi_barbwire.cpp writes the epair).
+bool IsBarbwireEntity( entity_s *inst )
+{
+    entity_s_def *def = DefOf( inst );
+    const char *src = def ? ValueForKey2( def, "kiwi_barbwire" ) : "";
+    return src && src[0];
+}
+
 // targetname with Plasticity's "<class> <id>" fallback (Outliner.tsx:158).
 void FolderName( entity_s *inst, char *out, int outSize )
 {
@@ -337,6 +351,16 @@ void FolderName( entity_s *inst, char *out, int outSize )
     if ( tn && tn[0] )
     {
         _snprintf( out, (size_t)outSize, "%s", tn );
+    }
+    else if ( IsBarbwireEntity( inst ) )
+    {
+        // The curve's name, plus the piece ordinal when the run was split.
+        const char *src   = ValueForKey2( def, "kiwi_barbwire" );
+        const char *piece = ValueForKey2( def, "kiwi_barbwire_piece" );
+        if ( piece && piece[0] && strcmp( piece, "0" ) )
+            _snprintf( out, (size_t)outSize, "%s #%s", src, piece );
+        else
+            _snprintf( out, (size_t)outSize, "%s", src );
     }
     else if ( IsFuncGroup( inst ) )
     {
@@ -465,10 +489,42 @@ void FlattenEntitySection( koutKind_t sectionKind )
     if ( Collapsed( sectionKey ) )
         return;
 
+    // KIWI (2026-09-16): the Barbwire folder comes first inside Models; its members are
+    // listed one level deeper and skipped by the flat pass below.
+    if ( sectionKind == KOUT_SECTION_MODELS )
+    {
+        int wires = 0;
+        for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+            if ( e != world_entity && IsBarbwireEntity( e ) && EntitySection( e ) == sectionKind )
+                ++wires;
+        if ( wires )
+        {
+            PushRow( KOUT_BARBWIRE_FOLDER, 1, KOUT_KEY_BARBWIRE );
+            s_rows.back().count = wires;
+            if ( !Collapsed( KOUT_KEY_BARBWIRE ) )
+            {
+                for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+                {
+                    if ( e == world_entity || !IsBarbwireEntity( e ) || EntitySection( e ) != sectionKind )
+                        continue;
+                    entity_s_def *def = DefOf( e );
+                    const unsigned key = def ? EntKey( def->numberId ) : 0u;
+                    PushRow( KOUT_ENTITY, 2, key );
+                    s_rows.back().ent   = e;
+                    s_rows.back().count = EntityBrushCount( e );
+                    if ( !Collapsed( key ) )
+                        FlattenEntityBrushes( e, 3 );
+                }
+            }
+        }
+    }
+
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
         if ( e == world_entity || EntitySection( e ) != sectionKind )
             continue;
+        if ( sectionKind == KOUT_SECTION_MODELS && IsBarbwireEntity( e ) )
+            continue;                               // listed under the Barbwire folder
 
         entity_s_def *def = DefOf( e );
         const unsigned key = def ? EntKey( def->numberId ) : 0u;
@@ -966,7 +1022,7 @@ bool UngroupEntity( entity_s *inst, const char *op )
 bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
-        || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS;
+        || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER;
 }
 
 // Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
@@ -982,6 +1038,11 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh )
             if ( k == KOUT_SECTION_BRUSHES )      filter = KOUT_FILTER_NOT_TERRAIN;
             else if ( k == KOUT_SECTION_TERRAIN ) filter = KOUT_FILTER_TERRAIN;
             else                                  continue;
+        }
+        else if ( k == KOUT_BARBWIRE_FOLDER )
+        {
+            if ( !IsBarbwireEntity( e ) || EntitySection( e ) != KOUT_SECTION_MODELS )
+                continue;
         }
         else if ( EntitySection( e ) != k )
             continue;
@@ -1448,6 +1509,7 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_LIGHTS:
                 case KOUT_SECTION_MODELS:
                 case KOUT_SECTION_IMAGES:
+                case KOUT_BARBWIRE_FOLDER:
                     SectionEyeState( r.kind, &hidden, &hasEye );
                     break;
                 default:
@@ -1559,6 +1621,9 @@ void KiwiOutliner_Draw()
                     break;
                 case KOUT_SECTION_IMAGES:
                     _snprintf( label, sizeof( label ), "Images (%i)", r.count );
+                    break;
+                case KOUT_BARBWIRE_FOLDER:
+                    _snprintf( label, sizeof( label ), "Barbwire (%i)", r.count );
                     break;
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
@@ -1778,20 +1843,34 @@ void KiwiOutliner_Draw()
                             }
                             g_nUpdateBits = -1;
                         }
-                        else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY )
+                        else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY
+                               || r.kind == KOUT_BARBWIRE_FOLDER )
                         {
+                            // The Barbwire folder acts on every member entity at once;
+                            // an entity row on its own brushes.
+                            std::vector<entity_s *> ents;
+                            if ( r.kind == KOUT_BARBWIRE_FOLDER )
+                            {
+                                for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+                                    if ( e != world_entity && IsBarbwireEntity( e ) )
+                                        ents.push_back( e );
+                            }
+                            else
+                                ents.push_back( r.ent );
+
                             selection_t &sel = KiwiSel();
                             bool any = false;
                             bool all = true;
-                            for ( selbrush_t *b = r.ent->brushes.ownerNext;
-                                  b && b != &r.ent->brushes; b = b->ownerNext )
-                            {
-                                if ( !Sel_BrushLive( b ) )
-                                    continue;
-                                any = true;
-                                if ( !BrushSelected( b ) )
-                                    all = false;
-                            }
+                            for ( size_t k = 0; k < ents.size(); ++k )
+                                for ( selbrush_t *b = ents[k]->brushes.ownerNext;
+                                      b && b != &ents[k]->brushes; b = b->ownerNext )
+                                {
+                                    if ( !Sel_BrushLive( b ) )
+                                        continue;
+                                    any = true;
+                                    if ( !BrushSelected( b ) )
+                                        all = false;
+                                }
                             // Ctrl toggles the group as a unit; Shift adds it.
                             const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
                             if ( !io.KeyShift && !io.KeyCtrl )
@@ -1799,14 +1878,15 @@ void KiwiOutliner_Draw()
                                 Sel_Clear( sel );
                                 KiwiConSel_Clear();
                             }
-                            for ( selbrush_t *b = r.ent->brushes.ownerNext;
-                                  b && b != &r.ent->brushes; b = b->ownerNext )
-                            {
-                                if ( !Sel_BrushLive( b ) )
-                                    continue;
-                                if ( remove ) Sel_Remove( sel, Sel_MakeObject( b ) );
-                                else          Sel_Add   ( sel, Sel_MakeObject( b ) );
-                            }
+                            for ( size_t k = 0; k < ents.size(); ++k )
+                                for ( selbrush_t *b = ents[k]->brushes.ownerNext;
+                                      b && b != &ents[k]->brushes; b = b->ownerNext )
+                                {
+                                    if ( !Sel_BrushLive( b ) )
+                                        continue;
+                                    if ( remove ) Sel_Remove( sel, Sel_MakeObject( b ) );
+                                    else          Sel_Add   ( sel, Sel_MakeObject( b ) );
+                                }
                             Sel_SyncToLegacy();
                             g_nUpdateBits = -1;
                         }

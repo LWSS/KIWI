@@ -2482,7 +2482,239 @@ namespace
     // `handOff` false writes the files and only prints their paths (test mode);
     // true runs the auto-import, which itself falls back to Explorer when the
     // PlasticityAutoImport preference is off.
-    bool ExecuteExport( bool includeConstruction, bool includeTerrain, bool handOff )
+    // ---- "Place at origin, axis-aligned" (KIWI 2026-09-16, user: "move the models to
+    // the origin and try to align them perfectly with the axes to allow for quicker
+    // alignment when designing accompanying models") -------------------------------
+    // One rigid frame for the WHOLE export (brushes, patches, models, terrain and
+    // construction prisms move together, so their relations survive):
+    //   * a selection with a model uses the FIRST selected model's own frame - its
+    //     origin and angles inverted - so that model lands in its native xmodel space,
+    //     exactly as it was authored, and anything drawn around it in Plasticity lines
+    //     up in Radiant when placed with the same origin and angles;
+    //   * a brush / patch selection is yawed by the dominant horizontal face direction
+    //     (area-weighted, faces come in 90-degree sets) and rested base-centre on the
+    //     origin, matching obj2xmodel's "base" origin.
+    // Local = axis * (world - origin); axis rows are the frame's basis in world space.
+    struct ExportFrame
+    {
+        bool        active;
+        double      origin[3];
+        double      axis[3][3];
+        std::string describe;
+        ExportFrame() : active( false ) { memset( origin, 0, sizeof( origin ) ); memset( axis, 0, sizeof( axis ) ); }
+    };
+
+    void FrameLocalPoint( const ExportFrame &f, const double in[3], double out[3] )
+    {
+        const double d[3] = { in[0] - f.origin[0], in[1] - f.origin[1], in[2] - f.origin[2] };
+        for ( int k = 0; k < 3; ++k )
+            out[k] = f.axis[k][0] * d[0] + f.axis[k][1] * d[1] + f.axis[k][2] * d[2];
+    }
+
+    void FrameLocalDir( const ExportFrame &f, const double in[3], double out[3] )
+    {
+        for ( int k = 0; k < 3; ++k )
+            out[k] = f.axis[k][0] * in[0] + f.axis[k][1] * in[1] + f.axis[k][2] * in[2];
+    }
+
+    int s_exportAtOrigin = -1;
+
+    bool ExportAtOriginEnabled()
+    {
+        if ( s_exportAtOrigin < 0 )
+            s_exportAtOrigin = Radiant_ProfileGetInt( PLASTICITY_PREF_SECTION,
+                                                      "PlasticityExportAtOrigin", 0 ) ? 1 : 0;
+        return s_exportAtOrigin != 0;
+    }
+
+    void SetExportAtOriginEnabled( bool enabled )
+    {
+        const int value = enabled ? 1 : 0;
+        if ( s_exportAtOrigin == value )
+            return;
+        s_exportAtOrigin = value;
+        Radiant_ProfileSetInt( PLASTICITY_PREF_SECTION, "PlasticityExportAtOrigin", value );
+    }
+
+    bool ComputeExportFrame( ExportFrame &frame )
+    {
+        frame = ExportFrame();
+
+        // 1. A model: its own frame.
+        int models = 0;
+        bool mixedAngles = false;
+        float firstAngles[3] = { 0.0f, 0.0f, 0.0f };
+        for ( selbrush_t *selected = selected_brushes.next;
+              selected && selected != &selected_brushes; selected = selected->next )
+        {
+            float mins[3], maxs[3], angles[3], scale, origin[3];
+            XModel *model = nullptr;
+            if ( !selected->owner || !selected->owner->def || !selected->def
+              || !KiwiDrop_IsModelEntity( selected )
+              || !KiwiDrop_GetModelInfo( selected, mins, maxs, angles, &scale, origin, &model ) )
+                continue;
+            if ( models == 0 )
+            {
+                float axis[3][3];
+                AnglesToAxis( angles, axis );
+                for ( int r = 0; r < 3; ++r )
+                    for ( int c = 0; c < 3; ++c )
+                        frame.axis[r][c] = (double)axis[r][c];
+                for ( int k = 0; k < 3; ++k )
+                {
+                    frame.origin[k] = (double)origin[k];
+                    firstAngles[k]  = angles[k];
+                }
+                char text[256];
+                _snprintf( text, sizeof( text ),
+                           "model '%s' frame: origin %.1f %.1f %.1f, angles %.1f %.1f %.1f",
+                           model && model->name ? model->name : "?",
+                           origin[0], origin[1], origin[2], angles[0], angles[1], angles[2] );
+                text[sizeof( text ) - 1] = '\0';
+                frame.describe = text;
+            }
+            else if ( fabsf( angles[0] - firstAngles[0] ) > 0.01f || fabsf( angles[1] - firstAngles[1] ) > 0.01f
+                   || fabsf( angles[2] - firstAngles[2] ) > 0.01f )
+                mixedAngles = true;
+            ++models;
+        }
+        if ( models > 0 )
+        {
+            if ( models > 1 )
+                frame.describe += mixedAngles ? " (first of several models; the others keep their relative pose)"
+                                              : " (first of several models)";
+            frame.active = true;
+            return true;
+        }
+
+        // 2. Brushes / patches: dominant horizontal face direction, base centre.
+        double sumSin = 0.0, sumCos = 0.0;
+        bool anyNode = false;
+        for ( selbrush_t *selected = selected_brushes.next;
+              selected && selected != &selected_brushes; selected = selected->next )
+        {
+            const brush_t *def = selected->def;
+            if ( !def )
+                continue;
+            anyNode = true;
+            if ( def->patch || !def->faces )
+                continue;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const face_t &face = def->faces[f];
+                const winding_t *w = face.w;
+                if ( !w || w->numpoints < 3 )
+                    continue;
+                const double nx = face.plane.normal[0], ny = face.plane.normal[1], nz = face.plane.normal[2];
+                if ( fabs( nz ) > 0.7 || ( nx * nx + ny * ny ) < 1.0e-6 )
+                    continue;
+                // Area (Newell) weights long walls over slivers.
+                double area[3] = { 0.0, 0.0, 0.0 };
+                for ( int i = 0; i < w->numpoints; ++i )
+                {
+                    const float *a = w->p[i], *b = w->p[( i + 1 ) % w->numpoints];
+                    area[0] += ( (double)a[1] - b[1] ) * ( (double)a[2] + b[2] );
+                    area[1] += ( (double)a[2] - b[2] ) * ( (double)a[0] + b[0] );
+                    area[2] += ( (double)a[0] - b[0] ) * ( (double)a[1] + b[1] );
+                }
+                const double weight = 0.5 * sqrt( area[0] * area[0] + area[1] * area[1] + area[2] * area[2] );
+                const double a4 = 4.0 * atan2( ny, nx );       // 90-degree symmetry
+                sumSin += weight * sin( a4 );
+                sumCos += weight * cos( a4 );
+            }
+        }
+        if ( !anyNode )
+            return false;
+        double yaw = 0.0;
+        if ( sumSin * sumSin + sumCos * sumCos > 1.0e-12 )
+            yaw = atan2( sumSin, sumCos ) / 4.0;
+        if ( fabs( yaw ) < 0.5 * 3.14159265358979 / 180.0 )
+            yaw = 0.0;                                          // already on the axes
+        const double c = cos( yaw ), s = sin( yaw );
+        frame.axis[0][0] =  c; frame.axis[0][1] = s; frame.axis[0][2] = 0.0;
+        frame.axis[1][0] = -s; frame.axis[1][1] = c; frame.axis[1][2] = 0.0;
+        frame.axis[2][0] = 0.0; frame.axis[2][1] = 0.0; frame.axis[2][2] = 1.0;
+
+        // Bounds in the yawed frame from every selected node's box corners.
+        double lo[3] = { 1e30, 1e30, 1e30 }, hi[3] = { -1e30, -1e30, -1e30 };
+        for ( selbrush_t *selected = selected_brushes.next;
+              selected && selected != &selected_brushes; selected = selected->next )
+        {
+            const brush_t *def = selected->def;
+            if ( !def )
+                continue;
+            for ( int corner = 0; corner < 8; ++corner )
+            {
+                const double p[3] = { ( corner & 1 ) ? def->maxs[0] : def->mins[0],
+                                      ( corner & 2 ) ? def->maxs[1] : def->mins[1],
+                                      ( corner & 4 ) ? def->maxs[2] : def->mins[2] };
+                double q[3];
+                FrameLocalDir( frame, p, q );
+                for ( int k = 0; k < 3; ++k )
+                {
+                    if ( q[k] < lo[k] ) lo[k] = q[k];
+                    if ( q[k] > hi[k] ) hi[k] = q[k];
+                }
+            }
+        }
+        // Pivot (yawed frame) = base centre; origin (world) = axis^T * pivot.
+        const double pivot[3] = { 0.5 * ( lo[0] + hi[0] ), 0.5 * ( lo[1] + hi[1] ), lo[2] };
+        for ( int k = 0; k < 3; ++k )
+            frame.origin[k] = frame.axis[0][k] * pivot[0] + frame.axis[1][k] * pivot[1] + frame.axis[2][k] * pivot[2];
+        char text[256];
+        _snprintf( text, sizeof( text ),
+                   "brush selection yawed by %.2f deg, base centre %.1f %.1f %.1f moved to the origin",
+                   -yaw * 180.0 / 3.14159265358979, frame.origin[0], frame.origin[1], frame.origin[2] );
+        text[sizeof( text ) - 1] = '\0';
+        frame.describe = text;
+        frame.active = true;
+        return true;
+    }
+
+    void ApplyExportFrame( const ExportFrame &frame, std::vector<StepSolid> &solids,
+                           std::vector<ObjObject> &objects )
+    {
+        if ( !frame.active )
+            return;
+        for ( size_t s = 0; s < solids.size(); ++s )
+        {
+            StepSolid &solid = solids[s];
+            for ( size_t v = 0; v < solid.vertices.size(); ++v )
+            {
+                const double in[3] = { solid.vertices[v].x, solid.vertices[v].y, solid.vertices[v].z };
+                double out[3];
+                FrameLocalPoint( frame, in, out );
+                solid.vertices[v].x = out[0];
+                solid.vertices[v].y = out[1];
+                solid.vertices[v].z = out[2];
+            }
+            for ( size_t f = 0; f < solid.faces.size(); ++f )
+            {
+                double out[3];
+                FrameLocalDir( frame, solid.faces[f].normal, out );
+                memcpy( solid.faces[f].normal, out, sizeof( out ) );
+            }
+        }
+        // OBJ vertices are already metres: the same rotation, the origin in metres.
+        ExportFrame metres = frame;
+        for ( int k = 0; k < 3; ++k )
+            metres.origin[k] = frame.origin[k] * METERS_PER_UNIT;
+        for ( size_t o = 0; o < objects.size(); ++o )
+        {
+            for ( size_t v = 0; v < objects[o].vertices.size(); ++v )
+            {
+                ObjVertex &vertex = objects[o].vertices[v];
+                const double in[3] = { vertex.x, vertex.y, vertex.z };
+                double out[3];
+                FrameLocalPoint( metres, in, out );
+                vertex.x = (float)out[0];
+                vertex.y = (float)out[1];
+                vertex.z = (float)out[2];
+            }
+        }
+    }
+
+    bool ExecuteExport( bool includeConstruction, bool includeTerrain, bool handOff, bool atOrigin )
     {
         std::string stepPath;
         std::string objPath;
@@ -2509,6 +2741,20 @@ namespace
             return false;
         }
         PrintExportStats( stats );
+        if ( atOrigin )
+        {
+            ExportFrame frame;
+            if ( ComputeExportFrame( frame ) )
+            {
+                ApplyExportFrame( frame, solids, objects );
+                Sys_Printf( "Plasticity export: placed at origin - %s. Place what you design\n"
+                            "  around it back in Radiant with that origin and those angles.\n",
+                            frame.describe.c_str() );
+            }
+            else
+                Sys_Printf( "Plasticity export: nothing selected to anchor the origin frame on; "
+                            "exported in world space.\n" );
+        }
 
         AutoImportJob job;
         job.groupName = groupName;
@@ -2652,6 +2898,24 @@ void KiwiPlastBridge_Draw()
     }
     const bool includeTerrain = ExportTerrainEnabled();
 
+    // KIWI (2026-09-16): rigid re-frame of the whole export onto the origin.
+    {
+        bool atOriginOpt = ExportAtOriginEnabled();
+        if ( ImGui::Checkbox( "Place at origin, axis-aligned", &atOriginOpt ) )
+            SetExportAtOriginEnabled( atOriginOpt );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Move everything exported so it sits on the origin, for designing\n"
+                               "accompanying models around it.\n"
+                               "With a model selected: the first model's own frame is used (its\n"
+                               "origin and angles undone), so it lands exactly as its xmodel was\n"
+                               "authored; place your new model with the same origin and angles.\n"
+                               "Brushes only: yawed onto the axes by their dominant wall direction\n"
+                               "and rested base-centre on the origin.\n"
+                               "Everything in the export moves together, terrain included.\n"
+                               "The console prints the origin and angles used." );
+    }
+    const bool atOrigin = ExportAtOriginEnabled();
+
     bool autoImport = AutoImportEnabled();
     if ( ImGui::Checkbox( "Auto-import into Plasticity", &autoImport ) )
         SetAutoImportEnabled( autoImport );
@@ -2679,12 +2943,14 @@ void KiwiPlastBridge_Draw()
     ImGui::EndPopup();
 
     if ( send )
-        ExecuteExport( includeConstruction, includeTerrain, true );
+        ExecuteExport( includeConstruction, includeTerrain, true, atOrigin );
 }
 
-bool KiwiPlastBridge_ExportNow( bool includeConstruction, bool includeTerrain, bool handOff )
+bool KiwiPlastBridge_ExportNow( bool includeConstruction, bool includeTerrain, bool handOff,
+                                int atOrigin )
 {
-    return ExecuteExport( includeConstruction, includeTerrain, handOff );
+    const bool frame = atOrigin < 0 ? ExportAtOriginEnabled() : atOrigin != 0;
+    return ExecuteExport( includeConstruction, includeTerrain, handOff, frame );
 }
 
 bool KiwiPlastBridge_CanPush()

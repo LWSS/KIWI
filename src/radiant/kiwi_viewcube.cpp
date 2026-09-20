@@ -550,15 +550,16 @@ namespace
         if ( hot && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
             KiwiCam_SetOrtho( !ortho );
 
-        // This auxiliary control is positioned by, and visible only with, perspective.
+        // The ground-grid switch, in BOTH projections (2026-09-19: it used to exist only in
+        // perspective, so the ortho lattice could not be turned off from here).  It drives
+        // the grid of the projection it is shown in; the two states are independent.
         bool pgHot = false;
-        if ( !ortho )
         {
             const float gx1 = x0 - KVC_PGRID_GAP;
             const float gx0 = gx1 - KVC_PGRID_W;
             if ( gx0 >= imgMinX + KVC_MARGIN )
             {
-                const bool on   = KiwiGrid_PerspGrid();
+                const bool on   = ortho ? KiwiGrid_OrthoGrid() : KiwiGrid_PerspGrid();
                 const bool over = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
                                && mouse.x >= gx0 && mouse.x <= gx1
                                && mouse.y >= y0  && mouse.y <= y1;
@@ -584,13 +585,21 @@ namespace
                 }
 
                 if ( over && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
-                    KiwiGrid_SetPerspGrid( !on );
-                if ( over )
+                {
+                    if ( ortho ) KiwiGrid_SetOrthoGrid( !on );
+                    else         KiwiGrid_SetPerspGrid( !on );
+                }
+                if ( over && ortho )
+                    ImGui::SetTooltip( "Ground grid in ORTHO (on by default, remembered).\n"
+                                       "Turn it off when the lattice gets in the way - over terrain\n"
+                                       "flattened to the grid plane, for instance.  The axes, grid\n"
+                                       "snapping and the perspective grid are unaffected." );
+                else if ( over )
                     ImGui::SetTooltip( "Ground grid in PERSPECTIVE (off by default).\n"
                                        "Spacing is chosen at the ORBIT PIVOT's depth and the\n"
                                        "lattice stops where its own cells stop resolving, so\n"
                                        "near the horizon you get the major lines and then\n"
-                                       "nothing.  Ortho is unaffected." );
+                                       "nothing.  Ortho has its own switch." );
             }
         }
         return hot || pgHot;

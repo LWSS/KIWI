@@ -20,6 +20,7 @@
 
 #include "stdafx.h"
 #include "qe3.h"
+#include "mainfrm.h"                 // camera_s: the re-tint wave starts at the camera
 
 #include <imgui/imgui.h>
 
@@ -47,12 +48,16 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #include <map>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 extern int          Sys_Printf( const char *fmt, ... );
 extern int          g_nUpdateBits;
+extern camera_s    *Ed_Camera();                                       // camwnd.cpp:165 (re-tint order)
 extern selbrush_t   selected_brushes;                       // map.cpp 0x23F1864
 extern selbrush_t   active_brushes;                         // map.cpp 0x23F189C
 extern entity_s    *world_entity;
@@ -80,7 +85,10 @@ extern void         Undo_EndBrushList( selbrush_t *list );             // undo.c
 extern void         Undo_AddEntity_W( entity_s *ent );                 // undo.cpp:633
 extern void         Undo_End();
 extern void         Undo_KiwiMarkCreated( brush_t *def );              // undo.cpp (KIWI tail)
+extern void         Brush_Free( selbrush_t *b );                       // brush.cpp:1002 (0x475BA0)
+extern void         Sel_InvalidateFromLegacy();                        // kiwi_selection.cpp:486
 extern void         Undo_AddBrush( entity_brush_s *pBrushInst );       // undo.cpp:494 (takes the brush DEF)
+extern entity_s    *Brush_Move( const float *move, brush_t *def, char snap ); // brush.cpp 0x4782A0: faces, patch ctrl, entity origin
 // Flatten-to-brushes and brush-face painting.
 extern brush_t     *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );          // brush.cpp
 extern void         Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510
@@ -129,7 +137,7 @@ namespace
     const char *KTER_TOOL_HINT[KTER_TOOL_COUNT] =
     {
         "LMB raise   Ctrl+LMB dig   Shift+LMB smooth   V pick base height",
-        "LMB snap to target Z   V / Ctrl+LMB pick the height under the pointer   Shift+LMB smooth",
+        "LMB sets everything inside the outer ring to the target Z, instantly   V / Ctrl+LMB pick the height under the pointer   Alt+wheel target   Shift+LMB smooth",
         "LMB smooth",
         "LMB add noise   Ctrl+LMB subtract   Shift+LMB smooth",
         "LMB paint the brush material onto any terrain touched   Ctrl+LMB paint it out   Shift+LMB smooth   I eyedropper",
@@ -156,8 +164,22 @@ namespace
     float s_flatTol     = 1.0f;      // Flatten: a patch whose heights span <= this becomes one brush
     float s_flatThick   = 16.0f;     // Flatten: brush thickness below the surface
     bool  s_affectUnselected = false;
+    // KIWI (2026-09-16, user): height strokes also lift / lower whatever rests on the
+    // terrain (brushes, models, entities, non-terrain patches) by the terrain's own
+    // height change under each object, so placed props survive a resculpt. Off by
+    // default; see CaptureRiders / CarryRiders.
+    bool  s_carryObjects = false;
+    bool  s_setHeightFeather = false;   // Set height: ramp the edge by falloff x strength (off = exact, hard edge)
+    bool  s_setHeightContain = true;    // ALL height tools: never change anything outside the ring (SetHeightFits)
+    // OFF by default (2026-09-18, user: "it keeps making the patch more and more dense with
+    // tri's ... I dont want to waste tri's like this unless I specify it with the tesselate
+    // button"): density is the user's call.  It was ON for half a day and silently added
+    // ~12k triangles in a few strokes of a 177-unit ring.
+    bool  s_autoRefine  = false;        // height tools: re-grid coarse terrain under the ring first (RefineUnderRing)
+    float s_refineMin   = 16.0f;        // ... never finer than this cell size
+    bool  s_layerDepthEqual = true;     // paint layers draw depth-EQUAL to their own base (see StripDecalOffset)
     float s_chunkSize   = 2048.0f;   // max patch side; the expander/split chunk size
-    int   s_density     = 8;         // Tessellate: cells across the whole patch (any size; >15 splits)
+    float s_tessCell    = 64.0f;     // Tessellate: ABSOLUTE cell size in world units (>15 cells an axis splits)
     bool  s_expand      = false;     // Raise: "Allow terrain creation" - lay chunks in empty lattice cells
     float s_createZ     = 0.0f;      // creation: base height where nothing at all is under the cursor
     int   s_createCells = 8;         // creation: cells per side of a chunk laid with no terrain in reach
@@ -166,6 +188,7 @@ namespace
     bool  s_hideWire    = false;     // armed: hide the patch wireframe entirely (Tab toggles)
     float s_wireReach   = 1.25f;     // armed: wireframe shown within outer radius x this
     bool  s_heatmap     = true;      // armed height tools: patches wear a height gradient
+    bool  s_heatAlways  = false;     // ...and with this, also while NOT armed (off by default)
 
     // ── session ──────────────────────────────────────────────────────────────
     bool  s_loaded = false;
@@ -175,6 +198,11 @@ namespace
     bool  s_cursorHave = false;
     float s_cursor[3]  = { 0.0f, 0.0f, 0.0f };
     selbrush_t *s_cursorNode = nullptr;      // the patch under the cursor (ring drop target)
+    // Its def at pick time, as a KEY ONLY (never dereferenced).  The node can be freed
+    // behind the tool's back - an undo, Delete, another tool - so nothing may read
+    // s_cursorNode without LiveCursorNode() first (2026-09-18 crash: ForgetDef read
+    // s_cursorNode->patch of a node an undo had freed; patch was 0xFFFFFFFFFFFFFFFF).
+    const patchMesh_t *s_cursorDef = nullptr;
     // What the cursor landed on.  Only "Allow terrain creation" lets it leave the patches.
     enum kterCursor_t { KCUR_NONE = 0, KCUR_PATCH, KCUR_SURFACE, KCUR_PLANE };
     int   s_cursorKind = KCUR_NONE;
@@ -208,12 +236,14 @@ namespace
     int   s_layersAdded = 0;                 // per stroke: slots created on touched patches
     int   s_layersFull  = 0;                 // per stroke: patches skipped (4 slots used)
     int   s_facesPainted = 0;                // per stroke: brush faces that took the material
+    int   s_carried      = 0;                // per stroke: objects "Carry objects" moved
     std::vector<selbrush_t *> s_targets;     // the patches one stroke touches
     std::vector<patchMesh_t *> s_dirtyDefs;  // changed this frame; rebuilt once
     bool  s_dirtyBounds = false;
 
     std::map<std::string, Material *>  s_blendTwins;   // material -> preview twin (null = failed)
     std::map<std::string, std::string> s_twinErr;      // material -> why
+    void RestripTwins();                               // below: re-apply the twins' depth state
 
     // Auto-transition bands, per patch and slot.
     struct kterBand_t
@@ -282,14 +312,14 @@ namespace
         s_squareRot = ClampF( s_squareRot, -180.0f, 180.0f );
         s_amount    = ClampF( s_amount, 1.0f, 4096.0f );
         s_targetZ   = ClampF( s_targetZ, -65536.0f, 65536.0f );
+        s_refineMin = ClampF( s_refineMin, 4.0f, 256.0f );
         s_noiseScale = ClampF( s_noiseScale, 0.25f, 2048.0f );
         s_noiseFreq  = ClampF( s_noiseFreq, 0.0001f, 1.0f );
         s_blendWeight = ClampF( s_blendWeight, 0.0f, 1.0f );
         if ( s_blendRings < 1 ) s_blendRings = 1;
         if ( s_blendRings > 4 ) s_blendRings = 4;
         s_chunkSize = ClampF( s_chunkSize, 256.0f, 8192.0f );
-        if ( s_density < 1 ) s_density = 1;
-        if ( s_density > 120 ) s_density = 120;
+        s_tessCell  = ClampF( s_tessCell, 4.0f, 4096.0f );
         s_createZ = ClampF( s_createZ, -65536.0f, 65536.0f );
         if ( s_createCells < 1 )  s_createCells = 1;
         if ( s_createCells > 15 ) s_createCells = 15;
@@ -302,6 +332,9 @@ namespace
             return;
         s_loaded = true;
         s_tool      = Radiant_ProfileGetInt( KTER_PROFILE, "Tool", KTER_RAISE );
+        // A profile saved on the retired Smooth tool lands on Raise (Shift+LMB smooths).
+        // Only here: the test DSL may still select the slot explicitly.
+        if ( s_tool == KTER_SMOOTH ) s_tool = KTER_RAISE;
         s_shape     = Radiant_ProfileGetInt( KTER_PROFILE, "Shape", KTER_CIRCLE );
         s_falloff   = Radiant_ProfileGetInt( KTER_PROFILE, "Falloff", KTER_FO_SMOOTH );
         s_outer     = ReadFloat( "Outer", 256.0f );
@@ -319,14 +352,30 @@ namespace
         s_flatThick  = ReadFloat( "FlatThick", 16.0f );
         s_paintBrushes = Radiant_ProfileGetInt( KTER_PROFILE, "PaintBrushes", 0 ) != 0;
         s_affectUnselected = Radiant_ProfileGetInt( KTER_PROFILE, "AffectUnselected", 0 ) != 0;
+        s_carryObjects     = Radiant_ProfileGetInt( KTER_PROFILE, "CarryObjects", 0 ) != 0;
+        s_setHeightFeather = Radiant_ProfileGetInt( KTER_PROFILE, "SetHeightFeather", 0 ) != 0;
+        // "ContainRing": third key in two days (Set-height-only ON, then OFF); now every
+        // height tool, ON, workable because RefineUnderRing keeps the grid fine under the ring.
+        s_setHeightContain = Radiant_ProfileGetInt( KTER_PROFILE, "ContainRing", 1 ) != 0;
+        // "RefineUnderRing": a new key, so the ON the old default saved is not carried over.
+        s_autoRefine = Radiant_ProfileGetInt( KTER_PROFILE, "RefineUnderRing", 0 ) != 0;
+        s_refineMin  = ReadFloat( "SetHeightRefineMin", 16.0f );
+        {
+            // a twin can be loaded (and given the default test) by a draw before the first Load()
+            const bool was = s_layerDepthEqual;
+            s_layerDepthEqual = Radiant_ProfileGetInt( KTER_PROFILE, "LayerDepthEqual", 1 ) != 0;
+            if ( was != s_layerDepthEqual )
+                RestripTwins();
+        }
         s_chunkSize = ReadFloat( "ChunkSize2", 2048.0f );
-        s_density   = Radiant_ProfileGetInt( KTER_PROFILE, "DensityCells", 8 );
+        s_tessCell  = ReadFloat( "TessCellSize", 64.0f );
         s_expand    = Radiant_ProfileGetInt( KTER_PROFILE, "Expand", 0 ) != 0;
         s_createZ   = ReadFloat( "CreateZ", 0.0f );
         s_createCells = Radiant_ProfileGetInt( KTER_PROFILE, "CreateCells", 8 );
         s_createOnSurfaces = Radiant_ProfileGetInt( KTER_PROFILE, "CreateOnSurfaces", 1 ) != 0;
         s_wireReach = ReadFloat( "WireReach", 1.25f );
         s_heatmap   = Radiant_ProfileGetInt( KTER_PROFILE, "Heatmap", 1 ) != 0;
+        s_heatAlways = Radiant_ProfileGetInt( KTER_PROFILE, "HeatmapAlways", 0 ) != 0;
         {
             const std::string pm = Radiant_ProfileGetString( KTER_PROFILE, "PaintMaterial", "" );
             strncpy( s_paintMaterial, pm.c_str(), sizeof( s_paintMaterial ) - 1 );
@@ -358,14 +407,21 @@ namespace
         WriteFloat( "FlatThick", s_flatThick );
         Radiant_ProfileSetInt( KTER_PROFILE, "PaintBrushes", s_paintBrushes ? 1 : 0 );
         Radiant_ProfileSetInt( KTER_PROFILE, "AffectUnselected", s_affectUnselected ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "CarryObjects", s_carryObjects ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "SetHeightFeather", s_setHeightFeather ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "ContainRing", s_setHeightContain ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "RefineUnderRing", s_autoRefine ? 1 : 0 );
+        WriteFloat( "SetHeightRefineMin", s_refineMin );
+        Radiant_ProfileSetInt( KTER_PROFILE, "LayerDepthEqual", s_layerDepthEqual ? 1 : 0 );
         WriteFloat( "ChunkSize2", s_chunkSize );
-        Radiant_ProfileSetInt( KTER_PROFILE, "DensityCells", s_density );
+        WriteFloat( "TessCellSize", s_tessCell );
         Radiant_ProfileSetInt( KTER_PROFILE, "Expand", s_expand ? 1 : 0 );
         WriteFloat( "CreateZ", s_createZ );
         Radiant_ProfileSetInt( KTER_PROFILE, "CreateCells", s_createCells );
         Radiant_ProfileSetInt( KTER_PROFILE, "CreateOnSurfaces", s_createOnSurfaces ? 1 : 0 );
         WriteFloat( "WireReach", s_wireReach );
         Radiant_ProfileSetInt( KTER_PROFILE, "Heatmap", s_heatmap ? 1 : 0 );
+        Radiant_ProfileSetInt( KTER_PROFILE, "HeatmapAlways", s_heatAlways ? 1 : 0 );
         Radiant_ProfileSetString( KTER_PROFILE, "PaintMaterial", s_paintMaterial );
         Radiant_ProfileSetInt( KTER_PROFILE, "PaintBase", s_paintBase ? 1 : 0 );
         Radiant_ProfileSetInt( KTER_PROFILE, "WeightView", s_weightView ? 1 : 0 );
@@ -484,9 +540,11 @@ namespace
         if ( PickPatches( ray.origin, ray.dir, true, outPoint, outColor, &s_cursorNode ) )
         {
             s_cursorKind = KCUR_PATCH;
+            s_cursorDef  = ( s_cursorNode && s_cursorNode->patch ) ? s_cursorNode->patch->def : nullptr;
             return true;
         }
         s_cursorNode = nullptr;
+        s_cursorDef  = nullptr;
         if ( outColor )
             memset( outColor, 255, 4 );
         // Off the patches: terrain creation lands on surfaces / the base plane, and
@@ -556,12 +614,53 @@ namespace
         const float ex = p10[0] - p00[0], ey = p01[1] - p00[1];
         if ( fabsf( ex ) < 1.0f || fabsf( ey ) < 1.0f )
             return false;
-        return fabsf( p10[1] - p00[1] ) < 1.0f && fabsf( p01[0] - p00[0] ) < 1.0f
-            && fabsf( p11[0] - p10[0] ) < 1.0f && fabsf( p11[1] - p01[1] ) < 1.0f;
+        if ( !( fabsf( p10[1] - p00[1] ) < 1.0f && fabsf( p01[0] - p00[0] ) < 1.0f
+             && fabsf( p11[0] - p10[0] ) < 1.0f && fabsf( p11[1] - p01[1] ) < 1.0f ) )
+            return false;
+        // KIWI (2026-09-18, user screenshots of "redundant geo"): the four corners are not
+        // enough.  A patch with square corners but CURVED edges / an irregular interior
+        // passed as a sheet, and Tessellate / Split / the chunk lattice then rebuilt it from
+        // its bounding box: rectangular chunks poking out past the curve and lying on the
+        // neighbours.  A sheet has EVERY point on the regular lattice its corners span.
+        const float sx = ex / (float)( def->width - 1 ), sy = ey / (float)( def->height - 1 );
+        for ( int i = 0; i < def->width; ++i )
+            for ( int j = 0; j < def->height; ++j )
+            {
+                const float *p = def->ctrl[i][j].xyz;
+                if ( fabsf( p[0] - ( p00[0] + sx * (float)i ) ) > 1.0f
+                  || fabsf( p[1] - ( p00[1] + sy * (float)j ) ) > 1.0f )
+                    return false;
+            }
+        return true;
     }
 
     // Height of the cursor patch at (x,y): bilinear off the control grid for a sheet
     // (O(1)), the cursor height otherwise.  No ray casts: the ring is 64 of these per move.
+    // The cursor node only if it is still linked in a display list AND still the patch
+    // that was picked (a freed node's address can be reused); otherwise it is dropped.
+    // One list walk - call it once per operation, not per ring point.
+    selbrush_t *LiveCursorNode()
+    {
+        if ( !s_cursorNode )
+            return nullptr;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( b == s_cursorNode )
+                {
+                    if ( b->patch && b->patch->def == s_cursorDef )
+                        return b;
+                    pass = 2;
+                    break;
+                }
+        }
+        s_cursorNode = nullptr;
+        s_cursorDef  = nullptr;
+        return nullptr;
+    }
+
+    // RebuildRing validates the node once (LiveCursorNode) before its 64 calls here.
     bool DropToSurface( float x, float y, float zGuess, float *outZ )
     {
         if ( !s_cursorNode || !s_cursorNode->patch )
@@ -683,6 +782,55 @@ namespace
         return -1;
     }
 
+    // KIWI (2026-09-19): "kiwi_blend_<name>" is the EDITOR'S OWN preview copy of <name> (an
+    // alpha-blend decal clone written into materials/ so the renderer can load it).  Being a
+    // real file it shows in the texture browser, and the user's map had it painted as a
+    // terrain LAYER on 49 patches (found by peeking the running editor's twin table: a
+    // "kiwi_blend_kiwi_blend_..." twin-of-a-twin).  Such a layer compiles as a decal material,
+    // and the same grass then lives under two names, which Blend / the seam pass cannot join.
+    // The real name is what belongs in a map: paint material names are unwrapped on the way
+    // in, and a patch that already carries a wrapped layer is healed when a paint / blend
+    // stroke touches it.
+    const char *UnwrapTwinName( const char *name )
+    {
+        while ( name && !_strnicmp( name, "kiwi_blend_", 11 ) )
+            name += 11;
+        return name;
+    }
+
+    void HealTwinLayers( patchMesh_t *def )
+    {
+        for ( int k = 0; k < KTER_SLOTS; ++k )
+        {
+            if ( !SlotUsed( def, k ) || _strnicmp( def->kiwiLayer[k], "kiwi_blend_", 11 ) != 0 )
+                continue;
+            char real[64];
+            strncpy( real, UnwrapTwinName( def->kiwiLayer[k] ), sizeof( real ) - 1 );
+            real[sizeof( real ) - 1] = '\0';
+            if ( !real[0] )
+                continue;
+            const int other = FindSlotByName( def, real );
+            if ( other >= 0 && other != k )
+            {
+                // the real layer is there too: keep the stronger weight per point, drop the wrapped one
+                for ( int i = 0; i < def->width; ++i )
+                    for ( int j = 0; j < def->height; ++j )
+                    {
+                        byte *c = (byte *)&def->ctrl[i][j].vert_color;
+                        if ( c[k] > c[other] )
+                            c[other] = c[k];
+                        c[k] = 0;
+                    }
+                def->kiwiLayer[k][0] = '\0';
+            }
+            else
+            {
+                strncpy( def->kiwiLayer[k], real, 63 );
+                def->kiwiLayer[k][63] = '\0';
+            }
+        }
+    }
+
     // Texture paint with a material on the brush (or "erase to base") needs no
     // selection: every eligible patch is a target.
     bool PaintAnywhere()
@@ -699,17 +847,50 @@ namespace
     // needs no offset at all: clear it and make the depth test LESSEQUAL so the coplanar
     // run still passes over its own base. stateBitsTable is per material
     // (Material_SetStateBits copies it), and these materials are editor-only.
+    //
+    // KIWI FIX (2026-09-19, user: "some of the materials are rendering through each other" -
+    // gravel paint over rail ties that the Height-colours view shows IN FRONT of the ground).
+    // Settled by reading the state back from the D3D device (a temporary GetRenderState dump
+    // in r_ed_scene.cpp's pass setup, removed again once it had answered): the twins
+    // had no bias and the right test, everything else was opaque and depth-writing.  The
+    // cause was LESSEQUAL itself.  A layer run is blended, writes no depth and draws LAST
+    // (sort key base + L), so wherever another surface lies within one depth-buffer step of
+    // the ground - tie tops on a rail bed flattened to their height - "less OR EQUAL" let
+    // the paint win every near-tie, systematically, while in the heat view (no layer runs)
+    // the ties were the last opaque thing drawn and won the very same ties.
+    // A layer belongs on pixels whose visible surface is ITS OWN base run and nowhere else:
+    // depth EQUAL.  The layer run is the base run's grid vertex for vertex, and this
+    // renderer already relies on exactly that for the sun re-add (technique 26,
+    // "additive_stencil", depth EQUAL against the base pass - camwnd.cpp
+    // Cam_DrawBrushList_SunPreview).  The wireframe entries keep LESSEQUAL (lines are not
+    // the base's triangles).  `s_layerDepthEqual` (pref LayerDepthEqual, default on) is the
+    // escape hatch should some techset's vertex shader not reproduce the base's depth
+    // bit for bit - the symptom would be paint flickering or vanishing.
     void StripDecalOffset( Material *m )
     {
         if ( !m || !m->stateBitsTable )
             return;
+        const int wireA = m->stateBitsEntry[TECHNIQUE_WIREFRAME_SOLID];
+        const int wireB = m->stateBitsEntry[TECHNIQUE_WIREFRAME_SHADED];
         for ( int e = 0; e < (int)m->stateBitsCount; ++e )
         {
             unsigned int &bits1 = m->stateBitsTable[e].loadBits[1];
             bits1 &= ~(unsigned int)GFXS1_POLYGON_OFFSET_MASK;
-            if ( !( bits1 & GFXS1_DEPTHTEST_DISABLE ) )
-                bits1 = ( bits1 & ~(unsigned int)GFXS1_DEPTHTEST_MASK ) | GFXS1_DEPTHTEST_LESSEQUAL;
+            if ( bits1 & GFXS1_DEPTHTEST_DISABLE )
+                continue;
+            const bool wire = ( e == wireA || e == wireB );
+            const unsigned int func = ( s_layerDepthEqual && !wire ) ? GFXS1_DEPTHTEST_EQUAL : GFXS1_DEPTHTEST_LESSEQUAL;
+            bits1 = ( bits1 & ~(unsigned int)GFXS1_DEPTHTEST_MASK ) | func;
         }
+    }
+
+    // Material state is read at draw time, so this takes effect on the next frame - no patch
+    // re-upload, no mesh-run rebuild.
+    void RestripTwins()
+    {
+        for ( std::map<std::string, Material *>::iterator it = s_blendTwins.begin(); it != s_blendTwins.end(); ++it )
+            StripDecalOffset( it->second );
+        g_nUpdateBits |= W_CAMERA;
     }
 
     // Preview twin: "kiwi_blend_<name>", an alpha-blend (l_sm_b0c0[n0][s0]) material over
@@ -1347,6 +1528,30 @@ namespace
         return true;
     }
 
+    // The stamp centres of the ApplyStroke being flushed.  With "never change anything
+    // outside the ring" on, the seam pass only touches border points one of those rings
+    // covered: it used to run over a stamped patch's WHOLE border and so "healed" old
+    // cracks on neighbours far from the brush (2026-09-18).  Empty = no restriction.
+    float s_reachCenters[8][3];
+    int   s_reachCount = 0;
+
+    // Control points a height stamp moved since the last flush.  The weld uses it: where
+    // two patches share a point and only ONE side's copy moved (the other was shut out -
+    // its cells are coarser and stick out of the ring - or simply is not a target), the
+    // moved copy wins.  A plain mean halved the stroke along such a seam on every flush:
+    // the other half of the "moat" (2026-09-18).
+    std::set<const drawVert_t *> s_movedPts;
+
+    bool InStrokeReach( const float *p )
+    {
+        if ( !s_setHeightContain || s_reachCount == 0 )
+            return true;
+        for ( int i = 0; i < s_reachCount; ++i )
+            if ( BrushDistance( s_reachCenters[i], p ) <= s_outer )
+                return true;
+        return false;
+    }
+
     void StitchSeams()
     {
         if ( s_targets.empty() || s_dirtyDefs.empty() )
@@ -1373,9 +1578,14 @@ namespace
             for ( int k = 0; k < an; ++k )
             {
                 drawVert_t *P = &A->ctrl[ai[k]][aj[k]];
+                if ( !InStrokeReach( P->xyz ) )
+                    continue;
                 // Pass 1: weld with coincident border points on other patches.
                 float  zSum = P->xyz[2];
                 int    zN = 1;
+                const bool pMoved = s_movedPts.count( P ) != 0;
+                float  mSum = pMoved ? P->xyz[2] : 0.0f;       // mean over the copies a stamp moved
+                int    mN   = pMoved ? 1 : 0;
                 std::vector<drawVert_t *> group;
                 std::vector<size_t>       groupPatch;
                 for ( size_t o = 0; o < all.size(); ++o )
@@ -1397,12 +1607,13 @@ namespace
                             group.push_back( Q );
                             groupPatch.push_back( o );
                             if ( all[o].target ) { zSum += Q->xyz[2]; ++zN; }
+                            if ( s_movedPts.count( Q ) ) { mSum += Q->xyz[2]; ++mN; }
                         }
                     }
                 }
                 if ( !group.empty() )
                 {
-                    const float z = zSum / (float)zN;
+                    const float z = mN ? mSum / (float)mN : zSum / (float)zN;
                     P->xyz[2] = z;
                     for ( size_t g = 0; g < group.size(); ++g )
                     {
@@ -1450,10 +1661,50 @@ namespace
                 int bi[64], bj[64];
                 const int bn = BorderRing( B, bi, bj );
 
-                // (a) A's partnerless points onto B's segments.
+                // KIWI (2026-09-18, user: "at the edge of 2 terrain patches, it forms a moat
+                // ... the raise tool doesn't seem to like raising this area"): (a) used to run
+                // FIRST.  It snapped the stroked patch's seam points down onto the neighbour's
+                // edge while that edge still had its OLD heights, and only then (b) copied the
+                // - now lowered - seam back to the neighbour.  Every flush undid the stroke
+                // along the seam, so the ground rose on both sides of a line that could not:
+                // a moat.  The STROKED patch is the master: (b) first lifts the neighbour's
+                // seam vertices onto the stroked profile, then (a) lays the stroked patch's
+                // in-between points on the neighbour's (now moved) edge to close the crack.
+                // (A seam between two neighbour vertices that are both outside every ring
+                // still cannot bend - RefineUnderRing re-grids the neighbour for that.)
+
+                // (b) B's points inside A's segments (strictly between the ends).
+                for ( int m = 0; m < bn; ++m )
+                {
+                    drawVert_t *Q = &B->ctrl[bi[m]][bj[m]];
+                    if ( !InStrokeReach( Q->xyz ) )
+                        continue;
+                    for ( int k = 0; k < an; ++k )
+                    {
+                        const float *p0 = A->ctrl[ai[k]][aj[k]].xyz;
+                        const float *p1 = A->ctrl[ai[( k + 1 ) % an]][aj[( k + 1 ) % an]].xyz;
+                        if ( ( fabsf( p0[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p0[1] - Q->xyz[1] ) <= KTER_WELD )
+                          || ( fabsf( p1[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p1[1] - Q->xyz[1] ) <= KTER_WELD ) )
+                            continue;                       // an end: pass 1 welded it
+                        float t;
+                        if ( !OnSegment( Q->xyz, p0, p1, &t ) )
+                            continue;
+                        const float z = p0[2] + ( p1[2] - p0[2] ) * t;
+                        if ( fabsf( Q->xyz[2] - z ) > 0.001f )
+                        {
+                            TouchNeighbour( B, all[o].target );
+                            Q->xyz[2] = z;
+                        }
+                        break;
+                    }
+                }
+
+                // (a) A's partnerless points onto B's segments (B's seam is final now).
                 for ( int k = 0; k < an; ++k )
                 {
                     drawVert_t *P = &A->ctrl[ai[k]][aj[k]];
+                    if ( !InStrokeReach( P->xyz ) )
+                        continue;
                     bool partnered = false;
                     for ( int m = 0; m < bn && !partnered; ++m )
                     {
@@ -1472,30 +1723,6 @@ namespace
                         // P sits on B's edge between two of B's vertices: only B's straight
                         // segment can be honoured, so P takes its height there.
                         P->xyz[2] = q0[2] + ( q1[2] - q0[2] ) * t;
-                        break;
-                    }
-                }
-
-                // (b) B's points inside A's segments (strictly between the ends).
-                for ( int m = 0; m < bn; ++m )
-                {
-                    drawVert_t *Q = &B->ctrl[bi[m]][bj[m]];
-                    for ( int k = 0; k < an; ++k )
-                    {
-                        const float *p0 = A->ctrl[ai[k]][aj[k]].xyz;
-                        const float *p1 = A->ctrl[ai[( k + 1 ) % an]][aj[( k + 1 ) % an]].xyz;
-                        if ( ( fabsf( p0[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p0[1] - Q->xyz[1] ) <= KTER_WELD )
-                          || ( fabsf( p1[0] - Q->xyz[0] ) <= KTER_WELD && fabsf( p1[1] - Q->xyz[1] ) <= KTER_WELD ) )
-                            continue;                       // an end: pass 1 welded it
-                        float t;
-                        if ( !OnSegment( Q->xyz, p0, p1, &t ) )
-                            continue;
-                        const float z = p0[2] + ( p1[2] - p0[2] ) * t;
-                        if ( fabsf( Q->xyz[2] - z ) > 0.001f )
-                        {
-                            TouchNeighbour( B, all[o].target );
-                            Q->xyz[2] = z;
-                        }
                         break;
                     }
                 }
@@ -1558,26 +1785,40 @@ namespace
                 }
                 if ( group.empty() )
                     continue;
-                float mean[4];
-                for ( int c = 0; c < 4; ++c )
+                // KIWI (2026-09-18): BY LAYER NAME, not by byte index.  This used to average
+                // (and then memcpy) the four raw colour bytes across the seam, which is only
+                // right when both patches keep the same material in the same slot - and
+                // ShareLayersUnderRing now adds layers wherever a slot happens to be free.
+                // A member that does not carry the layer is left alone for that layer.
+                for ( int c = 0; c < KTER_SLOTS; ++c )
                 {
-                    mean[c] = (float)( (const byte *)&P->vert_color )[c];
-                    for ( size_t g = 0; g < group.size(); ++g )
-                        mean[c] += (float)( (const byte *)&group[g]->vert_color )[c];
-                    mean[c] /= (float)( group.size() + 1 );
-                }
-                for ( int c = 0; c < 4; ++c )
-                    ( (byte *)&P->vert_color )[c] = (byte)(int)( mean[c] + 0.5f );
-                for ( size_t g = 0; g < group.size(); ++g )
-                {
-                    bool differs = false;
-                    for ( int c = 0; c < 4 && !differs; ++c )
-                        differs = ( (const byte *)&group[g]->vert_color )[c] != ( (const byte *)&P->vert_color )[c];
-                    if ( !differs )
+                    if ( !SlotUsed( A, c ) )
                         continue;
-                    TouchNeighbour( all[groupPatch[g]].def, all[groupPatch[g]].target );
-                    NoteDirty( all[groupPatch[g]].def, false );
-                    memcpy( &group[g]->vert_color, &P->vert_color, 4 );
+                    float sum = (float)( (const byte *)&P->vert_color )[c];
+                    int   cnt = 1;
+                    int   slotOf[64];
+                    const size_t gn = group.size() < 64 ? group.size() : 64;
+                    for ( size_t g = 0; g < gn; ++g )
+                    {
+                        slotOf[g] = FindSlotByName( all[groupPatch[g]].def, A->kiwiLayer[c] );
+                        if ( slotOf[g] >= 0 )
+                        {
+                            sum += (float)( (const byte *)&group[g]->vert_color )[slotOf[g]];
+                            ++cnt;
+                        }
+                    }
+                    if ( cnt < 2 )
+                        continue;
+                    const byte mean = (byte)(int)( sum / (float)cnt + 0.5f );
+                    ( (byte *)&P->vert_color )[c] = mean;
+                    for ( size_t g = 0; g < gn; ++g )
+                    {
+                        if ( slotOf[g] < 0 || ( (const byte *)&group[g]->vert_color )[slotOf[g]] == mean )
+                            continue;
+                        TouchNeighbour( all[groupPatch[g]].def, all[groupPatch[g]].target );
+                        NoteDirty( all[groupPatch[g]].def, false );
+                        ( (byte *)&group[g]->vert_color )[slotOf[g]] = mean;
+                    }
                 }
             }
         }
@@ -1593,6 +1834,70 @@ namespace
             Patch_Rebuild( s_dirtyDefs[i], s_dirtyBounds ? 1 : 0 );
         s_dirtyDefs.clear();
         s_dirtyBounds = false;
+        s_movedPts.clear();
+    }
+
+    float CellSizeOf( const patchMesh_t *def );     // below: the grid's world cell size
+    bool  s_coarseSpill = false;                    // Set height reached a grid coarser than the brush
+    int   s_fitSet = 0, s_fitShut = 0;              // Set height, this stamp: points set / points held back
+    bool  s_containBypass = false;                  // Stamp(): second pass when containment shut EVERY point out
+
+    // KIWI (2026-09-17, user: "the set height tool is still causing some sort of lean on
+    // areas not affected by the circle"): a terrain mesh is flat triangles between control
+    // points, so moving ONE point tilts every triangle that uses it - and those reach a
+    // full cell past the point.  Setting every point inside the ring therefore always
+    // leaned the cells just OUTSIDE it.  Contained mode moves a point only when every
+    // triangle it would tilt lies inside the ring: both edge neighbours of each of its
+    // four cells, plus the far corner when that cell's diagonal runs through the point.
+    // The slope between old and new height then sits inside the ring and the ground
+    // outside keeps its shape exactly.  At a patch border the missing cells are taken as
+    // the mirror image of the ones that exist, so the two patches sharing the seam reach
+    // the same verdict for their coincident points (a regular grid continues that way).
+    bool InsideRing( const float *center, float x, float y )
+    {
+        const float p[3] = { x, y, 0.0f };
+        return BrushDistance( center, p ) <= s_outer;
+    }
+
+    bool SetHeightFits( const patchMesh_t *def, int i, int j, const float *center )
+    {
+        if ( def->width < 2 || def->height < 2 )
+            return true;
+        const float *v = def->ctrl[i][j].xyz;
+        for ( int di = -1; di <= 1; di += 2 )
+            for ( int dj = -1; dj <= 1; dj += 2 )
+            {
+                const int  ni = i + di, nj = j + dj;
+                const bool okI = ni >= 0 && ni < def->width;
+                const bool okJ = nj >= 0 && nj < def->height;
+                const int  ri = okI ? ni : i - di;          // real column / row used (mirrored if !ok)
+                const int  rj = okJ ? nj : j - dj;
+                const float *eI = def->ctrl[ri][j].xyz;
+                const float *eJ = def->ctrl[i][rj].xyz;
+                const float *dg = def->ctrl[ri][rj].xyz;
+                const float sI = okI ? 1.0f : -1.0f, sJ = okJ ? 1.0f : -1.0f;
+                // offsets from v, mirrored across the border where the cell does not exist
+                const float eIx = v[0] + ( eI[0] - v[0] ) * sI, eIy = v[1] + ( eI[1] - v[1] ) * sI;
+                const float eJx = v[0] + ( eJ[0] - v[0] ) * sJ, eJy = v[1] + ( eJ[1] - v[1] ) * sJ;
+                if ( !InsideRing( center, eIx, eIy ) || !InsideRing( center, eJx, eJy ) )
+                    return false;
+                bool needDiag = true;
+                if ( okI && okJ )
+                {
+                    const int  qi = ni < i ? ni : i, qj = nj < j ? nj : j;
+                    const bool turned   = ( def->ctrl[qi][qj].turned_edge & 1 ) != 0;   // diagonal v00-v11
+                    const bool onMain   = di == dj;                                     // v is v00 or v11
+                    needDiag = turned ? onMain : !onMain;
+                }
+                if ( needDiag )
+                {
+                    const float dx = ( eIx - v[0] ) + ( eJx - v[0] ) + ( ( dg[0] - eI[0] - eJ[0] + v[0] ) * sI * sJ );
+                    const float dy = ( eIy - v[1] ) + ( eJy - v[1] ) + ( ( dg[1] - eI[1] - eJ[1] + v[1] ) * sI * sJ );
+                    if ( !InsideRing( center, v[0] + dx, v[1] + dy ) )
+                        return false;
+                }
+            }
+        return true;
     }
 
     bool StampPatch( selbrush_t *b, kterOp_t op, const float *center, float sign, float dt )
@@ -1608,6 +1913,19 @@ namespace
                 return false;
         }
         const bool texOp = ( op == OP_TEXTURE || ( op == OP_SMOOTH && s_tool == KTER_TEXTURE ) );
+        // a layer stored under the editor's preview name goes back to the real material first
+        if ( texOp || op == OP_BLEND )
+        {
+            bool wrapped = false;
+            for ( int k = 0; k < KTER_SLOTS && !wrapped; ++k )
+                wrapped = SlotUsed( def, k ) && !_strnicmp( def->kiwiLayer[k], "kiwi_blend_", 11 );
+            if ( wrapped )
+            {
+                MarkTouched( def );
+                HealTwinLayers( def );
+                NoteDirty( def, false );
+            }
+        }
         // Texture paint: which slot on THIS patch the brush material means.
         //   -1        = base / erase every layer (needs at least one layer to erase)
         //   existing  = paint (or erase / smooth) that slot
@@ -1670,8 +1988,26 @@ namespace
                 const float lt = LerpStep( ( texOp || op == OP_BLEND ) ? w * 3.0f : w, dt );
                 const float at = w * dt * AdditiveRate();
 
+                // EVERY height op (2026-09-18: Raise / Dig / Noise / Smooth leaked past the
+                // ring exactly like Set height did): a point moves only if all the
+                // triangles it tilts lie inside the ring.  RefineUnderRing keeps the grid
+                // under the ring fine enough for that to leave plenty of points.
+                const bool heightOp = op == OP_RAISE || op == OP_SETHEIGHT || op == OP_NOISE
+                                   || ( op == OP_SMOOTH && s_tool != KTER_TEXTURE && s_tool != KTER_BLEND );
+                if ( heightOp && s_setHeightContain && !s_containBypass )
+                {
+                    if ( !SetHeightFits( def, i, j, center ) )
+                    {
+                        ++s_fitShut;                 // its cells stick out of the ring: leave it alone
+                        continue;
+                    }
+                    ++s_fitSet;
+                }
+
                 MarkTouched( def );
                 changed = true;
+                if ( heightOp )
+                    s_movedPts.insert( cp );     // the weld lets a moved copy win over an unmoved one
                 byte *col = (byte *)&cp->vert_color;
                 switch ( op )
                 {
@@ -1680,8 +2016,26 @@ namespace
                     break;
                 case OP_SETHEIGHT:
                 {
-                    const float f = w > 1.0f ? 1.0f : w;
-                    cp->xyz[2] += ( s_targetZ - cp->xyz[2] ) * f;
+                    // KIWI (2026-09-17, user: "It should only affect the area in the circle
+                    // and it should be an instant height change ... an area i've already
+                    // flattened is being risen up"): this used to LERP toward the target by
+                    // falloff x strength, re-applied on every mouse move.  So the core only
+                    // reached the target at strength 1, and the whole band between the inner
+                    // and outer ring was dragged part of the way - which is what lifted
+                    // ground next to the spot being set, including ground already flattened
+                    // to a different height.  Now every control point inside the OUTER ring
+                    // is set to exactly the target, at once, and nothing outside it is
+                    // touched; strength and falloff do not apply.  "Feather the edge" brings
+                    // the old ramp back for blending a plateau into a slope.
+                    if ( s_setHeightFeather )
+                    {
+                        const float f = w > 1.0f ? 1.0f : w;
+                        cp->xyz[2] += ( s_targetZ - cp->xyz[2] ) * f;
+                    }
+                    else
+                        cp->xyz[2] = s_targetZ;
+                    if ( ( s_setHeightFeather || !s_setHeightContain ) && CellSizeOf( def ) > s_outer )
+                        s_coarseSpill = true;    // one moved point drags cells wider than the brush
                     break;
                 }
                 case OP_NOISE:
@@ -1842,13 +2196,101 @@ namespace
         return painted;
     }
 
+    // KIWI (2026-09-18, user: "when im blending, I can't blend areas that dont have the paint
+    // already ... I can fix this manually by dabbing a bit of paint on that area and then
+    // blending, but that's a hassle").  Blend skipped every patch without layers and only
+    // averaged inside each patch's own grid, so paint stopped dead at the border of a patch
+    // that did not carry that material: the sharp axis-aligned lines.  The manual dab worked
+    // because it ADDS the layer slot.  Blend now does that itself: every layer that has
+    // weight inside the ring on one target patch is given (at weight zero) to every other
+    // target patch the ring touches that lacks it - same slot index when that is free, else
+    // the first free one; StitchWeights matches layers by NAME, so either works.  The seam
+    // pass then carries the weight across the border and the blend diffuses it inward.
+    void ShareLayersUnderRing( const float *center )
+    {
+        const float r = s_shape == KTER_SQUARE ? s_outer * 1.42f : s_outer;
+        std::vector<selbrush_t *> under;
+        for ( size_t t = 0; t < s_targets.size(); ++t )
+        {
+            const float *mins = s_targets[t]->def->mins, *maxs = s_targets[t]->def->maxs;
+            if ( center[0] + r < mins[0] || center[0] - r > maxs[0]
+              || center[1] + r < mins[1] || center[1] - r > maxs[1] )
+                continue;
+            under.push_back( s_targets[t] );
+        }
+        if ( under.size() < 2 )
+            return;
+        for ( size_t a = 0; a < under.size(); ++a )
+        {
+            const patchMesh_t *A = under[a]->patch->def;
+            for ( int k = 0; k < KTER_SLOTS; ++k )
+            {
+                if ( !SlotUsed( A, k ) )
+                    continue;
+                // only a layer that really has paint under the ring is worth a draw run elsewhere
+                bool painted = false;
+                for ( int i = 0; i < A->width && !painted; ++i )
+                    for ( int j = 0; j < A->height && !painted; ++j )
+                        painted = ( (const byte *)&A->ctrl[i][j].vert_color )[k] != 0
+                               && BrushDistance( center, A->ctrl[i][j].xyz ) <= s_outer;
+                if ( !painted )
+                    continue;
+                for ( size_t b = 0; b < under.size(); ++b )
+                {
+                    patchMesh_t *B = under[b]->patch->def;
+                    if ( b == a || FindSlotByName( B, A->kiwiLayer[k] ) >= 0 )
+                        continue;
+                    const int slot = SlotUsed( B, k ) ? FirstFreeSlot( B ) : k;
+                    if ( slot < 0 )
+                    {
+                        ++s_layersFull;                  // four layers already: reported at stroke end
+                        continue;
+                    }
+                    MarkTouched( B );                    // undo copy before the first change
+                    const bool first = UsedSlotCount( B ) == 0;
+                    for ( int i = 0; i < B->width; ++i )
+                        for ( int j = 0; j < B->height; ++j )
+                        {
+                            if ( first )                 // white bytes mean nothing as weights
+                                *(unsigned int *)&B->ctrl[i][j].vert_color = 0u;
+                            else
+                                ( (byte *)&B->ctrl[i][j].vert_color )[slot] = 0;
+                        }
+                    strncpy( B->kiwiLayer[slot], A->kiwiLayer[k], 63 );
+                    B->kiwiLayer[slot][63] = '\0';
+                    ++s_layersAdded;
+                    NoteDirty( B, false );
+                }
+            }
+        }
+    }
+
     void Stamp( const float *center, kterOp_t op, float sign, float dt )
     {
         if ( dt <= 0.0f )
             return;
+        // Blend, and the Texture tool's Shift-smooth (same "nothing to smooth here" wall)
+        if ( op == OP_BLEND || ( op == OP_SMOOTH && s_tool == KTER_TEXTURE ) )
+            ShareLayersUnderRing( center );
         bool any = false;
+        s_fitSet = s_fitShut = 0;
+        s_containBypass = false;
         for ( size_t i = 0; i < s_targets.size(); ++i )
             any |= StampPatch( s_targets[i], op, center, sign, dt );
+        // "Never change anything outside the ring" on a grid too coarse for this ring: NO
+        // point has all its triangles inside it, and the brush would simply be dead.  With
+        // automatic re-gridding now opt-in that is the normal case on coarse terrain, so
+        // this stamp falls back to moving the points inside the ring (their cells then lean
+        // up to one cell past it - the patch mesh cannot do better without more triangles)
+        // and the status line says how to confine it.
+        if ( s_fitSet == 0 && s_fitShut > 0 )
+        {
+            s_containBypass = true;
+            for ( size_t i = 0; i < s_targets.size(); ++i )
+                any |= StampPatch( s_targets[i], op, center, sign, dt );
+            s_containBypass = false;
+            s_coarseSpill = true;
+        }
         if ( op == OP_TEXTURE && sign > 0.0f )
         {
             const int faces = PaintBrushFaces( center );
@@ -1878,6 +2320,163 @@ namespace
         case KTER_BLEND:     return OP_BLEND;
         default:             return OP_RAISE;
         }
+    }
+
+    // ── Carry objects (KIWI 2026-09-16, user: "raising / lowering / modifying the
+    // terrain in any way will also move the models up or down according to the terrain
+    // changes ... everything, not just models (brushes too), disabled by default") ────
+    //
+    // A "rider" is any visible, unfiltered brush, patch or entity that is not itself a
+    // terrain patch and whose bottom sits within KTER_CARRY_TOL of the stroke's terrain
+    // under its footprint centre when the stroke begins. Each flush re-samples the
+    // terrain there and moves the rider by (terrain now - terrain at the start), applied
+    // as a delta from what was already applied, so a long stroke never accumulates
+    // error. Brush_Move carries faces, patch control points and entity origins alike,
+    // and every rider is Undo_AddBrush'ed once inside the stroke's own record so Ctrl+Z
+    // puts the props back together with the terrain.
+    const float KTER_CARRY_TOL = 48.0f;
+
+    struct kterRider_t
+    {
+        selbrush_t *node;
+        brush_t    *def;
+        float       x, y;           // footprint centre
+        float       baseTerrainZ;   // terrain under it at the stroke start
+        float       applied;        // z already applied this stroke
+        bool        undoAdded;
+        bool        reached;        // a stamp's ring covered its footprint centre (else it never moves)
+    };
+    std::vector<kterRider_t> s_riders;
+
+    // Carry objects: only what a ring actually reached may move (2026-09-18: fence panels
+    // OUTSIDE the ring rode along on terrain spill).  Called for every stamp centre.
+    void MarkRidersReached( const float *center )
+    {
+        for ( size_t i = 0; i < s_riders.size(); ++i )
+            if ( !s_riders[i].reached )
+            {
+                const float p[3] = { s_riders[i].x, s_riders[i].y, 0.0f };
+                s_riders[i].reached = BrushDistance( center, p ) <= s_outer;
+            }
+    }
+
+    bool HeightStroke()
+    {
+        const kterOp_t op = OpForStroke();
+        return op == OP_RAISE || op == OP_SETHEIGHT || op == OP_NOISE
+            || ( op == OP_SMOOTH && s_tool != KTER_TEXTURE && s_tool != KTER_BLEND );
+    }
+
+    // Terrain height under (x, y) across the stroke's target patches: the highest
+    // sheet that covers the point (irregular grids cannot be sampled and are skipped).
+    bool TerrainZAt( float x, float y, float *outZ )
+    {
+        bool  have = false;
+        float best = 0.0f;
+        for ( size_t t = 0; t < s_targets.size(); ++t )
+        {
+            selbrush_t *b = s_targets[t];
+            if ( !b || !b->def || !b->patch || !b->patch->def )
+                continue;
+            const float *mins = b->def->mins, *maxs = b->def->maxs;
+            if ( x < mins[0] - 0.5f || x > maxs[0] + 0.5f || y < mins[1] - 0.5f || y > maxs[1] + 0.5f )
+                continue;
+            const patchMesh_t *def = b->patch->def;
+            if ( !GridIsSheet( def ) )
+                continue;
+            float z;
+            byte  c[4];
+            SampleGrid( def, x, y, &z, c );
+            if ( !have || z > best )
+            {
+                best = z;
+                have = true;
+            }
+        }
+        if ( have )
+            *outZ = best;
+        return have;
+    }
+
+    void CaptureRiders()
+    {
+        s_riders.clear();
+        if ( !s_carryObjects || !HeightStroke() )
+            return;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                brush_t *def = b->def;
+                if ( !def || FilterBrush( b, 0 ) || ( b->brushFlags & 0x20 ) != 0 )
+                    continue;
+                if ( b->patch && PatchEligible( b ) )
+                    continue;                           // terrain is what moves, never a rider
+                const float x = 0.5f * ( def->mins[0] + def->maxs[0] );
+                const float y = 0.5f * ( def->mins[1] + def->maxs[1] );
+                float z;
+                if ( !TerrainZAt( x, y, &z ) )
+                    continue;
+                if ( fabsf( def->mins[2] - z ) > KTER_CARRY_TOL )
+                    continue;                           // floating or buried: leave it
+                kterRider_t r;
+                r.node = b;
+                r.def  = def;
+                r.x = x;
+                r.y = y;
+                r.baseTerrainZ = z;
+                r.applied  = 0.0f;
+                r.undoAdded = false;
+                r.reached  = false;
+                s_riders.push_back( r );
+            }
+        }
+    }
+
+    int CarryRiders()
+    {
+        int moved = 0;
+        for ( size_t i = 0; i < s_riders.size(); ++i )
+        {
+            kterRider_t &r = s_riders[i];
+            if ( !r.reached )
+                continue;                               // no ring covered it: it stays put
+            if ( !r.node || r.node->def != r.def )
+                continue;                               // went away mid-stroke
+            float z;
+            if ( !TerrainZAt( r.x, r.y, &z ) )
+                continue;
+            const float want = z - r.baseTerrainZ;
+            const float step = want - r.applied;
+            if ( fabsf( step ) < 0.01f )
+                continue;
+            if ( !r.undoAdded )
+            {
+                // KIWI (2026-09-17, user: "when objects are carried up by terrain changes,
+                // it's not undo-able. FIX THIS!"): Brush_Move on an entity's brush also moves
+                // the ENTITY (a model's origin lives on its def, and the model draws from
+                // it).  Saving only the brush meant Undo_Undo put the old bounding box back
+                // under an entity that still sat at the raised origin - the prop stayed up.
+                // An entity-owned rider is recorded the way Edit>Delete records one:
+                // Undo_AddEntity_W clones the def (origin + epairs) and every brush of it, so
+                // phase 2/3 swap the whole entity back.  Worldspawn brushes and patches need
+                // only themselves.  Both calls skip what the record already holds.
+                entity_s *ownerDef = r.def->owner;
+                if ( ownerDef && world_entity && ownerDef != (entity_s *)world_entity->def )
+                    Undo_AddEntity_W( ownerDef );
+                else
+                    Undo_AddBrush( (entity_brush_s *)r.def );
+                r.undoAdded = true;
+            }
+            const float move[3] = { 0.0f, 0.0f, step };
+            Brush_Move( move, r.def, 0 );
+            r.applied = want;
+            ++moved;
+        }
+        if ( moved )
+            g_nUpdateBits = -1;
+        return moved;
     }
 
     void BuildTargets()
@@ -2023,8 +2622,11 @@ namespace
     void ForgetDef( patchMesh_t *def )
     {
         s_bands.erase( def );
-        if ( s_cursorNode && s_cursorNode->patch && s_cursorNode->patch->def == def )
+        if ( s_cursorDef == def )                // by key: the node itself may already be freed
+        {
             s_cursorNode = nullptr;
+            s_cursorDef  = nullptr;
+        }
     }
 
     // Edit->Delete's bracket over the current selection.
@@ -2045,7 +2647,9 @@ namespace
         std::vector<selbrush_t *> originals;
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
         {
-            if ( !PatchEligible( b ) )
+            // Regular sheets only: the split rebuilds from the bounding rectangle, which is
+            // not the shape of a curved / irregular patch (chunks would land on neighbours).
+            if ( !PatchEligible( b ) || !GridIsSheet( b->patch->def ) )
                 continue;
             const float *mins = b->def->mins, *maxs = b->def->maxs;
             if ( maxs[0] - mins[0] <= s_chunkSize + 0.5f && maxs[1] - mins[1] <= s_chunkSize + 0.5f )
@@ -2089,6 +2693,8 @@ namespace
             ForgetDef( originals[i]->patch->def );
         Select_Delete();
         Undo_EndBrushList( &selected_brushes );
+        for ( size_t i = 0; i < created.size(); ++i )
+            Undo_KiwiMarkCreated( created[i]->def );   // same omission as Tessellate (2026-09-17)
         Undo_End();
         for ( size_t i = 0; i < created.size(); ++i )
             Select_Brush( created[i], 0, 0, 0 );
@@ -2242,6 +2848,23 @@ namespace
         return false;
     }
 
+    // Does any terrain SURFACE lie under the rectangle?  4 x 4 vertical rays, inset a tenth
+    // of the cell so a neighbour that merely shares the edge does not count.
+    bool CellTouchesTerrain( float minx, float miny, float sx, float sy )
+    {
+        for ( int a = 0; a < 4; ++a )
+            for ( int b = 0; b < 4; ++b )
+            {
+                const float org[3] = { minx + sx * ( 0.1f + 0.8f * (float)a / 3.0f ),
+                                       miny + sy * ( 0.1f + 0.8f * (float)b / 3.0f ), 65536.0f };
+                const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                float hit[3];
+                if ( PickPatches( org, dir, true, hit, nullptr ) )
+                    return true;
+            }
+        return false;
+    }
+
     // The lattice a stroke lays chunks on.  With terrain under the cursor - or, when
     // creation is allowed, within reach of the brush - the chunks CONTINUE that sheet:
     // its corner anchors the lattice, the chunk sides are the nearest multiple of its
@@ -2325,9 +2948,38 @@ namespace
     {
         if ( !s_cursorHave )
             return false;
-        selbrush_t *node = s_cursorNode;
+        selbrush_t *node = LiveCursorNode();
         if ( !node && CreationAllowed() )
             node = NearestEligiblePatch( s_cursor, s_outer + s_chunkSize );
+        // KIWI (2026-09-18): the lattice is anchored on a patch's mins and copies its cell
+        // size, and RefineUnderRing now cuts the sheet under the cursor into small fine
+        // PIECES whose mins sit anywhere inside the old chunk.  Anchor on the LARGEST sheet
+        // in reach instead - an uncut chunk, whose mins still is a lattice point and whose
+        // cells are the terrain's real cell size - so new chunks keep lining up.  (Until
+        // this, the re-grid was simply switched off while "Allow terrain creation" was
+        // ticked, which is how the user always sculpts.)
+        if ( node )
+        {
+            const float reach = s_outer + s_chunkSize;
+            float bestArea = ( node->def->maxs[0] - node->def->mins[0] ) * ( node->def->maxs[1] - node->def->mins[1] );
+            for ( int pass = 0; pass < 2; ++pass )
+            {
+                selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                {
+                    if ( !PatchEligible( b ) || !GridIsSheet( b->patch->def ) )
+                        continue;
+                    if ( BoundsDistanceXY( b, s_cursor ) > reach )
+                        continue;
+                    const float area = ( b->def->maxs[0] - b->def->mins[0] ) * ( b->def->maxs[1] - b->def->mins[1] );
+                    if ( area > bestArea * 1.01f )
+                    {
+                        bestArea = area;
+                        node = b;
+                    }
+                }
+            }
+        }
         if ( node )
         {
             L->like  = node->patch->def;
@@ -2377,7 +3029,15 @@ namespace
                 if ( near2[1] < miny ) near2[1] = miny; else if ( near2[1] > miny + SY ) near2[1] = miny + SY;
                 if ( BrushDistance( s_cursor, near2 ) > r )
                     continue;
-                if ( AnyPatchCovers( mx, my ) )
+                // KIWI (2026-09-18, user: "the terrain tool creating redundant terrain patches
+                // on top of each other"): this used to test the cell's CENTRE against patch
+                // BOUNDING BOXES.  Beside irregular terrain that fails both ways - a cell whose
+                // centre sits in a gap got a whole chunk laid over its neighbours, and a real
+                // gap whose centre lies inside a curved neighbour's box could never be filled.
+                // A cell is empty only if NO terrain surface lies under any of a 4 x 4 spread
+                // of points inside it (real ray tests); a partly covered cell is left to the
+                // gap filler (FillHoleUnderCursor), which follows the hole's own outline.
+                if ( CellTouchesTerrain( minx, miny, SX, SY ) )
                     continue;
                 float zSum = 0.0f; int zN = 0;
                 const float probes[4][2] = { { minx - 8.0f, my }, { minx + SX + 8.0f, my },
@@ -2405,8 +3065,815 @@ namespace
         return EmptyCellsUnderBrush( s_expandCells, L );
     }
 
+    // ── fill a hole (KIWI 2026-09-18, user: "I can't fill this gap. Make it so I can fill
+    // this gap with the terrain creation option on the dig/raise tool") ──────────────────
+    // The chunk lattice is axis-aligned squares; a gap between curved / irregular patches is
+    // not, so no lattice cell can ever fill it without lying on a neighbour.  With the cursor
+    // over NO terrain, Raise + "Allow terrain creation" first looks for a HOLE around it:
+    //   1. every border segment of the terrain in reach that no other patch shares (its
+    //      midpoint is on nobody else's border and has no other terrain under it) is OPEN;
+    //   2. open segments are chained end to end from the one nearest the cursor; a chain that
+    //      closes around the cursor is the hole's outline;
+    //   3. the four sharpest turns are its corners, giving four sides.  Opposite sides get the
+    //      same point count by splitting the longest segments of the shorter one - so EVERY
+    //      neighbour vertex stays a fill vertex and added points lie on a neighbour's straight
+    //      edge: the seam cannot crack;
+    //   4. the inside is a Coons blend of the four sides (positions, heights and layer
+    //      weights), cut into patches of at most 16 x 16 points.
+    struct kterHoleEdge_t
+    {
+        float       a[7], b[7];         // x y z + the four colour bytes
+        selbrush_t *node;
+        bool        used;
+    };
+
+    void HoleVert( const drawVert_t &v, float out[7] )
+    {
+        out[0] = v.xyz[0]; out[1] = v.xyz[1]; out[2] = v.xyz[2];
+        const byte *c = (const byte *)&v.vert_color;
+        for ( int k = 0; k < 4; ++k )
+            out[3 + k] = (float)c[k];
+    }
+
+    float PointSegDist2XY( const float *p, const float *a, const float *b )
+    {
+        const float dx = b[0] - a[0], dy = b[1] - a[1];
+        const float len2 = dx * dx + dy * dy;
+        float t = len2 > 1e-6f ? ( ( p[0] - a[0] ) * dx + ( p[1] - a[1] ) * dy ) / len2 : 0.0f;
+        t = t < 0.0f ? 0.0f : ( t > 1.0f ? 1.0f : t );
+        const float ex = p[0] - ( a[0] + dx * t ), ey = p[1] - ( a[1] + dy * t );
+        return ex * ex + ey * ey;
+    }
+
+    // Bring a side up to `count` points by splitting its longest segment until it fits.
+    void HoleUpsample( std::vector<float> &side, int count )
+    {
+        while ( (int)( side.size() / 7 ) < count )
+        {
+            const int n = (int)( side.size() / 7 );
+            int   best = 0;
+            float bestLen = -1.0f;
+            for ( int k = 0; k + 1 < n; ++k )
+            {
+                const float *a = &side[k * 7], *b = &side[( k + 1 ) * 7];
+                const float l = ( b[0] - a[0] ) * ( b[0] - a[0] ) + ( b[1] - a[1] ) * ( b[1] - a[1] );
+                if ( l > bestLen ) { bestLen = l; best = k; }
+            }
+            float mid[7];
+            for ( int c = 0; c < 7; ++c )
+                mid[c] = ( side[best * 7 + c] + side[( best + 1 ) * 7 + c] ) * 0.5f;
+            side.insert( side.begin() + ( best + 1 ) * 7, mid, mid + 7 );
+        }
+    }
+
+    selbrush_t *CreatePatchFromGrid( const patchMesh_t *like, entity_s *owner, const std::vector<float> &grid,
+                                     int W, int i0, int i1, int j0, int j1 )
+    {
+        const int nx = i1 - i0 + 1, ny = j1 - j0 + 1;
+        if ( nx < 2 || ny < 2 || nx > 16 || ny > 16 )
+            return nullptr;
+        patchMesh_t *p = MakeNewPatch();
+        p->width  = nx;
+        p->height = ny;
+        p->type       = (PATCH_TYPES)( like->type | PATCH_TERRAIN );
+        p->contents   = like->contents;
+        p->flags      = like->flags;
+        p->subDivType = like->subDivType;
+        p->texture    = like->texture;
+        p->lightmap   = like->lightmap;
+        p->smoothing  = like->smoothing;
+        memcpy( p->kiwiLayer, like->kiwiLayer, sizeof( p->kiwiLayer ) );
+        const bool layered = UsedSlotCount( like ) != 0;
+        for ( int a = 0; a < nx; ++a )
+            for ( int b = 0; b < ny; ++b )
+            {
+                const float *g = &grid[( ( j0 + b ) * W + ( i0 + a ) ) * 7];
+                drawVert_t *cp = &p->ctrl[a][b];
+                cp->xyz[0] = g[0]; cp->xyz[1] = g[1]; cp->xyz[2] = g[2];
+                byte *c = (byte *)&cp->vert_color;
+                for ( int k = 0; k < 4; ++k )
+                    c[k] = layered ? (byte)(int)( ClampF( g[3 + k], 0.0f, 255.0f ) + 0.5f ) : (byte)255;
+            }
+        Patch_KiwiTextureAndBuild( p, g_qeglobals.random_texture_stuff[0].sampleSize );
+        brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
+        selbrush_t *inst = Brush_AddToList( pdef, owner );
+        inst->next = active_brushes.next;
+        active_brushes.next->prev = inst;
+        active_brushes.next = inst;
+        inst->prev = &active_brushes;
+        return inst;
+    }
+
+    bool  s_holeFailValid = false;          // do not re-search the same spot every frame
+    float s_holeFailAt[2] = { 0.0f, 0.0f };
+
+    bool FillOutline( std::vector<float> &loop, const patchMesh_t *like, entity_s *owner, bool verbose );
+
+    // The first outline search: classify whole border segments near the ring, chain them by
+    // endpoint.  Kept as the FALLBACK of TraceHoleOutline (below), which replaced it.
+    bool FillHoleByChain( bool verbose )
+    {
+        if ( !s_cursorHave )
+            return false;
+        const float tol = 2.0f, tol2 = tol * tol;
+        const float bridge = 96.0f;                     // widest break in an outline that is closed anyway
+        // Only terrain near the ring: the gap has to be UNDER the ring, and the pairwise
+        // border test below grows with the square of the patches looked at.
+        const float reach = s_outer + 512.0f;
+
+        // 1. the terrain in reach and its border rings
+        struct ring_t { selbrush_t *node; int n; int ii[64], jj[64]; };
+        std::vector<ring_t> rings;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !PatchEligible( b ) || BoundsDistanceXY( b, s_cursor ) > reach )
+                    continue;
+                ring_t r;
+                r.node = b;
+                r.n = BorderRing( b->patch->def, r.ii, r.jj );
+                if ( r.n >= 4 )
+                    rings.push_back( r );
+            }
+        }
+        if ( rings.empty() )
+            return false;
+
+        std::vector<kterHoleEdge_t> open;
+        for ( size_t p = 0; p < rings.size(); ++p )
+        {
+            const patchMesh_t *A = rings[p].node->patch->def;
+            for ( int k = 0; k < rings[p].n; ++k )
+            {
+                const int k1 = ( k + 1 ) % rings[p].n;
+                const drawVert_t &va = A->ctrl[rings[p].ii[k]][rings[p].jj[k]];
+                const drawVert_t &vb = A->ctrl[rings[p].ii[k1]][rings[p].jj[k1]];
+                const float mid[3] = { ( va.xyz[0] + vb.xyz[0] ) * 0.5f, ( va.xyz[1] + vb.xyz[1] ) * 0.5f,
+                                       ( va.xyz[2] + vb.xyz[2] ) * 0.5f };
+                if ( ( va.xyz[0] - vb.xyz[0] ) * ( va.xyz[0] - vb.xyz[0] )
+                   + ( va.xyz[1] - vb.xyz[1] ) * ( va.xyz[1] - vb.xyz[1] ) < 0.01f )
+                    continue;
+                bool shared = false;
+                for ( size_t q = 0; q < rings.size() && !shared; ++q )
+                {
+                    if ( q == p )
+                        continue;
+                    const float *mins = rings[q].node->def->mins, *maxs = rings[q].node->def->maxs;
+                    if ( mid[0] < mins[0] - tol || mid[0] > maxs[0] + tol || mid[1] < mins[1] - tol || mid[1] > maxs[1] + tol )
+                        continue;
+                    const patchMesh_t *B = rings[q].node->patch->def;
+                    for ( int m = 0; m < rings[q].n && !shared; ++m )
+                    {
+                        const int m1 = ( m + 1 ) % rings[q].n;
+                        shared = PointSegDist2XY( mid, B->ctrl[rings[q].ii[m]][rings[q].jj[m]].xyz,
+                                                  B->ctrl[rings[q].ii[m1]][rings[q].jj[m1]].xyz ) <= tol2;
+                    }
+                }
+                if ( !shared )
+                {
+                    // other terrain under / over it (stacked patches): not a hole edge either
+                    const float org[3] = { mid[0], mid[1], 65536.0f };
+                    const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                    float hit[3];
+                    shared = PickPatches( org, dir, true, hit, nullptr, nullptr, rings[p].node );
+                }
+                if ( shared )
+                    continue;
+                kterHoleEdge_t e;
+                HoleVert( va, e.a );
+                HoleVert( vb, e.b );
+                e.node = rings[p].node;
+                e.used = false;
+                open.push_back( e );
+            }
+        }
+        if ( open.size() < 3 )
+            return false;
+
+        // 2. chain from the open edge nearest the cursor
+        // The gap must be under the RING, not under the exact cursor point: a sliver a few
+        // units wide cannot be aimed at, and the cursor then sits on the terrain beside it.
+        int start = -1;
+        float startD = s_outer * s_outer;
+        for ( size_t i = 0; i < open.size(); ++i )
+        {
+            const float d = PointSegDist2XY( s_cursor, open[i].a, open[i].b );
+            if ( d < startD ) { startD = d; start = (int)i; }
+        }
+        if ( start < 0 )
+            return false;                               // no open edge under the ring: nothing to say
+        std::vector<float> loop;                        // 7 floats a vertex
+        loop.insert( loop.end(), open[start].a, open[start].a + 7 );
+        loop.insert( loop.end(), open[start].b, open[start].b + 7 );
+        open[start].used = true;
+        bool closed = false;
+        for ( int guard = 0; guard < 400 && !closed; ++guard )
+        {
+            const float *cur = &loop[loop.size() - 7];
+            const float *first = &loop[0];
+            // KIWI (2026-09-18, user video: a thin SLIVER gap would not fill): at a sliver's
+            // tips its two sides run within `tol` of each other, so the end segments test as
+            // "shared" and drop out of the open set - the outline then has a break at each
+            // tip and never closed.  Two passes: an exact continuation first, else BRIDGE the
+            // break to the nearest unused open endpoint (or back to the start) within
+            // `bridge` units.  The bridged tip leaves a crack narrower than `tol`.
+            int   best = -1;
+            bool  bestFlip = false, bridged = false;
+            for ( int attempt = 0; attempt < 2 && best < 0 && !closed; ++attempt )
+            {
+                float bestD = attempt == 0 ? tol2 : bridge * bridge;
+                for ( size_t i = 0; i < open.size(); ++i )
+                {
+                    if ( open[i].used )
+                        continue;
+                    const float da = ( open[i].a[0] - cur[0] ) * ( open[i].a[0] - cur[0] ) + ( open[i].a[1] - cur[1] ) * ( open[i].a[1] - cur[1] );
+                    const float db = ( open[i].b[0] - cur[0] ) * ( open[i].b[0] - cur[0] ) + ( open[i].b[1] - cur[1] ) * ( open[i].b[1] - cur[1] );
+                    if ( da <= bestD ) { bestD = da; best = (int)i; bestFlip = false; }
+                    if ( db <= bestD ) { bestD = db; best = (int)i; bestFlip = true; }
+                }
+                if ( attempt == 1 && loop.size() / 7 >= 3 )
+                {
+                    // closing the outline beats bridging further away
+                    const float dc = ( first[0] - cur[0] ) * ( first[0] - cur[0] ) + ( first[1] - cur[1] ) * ( first[1] - cur[1] );
+                    if ( dc <= bestD )
+                    {
+                        closed = true;
+                        best = -1;
+                    }
+                }
+                bridged = attempt == 1;
+            }
+            if ( closed )
+                break;
+            if ( best < 0 )
+            {
+                if ( verbose )
+                Sys_Printf( "Terrain Sculpt: gap fill - the open edges around the cursor do not close into an outline "
+                            "(%i vertices chained, no open edge within %.0f units of the last one). Not a hole, or its "
+                            "edge is covered by stacked terrain - try 'Select terrain stacked on other terrain'.\n",
+                            (int)( loop.size() / 7 ), bridge );
+                return false;
+            }
+            open[best].used = true;
+            if ( bridged )
+            {
+                // the far endpoint of the bridge joins the outline as well
+                const float *nearEnd = bestFlip ? open[best].b : open[best].a;
+                loop.insert( loop.end(), nearEnd, nearEnd + 7 );
+            }
+            const float *next = bestFlip ? open[best].a : open[best].b;
+            first = &loop[0];
+            if ( ( next[0] - first[0] ) * ( next[0] - first[0] ) + ( next[1] - first[1] ) * ( next[1] - first[1] ) <= tol2 )
+                closed = true;
+            else
+                loop.insert( loop.end(), next, next + 7 );
+        }
+        if ( !closed )
+            return false;
+        return FillOutline( loop, open[start].node->patch->def, open[start].node->owner, verbose );
+    }
+
+    // Stages 3 + 4: a closed outline (7 floats a vertex) -> corners -> Coons grid -> patches.
+    bool FillOutline( std::vector<float> &loop, const patchMesh_t *like, entity_s *owner, bool verbose )
+    {
+        int n = (int)( loop.size() / 7 );
+        if ( n < 3 || !like || !owner )
+            return false;
+
+        // A closed chain of open edges is either a HOLE (terrain outside it) or the OUTER
+        // boundary of a piece of terrain (terrain inside it) - and filling the latter would
+        // pave over the map.  Probe just inside the outline at three edges: a hole has no
+        // terrain there.  (Orientation-free: the probe side comes from the outline's own
+        // winding, not from the patches' grid direction.)
+        {
+            float area = 0.0f;
+            for ( int i = 0, j = n - 1; i < n; j = i++ )
+                area += loop[j * 7] * loop[i * 7 + 1] - loop[i * 7] * loop[j * 7 + 1];
+            const float sideSign = area >= 0.0f ? 1.0f : -1.0f;     // CCW: interior is to the left
+            int terrainInside = 0, probes = 0;
+            for ( int t = 0; t < 3; ++t )
+            {
+                const int i = ( n * t ) / 3, i1 = ( i + 1 ) % n;
+                const float *p0 = &loop[i * 7], *p1 = &loop[i1 * 7];
+                float dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+                const float len = sqrtf( dx * dx + dy * dy );
+                if ( len < 0.5f )
+                    continue;
+                dx /= len; dy /= len;
+                const float org[3] = { ( p0[0] + p1[0] ) * 0.5f - dy * 0.75f * sideSign,
+                                       ( p0[1] + p1[1] ) * 0.5f + dx * 0.75f * sideSign, 65536.0f };
+                const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                float hit[3];
+                ++probes;
+                if ( PickPatches( org, dir, true, hit, nullptr ) )
+                    ++terrainInside;
+            }
+            if ( probes == 0 || terrainInside * 2 > probes )
+                return false;                           // the outer edge of terrain, not a hole
+        }
+        if ( n == 3 )                                    // a triangle: give it a fourth corner
+        {
+            std::vector<float> tri( loop );
+            HoleUpsample( tri, 4 );
+            loop.swap( tri );
+            n = 4;
+        }
+        // counter-clockwise from above, so the patch faces up like every other sheet
+        {
+            float area = 0.0f;
+            for ( int i = 0, j = n - 1; i < n; j = i++ )
+                area += loop[j * 7] * loop[i * 7 + 1] - loop[i * 7] * loop[j * 7 + 1];
+            if ( area < 0.0f )
+            {
+                std::vector<float> rev;
+                for ( int i = n - 1; i >= 0; --i )
+                    rev.insert( rev.end(), &loop[i * 7], &loop[i * 7] + 7 );
+                loop.swap( rev );
+            }
+        }
+
+        // 3. corners = the four sharpest turns, kept apart along the outline
+        std::vector<float> turn( n ), arc( n + 1, 0.0f );
+        for ( int i = 0; i < n; ++i )
+        {
+            const float *p0 = &loop[( ( i + n - 1 ) % n ) * 7], *p1 = &loop[i * 7], *p2 = &loop[( ( i + 1 ) % n ) * 7];
+            float ax = p1[0] - p0[0], ay = p1[1] - p0[1], bx = p2[0] - p1[0], by = p2[1] - p1[1];
+            const float la = sqrtf( ax * ax + ay * ay ), lb = sqrtf( bx * bx + by * by );
+            float c = ( la > 1e-4f && lb > 1e-4f ) ? ( ax * bx + ay * by ) / ( la * lb ) : 1.0f;
+            c = c < -1.0f ? -1.0f : ( c > 1.0f ? 1.0f : c );
+            turn[i] = acosf( c );
+            arc[i + 1] = arc[i] + lb;
+        }
+        const float perimeter = arc[n];
+        int corner[4] = { -1, -1, -1, -1 };
+        for ( int attempt = 0; attempt < 2 && corner[3] < 0; ++attempt )
+        {
+            const float apart = attempt == 0 ? perimeter * 0.08f : 0.0f;
+            std::vector<unsigned char> taken( n, 0 );
+            for ( int c = 0; c < 4; ++c )
+            {
+                corner[c] = -1;
+                float best = -1.0f;
+                for ( int i = 0; i < n; ++i )
+                {
+                    if ( taken[i] || turn[i] <= best )
+                        continue;
+                    bool crowded = false;               // ("near" is a windef.h macro)
+                    for ( int o = 0; o < c && !crowded; ++o )
+                    {
+                        float d = fabsf( arc[i] - arc[corner[o]] );
+                        if ( d > perimeter * 0.5f ) d = perimeter - d;
+                        crowded = d < apart || i == corner[o];
+                    }
+                    if ( crowded )
+                        continue;
+                    best = turn[i];
+                    corner[c] = i;
+                }
+                if ( corner[c] < 0 )
+                    break;
+                taken[corner[c]] = 1;
+            }
+        }
+        // A RAGGED outline (the user's 2026-09-18 hole: stair-steps left by deleted fine
+        // pieces, dozens of right-angle turns) has no four "sharpest" turns - every step ties,
+        // and corners picked among them bunch up on one side.  With more than six real turns
+        // the corners come from the outline's overall shape instead: its extreme points along
+        // the two diagonals (min / max of x+y and x-y), which always spread round the hole.
+        {
+            int realTurns = 0;
+            for ( int i = 0; i < n; ++i )
+                if ( turn[i] > 0.6f )                    // ~35 degrees
+                    ++realTurns;
+            if ( realTurns > 6 || corner[3] < 0 )
+            {
+                int ext[4] = { 0, 0, 0, 0 };
+                for ( int i = 1; i < n; ++i )
+                {
+                    const float *p = &loop[i * 7];
+                    const float s = p[0] + p[1], d = p[0] - p[1];
+                    if ( s < loop[ext[0] * 7] + loop[ext[0] * 7 + 1] ) ext[0] = i;   // bottom-left
+                    if ( d > loop[ext[1] * 7] - loop[ext[1] * 7 + 1] ) ext[1] = i;   // bottom-right
+                    if ( s > loop[ext[2] * 7] + loop[ext[2] * 7 + 1] ) ext[2] = i;   // top-right
+                    if ( d < loop[ext[3] * 7] - loop[ext[3] * 7 + 1] ) ext[3] = i;   // top-left
+                }
+                const bool distinct = ext[0] != ext[1] && ext[0] != ext[2] && ext[0] != ext[3]
+                                   && ext[1] != ext[2] && ext[1] != ext[3] && ext[2] != ext[3];
+                if ( distinct )
+                    memcpy( corner, ext, sizeof( corner ) );
+            }
+        }
+        if ( corner[3] < 0 )
+        {
+            if ( verbose )
+                Sys_Printf( "Terrain Sculpt: gap fill - the %i-vertex outline has no four usable corners.\n", n );
+            return false;
+        }
+        std::sort( corner, corner + 4 );
+
+        // 4. four sides, opposite sides equalised, Coons blend
+        std::vector<float> side[4];
+        for ( int s = 0; s < 4; ++s )
+        {
+            int i = corner[s];
+            const int end = corner[( s + 1 ) % 4];
+            for ( ;; )
+            {
+                side[s].insert( side[s].end(), &loop[i * 7], &loop[i * 7] + 7 );
+                if ( i == end && side[s].size() > 7 )
+                    break;
+                i = ( i + 1 ) % n;
+                if ( side[s].size() / 7 > 2000 )
+                    return false;
+            }
+        }
+        int W = (int)( side[0].size() / 7 ), W2 = (int)( side[2].size() / 7 );
+        int H = (int)( side[1].size() / 7 ), H2 = (int)( side[3].size() / 7 );
+        if ( W2 > W ) W = W2;
+        if ( H2 > H ) H = H2;
+        if ( W < 2 || H < 2 || W > 241 || H > 241 )
+        {
+            if ( verbose )
+                Sys_Printf( "Terrain Sculpt: gap fill - the gap's outline needs a %i x %i point grid (limit 241). Fill part "
+                            "of it with ordinary creation chunks first, then the rest.\n", W, H );
+            return false;
+        }
+        HoleUpsample( side[0], W ); HoleUpsample( side[2], W );
+        HoleUpsample( side[1], H ); HoleUpsample( side[3], H );
+
+        std::vector<float> grid( (size_t)W * H * 7 );
+        const float *c0 = &side[0][0], *c1 = &side[1][0], *c2 = &side[2][0], *c3 = &side[3][0];
+        for ( int j = 0; j < H; ++j )
+            for ( int i = 0; i < W; ++i )
+            {
+                const float u = W > 1 ? (float)i / (float)( W - 1 ) : 0.0f;
+                const float v = H > 1 ? (float)j / (float)( H - 1 ) : 0.0f;
+                const float *B = &side[0][i * 7], *T = &side[2][( W - 1 - i ) * 7];
+                const float *R = &side[1][j * 7], *L = &side[3][( H - 1 - j ) * 7];
+                float *g = &grid[( (size_t)j * W + i ) * 7];
+                for ( int k = 0; k < 7; ++k )
+                {
+                    if      ( j == 0 )     g[k] = B[k];
+                    else if ( j == H - 1 ) g[k] = T[k];
+                    else if ( i == 0 )     g[k] = L[k];
+                    else if ( i == W - 1 ) g[k] = R[k];
+                    else
+                        g[k] = ( 1.0f - v ) * B[k] + v * T[k] + ( 1.0f - u ) * L[k] + u * R[k]
+                             - ( ( 1.0f - u ) * ( 1.0f - v ) * c0[k] + u * ( 1.0f - v ) * c1[k]
+                               + u * v * c2[k] + ( 1.0f - u ) * v * c3[k] );
+                }
+            }
+
+        int made = 0;
+        for ( int j0 = 0; j0 < H - 1; j0 += 15 )
+            for ( int i0 = 0; i0 < W - 1; i0 += 15 )
+            {
+                selbrush_t *node = CreatePatchFromGrid( like, owner, grid, W, i0, i0 + 15 < W - 1 ? i0 + 15 : W - 1,
+                                                        j0, j0 + 15 < H - 1 ? j0 + 15 : H - 1 );
+                if ( !node )
+                    continue;
+                if ( s_undoOpen )
+                {
+                    node->patch->def->xx22b = 1;
+                    Undo_KiwiMarkCreated( node->def );
+                }
+                Select_Brush( node, 0, 0, 0 );
+                s_targets.push_back( node );
+                ++s_created;
+                ++made;
+            }
+        if ( !made )
+            return false;
+        s_holeFailValid = false;
+        // The point count is dictated by the gap's OUTLINE (every neighbour vertex has to be a
+        // fill vertex or the seam cracks) - so say what it cost; Ctrl+Z takes it back.
+        const int tris = ( W - 1 ) * ( H - 1 ) * 2;
+        SetStatus( "Filled the gap: %i patch%s, %i x %i points, %i triangles (set by the gap's edge vertices). Ctrl+Z undoes.",
+                   made, made == 1 ? "" : "es", W, H, tris );
+        Sys_Printf( "Terrain Sculpt: filled a %i-vertex gap with %i patch%s (%i x %i points, %i triangles - the density "
+                    "is set by the vertices along the gap's edge).\n", n, made, made == 1 ? "" : "es", W, H, tris );
+        g_nUpdateBits = -1;
+        return true;
+    }
+
+    // ── the outline TRACER (KIWI 2026-09-18, user console: "72 vertices chained, no open edge
+    // within 96 units of the last one" on a hole ten times the ring) ───────────────────────
+    // FillHoleByChain gathered terrain near the RING only, so the far side of a big hole was
+    // never seen, and it judged whole border segments - wrong wherever a fine patch's corner
+    // lands part-way along a coarse neighbour's edge (half that segment is seam, half is
+    // hole).  The tracer has neither limit.  It treats every patch border as a planar graph
+    // whose edges END at any other patch's border vertex lying on them, starts on the open
+    // sub-edge nearest the cursor, works out which side of it has no terrain (the hole), and
+    // walks node to node always taking the turn that HUGS the hole, until it is back at the
+    // start.  Hole kept on the left => a real hole comes out counter-clockwise; a clockwise
+    // result is the outside of the terrain and is refused.
+    struct kterHRing_t
+    {
+        selbrush_t        *node;
+        const patchMesh_t *def;
+        int                n;
+        int                ii[64], jj[64];
+    };
+
+    struct kterHCand_t
+    {
+        float              end[7];
+        float              theta;
+        const kterHRing_t *owner;
+    };
+
+    const float KHOLE_TOL = 2.0f;
+
+    const drawVert_t &HRingVert( const kterHRing_t &r, int k )
+    {
+        return r.def->ctrl[r.ii[k]][r.jj[k]];
+    }
+
+    bool HRingNear( const kterHRing_t &r, const float *lo, const float *hi )
+    {
+        const float *mins = r.node->def->mins, *maxs = r.node->def->maxs;
+        return !( hi[0] < mins[0] - KHOLE_TOL || lo[0] > maxs[0] + KHOLE_TOL
+               || hi[1] < mins[1] - KHOLE_TOL || lo[1] > maxs[1] + KHOLE_TOL );
+    }
+
+    // Is the sub-edge a-b (on `owner`'s border) open: on nobody else's border, no other terrain under it?
+    bool HEdgeOpen( const std::vector<kterHRing_t> &rings, const kterHRing_t *owner, const float *a, const float *b )
+    {
+        const float mid[3] = { ( a[0] + b[0] ) * 0.5f, ( a[1] + b[1] ) * 0.5f, 0.0f };
+        for ( size_t q = 0; q < rings.size(); ++q )
+        {
+            if ( &rings[q] == owner || !HRingNear( rings[q], mid, mid ) )
+                continue;
+            for ( int m = 0; m < rings[q].n; ++m )
+                if ( PointSegDist2XY( mid, HRingVert( rings[q], m ).xyz,
+                                      HRingVert( rings[q], ( m + 1 ) % rings[q].n ).xyz ) <= KHOLE_TOL * KHOLE_TOL )
+                    return false;
+        }
+        const float org[3] = { mid[0], mid[1], 65536.0f };
+        const float dir[3] = { 0.0f, 0.0f, -1.0f };
+        float hit[3];
+        return !PickPatches( org, dir, true, hit, nullptr, nullptr, owner->node );
+    }
+
+    // From p toward e along owner's border: stop at the first OTHER patch's border vertex on the way.
+    void HNextEvent( const std::vector<kterHRing_t> &rings, const kterHRing_t *owner,
+                     const float *p, const drawVert_t &e, float out[7] )
+    {
+        HoleVert( e, out );
+        const float dx = e.xyz[0] - p[0], dy = e.xyz[1] - p[1];
+        const float len2 = dx * dx + dy * dy;
+        if ( len2 < 1e-4f )
+            return;
+        const float len = sqrtf( len2 );
+        const float lo[2] = { p[0] < e.xyz[0] ? p[0] : e.xyz[0], p[1] < e.xyz[1] ? p[1] : e.xyz[1] };
+        const float hi[2] = { p[0] > e.xyz[0] ? p[0] : e.xyz[0], p[1] > e.xyz[1] ? p[1] : e.xyz[1] };
+        float bestT = 1.0f - KHOLE_TOL / len;
+        for ( size_t q = 0; q < rings.size(); ++q )
+        {
+            if ( &rings[q] == owner || !HRingNear( rings[q], lo, hi ) )
+                continue;
+            for ( int m = 0; m < rings[q].n; ++m )
+            {
+                const drawVert_t &v = HRingVert( rings[q], m );
+                const float t = ( ( v.xyz[0] - p[0] ) * dx + ( v.xyz[1] - p[1] ) * dy ) / len2;
+                if ( t * len <= KHOLE_TOL || t >= bestT )
+                    continue;
+                const float ex = v.xyz[0] - ( p[0] + dx * t ), ey = v.xyz[1] - ( p[1] + dy * t );
+                if ( ex * ex + ey * ey > KHOLE_TOL * KHOLE_TOL )
+                    continue;
+                bestT = t;
+                HoleVert( v, out );
+            }
+        }
+    }
+
+    // Every way on from point p along any patch border passing through it.
+    void HOutEdges( const std::vector<kterHRing_t> &rings, const float *p, std::vector<kterHCand_t> &out )
+    {
+        out.clear();
+        const float tol2 = KHOLE_TOL * KHOLE_TOL;
+        for ( size_t r = 0; r < rings.size(); ++r )
+        {
+            if ( !HRingNear( rings[r], p, p ) )
+                continue;
+            for ( int k = 0; k < rings[r].n; ++k )
+            {
+                const drawVert_t &A = HRingVert( rings[r], k ), &B = HRingVert( rings[r], ( k + 1 ) % rings[r].n );
+                if ( PointSegDist2XY( p, A.xyz, B.xyz ) > tol2 )
+                    continue;
+                const bool atA = ( A.xyz[0] - p[0] ) * ( A.xyz[0] - p[0] ) + ( A.xyz[1] - p[1] ) * ( A.xyz[1] - p[1] ) <= tol2;
+                const bool atB = ( B.xyz[0] - p[0] ) * ( B.xyz[0] - p[0] ) + ( B.xyz[1] - p[1] ) * ( B.xyz[1] - p[1] ) <= tol2;
+                for ( int way = 0; way < 2; ++way )
+                {
+                    if ( way == 0 ? atA : atB )
+                        continue;                        // already at that end
+                    kterHCand_t c;
+                    c.owner = &rings[r];
+                    c.theta = 0.0f;
+                    HNextEvent( rings, &rings[r], p, way == 0 ? A : B, c.end );
+                    if ( ( c.end[0] - p[0] ) * ( c.end[0] - p[0] ) + ( c.end[1] - p[1] ) * ( c.end[1] - p[1] ) <= tol2 )
+                        continue;
+                    out.push_back( c );
+                }
+            }
+        }
+    }
+
+    bool TraceHoleOutline( std::vector<float> &loop, selbrush_t **likeNode, bool verbose )
+    {
+        loop.clear();
+        const float tol2 = KHOLE_TOL * KHOLE_TOL;
+        std::vector<kterHRing_t> rings;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !PatchEligible( b ) || BoundsDistanceXY( b, s_cursor ) > 16384.0f )
+                    continue;
+                kterHRing_t r;
+                r.node = b;
+                r.def  = b->patch->def;
+                r.n    = BorderRing( r.def, r.ii, r.jj );
+                if ( r.n >= 4 )
+                    rings.push_back( r );
+            }
+        }
+
+        // ── the start: the open sub-edge under the ring nearest the cursor ──────────
+        float sa[7], sb[7], startD = s_outer * s_outer;
+        const kterHRing_t *startRing = nullptr;
+        for ( size_t r = 0; r < rings.size(); ++r )
+        {
+            if ( BoundsDistanceXY( rings[r].node, s_cursor ) > s_outer )
+                continue;
+            for ( int k = 0; k < rings[r].n; ++k )
+            {
+                const drawVert_t &A = HRingVert( rings[r], k ), &B = HRingVert( rings[r], ( k + 1 ) % rings[r].n );
+                if ( PointSegDist2XY( s_cursor, A.xyz, B.xyz ) >= startD )
+                    continue;
+                // walk this border segment event to event
+                float from[7];
+                HoleVert( A, from );
+                for ( int guard = 0; guard < 64; ++guard )
+                {
+                    float to[7];
+                    HNextEvent( rings, &rings[r], from, B, to );
+                    const float d = PointSegDist2XY( s_cursor, from, to );
+                    if ( d < startD && HEdgeOpen( rings, &rings[r], from, to ) )
+                    {
+                        startD = d;
+                        startRing = &rings[r];
+                        memcpy( sa, from, sizeof( sa ) );
+                        memcpy( sb, to, sizeof( sb ) );
+                    }
+                    if ( ( to[0] - B.xyz[0] ) * ( to[0] - B.xyz[0] ) + ( to[1] - B.xyz[1] ) * ( to[1] - B.xyz[1] ) <= tol2 )
+                        break;
+                    memcpy( from, to, sizeof( from ) );
+                }
+            }
+        }
+        if ( !startRing )
+            return false;                               // no open edge under the ring: ordinary ground
+
+        // ── which side is the hole?  (the owner patch is on the other one) ───────────
+        {
+            float dx = sb[0] - sa[0], dy = sb[1] - sa[1];
+            const float len = sqrtf( dx * dx + dy * dy );
+            dx /= len; dy /= len;
+            bool leftEmpty = false, rightEmpty = false;
+            for ( float off = 1.5f; off >= 0.4f && leftEmpty == rightEmpty; off *= 0.5f )
+            {
+                const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                float hit[3];
+                const float l[3] = { ( sa[0] + sb[0] ) * 0.5f - dy * off, ( sa[1] + sb[1] ) * 0.5f + dx * off, 65536.0f };
+                const float r[3] = { ( sa[0] + sb[0] ) * 0.5f + dy * off, ( sa[1] + sb[1] ) * 0.5f - dx * off, 65536.0f };
+                leftEmpty  = !PickPatches( l, dir, true, hit, nullptr );
+                rightEmpty = !PickPatches( r, dir, true, hit, nullptr );
+            }
+            if ( leftEmpty == rightEmpty )
+            {
+                if ( verbose )
+                    Sys_Printf( "Terrain Sculpt: gap fill - cannot tell which side of the open edge at (%.0f %.0f) is the gap.\n",
+                                sa[0], sa[1] );
+                return false;
+            }
+            // The void beside an open edge is either a hole or simply the OUTSIDE of the map -
+            // and creation strokes happen at the map's edge all the time, where walking the
+            // whole boundary just to refuse it would hitch every stroke.  A hole has terrain
+            // on its far side: look straight out at doubling distances; nothing within 8192
+            // units means "outside", decided with nine rays instead of a boundary walk.
+            {
+                const float side = leftEmpty ? 1.0f : -1.0f;
+                bool farTerrain = false;
+                for ( float dist = 32.0f; dist <= 8192.0f && !farTerrain; dist *= 2.0f )
+                {
+                    const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                    float hit[3];
+                    const float o[3] = { ( sa[0] + sb[0] ) * 0.5f - dy * dist * side,
+                                         ( sa[1] + sb[1] ) * 0.5f + dx * dist * side, 65536.0f };
+                    farTerrain = PickPatches( o, dir, true, hit, nullptr );
+                }
+                if ( !farTerrain )
+                    return false;
+            }
+            if ( !leftEmpty )                           // keep the hole on the LEFT of travel
+            {
+                float t[7];
+                memcpy( t, sa, sizeof( t ) ); memcpy( sa, sb, sizeof( sa ) ); memcpy( sb, t, sizeof( sb ) );
+            }
+        }
+
+        // ── walk, hugging the hole ──────────────────────────────────────────────────
+        loop.insert( loop.end(), sa, sa + 7 );
+        loop.insert( loop.end(), sb, sb + 7 );
+        std::vector<kterHCand_t> cands;
+        bool closed = false;
+        for ( int step = 0; step < 2000 && !closed; ++step )
+        {
+            const size_t nv = loop.size() / 7;
+            float cur[7], prev[2];
+            memcpy( cur, &loop[( nv - 1 ) * 7], sizeof( cur ) );
+            prev[0] = loop[( nv - 2 ) * 7]; prev[1] = loop[( nv - 2 ) * 7 + 1];
+            const float dinx = cur[0] - prev[0], diny = cur[1] - prev[1];
+            HOutEdges( rings, cur, cands );
+            for ( size_t c = 0; c < cands.size(); ++c )
+            {
+                const float ox = cands[c].end[0] - cur[0], oy = cands[c].end[1] - cur[1];
+                cands[c].theta = atan2f( dinx * oy - diny * ox, dinx * ox + diny * oy );   // + = left turn
+            }
+            std::sort( cands.begin(), cands.end(),
+                       []( const kterHCand_t &a, const kterHCand_t &b ) { return a.theta > b.theta; } );
+            const kterHCand_t *take = nullptr;
+            for ( size_t c = 0; c < cands.size() && !take; ++c )
+            {
+                if ( fabsf( cands[c].theta ) > 3.12f )
+                    continue;                           // straight back the way we came
+                if ( HEdgeOpen( rings, cands[c].owner, cur, cands[c].end ) )
+                    take = &cands[c];
+            }
+            if ( !take )
+            {
+                if ( verbose )
+                    Sys_Printf( "Terrain Sculpt: gap fill - the gap's outline breaks off at (%.0f %.0f) after %i vertices: "
+                                "no open terrain edge leads on from there (terrain stacked on that edge? try 'Select "
+                                "terrain stacked on other terrain').\n", cur[0], cur[1], (int)nv );
+                return false;
+            }
+            if ( ( take->end[0] - loop[0] ) * ( take->end[0] - loop[0] ) + ( take->end[1] - loop[1] ) * ( take->end[1] - loop[1] ) <= tol2 )
+                closed = true;
+            else
+                loop.insert( loop.end(), take->end, take->end + 7 );
+        }
+        if ( !closed )
+        {
+            if ( verbose )
+                Sys_Printf( "Terrain Sculpt: gap fill - the outline did not close within 2000 vertices (the open map edge?).\n" );
+            return false;
+        }
+        const int n = (int)( loop.size() / 7 );
+        float area = 0.0f;
+        for ( int i = 0, j = n - 1; i < n; j = i++ )
+            area += loop[j * 7] * loop[i * 7 + 1] - loop[i * 7] * loop[j * 7 + 1];
+        if ( area <= 0.0f )
+            return false;                               // clockwise with the void on the left: the OUTSIDE of the terrain
+        *likeNode = startRing->node;
+        return true;
+    }
+
+    bool FillHoleUnderCursor()
+    {
+        if ( !s_cursorHave )
+            return false;
+        if ( s_holeFailValid )
+        {
+            const float dx = s_cursor[0] - s_holeFailAt[0], dy = s_cursor[1] - s_holeFailAt[1];
+            if ( dx * dx + dy * dy < 16.0f * 16.0f )
+                return false;
+        }
+        s_holeFailValid = true;
+        s_holeFailAt[0] = s_cursor[0];
+        s_holeFailAt[1] = s_cursor[1];
+
+        // This runs on every creation stroke, also over ordinary ground and along the map's
+        // edge: it only SPEAKS when the cursor is off the terrain, i.e. aimed at a gap.
+        const bool verbose = LiveCursorNode() == nullptr;
+        std::vector<float> loop;
+        selbrush_t *likeNode = nullptr;
+        if ( TraceHoleOutline( loop, &likeNode, verbose ) && likeNode
+          && FillOutline( loop, likeNode->patch->def, likeNode->owner, verbose ) )
+            return true;
+        return FillHoleByChain( false );                // the older near-ring search, silent
+    }
+
     void ExpandUnderBrush()
     {
+        // A gap between existing patches is filled along its own outline first; the square
+        // lattice below only ever lays chunks on ground that has NO terrain at all.
+        if ( FillHoleUnderCursor() )
+            return;
         kterLattice_t L;
         if ( !ResolveLattice( &L ) )
             return;
@@ -2462,6 +3929,286 @@ namespace
         g_nUpdateBits = -1;
     }
 
+    // ── Set height: refine the mesh under the ring ───────────────────────────
+    // KIWI (2026-09-18, user: "I want it to simply just set all terrain in the circle to
+    // the desired height. Look back at farcry source, it worked great there").  Far Cry's
+    // flatten (Editor/Heightmap.cpp CHeightmap::DrawSpot2) is nothing but "every sample
+    // inside the radius goes to the height".  It works great because its heightmap is a
+    // dense uniform grid: the brush always covers dozens of samples and the spill at the
+    // rim is one 2 m unit.  A CoD4 patch sheet can have cells as wide as the ring, and then
+    // the same rule moves zero or one point - a spike, or a lean a whole cell past the ring.
+    //
+    // So before Set height stamps, every coarse sheet the ring reaches is RE-GRIDDED:
+    // quartered until the pieces under the ring fit one 16-point patch at the wanted cell
+    // size (a quarter of the outer radius, a power of two, never below "Finest cell"), and
+    // those pieces are laid fine.  Pieces the ring does not reach keep the sheet's own cell
+    // size, so the triangle cost stays local (about ten patches per touched sheet, not
+    // hundreds).  Every piece samples the ORIGINAL grid; the seam pass closes the fine /
+    // coarse edges.  All inside the stroke's undo record: the original is saved, the
+    // pieces are stamped as created, one Ctrl+Z brings the sheet back.
+    //
+    // KIWI (2026-09-18, later, user: "im still having shit outside of the circle affected
+    // by the terrain tools!!!"): the first version quartered the sheet and RE-SAMPLED every
+    // piece bilinearly, which shifted ground far from the ring by small amounts (a terrain
+    // quad draws as two triangles, not a bilinear surface, and the new vertices did not sit
+    // on the old ones).  The re-grid is now EXACT:
+    //   * the sheet is only ever cut along its OWN grid lines;
+    //   * pieces the ring does not reach are verbatim sub-grids (same points, same
+    //     diagonals) - not one height differs;
+    //   * the cells under the ring are split k x k (k a power of two <= 8) with every new
+    //     point read off the original cell's own TRIANGLE and every sub-quad keeping that
+    //     cell's diagonal, so the fine mesh IS the old surface until a stamp moves it.
+    // Refined pieces are therefore not handed to the seam pass: their edges already match.
+    float RefineCellFor( float outer )
+    {
+        float want = 256.0f;
+        while ( want * 0.5f >= s_refineMin && want > outer / 4.0f )
+            want *= 0.5f;
+        return want;
+    }
+
+    // Mean cell edge along grid axis 0 (i) or 1 (j), measured in XY along the first row /
+    // column - valid for ANY terrain grid (rotated, curved), unlike CellSizeAxis.
+    float CellSpan( const patchMesh_t *def, int axis )
+    {
+        const int n = axis == 0 ? def->width : def->height;
+        if ( n < 2 )
+            return 64.0f;
+        float len = 0.0f;
+        for ( int k = 0; k + 1 < n; ++k )
+        {
+            const float *a = axis == 0 ? def->ctrl[k][0].xyz     : def->ctrl[0][k].xyz;
+            const float *b = axis == 0 ? def->ctrl[k + 1][0].xyz : def->ctrl[0][k + 1].xyz;
+            len += sqrtf( ( b[0] - a[0] ) * ( b[0] - a[0] ) + ( b[1] - a[1] ) * ( b[1] - a[1] ) );
+        }
+        const float c = len / (float)( n - 1 );
+        return c > 1.0f ? c : 64.0f;
+    }
+
+    int RefineFactor( float cell, float want )
+    {
+        int k = 1;
+        while ( k < 8 && cell / (float)k > want * 1.5f )
+            k *= 2;
+        return k;
+    }
+
+    // Position + colour at (fu, fv) inside source cell (i, j), read off the triangle that
+    // draws there: turned_edge & 1 = diagonal v00-v11, else v01-v10 (as DrawWorld's wire).
+    void SampleCellTri( const patchMesh_t *src, int i, int j, float fu, float fv, drawVert_t *out )
+    {
+        const drawVert_t &v00 = src->ctrl[i][j],     &v10 = src->ctrl[i + 1][j];
+        const drawVert_t &v01 = src->ctrl[i][j + 1], &v11 = src->ctrl[i + 1][j + 1];
+        // weights of the four corners
+        float w00, w10, w01, w11;
+        if ( ( v00.turned_edge & 1 ) != 0 )
+        {
+            if ( fu >= fv ) { w00 = 1.0f - fu; w10 = fu - fv; w11 = fv; w01 = 0.0f; }
+            else            { w00 = 1.0f - fv; w01 = fv - fu; w11 = fu; w10 = 0.0f; }
+        }
+        else
+        {
+            if ( fu + fv <= 1.0f ) { w00 = 1.0f - fu - fv; w10 = fu; w01 = fv; w11 = 0.0f; }
+            else                   { w11 = fu + fv - 1.0f; w01 = 1.0f - fu; w10 = 1.0f - fv; w00 = 0.0f; }
+        }
+        for ( int a = 0; a < 3; ++a )
+            out->xyz[a] = v00.xyz[a] * w00 + v10.xyz[a] * w10 + v01.xyz[a] * w01 + v11.xyz[a] * w11;
+        // texture / lightmap / smoothing coordinates are linear over a triangle too, so the
+        // new points carry the OLD mapping exactly (no re-projection, nothing shifts)
+        {
+            const float *t00 = (const float *)&v00.texCoord, *t10 = (const float *)&v10.texCoord;
+            const float *t01 = (const float *)&v01.texCoord, *t11 = (const float *)&v11.texCoord;
+            float *to = (float *)&out->texCoord;
+            for ( int a = 0; a < 6; ++a )
+                to[a] = t00[a] * w00 + t10[a] * w10 + t01[a] * w01 + t11[a] * w11;
+            const float *s00 = (const float *)&v00.savedTexCoord, *s10 = (const float *)&v10.savedTexCoord;
+            const float *s01 = (const float *)&v01.savedTexCoord, *s11 = (const float *)&v11.savedTexCoord;
+            float *so = (float *)&out->savedTexCoord;
+            for ( int a = 0; a < 6; ++a )
+                so[a] = s00[a] * w00 + s10[a] * w10 + s01[a] * w01 + s11[a] * w11;
+        }
+        const byte *c00 = (const byte *)&v00.vert_color, *c10 = (const byte *)&v10.vert_color;
+        const byte *c01 = (const byte *)&v01.vert_color, *c11 = (const byte *)&v11.vert_color;
+        byte *co = (byte *)&out->vert_color;
+        for ( int k = 0; k < 4; ++k )
+            co[k] = (byte)(int)( ClampF( c00[k] * w00 + c10[k] * w10 + c01[k] * w01 + c11[k] * w11, 0.0f, 255.0f ) + 0.5f );
+    }
+
+    // Source cells [i0,i1) x [j0,j1), each split k x k.  k = 1 is a verbatim sub-grid.
+    selbrush_t *CreatePiece( const patchMesh_t *src, entity_s *owner, int i0, int i1, int j0, int j1, int k )
+    {
+        const int nx = ( i1 - i0 ) * k + 1, ny = ( j1 - j0 ) * k + 1;
+        if ( nx < 2 || ny < 2 || nx > 16 || ny > 16 )
+            return nullptr;
+        patchMesh_t *p = MakeNewPatch();
+        p->width  = nx;
+        p->height = ny;
+        p->type       = (PATCH_TYPES)( src->type | PATCH_TERRAIN );
+        p->contents   = src->contents;
+        p->flags      = src->flags;
+        p->subDivType = src->subDivType;
+        p->texture    = src->texture;
+        p->lightmap   = src->lightmap;
+        p->smoothing  = src->smoothing;
+        memcpy( p->kiwiLayer, src->kiwiLayer, sizeof( p->kiwiLayer ) );
+        for ( int a = 0; a < nx; ++a )
+            for ( int b = 0; b < ny; ++b )
+            {
+                int   ci = i0 + a / k, cj = j0 + b / k;
+                float fu = (float)( a % k ) / (float)k, fv = (float)( b % k ) / (float)k;
+                if ( ci >= i1 ) { ci = i1 - 1; fu = 1.0f; }
+                if ( cj >= j1 ) { cj = j1 - 1; fv = 1.0f; }
+                const bool onPoint = ( a % k == 0 ) && ( b % k == 0 );
+                const drawVert_t &orig = src->ctrl[i0 + a / k][j0 + b / k];     // valid when onPoint
+                drawVert_t *cp = &p->ctrl[a][b];
+                *cp = onPoint ? orig : src->ctrl[ci][cj];
+                if ( !onPoint )
+                    SampleCellTri( src, ci, cj, fu, fv, cp );
+                // the quad that STARTS here lies in source cell (a/k, b/k): keep its diagonal
+                const int qi = i0 + ( a / k < i1 - i0 ? a / k : i1 - i0 - 1 );
+                const int qj = j0 + ( b / k < j1 - j0 ? b / k : j1 - j0 - 1 );
+                cp->turned_edge = ( src->ctrl[qi][qj].turned_edge & 1 )
+                                | ( onPoint ? ( orig.turned_edge & ~1 ) : 0 );
+            }
+        // Not Patch_KiwiTextureAndBuild: that re-projects the texture, and these pieces must
+        // look exactly like the sheet they replace.  The mapping state rides along instead.
+        p->bDirty = src->bDirty;
+        *(float *)&p->size_of_struct_0x504C = *(const float *)&src->size_of_struct_0x504C;
+        Patch_Rebuild( p, 0 );                   // tessellate only (no re-project, no bounds: no brush yet)
+        brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
+        selbrush_t *inst = Brush_AddToList( pdef, owner );
+        inst->next = active_brushes.next;
+        active_brushes.next->prev = inst;
+        active_brushes.next = inst;
+        inst->prev = &active_brushes;
+        return inst;
+    }
+
+    bool RefineUnderRing( const float *from, const float *to )
+    {
+        if ( !s_autoRefine )
+            return false;
+        const float want = RefineCellFor( s_outer );
+        const float r = ( s_shape == KTER_SQUARE ? s_outer * 1.42f : s_outer ) + want;
+        const float box[4] = { ( from[0] < to[0] ? from[0] : to[0] ) - r, ( from[1] < to[1] ? from[1] : to[1] ) - r,
+                               ( from[0] > to[0] ? from[0] : to[0] ) + r, ( from[1] > to[1] ? from[1] : to[1] ) + r };
+        // EVERY eligible sheet the ring box reaches, target or not (2026-09-18 "moat"): a seam
+        // is a straight line between the COARSER side's vertices, so a coarse neighbour that
+        // is not re-gridded pins the seam flat between two far-apart points while the ground
+        // rises on both sides.  The seam pass already edits such neighbours; re-gridding them
+        // (exactly - nothing moves) is what lets the seam follow the stroke.
+        std::vector<selbrush_t *> victims;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *node = head->next; node && node != head; node = node->next )
+            {
+                if ( !PatchEligible( node ) )
+                    continue;
+                // ANY terrain grid, not only axis-aligned sheets: CreatePiece cuts along the
+                // patch's own grid lines and reads new points off its own triangles, so a
+                // curved or rotated patch refines exactly too.
+                const patchMesh_t *def = node->patch->def;
+                if ( def->width < 2 || def->height < 2 )
+                    continue;
+                const float *mins = node->def->mins, *maxs = node->def->maxs;
+                if ( maxs[0] < box[0] || mins[0] > box[2] || maxs[1] < box[1] || mins[1] > box[3] )
+                    continue;
+                if ( CellSpan( def, 0 ) <= want * 1.5f && CellSpan( def, 1 ) <= want * 1.5f )
+                    continue;                              // already fine enough
+                victims.push_back( node );
+            }
+        }
+        if ( victims.empty() )
+            return false;
+
+        int pieces = 0;
+        for ( size_t v = 0; v < victims.size(); ++v )
+        {
+            selbrush_t  *node = victims[v];
+            patchMesh_t *def  = node->patch->def;
+            bool wasSelected = false;
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes && !wasSelected; b = b->next )
+                wasSelected = ( b == node );
+            std::vector<selbrush_t *> made;
+            {
+                const int cw = def->width - 1, ch = def->height - 1;     // cells per axis
+                int fx = RefineFactor( CellSpan( def, 0 ), want );
+                int fy = RefineFactor( CellSpan( def, 1 ), want );
+                const int k = fx > fy ? fx : fy;                         // k x k keeps each cell's diagonal exact
+                // the block of source cells whose own XY box touches the ring box - per CELL,
+                // so it holds for curved / rotated grids as well as sheets
+                int ci0 = cw, ci1 = -1, cj0 = ch, cj1 = -1;
+                for ( int i = 0; i < cw; ++i )
+                    for ( int j = 0; j < ch; ++j )
+                    {
+                        float lo[2] = { FLT_MAX, FLT_MAX }, hi[2] = { -FLT_MAX, -FLT_MAX };
+                        for ( int c = 0; c < 4; ++c )
+                        {
+                            const float *p = def->ctrl[i + ( c & 1 )][j + ( c >> 1 )].xyz;
+                            for ( int a = 0; a < 2; ++a )
+                            {
+                                if ( p[a] < lo[a] ) lo[a] = p[a];
+                                if ( p[a] > hi[a] ) hi[a] = p[a];
+                            }
+                        }
+                        if ( hi[0] < box[0] || lo[0] > box[2] || hi[1] < box[1] || lo[1] > box[3] )
+                            continue;
+                        if ( i < ci0 ) ci0 = i; if ( i > ci1 ) ci1 = i;
+                        if ( j < cj0 ) cj0 = j; if ( j > cj1 ) cj1 = j;
+                    }
+                if ( k < 2 || ci1 < ci0 || cj1 < cj0 )
+                    continue;
+                entity_s *owner = node->owner;
+                selbrush_t *piece;
+                // verbatim frame around the block: left, right, below, above
+                if ( ci0 > 0 && ( piece = CreatePiece( def, owner, 0, ci0, 0, ch, 1 ) ) != nullptr )            made.push_back( piece );
+                if ( ci1 + 1 < cw && ( piece = CreatePiece( def, owner, ci1 + 1, cw, 0, ch, 1 ) ) != nullptr )  made.push_back( piece );
+                if ( cj0 > 0 && ( piece = CreatePiece( def, owner, ci0, ci1 + 1, 0, cj0, 1 ) ) != nullptr )     made.push_back( piece );
+                if ( cj1 + 1 < ch && ( piece = CreatePiece( def, owner, ci0, ci1 + 1, cj1 + 1, ch, 1 ) ) != nullptr ) made.push_back( piece );
+                // the block itself, k x k per cell, at most 15 fine cells a piece
+                const int m = 15 / k;
+                for ( int ia = ci0; ia <= ci1; ia += m )
+                    for ( int ja = cj0; ja <= cj1; ja += m )
+                    {
+                        const int ib = ia + m < ci1 + 1 ? ia + m : ci1 + 1;
+                        const int jb = ja + m < cj1 + 1 ? ja + m : cj1 + 1;
+                        if ( ( piece = CreatePiece( def, owner, ia, ib, ja, jb, k ) ) != nullptr )
+                            made.push_back( piece );
+                    }
+            }
+            if ( made.empty() )
+                continue;
+            if ( s_undoOpen )
+                Undo_AddBrush( (entity_brush_s *)node->def );   // a no-op when the stroke already saved it
+            for ( size_t m = 0; m < made.size(); ++m )
+            {
+                patchMesh_t *mdef = made[m]->patch->def;
+                if ( s_undoOpen )
+                {
+                    mdef->xx22b = 1;                         // born in the record: no copy on first stamp
+                    Undo_KiwiMarkCreated( made[m]->def );
+                }
+                if ( wasSelected )
+                    Select_Brush( made[m], 0, 0, 0 );
+                // NOT NoteDirty: the pieces' edges match by construction, and the seam pass
+                // would "heal" old cracks on neighbours far outside the ring.
+            }
+            pieces += (int)made.size();
+            ForgetDef( def );
+            Brush_Free( node );
+        }
+        BuildTargets();
+        if ( pieces )
+        {
+            s_created += pieces;
+            Sys_Printf( "Terrain Sculpt: re-gridded %i sheet%s under the ring into %i piece%s (toward %.0f-unit cells there; the rest is unchanged).\n",
+                        (int)victims.size(), victims.size() == 1 ? "" : "s", pieces, pieces == 1 ? "" : "s", want );
+        }
+        g_nUpdateBits = -1;
+        return pieces > 0;
+    }
+
     void TrimUnderBrush()
     {
         if ( !s_cursorHave )
@@ -2494,98 +4241,84 @@ namespace
         SetStatus( "Armed. Trimmed %i patch%s.", (int)victims.size(), victims.size() == 1 ? "" : "es" );
     }
 
-    // Resample a sheet patch to `points` x `points` (heights, colours and texcoords
-    // bilinear from the old grid; borders reproduce the old border exactly at the new
-    // points).  16 is the format's cap: for more, split into smaller chunks first.
-    void ResamplePatch( patchMesh_t *def, int points )
+    // KIWI (2026-09-17, user: "the tesselate in the terrain sculpt tool does not work how it
+    // should. It should be an absolute value not a relative one"): the setting used to be
+    // "cells across each selected patch", so a 512-unit chunk and a 4096-unit sheet given
+    // the same number came out eight times apart in real density, and a region could not
+    // be brought to one resolution.  It is now a CELL SIZE in world units: every selected
+    // patch is rebuilt so its cells are that big, whatever its own size - per axis, so a
+    // rectangular sheet gets square cells too.  The count per axis is extent / cell
+    // rounded to a whole cell (so the real size can differ by a fraction on a sheet whose
+    // extent is not a multiple); more than 15 cells on an axis splits that axis into
+    // chunks, 16 points being the CoD4 patch cap.  Every chunk samples the ORIGINAL grid,
+    // so the shared chunk edges coincide exactly.
+    struct kterTessPlan_t
     {
-        if ( points < 2 || points > 16 || def->width < 2 || def->height < 2 )
-            return;
-        patchMesh_t *old = (patchMesh_t *)operator new( sizeof( patchMesh_t ) );
-        memcpy( old, def, sizeof( patchMesh_t ) );
-        const float *p00 = old->ctrl[0][0].xyz;
-        const float *p10 = old->ctrl[old->width - 1][0].xyz;
-        const float *p01 = old->ctrl[0][old->height - 1].xyz;
-        const float ex = p10[0] - p00[0], ey = p01[1] - p00[1];
-        for ( int i = 0; i < points; ++i )
-            for ( int j = 0; j < points; ++j )
-            {
-                const float fu = (float)i / (float)( points - 1 );
-                const float fv = (float)j / (float)( points - 1 );
-                // Fractional old-grid coordinates.
-                const float u = fu * (float)( old->width - 1 ), v = fv * (float)( old->height - 1 );
-                int i0 = (int)u, j0 = (int)v;
-                if ( i0 > old->width - 2 )  i0 = old->width - 2;
-                if ( j0 > old->height - 2 ) j0 = old->height - 2;
-                const int i1 = i0 + 1, j1 = j0 + 1;
-                const float tu = u - (float)i0, tv = v - (float)j0;
-                const drawVert_t &a = old->ctrl[i0][j0], &b = old->ctrl[i1][j0];
-                const drawVert_t &c = old->ctrl[i0][j1], &d = old->ctrl[i1][j1];
-                drawVert_t *cp = &def->ctrl[i][j];
-                memset( cp, 0, sizeof( *cp ) );
-                cp->xyz[0] = p00[0] + ex * fu;
-                cp->xyz[1] = p00[1] + ey * fv;
-                cp->xyz[2] = ( a.xyz[2] * ( 1 - tu ) + b.xyz[2] * tu ) * ( 1 - tv )
-                           + ( c.xyz[2] * ( 1 - tu ) + d.xyz[2] * tu ) * tv;
-                const float *ta = (const float *)&a.texCoord, *tb = (const float *)&b.texCoord;
-                const float *tc = (const float *)&c.texCoord, *td = (const float *)&d.texCoord;
-                float *tt = (float *)&cp->texCoord;
-                for ( int k = 0; k < 6; ++k )
-                    tt[k] = ( ta[k] * ( 1 - tu ) + tb[k] * tu ) * ( 1 - tv ) + ( tc[k] * ( 1 - tu ) + td[k] * tu ) * tv;
-                cp->savedTexCoord = cp->texCoord;
-                for ( int k = 0; k < 4; ++k )
-                {
-                    const float ca = ( (const byte *)&a.vert_color )[k], cb = ( (const byte *)&b.vert_color )[k];
-                    const float cc = ( (const byte *)&c.vert_color )[k], cd = ( (const byte *)&d.vert_color )[k];
-                    const float m = ( ca * ( 1 - tu ) + cb * tu ) * ( 1 - tv ) + ( cc * ( 1 - tu ) + cd * tu ) * tv;
-                    ( (byte *)&cp->vert_color )[k] = (byte)(int)( ClampF( m, 0.0f, 255.0f ) + 0.5f );
-                }
-            }
-        def->width = def->height = points;
-        operator delete( old );
+        int cellsX, cellsY;         // whole cells across the patch
+        int kx, ky;                 // chunks per axis
+        int perX, perY;             // cells per chunk (<= 15)
+    };
+
+    kterTessPlan_t TessPlan( float ex, float ey, float cell )
+    {
+        kterTessPlan_t p;
+        if ( cell < 1.0f ) cell = 1.0f;
+        p.cellsX = (int)( ex / cell + 0.5f ); if ( p.cellsX < 1 ) p.cellsX = 1;
+        p.cellsY = (int)( ey / cell + 0.5f ); if ( p.cellsY < 1 ) p.cellsY = 1;
+        p.kx = ( p.cellsX + 14 ) / 15;
+        p.ky = ( p.cellsY + 14 ) / 15;
+        p.perX = ( p.cellsX + p.kx - 1 ) / p.kx;
+        p.perY = ( p.cellsY + p.ky - 1 ) / p.ky;
+        p.cellsX = p.perX * p.kx;            // rounded up to fill whole chunks
+        p.cellsY = p.perY * p.ky;
+        return p;
     }
 
-    // Tessellate the selected terrain to `cells` cells across the whole patch.  Up to 15
-    // cells it resamples in place (16 points is the CoD4 patch cap); above that the patch
-    // becomes k x k chunks of cells/k cells each, every chunk sampled from the original
-    // grid so the shared chunk edges coincide exactly.  `cells` is rounded up to a
-    // multiple of k when needed.
     void TessellateSelected()
     {
-        int cells = s_density < 1 ? 1 : s_density;
-        int k = ( cells + 14 ) / 15;                       // chunks per side
-        if ( k < 1 ) k = 1;
-        const int perChunk = ( cells + k - 1 ) / k;        // cells per chunk side (<= 15)
-        cells = perChunk * k;
-
+        // KIWI (2026-09-18, user: "it duplicates when tessellating!!!"): a regular sheet is
+        // re-gridded to the absolute cell size from its rectangle.  ANY OTHER terrain grid
+        // (curved edges, rotated, irregular) must never go down that road - its bounding box
+        // is not its shape, and the rectangular chunks landed on the neighbours.  Those are
+        // subdivided EXACTLY instead: every cell split k x k along the patch's own grid
+        // (CreatePiece), k the power of two that brings its cells to the wanted size.  They
+        // can only get finer; one that is already fine enough is left alone and counted.
         std::vector<selbrush_t *> nodes;
+        std::vector<int>          exactK;           // 0 = regular sheet, else the k of CreatePiece
+        int alreadyFine = 0;
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
-            if ( PatchEligible( b ) && GridIsSheet( b->patch->def ) )
+        {
+            if ( !PatchEligible( b ) || b->patch->def->width < 2 || b->patch->def->height < 2 )
+                continue;
+            if ( GridIsSheet( b->patch->def ) )
+            {
                 nodes.push_back( b );
+                exactK.push_back( 0 );
+                continue;
+            }
+            const int fx = RefineFactor( CellSpan( b->patch->def, 0 ), s_tessCell );
+            const int fy = RefineFactor( CellSpan( b->patch->def, 1 ), s_tessCell );
+            const int k = fx > fy ? fx : fy;
+            if ( k < 2 )
+            {
+                ++alreadyFine;
+                continue;
+            }
+            nodes.push_back( b );
+            exactK.push_back( k );
+        }
         if ( nodes.empty() )
         {
-            Sys_Printf( "Terrain Sculpt: select flat-sheet terrain patches to tessellate.\n" );
+            if ( alreadyFine )
+                Sys_Printf( "Terrain Sculpt: the %i selected curved / irregular patch%s already at that cell size or finer "
+                            "(such patches can only be subdivided, never made coarser).\n",
+                            alreadyFine, alreadyFine == 1 ? " is" : "es are" );
+            else
+                Sys_Printf( "Terrain Sculpt: select terrain patches to tessellate.\n" );
             return;
         }
 
-        if ( k == 1 )
-        {
-            std::vector<patchMesh_t *> defs;
-            for ( size_t i = 0; i < nodes.size(); ++i )
-                defs.push_back( nodes[i]->patch->def );
-            MultiEditBegin( defs, "tessellate terrain" );
-            for ( size_t i = 0; i < defs.size(); ++i )
-            {
-                ResamplePatch( defs[i], cells + 1 );
-                Patch_Rebuild( defs[i], 1 );
-            }
-            MultiEditEnd( defs );
-            Sys_Printf( "Terrain Sculpt: %i patch%s tessellated to %i cells across.\n",
-                        (int)nodes.size(), nodes.size() == 1 ? "" : "es", cells );
-            return;
-        }
-
-        // Split path: k x k chunks, each perChunk+1 points, sampled from the original.
+        // One path for every patch (a single chunk is just kx = ky = 1) and ONE undo record.
         Select_Deselect( 1 );
         Undo_ClearRedo();
         Undo_GeneralStart( "tessellate terrain" );
@@ -2595,30 +4328,137 @@ namespace
         for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
             Undo_AddEntity_W( (entity_s *)i->owner->def );
         std::vector<selbrush_t *> created;
+        int triangles = 0;
+        float cellMin = FLT_MAX, cellMax = 0.0f;
         for ( size_t bi = 0; bi < nodes.size(); ++bi )
         {
             selbrush_t *src = nodes[bi];
+            if ( exactK[bi] > 0 )
+            {
+                // exact k x k subdivision of a non-sheet grid, <= 15 fine cells a piece
+                const patchMesh_t *sdef = src->patch->def;
+                const int k = exactK[bi], m = 15 / k;
+                const int cw = sdef->width - 1, ch = sdef->height - 1;
+                for ( int ia = 0; ia < cw; ia += m )
+                    for ( int ja = 0; ja < ch; ja += m )
+                    {
+                        selbrush_t *made = CreatePiece( sdef, src->owner, ia, ia + m < cw ? ia + m : cw,
+                                                        ja, ja + m < ch ? ja + m : ch, k );
+                        if ( made )
+                            created.push_back( made );
+                    }
+                triangles += cw * ch * k * k * 2;
+                const float cx = CellSpan( sdef, 0 ) / (float)k, cy = CellSpan( sdef, 1 ) / (float)k;
+                if ( cx < cellMin ) cellMin = cx;
+                if ( cy < cellMin ) cellMin = cy;
+                if ( cx > cellMax ) cellMax = cx;
+                if ( cy > cellMax ) cellMax = cy;
+                continue;
+            }
             const float *mins = src->def->mins, *maxs = src->def->maxs;
             const float ex = maxs[0] - mins[0], ey = maxs[1] - mins[1];
-            const float sx = ex / (float)k, sy = ey / (float)k;
-            const float size = sx < sy ? sx : sy;
-            for ( int cy = 0; cy < k; ++cy )
-                for ( int cx = 0; cx < k; ++cx )
-                    created.push_back( CreateChunk( src->patch->def, src->owner,
-                                                    mins[0] + sx * (float)cx, mins[1] + sy * (float)cy,
-                                                    size, perChunk + 1, src->patch->def, 0.0f ) );
+            const kterTessPlan_t p = TessPlan( ex, ey, s_tessCell );
+            const float sx = ex / (float)p.kx, sy = ey / (float)p.ky;
+            for ( int cy = 0; cy < p.ky; ++cy )
+                for ( int cx = 0; cx < p.kx; ++cx )
+                {
+                    selbrush_t *made = CreateChunkXY( src->patch->def, src->owner,
+                                                      mins[0] + sx * (float)cx, mins[1] + sy * (float)cy,
+                                                      sx, sy, p.perX + 1, p.perY + 1, src->patch->def, 0.0f );
+                    if ( made )
+                        created.push_back( made );
+                }
+            triangles += p.cellsX * p.cellsY * 2;
+            const float realX = ex / (float)p.cellsX, realY = ey / (float)p.cellsY;
+            if ( realX < cellMin ) cellMin = realX;
+            if ( realY < cellMin ) cellMin = realY;
+            if ( realX > cellMax ) cellMax = realX;
+            if ( realY > cellMax ) cellMax = realY;
         }
         for ( size_t i = 0; i < nodes.size(); ++i )
             ForgetDef( nodes[i]->patch->def );
         Select_Delete();
         Undo_EndBrushList( &selected_brushes );
+        // KIWI (2026-09-17, user: "the operation is not undo-able ... looks like multiple
+        // layers"): the chunks were born inside the record but never stamped with its id,
+        // so Ctrl+Z put the saved originals back and LEFT the chunks - two sheets on top of
+        // each other.  Stamped, undo phase 1 frees them before the originals return.
+        for ( size_t i = 0; i < created.size(); ++i )
+            Undo_KiwiMarkCreated( created[i]->def );
         Undo_End();
         for ( size_t i = 0; i < created.size(); ++i )
             Select_Brush( created[i], 0, 0, 0 );
         s_targets.clear();
         g_nUpdateBits = -1;
-        Sys_Printf( "Terrain Sculpt: %i patch%s tessellated to %i cells across as %ix%i chunks of %i cells.\n",
-                    (int)nodes.size(), nodes.size() == 1 ? "" : "es", cells, k, k, perChunk );
+        Sys_Printf( "Terrain Sculpt: %i patch%s tessellated to %.0f-unit cells (actual %.1f..%.1f) as %i chunk%s, %i triangles.\n",
+                    (int)nodes.size(), nodes.size() == 1 ? "" : "es", s_tessCell, cellMin, cellMax,
+                    (int)created.size(), created.size() == 1 ? "" : "s", triangles );
+    }
+
+    // ── find stacked terrain (clean-up for maps the old bugs already touched) ──
+    // A patch is "stacked" when other terrain lies under / over at least 7 of 9 points spread
+    // over its interior.  Of a mutually overlapping pair only ONE is picked: the smaller in
+    // area, or for equal ones the node at the higher address.  Selects; never deletes.
+    int SelectStackedTerrain()
+    {
+        std::vector<selbrush_t *> all;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( PatchEligible( b ) && !FilterBrush( b, 0 ) && b->patch->def->width >= 2 && b->patch->def->height >= 2 )
+                    all.push_back( b );
+        }
+        std::vector<selbrush_t *> stacked;
+        for ( size_t n = 0; n < all.size(); ++n )
+        {
+            selbrush_t *node = all[n];
+            const patchMesh_t *def = node->patch->def;
+            const float area = ( node->def->maxs[0] - node->def->mins[0] ) * ( node->def->maxs[1] - node->def->mins[1] );
+            int covered = 0;
+            bool keepThis = false;
+            for ( int a = 1; a <= 3 && !keepThis; ++a )
+                for ( int b = 1; b <= 3 && !keepThis; ++b )
+                {
+                    // bilinear point inside the grid at (a/4, b/4), off the vertices
+                    const float fu = (float)a * 0.25f * (float)( def->width - 1 );
+                    const float fv = (float)b * 0.25f * (float)( def->height - 1 );
+                    int i = (int)fu, j = (int)fv;
+                    if ( i > def->width - 2 )  i = def->width - 2;
+                    if ( j > def->height - 2 ) j = def->height - 2;
+                    drawVert_t pt;
+                    SampleCellTri( def, i, j, fu - (float)i, fv - (float)j, &pt );
+                    const float org[3] = { pt.xyz[0], pt.xyz[1], 65536.0f };
+                    const float dir[3] = { 0.0f, 0.0f, -1.0f };
+                    float hit[3];
+                    selbrush_t *other = nullptr;
+                    if ( !PickPatches( org, dir, true, hit, nullptr, &other, node ) || !other )
+                        continue;
+                    const float oarea = ( other->def->maxs[0] - other->def->mins[0] ) * ( other->def->maxs[1] - other->def->mins[1] );
+                    // the bigger one of a pair stays; of equals, the lower address stays
+                    if ( area > oarea * 1.02f || ( area >= oarea * 0.98f && node < other ) )
+                        keepThis = true;
+                    else
+                        ++covered;
+                }
+            if ( !keepThis && covered >= 7 )
+                stacked.push_back( node );
+        }
+        if ( stacked.empty() )
+        {
+            Sys_Printf( "Terrain Sculpt: no terrain patch lies on top of another.\n" );
+            SetStatus( "No stacked terrain found." );
+            return 0;
+        }
+        Select_Deselect( 1 );
+        for ( size_t i = 0; i < stacked.size(); ++i )
+            Select_Brush( stacked[i], 0, 0, 0 );
+        Sel_InvalidateFromLegacy();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Terrain Sculpt: %i terrain patch%s on top of other terrain - SELECTED (nothing deleted). "
+                    "Check them, then press Delete.\n", (int)stacked.size(), stacked.size() == 1 ? " lies" : "es lie" );
+        SetStatus( "%i stacked terrain patch%s selected - check, then Delete.", (int)stacked.size(), stacked.size() == 1 ? "" : "es" );
+        return (int)stacked.size();
     }
 
     // ── join adjacent sheets ─────────────────────────────────────────────────
@@ -2805,6 +4645,7 @@ namespace
         s_ringCount = 0;
         if ( !s_cursorHave )
             return;
+        LiveCursorNode();                        // drops a node freed since the pick (DropToSurface reads it)
         const int n = 32;
         const float rot = s_squareRot * KTER_PI / 180.0f;
         const float cr = cosf( rot ), sr = sinf( rot );
@@ -2895,6 +4736,12 @@ namespace
             if ( n < 1 ) n = 1;
             if ( n > 6 ) n = 6;
         }
+        // Every height stroke first brings the mesh under the ring to a density the ring can
+        // work with - also with "Allow terrain creation" on (ResolveLattice anchors on the
+        // largest sheet in reach, so refined pieces do not shift the chunk lattice).
+        if ( HeightStroke() )
+            RefineUnderRing( s_haveLastCenter ? s_lastCenter : s_cursor, s_cursor );
+        s_reachCount = 0;                        // the rings of THIS flush (InStrokeReach)
         const float dtEach = s_accumDt / (float)n;
         for ( int k = 1; k <= n; ++k )
         {
@@ -2903,6 +4750,12 @@ namespace
             for ( int a = 0; a < 3; ++a )
                 c[a] = s_haveLastCenter ? s_lastCenter[a] + ( s_cursor[a] - s_lastCenter[a] ) * f : s_cursor[a];
             Stamp( c, OpForStroke(), sign, dtEach );
+            MarkRidersReached( c );
+            if ( s_reachCount < 8 )
+            {
+                memcpy( s_reachCenters[s_reachCount], c, sizeof( c ) );
+                ++s_reachCount;
+            }
         }
         memcpy( s_lastCenter, s_cursor, sizeof( s_cursor ) );
         s_haveLastCenter = true;
@@ -2910,6 +4763,8 @@ namespace
         if ( CreationAllowed() && !s_modShift && !s_modCtrl )
             ExpandUnderBrush();
         FlushDirty();
+        s_reachCount = 0;                    // other flushes (stroke end, tools) are unrestricted
+        CarryRiders();                       // after the seams: riders read final heights
     }
 
     // ── height gradient ("heatmap") while a height tool is armed ─────────────
@@ -2926,9 +4781,15 @@ namespace
 
     bool HeatmapActive()
     {
-        return s_armed && s_heatmap
-            && ( s_tool == KTER_RAISE || s_tool == KTER_SETHEIGHT || s_tool == KTER_SMOOTH
-              || s_tool == KTER_NOISE || s_tool == KTER_TRIM );
+        const bool heightTool = s_tool == KTER_RAISE || s_tool == KTER_SETHEIGHT || s_tool == KTER_SMOOTH
+                             || s_tool == KTER_NOISE || s_tool == KTER_TRIM;
+        // KIWI (2026-09-17, user: "add an option to turn on height colors while not
+        // armed"): the always-on view shows the gradient with the tool put away, for
+        // reading relief while placing models or comparing against an elevation map.  It
+        // still yields to an ARMED texture / blend / grass tool - those need the real look.
+        if ( s_heatAlways && !( s_armed && !heightTool ) )
+            return true;
+        return s_armed && s_heatmap && heightTool;
     }
 
     // Min/max control-point Z over the eligible patches; true when the range moved.
@@ -2989,26 +4850,122 @@ namespace
         return B | ( G << 8 ) | ( R << 16 ) | 0xFF000000u;
     }
 
-    // Re-upload every patch's visuals (the VB colours come from LayerUpload).
+    // Re-upload every patch's visuals (the VB colours and the run material come from
+    // LayerUpload).  Two facts shape this (both learned the hard way on 2026-09-17):
+    //
+    //  1. A patch instance rebuilds its visuals LAZILY at draw time whenever
+    //     inst->version != def->version (pmesh.cpp Patch_Fill).  So a re-tint needs only
+    //     `++def->version` - NOT Patch_Rebuild, which also re-tessellates the curveDef and
+    //     was most of the old 1-2 s stall.  Off-screen patches then re-upload when they come
+    //     into view, for free.
+    //  2. Every frame in which ANY patch re-uploads, the world window's mesh runs are
+    //     rebuilt ("build mesh runs" in Tracy).  That is cheap while the terrain wears the
+    //     single heat material and ~50-100 ms while it is textured.  My first fix spread
+    //     every re-tint over ~200 frames, so disarming (heat -> textures) sat at 10 fps for
+    //     twenty seconds (user: "when I turn off sculpt mode, the editor now lags like
+    //     crazy ... 'build mesh runs' zone ... height colors removes the lag").
+    //
+    // Hence: a MODE change (arm, disarm, tool, toggle - the material changes, textures may
+    // be involved) bumps every version AT ONCE: one frame of re-upload, one run rebuild.
+    // Only a RANGE change while the heat view stays on (the original "re-scaling lags"
+    // report) uses the wave, where each frame's run rebuild costs almost nothing.
+    std::set<const patchMesh_t *> s_retintDone;     // raw def pointers as keys only, never dereferenced
+    bool s_retintPending = false;
+    const int KTER_RETINT_PER_FRAME = 64;           // wave: patches re-tinted per frame (~20 frames on powerplant)
+
     void RebuildAllPatchVisuals()
     {
+        s_retintPending = false;
+        s_retintDone.clear();
         for ( int pass = 0; pass < 2; ++pass )
         {
             selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
                 if ( NodeIsPatch( b ) )
-                {
-                    Patch_Rebuild( b->patch->def, 0 );
                     ++b->patch->def->version;
-                }
         }
         g_nUpdateBits = -1;
+    }
+
+    // Heat range moved while the heat view stays on: re-tint as a wave from the camera out.
+    void ScheduleRetintWave()
+    {
+        s_retintDone.clear();
+        s_retintPending = true;
+        g_nUpdateBits = -1;
+    }
+
+    void RetintTick()
+    {
+        // Always-on view with the tool put away: nothing ends a stroke to refresh the
+        // range, so poll it about once a second (a plain walk over the control points,
+        // well under a millisecond).  A map load, an undo or a Move of terrain then
+        // re-ranges the colours; the 5 % hysteresis keeps small edits from re-tinting.
+        if ( s_heatAlways && !s_armed && !s_retintPending )
+        {
+            static DWORD s_lastPoll = 0;
+            const DWORD now = ::GetTickCount();
+            if ( now - s_lastPoll > 1000u )
+            {
+                s_lastPoll = now;
+                if ( ComputeHeatRange() )
+                    ScheduleRetintWave();
+            }
+        }
+        if ( !s_retintPending )
+            return;
+        if ( !HeatmapActive() )
+        {
+            // The heat view went away mid-wave: the mode change already bumped everything.
+            s_retintPending = false;
+            s_retintDone.clear();
+            return;
+        }
+        const camera_s *c = Ed_Camera();
+        std::vector<std::pair<float, selbrush_t *> > todo;
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !NodeIsPatch( b ) || s_retintDone.count( b->patch->def ) )
+                    continue;
+                float d2 = 0.0f;
+                if ( b->def )
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        const float mid = ( b->def->mins[k] + b->def->maxs[k] ) * 0.5f - c->origin[k];
+                        d2 += mid * mid;
+                    }
+                todo.push_back( std::make_pair( d2, b ) );
+            }
+        }
+        if ( todo.empty() )
+        {
+            s_retintPending = false;
+            s_retintDone.clear();
+            return;
+        }
+        std::sort( todo.begin(), todo.end() );
+
+        // The cost lands in the draw (the lazy visual rebuild), not here, so the budget is
+        // a patch count rather than a timer.
+        int done = 0;
+        for ( size_t i = 0; i < todo.size() && done < KTER_RETINT_PER_FRAME; ++i )
+        {
+            patchMesh_t *def = todo[i].second->patch->def;
+            if ( !s_retintDone.insert( def ).second )
+                continue;                       // two nodes of one def
+            ++def->version;                     // visuals re-upload at the next draw
+            ++done;
+        }
+        g_nUpdateBits = -1;                     // keep frames coming until the wave ends
     }
 
     // Arm / tool / toggle transitions: refresh the range and the uploads.
     void HeatmapRefresh()
     {
-        if ( s_armed && s_heatmap )
+        if ( HeatmapActive() )
             ComputeHeatRange();
         RebuildAllPatchVisuals();
     }
@@ -3024,6 +4981,12 @@ namespace
             return;
         }
         FlushDirty();
+        CarryRiders();
+        s_carried = 0;
+        for ( size_t i = 0; i < s_riders.size(); ++i )
+            if ( s_riders[i].undoAdded )
+                ++s_carried;
+        s_riders.clear();
         Patch_PaintFinish( &selected_brushes );
         Patch_PaintFinish( &active_brushes );
         if ( s_undoOpen )
@@ -3031,22 +4994,43 @@ namespace
         // The gradient range follows the terrain: re-tint everything only when the
         // stroke pushed the extremes (the touched patches re-uploaded already).
         if ( HeatmapActive() && ComputeHeatRange() )
-            RebuildAllPatchVisuals();
+            ScheduleRetintWave();               // heat stays on: the cheap, smooth path
         s_undoOpen = false;
         s_stroke   = false;
         g_nUpdateBits = -1;
         if ( s_touched || s_created || s_facesPainted )
-            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s, %i chunk%s laid, %i brush face%s painted.",
+            SetStatus( "Armed. Last stroke: %i stamp%s over %i patch%s, %i chunk%s laid, %i brush face%s painted, %i object%s carried.",
                        s_stamps, s_stamps == 1 ? "" : "s", s_touched, s_touched == 1 ? "" : "es",
-                       s_created, s_created == 1 ? "" : "s", s_facesPainted, s_facesPainted == 1 ? "" : "s" );
+                       s_created, s_created == 1 ? "" : "s", s_facesPainted, s_facesPainted == 1 ? "" : "s",
+                       s_carried, s_carried == 1 ? "" : "s" );
         else if ( CreationAllowed() )
             SetStatus( "Armed. The stroke reached no control point and every cell under it was covered." );
         else
             SetStatus( "Armed. The stroke reached no control point (grow the radius or select the patch)." );
+        if ( s_coarseSpill )
+        {
+            // Said once per stroke, in the status line too, because the effect looks like a bug.
+            SetStatus( "Armed. The terrain under the ring is too coarse for it: moved points drag their whole cells, so "
+                       "ground up to one cell past the ring leaned. Tessellate that patch finer to confine strokes." );
+            Sys_Printf( "Terrain Sculpt: the grid under the ring is coarser than the ring can contain; the change "
+                        "extends up to a full cell past it there. Tessellate that patch to a smaller cell size (your "
+                        "call - nothing is re-gridded automatically unless 'Refine the mesh under the ring' is ticked).\n" );
+            s_coarseSpill = false;
+        }
         if ( s_layersAdded || s_layersFull )
-            Sys_Printf( "Terrain Sculpt: '%s' added as a layer on %i patch%s%s.\n",
-                        s_paintMaterial, s_layersAdded, s_layersAdded == 1 ? "" : "es",
-                        s_layersFull ? " (some patches already carry 4 layers and were skipped)" : "" );
+        {
+            const bool shared = s_tool == KTER_BLEND || ( s_tool == KTER_TEXTURE && s_modShift );
+            if ( shared )
+                Sys_Printf( "Terrain Sculpt: blending carried %i layer%s onto neighbouring patch%s that did not have "
+                            "%s yet%s.\n", s_layersAdded, s_layersAdded == 1 ? "" : "s",
+                            s_layersAdded == 1 ? "" : "es", s_layersAdded == 1 ? "it" : "them",
+                            s_layersFull ? " (a patch that already carries 4 layers cannot take another - the hard "
+                                           "line stays there)" : "" );
+            else
+                Sys_Printf( "Terrain Sculpt: '%s' added as a layer on %i patch%s%s.\n",
+                            s_paintMaterial, s_layersAdded, s_layersAdded == 1 ? "" : "es",
+                            s_layersFull ? " (some patches already carry 4 layers and were skipped)" : "" );
+        }
         s_stamps = s_touched = s_created = 0;
     }
 
@@ -3536,6 +5520,7 @@ void KiwiTerrain_LayerUpload( patchMesh_t *def, int run, int baseRuns,
 void KiwiTerrain_Draw()
 {
     Load();
+    RetintTick();                               // the scheduled heat / weight-view re-upload
     if ( s_stroke && s_tool != KTER_TRIM && !( s_tool == KTER_SETHEIGHT && !s_modShift ) )
     {
         float dt = ImGui::GetIO().DeltaTime;
@@ -3599,7 +5584,35 @@ void KiwiTerrain_Draw()
                 s_inner = s_outer;
             changed |= ImGui::SliderFloat( "Strength", &s_strength, 0.01f, 2.0f, "%.2f" );
             ImGui::TextDisabled( "Resize while sculpting: [ ] or + / - (hold to repeat), Ctrl+wheel.  "
-                                 "Strength: Shift+wheel." );
+                                 "Strength: Shift+wheel or Alt+wheel (Set height: Alt+wheel moves the target)." );
+            if ( s_tool == KTER_RAISE || s_tool == KTER_SETHEIGHT || s_tool == KTER_SMOOTH || s_tool == KTER_NOISE )
+            {
+                changed |= ImGui::Checkbox( "Never change anything outside the ring", &s_setHeightContain );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Every height tool. A terrain point moves only if ALL the triangles it tilts\n"
+                                       "lie inside the ring, so the ramp between old and new ground stays inside it:\n"
+                                       "no ground, seam or carried object outside the ring ever changes.\n"
+                                       "Off: every point inside the ring moves and its cells lean past the ring." );
+                changed |= ImGui::Checkbox( "Refine the mesh under the ring", &s_autoRefine );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "OFF by default - it ADDS TRIANGLES (a few thousand per touched area).\n"
+                                       "Terrain whose cells are coarser than about a quarter of the outer radius is\n"
+                                       "re-gridded under the ring before the stroke, so the ring always has points\n"
+                                       "to work with. Exact: the sheet is cut along its own grid lines, pieces the\n"
+                                       "ring misses are verbatim copies, and refined cells reproduce the old\n"
+                                       "triangles until a stamp moves them. Part of the stroke's undo.\n"
+                                       "Both sides of a seam are re-gridded (selected or not), so a fine sheet\n"
+                                       "next to a coarse one gets matching seam points and no 'moat' forms." );
+                if ( s_autoRefine )
+                {
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth( 90.0f );
+                    changed |= ImGui::InputFloat( "Finest cell", &s_refineMin, 0.0f, 0.0f, "%.0f" );
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "The re-grid never goes below this cell size, however small the ring.\n"
+                                           "Now: %.0f-unit cells for a %.0f outer radius.", RefineCellFor( s_outer ), s_outer );
+                }
+            }
         }
 
         if ( s_tool != KTER_GRASS )
@@ -3654,7 +5667,17 @@ void KiwiTerrain_Draw()
                 s_targetZ = s_cursor[2];
                 changed = true;
             }
-            ImGui::TextDisabled( "Snaps instantly; the green ghost ring shows the target height." );
+            ImGui::TextDisabled( "Every point inside the OUTER ring is set to exactly this height, at once\n"
+                                 "(the Far Cry flatten). Strength and falloff do not apply." );
+            changed |= ImGui::Checkbox( "Feather the edge (use falloff + strength)", &s_setHeightFeather );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Off (default): an exact, hard-edged set inside the ring.\n"
+                                   "On: the band between the inner and outer ring is eased toward the\n"
+                                   "target instead - for blending a plateau into a slope. That ramp moves\n"
+                                   "ground around the spot, so leave it off next to finished work." );
+            ImGui::TextDisabled( "A moved point drags the whole grid cells around it: on a sheet whose cells\n"
+                                 "are wider than the brush the change spills a full cell past the ring.\n"
+                                 "Tessellate that sheet to a smaller cell size first (Density, below)." );
             break;
         case KTER_NOISE:
             changed |= ImGui::SliderFloat( "Noise height", &s_noiseScale, 0.25f, 512.0f, "%.1f",
@@ -3687,9 +5710,16 @@ void KiwiTerrain_Draw()
         ImGui::PushItemWidth( 190.0f );
 
         ImGui::SeparatorText( "Tool" );
+        // KIWI (2026-09-17, user: "remove the smooth tool and just encourage shift-click
+        // usage"): Smooth is no longer a tool of its own - Shift+LMB smooths from every
+        // sculpt tool, without a trip to this panel.  The enum slot stays (saved profiles
+        // and the test DSL's `terrain tool smooth` still resolve) but is never listed.
+        int shown = 0;
         for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
         {
-            if ( i % 2 )
+            if ( i == KTER_SMOOTH )
+                continue;
+            if ( shown++ % 2 )
                 ImGui::SameLine( 200.0f );
             if ( ImGui::RadioButton( KTER_TOOL_NAME[i], s_tool == i ) )
             {
@@ -3697,6 +5727,8 @@ void KiwiTerrain_Draw()
                 changed = true;
             }
         }
+        ImGui::TextColored( ImVec4( 1.0f, 0.82f, 0.35f, 1.0f ),
+                            "Smooth: hold Shift and drag with any sculpt tool." );
 
         ImGui::Spacing();
         if ( ImGui::Button( s_armed ? "Disarm (Esc)"
@@ -3744,6 +5776,27 @@ void KiwiTerrain_Draw()
                 ImGui::SetTooltip( "Height tools (Raise, Set height, Smooth, Noise, Trim) show every patch\n"
                                    "as a blue -> green -> red gradient by height instead of its texture,\n"
                                    "so relief reads at a glance. Texture / colour paint keep the real look." );
+            if ( ImGui::Checkbox( "Height colours while NOT armed too", &s_heatAlways ) )
+            {
+                Save();
+                HeatmapRefresh();
+            }
+            if ( ImGui::Checkbox( "Paint never draws over other geometry", &s_layerDepthEqual ) )
+            {
+                Save();
+                RestripTwins();
+            }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "On (default): a paint layer only lands on pixels where its OWN ground is the\n"
+                                   "visible surface (depth EQUAL). A prop lying almost flush with the ground -\n"
+                                   "rail ties on a flattened bed - then looks the same as with Height colours.\n"
+                                   "Off: the old less-or-equal test; the paint, drawn last, wins every near-tie\n"
+                                   "and creeps over such props. Turn it off only if paint flickers or vanishes." );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Keeps the height gradient (and its legend) on with the tool put away -\n"
+                                   "for reading relief while placing models or matching an elevation map.\n"
+                                   "An armed Texture / Blend / Grass tool still shows the real look.\n"
+                                   "The colour range re-checks about once a second." );
 
             ImGui::SeparatorText( "Chunks" );
             changed |= ImGui::SliderFloat( "Chunk size", &s_chunkSize, 256.0f, 8192.0f, "%.0f",
@@ -3755,6 +5808,13 @@ void KiwiTerrain_Draw()
                                    "with no terrain in reach the lattice starts at the world origin." );
             if ( ImGui::Button( "Split oversized selected patches" ) )
                 SplitOversized();
+            if ( ImGui::Button( "Select terrain stacked on other terrain" ) )
+                SelectStackedTerrain();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Finds patches that lie on top of other terrain (left behind by older\n"
+                                   "Tessellate / creation bugs) and SELECTS them - nothing is deleted.\n"
+                                   "Of two overlapping patches the smaller one is picked (of two equal\n"
+                                   "ones, one of them). Check the selection, then press Delete." );
             ImGui::SeparatorText( "Flatten to brushes" );
             ImGui::SetNextItemWidth( 120.0f );
             changed |= ImGui::InputFloat( "Flatness tolerance", &s_flatTol, 0.5f, 4.0f, "%.1f" );
@@ -3773,26 +5833,43 @@ void KiwiTerrain_Draw()
                                    "The new brushes stay SELECTED (flat highlight in the camera) - Esc to see\n"
                                    "their texture. Undoable." );
             ImGui::SeparatorText( "Density" );
-            ImGui::SetNextItemWidth( 160.0f );
-            changed |= ImGui::SliderInt( "Cells across each selected patch", &s_density, 1, 120,
-                                         "%d", ImGuiSliderFlags_Logarithmic );
+            changed |= UnitInputWorld( "Cell size (absolute)", &s_tessCell, 160.0f );
+            s_tessCell = ClampF( s_tessCell, 4.0f, 4096.0f );
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "/2" ) ) { s_tessCell = ClampF( s_tessCell * 0.5f, 4.0f, 4096.0f ); changed = true; }
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "x2" ) ) { s_tessCell = ClampF( s_tessCell * 2.0f, 4.0f, 4096.0f ); changed = true; }
             {
-                const int k = ( s_density + 14 ) / 15;
-                const int per = ( s_density + k - 1 ) / k;
-                if ( k > 1 )
-                    ImGui::TextDisabled( "= %ix%i chunks of %i cells (a patch holds 16 points, so it splits)",
-                                         k, k, per );
+                // What the selection would become, so the number is never a guess.
+                int patches = 0, chunks = 0, tris = 0, nowTris = 0;
+                for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+                {
+                    if ( !PatchEligible( b ) || !GridIsSheet( b->patch->def ) || !b->def )
+                        continue;
+                    const kterTessPlan_t p = TessPlan( b->def->maxs[0] - b->def->mins[0],
+                                                       b->def->maxs[1] - b->def->mins[1], s_tessCell );
+                    ++patches;
+                    chunks  += p.kx * p.ky;
+                    tris    += p.cellsX * p.cellsY * 2;
+                    nowTris += ( b->patch->def->width - 1 ) * ( b->patch->def->height - 1 ) * 2;
+                }
+                if ( patches )
+                    ImGui::TextDisabled( "%i selected patch%s: %i -> %i triangles, %i chunk%s",
+                                         patches, patches == 1 ? "" : "es", nowTris, tris,
+                                         chunks, chunks == 1 ? "" : "s" );
                 else
-                    ImGui::TextDisabled( "= one %ix%i grid (%i triangles)", s_density + 1, s_density + 1,
-                                         s_density * s_density * 2 );
+                    ImGui::TextDisabled( "select terrain patches to see the result" );
             }
             if ( ImGui::Button( "Tessellate" ) )
                 TessellateSelected();
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Rebuilds each selected terrain patch at this many cells across. Heights,\n"
-                                   "layer weights and texcoords are interpolated from the current grid;\n"
-                                   "chunk edges coincide exactly. Neighbouring patches keep their own grid,\n"
-                                   "so tessellate a whole region to the same value. Undoable." );
+                ImGui::SetTooltip( "Rebuilds every selected terrain patch so its cells are THIS BIG in world\n"
+                                   "units, whatever the patch's own size - a small chunk and a huge sheet end up\n"
+                                   "at the same real density. More than 15 cells on an axis splits the patch\n"
+                                   "into chunks (a patch holds 16 points). Heights, layer weights and texcoords\n"
+                                   "are interpolated from the current grid; chunk edges coincide exactly.\n"
+                                   "A sheet whose size is not a whole number of cells gets the nearest fit.\n"
+                                   "One undo record." );
             {
                 const int bez = SelectedBezierCount();
                 if ( bez > 0 )
@@ -3811,6 +5888,14 @@ void KiwiTerrain_Draw()
 
             ImGui::SeparatorText( "Scope" );
             changed |= ImGui::Checkbox( "Affect unselected patches too", &s_affectUnselected );
+            changed |= ImGui::Checkbox( "Carry objects resting on the terrain", &s_carryObjects );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Height strokes (Raise / Dig, Set height, Smooth, Noise) also move whatever\n"
+                                   "sits on the sculpted terrain - models, entities, brushes and non-terrain\n"
+                                   "patches - up or down by the terrain's own change under each object, so\n"
+                                   "placed props survive a resculpt. An object counts when its bottom is\n"
+                                   "within 48 units of the terrain at the start of the stroke; floating or\n"
+                                   "buried things stay put. Undo restores them with the terrain." );
             ImGui::TextDisabled( "Terrain meshes only - bezier curves are never sculpted, welded or painted." );
             if ( ImGui::Checkbox( "Soft-select vertex drags (legacy Drag Up/Down)", &s_softSelect ) )
             {
@@ -3851,6 +5936,16 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
     s_modShift = shift;
     s_modCtrl  = ctrl;
 
+    // Never paint the editor's own preview copy ("kiwi_blend_<name>", pickable in the texture
+    // browser because it is a real file): the layer is the real material.
+    if ( !_strnicmp( s_paintMaterial, "kiwi_blend_", 11 ) )
+    {
+        const char *real = UnwrapTwinName( s_paintMaterial );
+        Sys_Printf( "Terrain Sculpt: '%s' is the editor's preview copy - painting '%s' instead.\n", s_paintMaterial, real );
+        memmove( s_paintMaterial, real, strlen( real ) + 1 );
+        Save();
+    }
+
     if ( ctrl && !shift )
     {
         if ( s_tool == KTER_SETHEIGHT )
@@ -3884,6 +5979,7 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
     s_undoOpen = true;
     Patch_Paint( &selected_brushes );
     Patch_Paint( &active_brushes );          // seam stitching may touch unselected neighbours
+    CaptureRiders();                         // "Carry objects": what rests on the targets now
 
     s_stroke    = true;
     s_stamps    = 0;
@@ -3892,6 +5988,9 @@ static bool BeginStroke( bool shift, bool ctrl, const byte picked[4] )
     s_layersAdded = 0;
     s_layersFull  = 0;
     s_facesPainted = 0;
+    s_carried   = 0;
+    s_coarseSpill = false;
+    s_holeFailValid = false;                 // a new press may search for a gap again
     s_noiseSeed += 1.0f;
     s_haveLastCenter = false;
     s_accumDt   = 1.0f / 60.0f;
@@ -3948,6 +6047,7 @@ int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
         HudAdd( prompts, &n, "V",          "Pick height under cursor" );
         HudAdd( prompts, &n, "Ctrl+LMB",   "Pick height under cursor" );
         HudAdd( prompts, &n, "Target",     targetText );
+        HudAdd( prompts, &n, "Alt+wheel",  "Target height" );
         HudAdd( prompts, &n, "Shift+LMB",  "Smooth" );
         break;
     case KTER_SMOOTH:
@@ -3980,7 +6080,7 @@ int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
     {
         HudAdd( prompts, &n, "[ ]",         "Radius" );
         HudAdd( prompts, &n, "Ctrl+wheel",  "Radius" );
-        HudAdd( prompts, &n, "Shift+wheel", "Strength" );
+        HudAdd( prompts, &n, s_tool == KTER_SETHEIGHT ? "Shift+wheel" : "Alt/Shift+wheel", "Strength" );
     }
     HudAdd( prompts, &n, "Esc", "Disarm" );
     *out = prompts;
@@ -4183,10 +6283,32 @@ bool KiwiTerrain_HandleKey( int vk )
     return false;
 }
 
-bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl )
+bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl, bool alt )
 {
     if ( !s_armed || steps == 0.0f )
         return false;
+    // KIWI (2026-09-17, user: "when using the set-height tool, alt-scroll should adjust the
+    // set-height.  alt-scroll in raise/dig mode should adjust strength"): Alt+wheel drives
+    // the value that matters most for the armed tool.
+    if ( alt && s_tool != KTER_GRASS )
+    {
+        if ( s_tool == KTER_SETHEIGHT )
+        {
+            const float step = shift ? 1.0f : 8.0f;
+            s_targetZ = ClampF( s_targetZ + ( steps > 0.0f ? step : -step ), -65536.0f, 65536.0f );
+            char h[48];
+            KiwiUnits_Format( h, sizeof( h ), s_targetZ );
+            SetStatus( "Armed. Target height %s (Alt+wheel; Shift for 1-unit steps).", h );
+        }
+        else
+        {
+            s_strength = ClampF( s_strength + ( steps > 0.0f ? 0.1f : -0.1f ), 0.01f, 2.0f );
+            SetStatus( "Armed. Strength %.2f (Alt+wheel).", s_strength );
+        }
+        Save();
+        g_nUpdateBits |= W_CAMERA;
+        return true;
+    }
     if ( ctrl )
     {
         RadiusStep( steps > 0.0f ? 1.25f : 0.8f );
@@ -4530,6 +6652,34 @@ void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float im
                                IM_COL32( 255, 255, 255, 240 ) );
         dl->AddLine( ImVec2( x0, y ), ImVec2( x1, y ), IM_COL32( 255, 255, 255, 200 ), 1.0f );
     }
+
+    // KIWI (2026-09-17, user: "add a 2nd line for the set height target height on this
+    // graph"): the Set height target as a magenta line with its marker on the bar's RIGHT
+    // (the cursor's white one sits on the left) and the value beside the legend, so the
+    // two read apart and Alt+wheel has something to watch.  A target outside the colour
+    // range pins to that end of the bar and says which way it lies.
+    if ( s_armed && s_tool == KTER_SETHEIGHT )
+    {
+        const float span = s_heatMaxZ - s_heatMinZ;
+        const float raw  = span > 0.0f ? ( s_targetZ - s_heatMinZ ) / span : 0.5f;
+        const float t    = ClampF( raw, 0.0f, 1.0f );
+        const float y    = y1 - barH * t;
+        const ImU32 col  = IM_COL32( 255, 80, 235, 255 );
+        dl->AddLine( ImVec2( x0 - 1.0f, y ), ImVec2( x1 + 1.0f, y ), col, 2.0f );
+        dl->AddTriangleFilled( ImVec2( x1 + 8.0f, y - 4.0f ), ImVec2( x1 + 8.0f, y + 4.0f ), ImVec2( x1 + 2.0f, y ), col );
+
+        char value[64], text[96];
+        KiwiUnits_Format( value, sizeof( value ), s_targetZ );
+        _snprintf( text, sizeof( text ), "target %s%s", value, raw > 1.0f ? " (above)" : ( raw < 0.0f ? " (below)" : "" ) );
+        text[sizeof( text ) - 1] = '\0';
+        const ImVec2 ts = ImGui::CalcTextSize( text );
+        const float tx = x0 - 6.0f + boxW + 4.0f;
+        float ty = y - lineH * 0.5f;
+        if ( ty < y0 - lineH ) ty = y0 - lineH;
+        dl->AddRectFilled( ImVec2( tx - 3.0f, ty - 1.0f ), ImVec2( tx + ts.x + 3.0f, ty + ts.y + 1.0f ),
+                           IM_COL32( 18, 18, 22, 190 ), 3.0f );
+        dl->AddText( ImVec2( tx, ty ), col, text );
+    }
 }
 
 // ── J: join selected terrain sheets ──────────────────────────────────────────
@@ -4635,9 +6785,16 @@ bool KiwiTerrain_TestSet( const char *key, float value )
     else if ( !_stricmp( key, "surfaces" ) )    s_createOnSurfaces = value != 0.0f;
     else if ( !_stricmp( key, "targetz" ) )     s_targetZ = value;
     else if ( !_stricmp( key, "unselected" ) )  s_affectUnselected = value != 0.0f;
+    else if ( !_stricmp( key, "carry" ) )       s_carryObjects = value != 0.0f;
+    else if ( !_stricmp( key, "feather" ) )     s_setHeightFeather = value != 0.0f;
+    else if ( !_stricmp( key, "contain" ) )     s_setHeightContain = value != 0.0f;
+    else if ( !_stricmp( key, "refine" ) )      s_autoRefine = value != 0.0f;
+    else if ( !_stricmp( key, "layerequal" ) )  { s_layerDepthEqual = value != 0.0f; RestripTwins(); }
+    else if ( !_stricmp( key, "refinemin" ) )   s_refineMin = value;
     else if ( !_stricmp( key, "hidewire" ) )    s_hideWire = value != 0.0f;
     else if ( !_stricmp( key, "wirereach" ) )   s_wireReach = value;
     else if ( !_stricmp( key, "heatmap" ) )     { s_heatmap = value != 0.0f; HeatmapRefresh(); }
+    else if ( !_stricmp( key, "heatalways" ) )  { s_heatAlways = value != 0.0f; HeatmapRefresh(); }
     else if ( !_stricmp( key, "paintbrushes" ) ) s_paintBrushes = value != 0.0f;
     else if ( !_stricmp( key, "flattol" ) )     s_flatTol = value;
     else if ( !_stricmp( key, "flatthick" ) )   s_flatThick = value;
@@ -4649,6 +6806,47 @@ bool KiwiTerrain_TestSet( const char *key, float value )
     RebuildRing();
     g_nUpdateBits |= W_CAMERA;
     return true;
+}
+
+// Tessellate / Split the selection exactly as the panel buttons do (test DSL).
+static int CountPatches()
+{
+    int n = 0;
+    for ( int pass = 0; pass < 2; ++pass )
+    {
+        selbrush_t *head = pass == 0 ? &selected_brushes : &active_brushes;
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            if ( b->patch )
+                ++n;
+    }
+    return n;
+}
+
+bool KiwiTerrain_TestTessellate( float cell )
+{
+    Load();
+    if ( cell > 0.0f )
+        s_tessCell = ClampF( cell, 4.0f, 4096.0f );
+    const int before = CountPatches();
+    TessellateSelected();
+    return CountPatches() != before;
+}
+
+// The panel's "Select terrain stacked on other terrain"; returns how many were selected.
+int KiwiTerrain_TestSelectStacked()
+{
+    Load();
+    return SelectStackedTerrain();
+}
+
+bool KiwiTerrain_TestSplit( float chunk )
+{
+    Load();
+    if ( chunk > 0.0f )
+        s_chunkSize = chunk;
+    const int before = CountPatches();
+    SplitOversized();
+    return CountPatches() != before;
 }
 
 bool KiwiTerrain_TestSetPaintMaterial( const char *name )

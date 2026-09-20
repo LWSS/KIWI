@@ -13,6 +13,8 @@
 #include "kiwi_camera.h"
 #include "kiwi_pick.h"
 #include "kiwi_droptrace.h"          // KiwiDrop_Trace — the orbit pivot's any-surface fallback
+#include "kiwi_section.h"            // KiwiSection_Active: the sweep guard yields to a section cut
+#include "kiwi_construct.h"          // KiwiCon_PlaneIsExplicit: ...and to a chosen construction plane
 #include "radiant_registry.h"        // Radiant_Profile* (the fly-speed multiplier)
 #include "kiwi_vec.h"     // shared Dot3/Sub3/... helpers
 
@@ -69,6 +71,9 @@ namespace
     const float KCAM_DOLLY_STEP  = 0.95f;      // multiplicative per wheel step
     // One inch permits detail work; perspective surface anchoring prevents punch-through.
     const float KCAM_MIN_DIST    = 1.0f;
+    // KIWI (2026-09-16): how short of the first solid the sweep guard parks the eye.
+    // Larger than KCAM_MIN_DIST so the near plane never slices the surface it stopped at.
+    const float KCAM_SWEEP_MARGIN = 2.0f;
 
     // Equal and opposite wheel deltas must use reciprocal factors.  Computing the
     // zoom-out arm as the reciprocal of the same positive-magnitude powf keeps the
@@ -643,22 +648,29 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
 
     // Anchor at the cursor-ray hit, or d0 down that ray on a miss; retain no stale
     // value from a previous notch.
+    // KIWI (2026-09-16, user: "the zoom just flies past the terrain ... make it so the
+    // zoom doesn't clip through objects unless a custom construction face or section
+    // view is set"): the anchor comes from Pick_TraceSolid - brushes, patches AND every
+    // model by its mesh, whatever the "selectable models" preference says.  Pick() used
+    // to skip props under that preference, so the wheel anchored on the terrain BEHIND
+    // the prop (or, on a sky miss, on the standoff distance) and the eye sailed straight
+    // through it.
     float toAnchor[3] = { dir[0] * d0, dir[1] * d0, dir[2] * d0 };
     float surface = d0;
     bool haveHit = false;
     if ( haveRay )
     {
-        const pick_result_t r = Pick( ray, SEL_MASK_OBJECT | SEL_MASK_FACE );
-        if ( r.valid )
+        float hitDist = 0.0f;
+        if ( Pick_TraceSolid( ray.origin, ray.dir, &hitDist ) && hitDist > 0.0f )
         {
-            const float rel[3] = { r.point[0] - c->origin[0],
-                                   r.point[1] - c->origin[1],
-                                   r.point[2] - c->origin[2] };
-            const float hitDist = sqrtf( Dot3( rel, rel ) );
-            if ( hitDist > 0.0f )                       // also rejects NaN
+            const float rel[3] = { ray.origin[0] + ray.dir[0] * hitDist - c->origin[0],
+                                   ray.origin[1] + ray.dir[1] * hitDist - c->origin[1],
+                                   ray.origin[2] + ray.dir[2] * hitDist - c->origin[2] };
+            const float relDist = sqrtf( Dot3( rel, rel ) );
+            if ( relDist > 0.0f )                       // also rejects NaN
             {
                 Copy3( rel, toAnchor );
-                surface = hitDist;
+                surface = relDist;
                 haveHit = true;
             }
         }
@@ -680,7 +692,50 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
 
     // The eye leash is the final effective-factor clamp.
     kEff   = ScaleFactorInsideWorld( c, toAnchor, kEff );
-    newDist = d0 * kEff;
+
+    // KIWI (2026-09-16): the SWEEP guard.  The anchor clamp above only protects the
+    // surface under the cursor; a notch whose anchor is far away (a sky miss, terrain
+    // seen past a prop's edge, a shallow angle) still moved the eye by thousands of
+    // units and through whatever stood in between.  Trace the eye's own travel and
+    // stop it KCAM_SWEEP_MARGIN short of the first solid, both in and out.  Skipped
+    // while a section cut is on (geometry above the cut is culled, so the eye must
+    // pass it) or a construction plane was set on purpose (the operator is working
+    // inside/through geometry and asked for free clipping).
+    if ( kEff != 1.0f && !KiwiSection_Active() && !KiwiCon_PlaneIsExplicit() )
+    {
+        const float anchorLen = sqrtf( Dot3( toAnchor, toAnchor ) );
+        float travel[3];
+        for ( int i = 0; i < 3; ++i )
+            travel[i] = toAnchor[i] * ( 1.0f - kEff );
+        const float travelLen = sqrtf( Dot3( travel, travel ) );
+        if ( travelLen > 0.0f && anchorLen > 0.0f )
+        {
+            const float tdir[3] = { travel[0] / travelLen, travel[1] / travelLen,
+                                    travel[2] / travelLen };
+            float solid = 0.0f;
+            if ( Pick_TraceSolid( c->origin, tdir, &solid )
+              && solid < travelLen + KCAM_SWEEP_MARGIN )
+            {
+                const float allowed = solid - KCAM_SWEEP_MARGIN;
+                if ( !( allowed > 0.0f ) )
+                    return;                     // already against it: hard stop
+                // Same scale-about-anchor identity, shortened to the allowed travel.
+                kEff = ( kEff < 1.0f ) ? ( 1.0f - allowed / anchorLen )
+                                       : ( 1.0f + allowed / anchorLen );
+            }
+        }
+    }
+
+    // KIWI (2026-09-16, user: "you broke the right click pan camera sensitivity. It's now
+    // insanely low"): the pan scale is world-per-pixel at the pivot, and the pivot sits
+    // s_dist down the view axis after a notch.  Scaling s_dist by kEff keeps the ratio
+    // pivot/anchor - fine while the eye sailed through props, but now that a notch
+    // really parks the eye a unit from what is under the cursor, a pivot that started
+    // nearer than the anchor (default 96 vs terrain at 3000) collapsed to 1 unit and pan
+    // stopped moving.  A notch that hit something makes THAT its depth: s_dist becomes
+    // the remaining distance to the hit, so pan and the next orbit work at the depth of
+    // the thing you zoomed onto (Plasticity's zoom-to-cursor).  A miss keeps the scale.
+    newDist = ( haveHit ? surface : d0 ) * kEff;
     if ( newDist < KCAM_MIN_DIST ) newDist = KCAM_MIN_DIST;
     if ( newDist > maxDist )       newDist = maxDist;
 

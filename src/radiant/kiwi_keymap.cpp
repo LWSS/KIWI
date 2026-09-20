@@ -174,6 +174,11 @@ namespace
 
         Bind( table, count, 32961, 0x44, 3 );   // RotateZ -> Shift+Alt+D (frees Shift+D)
         Bind( table, count, KIWI_CMD_DUPLICATE, 0x44, 1 );         // Shift+D
+        // Ctrl+Shift+V is the classic ToggleView chord (mainfrm.cpp command table, 33071 -
+        // show / hide the 2D view).  The first version of this line missed that and bound a
+        // second command to the same chord; the occupant moves first, like every other claim.
+        Bind( table, count, 33071, 0x56, 6 );   // ToggleView -> Ctrl+Alt+V (frees Ctrl+Shift+V)
+        Bind( table, count, KIWI_CMD_PASTE_IN_PLACE, 0x56, 5 );    // Ctrl+Shift+V
 
         // The ported key-name table lacks 0xBF, so radiant.ini cannot name this chord.
         Bind( table, count, KIWI_CMD_FOCUS_SELECTION, 0xBF, 0 );   // /

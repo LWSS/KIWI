@@ -91,3 +91,8 @@ void KiwiGrid_SetSnapEnabled( bool on );
 // lines fade; axes remain.
 bool KiwiGrid_PerspGrid();
 void KiwiGrid_SetPerspGrid( bool on );
+
+// The same switch for ORTHO: default on, persisted ([KiwiUX] OrthoGrid).  The view cube's
+// lattice button drives whichever of the two belongs to the current projection.
+bool KiwiGrid_OrthoGrid();
+void KiwiGrid_SetOrthoGrid( bool on );

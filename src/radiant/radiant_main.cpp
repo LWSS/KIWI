@@ -672,6 +672,12 @@ static bool Radiant_BootFrame( HWND frame )
         KiwiWindows_BuildViewMenu( s_hMenu );
         // KIWI: append before the launcher below performs the final DrawMenuBar.
         KiwiPlastBridge_BuildMenu( s_hMenu );
+        // KIWI (2026-09-16): barbwire along construction, same Selection popup.
+        extern void KiwiBarbwire_BuildMenu( void *frameMenu );
+        KiwiBarbwire_BuildMenu( s_hMenu );
+        // KIWI (2026-09-18): Edit > Paste Group In Place (Ctrl+Shift+V).
+        extern void KiwiPastePlace_BuildMenu( void *frameMenu );
+        KiwiPastePlace_BuildMenu( s_hMenu );
         // KIWI: native prefab insertion shares the model placement/undo pipeline.
         extern void KiwiModelBrowser_BuildFileMenu( void *frameMenu );
         KiwiModelBrowser_BuildFileMenu( s_hMenu );
@@ -716,21 +722,32 @@ static bool Radiant_BootFrame( HWND frame )
     // 6a-pre) Seed the per-edit-layer current texdefs (Load_Textures head 0x45d140).
     Radiant_SeedCurrentTexdefs();                              // mainfrm.cpp:1595
 
+    // KIWI (2026-09-19, user: "the startup is taking 20 seconds and there's no tracy zones"):
+    // each heavy boot step gets a zone, so the next slow start names its own culprit.
     // 6a-bis) Bulk-load every material in the searchpaths into the browser.
-    Load_Materials();                                          // mainfrm.cpp:1600
+    Load_Materials();                                          // mainfrm.cpp:1600  (zone inside)
 
     // 6a-ter) Scan the entity def folders into the eclass list (QE_LoadProject tail).
-    Radiant_LoadEclassDefs();                                  // mainfrm.cpp:1603
+    {
+        PROF_SCOPED( "boot: eclass defs" );
+        Radiant_LoadEclassDefs();                              // mainfrm.cpp:1603
+    }
 
     // 6b) Load the visibility filters (RadiantFilters.txt), then refresh the Filters pane
     //     (a no-op in this shell — the ImGui panel re-gathers itself).
-    Load_RadiantFilters();                                     // mainfrm.cpp:1611
-    Radiant_RefreshFilterPane();
+    {
+        PROF_SCOPED( "boot: filters" );
+        Load_RadiantFilters();                                 // mainfrm.cpp:1611
+        Radiant_RefreshFilterPane();
+    }
 
     // Optional cmdline map (File→Open replaces this for interactive use) — mainfrm.cpp:1615.
     const char *mapPath = ( __argc > 1 ) ? __argv[1] : nullptr;
     if ( Radiant_PathLooksLikeMap( mapPath ) )
+    {
+        PROF_SCOPED( "boot: open map" );
         Radiant_OpenMap( mapPath );
+    }
 
     // No map loaded → Map_NewMap left world_entity NULL and the first drag-created brush
     // would NULL-deref Entity_LinkBrush( world_entity->def ).  The binary ends startup with a
@@ -1107,9 +1124,40 @@ static int Radiant_RunMessageLoop()
 // ═════════════════════════════════════════════════════════════════════════════
 //  WinMain — CRadiantApp::InitInstance (radiantapp.cpp:49) + CWinApp::Run.
 // ═════════════════════════════════════════════════════════════════════════════
+// KIWI (2026-09-17, user: "imagine losing all your progress to this"): the rescue save
+// (map.cpp Kiwi_RescueSave, fronted by engine_stubs.cpp Kiwi_FatalRescue) only ran for
+// engine Com_Errors and device loss - a raw access violation in any DLL skipped it and the
+// session was simply gone.  This last-chance filter runs it for EVERY unhandled exception:
+// `<map>_rescue.map` is written beside the map (the real file is never touched) and a box
+// names it, then the exception continues to Windows as before.  Both layers under it are
+// one-shot and SEH-wrapped, so a torn map cannot turn the rescue into a second crash.
+// Not installed in -kiwitest mode (its box would hang the harness), and a debugger
+// receives the exception before this filter does.
+extern void Kiwi_FatalRescue( const char *why );            // engine_stubs.cpp:275
+
+static LONG WINAPI Kiwi_UnhandledFilter( EXCEPTION_POINTERS *ep )
+{
+    char why[200];
+    const unsigned long code = ( ep && ep->ExceptionRecord ) ? ep->ExceptionRecord->ExceptionCode : 0ul;
+    const void *at = ( ep && ep->ExceptionRecord ) ? ep->ExceptionRecord->ExceptionAddress : nullptr;
+    _snprintf( why, sizeof( why ), "Unhandled exception 0x%08lX at address %p (a crash, not an engine error).",
+               code, at );
+    why[sizeof( why ) - 1] = '\0';
+    Kiwi_FatalRescue( why );
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
                       LPSTR /*lpCmdLine*/, int nCmdShow )
 {
+    {
+        bool testMode = false;
+        for ( int i = 1; i < __argc; ++i )
+            if ( _stricmp( __argv[i], "-kiwitest" ) == 0 )
+                testMode = true;
+        if ( !testMode )
+            ::SetUnhandledExceptionFilter( Kiwi_UnhandledFilter );
+    }
     // radiantapp.cpp:53 — gate P2 smoke test: verify the engine subset links and basic
     // printing works before any real init.  Com_Printf is safe pre-init.
     Com_Printf( 0, "[Radiant] Gate P2 smoke: engine subset initialized, WinMain reached\n" );

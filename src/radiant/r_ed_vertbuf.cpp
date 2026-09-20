@@ -26,6 +26,7 @@
 #include <gfx_d3d/r_init.h>        // dx, R_ErrorDescription
 #include <gfx_d3d/r_gfx.h>        // GfxWorldVertex, GfxColor, PackedUnitVec
 #include <qcommon/com_pack.h>     // Vec3PackUnitVec
+#include "kiwi_pack.h"            // KiwiPack_UnitVec: the editor's fast encoder
 // The camera surf cache holds editorMesh_s records whose `handle` IS a slot in this
 // pool, so every function here that reassigns or destroys a slot must invalidate it.
 #include "kiwi_surfcache.h"       // KiwiSurfCache_Invalidate / KiwiEdScene_ReleaseMeshRunIB
@@ -387,8 +388,12 @@ static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, i
         o->texCoord[1] = texCoord[2 * i + 1];
         // 0x51cd50 never writes lmapCoord (@+0x1C/0x20): the loop stores only offsets
         // 0/4/8/0xC/0x10/0x14/0x18/0x24/0x28.
-        o->normal  = Vec3PackUnitVec(n);
-        o->tangent = Vec3PackUnitVec(t);
+        // KIWI (2026-09-17): the shipped Vec3PackUnitVec tries all 256 scales with a
+        // normalise each - profiled at ~100 % of every patch / face re-upload (a terrain
+        // dig on a painted map hitched for seconds, once per material run).  Same wire
+        // format, finest-fitting scales only, memoised: kiwi_pack.cpp.
+        o->normal  = KiwiPack_UnitVec(n);
+        o->tangent = KiwiPack_UnitVec(t);
     }
 
     hr = vb->Unlock();

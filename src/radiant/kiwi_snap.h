@@ -185,3 +185,9 @@ void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
 // Marker/label visibility setting; it does not change snapping behavior.
 bool KiwiSnap_ShowMarkers();
 void KiwiSnap_SetShowMarkers( bool on );
+
+// KIWI (2026-09-16): unit direction of the MOST RECENT KiwiSnap_Query's edge / axis /
+// construction-segment answer (the same vector its along-line marker tick uses). False
+// when the last snap named no line (a vertex, face, grid, or nothing). One query per
+// MouseMove, so this belongs to the snap just handed to the caller.
+bool KiwiSnap_LastEdgeDir( float out[3] );

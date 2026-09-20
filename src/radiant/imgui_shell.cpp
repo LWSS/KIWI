@@ -1836,6 +1836,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         extern void KiwiPlastBridge_Draw();     // kiwi_plastbridge.cpp
         KiwiPlastBridge_Draw();
     }
+    { // KIWI (2026-09-16): the "Barbwire Along Construction..." options dialog - same shape.
+        extern void KiwiBarbwire_Draw();        // kiwi_barbwire.cpp
+        KiwiBarbwire_Draw();
+    }
     // KIWI-UX (ROUND BF): the BUILD & RUN dialog.  Also not a dock window — a FLOATING
     // window with its own file-scope open flag, so this round adds no kiwiWindow_t row and
     // does NOT bump KIWI_LAYOUT_VERSION either.  It is called UNCONDITIONALLY and POLLS ITS

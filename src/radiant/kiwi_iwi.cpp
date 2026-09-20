@@ -36,6 +36,60 @@ void SetErr( char *err, size_t errSz, const char *fmt, ... )
     err[errSz - 1] = '\0';
 }
 
+// KIWI (2026-09-17, user: "crash when pasting in that image. This is really bad, imagine
+// losing all your progress to this"): D3DX9_43 access-violated twelve frames deep inside
+// D3DXCreateTextureFromFileEx on a 4096x4096 picture.  That DLL is closed, unmaintained and
+// is handed files the operator found anywhere, so NO call into it may be able to take the
+// editor down: every entry goes through one of these SEH shims and a fault becomes an
+// ordinary "conversion failed" result.  (Separate functions because MSVC forbids __try in
+// a frame that owns C++ objects.)  `*crashed` tells the caller to say so.
+HRESULT GuardedImageInfo( const char *path, D3DXIMAGE_INFO *info, bool *crashed )
+{
+    *crashed = false;
+    __try
+    {
+        return ::D3DXGetImageInfoFromFileA( path, info );
+    }
+    __except ( EXCEPTION_EXECUTE_HANDLER )
+    {
+        *crashed = true;
+        return E_FAIL;
+    }
+}
+
+HRESULT GuardedCreateTexture( const char *path, UINT w, UINT h, UINT mips, D3DFORMAT fmt,
+                              D3DPOOL pool, DWORD filter, DWORD mipFilter,
+                              IDirect3DTexture9 **out, bool *crashed )
+{
+    *crashed = false;
+    *out = nullptr;
+    __try
+    {
+        return ::D3DXCreateTextureFromFileExA( dx.device, path, w, h, mips, 0, fmt, pool,
+                                               filter, mipFilter, 0, nullptr, nullptr, out );
+    }
+    __except ( EXCEPTION_EXECUTE_HANDLER )
+    {
+        *crashed = true;
+        *out = nullptr;                     // whatever D3DX half-built is abandoned, not released
+        return E_FAIL;
+    }
+}
+
+HRESULT GuardedLoadSurface( IDirect3DSurface9 *dst, IDirect3DSurface9 *src, DWORD filter, bool *crashed )
+{
+    *crashed = false;
+    __try
+    {
+        return ::D3DXLoadSurfaceFromSurface( dst, nullptr, nullptr, src, nullptr, nullptr, filter, 0 );
+    }
+    __except ( EXCEPTION_EXECUTE_HANDLER )
+    {
+        *crashed = true;
+        return E_FAIL;
+    }
+}
+
 bool IsPow2( int v ) { return v > 0 && ( v & ( v - 1 ) ) == 0; }
 
 int NextPow2( int v )
@@ -179,7 +233,13 @@ bool KiwiIwi_Probe( const char *srcPath, kiwiIwiSource_t *out, char *err, size_t
 
     D3DXIMAGE_INFO info;
     memset( &info, 0, sizeof( info ) );
-    const HRESULT hr = ::D3DXGetImageInfoFromFileA( srcPath, &info );
+    bool crashed = false;
+    const HRESULT hr = GuardedImageInfo( srcPath, &info, &crashed );
+    if ( crashed )
+    {
+        SetErr( err, errSz, "D3DX crashed reading the image header (caught; the file is malformed or unsupported)" );
+        return false;
+    }
     if ( FAILED( hr ) )
     {
         SetErr( err, errSz, "not a readable image (D3DXGetImageInfoFromFile 0x%08X)", (unsigned)hr );
@@ -218,13 +278,16 @@ IDirect3DTexture9 *KiwiIwi_CreatePreview( const char *srcPath )
         return nullptr;
 
     IDirect3DTexture9 *tex = nullptr;
-    const HRESULT hr = ::D3DXCreateTextureFromFileExA(
-        dx.device, srcPath,
+    bool crashed = false;
+    const HRESULT hr = GuardedCreateTexture(
+        srcPath,
         D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,   // keep the true aspect in the preview
         1,                                            // one level
-        0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
+        D3DFMT_A8R8G8B8, D3DPOOL_MANAGED,
         D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER, D3DX_FILTER_NONE,
-        0, nullptr, nullptr, &tex );
+        &tex, &crashed );
+    if ( crashed )
+        Sys_Printf( "IWI preview: D3DX crashed decoding '%s' (caught); no preview.\n", srcPath );
     if ( FAILED( hr ) )
         return nullptr;
     return tex;
@@ -282,17 +345,32 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     // Normal maps build ARGB8 mips from source normals before slope encoding and conversion.
     // Dithering is disabled because it perturbs slopes.
     const bool  twoStage    = ( encoding == KIWI_IWI_ENC_NORMAL );
-    const DWORD resampleFlt = twoStage ? D3DX_FILTER_TRIANGLE
-                                       : ( D3DX_FILTER_TRIANGLE | D3DX_FILTER_DITHER );
+    // A source already at the target size needs no resample at all: D3DX_FILTER_NONE skips
+    // the triangle filter's full-image float buffers (a quarter gigabyte at 4096x4096),
+    // which is where the 2026-09-17 crash sat.  Only a real resize pays for TRIANGLE.
+    DWORD resampleFlt = resampled ? D3DX_FILTER_TRIANGLE : D3DX_FILTER_NONE;
+    if ( !twoStage && resampled )
+        resampleFlt |= D3DX_FILTER_DITHER;
 
     IDirect3DTexture9 *tex = nullptr;
-    HRESULT hr = ::D3DXCreateTextureFromFileExA(
-        dx.device, srcPath,
-        (UINT)width, (UINT)height, (UINT)mipCount,
-        0, twoStage ? D3DFMT_A8R8G8B8 : D3DFormatFor( format ), D3DPOOL_SYSTEMMEM,
-        resampleFlt,                                 // resample filter
-        D3DX_FILTER_BOX,                             // mip filter
-        0, nullptr, nullptr, &tex );
+    bool crashed = false;
+    const D3DFORMAT loadFmt = twoStage ? D3DFMT_A8R8G8B8 : D3DFormatFor( format );
+    HRESULT hr = GuardedCreateTexture( srcPath, (UINT)width, (UINT)height, (UINT)mipCount, loadFmt,
+                                       D3DPOOL_SYSTEMMEM, resampleFlt, D3DX_FILTER_BOX, &tex, &crashed );
+    if ( crashed )
+    {
+        // One gentler retry: the cheapest filters D3DX has, no dithering.
+        Sys_Printf( "IWI writer: D3DX crashed decoding '%s' (caught); retrying with plain filters.\n", srcPath );
+        hr = GuardedCreateTexture( srcPath, (UINT)width, (UINT)height, (UINT)mipCount, loadFmt,
+                                   D3DPOOL_SYSTEMMEM, resampled ? D3DX_FILTER_LINEAR : D3DX_FILTER_NONE,
+                                   D3DX_FILTER_BOX, &tex, &crashed );
+        if ( crashed )
+        {
+            SetErr( err, errSz, "D3DX crashed decoding the image twice (caught; the editor is unharmed). "
+                                "Re-save it smaller or as a different format" );
+            return false;
+        }
+    }
     if ( FAILED( hr ) || !tex )
     {
         SetErr( err, errSz, "decode failed (D3DXCreateTextureFromFileEx 0x%08X)", (unsigned)hr );
@@ -334,13 +412,13 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
             {
                 IDirect3DSurface9 *sSrc = nullptr;
                 IDirect3DSurface9 *sDst = nullptr;
+                bool surfCrashed = false;
                 if ( FAILED( tex->GetSurfaceLevel( (UINT)L, &sSrc ) )
                      || FAILED( packed->GetSurfaceLevel( (UINT)L, &sDst ) )
-                     || FAILED( ::D3DXLoadSurfaceFromSurface( sDst, nullptr, nullptr,
-                                                              sSrc, nullptr, nullptr,
-                                                              D3DX_FILTER_NONE, 0 ) ) )
+                     || FAILED( GuardedLoadSurface( sDst, sSrc, D3DX_FILTER_NONE, &surfCrashed ) ) )
                 {
-                    SetErr( err, errSz, "normal-map compression failed on mip level %d", L );
+                    SetErr( err, errSz, "normal-map compression %s on mip level %d",
+                            surfCrashed ? "crashed inside D3DX (caught)" : "failed", L );
                     convOk = false;
                 }
                 if ( sDst )

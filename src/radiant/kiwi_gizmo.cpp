@@ -13,6 +13,7 @@
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
 #include "kiwi_lollipop.h"
+#include "kiwi_droptrace.h"          // KiwiDrop_IsModelEntity: models-only scale gizmo
 #include "kiwi_pick.h"
 #include "kiwi_transform.h"
 #include "kiwi_ux.h"
@@ -24,6 +25,7 @@
 #include <string.h>
 
 extern camera_s *Ed_Camera();
+extern selbrush_t selected_brushes;     // map.cpp (models-only scale gizmo test)
 extern void      CamWnd_BuildMatrix();
 extern int       g_nUpdateBits;
 extern char      Byte4PackPixelColor( float *from, GfxColor *out );
@@ -129,6 +131,10 @@ namespace
     {
         linearKind_t kind;
         float anchor[3];
+        // KIWI (2026-09-16): the move gizmo's orientation (rows = world basis vectors).
+        // Identity for scale and for an unframed move; a snapped edge/face rotates it so
+        // dragging an axis moves exactly along the edge.
+        float basis[3][3];
         float wpp;
         float axisLen;
         float headLen;
@@ -138,12 +144,22 @@ namespace
         float centreRad;
         bool  hasNormal;
         float normal[3];
+        // KIWI (2026-09-16, user: "the scale gizmo on models shouldn't have any of the
+        // x/y/z, it looks like it only supports uniform scaling ... maybe just a diagonal
+        // lollipop"): a models-only selection scales through `modelscale`, which is
+        // uniform, so the axis boxes and plane squares were handles that did nothing.
+        // Then the gizmo is one stick up-right on screen with the uniform ball at `stick`.
+        bool  uniformOnly;
+        float stick[3];
     };
 
     struct ringGeo_t
     {
         float pivot[3];
         float radius;
+        // Rows = the X / Y / Z ring axes: world, or the aligned rotate's frame
+        // (KiwiXform_ActiveRotateFrame - the face / model the pivot was placed on).
+        float basis[3][3];
     };
 
     float Length3( const float *v )
@@ -179,26 +195,57 @@ namespace
         return cmd && cmd->Name() && strcmp( cmd->Name(), "Scale" ) == 0;
     }
 
+    // Drawable state. Pivot placement is intentionally NOT excluded here: the move
+    // gizmo is drawn (and rotates to the snapped edge) while V is live. Interaction
+    // gates on GizmoInteractive() instead.
     bool GizmoUsable()
     {
         if ( !KiwiUX_ModernInput() || !KiwiGizmo_Show() )
             return false;
-        if ( KiwiXform_PivotPlacing() || KiwiLollipop_Active() )
+        if ( KiwiLollipop_Active() )
             return false;
         const camera_s *c = Ed_Camera();
         return c->width >= 1 && c->height >= 1;
+    }
+
+    // Hover / grab are suppressed during pivot placement so a click PLACES the pivot
+    // (PressIntercept) instead of grabbing an arrow.
+    bool GizmoInteractive()
+    {
+        return GizmoUsable() && !KiwiXform_PivotPlacing();
+    }
+
+    // Every selected object is an xmodel entity: Scale can only write `modelscale`.
+    bool SelectionIsModelsOnly()
+    {
+        int n = 0;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !KiwiDrop_IsModelEntity( b ) )
+                return false;
+            ++n;
+        }
+        return n > 0;
     }
 
     bool BuildLinear( gizmoGeo_t *g )
     {
         if ( !g || !GizmoUsable() )
             return false;
+        g->uniformOnly = false;
+        g->stick[0] = g->stick[1] = g->stick[2] = 0.0f;
+
+        // Default orientation is world-aligned; a framed move overrides it below.
+        for ( int r = 0; r < 3; ++r )
+            for ( int c = 0; c < 3; ++c )
+                g->basis[r][c] = ( r == c ) ? 1.0f : 0.0f;
 
         if ( KiwiXform_IsMoveActive() )
         {
             g->kind = KGZ_MOVE;
-            if ( !KiwiXform_ActivePivot( g->anchor ) )
+            if ( !KiwiXform_GizmoAnchor( g->anchor ) )
                 return false;
+            KiwiXform_ActiveFrame( g->basis );   // leaves identity when unframed
         }
         else if ( ScaleActive() )
         {
@@ -220,6 +267,17 @@ namespace
         g->planeRad  = KGZ_PLANE_RAD_PIX * g->wpp;
         g->centreRad = ( g->kind == KGZ_SCALE ? KGZ_SCALE_BALL_PIX : KGZ_CENTER_PIX ) * g->wpp;
         g->hasNormal = g->kind == KGZ_MOVE && KiwiXform_ActivePushDir( g->normal );
+        if ( g->kind == KGZ_SCALE && SelectionIsModelsOnly() )
+        {
+            // Screen diagonal (up-right), so the stick never foreshortens to a dot.
+            const camera_s *c = Ed_Camera();
+            float dir[3] = { c->vright[0] + c->vup[0], c->vright[1] + c->vup[1], c->vright[2] + c->vup[2] };
+            if ( Normalize3( dir ) )
+            {
+                g->uniformOnly = true;
+                Mad3( g->anchor, dir, g->axisLen, g->stick );
+            }
+        }
         return g->wpp > 0.0f;
     }
 
@@ -227,16 +285,28 @@ namespace
     {
         if ( !g || !GizmoUsable() || !KiwiXform_IsRotateActive() )
             return false;
+        if ( KiwiXform_PivotPlacing() )      // rotate ring stays hidden while placing V
+            return false;
         if ( !KiwiXform_ActivePivot( g->pivot ) )
             return false;
+        for ( int r = 0; r < 3; ++r )
+            for ( int c = 0; c < 3; ++c )
+                g->basis[r][c] = ( r == c ) ? 1.0f : 0.0f;
+        KiwiXform_ActiveRotateFrame( g->basis );          // leaves identity when unframed
         g->radius = KGZ_RING_PIX * KiwiCam_WorldPerPixel( g->pivot );
         return g->radius > 0.0f;
     }
 
+    // Orientation-aware axis direction (world axis unless the move gizmo is framed).
+    void GizmoAxis( const gizmoGeo_t &g, int axis, float *out )
+    {
+        Copy3( g.basis[axis], out );
+    }
+
     void AxisTip( const gizmoGeo_t &g, int axis, float *out )
     {
-        Copy3( g.anchor, out );
-        out[axis] += g.axisLen;
+        for ( int k = 0; k < 3; ++k )
+            out[k] = g.anchor[k] + g.basis[axis][k] * g.axisLen;
     }
 
     void NormalTip( const gizmoGeo_t &g, float *out )
@@ -252,9 +322,10 @@ namespace
         const float sj[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
         for ( int k = 0; k < 4; ++k )
         {
-            Copy3( g.anchor, q[k] );
-            q[k][i] += g.planeOff + si[k] * g.planeRad;
-            q[k][j] += g.planeOff + sj[k] * g.planeRad;
+            const float oi = g.planeOff + si[k] * g.planeRad;
+            const float oj = g.planeOff + sj[k] * g.planeRad;
+            for ( int a = 0; a < 3; ++a )
+                q[k][a] = g.anchor[a] + oi * g.basis[i][a] + oj * g.basis[j][a];
         }
     }
 
@@ -262,9 +333,10 @@ namespace
     {
         const int i = ( axis + 1 ) % 3;
         const int j = ( axis + 2 ) % 3;
-        Copy3( g.pivot, out );
-        out[i] += cosf( angle ) * g.radius * radiusMul;
-        out[j] += sinf( angle ) * g.radius * radiusMul;
+        const float ci = cosf( angle ) * g.radius * radiusMul;
+        const float sj = sinf( angle ) * g.radius * radiusMul;
+        for ( int k = 0; k < 3; ++k )
+            out[k] = g.pivot[k] + g.basis[i][k] * ci + g.basis[j][k] * sj;
     }
 
     void RingPoint( const ringGeo_t &g, int axis, int k, float *out )
@@ -292,7 +364,7 @@ namespace
         if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
             return false;
         float normal[3];
-        AxisVector( axis, normal );
+        Copy3( g.basis[axis], normal );
         float hit[3];
         if ( !RayPlane( ray, g.pivot, normal, hit ) )
             return false;
@@ -300,9 +372,10 @@ namespace
         Sub3( hit, g.pivot, rel );
         const int i = ( axis + 1 ) % 3;
         const int j = ( axis + 2 ) % 3;
-        if ( fabsf( rel[i] ) < g.radius * 0.001f && fabsf( rel[j] ) < g.radius * 0.001f )
+        const float ri = Dot3( rel, g.basis[i] ), rj = Dot3( rel, g.basis[j] );
+        if ( fabsf( ri ) < g.radius * 0.001f && fabsf( rj ) < g.radius * 0.001f )
             return false;
-        *outDegrees = atan2f( rel[j], rel[i] ) * KGZ_DEGREES;
+        *outDegrees = atan2f( rj, ri ) * KGZ_DEGREES;
         return true;
     }
 
@@ -608,7 +681,7 @@ namespace
         const float *rgb = AxisRgb( axis );
         const float alpha = HandleAlpha( handle );
         float direction[3];
-        AxisVector( axis, direction );
+        GizmoAxis( g, axis, direction );
         float end[3];
         if ( g.kind == KGZ_MOVE )
             Mad3( g.anchor, direction, g.axisLen - g.headLen, end );
@@ -786,6 +859,19 @@ namespace
     {
         GizmoDepthClear();
 
+        if ( g.uniformOnly )
+        {
+            // The uniform lollipop: a stick from the pivot to the ball, nothing else.
+            float shaft[2][3];
+            Copy3( g.anchor, shaft[0] ); Copy3( g.stick, shaft[1] );
+            DrawRibbon( shaft, 2, HandleWidth( KGZ_CENTER ), false, c,
+                        CentreRgb(), HandleAlpha( KGZ_CENTER ) );
+            DrawSphere( g.anchor, g.centreRad * 0.35f, CentreRgb(), HandleAlpha( KGZ_CENTER ) );
+            DrawSphere( g.stick, g.centreRad, CentreRgb(), HandleAlpha( KGZ_CENTER ) );
+            MeshPassEnd();
+            return;
+        }
+
         float planeScore[3];
         for ( int n = 0; n < 3; ++n )
         {
@@ -883,6 +969,20 @@ namespace
         if ( !Pick_WorldToImage( g.anchor, &anchorX, &anchorY ) )
             return KGZ_NONE;
 
+        if ( g.uniformOnly )
+        {
+            // Ball first, then the stick beyond the pivot's own dead zone; both are the
+            // uniform handle.
+            float sx, sy;
+            if ( !Pick_WorldToImage( g.stick, &sx, &sy ) )
+                return KGZ_NONE;
+            if ( Distance2D( px, py, sx, sy ) <= KGZ_SCALE_BALL_PIX + KGZ_SOLID_PICK_PAD )
+                return KGZ_CENTER;
+            float t = 0.0f;
+            const float d = SegmentDistance2D( px, py, anchorX, anchorY, sx, sy, &t );
+            return ( t >= KGZ_AXIS_MIN_T && d <= KGZ_SHAFT_PICK_PIX ) ? KGZ_CENTER : KGZ_NONE;
+        }
+
         const float centrePick = g.kind == KGZ_SCALE
                                ? KGZ_SCALE_BALL_PIX + KGZ_SOLID_PICK_PAD
                                : KGZ_CENTER_PICK_PIX;
@@ -920,7 +1020,7 @@ namespace
 
         for ( int axis = 0; axis < 3; ++axis )
         {
-            float direction[3]; AxisVector( axis, direction );
+            float direction[3]; GizmoAxis( g, axis, direction );
             float tip[3]; AxisTip( g, axis, tip );
             const float solidBack = g.kind == KGZ_MOVE
                                   ? g.axisLen - g.headLen
@@ -1066,7 +1166,7 @@ void KiwiGizmo_Hover( int imgX, int imgY, bool over )
     s_hot = KGZ_NONE;
     s_ringHot = -1;
 
-    if ( over && s_grabbed == KGZ_NONE && s_ringGrab < 0 )
+    if ( over && s_grabbed == KGZ_NONE && s_ringGrab < 0 && GizmoInteractive() )
     {
         CamWnd_BuildMatrix();
         gizmoGeo_t linear;
@@ -1086,6 +1186,10 @@ void KiwiGizmo_Hover( int imgX, int imgY, bool over )
 bool KiwiGizmo_MouseDown( int imgX, int imgY )
 {
     if ( !KiwiCmd_Active() )
+        return false;
+    // While placing a pivot the click PLACES it (PressIntercept), so the gizmo, though
+    // drawn, must not grab an arrow.
+    if ( !GizmoInteractive() )
         return false;
     CamWnd_BuildMatrix();
 

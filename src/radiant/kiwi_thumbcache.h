@@ -68,6 +68,13 @@ bool KiwiThumbCache_ResolveModelFiles( const char *xmodelName,
                                        std::vector<std::string> *outLoose,
                                        std::vector<std::string> *outPacked );
 
+// KIWI (2026-09-16, user: "a small icon/banner ... if the model supports physics collision
+// (it can be shot around in the world like a tire/can)"): the physics preset named in the
+// xmodel header (`tire`, `empty_trashcan`, ...), "" when the model has none.  That field
+// is what makes a dyn_model a physics prop, so it is the honest test.  Reads the header
+// only - no model load.  False when xmodel/<name> is not on the search path.
+bool KiwiThumbCache_ModelPhysPreset( const char *xmodelName, std::string *outPreset );
+
 // Writers must invalidate after replacing xmodel/<name> or its parts/surfs;
 // otherwise the cached source hash is not recomputed until the next process start.
 void KiwiThumbCache_Invalidate( const char *xmodelName );

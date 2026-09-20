@@ -89,39 +89,38 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC
 
 # Compile flags — match the SP/MP builds (/MT static CRT, as the original binary used)
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /O2 /Ot /MP4 /W3 /Z7 /permissive-")
-set(CMAKE_CXX_FLAGS_DEBUG   "${CMAKE_CXX_FLAGS_DEBUG}   /MTd /Od /MP4 /W3 /Z7 /permissive-")
 
-# Debug builds compile the per-vertex / per-triangle render TUs at /O2.  cl.exe rejects
-# /RTC1 together with /O2 (D8016) and CMake cannot remove a flag per source, so /RTC1 is
-# stripped from this directory's Debug flags.  -DKIWI_RADIANT_DEBUG_FAST_HOT=OFF restores both.
-option(KIWI_RADIANT_DEBUG_FAST_HOT
-       "Radiant Debug: compile the proven-hot render TUs at /O2 (requires dropping /RTC1)" ON)
+# KIWI (2026-09-16, user: "radiant debug with optimizations, I don't want a Release
+# folder — 2 copies"): the WHOLE Radiant Debug build is compiled at /O2 so one Debug
+# output folder is fast enough to run and no parallel Release copy is needed.  cl.exe
+# rejects /RTC1 with /O2 (D8016), so the Debug runtime checks are dropped for this
+# directory (scripts/mp, scripts/dedi, scripts/cod4map are separate add_subdirectory
+# scopes and keep their own flags).  /Z7 keeps full symbols and NDEBUG stays undefined,
+# so iasserts and _DEBUG remain — the editor is still debuggable, just harder to step.
+# This mirrors the Release flags (line above), which already build the whole editor at
+# /O2 with /we4700, so no /O2-only warning turns into a new error.
+# Set KIWI_RADIANT_DEBUG_OPTIMIZED=OFF for a classic unoptimized, fully steppable /Od Debug.
+option(KIWI_RADIANT_DEBUG_OPTIMIZED
+       "Radiant Debug: compile the entire editor at /O2 (drops /RTC1)" ON)
 
-if(KIWI_RADIANT_DEBUG_FAST_HOT)
-    # Directory-scoped: scripts/mp, scripts/dedi and scripts/cod4map are separate
-    # add_subdirectory() scopes and keep their own flags untouched.
+if(KIWI_RADIANT_DEBUG_OPTIMIZED)
     string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7 /permissive-")
+    set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}   /MTd /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7")
+else()
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /Od /MP4 /W3 /Z7 /permissive-")
+endif()
 
-    # Leaf per-element loops only.  Editor LOGIC (brush.cpp, camwnd.cpp, entity.cpp,
-    # pmesh.cpp) stays at /Od so it remains steppable.
-    set(KIWI_RADIANT_DEBUG_HOT_SRCS
-        "${SRC_DIR}/radiant/r_ed_scene.cpp"
-        "${SRC_DIR}/radiant/kiwi_instcache.cpp"
-        "${SRC_DIR}/radiant/kiwi_modelcache.cpp"
-        "${SRC_DIR}/radiant/shadowvolume.cpp"
-        "${SRC_DIR}/radiant/kiwi_shadowcache.cpp"
-        "${SRC_DIR}/radiant/kiwi_lightcache.cpp"
-        "${SRC_DIR}/radiant/kiwi_walkcache.cpp"
-        "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
-        "${SRC_DIR}/gfx_d3d/rb_backend.cpp"
-        "${SRC_DIR}/gfx_d3d/r_xsurface.cpp"
-        "${SRC_DIR}/gfx_d3d/r_shade.cpp"
-        "${SRC_DIR}/universal/com_math.cpp"
-    )
-    # Per-source options are appended AFTER the configuration flags, so /O2 wins.
-    set_source_files_properties(${KIWI_RADIANT_DEBUG_HOT_SRCS} PROPERTIES
-        COMPILE_OPTIONS "$<$<CONFIG:Debug>:/O2;/Ob2;/Oi;/Ot>")
+# KIWI (2026-09-17): x64 only guarantees SSE2.  AVX2 lets the compiler vectorise the editor's
+# float loops (instance-cache transforms, terrain stamps, mesh staging) 8 wide, but an exe built
+# with it dies with an illegal-instruction fault on a CPU without AVX2 (anything before ~2013
+# Intel Haswell / 2015 AMD Excavator), so it is OFF unless you build for your own machine.
+# MSVC does not contract a*b+c into FMA under the default /fp:precise, so results stay bit-for-
+# bit the same as the SSE2 build - the ported math is not perturbed.
+option(KIWI_RADIANT_AVX2 "Radiant: compile with /arch:AVX2 (needs an AVX2 CPU to RUN)" OFF)
+if(KIWI_RADIANT_AVX2 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    target_compile_options(${PROJECT_NAME} PRIVATE /arch:AVX2)
 endif()
 
 # Warnings as Errors

@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <float.h>
+#include <map>
 #include <string>
 #include <vector>
 #include <string.h>
@@ -43,6 +44,7 @@ extern void        SetKeyValue( entity_s_def *e, const char *key, const char *va
 extern void        Undo_ClearRedo();
 extern void        Undo_GeneralStart( const char *operation );
 extern void        Undo_AddEntity_W( entity_s *e );                       // undo.cpp 0x45E990
+extern void        Undo_KiwiMarkCreated( brush_t *def );                  // undo.cpp (KIWI tail)
 extern void        Undo_End();
 extern void        MarkMapModified();
 extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
@@ -273,12 +275,50 @@ namespace
                          edge, 1.0f );
     }
 
+    // KIWI (2026-09-16, user: "a small icon/banner in top corner of the thumbnail if the
+    // model supports physics collision"): the header's physics preset, looked up lazily
+    // for tiles that are actually on screen and remembered for the session.  A few header
+    // reads per frame at most, so scrolling a 4,600-model list never hitches.
+    std::map<std::string, std::string> s_physPreset;      // name -> preset ("" = none)
+    int s_physFrame  = -1;
+    int s_physBudget = 0;
+    const int KMODEL_PHYS_PER_FRAME = 12;
+
+    // Null while unknown (not looked up yet); else the preset, "" when the model has none.
+    const std::string *PhysPreset( const std::string &name, bool mayLoad )
+    {
+        std::map<std::string, std::string>::iterator it = s_physPreset.find( name );
+        if ( it != s_physPreset.end() )
+            return &it->second;
+        if ( !mayLoad )
+            return nullptr;
+        const int frame = ImGui::GetFrameCount();
+        if ( frame != s_physFrame )
+        {
+            s_physFrame  = frame;
+            s_physBudget = KMODEL_PHYS_PER_FRAME;
+        }
+        if ( s_physBudget <= 0 )
+            return nullptr;
+        --s_physBudget;
+        std::string preset;
+        KiwiThumbCache_ModelPhysPreset( name.c_str(), &preset );
+        return &s_physPreset.insert( std::make_pair( name, preset ) ).first->second;
+    }
+
     void DrawTooltip( const modelRow_t &row, bool failed, bool ready )
     {
         if ( !ImGui::BeginTooltip() )
             return;
         ImGui::TextUnformatted( row.name.c_str() );
         ImGui::Separator();
+        {
+            const std::string *preset = PhysPreset( row.name, true );
+            if ( preset && !preset->empty() )
+                ImGui::TextColored( ImVec4( 1.0f, 0.72f, 0.25f, 1.0f ),
+                                    "PHYSICS prop (preset \"%s\") - place it as a dyn_model to be shot around",
+                                    preset->c_str() );
+        }
 
         float mins[3], maxs[3];
         if ( KiwiEntThumb_GetModelBounds( row.name.c_str(), mins, maxs ) )
@@ -590,6 +630,21 @@ namespace
             dl->AddText( ImVec2( p0.x + 3.0f, p0.y + 2.0f ),
                          ImGui::GetColorU32( ImGuiCol_TextDisabled ), "BAD" );
         }
+        else
+        {
+            // Physics badge, top-right corner.  Only visible tiles ask (and only a few per
+            // frame), so the badge fills in a beat after a tile scrolls into view.
+            const std::string *preset = PhysPreset( row.name, ImGui::IsRectVisible( p0, p1 ) );
+            if ( preset && !preset->empty() )
+            {
+                const char  *tag = "PHYS";
+                const ImVec2 ts  = ImGui::CalcTextSize( tag );
+                const ImVec2 b1( boxMax.x - 1.0f, p0.y + 1.0f + ts.y + 2.0f );
+                const ImVec2 b0( b1.x - ts.x - 6.0f, p0.y + 1.0f );
+                dl->AddRectFilled( b0, b1, IM_COL32( 235, 150, 30, 235 ), 3.0f );
+                dl->AddText( ImVec2( b0.x + 3.0f, b0.y + 1.0f ), IM_COL32( 20, 14, 4, 255 ), tag );
+            }
+        }
 
         dl->PushClipRect( ImVec2( p0.x, boxMax.y ), p1, true );
         const ImGuiCol nameStyle = failed || !hovered
@@ -661,6 +716,13 @@ namespace
         Brush_Create( mins, maxs, def, nullptr );
         Brush_BuildWindings( def, 1 );
         KiwiExtrude_LandDef( def );
+        // KIWI (2026-09-16, user: "undo'ing ... placing a model leaves behind square
+        // brushes"): the placeholder is born INSIDE the open record, but CreateEntityFromName
+        // opens with Undo_AddBrushList(selected) which cloned it as if it had existed before
+        // - and Undo_Undo restored that clone after freeing the entity.  Stamping it as
+        // created makes Undo_AddBrush skip it (no clone); Entity_Create's tail deletes the
+        // placeholder itself, so nothing is left for either phase.
+        Undo_KiwiMarkCreated( def );
         return true;
     }
 

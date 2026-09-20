@@ -78,6 +78,7 @@ typedef struct DXGI_JPEG_QUANTIZATION_TABLE
 #include <limits.h>
 #include <map>
 #include <math.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -225,6 +226,13 @@ namespace
     bool WicMemoryToPng( BYTE *data, DWORD size, const char *outPath, int *pixW, int *pixH );
     bool DibToBgra( const BYTE *dib, SIZE_T bytes, std::vector<BYTE> *out, int *outW, int *outH );
     bool BgraToPng( const std::vector<BYTE> &pixels, int w, int h, const char *outPath );
+
+    // KIWI (2026-09-17, user: "add reject reasons to the reference image error logger"):
+    // every refusal on the paste / drop / import path records WHY, and the one-line
+    // failure message prints the collected reasons instead of a bare "failed".
+    void RejectClear();
+    void Reject( const char *fmt, ... );
+    const char *RejectText();                   // "" when nothing was recorded
 }
 
 int KiwiRefImage_Count() { return (int)s_images.size(); }
@@ -1064,8 +1072,15 @@ bool KiwiRefImage_HandleDropFiles( void *dropHandle, int screenX, int screenY )
     ::DragFinish( drop );
     BeginEdit( paths.size() == 1 ? "add reference image" : "add reference images" );
     int added = 0;
+    RejectClear();
     for ( size_t i = 0; i < paths.size(); ++i ) if ( ImportOne( paths[i].c_str(), place ) ) ++added;
     if ( added ) CommitPending(); else CancelEdit();
+    if ( added < (int)paths.size() )
+    {
+        const char *why = RejectText();
+        Sys_Printf( "Reference image drop: %i of %i file(s) imported%s%s.\n", added, (int)paths.size(),
+                    why[0] ? " - " : "", why );
+    }
     return true;
 }
 
@@ -1075,17 +1090,23 @@ bool KiwiRefImage_PasteClipboard()
     const UINT pngFormat = ::RegisterClipboardFormatA( "PNG" );
     bool recognized = false, wrote = false;
     char pasted[1200] = { 0 }; std::string rel;
+    RejectClear();
+    const char *KNOFOLDER = "no refimages folder could be made beside the map (save the map first, or check the folder is writable)";
 
     HANDLE h = pngFormat ? ::GetClipboardData( pngFormat ) : nullptr;
     if ( h )
     {
         recognized = true;
-        if ( NewPastePath( pasted, sizeof( pasted ), &rel ) )
+        if ( !NewPastePath( pasted, sizeof( pasted ), &rel ) )
+            Reject( "%s", KNOFOLDER );
+        else
         {
             BYTE *data = (BYTE *)::GlobalLock( h );
             const SIZE_T size = ::GlobalSize( h );
-            wrote = data && size && size <= 0xFFFFFFFFu
-                 && WicMemoryToPng( data, (DWORD)size, pasted, nullptr, nullptr );
+            if ( !data || !size || size > 0xFFFFFFFFu )
+                Reject( "the clipboard PNG block could not be locked" );
+            else
+                wrote = WicMemoryToPng( data, (DWORD)size, pasted, nullptr, nullptr );
             if ( data ) ::GlobalUnlock( h );
         }
     }
@@ -1097,13 +1118,18 @@ bool KiwiRefImage_PasteClipboard()
             h = ::GetClipboardData( formats[f] );
             if ( !h ) continue;
             recognized = true;
-            if ( NewPastePath( pasted, sizeof( pasted ), &rel ) )
+            if ( !NewPastePath( pasted, sizeof( pasted ), &rel ) )
+                Reject( "%s", KNOFOLDER );
+            else
             {
                 BYTE *data = (BYTE *)::GlobalLock( h );
                 const SIZE_T size = ::GlobalSize( h );
                 std::vector<BYTE> pixels; int w = 0, hgt = 0;
-                wrote = data && DibToBgra( data, size, &pixels, &w, &hgt )
-                     && BgraToPng( pixels, w, hgt, pasted );
+                if ( !data )
+                    Reject( "the clipboard bitmap could not be locked" );
+                else
+                    wrote = DibToBgra( data, size, &pixels, &w, &hgt )
+                         && BgraToPng( pixels, w, hgt, pasted );
                 if ( data ) ::GlobalUnlock( h );
             }
         }
@@ -1129,7 +1155,12 @@ bool KiwiRefImage_PasteClipboard()
     {
         CancelEdit();
         if ( pasted[0] ) ::DeleteFileA( pasted );
-        Sys_Printf( "Reference image paste: clipboard image decode/import failed.\n" );
+        // Decode refusals were recorded above; an import refusal (copy / IWI / material)
+        // records its own and usually printed a detailed line just before this one.
+        const char *why = RejectText();
+        Sys_Printf( "Reference image paste failed: %s.\n",
+                    why[0] ? why : ( wrote || dropped[0] ? "the image decoded but could not be imported (see the line above)"
+                                                        : "the clipboard held no readable image" ) );
     }
     return true;
 }
@@ -1596,6 +1627,68 @@ namespace
         return false;
     }
 
+    // Reject reasons: appended with "; " between them, so a paste that tried the PNG
+    // format and then the DIB reports both refusals.
+    char s_reject[768] = { 0 };
+
+    void RejectClear() { s_reject[0] = '\0'; }
+
+    void Reject( const char *fmt, ... )
+    {
+        char one[320];
+        va_list ap;
+        va_start( ap, fmt );
+        _vsnprintf( one, sizeof( one ), fmt, ap );
+        va_end( ap );
+        one[sizeof( one ) - 1] = '\0';
+        const size_t have = strlen( s_reject );
+        if ( strstr( s_reject, one ) )
+            return;                             // the same reason twice says nothing new
+        _snprintf( s_reject + have, sizeof( s_reject ) - have, "%s%s", have ? "; " : "", one );
+        s_reject[sizeof( s_reject ) - 1] = '\0';
+    }
+
+    const char *RejectText() { return s_reject; }
+
+    // Longest side the pipeline keeps (KiwiIwi's cap, and a safe D3D9 texture size), and
+    // the largest source it will decode in order to shrink it.
+    const UINT KREF_MAX_PIX = 4096u;
+    const UINT KREF_MAX_SRC = 16384u;
+
+    // KIWI (2026-09-17, user: "im getting errors when trying to paste in this heatmap
+    // image" - a 4800 x 4800 export): anything over 4096 a side used to be refused
+    // outright.  It is now shrunk to fit with WIC's Fant filter (the aspect ratio is kept,
+    // so a picture still maps onto the same world rectangle).  `*outScaler` stays null
+    // when no shrink is needed; false only when the shrink itself failed.
+    bool FitScaler( IWICImagingFactory *factory, IWICBitmapSource *source, UINT *w, UINT *h,
+                    IWICBitmapScaler **outScaler )
+    {
+        *outScaler = nullptr;
+        if ( *w <= KREF_MAX_PIX && *h <= KREF_MAX_PIX )
+            return true;
+        const double k = (double)KREF_MAX_PIX / (double)( *w > *h ? *w : *h );
+        UINT nw = (UINT)( (double)*w * k + 0.5 ), nh = (UINT)( (double)*h * k + 0.5 );
+        if ( nw < 1u ) nw = 1u;
+        if ( nh < 1u ) nh = 1u;
+        if ( nw > KREF_MAX_PIX ) nw = KREF_MAX_PIX;
+        if ( nh > KREF_MAX_PIX ) nh = KREF_MAX_PIX;
+        IWICBitmapScaler *scaler = nullptr;
+        HRESULT hr = factory->CreateBitmapScaler( &scaler );
+        if ( SUCCEEDED( hr ) )
+            hr = scaler->Initialize( source, nw, nh, WICBitmapInterpolationModeFant );
+        if ( FAILED( hr ) )
+        {
+            if ( scaler ) scaler->Release();
+            Reject( "could not shrink %ux%u to fit %u (WIC 0x%08lX)", *w, *h, KREF_MAX_PIX, (unsigned long)hr );
+            return false;
+        }
+        Sys_Printf( "Reference image: %ux%u is over the %u-pixel limit; shrunk to %ux%u.\n",
+                    *w, *h, KREF_MAX_PIX, nw, nh );
+        *w = nw; *h = nh;
+        *outScaler = scaler;
+        return true;
+    }
+
     // WIC is used for WebP/fallback decoding and for clipboard PNG/DIB serialization.
     IWICImagingFactory *WicFactory()
     {
@@ -1652,19 +1745,35 @@ namespace
     {
         IWICBitmapFrameDecode *frame = nullptr;
         IWICFormatConverter *conv = nullptr;
+        IWICBitmapScaler *scaler = nullptr;
         UINT w = 0, h = 0;
         bool ok = false;
         wchar_t wide[1200];
-        if ( ::MultiByteToWideChar( CP_ACP, 0, outPath, -1, wide, 1200 ) <= 0 ) return false;
-        if ( SUCCEEDED( decoder->GetFrame( 0, &frame ) )
-          && SUCCEEDED( frame->GetSize( &w, &h ) ) && w > 0 && h > 0
-          && w <= 4096u && h <= 4096u
-          && SUCCEEDED( factory->CreateFormatConverter( &conv ) )
-          && SUCCEEDED( conv->Initialize( frame, GUID_WICPixelFormat32bppBGRA,
-                                          WICBitmapDitherTypeNone, nullptr, 0.0,
-                                          WICBitmapPaletteTypeCustom ) ) )
-            ok = WicEncodePng( factory, conv, w, h, wide );
+        if ( ::MultiByteToWideChar( CP_ACP, 0, outPath, -1, wide, 1200 ) <= 0 )
+        {
+            Reject( "the destination path is too long" );
+            return false;
+        }
+        HRESULT hr = decoder->GetFrame( 0, &frame );
+        if ( FAILED( hr ) )
+            Reject( "the image has no decodable frame (WIC 0x%08lX)", (unsigned long)hr );
+        else if ( FAILED( hr = frame->GetSize( &w, &h ) ) || !w || !h )
+            Reject( "the image reports no size (WIC 0x%08lX)", (unsigned long)hr );
+        else if ( w > KREF_MAX_SRC || h > KREF_MAX_SRC )
+            Reject( "%ux%u is larger than the %u-pixel decode limit", w, h, KREF_MAX_SRC );
+        else if ( FitScaler( factory, frame, &w, &h, &scaler ) )
+        {
+            IWICBitmapSource *pixels = scaler ? (IWICBitmapSource *)scaler : (IWICBitmapSource *)frame;
+            if ( FAILED( hr = factory->CreateFormatConverter( &conv ) )
+              || FAILED( hr = conv->Initialize( pixels, GUID_WICPixelFormat32bppBGRA,
+                                                WICBitmapDitherTypeNone, nullptr, 0.0,
+                                                WICBitmapPaletteTypeCustom ) ) )
+                Reject( "its pixel format cannot be converted to BGRA (WIC 0x%08lX)", (unsigned long)hr );
+            else if ( !( ok = WicEncodePng( factory, conv, w, h, wide ) ) )
+                Reject( "writing '%s' failed (disk full, or the folder is read-only?)", outPath );
+        }
         if ( conv ) conv->Release();
+        if ( scaler ) scaler->Release();
         if ( frame ) frame->Release();
         if ( ok )
         {
@@ -1705,7 +1814,7 @@ namespace
                                                                   &decoder ) )
                && SUCCEEDED( decoder->GetFrame( 0, &frame ) )
                && SUCCEEDED( frame->GetSize( &w, &h ) )
-               && w > 0 && h > 0 && w <= 4096u && h <= 4096u;
+               && w > 0 && h > 0 && w <= KREF_MAX_SRC && h <= KREF_MAX_SRC;   // oversize shrinks later
         if ( frame ) frame->Release();
         if ( decoder ) decoder->Release();
         factory->Release();
@@ -1719,17 +1828,19 @@ namespace
 
     bool WicMemoryToPng( BYTE *data, DWORD size, const char *outPath, int *pixW, int *pixH )
     {
-        if ( !data || !size ) return false;
+        if ( !data || !size ) { Reject( "the clipboard PNG block is empty" ); return false; }
         IWICImagingFactory *factory = WicFactory();
-        if ( !factory ) return false;
+        if ( !factory ) { Reject( "Windows Imaging Component is unavailable (COM init failed)" ); return false; }
         IWICStream *stream = nullptr;
         IWICBitmapDecoder *decoder = nullptr;
         bool ok = false;
-        if ( SUCCEEDED( factory->CreateStream( &stream ) )
-          && SUCCEEDED( stream->InitializeFromMemory( data, size ) )
-          && SUCCEEDED( factory->CreateDecoderFromStream( stream, nullptr,
-                                                          WICDecodeMetadataCacheOnDemand,
-                                                          &decoder ) ) )
+        HRESULT hr = factory->CreateStream( &stream );
+        if ( SUCCEEDED( hr ) ) hr = stream->InitializeFromMemory( data, size );
+        if ( SUCCEEDED( hr ) )
+            hr = factory->CreateDecoderFromStream( stream, nullptr, WICDecodeMetadataCacheOnDemand, &decoder );
+        if ( FAILED( hr ) )
+            Reject( "the clipboard PNG block is not a decodable image (WIC 0x%08lX)", (unsigned long)hr );
+        else
             ok = WicDecoderToPng( factory, decoder, outPath, pixW, pixH );
         if ( decoder ) decoder->Release();
         if ( stream ) stream->Release();
@@ -1752,16 +1863,37 @@ namespace
     bool DibToBgra( const BYTE *dib, SIZE_T bytes, std::vector<BYTE> *out,
                     int *outW, int *outH )
     {
-        if ( !dib || bytes < sizeof( BITMAPINFOHEADER ) ) return false;
+        if ( !dib || bytes < sizeof( BITMAPINFOHEADER ) )
+        {
+            Reject( "the clipboard bitmap is truncated (%u bytes)", (unsigned)bytes );
+            return false;
+        }
         const BITMAPINFOHEADER *h = (const BITMAPINFOHEADER *)dib;
         if ( h->biSize < sizeof( BITMAPINFOHEADER ) || h->biSize > bytes
-          || h->biWidth <= 0 || h->biHeight == 0 || h->biHeight == INT_MIN
-          || ( h->biBitCount != 24 && h->biBitCount != 32 )
-          || ( h->biCompression != BI_RGB && h->biCompression != BI_BITFIELDS ) )
+          || h->biWidth <= 0 || h->biHeight == 0 || h->biHeight == INT_MIN )
+        {
+            Reject( "the clipboard bitmap header is malformed" );
             return false;
+        }
+        if ( h->biBitCount != 24 && h->biBitCount != 32 )
+        {
+            Reject( "the clipboard bitmap is %u-bit; only 24 and 32-bit are read", (unsigned)h->biBitCount );
+            return false;
+        }
+        if ( h->biCompression != BI_RGB && h->biCompression != BI_BITFIELDS )
+        {
+            Reject( "the clipboard bitmap is compressed (type %lu)", (unsigned long)h->biCompression );
+            return false;
+        }
         const int width = h->biWidth;
         const int height = h->biHeight < 0 ? -h->biHeight : h->biHeight;
-        if ( width > 4096 || height > 4096 ) return false; // same cap as KiwiIwi_Probe
+        // Oversize bitmaps are shrunk by BgraToPng; this is only the memory sanity cap.
+        if ( width > (int)KREF_MAX_SRC || height > (int)KREF_MAX_SRC
+          || (uint64_t)width * (uint64_t)height > 96000000ull )
+        {
+            Reject( "the clipboard bitmap is %ix%i, too large to decode", width, height );
+            return false;
+        }
         SIZE_T offset = h->biSize;
         unsigned masks[4] = { 0x00FF0000u, 0x0000FF00u, 0x000000FFu, 0u };
         if ( h->biCompression == BI_BITFIELDS )
@@ -1812,7 +1944,10 @@ namespace
         }
         const SIZE_T srcStride = ( ( (SIZE_T)width * h->biBitCount + 31u ) / 32u ) * 4u;
         if ( offset > bytes || srcStride > bytes || (SIZE_T)height > ( bytes - offset ) / srcStride )
+        {
+            Reject( "the clipboard bitmap holds fewer pixels than its %ix%i header claims", width, height );
             return false;
+        }
         out->assign( (SIZE_T)width * (SIZE_T)height * 4u, 255u );
         for ( int y = 0; y < height; ++y )
         {
@@ -1849,19 +1984,31 @@ namespace
         const UINT bufferSize = (UINT)pixels.size();
         if ( (size_t)bufferSize != pixels.size() ) return false;
         IWICImagingFactory *factory = WicFactory();
-        if ( !factory ) return false;
+        if ( !factory ) { Reject( "Windows Imaging Component is unavailable (COM init failed)" ); return false; }
         IWICBitmap *bitmap = nullptr;
+        IWICBitmapScaler *scaler = nullptr;
         bool ok = false;
-        if ( SUCCEEDED( factory->CreateBitmapFromMemory( (UINT)w, (UINT)h,
-                                                         GUID_WICPixelFormat32bppBGRA,
-                                                         (UINT)w * 4u, bufferSize,
-                                                         const_cast<BYTE *>( pixels.data() ),
-                                                         &bitmap ) ) )
+        const HRESULT hr = factory->CreateBitmapFromMemory( (UINT)w, (UINT)h,
+                                                            GUID_WICPixelFormat32bppBGRA,
+                                                            (UINT)w * 4u, bufferSize,
+                                                            const_cast<BYTE *>( pixels.data() ),
+                                                            &bitmap );
+        if ( FAILED( hr ) )
+            Reject( "WIC refused the %ix%i clipboard bitmap (0x%08lX)", w, h, (unsigned long)hr );
+        else
         {
             wchar_t wide[1200];
-            if ( ::MultiByteToWideChar( CP_ACP, 0, outPath, -1, wide, 1200 ) > 0 )
-                ok = WicEncodePng( factory, bitmap, (UINT)w, (UINT)h, wide );
+            UINT ow = (UINT)w, oh = (UINT)h;
+            if ( ::MultiByteToWideChar( CP_ACP, 0, outPath, -1, wide, 1200 ) <= 0 )
+                Reject( "the destination path is too long" );
+            else if ( FitScaler( factory, bitmap, &ow, &oh, &scaler ) )
+            {
+                IWICBitmapSource *src = scaler ? (IWICBitmapSource *)scaler : (IWICBitmapSource *)bitmap;
+                if ( !( ok = WicEncodePng( factory, src, ow, oh, wide ) ) )
+                    Reject( "writing '%s' failed (disk full, or the folder is read-only?)", outPath );
+            }
         }
+        if ( scaler ) scaler->Release();
         if ( bitmap ) bitmap->Release();
         factory->Release();
         return ok;
@@ -2102,11 +2249,18 @@ namespace
 
     bool CopySource( const char *src, char *copied, int cap, std::string *rel )
     {
-        if ( !src || !FileExists( src ) || !AcceptedImage( src ) ) return false;
-        if ( !UniqueCopyTarget( src, copied, cap, rel ) ) return false;
+        if ( !src || !FileExists( src ) ) { Reject( "'%s' does not exist", src ? BaseName( src ) : "" ); return false; }
+        if ( !AcceptedImage( src ) ) { Reject( "'%s' is not an accepted image type", BaseName( src ) ); return false; }
+        if ( !UniqueCopyTarget( src, copied, cap, rel ) )
+        {
+            Reject( "no destination for '%s' in the map's refimages folder (save the map first?)", BaseName( src ) );
+            return false;
+        }
         if ( SamePath( src, copied ) ) return true;
         if ( !::CopyFileA( src, copied, TRUE ) )
         {
+            Reject( "copying '%s' into the map folder failed (Windows error %lu)", BaseName( src ),
+                    (unsigned long)::GetLastError() );
             Sys_Printf( "Reference image '%s': copy into the map folder failed.\n", BaseName( src ) );
             return false;
         }
@@ -2138,6 +2292,8 @@ namespace
         r.name = display;
         if ( !EnsureMaterial( r ) )
         {
+            Reject( "'%s' decoded but its IWI / material could not be generated (details on the line above)",
+                    BaseName( copied ) );
             std::map<std::string, std::string>::iterator known = s_fileAsset.find( r.file );
             if ( known != s_fileAsset.end() ) { s_assetCache.erase( known->second ); s_fileAsset.erase( known ); }
             if ( !SamePath( src, copied ) ) ::DeleteFileA( copied );

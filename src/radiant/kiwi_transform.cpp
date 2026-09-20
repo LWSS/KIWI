@@ -139,6 +139,11 @@ namespace
     bool     s_pivotHave   = false;
     float    s_pivotPos[3] = { 0.0f, 0.0f, 0.0f };
     unsigned s_pivotSig    = 0;
+    // KIWI (2026-09-16): the move gizmo orientation placed with the pivot (rows = world
+    // basis; X along a snapped edge, Z along a snapped face normal). Persists and
+    // expires with the pivot so an along-edge frame survives a commit.
+    bool     s_pivotFrameHave    = false;
+    float    s_pivotFrame[3][3]  = { { 1,0,0 }, { 0,1,0 }, { 0,0,1 } };
 
     // Order-independent typed-selection hash; construction selection contributes
     // only its item count.
@@ -186,6 +191,25 @@ namespace
         s_pivotPos[2] = p[2];
         s_pivotSig    = SelectionSignature();
         s_pivotHave   = true;
+    }
+
+    void PivotStoreFrame( const float f[3][3] )
+    {
+        memcpy( s_pivotFrame, f, sizeof( s_pivotFrame ) );
+        s_pivotFrameHave = true;
+    }
+
+    void PivotClearFrame() { s_pivotFrameHave = false; }
+
+    // Fill `out` and return true only while the stored frame matches the live pivot.
+    bool PivotFrameActive( float out[3][3] )
+    {
+        if ( !s_pivotFrameHave || !s_pivotHave )
+            return false;
+        if ( SelectionSignature() != s_pivotSig )
+            return false;
+        memcpy( out, s_pivotFrame, sizeof( s_pivotFrame ) );
+        return true;
     }
 
     // Ray/plane hit; reject near-parallel, behind-camera, and remote intersections.
@@ -508,6 +532,8 @@ namespace
             if ( vk == 0x1B && m_pivotPlacing )    // VK_ESCAPE
             {
                 m_pivotPlacing = false;
+                m_frameActive = m_frameSaved;      // restore the pre-placement orientation
+                memcpy( m_frame, m_frameSavedM, sizeof( m_frame ) );
                 Sys_Printf( "Pivot: placement cancelled.\n" );
                 RefreshHud();                      // drop the PIVOT line
                 g_nUpdateBits |= 1;
@@ -519,6 +545,9 @@ namespace
         void BeginPivot()
         {
             m_pivotPlacing = true;
+            // Save the current orientation so Esc restores it; snapping rebuilds it live.
+            m_frameSaved = m_frameActive;
+            memcpy( m_frameSavedM, m_frame, sizeof( m_frame ) );
             // Seed from the live anchor; baseline/session positions may lag an active move.
             Copy3( PivotAnchor(), m_pivotWip );
             m_pivotWipHave = true;
@@ -536,6 +565,9 @@ namespace
             if ( m_pivotWipHave )
             {
                 PivotStore( m_pivotWip );
+                float f[3][3];
+                if ( CurrentFrame( f ) ) PivotStoreFrame( f );
+                else                     PivotClearFrame();
                 ApplyPivot( m_pivotWip );
                 char bx[32], by[32], bz[32];
                 KiwiUnits_Format( bx, sizeof( bx ), m_pivotWip[0] );
@@ -574,6 +606,7 @@ namespace
                     }
                 }
             }
+            OnPivotSnap( snap );                 // Move rebuilds the gizmo frame here
             UpdatePivotHud();
             g_nUpdateBits |= 1;
             return true;
@@ -639,6 +672,34 @@ namespace
         bool  m_pivotPlacing = false;
         bool  m_pivotWipHave = false;
         float m_pivotWip[3]  = { 0.0f, 0.0f, 0.0f };
+
+        // KIWI (2026-09-16): optional gizmo orientation (rows = world basis vectors).
+        // Move populates it from the snap under the placing pivot; other commands leave
+        // it inactive (world axes). The saved copy restores it if placement is cancelled.
+        bool  m_frameActive  = false;
+        float m_frame[3][3]  = { { 1,0,0 }, { 0,1,0 }, { 0,0,1 } };
+        bool  m_frameSaved   = false;
+        float m_frameSavedM[3][3] = { { 1,0,0 }, { 0,1,0 }, { 0,0,1 } };
+
+        // Move builds a frame from the live snap while placing; default leaves it off.
+        virtual void OnPivotSnap( const snap_result_t & ) {}
+        // The frame to persist with the pivot on commit; false = clear the stored frame.
+        virtual bool CurrentFrame( float out[3][3] ) const { (void)out; return false; }
+        // Does the frame steer this command's axes right now? Rotate/Scale never set one;
+        // Move narrows it (no face push, no reference image).
+        virtual bool FrameApplies() const { return m_frameActive; }
+
+        // World direction of constraint axis k: the frame row when it applies, else world.
+        void FrameAxis( int k, float *out ) const
+        {
+            if ( FrameApplies() && k >= 0 && k < 3 )
+                Copy3( m_frame[k], out );
+            else
+            {
+                out[0] = out[1] = out[2] = 0.0f;
+                if ( k >= 0 && k < 3 ) out[k] = 1.0f;
+            }
+        }
 
         // Ray from the framework's last cursor position over the camera.
         bool CursorRay( ray_t *out ) const
@@ -747,8 +808,7 @@ namespace
 
                 if ( m_con == CON_AXIS )
                 {
-                    float ax[3] = { 0.0f, 0.0f, 0.0f };
-                    ax[m_axis] = 1.0f;
+                    float ax[3]; FrameAxis( m_axis, ax );
                     float a[3], b[3];
                     Mad3( origin, ax, -len, a );
                     Mad3( origin, ax,  len, b );
@@ -761,8 +821,7 @@ namespace
                     {
                         if ( k == m_axis )
                             continue;
-                        float ax[3] = { 0.0f, 0.0f, 0.0f };
-                        ax[k] = 1.0f;
+                        float ax[3]; FrameAxis( k, ax );
                         float a[3], b[3];
                         Mad3( origin, ax, -len, a );
                         Mad3( origin, ax,  len, b );
@@ -1026,6 +1085,7 @@ namespace
                     // A session pivot overrides MoveBegin's construction centroid once and stays
                     // latched. This preserves live reference == m_ref + m_total for absolute snaps.
                     m_pivotOverridden = PivotActive( m_ref );
+                    m_frameActive = m_pivotOverridden && PivotFrameActive( m_frame );
                     CamWnd_BuildMatrix();
                     Copy3( Ed_Camera()->vpn, m_planeN );
                     LatchMapStart();
@@ -1077,6 +1137,8 @@ namespace
             // Override each kind's natural reference with the session pivot after baseline
             // capture; the chosen m_ref remains latched for the gesture.
             m_pivotOverridden = PivotActive( m_ref );
+            // Adopt the along-edge frame placed with that pivot, if it is still current.
+            m_frameActive = m_pivotOverridden && PivotFrameActive( m_frame );
 
             // Latch the camera normal so orbiting cannot rotate the movement plane.
             CamWnd_BuildMatrix();
@@ -1153,6 +1215,90 @@ namespace
                 Mad3( m_ref, m_pushDir, m_deleting ? 0.0f : m_scalar, out3 );
             else
                 Add3( m_ref, m_total, out3 );
+        }
+
+        // ── gizmo orientation frame (KIWI 2026-09-16) ─────────────────────────────
+        // Face pushes and reference images keep world/plane behaviour, so they never
+        // adopt the snapped frame; FrameAxis / DrawConstraint read this predicate.
+        bool Framed() const { return m_frameActive && m_kind != SEL_FACE && !m_refImage; }
+        bool FrameApplies() const override { return Framed(); }
+
+        // The gizmo draws at the placing pivot while V is live, else at the live anchor.
+        bool GizmoAnchor( float *out3 ) const
+        {
+            if ( m_pivotPlacing ) { Copy3( m_pivotWip, out3 ); return true; }
+            LiveAnchor( out3 );
+            return true;
+        }
+
+        bool GizmoFrame( float out[3][3] ) const
+        {
+            if ( !Framed() )
+                return false;
+            memcpy( out, m_frame, sizeof( m_frame ) );
+            return true;
+        }
+
+        bool CurrentFrame( float out[3][3] ) const override
+        {
+            if ( !m_frameActive )
+                return false;
+            memcpy( out, m_frame, sizeof( m_frame ) );
+            return true;
+        }
+
+        // Build the gizmo frame from the live snap under the placing pivot:
+        //   * a snapped edge/segment  -> X along the edge (Z its face normal if any);
+        //   * a snapped face          -> Z along the face normal, X in the plane;
+        //   * a vertex / grid / miss  -> world-aligned (frame off).
+        void OnPivotSnap( const snap_result_t &snap ) override
+        {
+            float edge[3];
+            const bool haveEdge = KiwiSnap_LastEdgeDir( edge ) && Norm3( edge );
+            float n[3] = { snap.planeNormal[0], snap.planeNormal[1], snap.planeNormal[2] };
+            const bool planeOk = snap.havePlane && Norm3( n );
+
+            if ( haveEdge )
+            {
+                float z[3];
+                if ( planeOk )
+                    Copy3( n, z );
+                else
+                {
+                    float up[3] = { 0.0f, 0.0f, 1.0f };
+                    if ( fabsf( Dot3( edge, up ) ) > 0.98f ) { up[0] = 1.0f; up[1] = 0.0f; up[2] = 0.0f; }
+                    float side[3]; Cross3( edge, up, side );
+                    if ( !Norm3( side ) ) { m_frameActive = false; return; }
+                    Cross3( side, edge, z ); Norm3( z );
+                }
+                float x[3];
+                const float d = Dot3( edge, z );
+                for ( int k = 0; k < 3; ++k ) x[k] = edge[k] - d * z[k];
+                if ( !Norm3( x ) ) { m_frameActive = false; return; }
+                float y[3]; Cross3( z, x, y ); Norm3( y );
+                SetFrame( x, y, z );
+                return;
+            }
+            if ( planeOk )
+            {
+                float x[3] = { 1.0f, 0.0f, 0.0f };
+                if ( fabsf( Dot3( x, n ) ) > 0.98f ) { x[0] = 0.0f; x[1] = 1.0f; x[2] = 0.0f; }
+                const float d = Dot3( x, n );
+                for ( int k = 0; k < 3; ++k ) x[k] -= d * n[k];
+                if ( !Norm3( x ) ) { m_frameActive = false; return; }
+                float y[3]; Cross3( n, x, y ); Norm3( y );
+                SetFrame( x, y, n );
+                return;
+            }
+            m_frameActive = false;
+        }
+
+        void SetFrame( const float *x, const float *y, const float *z )
+        {
+            Copy3( x, m_frame[0] );
+            Copy3( y, m_frame[1] );
+            Copy3( z, m_frame[2] );
+            m_frameActive = true;
         }
 
         // Snap at the cursor; mapping already resolves target - m_ref, so redirecting
@@ -1321,7 +1467,15 @@ namespace
                 Mad3( m_ref, m_pushDir, m_scalar, now );
             else
                 Add3( m_ref, m_total, now );
-            DrawConstraint( m_ref, m_ref, now );
+            // KIWI (2026-09-17, user: "when moving models, dont show the yellow line"): a
+            // model move is judged by where the prop sits, and over a satellite picture the
+            // long start-to-current band only hid what was being lined up.  A models-only
+            // selection passes a zero-length band (axis accents still draw); brushes,
+            // faces and construction keep theirs, where the travel distance is the point.
+            bool modelsOnly = selected_brushes.next != &selected_brushes && m_kind != SEL_FACE;
+            for ( selbrush_t *b = selected_brushes.next; modelsOnly && b && b != &selected_brushes; b = b->next )
+                modelsOnly = KiwiDrop_IsModelEntity( b );
+            DrawConstraint( m_ref, modelsOnly ? now : m_ref, now );
             // Draw the pivot marker at the live anchor, not the mapping origin.
             if ( m_pivotOverridden )
                 DrawPivotMarker( now, false );
@@ -1364,6 +1518,7 @@ namespace
             m_deleting     = false;    // push-through-delete state
             m_pivotPlacing = false;
             m_pivotOverridden = false; // m_ref is the session pivot
+            m_frameActive  = false;    // Begin() restores it from the session pivot store
             m_con          = CON_FREE;
             m_axis         = 2;
             m_undoOpen     = false;
@@ -1848,14 +2003,12 @@ namespace
 
             if ( m_con == CON_AXIS )
             {
-                float ax[3] = { 0.0f, 0.0f, 0.0f };
-                ax[m_axis] = 1.0f;
+                float ax[3]; FrameAxis( m_axis, ax );
                 return KiwiCam_RayAxis( ray, m_ref, ax, out );
             }
             if ( m_con == CON_PLANE )
             {
-                float n[3] = { 0.0f, 0.0f, 0.0f };
-                n[m_axis] = 1.0f;
+                float n[3]; FrameAxis( m_axis, n );
                 return RayPlane( ray, m_ref, n, out );
             }
             return RayPlane( ray, m_ref, m_planeN, out );
@@ -1872,7 +2025,7 @@ namespace
                 float axis[3] = { 0.0f, 0.0f, 0.0f };
                 const bool oneAxis = ( m_kind == SEL_FACE ) || ( m_con == CON_AXIS );
                 if ( m_kind == SEL_FACE )      Copy3( m_pushDir, axis );
-                else if ( m_con == CON_AXIS )  axis[m_axis] = 1.0f;
+                else if ( m_con == CON_AXIS )  FrameAxis( m_axis, axis );
                 if ( !m_axisWarned && oneAxis && !KiwiCam_AxisPortrayable( axis ) )
                 {
                     m_axisWarned = true;
@@ -1929,6 +2082,20 @@ namespace
         // Project only this grab's delta onto the active constraint.
         void Constrain( float *d ) const
         {
+            if ( m_con == CON_FREE )
+                return;
+            if ( Framed() )
+            {
+                // Decompose into the frame, drop the components the lock does not own,
+                // recompose. Axis keeps only m_axis; plane keeps the other two.
+                float c[3] = { Dot3( d, m_frame[0] ), Dot3( d, m_frame[1] ), Dot3( d, m_frame[2] ) };
+                for ( int k = 0; k < 3; ++k )
+                    if ( ( m_con == CON_AXIS ) ? ( k != m_axis ) : ( k == m_axis ) )
+                        c[k] = 0.0f;
+                for ( int k = 0; k < 3; ++k )
+                    d[k] = c[0] * m_frame[0][k] + c[1] * m_frame[1][k] + c[2] * m_frame[2][k];
+                return;
+            }
             if ( m_con == CON_AXIS )
             {
                 for ( int k = 0; k < 3; ++k )
@@ -1960,8 +2127,19 @@ namespace
         {
             if ( m_con == CON_AXIS )
             {
-                out[0] = out[1] = out[2] = 0.0f;
-                out[m_axis] = 1.0f;
+                FrameAxis( m_axis, out );       // frame X/Y/Z, else world
+                return true;
+            }
+            // Framed plane lock: project the carried direction onto the frame plane.
+            if ( Framed() && m_con == CON_PLANE )
+            {
+                float d[3]; Copy3( m_total, d );
+                float fa[3]; FrameAxis( m_axis, fa );
+                const float dn = Dot3( d, fa );
+                for ( int k = 0; k < 3; ++k ) d[k] -= dn * fa[k];
+                if ( Norm3( d ) ) { Copy3( d, out ); return true; }
+                // Degenerate: fall back to a frame axis the plane owns.
+                FrameAxis( ( m_axis + 1 ) % 3, out );
                 return true;
             }
             float d[3];
@@ -2113,26 +2291,43 @@ namespace
                     bool axisDepthDone = false;
                     if ( m_con == CON_AXIS )
                     {
-                        float ax[3] = { 0.0f, 0.0f, 0.0f };
-                        ax[m_axis] = 1.0f;
+                        float ax[3]; FrameAxis( m_axis, ax );
                         float t = 0.0f;
                         if ( KiwiSnap_AxisDepth( m_snap, m_ref, ax, &t ) )
                         {
-                            // Axis snaps replace only the locked component; off-axis carried totals survive.
-                            if ( areaOnly )
-                            {
-                                float at[3];
-                                Add3( m_ref, total, at );
-                                total[m_axis] = KiwiSnap_AreaMagnet( total[m_axis], t, at );
-                            }
-                            else
-                            {
-                                total[m_axis] = t;
-                            }
+                            // Axis snaps replace only the locked component (along ax, which
+                            // is the frame axis when framed); off-axis carried totals survive.
+                            float at[3];
+                            Add3( m_ref, total, at );
+                            const float cur = Dot3( total, ax );
+                            const float want = areaOnly ? KiwiSnap_AreaMagnet( cur, t, at ) : t;
+                            for ( int k = 0; k < 3; ++k )
+                                total[k] += ( want - cur ) * ax[k];
                         }
                         else if ( !areaOnly )
                         {
                             Copy3( m_total, total );   // refused: leave it where it is
+                        }
+                        axisDepthDone = true;
+                    }
+                    if ( !axisDepthDone && Framed() )
+                    {
+                        // Framed plane/free: replace the owned FRAME components with the
+                        // target's, so a vertex/edge snap lands on the target in edge space.
+                        float absT[3];
+                        Sub3( m_snap.position, m_ref, absT );
+                        float at[3];
+                        Add3( m_ref, total, at );
+                        for ( int a = 0; a < 3; ++a )
+                        {
+                            if ( m_con == CON_PLANE && a == m_axis )
+                                continue;
+                            const float *fa = m_frame[a];
+                            const float cur = Dot3( total, fa );
+                            const float tgt = Dot3( absT, fa );
+                            const float want = areaOnly ? KiwiSnap_AreaMagnet( cur, tgt, at ) : tgt;
+                            for ( int k = 0; k < 3; ++k )
+                                total[k] += ( want - cur ) * fa[k];
                         }
                         axisDepthDone = true;
                     }
@@ -2169,9 +2364,11 @@ namespace
                 // SNAP_FACE keeps its capture band. Named geometry targets are exempt so exact
                 // vertices, midpoints, centers, endpoints, and intersections are never rounded.
                 // KiwiSnap_LatticeAxis also supplies the major-line preference.
+                // A framed move runs along a diagonal edge, where world-grid lattice
+                // quantization is meaningless, so skip it entirely when framed.
                 const bool namedTarget = KiwiSnap_IsGeometry( m_snap.type )
                                       && m_snap.type != SNAP_FACE;
-                if ( !namedTarget )
+                if ( !namedTarget && !Framed() )
                 {
                     const bool hard = !KiwiSnap_IsGeometry( m_snap.type );
                     for ( int k = 0; k < 3; ++k )
@@ -2767,6 +2964,29 @@ namespace
         bool  m_majorLock    = false;
     };
 
+    // The first selected xmodel's own axes (forward, left, up) from its `angles` - the
+    // frame an aligned rotate falls back to when the pivot has no face or edge under it.
+    bool FirstSelectedModelAxes( float out[3][3] )
+    {
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !KiwiDrop_IsModelEntity( b ) )
+                continue;
+            float mins[3], maxs[3], ang[3], scale, origin[3];
+            if ( !KiwiDrop_GetModelInfo( b, mins, maxs, ang, &scale, origin ) )
+                continue;
+            const float k = 3.14159265358979323846f / 180.0f;
+            const float sp = sinf( ang[0] * k ), cp = cosf( ang[0] * k );
+            const float sy = sinf( ang[1] * k ), cy = cosf( ang[1] * k );
+            const float sr = sinf( ang[2] * k ), cr = cosf( ang[2] * k );
+            out[0][0] = cp * cy;                    out[0][1] = cp * sy;                    out[0][2] = -sp;
+            out[1][0] = sr * sp * cy - cr * sy;     out[1][1] = sr * sp * sy + cr * cy;     out[1][2] = sr * cp;
+            out[2][0] = cr * sp * cy + sr * sy;     out[2][1] = cr * sp * sy - sr * cy;     out[2][2] = cr * cp;
+            return true;
+        }
+        return false;
+    }
+
     // Whole-selection rotate.
     class KiwiRotateCommand : public KiwiXformBase
     {
@@ -2840,6 +3060,9 @@ namespace
             // A session pivot replaces row 0 of the ported rot_around matrix.
             m_pivotOverridden = PivotActive( m_pivot );
             m_pivotPlacing    = false;
+            // ... and brings the frame it was placed with (the aligned rings).
+            m_frameActive     = m_pivotOverridden && PivotFrameActive( m_frame );
+            m_wipFrameActive  = false;
             UpdateHud();
             return true;
         }
@@ -2852,6 +3075,96 @@ namespace
                 return;
             Recompute();
             g_nUpdateBits |= 1;
+        }
+
+        // ── aligned rotation (KIWI 2026-09-18, user: "when setting the gizmo position (V)
+        // for rotating a model, the gizmo should align to the face/vertex where I put it so
+        // i can do an exact aligned rotation according to the model's shape") ────────────
+        // While V is live the frame under the cursor is tracked in m_wipFrame (NOT m_frame:
+        // ApplyPivot must first unwind the turns made about the OLD axes):
+        //   * a snapped edge   -> X along the edge, Z the face normal there;
+        //   * a face / surface -> Z along its normal, X = the selected model's own axis that
+        //                         lies flattest in that face (world X without a model);
+        //   * a vertex / miss  -> the selected model's own axes (its `angles`).
+        // X / Y / Z and the three rings then mean THAT frame's axes.  Construction and
+        // reference-image rotates keep world axes (their stores compose world matrices).
+        bool FrameApplies() const override { return m_frameActive && !m_construct && !m_refImage; }
+
+        bool GizmoFrame( float out[3][3] ) const
+        {
+            if ( !FrameApplies() )
+                return false;
+            memcpy( out, m_frame, sizeof( m_frame ) );
+            return true;
+        }
+
+        bool CurrentFrame( float out[3][3] ) const override
+        {
+            if ( !m_wipFrameActive )
+                return false;
+            memcpy( out, m_wipFrame, sizeof( m_wipFrame ) );
+            return true;
+        }
+
+        void OnPivotSnap( const snap_result_t &snap ) override
+        {
+            m_wipFrameActive = false;
+            float model[3][3];
+            const bool haveModel = FirstSelectedModelAxes( model );
+
+            float edge[3];
+            const bool haveEdge = KiwiSnap_LastEdgeDir( edge ) && Norm3( edge );
+            float n[3] = { snap.planeNormal[0], snap.planeNormal[1], snap.planeNormal[2] };
+            const bool planeOk = snap.havePlane && Norm3( n );
+
+            float x[3], y[3], z[3];
+            if ( haveEdge )
+            {
+                if ( planeOk )
+                    Copy3( n, z );
+                else
+                {
+                    float up[3] = { 0.0f, 0.0f, 1.0f };
+                    if ( fabsf( Dot3( edge, up ) ) > 0.98f ) { up[0] = 1.0f; up[1] = 0.0f; up[2] = 0.0f; }
+                    float side[3]; Cross3( edge, up, side );
+                    if ( !Norm3( side ) ) return;
+                    Cross3( side, edge, z ); Norm3( z );
+                }
+                const float d = Dot3( edge, z );
+                for ( int k = 0; k < 3; ++k ) x[k] = edge[k] - d * z[k];
+                if ( !Norm3( x ) ) return;
+            }
+            else if ( planeOk )
+            {
+                Copy3( n, z );
+                // the in-plane reference: the model axis flattest in the face, else world
+                float ref[3] = { 1.0f, 0.0f, 0.0f };
+                if ( haveModel )
+                {
+                    int best = 0;
+                    for ( int k = 1; k < 3; ++k )
+                        if ( fabsf( Dot3( model[k], z ) ) < fabsf( Dot3( model[best], z ) ) )
+                            best = k;
+                    Copy3( model[best], ref );
+                }
+                else if ( fabsf( Dot3( ref, z ) ) > 0.98f ) { ref[0] = 0.0f; ref[1] = 1.0f; }
+                const float d = Dot3( ref, z );
+                for ( int k = 0; k < 3; ++k ) x[k] = ref[k] - d * z[k];
+                if ( !Norm3( x ) ) return;
+            }
+            else if ( haveModel )
+            {
+                memcpy( m_wipFrame, model, sizeof( m_wipFrame ) );
+                m_wipFrameActive = true;
+                return;
+            }
+            else
+                return;
+            Cross3( z, x, y ); Norm3( y );
+            Copy3( x, m_wipFrame[0] );
+            Copy3( y, m_wipFrame[1] );
+            Copy3( z, m_wipFrame[2] );
+            m_wipFrameActive = true;
         }
 
         bool KeyDown( int vk, unsigned mods ) override
@@ -2868,9 +3181,12 @@ namespace
         {
             // Moving a used rotation center first undoes everything turned about the
             // old center (the whole chain), then adopts the new center at zero degrees.
-            UnwindAll();
+            UnwindAll();                      // about the OLD pivot and the OLD frame
             Copy3( p, m_pivot );
             m_pivotOverridden = true;
+            m_frameActive = m_wipFrameActive; // the frame the pivot was placed with
+            if ( m_wipFrameActive )
+                memcpy( m_frame, m_wipFrame, sizeof( m_frame ) );
             UpdateHud();
         }
 
@@ -3038,7 +3354,25 @@ namespace
         {
             float rot_around[4][3];
             Copy3( m_pivot, rot_around[0] );
-            Select_RotateAxis( axis, delta, (float (*)[4][3])rot_around );
+            if ( FrameApplies() )
+            {
+                // The same matrix Select_RotateAxis writes, about an ARBITRARY unit axis u:
+                // its three cases are Rodrigues(u, -deg) TRANSPOSED for u = X / Y / Z, so
+                //   m[a][b] = c * I + (1 - c) * u_a u_b - s * [u]x[a][b],  (s, c) of -deg.
+                // Select_RotateFixedSize composes any 3x3 onto a model's `angles`, brushes and
+                // patches take it through Select_ApplyMatrix as they do for the world axes.
+                const float *u = m_frame[axis];
+                const float rad = -delta * 3.14159265358979323846f / 180.0f;
+                const float c = cosf( rad ), s = sinf( rad );
+                const float ux[3][3] = { {  0.0f, -u[2],  u[1] },
+                                         {  u[2],  0.0f, -u[0] },
+                                         { -u[1],  u[0],  0.0f } };
+                for ( int a = 0; a < 3; ++a )
+                    for ( int b = 0; b < 3; ++b )
+                        rot_around[1 + a][b] = ( a == b ? c : 0.0f ) + ( 1.0f - c ) * u[a] * u[b] - s * ux[a][b];
+            }
+            else
+                Select_RotateAxis( axis, delta, (float (*)[4][3])rot_around );
             Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], delta, 0 );
             g_nUpdateBits = -1;
         }
@@ -3124,8 +3458,9 @@ namespace
             // Idle rotate HUD explains the ring/numeric gate.
             if ( !m_ringActive && !m_hasNum && fabsf( m_deg ) <= KX_EPS )
             {
-                SetHud( "%s  axis %s  grab a ring / type degrees%s%s", What(), AxisName( m_axis ),
-                        chain, m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot)" );
+                SetHud( "%s  axis %s%s  grab a ring / type degrees%s%s", What(), AxisName( m_axis ),
+                        FrameApplies() ? " (ALIGNED to the pivot's face / model)" : "",
+                        chain, m_pivotOverridden ? "  [pivot moved]" : "  (V moves the pivot, and aligns the rings to what it lands on)" );
                 return;
             }
             // The ring snaps to 5 degrees unless Ctrl is held (KIWI 2026-09-10).
@@ -3154,6 +3489,9 @@ namespace
         bool  m_ringFresh  = false;
         // Latch whether the current rotation uses the session pivot.
         bool  m_pivotOverridden = false;
+        // The frame under the cursor while V is live; adopted into m_frame by ApplyPivot.
+        float m_wipFrame[3][3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+        bool  m_wipFrameActive = false;
     };
 
     // Whole-selection scale.
@@ -3810,6 +4148,33 @@ bool KiwiXform_ActivePivot( float *out3 )
         Copy3( s_rotate.Pivot(), out3 );
         return true;
     }
+    return false;
+}
+
+// The linear (move) gizmo anchor: the placing pivot while V is live, else the live
+// anchor. Lets the gizmo follow the cursor during pivot placement.
+bool KiwiXform_GizmoAnchor( float out3[3] )
+{
+    if ( !out3 )
+        return false;
+    if ( KiwiCmd_Active() == &s_move )
+        return s_move.GizmoAnchor( out3 );
+    return KiwiXform_ActivePivot( out3 );
+}
+
+// The move gizmo's orientation (rows = world basis). False = world-aligned.
+bool KiwiXform_ActiveFrame( float out[3][3] )
+{
+    if ( KiwiCmd_Active() == &s_move )
+        return s_move.GizmoFrame( out );
+    return false;
+}
+
+// The aligned rotate's frame (rows = the X / Y / Z ring axes); false = world axes.
+bool KiwiXform_ActiveRotateFrame( float out[3][3] )
+{
+    if ( KiwiCmd_Active() == &s_rotate )
+        return s_rotate.GizmoFrame( out );
     return false;
 }
 

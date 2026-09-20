@@ -91,9 +91,11 @@ namespace
                 key = CommandList_KeyName( table[i], keybuf );
             char mods[24];
             mods[0] = '\0';
+            // The conventional reading order (user 2026-09-18: "this really needs to be
+            // ctrl-shift-v"): Ctrl, Shift, Alt, Win - it used to print "Shift+Ctrl+V".
+            if ( table[i].mods & 4 ) strcat( mods, "Ctrl+" );
             if ( table[i].mods & 1 ) strcat( mods, "Shift+" );
             if ( table[i].mods & 2 ) strcat( mods, "Alt+" );
-            if ( table[i].mods & 4 ) strcat( mods, "Ctrl+" );
             if ( table[i].mods & 8 ) strcat( mods, "Win+" );
             _snprintf( out, outSize, "%s%s", mods, key ? key : "?" );
             out[outSize - 1] = '\0';

@@ -18,6 +18,10 @@ void KiwiUX_SetShowAxes( bool on );
 bool KiwiUX_ShowHover();                   // hover outline + active-item accent
 void KiwiUX_SetShowHover( bool on );
 
+// View > Leak Finder Background: the 3D camera clears to a strobing magenta / green instead
+// of the background colour, so a gap in the terrain (or any hole to the void) flashes.
+bool KiwiUX_LeakBackground();
+void KiwiUX_SetLeakBackground( bool on );
 bool KiwiUX_ShowTriCount();                // camera bottom-right "N tris" readout (View menu)
 void KiwiUX_SetShowTriCount( bool on );
 

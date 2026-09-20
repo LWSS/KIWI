@@ -77,6 +77,11 @@ void KiwiXform_PresetMoveConstraint( int con, int axis );
 bool KiwiXform_IsMoveActive();
 bool KiwiXform_IsRotateActive();
 bool KiwiXform_ActivePivot( float *out3 );
+// Where the move gizmo draws (the placing pivot while V is live, else the live anchor)
+// and its orientation (rows = world basis; false = world-aligned). KIWI 2026-09-16.
+bool KiwiXform_GizmoAnchor( float out3[3] );
+bool KiwiXform_ActiveFrame( float out[3][3] );
+bool KiwiXform_ActiveRotateFrame( float out[3][3] );   // aligned rotate rings; false = world axes
 void KiwiXform_PresetRotateAxis( int axis );
 void KiwiXform_FeedRotateDegrees( bool active, float degrees );
 

@@ -2078,6 +2078,12 @@ void RadiantClipboard_CloneSelection()
 // buffer and place + select the result. Sets up / tears down the parse session exactly
 // like the binary (Com_BeginParseSession + spaceDelimited=0/negativeNumbers=1) so the
 // version-4 .map tokens parse identically.
+// KIWI: is there map text to paste?  (kiwi_pasteplace.cpp gates its command on it.)
+bool RadiantClipboard_HasMapText()
+{
+    return s_clipboardLen != 0 && s_clipboardBuf != nullptr;
+}
+
 void RadiantClipboard_Paste()
 {
     if ( !s_clipboardLen || !s_clipboardBuf )

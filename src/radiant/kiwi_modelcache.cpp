@@ -19,11 +19,15 @@ namespace
 // A 4 MB chunk holds 131,072 packed verts; one XSurface has at most 65,535.
 const unsigned KMC_VB_CHUNK_BYTES = 4u * 1024u * 1024u;
 const unsigned KMC_IB_CHUNK_BYTES = 1u * 1024u * 1024u;   // >= 65,535 tris * 6 B
-const int      KMC_MAX_VB_CHUNKS  = 32;                   // 128 MB cap
-const int      KMC_MAX_IB_CHUNKS  = 32;                   //  32 MB cap
+// KIWI (2026-09-17): 128 MB / 32 MB / 4096 surfaces were 32-bit address-space budgets.  On x64
+// the ceilings are 8x (1 GB / 256 MB / 32768); chunks are still created on demand, so nothing
+// changes for a map that fitted - one that did not stops falling back to the uncached draw.
+const bool     KMC_X64            = sizeof( void * ) == 8;
+const int      KMC_MAX_VB_CHUNKS  = KMC_X64 ? 256 : 32;   // x 4 MB
+const int      KMC_MAX_IB_CHUNKS  = KMC_X64 ? 256 : 32;   // x 1 MB
 
 // Open-addressed pointer -> entry table.  Never grows; full = Get() false.
-const int      KMC_TABLE_SIZE     = 4096;
+const int      KMC_TABLE_SIZE     = KMC_X64 ? 32768 : 4096;
 const int      KMC_TABLE_MASK     = KMC_TABLE_SIZE - 1;
 
 struct Entry
@@ -56,7 +60,9 @@ bool                     s_reportedFull;
 unsigned KMC_HashPtr( const XSurface *p )
 {
     // XSurfaces sit in 56-byte arrays, so the pointer's low bits are far from uniform.
-    unsigned h = (unsigned)(uintptr_t)p;
+    // x64: fold the high half in rather than truncating it away.
+    const uintptr_t v = (uintptr_t)p;
+    unsigned h = (unsigned)( v ^ ( (unsigned long long)v >> 32 ) );
     h ^= h >> 15;
     h *= 0x2545F491u;
     h ^= h >> 13;
