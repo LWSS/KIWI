@@ -305,8 +305,22 @@ namespace
             if ( m_srcPatch )
                 return ClickPatch();
 
+            // KIWI (2026-09-21, user: "the UV's sometimes get stretched/blown out. all the
+            // command should do is a precise extrude"): the plane points written are the
+            // face's OWN three points slid along its normal onto the target plane - what
+            // push/pull writes (kiwi_transform.cpp ApplyFaces), with a per-point distance.
+            // The ported lock keeps the saved S/T AT THE THREE PLANE POINTS, so it is only
+            // meaningful when the new points are the old ones moved.  m_pts (the target's
+            // centre +/- its radius along an arbitrary basis) are unrelated points, and
+            // with Texture Lock on the solve mapped the old texcoords onto them: an
+            // arbitrary affine stretch.  "Sometimes" = whenever the lock pref was on.
+            float pts[3][3];
+            const bool slid = SlidePlanePts( pts );
+            if ( !slid )
+                memcpy( pts, m_pts, sizeof( pts ) );   // edge-on: plane only, no lock below
+
             // Trial: no undo bracket or texture lock.
-            WritePlanePts( m_pts );
+            WritePlanePts( pts );
             KiwiValid_Rebuild( m_node->def );
 
             // A copied chamfer plane may duplicate an existing V5 half-space.
@@ -365,12 +379,14 @@ namespace
             face_t *f = &m_node->def->faces[m_face];
             memcpy( f->mtldef, m_baseMtl, sizeof( m_baseMtl ) );                   // restore typed baseline
             Face_MakePlane( f );                    // baseline plane must exist before the save
-            if ( f->w )
+            if ( f->w && slid )
                 Ed_FaceTexLockSave( saveBuf, f );
 
-            WritePlanePts( m_pts );
+            WritePlanePts( pts );
 
-            if ( f->w )
+            // Unslid points carry no texcoord meaning: leave the texdef alone, which for
+            // a planar projection is already the "nothing moved in the plane" answer.
+            if ( f->w && slid )
                 Ed_FaceTexLockReproject( f, saveBuf, lockFlags );
 
             KiwiValid_Rebuild( m_node->def );
@@ -688,6 +704,27 @@ namespace
             Copy3( c, pts[1] );
             Mad3( c, v, r, pts[2] );
             Copy3( n, outN );
+            return true;
+        }
+
+        // The source face's current plane points, each slid along the source normal onto
+        // the target plane.  A shear along n with n.N > 0 (BuildPlanePts flips N to make
+        // it so) keeps the three points non-collinear and their winding sense.  False
+        // when the face is edge-on to the target: the slide is then ill-conditioned.
+        bool SlidePlanePts( float out[3][3] ) const
+        {
+            const float denom = Dot3( m_srcNormal, m_ghostN );
+            if ( fabsf( denom ) < KMATCH_MIN_COS )
+                return false;
+            const float   planeD = Dot3( m_ghostN, m_pts[1] );
+            const face_t *f      = &m_node->def->faces[m_face];
+            for ( int p = 0; p < 3; ++p )
+            {
+                ProjectAlong( f->planepts[p], m_srcNormal, m_ghostN, planeD, denom, out[p] );
+                for ( int k = 0; k < 3; ++k )
+                    if ( !( fabsf( out[p][k] ) <= KVALID_MAX_COORD ) )
+                        return false;
+            }
             return true;
         }
 

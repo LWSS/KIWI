@@ -6,7 +6,8 @@
 #include "qe3.h"
 #include "kiwi_lightcache.h"
 #include "kiwi_walkcache.h"
-#include "kiwi_command.h"      // KiwiCmd_Active: hold caster lists during a live gesture
+#include "kiwi_surfcache.h"    // KiwiSurfCache_Invalidate: a hide must retire the cached pass
+#include "kiwi_command.h"     // KiwiCmd_Active: hold caster lists during a live gesture
 
 #include <stdlib.h>
 #include <string.h>
@@ -266,6 +267,14 @@ void KiwiLightCache_EntityKeyChanged(entity_s_def *lightDef, const char *key)
 void KiwiLightCache_VisibilityChanged()
 {
     ++s_visibilityGeneration;
+    // Every hide/show writer already lands here, so this is also where the camera's cached
+    // entity + prefab pass learns about it.  The hidden bit moves no epoch that
+    // KiwiSurfCache_TryReplay reads (no VB event, no walk or filter bump), so Isolate used
+    // to replay the block captured BEFORE the hide and every unselected model stayed on
+    // screen until some edit happened to invalidate it.  H never showed this: a selected
+    // object is not in the active (cached) pass.  After this the pass sees a shorter
+    // dispatch list than the capture and re-records.
+    KiwiSurfCache_Invalidate( "visibility" );
 }
 
 void KiwiLightCache_MapModified()

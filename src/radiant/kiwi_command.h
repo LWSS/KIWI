@@ -156,6 +156,8 @@
 #define KIWI_CMD_BARBWIRE           34151   // "Barbwire Along Construction..." (kiwi_barbwire)
 #define KIWI_CMD_PASTE_IN_PLACE     34152   // Ctrl+Shift+V  replace selected models by the clipboard group (kiwi_pasteplace)
 #define KIWI_CMD_VIEW_LEAK_BG       34153   // View > Leak Finder Background (strobing camera clear colour)
+#define KIWI_CMD_GROUP_ADD          34154   // selection joins the ONE group it already reaches into
+#define KIWI_CMD_GROUP_SELECT       34155   // grow the selection to whole groups (again = the parent group)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

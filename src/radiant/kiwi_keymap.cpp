@@ -116,6 +116,11 @@ namespace
         Bind( table, count, KIWI_CMD_ROTATE,         0x52, 0 );   // R
         Bind( table, count, KIWI_CMD_SCALE,          0x53, 0 );   // S
 
+        // Universal groups (2026-09-22).  Ctrl+G is the classic SelectSnapPointsToGrid and
+        // stays; Alt+G was the one free G chord (0, Shift, Shift+Alt, Ctrl, Ctrl+Shift and
+        // Ctrl+Alt are taken - mainfrm.cpp's table + the rebinds above).
+        Bind( table, count, KIWI_CMD_GROUP_CREATE,   0x47, 2 );   // Alt+G   group selection
+
         // Bind the duplicate-id alias so the base Backspace row remains unchanged.
         BindName( table, count, "KiwiDeleteSelection", 0x2E, 0 );   // Delete -> 33003
 

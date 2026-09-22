@@ -2316,6 +2316,12 @@ namespace
             Copy3( &m_pts[0], out );
         }
 
+        // Placed point i, oldest first.  Callers bound i by PointCount().
+        void PointAt( int i, float out[3] ) const
+        {
+            Copy3( &m_pts[(size_t)i * 3], out );
+        }
+
         // Guard the size_t stride here so short chains cannot underflow.
         void PrevPoint( float out[3] ) const
         {
@@ -3695,6 +3701,19 @@ bool KiwiCon_ToolPrevAnchor( float out[3] )
     if ( !s_activeTool || s_activeTool->PointCount() < 2 )
         return false;
     s_activeTool->PrevPoint( out );
+    return true;
+}
+
+int KiwiCon_ToolChainCount()
+{
+    return s_activeTool ? s_activeTool->PointCount() : 0;
+}
+
+bool KiwiCon_ToolChainPoint( int i, float out[3] )
+{
+    if ( !s_activeTool || i < 0 || i >= s_activeTool->PointCount() )
+        return false;
+    s_activeTool->PointAt( i, out );
     return true;
 }
 

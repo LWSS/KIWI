@@ -355,6 +355,11 @@ bool KiwiCon_ToolAnchor( float out[3] );
 // Previous committed point; relative-angle snapping's base direction.
 bool KiwiCon_ToolPrevAnchor( float out[3] );
 
+// Every placed WORLD point of the open chain, oldest first (index Count-1 is the anchor).
+// Snapping derives its parallel / perpendicular guides from the chain's own segments.
+int  KiwiCon_ToolChainCount();
+bool KiwiCon_ToolChainPoint( int i, float out[3] );
+
 // Expose an open chain's first point as a snap target once at least three points
 // exist, keeping visual closure and stored closure identical.
 bool KiwiCon_ToolLoopStart( float out[3] );

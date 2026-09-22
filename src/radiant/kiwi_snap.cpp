@@ -83,7 +83,7 @@ namespace
     const char *s_axisName      = "Z";
     // Incident edge directions join the ordinary axis set. Dedup parallel lines
     // and keep at most three directions closest to the cursor aim.
-    enum { KSNAP_MAX_EXT_AXES = 3 };
+    enum { KSNAP_MAX_EXT_AXES = 4 };   // 3 -> 4 (2026-09-21): the chain adds par/perp guides
     // Free-tool angle snapping is a capture band, not a quantizer. This is the
     // allowed lateral miss in SCREEN PIXELS at the segment's depth.
     const float KSNAP_ANGLE_BAND_PIX = 6.0f;
@@ -332,7 +332,7 @@ namespace
     enum { KSNAP_AXIS_CANDS = 4 + KSNAP_MAX_EXT_AXES };
     // extDirs contains extCount unit directions, already ranked by the caller.
     int GatherAxisCandidates( const kconPlane_t &plane, const float *extDirs,
-                              int extCount, axisCand_t *out )
+                              const char *const *extNames, int extCount, axisCand_t *out )
     {
         int n = 0;
         out[n].dir[0] = 0.0f; out[n].dir[1] = 0.0f; out[n].dir[2] = 1.0f;
@@ -365,7 +365,8 @@ namespace
             Copy3( d, out[n].dir );
             // An extension that happens to lie along a world axis is named for the
             // axis (AxisName), so the label never says "ext" about the vertical.
-            out[n].name = AxisName( d, "ext" );
+            // "par" / "perp" say which chain relation the guide holds (GatherAnchorDirs).
+            out[n].name = AxisName( d, ( extNames && extNames[i] ) ? extNames[i] : "ext" );
             ++n;
         }
         return n;
@@ -402,7 +403,7 @@ namespace
     };
 
     void ScanAxes( const camera_s *c, const float *anchor, const kconPlane_t &plane,
-                   const float *extDirs, int extCount,
+                   const float *extDirs, const char *const *extNames, int extCount,
                    float curX, float curY, axisBest_t *best )
     {
         const float wpp = WorldPerPixel( c, anchor );
@@ -413,7 +414,7 @@ namespace
         if ( half > 32768.0f ) half = 32768.0f;
 
         axisCand_t cand[KSNAP_AXIS_CANDS];
-        const int n = GatherAxisCandidates( plane, extDirs, extCount, cand );
+        const int n = GatherAxisCandidates( plane, extDirs, extNames, extCount, cand );
 
         for ( int i = 0; i < n; ++i )
         {
@@ -654,11 +655,12 @@ namespace
         float dir[3] = { 0.0f, 0.0f, 0.0f };
         float d2     = 0.0f;               // point-to-segment distance², world units²
         float key    = 0.0f;               // the sort key — see GatherAnchorDirs
+        const char *name = "ext";          // guide label unless the line is a world axis
     };
     // Insert by ascending key, deduplicate parallel directions, and drop the worst
     // entry at maxN. Equal keys prefer the later candidate.
     void AnchorDirPush( anchorDir_t *list, int *count, int maxN,
-                        const float *dir, float d2, float key )
+                        const float *dir, float d2, float key, const char *name = "ext" )
     {
         for ( int i = 0; i < *count; ++i )
         {
@@ -679,20 +681,53 @@ namespace
         for ( int i = last; i > at; --i )
             list[i] = list[i - 1];
         Copy3( dir, list[at].dir );
-        list[at].d2  = d2;
-        list[at].key = key;
+        list[at].d2   = d2;
+        list[at].key  = key;
+        list[at].name = name;
         if ( *count < maxN )
             ++*count;
     }
     // A line contains the anchor when point-to-segment distance is within
     // KREG_JOIN_DIST WORLD UNITS, the shared endpoint weld tolerance. With aim, rank
     // by collinearity; without aim, prefer the in-progress chain then nearest distance.
+    //
+    // KIWI (2026-09-21, user: "when drawing a multi point line at an angle, the angle
+    // match should be one of the snapping points"): with `planeN` (aimed, free tools)
+    // the open chain also offers, through the anchor, the PERPENDICULAR of its last
+    // segment and the PARALLEL + PERPENDICULAR of every earlier one.  Only the last
+    // segment's own line was a guide, and the 15-degree band (arm 5b) measures from the
+    // world axes, so a chain started at 37 degrees had nothing to square its next leg
+    // against.  Perpendiculars are taken in the frame's resolved plane.
+    enum { KSNAP_MAX_CHAIN_SEGS = 32 };
     int GatherAnchorDirs( const float anchor[3], const float *aim,
-                          anchorDir_t *out, int maxN )
+                          anchorDir_t *out, int maxN, const float *planeN = nullptr )
     {
         int count = 0;
         if ( maxN < 1 )
             return 0;
+        if ( aim && planeN )
+        {
+            const int pts  = KiwiCon_ToolChainCount();
+            int       segs = 0;
+            for ( int i = pts - 1; i >= 1 && segs < KSNAP_MAX_CHAIN_SEGS; --i, ++segs )
+            {
+                float a[3], b[3], dir[3];
+                if ( !KiwiCon_ToolChainPoint( i - 1, a ) || !KiwiCon_ToolChainPoint( i, b ) )
+                    break;
+                Sub3( b, a, dir );
+                if ( !Norm3( dir ) )
+                    continue;
+                // The last segment's own line is pushed below as the continuation.
+                if ( i != pts - 1 )
+                    AnchorDirPush( out, &count, maxN, dir, 0.0f,
+                                   1.0f - fabsf( Dot3( dir, aim ) ), "par" );
+                float perp[3];
+                Cross3( planeN, dir, perp );
+                if ( Norm3( perp ) )
+                    AnchorDirPush( out, &count, maxN, perp, 0.0f,
+                                   1.0f - fabsf( Dot3( perp, aim ) ), "perp" );
+            }
+        }
         // The in-progress segment is not stored until Finish(), so add its direction
         // explicitly. It is the unambiguous first choice for continuation and relative angle.
         {
@@ -1279,8 +1314,9 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             }
             // Free tools also offer incident construction/brush edge directions through the
             // anchor. They are full-3D line candidates; planar shapes cannot use off-plane axes.
-            float extDirs[KSNAP_MAX_EXT_AXES * 3] = { 0.0f };
-            int   extCount = 0;
+            float       extDirs[KSNAP_MAX_EXT_AXES * 3] = { 0.0f };
+            const char *extNames[KSNAP_MAX_EXT_AXES]    = { 0 };
+            int         extCount = 0;
             if ( !planarPlacer )
             {
                 // Rank incident directions by cursor collinearity before applying the cap.
@@ -1288,13 +1324,20 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 Sub3( raw, anchor, aim );
                 const bool haveAim = Norm3( aim );
                 anchorDir_t inc[KSNAP_MAX_EXT_AXES];
+                // The chain's perpendiculars turn in the plane this frame resolved
+                // (the surface or ground under the cursor); world up when it has none.
+                const float worldUp[3] = { 0.0f, 0.0f, 1.0f };
                 extCount = GatherAnchorDirs( anchor, haveAim ? aim : nullptr,
-                                             inc, KSNAP_MAX_EXT_AXES );
+                                             inc, KSNAP_MAX_EXT_AXES,
+                                             out->havePlane ? out->planeNormal : worldUp );
                 for ( int i = 0; i < extCount; ++i )
+                {
                     Copy3( inc[i].dir, extDirs + (size_t)i * 3 );
+                    extNames[i] = inc[i].name;
+                }
             }
 
-            ScanAxes( Ed_Camera(), anchor, axisBasis, extDirs, extCount,
+            ScanAxes( Ed_Camera(), anchor, axisBasis, extDirs, extNames, extCount,
                       curX, curY, &axisBest );
         }
         if ( axisBest.hit )
@@ -1377,11 +1420,45 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             if ( len > 1.0e-3f )
             {
                 const float rawDeg  = atan2f( dv, du ) * 57.29577951f;
-                const float stopDeg = floorf( rawDeg / KCON_ANGLE_STEP + 0.5f )
-                                    * KCON_ANGLE_STEP;
+                float stopDeg = floorf( rawDeg / KCON_ANGLE_STEP + 0.5f )
+                              * KCON_ANGLE_STEP;
                 float miss = rawDeg - stopDeg;
                 if ( miss < 0.0f )
                     miss = -miss;
+                // KIWI (2026-09-21): the same 15-degree stops measured from the chain's
+                // LAST SEGMENT compete with the world-bearing ones, nearer stop wins -
+                // what the planar placers already do (arm 7).  A leg drawn at 37 degrees
+                // makes 52 / 67 / 82 ... reachable; 0 / 90 / 180 off it are the "ext" and
+                // "perp" guides of the line rank above, which also hold their line.
+                bool  relStop = false;
+                float relDeg  = 0.0f;
+                {
+                    float prev[3];
+                    if ( KiwiCon_ToolPrevAnchor( prev ) )
+                    {
+                        float pd[3];
+                        Sub3( anchor, prev, pd );
+                        const float pu = Dot3( pd, cu ), pv = Dot3( pd, cv );
+                        if ( sqrtf( pu * pu + pv * pv ) > 1.0e-3f )
+                        {
+                            const float baseDeg = atan2f( pv, pu ) * 57.29577951f;
+                            const float rel     = floorf( ( rawDeg - baseDeg ) / KCON_ANGLE_STEP + 0.5f )
+                                                * KCON_ANGLE_STEP;
+                            float rmiss = rawDeg - ( baseDeg + rel );
+                            if ( rmiss < 0.0f )
+                                rmiss = -rmiss;
+                            if ( rmiss + 1.0e-3f < miss )
+                            {
+                                miss    = rmiss;
+                                stopDeg = baseDeg + rel;
+                                relStop = true;
+                                relDeg  = rel;
+                                while ( relDeg >   180.0f ) relDeg -= 360.0f;
+                                while ( relDeg <= -180.0f ) relDeg += 360.0f;
+                            }
+                        }
+                    }
+                }
                 // Convert the lateral SCREEN-PIXEL band to degrees at this length, then apply
                 // the minimum-degree floor and maximum-step-fraction cap.
                 float band = KSNAP_ANGLE_MAX_FRAC * KCON_ANGLE_STEP;
@@ -1412,8 +1489,8 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                                          + out->planeNormal[k] * outOfPlane;
                     // Report the same wrapped canonical bearing shown by the HUD.
                     s_angleDeg   = KiwiCon_WrapDeg( stopDeg );
-                    s_angleIsRel = false;
-                    s_angleRel   = 0.0f;
+                    s_angleIsRel = relStop;
+                    s_angleRel   = relStop ? relDeg : 0.0f;
                     out->valid = true;
                     out->type  = SNAP_ANGLE;
                     return true;

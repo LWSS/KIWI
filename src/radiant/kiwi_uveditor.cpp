@@ -748,10 +748,26 @@ namespace
         float st[KUVE_CHAIN_MAX_PTS][2];    // the face's OWN ST frame
         float wp[KUVE_CHAIN_MAX_PTS][3];    // the same points in world space
         float ctr[2];                       // ST centroid, own frame
+        float wctr[3];                      // world centroid
+        float nrm[3];                       // world plane normal
     };
     struct chainVert_t { long long k[3]; int face; int idx; };
     struct chainEdge_t { int va, vb; int face; int i0, i1; };   // va<=vb weld ids
-    struct chainAdj_t  { int fa, fb; int a0, a1, b0, b1; };     // matching vertex indices
+    // The shared stretch runs P..Q.  On face a it is a0->a1 at parameters ta[0], ta[1];
+    // on face b it is b0->b1 at tb[0], tb[1].  A welded (whole) edge is 0..1 on both.
+    struct chainAdj_t
+    {
+        int   fa, fb;
+        int   a0, a1, b0, b1;
+        float ta[2], tb[2];
+    };
+    // World units of collinear contact below which two edges merely touch at a corner.
+    const float KUVE_CHAIN_MIN_OVERLAP  = 1.0f;
+    // The partial-edge pass is O(E^2); past this many edges only whole edges are matched.
+    const int   KUVE_CHAIN_OVERLAP_EDGES = 1024;
+    // Same plane: normals agree this well and the centroid sits this close (world units).
+    const float KUVE_CHAIN_COPLANAR_DOT  = 0.999f;
+    const float KUVE_CHAIN_COPLANAR_DIST = 0.5f;
 
     std::vector<chainFace_t> s_cf;
     std::vector<chainVert_t> s_cv;
@@ -834,9 +850,15 @@ namespace
             chainFace_t &cf = s_cf[i];
             cf.n = 0;
             cf.ctr[0] = cf.ctr[1] = 0.0f;
+            cf.wctr[0] = cf.wctr[1] = cf.wctr[2] = 0.0f;
+            cf.nrm[0]  = cf.nrm[1]  = 0.0f;
+            cf.nrm[2]  = 1.0f;
             face_t *fd = FaceOf( s_faces[i] );
             if ( !fd || !fd->w )
                 continue;
+            cf.nrm[0] = fd->plane.normal[0];
+            cf.nrm[1] = fd->plane.normal[1];
+            cf.nrm[2] = fd->plane.normal[2];
             float st[KUVE_MAX_WINDING][2];
             int   n = FaceStPoints( s_faces[i], st, nullptr );
             if ( n > KUVE_CHAIN_MAX_PTS )
@@ -851,11 +873,15 @@ namespace
                 cf.wp[k][2] = fd->w->p[k][2];
                 cf.ctr[0]  += st[k][0];
                 cf.ctr[1]  += st[k][1];
+                for ( int c = 0; c < 3; ++c )
+                    cf.wctr[c] += cf.wp[k][c];
             }
             if ( n > 0 )
             {
                 cf.ctr[0] /= (float)n;
                 cf.ctr[1] /= (float)n;
+                for ( int c = 0; c < 3; ++c )
+                    cf.wctr[c] /= (float)n;
             }
         }
 
@@ -938,9 +964,72 @@ namespace
                     const int wb0 = weldId[weldBase[s_ce[b].face] + s_ce[b].i0];
                     if ( wb0 == wa0 ) { ad.b0 = s_ce[b].i0; ad.b1 = s_ce[b].i1; }
                     else              { ad.b0 = s_ce[b].i1; ad.b1 = s_ce[b].i0; }
+                    ad.ta[0] = 0.0f;  ad.ta[1] = 1.0f;
+                    ad.tb[0] = 0.0f;  ad.tb[1] = 1.0f;
                     s_ca.push_back( ad );
                 }
             i = j;
+        }
+
+        // KIWI (2026-09-21, user picture: a door cut into three coplanar brushes, "the UV
+        // editor doesn't put these blocks where they make sense to be according to the 3d
+        // view").  Those faces meet along PART of an edge - a T-junction, no two welded
+        // vertices in common - so the whole-edge match above found nothing and all but the
+        // anchor were shelved in a row.  Collinear edges that overlap by at least
+        // KUVE_CHAIN_MIN_OVERLAP are an adjacency too; the fold pins the overlap's ends,
+        // whose ST is a lerp along each edge (ST is affine over a planar face).  Appended
+        // AFTER the welded pairs, so a whole shared edge still folds first.
+        if ( (int)s_ce.size() <= KUVE_CHAIN_OVERLAP_EDGES )
+        {
+            for ( size_t a = 0; a < s_ce.size(); ++a )
+            {
+                const chainEdge_t &ea = s_ce[a];
+                const float *pa0 = s_cf[ea.face].wp[ea.i0];
+                const float *pa1 = s_cf[ea.face].wp[ea.i1];
+                float u[3] = { pa1[0] - pa0[0], pa1[1] - pa0[1], pa1[2] - pa0[2] };
+                const float la = sqrtf( u[0] * u[0] + u[1] * u[1] + u[2] * u[2] );
+                if ( la < KUVE_CHAIN_MIN_OVERLAP )
+                    continue;
+                u[0] /= la; u[1] /= la; u[2] /= la;
+
+                for ( size_t b = a + 1; b < s_ce.size(); ++b )
+                {
+                    const chainEdge_t &eb = s_ce[b];
+                    if ( eb.face == ea.face )
+                        continue;
+                    if ( eb.va == ea.va && eb.vb == ea.vb )
+                        continue;                       // a welded pair, already listed
+                    float s[2];
+                    bool  onLine = true;
+                    for ( int e = 0; e < 2 && onLine; ++e )
+                    {
+                        const float *q = s_cf[eb.face].wp[e ? eb.i1 : eb.i0];
+                        const float d[3] = { q[0] - pa0[0], q[1] - pa0[1], q[2] - pa0[2] };
+                        s[e] = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+                        const float off[3] = { d[0] - u[0] * s[e], d[1] - u[1] * s[e],
+                                               d[2] - u[2] * s[e] };
+                        onLine = ( off[0] * off[0] + off[1] * off[1] + off[2] * off[2] )
+                              <= KUVE_WELD_EPS * KUVE_WELD_EPS;
+                    }
+                    if ( !onLine || fabsf( s[1] - s[0] ) < KUVE_CHAIN_MIN_OVERLAP )
+                        continue;
+                    float lo = ( s[0] < s[1] ) ? s[0] : s[1];
+                    float hi = ( s[0] < s[1] ) ? s[1] : s[0];
+                    if ( lo < 0.0f ) lo = 0.0f;
+                    if ( hi > la )   hi = la;
+                    if ( hi - lo < KUVE_CHAIN_MIN_OVERLAP )
+                        continue;
+
+                    chainAdj_t ad;
+                    ad.fa = ea.face;  ad.a0 = ea.i0;  ad.a1 = ea.i1;
+                    ad.fb = eb.face;  ad.b0 = eb.i0;  ad.b1 = eb.i1;
+                    ad.ta[0] = lo / la;
+                    ad.ta[1] = hi / la;
+                    ad.tb[0] = ( lo - s[0] ) / ( s[1] - s[0] );
+                    ad.tb[1] = ( hi - s[0] ) / ( s[1] - s[0] );
+                    s_ca.push_back( ad );
+                }
+            }
         }
 
         // BFS from the active face, whose D remains identity.
@@ -960,34 +1049,199 @@ namespace
             for ( size_t r = 0; r < s_ca.size(); ++r )
             {
                 const chainAdj_t &ad = s_ca[r];
-                int fa = ad.fa, fb = ad.fb, a0 = ad.a0, a1 = ad.a1, b0 = ad.b0, b1 = ad.b1;
+                int   fa = ad.fa, fb = ad.fb, a0 = ad.a0, a1 = ad.a1, b0 = ad.b0, b1 = ad.b1;
+                float ta[2] = { ad.ta[0], ad.ta[1] }, tb[2] = { ad.tb[0], ad.tb[1] };
                 if ( fb == a && !placed[fa] ) { fb = fa; fa = a;
                                                 const int t0 = a0, t1 = a1;
-                                                a0 = b0; a1 = b1; b0 = t0; b1 = t1; }
+                                                a0 = b0; a1 = b1; b0 = t0; b1 = t1;
+                                                for ( int e = 0; e < 2; ++e )
+                                                { const float t = ta[e]; ta[e] = tb[e]; tb[e] = t; } }
                 if ( fa != a || placed[fb] )
                     continue;
                 if ( s_cf[fa].n < 3 || s_cf[fb].n < 3 )
                     continue;
 
+                // The shared stretch's two ends, in each face's own ST frame.
+                float sa0[2], sa1[2], sb0[2], sb1[2];
+                for ( int c = 0; c < 2; ++c )
+                {
+                    const float ea0 = s_cf[fa].st[a0][c], ea1 = s_cf[fa].st[a1][c];
+                    const float eb0 = s_cf[fb].st[b0][c], eb1 = s_cf[fb].st[b1][c];
+                    sa0[c] = ea0 + ( ea1 - ea0 ) * ta[0];
+                    sa1[c] = ea0 + ( ea1 - ea0 ) * ta[1];
+                    sb0[c] = eb0 + ( eb1 - eb0 ) * tb[0];
+                    sb1[c] = eb0 + ( eb1 - eb0 ) * tb[1];
+                }
+
                 float A0[2], A1[2];
-                XfApply( s_faceD[fa], s_cf[fa].st[a0][0], s_cf[fa].st[a0][1], &A0[0], &A0[1] );
-                XfApply( s_faceD[fa], s_cf[fa].st[a1][0], s_cf[fa].st[a1][1], &A1[0], &A1[1] );
+                XfApply( s_faceD[fa], sa0[0], sa0[1], &A0[0], &A0[1] );
+                XfApply( s_faceD[fa], sa1[0], sa1[1], &A1[0], &A1[1] );
 
-                uvXform_t D = FoldRigid( A0, A1, s_cf[fb].st[b0], s_cf[fb].st[b1] );
+                uvXform_t D = FoldRigid( A0, A1, sb0, sb1 );
 
-                // Same-side centroids overlap, so reflect the neighbor across the edge.
+                // A fold-out lands the neighbour across the edge from the placed face.
+                // Two faces in ONE plane keep whatever sides they have in the world:
+                // normally opposite too, but same-side when one lies over the other.
+                bool wantOpposite = true;
+                {
+                    const chainFace_t &ca3 = s_cf[fa], &cb3 = s_cf[fb];
+                    const float nd = ca3.nrm[0] * cb3.nrm[0] + ca3.nrm[1] * cb3.nrm[1]
+                                   + ca3.nrm[2] * cb3.nrm[2];
+                    if ( nd > KUVE_CHAIN_COPLANAR_DOT )
+                    {
+                        // edge direction and the in-plane perpendicular n x e
+                        float e[3], P[3], perp[3];
+                        for ( int c = 0; c < 3; ++c )
+                        {
+                            const float w0 = ca3.wp[a0][c], w1 = ca3.wp[a1][c];
+                            P[c] = w0 + ( w1 - w0 ) * ta[0];
+                            e[c] = w1 - w0;
+                        }
+                        perp[0] = ca3.nrm[1] * e[2] - ca3.nrm[2] * e[1];
+                        perp[1] = ca3.nrm[2] * e[0] - ca3.nrm[0] * e[2];
+                        perp[2] = ca3.nrm[0] * e[1] - ca3.nrm[1] * e[0];
+                        float wa = 0.0f, wb = 0.0f;
+                        for ( int c = 0; c < 3; ++c )
+                        {
+                            wa += perp[c] * ( ca3.wctr[c] - P[c] );
+                            wb += perp[c] * ( cb3.wctr[c] - P[c] );
+                        }
+                        wantOpposite = ( wa > 0.0f ) != ( wb > 0.0f );
+                    }
+                }
+
                 float ca[2], cb[2];
                 XfApply( s_faceD[fa], s_cf[fa].ctr[0], s_cf[fa].ctr[1], &ca[0], &ca[1] );
                 XfApply( D,           s_cf[fb].ctr[0], s_cf[fb].ctr[1], &cb[0], &cb[1] );
                 const float sa = SideOf( A0, A1, ca );
                 const float sb = SideOf( A0, A1, cb );
-                if ( ( sa > 0.0f ) == ( sb > 0.0f ) )
+                if ( ( ( sa > 0.0f ) == ( sb > 0.0f ) ) == wantOpposite )
                     D = XfMul( FoldMirror( A0, A1[0] - A0[0], A1[1] - A0[1] ), D );
 
                 s_faceD[fb] = D;
                 placed[fb]  = 1;
                 ++s_chainFolded;
                 queue.push_back( fb );
+            }
+        }
+
+        // Faces that touch nothing placed but lie in a placed face's PLANE (the panes of
+        // a window, tiles with a gap) go where that face's own mapping puts them: its
+        // world->display map is affine over the plane, so it says where any point of the
+        // plane belongs.  The neighbour stays rigid - pinned at one corner, turned to the
+        // mapped direction of its longest diagonal, mirrored if a third corner asks.
+        for ( bool progress = true; progress; )
+        {
+            progress = false;
+            for ( int fb = 0; fb < nf; ++fb )
+            {
+                if ( placed[fb] || s_cf[fb].n < 3 )
+                    continue;
+                const chainFace_t &cb3 = s_cf[fb];
+                for ( int fa = 0; fa < nf && !placed[fb]; ++fa )
+                {
+                    if ( !placed[fa] || s_cf[fa].n < 3 )
+                        continue;
+                    const chainFace_t &ca3 = s_cf[fa];
+                    float rel[3] = { cb3.wctr[0] - ca3.wp[0][0], cb3.wctr[1] - ca3.wp[0][1],
+                                     cb3.wctr[2] - ca3.wp[0][2] };
+                    if ( ca3.nrm[0] * cb3.nrm[0] + ca3.nrm[1] * cb3.nrm[1]
+                       + ca3.nrm[2] * cb3.nrm[2] <= KUVE_CHAIN_COPLANAR_DOT
+                      || fabsf( rel[0] * ca3.nrm[0] + rel[1] * ca3.nrm[1] + rel[2] * ca3.nrm[2] )
+                         > KUVE_CHAIN_COPLANAR_DIST )
+                        continue;
+
+                    // In-plane basis of the placed face: its first edge and the corner
+                    // farthest off that edge.
+                    float e1[3], e2[3] = { 0.0f, 0.0f, 0.0f };
+                    for ( int c = 0; c < 3; ++c )
+                        e1[c] = ca3.wp[1][c] - ca3.wp[0][c];
+                    int   k2   = -1;
+                    float best = 0.0f;
+                    for ( int k = 2; k < ca3.n; ++k )
+                    {
+                        float d[3], cr[3];
+                        for ( int c = 0; c < 3; ++c )
+                            d[c] = ca3.wp[k][c] - ca3.wp[0][c];
+                        cr[0] = e1[1] * d[2] - e1[2] * d[1];
+                        cr[1] = e1[2] * d[0] - e1[0] * d[2];
+                        cr[2] = e1[0] * d[1] - e1[1] * d[0];
+                        const float m = cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2];
+                        if ( m > best ) { best = m; k2 = k; }
+                    }
+                    if ( k2 < 0 || best < KUVE_EPS )
+                        continue;
+                    for ( int c = 0; c < 3; ++c )
+                        e2[c] = ca3.wp[k2][c] - ca3.wp[0][c];
+                    const float g11 = e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2];
+                    const float g12 = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
+                    const float g22 = e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2];
+                    const float det = g11 * g22 - g12 * g12;
+                    if ( fabsf( det ) < KUVE_EPS )
+                        continue;
+
+                    // Displayed position of world point X of the plane, through face fa.
+                    struct Map
+                    {
+                        const chainFace_t *f; const uvXform_t *D; int k2;
+                        const float *e1, *e2; float g11, g12, g22, det;
+                        void At( const float *X, float *out ) const
+                        {
+                            const float d[3] = { X[0] - f->wp[0][0], X[1] - f->wp[0][1],
+                                                 X[2] - f->wp[0][2] };
+                            const float r1 = d[0] * e1[0] + d[1] * e1[1] + d[2] * e1[2];
+                            const float r2 = d[0] * e2[0] + d[1] * e2[1] + d[2] * e2[2];
+                            const float a  = ( r1 * g22 - r2 * g12 ) / det;
+                            const float b  = ( r2 * g11 - r1 * g12 ) / det;
+                            const float s  = f->st[0][0] + a * ( f->st[1][0] - f->st[0][0] )
+                                                         + b * ( f->st[k2][0] - f->st[0][0] );
+                            const float t  = f->st[0][1] + a * ( f->st[1][1] - f->st[0][1] )
+                                                         + b * ( f->st[k2][1] - f->st[0][1] );
+                            XfApply( *D, s, t, &out[0], &out[1] );
+                        }
+                    };
+                    Map map = { &ca3, &s_faceD[fa], k2, e1, e2, g11, g12, g22, det };
+
+                    // fb's longest diagonal, and the corner farthest off it.
+                    int   i0 = 0, i1 = 1, i2 = -1;
+                    float far2 = -1.0f;
+                    for ( int p = 0; p < cb3.n; ++p )
+                        for ( int q = p + 1; q < cb3.n; ++q )
+                        {
+                            float d2 = 0.0f;
+                            for ( int c = 0; c < 3; ++c )
+                                d2 += ( cb3.wp[q][c] - cb3.wp[p][c] ) * ( cb3.wp[q][c] - cb3.wp[p][c] );
+                            if ( d2 > far2 ) { far2 = d2; i0 = p; i1 = q; }
+                        }
+                    float T0[2], T1[2];
+                    map.At( cb3.wp[i0], T0 );
+                    map.At( cb3.wp[i1], T1 );
+                    uvXform_t D = FoldRigid( T0, T1, cb3.st[i0], cb3.st[i1] );
+
+                    float offBest = 0.0f;
+                    for ( int p = 0; p < cb3.n; ++p )
+                    {
+                        if ( p == i0 || p == i1 )
+                            continue;
+                        float tp[2];
+                        map.At( cb3.wp[p], tp );
+                        const float off = fabsf( SideOf( T0, T1, tp ) );
+                        if ( off > offBest ) { offBest = off; i2 = p; }
+                    }
+                    if ( i2 >= 0 )
+                    {
+                        float want[2], got[2];
+                        map.At( cb3.wp[i2], want );
+                        XfApply( D, cb3.st[i2][0], cb3.st[i2][1], &got[0], &got[1] );
+                        if ( ( SideOf( T0, T1, want ) > 0.0f ) != ( SideOf( T0, T1, got ) > 0.0f ) )
+                            D = XfMul( FoldMirror( T0, T1[0] - T0[0], T1[1] - T0[1] ), D );
+                    }
+
+                    s_faceD[fb] = D;
+                    placed[fb]  = 1;
+                    ++s_chainFolded;
+                    progress    = true;
+                }
             }
         }
 

@@ -59,18 +59,12 @@ namespace
 
     // Fixed slots keep the cluster's position independent of font metrics; their
     // heights and gaps sum exactly to KVC_TOP_STRIP.
-    const float KVC_ZOOM_W    = 90.0f;   // bar width, pixels
-    const float KVC_ZOOM_H    = 8.0f;
-    const float KVC_ZOOM_GAP  = 2.0f;    // bar -> label
-    const float KVC_ZOOM_TEXT = 14.0f;   // the label's slot (one default-font line)
     const float KVC_SEC_W     = 104.0f;  // aligns with the cube backdrop
     const float KVC_SEC_H     = 20.0f;   // button height, pixels
-    const float KVC_SEC_GAP   = 4.0f;    // label -> button
     const float KVC_STRIP_GAP = 6.0f;    // button -> cube
-    // Two text rows under the bar: the zoom / triangle label and the cursor-distance
-    // line (the latter used to overlap the SECTION button).
-    const float KVC_TOP_STRIP = KVC_ZOOM_H + KVC_ZOOM_GAP + KVC_ZOOM_TEXT + KVC_ZOOM_TEXT
-                              + KVC_SEC_GAP + KVC_SEC_H + KVC_STRIP_GAP;
+    // The strip is the SECTION button alone since the zoom meter and the cursor-distance
+    // line were removed (2026-09-22).
+    const float KVC_TOP_STRIP = KVC_SEC_H + KVC_STRIP_GAP;
 
     // Omit the strip when it would push the cube below the image.
     float KVC_StripH( float imgH )
@@ -332,121 +326,10 @@ namespace
         out[o] = 0;
     }
 
-    // The "1px = ..." zoom meter shows only while the zoom is fresh (the units per
-    // pixel changed within the last KVC_ZOOM_LINGER seconds); the rest of the time
-    // the slot carries the triangle count.
-    const float KVC_ZOOM_LINGER = 1.5f;
-    float s_zoomLastWpp  = -1.0f;
-    float s_zoomLastTime = -1000.0f;
-
-    // Log-scaled fill is linear in multiplicative wheel steps. Colour maps the same
-    // fraction from green to red as world-units-per-pixel sensitivity increases;
-    // the formatted number uses current display units. The 8-pixel bar is read-only
-    // to avoid accidental zoom jumps, but still claims hover from the image.
-    bool DrawZoomBar( float imgMinX, float imgMinY, float imgW, float imgH )
-    {
-        if ( KVC_StripH( imgH ) <= 0.0f )
-            return false;                    // no room: the strip is not drawn at all
-
-        float frac = 0.0f, wpp = 0.0f;
-        if ( !KiwiCam_ZoomMeter( &frac, &wpp ) )
-            return false;
-
-        const float x1 = imgMinX + imgW - KVC_MARGIN;
-        const float x0 = x1 - KVC_ZOOM_W;
-        const float y0 = imgMinY + KVC_MARGIN;
-        const float y1 = y0 + KVC_ZOOM_H;
-
-        const ImVec2 mouse = ImGui::GetIO().MousePos;
-        const bool   hot   = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
-                          && mouse.x >= x0 && mouse.x <= x1
-                          && mouse.y >= y0 && mouse.y <= y1 + KVC_ZOOM_GAP + KVC_ZOOM_TEXT;
-
-        ImDrawList *dl = ImGui::GetWindowDrawList();
-
-        // Fresh zoom?  A changed units-per-pixel restarts the linger clock.
-        const float now = (float)ImGui::GetTime();
-        if ( s_zoomLastWpp < 0.0f )
-            s_zoomLastWpp = wpp;                 // first frame: nothing to announce
-        else if ( fabsf( wpp - s_zoomLastWpp ) > wpp * 1.0e-4f )
-        {
-            s_zoomLastWpp  = wpp;
-            s_zoomLastTime = now;
-        }
-        const bool zoomFresh = ( now - s_zoomLastTime ) < KVC_ZOOM_LINGER || hot;
-
-        if ( zoomFresh )
-        {
-            dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
-                               IM_COL32( 18, 18, 22, 175 ), 2.0f );
-
-            // Two linear legs preserve a true amber midpoint.
-            float r, g, b;
-            if ( frac < 0.5f )
-            {
-                const float t = frac * 2.0f;
-                r = 0.36f + ( 0.98f - 0.36f ) * t;
-                g = 0.80f + ( 0.75f - 0.80f ) * t;
-                b = 0.36f + ( 0.22f - 0.36f ) * t;
-            }
-            else
-            {
-                const float t = ( frac - 0.5f ) * 2.0f;
-                r = 0.98f + ( 0.95f - 0.98f ) * t;
-                g = 0.75f + ( 0.24f - 0.75f ) * t;
-                b = 0.22f + ( 0.20f - 0.22f ) * t;
-            }
-            const ImU32 col = IM_COL32( (int)( r * 255.0f ), (int)( g * 255.0f ),
-                                        (int)( b * 255.0f ), 235 );
-
-            // Keep a visible sliver at the minimum.
-            float fillW = ( x1 - x0 ) * frac;
-            if ( fillW < 2.0f ) fillW = 2.0f;
-            dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x0 + fillW, y1 ), col, 2.0f );
-            dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
-                         IM_COL32( 80, 84, 96, 150 ), 2.0f, 0, 1.0f );
-
-            char num[64];
-            char label[96];
-            KiwiUnits_Format( num, sizeof( num ), wpp );
-            _snprintf( label, sizeof( label ), "1px = %s", num );
-            label[sizeof( label ) - 1] = 0;
-            const ImVec2 ts = ImGui::CalcTextSize( label );
-            dl->AddText( ImVec2( x1 - ts.x, y1 + KVC_ZOOM_GAP ),
-                         hot ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 190, 196, 208, 225 ),
-                         label );
-        }
-        // Idle: the slot stays empty; the triangle count lives in the bottom-right
-        // corner (DrawTriCount) where View > Show Triangle Count controls it.
-
-        // KIWI-UX: live camera→cursor distance in RAW ENGINE UNITS (inches), under the
-        // zoom label.  This is the number distance-based systems compare against (model
-        // cull/LOD distances, fog, sound ranges), so a mapper can zoom to where detail
-        // should drop and read the threshold straight off the view.  One extra ray only
-        // while the cursor is over the camera image.
-        {
-            int cpx, cpy;
-            ray_t ray;
-            kiwiDropHit_t hit;
-            if ( ImGuiShell_CameraPaintCursor( &cpx, &cpy, nullptr, nullptr )
-              && Pick_RayFromImagePos( cpx, cpy, &ray )
-              && KiwiDrop_Trace( ray, false, &hit ) )
-            {
-                const float *eye = Ed_Camera()->origin;
-                const float dx = hit.point[0] - eye[0];
-                const float dy = hit.point[1] - eye[1];
-                const float dz = hit.point[2] - eye[2];
-                const float dist = sqrtf( dx * dx + dy * dy + dz * dz );
-                char dline[96];
-                _snprintf( dline, sizeof( dline ), "cursor %.0f units", dist );
-                dline[sizeof( dline ) - 1] = 0;
-                const ImVec2 dts = ImGui::CalcTextSize( dline );
-                dl->AddText( ImVec2( x1 - dts.x, y1 + KVC_ZOOM_GAP + KVC_ZOOM_TEXT ),
-                             IM_COL32( 190, 196, 208, 225 ), dline );
-            }
-        }
-        return hot;
-    }
+    // KIWI (2026-09-22, user: "what is this stupid new thing? remove it its useless, also
+    // remove the 1px = ... inches crap"): the zoom meter (bar + "1px = ..." label) and the
+    // "cursor N units" camera-to-cursor distance line that lived here are gone, and the
+    // strip they occupied is given back - SECTION is now the top of the cluster.
 
     // Three-state section control: off, waiting for a height, or active. It shares
     // KiwiSection_Toggle with the palette and claims its own hover/click rectangle.
@@ -457,8 +340,7 @@ namespace
 
         const float x1 = imgMinX + imgW - KVC_MARGIN;
         const float x0 = x1 - KVC_SEC_W;
-        const float y0 = imgMinY + KVC_MARGIN + KVC_ZOOM_H + KVC_ZOOM_GAP
-                       + KVC_ZOOM_TEXT + KVC_ZOOM_TEXT + KVC_SEC_GAP;   // below the cursor line
+        const float y0 = imgMinY + KVC_MARGIN;
         const float y1 = y0 + KVC_SEC_H;
 
         const ImVec2 mouse = ImGui::GetIO().MousePos;
@@ -1020,7 +902,6 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
 
     // Cube visibility does not hide independent camera, section or grid controls.
     DrawTriCount( imgMinX, imgMinY, imgW, imgH );      // corner readout, no hover claim
-    const bool zoomHot = DrawZoomBar( imgMinX, imgMinY, imgW, imgH );
     const bool secHot  = DrawSectionButton( imgMinX, imgMinY, imgW, imgH );
     const bool projHot = DrawProjButton( imgMinX, imgMinY, imgW, imgH );
     const bool gridHot = DrawGridButton( imgMinX, imgMinY, imgW, imgH );
@@ -1028,7 +909,7 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     const bool gridEditHot = DrawGridEditPopup();
 
     if ( !KiwiViewCube_Show() )
-        return zoomHot || secHot || projHot || gridHot || gridEditHot;
+        return secHot || projHot || gridHot || gridEditHot;
 
     camera_s *c = Ed_Camera();
     CamWnd_BuildMatrix();                        // vpn/vright/vup for THIS frame's angles
@@ -1207,5 +1088,5 @@ bool KiwiViewCube_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     }
 
     // Every visible control claims hover so clicks cannot start a marquee behind it.
-    return overWidget || zoomHot || secHot || projHot || gridHot || gridEditHot;
+    return overWidget || secHot || projHot || gridHot || gridEditHot;
 }

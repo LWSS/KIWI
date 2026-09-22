@@ -397,6 +397,58 @@ namespace
         return false;
     }
 
+    bool CentroidInside( const kregion_t &outer, const kregion_t &inner )
+    {
+        float uv[2];
+        KiwiCon_WorldToPlane( outer.plane, inner.centroid, uv );
+        // Even-odd crossing test in plane space (the pick's own test).
+        bool inside = false;
+        const std::vector<float> &pts = outer.pts;
+        const int n = PtCount( pts );
+        for ( int a = 0, b = n - 1; a < n; b = a++ )
+        {
+            const float *pa = Pt( pts, a );
+            const float *pb = Pt( pts, b );
+            if ( ( ( pa[1] > uv[1] ) != ( pb[1] > uv[1] ) )
+              && ( uv[0] < ( pb[0] - pa[0] ) * ( uv[1] - pa[1] ) / ( pb[1] - pa[1] ) + pa[0] ) )
+                inside = !inside;
+        }
+        return inside;
+    }
+
+    // See BuildRegions' tail.  Only strictly smaller coplanar regions whose centroid
+    // lies inside count towards the tiling; the areas must agree within 1 %.
+    void DropTiledRegions()
+    {
+        std::vector<char> drop( s_regions.size(), 0 );
+        for ( size_t i = 0; i < s_regions.size(); ++i )
+        {
+            const kregion_t &r = s_regions[i];
+            const float area = fabsf( KiwiRegion_SignedArea( r.pts ) );
+            if ( !( area > 0.0f ) )
+                continue;
+            float sum = 0.0f;
+            for ( size_t k = 0; k < s_regions.size(); ++k )
+            {
+                if ( k == i )
+                    continue;
+                const kregion_t &s = s_regions[k];
+                const float sa = fabsf( KiwiRegion_SignedArea( s.pts ) );
+                if ( !( sa < area * 0.99f ) || !SamePlaneApprox( r.plane, s.plane ) )
+                    continue;
+                if ( CentroidInside( r, s ) )
+                    sum += sa;
+            }
+            if ( sum > 0.0f && fabsf( sum - area ) <= area * 0.01f )
+                drop[i] = 1;
+        }
+        size_t out = 0;
+        for ( size_t i = 0; i < s_regions.size(); ++i )
+            if ( !drop[i] )
+                s_regions[out++] = s_regions[i];
+        s_regions.resize( out );
+    }
+
     void BuildRegions()
     {
         s_regions.clear();
@@ -666,6 +718,15 @@ namespace
             c[1] /= (float)n;
             KiwiCon_PlaneToWorld( r.plane, c, r.centroid );
         }
+
+        // KIWI (2026-09-22, user: "when construction planes have a line dividing them, it
+        // should treat it as 2 faces"): a rect with a line across it gave THREE faces -
+        // the two cells the arrangement finds AND the whole rect from pass 1, which is
+        // pushed first and so won every pick and drew over both halves.  A region that
+        // its smaller regions TILE (their areas sum to its own) is that coarser face and
+        // is dropped.  A loop merely nested inside another (a window in a wall) does not
+        // tile it, so the "holes are separate regions" rule above is unchanged.
+        DropTiledRegions();
     }
 
     // Carry flash state by world position rather than unstable derived indices.

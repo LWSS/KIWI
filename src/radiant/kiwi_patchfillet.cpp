@@ -110,6 +110,9 @@ namespace
     // The bias field's guard band: the chamfer plane must stay strictly between
     // the two faces, so |bias| is clamped this far inside the half-angle.
     const float KPF_BIAS_GUARD_DEG = 2.0f;
+    // A-key angle drag: degrees per pixel of sideways cursor travel, and the Ctrl step.
+    const float KPF_ANGLE_DEG_PER_PIX = 0.25f;
+    const float KPF_ANGLE_SNAP_DEG    = 5.0f;
 
     // One selected edge and its baseline-derived fillet frame.
     struct filletUnit_t
@@ -176,7 +179,8 @@ namespace
             static const kiwiPrompt_t s_chamfer[] = {
                 { "Ball", "Drag it — chamfer depth" },
                 { "D",    "Curve it (patch fillet)" },
-                { "Tab",  "Angle bias" },
+                { "A",    "Drag the angle (click ends)" },
+                { "Tab",  "Type the angle" },
             };
             static const kiwiPrompt_t s_fillet[] = {
                 { "Ball", "Drag it — fillet radius" },
@@ -244,10 +248,13 @@ namespace
         // radius; active-command key handling owns unmodified D during the gesture.
         bool KeyDown( int vk, unsigned mods ) override
         {
+            if ( vk == 0x41 && !mods )              // 'A', no modifiers
+                return ToggleAngleDrag();
             if ( vk != 0x44 || mods )               // 'D', no modifiers
                 return false;
             if ( m_units.empty() )
                 return true;
+            m_angleDrag = false;                    // D re-latches the depth; one owner at a time
 
             const filletUnit_t &drv = m_units[0];
             if ( !m_curve )
@@ -304,6 +311,8 @@ namespace
         // frame, and release pauses the command again.
         void HandleGrab( bool held ) override
         {
+            if ( held )
+                m_angleDrag = false;        // the ball is depth: taking it ends the angle drag
             if ( m_grabbed == held )
                 return;
             m_grabbed = held;
@@ -322,7 +331,8 @@ namespace
             KiwiCmd_Pause();
             Sys_Printf( "Bevel Edge: %i edge(s), parked at 0.  GRAB THE BALL on the "
                         "stem and drag to cut the chamfer, or just type a depth.  "
-                        "D curves it into a patch fillet, Tab reaches the angle bias, "
+                        "D curves it into a patch fillet, A drags the chamfer angle with "
+                        "the mouse (Tab types it), "
                         "RMB / Enter confirms, Esc cancels.\n", (int)m_units.size() );
             return true;
         }
@@ -409,6 +419,21 @@ namespace
             if ( m_units.empty() )
                 return;
             ReLatchFor( m_curve ? m_radius : m_depth );
+            LatchAngle();
+        }
+
+        // A click ends the angle drag where it stands (the depth ball stays parked).
+        // The lollipop grab is routed before this, so a press ON the ball never gets here.
+        bool PressIntercept( int imgX, int imgY ) override
+        {
+            (void)imgX; (void)imgY;
+            if ( !m_angleDrag )
+                return false;
+            m_angleDrag = false;
+            KiwiCmd_Pause();
+            UpdateHud();
+            g_nUpdateBits |= 1;
+            return true;
         }
 
         void DrawWorld() override
@@ -504,6 +529,9 @@ namespace
             m_curve     = false;        // chamfer is always the initial mode
             m_biasDeg   = 0.0f;
             m_hasBias   = false;
+            m_angleDrag = false;
+            m_angleX0   = 0;
+            m_angleBase = 0.0f;
             m_start     = 0.0f;
             m_haveStart = false;
             m_hasNum    = false;
@@ -698,6 +726,85 @@ namespace
             m_haveStart = true;
         }
 
+        // KIWI (2026-09-21, user: "pressing A while doing a bevel should allow dynamic
+        // angle change during the tool operation. (like in plasticity)").  A hands the
+        // MOUSE to the chamfer's angle bias - the Tab field's value, driven live: sideways
+        // cursor travel, KPF_ANGLE_DEG_PER_PIX per pixel, depth frozen where it stands.
+        // No button is held (the command is resumed so moves arrive); a click, A again,
+        // taking the depth ball, D, Enter or Esc all end it.  Ctrl steps by 5 degrees.
+        bool ToggleAngleDrag()
+        {
+            if ( m_units.empty() )
+                return true;
+            if ( m_angleDrag )
+            {
+                m_angleDrag = false;
+                KiwiCmd_Pause();
+                UpdateHud();
+                return true;
+            }
+            if ( m_curve )
+            {
+                Sys_Printf( "Fillet: no angle to drag - a fillet arc is tangent to BOTH "
+                            "faces, which fixes it on the bisector.  Press D for a flat "
+                            "chamfer, then A.\n" );
+                return true;
+            }
+            // A typed bias would pin the value under the mouse: the drag takes it over
+            // from wherever it stands.
+            if ( m_hasBias )
+            {
+                KiwiNum_ClearField( 1 );
+                m_hasBias = false;
+            }
+            m_angleDrag = true;
+            m_grabbed   = false;
+            KiwiCmd_Resume();               // parked commands get no MouseMove
+            LatchAngle();                   // Resume is a no-op when already hot
+            if ( m_depth < KPF_MIN_RADIUS )
+                Sys_Printf( "Bevel Edge: angle drag on - but the chamfer has no depth yet, "
+                            "so nothing will show until the ball is dragged or a depth "
+                            "typed.\n" );
+            UpdateHud();
+            return true;
+        }
+
+        // The current cursor column keeps the current bias.
+        void LatchAngle()
+        {
+            int x, y;
+            if ( !m_angleDrag || !KiwiCmd_LastCursor( &x, &y ) )
+                return;
+            m_angleX0   = x;
+            m_angleBase = m_biasDeg;
+        }
+
+        // Keep the requested value inside what the DRIVING edge can show, so dragging
+        // back answers at once instead of unwinding travel spent past the clamp.
+        void DragAngle()
+        {
+            int x, y;
+            if ( !m_angleDrag || m_curve || m_hasBias || m_units.empty()
+              || !KiwiCmd_LastCursor( &x, &y ) )
+                return;
+            float deg = m_angleBase + (float)( x - m_angleX0 ) * KPF_ANGLE_DEG_PER_PIX;
+            if ( KiwiCmd_SnapEngaged() )
+                deg = floorf( deg / KPF_ANGLE_SNAP_DEG + 0.5f ) * KPF_ANGLE_SNAP_DEG;
+            const float lim = m_units[0].biasLimit * ( 180.0f / 3.14159265358979f )
+                            - KPF_BIAS_GUARD_DEG;
+            bool clamped = true;
+            if ( !( lim > 0.0f ) )  deg = 0.0f;
+            else if ( deg >  lim )  deg =  lim;
+            else if ( deg < -lim )  deg = -lim;
+            else                    clamped = false;
+            if ( clamped )
+            {
+                m_angleX0   = x;            // this column IS the limit from now on
+                m_angleBase = deg;
+            }
+            m_biasDeg = deg;
+        }
+
         void Recompute()
         {
             if ( !AllLive() )
@@ -752,6 +859,8 @@ namespace
                     }
                 }
             }
+
+            DragAngle();                    // A: the mouse owns the bias, not the depth
 
             if ( s < 0.0f )
                 s = 0.0f;
@@ -1309,7 +1418,7 @@ namespace
                 const float applied = m_units[0].e.bias * m_units[0].biasSign
                                     * ( 180.0f / KPF_PI );
                 char bias[48] = { 0 };
-                if ( fabsf( m_biasDeg ) > 1.0e-3f || m_hasBias )
+                if ( fabsf( m_biasDeg ) > 1.0e-3f || m_hasBias || m_angleDrag )
                 {
                     char appliedText[32];
                     _snprintf( bias, sizeof( bias ), "  bias %s deg%s",
@@ -1317,8 +1426,10 @@ namespace
                                ( fabsf( applied - m_biasDeg ) > 0.05f ) ? " (clamped)" : "" );
                 }
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "bevel  %i edge(s)  d %s%s  (D: curve it)",
-                           (int)m_units.size(), b, bias );
+                           "bevel  %i edge(s)  d %s%s  %s",
+                           (int)m_units.size(), b, bias,
+                           m_angleDrag ? "ANGLE DRAG - move sideways, Ctrl = 5 deg, click or A ends"
+                                       : "(D: curve it, A: drag the angle)" );
             }
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
@@ -1339,6 +1450,10 @@ namespace
         bool                      m_curve     = false;
         float                     m_biasDeg   = 0.0f;
         bool                      m_hasBias   = false;
+        // A: the cursor column drives m_biasDeg (ToggleAngleDrag).
+        bool                      m_angleDrag = false;
+        int                       m_angleX0   = 0;
+        float                     m_angleBase = 0.0f;
         float                     m_start     = 0.0f;
         bool                      m_haveStart = false;
         bool                      m_hasNum    = false;

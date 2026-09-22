@@ -43,6 +43,13 @@ extern void         Select_Delete();                                          //
 
 extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4054
 
+// texturevecs.cpp: texdef -> 2x4 world texture matrix (0x45A1C0) and its inverse (0x459CC0).
+extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                              const float *uvBase, float rotate, float crossterm );
+extern void texturevecs_02( float *outSize, float *texMatPtr, float st1_phantom,
+                            const float *planeNormalPtr, float planeDist,
+                            float *outShift, float *outRotate, float *outCrossterm );
+
 // Keep at file scope; a block-scope declaration inside the anonymous namespace
 // receives incompatible MSVC linkage.
 extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods,
@@ -678,7 +685,8 @@ void KiwiBevel_MenuItems()
         ImGui::SetTooltip( canBevel
             ? "Chamfers the selected brush edges (the default).\n"
               "D toggles a quake3 bezier patch fillet into the\n"
-              "notch; Tab reaches the angle-bias field.\n"
+              "notch; A drags the chamfer angle with the mouse,\n"
+              "Tab types it.\n"
               "DEL on one selected face removes it and restores\n"
               "the original edge.  (Also bare B.)"
             : "Select one or more brush EDGES first (mode 2)." );
@@ -796,6 +804,97 @@ void KiwiBevel_BiasedNormal( const kiwiBevelEdge_t &e, float out[3] )
         Copy3( e.n, out );
 }
 
+// KIWI (2026-09-22, user: "the bevels get a skewed look. I want a new behavior where they
+// dont stretch the texture when beveling and instead just use more texture").
+//
+// A texdef is NOT a mapping in the face's plane: Face_MoveTexture projects it from the
+// face normal's DOMINANT WORLD AXIS (Ed_Normal_Calc, the Quake TextureAxisFromPlane).  A
+// chamfer face that copies its neighbour's texdef verbatim is therefore projected from an
+// axis it leans 30-60 degrees away from, and the texture is drawn out by 1/cos along the
+// slope - on a pitched roof the chamfer's dominant axis can even differ from the roof's.
+//
+// Instead the source face's mapping is UNFOLDED onto the chamfer, as if the texture were a
+// sheet bent over the new edge: each channel's world texture matrix is reduced to its
+// in-plane gradients, those are turned about the line the two planes share by the angle
+// between the normals, and the offset is chosen so both faces agree along that line.
+// Texel density is the source face's, the pattern runs on across the edge, and the chamfer
+// simply shows more of it.  texturevecs_02 (the binary's own inverse of Face_MoveTexture)
+// turns the result back into size / shift / rotate / crossterm for the chamfer's axis.
+static void KiwiBevel_UnfoldTexdefs( face_t *nf, const face_t *src, const float *nB, float dB )
+{
+    const float *nF = src->plane.normal;
+    const float  dF = src->plane.dist;
+    const float  lf = Dot3( nF, nF );
+    if ( !( lf > 0.81f && lf < 1.21f ) )
+        return;                                 // no usable source plane: keep the copy
+
+    float axis[3];
+    Cross3( nF, nB, axis );
+    const float sinA = Len3( axis );
+    const float cosA = Dot3( nF, nB );
+    if ( sinA < 1.0e-4f )
+        return;                                 // parallel planes: the copy is already exact
+    for ( int k = 0; k < 3; ++k )
+        axis[k] /= sinA;
+
+    // A point on both planes (n.p = dist on each).
+    float p0[3];
+    {
+        const float inv = 1.0f / ( sinA * sinA );
+        const float a   = ( dF - dB * cosA ) * inv;
+        const float b   = ( dB - dF * cosA ) * inv;
+        for ( int k = 0; k < 3; ++k )
+            p0[k] = nF[k] * a + nB[k] * b;
+    }
+
+    for ( int ch = 0; ch < 3; ++ch )            // the three projected channels (Face_TexLock_Save)
+    {
+        MaterialDef *md = &nf->mtldef[ch];
+        if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
+            continue;                           // MtlDef_IsValid's rule, without its assert
+        texdef_sub_t *td = &md->mat_texDef;     // copied from `src` by Face_Alloc
+
+        float m[8];
+        Face_MoveTexture( td->size, nF, m, td->shift, td->rotate, td->crossterm );
+
+        float out[8];
+        bool  ok = true;
+        for ( int row = 0; row < 2 && ok; ++row )
+        {
+            const float *a  = &m[row * 4];
+            const float  an = Dot3( a, nF );
+            float g[3], cr[3], r[3];
+            for ( int k = 0; k < 3; ++k )
+                g[k] = a[k] - nF[k] * an;       // the mapping's gradient IN the source plane
+            Cross3( axis, g, cr );
+            const float ag = Dot3( axis, g );
+            for ( int k = 0; k < 3; ++k )       // Rodrigues: nF -> nB about the shared line
+                r[k] = g[k] * cosA + cr[k] * sinA + axis[k] * ag * ( 1.0f - cosA );
+            if ( !( Dot3( r, r ) > 1.0e-12f ) )
+                ok = false;
+            const float at0 = Dot3( a, p0 ) + a[3];     // the source's value on the shared line
+            out[row * 4 + 0] = r[0];
+            out[row * 4 + 1] = r[1];
+            out[row * 4 + 2] = r[2];
+            out[row * 4 + 3] = at0 - Dot3( r, p0 );
+        }
+        if ( !ok )
+            continue;
+
+        texdef_sub_t res = *td;                 // sample_size rides along untouched
+        texturevecs_02( res.size, out, 0.0f, nB, dB, res.shift, &res.rotate, &res.crossterm );
+
+        bool finite = true;
+        const float chk[6] = { res.size[0], res.size[1], res.shift[0], res.shift[1],
+                               res.rotate, res.crossterm };
+        for ( int k = 0; k < 6; ++k )
+            if ( !( chk[k] == chk[k] ) || fabsf( chk[k] ) > 1.0e9f )
+                finite = false;
+        if ( finite && res.size[0] != 0.0f && res.size[1] != 0.0f )
+            *td = res;
+    }
+}
+
 int KiwiBevel_AppendFace( brush_t *def, const kiwiBevelEdge_t &e, float dist )
 {
     if ( !def || !def->faces || e.srcFace < 0 || e.srcFace >= def->faceCount )
@@ -825,5 +924,8 @@ int KiwiBevel_AppendFace( brush_t *def, const kiwiBevelEdge_t &e, float dist )
     Mad3( c, e.u, e.spread, nf->planepts[0] );
     Copy3( c,               nf->planepts[1] );
     Mad3( c, vb, e.spread, nf->planepts[2] );
+
+    // Face_Alloc may have moved the face array: index the source again.
+    KiwiBevel_UnfoldTexdefs( nf, &def->faces[e.srcFace], nb, Dot3( nb, c ) );
     return def->faceCount - 1;
 }

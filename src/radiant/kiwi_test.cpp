@@ -18,6 +18,7 @@
 #include "kiwi_construct.h"    // construct verb: a headless line / polyline
 #include "kiwi_conselect.h"    // ...selected for the verbs that act on construction
 #include "kiwi_barbwire.h"     // barbwire verb (test mode, no dialog)
+#include "kiwi_outliner.h"     // group verb + groups / grouped expectations
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -767,6 +768,21 @@ static void ExecuteExpect( const ScriptLine &line )
             }
             actualInt = modified ? 1 : 0;
         }
+        ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ),
+                      std::to_string( expectedInt ) );
+        return;
+    }
+    if ( subject == "groups" || subject == "grouped" )
+    {
+        // expect groups <n>   - universal group nodes (nested + implied parents included)
+        // expect grouped <n>  - brush instances (model boxes too) of grouped entities
+        if ( w.size() != 3 || !ParseInt( w[2], expectedInt ) )
+        {
+            ScriptError( line, "expect %s requires one integer", subject.c_str() );
+            return;
+        }
+        actualInt = subject == "groups" ? KiwiOutliner_TestGroupCount()
+                                        : KiwiOutliner_TestGroupedBrushCount();
         ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ),
                       std::to_string( expectedInt ) );
         return;
@@ -1618,6 +1634,23 @@ static void ExecuteLine( const ScriptLine &line )
         char err[256] = { 0 };
         if ( !KiwiBarbwire_LayNow( opts, err, sizeof( err ) ) )
             ScriptError( line, "barbwire failed: %s", err );
+        return;
+    }
+    if ( command == "group" )
+    {
+        // group          - Group Selection: a NEW universal group (nested where it belongs)
+        // group add      - Add Selection to Group: join the one group the selection reaches into
+        // group select   - Select Whole Group: grow the selection one group level
+        // group ungroup  - dissolve the group(s) the selection is directly in
+        const std::string mode = line.words.size() > 1 ? Lower( line.words[1] ) : "";
+        bool ok = false;
+        if ( mode.empty() )            ok = KiwiOutliner_GroupSelection();
+        else if ( mode == "add" )      ok = KiwiOutliner_AddSelectionToGroup();
+        else if ( mode == "select" )   ok = KiwiOutliner_SelectWholeGroup();
+        else if ( mode == "ungroup" )  ok = KiwiOutliner_UngroupSelection();
+        else { ScriptError( line, "group [add|select|ungroup]" ); return; }
+        if ( !ok )
+            ScriptError( line, "group %s did nothing", mode.empty() ? "(selection)" : mode.c_str() );
         return;
     }
     if ( command == "refimage" ) { ExecuteRefImage( line ); return; }

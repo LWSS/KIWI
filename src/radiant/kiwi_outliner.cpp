@@ -26,6 +26,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <map>
+#include <string>
 #include <vector>
 
 // Ported entry points; locations anchor the exact ABI used here.
@@ -46,6 +48,9 @@ extern void        sub_476330( selbrush_t *b );                              // 
 extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970; Brush_Select_Helper
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212
 extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89; "" when absent
+// File scope on purpose: declared inside the anonymous namespace it names a
+// namespace-local function and the link fails (LNK2019, 2026-09-22).
+extern void        DeleteKey( epair_t **head, const char *key );             // entity.cpp:175 (0x483720)
 extern void        Undo_ClearRedo();                                         // undo.cpp:176
 extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
 extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494; takes brush def
@@ -85,6 +90,11 @@ enum koutKind_t
     // `kiwi_barbwire` epair (kiwi_barbwire.cpp).  Section-like: its eye and click cover
     // every member; it is not a drop target and cannot be renamed.
     KOUT_BARBWIRE_FOLDER,
+    // Universal groups (2026-09-22, see UNIVERSAL GROUPS below): the top-level "Groups"
+    // section, one folder per group, and inside it one folder per kind of member.
+    KOUT_SECTION_GROUPS,
+    KOUT_UGROUP,                // koutRow_t::ugroup names the node
+    KOUT_UGROUP_TYPE,           // ...and ::ugType which kind (a KOUT_SECTION_* value)
 };
 
 struct koutRow_t
@@ -100,6 +110,8 @@ struct koutRow_t
     int         ordinal;    // the display number ("Brush 12", "Line 3")
     int         count;      // folders: how many children
     unsigned    key;        // collapse-set key; 0 = not collapsible
+    int         ugroup;     // KOUT_UGROUP / KOUT_UGROUP_TYPE — index into s_ug (this frame)
+    int         ugType;     // KOUT_UGROUP_TYPE — the KOUT_SECTION_* kind it lists
 };
 
 // numberId is stable for an entity's lifetime. Tags separate key namespaces and
@@ -116,6 +128,7 @@ const unsigned KOUT_KEY_MODELS   = 0xF0000005u;
 const unsigned KOUT_KEY_IMAGES = 0xF0000006u;
 const unsigned KOUT_KEY_TERRAIN = 0xF0000007u;
 const unsigned KOUT_KEY_BARBWIRE = 0xF0000008u;   // the Barbwire folder inside Models
+const unsigned KOUT_KEY_GROUPS   = 0xF0000009u;   // the top-level Groups section
 
 // Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
 // out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
@@ -191,7 +204,7 @@ bool Renameable( koutKind_t k )
 {
     return k == KOUT_GROUP_ENTITY || k == KOUT_ENTITY
         || k == KOUT_CON_GROUP    || k == KOUT_CON_OBJECT || k == KOUT_IMAGE
-        || k == KOUT_IMAGE_GROUP;
+        || k == KOUT_IMAGE_GROUP  || k == KOUT_UGROUP;
 }
 
 // Seed the editor with the current label (kiwi_viewcube.cpp:502-508).
@@ -373,6 +386,235 @@ void FolderName( entity_s *inst, char *out, int outSize )
     out[outSize - 1] = '\0';
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════════
+//  UNIVERSAL GROUPS  (KIWI 2026-09-22, user: "the group doesn't include models. You need
+//  to just make universal groups so i can have doorknobs and fine details and group
+//  houses together" / "redo the whole group system" / "make universal groups a top level
+//  item in the outliner with brush/model/etc subgroups inside it")
+//
+//  A group is a PATH - "village/house_1/door" - stored as the epair `kiwi_group` on every
+//  member ENTITY.  An epair is the one per-object store this editor saves in the .map,
+//  clones into undo records, and carries through copy / paste and prefab export; the map
+//  compilers ignore keys they do not know (the `kiwi_barbwire` precedent).  Nesting is
+//  the path, so a group of groups needs no record of its own.
+//
+//    - point and brush entities (models, lights, triggers, ...) carry the key themselves;
+//    - loose worldspawn brushes and patches have no epairs, so they join by being moved
+//      into a func_group that carries the key (a "wrapper").  cod4map folds func_group
+//      brushes back into the world, exactly as it always has for brush groups;
+//    - EVERY func_group is a group: one without the key is the top-level group named by
+//      its folder name, so brush groups made before this exist in the new system as-is.
+//
+//  The outliner never shows a wrapper: a group lists its nested groups, then one folder
+//  per kind (Brushes / Models / Lights / Entities) holding the members themselves.
+// ═════════════════════════════════════════════════════════════════════════════════════
+const char *KOUT_UG_KEY = "kiwi_group";
+
+std::string UGCleanName( const char *s )
+{
+    std::string out;
+    for ( const char *p = s ? s : ""; *p; ++p )
+        out.push_back( ( *p == '/' || *p == '\\' || *p == '"' ) ? '_' : *p );
+    while ( !out.empty() && out[out.size() - 1] == ' ' ) out.erase( out.size() - 1 );
+    while ( !out.empty() && out[0] == ' ' )              out.erase( 0, 1 );
+    return out;
+}
+
+// Normalised stored path: '/'-separated, no empty components.
+std::string UGCleanPath( const char *s )
+{
+    std::string out, part;
+    for ( const char *p = s ? s : ""; ; ++p )
+    {
+        if ( *p && *p != '/' )
+        {
+            part.push_back( *p );
+            continue;
+        }
+        part = UGCleanName( part.c_str() );
+        if ( !part.empty() )
+        {
+            if ( !out.empty() ) out.push_back( '/' );
+            out += part;
+        }
+        part.clear();
+        if ( !*p )
+            break;
+    }
+    return out;
+}
+
+// The group an entity is in; empty = none.  Worldspawn is never a member.
+std::string UGPathOf( entity_s *inst )
+{
+    entity_s_def *def = DefOf( inst );
+    if ( !def || inst == world_entity )
+        return std::string();
+    const char *v = ValueForKey2( def, KOUT_UG_KEY );
+    if ( v && v[0] )
+        return UGCleanPath( v );
+    if ( IsFuncGroup( inst ) )
+    {
+        char nm[80];
+        FolderName( inst, nm, sizeof( nm ) );
+        return UGCleanName( nm );
+    }
+    return std::string();
+}
+
+std::string UGParent( const std::string &p )
+{
+    const size_t at = p.rfind( '/' );
+    return at == std::string::npos ? std::string() : p.substr( 0, at );
+}
+
+std::string UGLeaf( const std::string &p )
+{
+    const size_t at = p.rfind( '/' );
+    return at == std::string::npos ? p : p.substr( at + 1 );
+}
+
+std::string UGJoin( const std::string &parent, const std::string &leaf )
+{
+    if ( parent.empty() ) return leaf;
+    if ( leaf.empty() )   return parent;
+    return parent + "/" + leaf;
+}
+
+// p is P itself or somewhere beneath it.
+bool UGIsUnder( const std::string &p, const std::string &P )
+{
+    if ( P.empty() )
+        return true;
+    return p == P || ( p.size() > P.size() && p.compare( 0, P.size(), P ) == 0 && p[P.size()] == '/' );
+}
+
+// What of `p` lies below the ancestor `P` ("" when p == P).
+std::string UGBelow( const std::string &p, const std::string &P )
+{
+    if ( P.empty() )      return p;
+    if ( p.size() <= P.size() ) return std::string();
+    return p.substr( P.size() + 1 );
+}
+
+// Deepest path both are under.
+std::string UGCommon( const std::string &a, const std::string &b )
+{
+    std::string out;
+    size_t ia = 0, ib = 0;
+    while ( ia < a.size() && ib < b.size() )
+    {
+        const size_t ea = a.find( '/', ia ), eb = b.find( '/', ib );
+        const std::string ca = a.substr( ia, ea == std::string::npos ? std::string::npos : ea - ia );
+        const std::string cb = b.substr( ib, eb == std::string::npos ? std::string::npos : eb - ib );
+        if ( ca != cb )
+            break;
+        out = UGJoin( out, ca );
+        if ( ea == std::string::npos || eb == std::string::npos )
+            break;
+        ia = ea + 1;
+        ib = eb + 1;
+    }
+    return out;
+}
+
+// Collapse keys: tag 0xC = a group, 0xB = one of its per-kind folders.
+unsigned UGHash( const std::string &s )
+{
+    unsigned h = 2166136261u;
+    for ( size_t i = 0; i < s.size(); ++i ) { h ^= (unsigned char)s[i]; h *= 16777619u; }
+    return h;
+}
+inline unsigned UGKey( const std::string &path ) { return 0xC0000000u | ( UGHash( path ) & 0x0FFFFFFFu ); }
+inline unsigned UGTypeKey( const std::string &path, int kind )
+{
+    return 0xB0000000u | ( ( UGHash( path ) * 31u + (unsigned)kind ) & 0x0FFFFFFFu );
+}
+
+// The group tree, rebuilt from the entity list whenever it is needed (each outliner
+// frame, each command).  Nodes are created for every ancestor a path implies.
+struct ugNode_t
+{
+    std::string             path;
+    int                     parent = -1;
+    std::vector<int>        kids;
+    std::vector<entity_s *> members;        // entities at EXACTLY this path
+    int                     total = 0;      // members here and below
+};
+std::vector<ugNode_t>                s_ug;
+std::map<std::string, int>           s_ugByPath;
+std::map<const entity_s *, int>      s_ugOf;      // member -> its node
+
+int UGEnsureNode( const std::string &path )
+{
+    std::map<std::string, int>::iterator it = s_ugByPath.find( path );
+    if ( it != s_ugByPath.end() )
+        return it->second;
+    const std::string up = UGParent( path );
+    const int parent = up.empty() ? -1 : UGEnsureNode( up );     // may grow s_ug
+    ugNode_t n;
+    n.path   = path;
+    n.parent = parent;
+    s_ug.push_back( n );
+    const int idx = (int)s_ug.size() - 1;
+    s_ugByPath[path] = idx;
+    if ( parent >= 0 )
+        s_ug[parent].kids.push_back( idx );
+    return idx;
+}
+
+void UGBuildTree()
+{
+    s_ug.clear();
+    s_ugByPath.clear();
+    s_ugOf.clear();
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        const std::string p = UGPathOf( e );
+        if ( p.empty() )
+            continue;
+        const int idx = UGEnsureNode( p );
+        s_ug[idx].members.push_back( e );
+        s_ugOf[e] = idx;
+    }
+    for ( size_t i = 0; i < s_ug.size(); ++i )
+        for ( int up = (int)i; up >= 0; up = s_ug[up].parent )
+            s_ug[up].total += (int)s_ug[i].members.size();
+    // Children in name order (the map's), whatever order the entity list produced them in.
+    for ( size_t i = 0; i < s_ug.size(); ++i )
+        s_ug[i].kids.clear();
+    for ( std::map<std::string, int>::const_iterator it = s_ugByPath.begin();
+          it != s_ugByPath.end(); ++it )
+        if ( s_ug[it->second].parent >= 0 )
+            s_ug[s_ug[it->second].parent].kids.push_back( it->second );
+}
+
+// Valid after UGBuildTree.
+bool UGHas( const entity_s *e )
+{
+    return s_ugOf.find( e ) != s_ugOf.end();
+}
+
+int UGFind( const std::string &path )
+{
+    std::map<std::string, int>::const_iterator it = s_ugByPath.find( path );
+    return it == s_ugByPath.end() ? -1 : it->second;
+}
+
+// Members of node `idx`; `kind` < 0 = every kind, `deep` = nested groups too.
+koutKind_t EntitySection( entity_s *inst );
+void UGMembers( int idx, int kind, bool deep, std::vector<entity_s *> &out )
+{
+    if ( idx < 0 || idx >= (int)s_ug.size() )
+        return;
+    for ( size_t i = 0; i < s_ug[idx].members.size(); ++i )
+        if ( kind < 0 || (int)EntitySection( s_ug[idx].members[i] ) == kind )
+            out.push_back( s_ug[idx].members[i] );
+    if ( deep )
+        for ( size_t i = 0; i < s_ug[idx].kids.size(); ++i )
+            UGMembers( s_ug[idx].kids[i], kind, true, out );
+}
+
 const char *ConTypeName( kconType_t t )
 {
     switch ( t )
@@ -452,6 +694,8 @@ void PushRow( koutKind_t kind, int indent, unsigned key )
     r.ordinal  = 0;
     r.count    = 0;
     r.key      = key;
+    r.ugroup   = -1;
+    r.ugType   = -1;
     s_rows.push_back( r );
 }
 
@@ -476,10 +720,13 @@ void FlattenEntitySection( koutKind_t sectionKind )
     PushRow( sectionKind, 0, sectionKey );
     const size_t sectionRow = s_rows.size() - 1;
 
+    // A grouped entity is listed under its group and nowhere else, so the type sections
+    // count and show only what is NOT in a group.  Every func_group is a group, which
+    // leaves Brushes with the loose worldspawn brushes alone.
     int count = 0;
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        if ( e != world_entity && EntitySection( e ) == sectionKind )
+        if ( e != world_entity && EntitySection( e ) == sectionKind && !UGHas( e ) )
             ++count;
     }
     if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
@@ -495,7 +742,8 @@ void FlattenEntitySection( koutKind_t sectionKind )
     {
         int wires = 0;
         for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
-            if ( e != world_entity && IsBarbwireEntity( e ) && EntitySection( e ) == sectionKind )
+            if ( e != world_entity && IsBarbwireEntity( e ) && EntitySection( e ) == sectionKind
+              && !UGHas( e ) )
                 ++wires;
         if ( wires )
         {
@@ -505,7 +753,8 @@ void FlattenEntitySection( koutKind_t sectionKind )
             {
                 for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
                 {
-                    if ( e == world_entity || !IsBarbwireEntity( e ) || EntitySection( e ) != sectionKind )
+                    if ( e == world_entity || !IsBarbwireEntity( e ) || EntitySection( e ) != sectionKind
+                      || UGHas( e ) )
                         continue;
                     entity_s_def *def = DefOf( e );
                     const unsigned key = def ? EntKey( def->numberId ) : 0u;
@@ -525,6 +774,8 @@ void FlattenEntitySection( koutKind_t sectionKind )
             continue;
         if ( sectionKind == KOUT_SECTION_MODELS && IsBarbwireEntity( e ) )
             continue;                               // listed under the Barbwire folder
+        if ( UGHas( e ) )
+            continue;                               // listed once, under its group
 
         entity_s_def *def = DefOf( e );
         const unsigned key = def ? EntKey( def->numberId ) : 0u;
@@ -537,6 +788,99 @@ void FlattenEntitySection( koutKind_t sectionKind )
 
     if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
         FlattenEntityBrushes( world_entity, 1, KOUT_FILTER_NOT_TERRAIN );
+}
+
+// One group: nested groups first, then a folder per kind of member.  The Brushes folder
+// lists the brushes THEMSELVES across every func_group at this path - the wrapper is
+// plumbing and never gets a row; the other kinds list their entities.
+void FlattenUGroup( int idx, int indent )
+{
+    const unsigned key = UGKey( s_ug[idx].path );
+    PushRow( KOUT_UGROUP, indent, key );
+    s_rows.back().ugroup = idx;
+    s_rows.back().count  = s_ug[idx].total;
+    if ( Collapsed( key ) )
+        return;
+
+    for ( size_t i = 0; i < s_ug[idx].kids.size(); ++i )
+        FlattenUGroup( s_ug[idx].kids[i], indent + 1 );
+
+    static const koutKind_t kinds[4] = { KOUT_SECTION_BRUSHES, KOUT_SECTION_MODELS,
+                                         KOUT_SECTION_LIGHTS,  KOUT_SECTION_ENTITIES };
+    for ( int k = 0; k < 4; ++k )
+    {
+        std::vector<entity_s *> ents;
+        UGMembers( idx, (int)kinds[k], false, ents );
+        if ( ents.empty() )
+            continue;
+        int count = (int)ents.size();
+        if ( kinds[k] == KOUT_SECTION_BRUSHES )
+        {
+            count = 0;
+            for ( size_t i = 0; i < ents.size(); ++i )
+                count += EntityBrushCount( ents[i] );
+        }
+        const unsigned tkey = UGTypeKey( s_ug[idx].path, (int)kinds[k] );
+        PushRow( KOUT_UGROUP_TYPE, indent + 1, tkey );
+        s_rows.back().ugroup = idx;
+        s_rows.back().ugType = (int)kinds[k];
+        s_rows.back().count  = count;
+        if ( Collapsed( tkey ) )
+            continue;
+
+        if ( kinds[k] == KOUT_SECTION_BRUSHES )
+        {
+            int ordinal = 0;
+            for ( size_t i = 0; i < ents.size(); ++i )
+                for ( selbrush_t *b = ents[i]->brushes.ownerNext;
+                      b && b != &ents[i]->brushes; b = b->ownerNext )
+                {
+                    PushRow( KOUT_BRUSH, indent + 2, 0 );
+                    s_rows.back().inst    = b;
+                    s_rows.back().ent     = ents[i];
+                    s_rows.back().ordinal = ++ordinal;
+                }
+            continue;
+        }
+        for ( size_t i = 0; i < ents.size(); ++i )
+        {
+            entity_s_def *def = DefOf( ents[i] );
+            const unsigned ekey = def ? EntKey( def->numberId ) : 0u;
+            PushRow( KOUT_ENTITY, indent + 2, ekey );
+            s_rows.back().ent   = ents[i];
+            s_rows.back().count = EntityBrushCount( ents[i] );
+            if ( !Collapsed( ekey ) )
+                FlattenEntityBrushes( ents[i], indent + 3 );
+        }
+    }
+}
+
+void FlattenGroups()
+{
+    int top = 0;
+    for ( size_t i = 0; i < s_ug.size(); ++i )
+        if ( s_ug[i].parent < 0 )
+            ++top;
+    PushRow( KOUT_SECTION_GROUPS, 0, KOUT_KEY_GROUPS );
+    s_rows.back().count = top;
+    if ( Collapsed( KOUT_KEY_GROUPS ) )
+        return;
+    // s_ugByPath is ordered, so the list is alphabetical and does not reshuffle when the
+    // entity list does.
+    for ( std::map<std::string, int>::const_iterator it = s_ugByPath.begin();
+          it != s_ugByPath.end(); ++it )
+        if ( s_ug[it->second].parent < 0 )
+            FlattenUGroup( it->second, 1 );
+}
+
+// The member entities a group row stands for: everything at or below a group, or one
+// kind at exactly that group for a per-kind folder.
+void UGRowEntities( const koutRow_t &r, std::vector<entity_s *> &out )
+{
+    if ( r.kind == KOUT_UGROUP )
+        UGMembers( r.ugroup, -1, true, out );
+    else if ( r.kind == KOUT_UGROUP_TYPE )
+        UGMembers( r.ugroup, r.ugType, false, out );
 }
 
 // Worldspawn's terrain meshes (Terrain Sculpt chunks, Terrain-dialog patches) get
@@ -646,6 +990,8 @@ void FlattenImages()
 void Flatten()
 {
     s_rows.clear();
+    UGBuildTree();                  // the sections below skip whatever is in a group
+    FlattenGroups();
     FlattenEntitySection( KOUT_SECTION_BRUSHES );
     FlattenTerrain();
     FlattenCurves();
@@ -694,7 +1040,26 @@ void AutoExpandForSelection()
             continue;
         }
 
-        SetCollapsed( SectionKey( EntitySection( e ) ), false );
+        // KIWI (2026-09-21, user: "the models tab needs to not expand each time I move a
+        // model. Keep it collapsed, it's over 800"): same rule as Terrain above.  Every
+        // drag step bumps the selection generation, so this pass re-opened the section
+        // the moment it was closed.  The entity's own folder is still opened, so the
+        // selected row is in view as soon as the section is opened by hand.
+        const koutKind_t section = EntitySection( e );
+        // A grouped object is listed under its group: open Groups and the chain of
+        // groups down to it.  Of the per-kind folders only Brushes opens by itself - a
+        // village's Models folder is the same 800 rows the Models rule above is about.
+        const std::string path = UGPathOf( e );
+        if ( !path.empty() )
+        {
+            SetCollapsed( KOUT_KEY_GROUPS, false );
+            for ( std::string p = path; !p.empty(); p = UGParent( p ) )
+                SetCollapsed( UGKey( p ), false );
+            if ( section == KOUT_SECTION_BRUSHES )
+                SetCollapsed( UGTypeKey( path, (int)section ), false );
+        }
+        else if ( section != KOUT_SECTION_MODELS )
+            SetCollapsed( SectionKey( section ), false );
         entity_s_def *def = DefOf( e );
         if ( def )
             SetCollapsed( EntKey( def->numberId ), false );
@@ -866,6 +1231,93 @@ void SetAnchor( const koutRow_t &r )
 // Brush reparenting
 // Snapshot instances before mutating their owner chains. One undo bracket covers
 // the move, with each Undo_AddBrush taken before its owner changes.
+
+// What of `insts` may change owner: live, not already in `targetInst`, and not the
+// bounding box of a point entity - that brush IS the model / light / node, and taking
+// it out of its entity would orphan the entity (Entity_Create, entity.cpp:1829-1840).
+// A selection made in the viewport routinely carries a few of those along.
+void FilterMovable( const std::vector<selbrush_t *> &insts, entity_s *targetInst,
+                    std::vector<selbrush_t *> &move, int *pointsSkipped )
+{
+    if ( pointsSkipped )
+        *pointsSkipped = 0;
+    for ( size_t i = 0; i < insts.size(); ++i )
+    {
+        selbrush_t *sb = insts[i];
+        if ( !sb || !Sel_BrushLive( sb ) )      // the liveness guard, before any deref
+            continue;
+        entity_s_def *ownerDef = sb->owner ? DefOf( sb->owner ) : nullptr;
+        if ( ownerDef && ownerDef->eclass && ownerDef->eclass->fixedsize )
+        {
+            if ( pointsSkipped )
+                ++*pointsSkipped;
+            continue;
+        }
+        if ( targetInst && sb->owner == targetInst )
+            continue;
+        move.push_back( sb );
+    }
+}
+
+// Inside an open undo record, BEFORE any relink.  A func_group that this move drains
+// completely is recorded whole (Undo_AddEntity_W, entity + brushes - what UngroupEntity
+// records) and returned in `emptied` for the caller to free after the relinks: an empty
+// func_group is a junk entity in the saved map.  Every other brush is recorded singly.
+void RecordMoveForUndo( const std::vector<selbrush_t *> &move, std::vector<entity_s *> &emptied )
+{
+    for ( size_t i = 0; i < move.size(); ++i )
+    {
+        entity_s *owner = move[i]->owner;
+        if ( !owner || owner == world_entity || !IsFuncGroup( owner ) )
+            continue;
+        bool seen = false;
+        for ( size_t k = 0; k < emptied.size() && !seen; ++k )
+            seen = ( emptied[k] == owner );
+        if ( seen )
+            continue;
+        int leaving = 0;
+        for ( size_t k = 0; k < move.size(); ++k )
+            if ( move[k]->owner == owner )
+                ++leaving;
+        if ( leaving == EntityBrushCount( owner ) )
+            emptied.push_back( owner );
+    }
+    for ( size_t i = 0; i < emptied.size(); ++i )
+        if ( entity_s_def *def = DefOf( emptied[i] ) )
+            Undo_AddEntity_W( (entity_s *)def );
+    for ( size_t i = 0; i < move.size(); ++i )
+    {
+        bool whole = false;
+        for ( size_t k = 0; k < emptied.size() && !whole; ++k )
+            whole = ( emptied[k] == move[i]->owner );
+        if ( !whole )
+            Undo_AddBrush( (entity_brush_s *)move[i]->def );
+    }
+}
+
+// One brush into `targetInst`: the ported unlink / link / instance-link / rebuild tail.
+void RelinkBrush( selbrush_t *sb, entity_s *targetInst, entity_s_def *targetDef )
+{
+    // select.cpp:5112: selected instances leave bookkeeping across the relink.
+    const bool wasSelected = ( ( (unsigned)sb->brushFlags & KOUT_BRUSHFLAG_SELECTED ) != 0 );
+    if ( wasSelected )
+        sub_476330( sb );
+
+    brush_t *bDef = sb->def;
+    Entity_UnlinkBrush( bDef );                          // entity.cpp:465
+    Entity_LinkBrush( bDef, (entity_s *)targetDef );     // entity.cpp:437
+    Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:633
+
+    Brush_BuildWindings( bDef, 1 );
+    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
+        SetupVertexSelection();                          // select.cpp:5130's gate
+    MarkMapModified();
+    ++bDef->version;
+
+    if ( wasSelected )
+        sub_476470( sb );
+}
+
 bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, const char *op )
 {
     if ( !targetInst )
@@ -889,56 +1341,35 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
     }
 
     std::vector<selbrush_t *> move;
-    for ( size_t i = 0; i < insts.size(); ++i )
-    {
-        selbrush_t *sb = insts[i];
-        if ( !sb || !Sel_BrushLive( sb ) )      // the liveness guard, before any deref
-            continue;
-        if ( sb->owner == targetInst )
-            continue;
-        move.push_back( sb );
-    }
+    int points = 0;
+    FilterMovable( insts, targetInst, move, &points );
     if ( move.empty() )
     {
         // Report a valid no-op drop instead of appearing to ignore it.
-        Sys_Printf( "Outliner: nothing to move — the %i dragged brush(es) are "
-                    "already in %s.\n", (int)insts.size(), ClassOf( targetInst ) );
+        if ( points > 0 && points == (int)insts.size() )
+            Sys_Printf( "Outliner: models, lights and other point entities cannot go in a "
+                        "brush group — nothing moved.\n" );
+        else
+            Sys_Printf( "Outliner: nothing to move — the %i brush(es) are already in %s.\n",
+                        (int)insts.size(), ClassOf( targetInst ) );
         return false;
     }
 
     Undo_ClearRedo();
     Undo_GeneralStart( op );
+    std::vector<entity_s *> emptied;
+    RecordMoveForUndo( move, emptied );                      // BEFORE the move
     for ( size_t i = 0; i < move.size(); ++i )
-        Undo_AddBrush( (entity_brush_s *)move[i]->def );     // BEFORE the move
-
-    for ( size_t i = 0; i < move.size(); ++i )
-    {
-        selbrush_t *sb = move[i];
-        // select.cpp:5112: selected instances leave bookkeeping across the relink.
-        const bool wasSelected = ( ( (unsigned)sb->brushFlags & KOUT_BRUSHFLAG_SELECTED ) != 0 );
-        if ( wasSelected )
-            sub_476330( sb );
-
-        brush_t *bDef = sb->def;
-        Entity_UnlinkBrush( bDef );                          // entity.cpp:465
-        Entity_LinkBrush( bDef, (entity_s *)targetDef );     // entity.cpp:437
-        Entity_LinkBrush_0_extern( targetInst, sb );         // brush.cpp:633
-
-        Brush_BuildWindings( bDef, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();                          // select.cpp:5130's gate
-        MarkMapModified();
-        ++bDef->version;
-
-        if ( wasSelected )
-            sub_476470( sb );
-    }
+        RelinkBrush( move[i], targetInst, targetDef );
+    for ( size_t i = 0; i < emptied.size(); ++i )
+        Entity_Free( (char *)emptied[i] );                   // select.cpp:5146
     Undo_End();
 
     g_nUpdateBits = -1;
     Sel_InvalidateFromLegacy();     // the instances did not move, but their owners did
     s_structural = true;            // the owner chains the flatten walked have changed
-    Sys_Printf( "Outliner: moved %i brush(es).\n", (int)move.size() );
+    Sys_Printf( "Outliner: moved %i brush(es)%s.\n", (int)move.size(),
+                emptied.empty() ? "" : "; the group(s) left empty were removed" );
     return true;
 }
 
@@ -954,6 +1385,448 @@ void GatherSelectedBrushes( std::vector<selbrush_t *> &out )
         if ( b && Sel_BrushLive( b ) )
             out.push_back( b );
     }
+}
+
+// ── Universal group operations ───────────────────────────────────────────────────────
+// What a set of picked brushes MEANS for grouping: an object in the viewport is a brush
+// instance, but the thing that joins a group is its entity - except for worldspawn
+// brushes and for PART of a func_group, which travel as brushes into a wrapper.
+struct ugUnits_t
+{
+    std::vector<entity_s *>   ents;     // models, lights, brush entities, func_groups picked whole
+    std::vector<selbrush_t *> loose;    // worldspawn brushes / patches, and part of a func_group
+};
+
+void UGUnitsFrom( const std::vector<selbrush_t *> &picked, ugUnits_t &u )
+{
+    std::map<entity_s *, int> pickedOf;
+    for ( size_t i = 0; i < picked.size(); ++i )
+        if ( picked[i] && Sel_BrushLive( picked[i] ) && picked[i]->owner )
+            ++pickedOf[picked[i]->owner];
+
+    std::map<entity_s *, bool> added;
+    for ( size_t i = 0; i < picked.size(); ++i )
+    {
+        selbrush_t *sb = picked[i];
+        if ( !sb || !Sel_BrushLive( sb ) || !sb->owner )
+            continue;
+        entity_s *e = sb->owner;
+        if ( e == world_entity )
+        {
+            u.loose.push_back( sb );
+            continue;
+        }
+        // Only a func_group can be taken apart; a trigger or a script_brushmodel is one
+        // object however many of its brushes were clicked.
+        if ( IsFuncGroup( e ) && pickedOf[e] < EntityBrushCount( e ) )
+        {
+            u.loose.push_back( sb );
+            continue;
+        }
+        if ( !added[e] )
+        {
+            added[e] = true;
+            u.ents.push_back( e );
+        }
+    }
+}
+
+// One legacy undo record for a whole group edit.  The legacy undo has no nesting, so every
+// step below assumes the record is open and nothing else opens one until UGTxnEnd.
+struct ugTxn_t
+{
+    std::vector<entity_s *>   recorded;     // snapshotted (or born) inside this record
+    std::vector<entity_s *>   freeAfter;    // func_groups drained by it
+    std::vector<selbrush_t *> reselect;     // the selection to put back
+};
+
+void UGTxnBegin( ugTxn_t &t, const char *op, bool clearSelection )
+{
+    // Entity_Create reads the legacy selection and merges into / refuses over whatever
+    // entity it touches (entity.cpp:1666-1749).  A wrapper has to be born EMPTY, so the
+    // selection is parked for the length of the record.
+    if ( clearSelection )
+    {
+        const selection_t &sel = KiwiSel();
+        for ( size_t i = 0; i < sel.items.size(); ++i )
+            if ( sel.items[i].kind == SEL_OBJECT && sel.items[i].brush )
+                t.reselect.push_back( sel.items[i].brush );
+        Sel_Clear( KiwiSel() );          // construction curves are not Entity_Create's business
+        Sel_SyncToLegacy();
+    }
+    Undo_ClearRedo();
+    Undo_GeneralStart( op );
+}
+
+void UGTxnRecord( ugTxn_t &t, entity_s *e )
+{
+    for ( size_t i = 0; i < t.recorded.size(); ++i )
+        if ( t.recorded[i] == e )
+            return;
+    if ( entity_s_def *def = DefOf( e ) )
+        Undo_AddEntity_W( (entity_s *)def );         // BEFORE the first change to it
+    t.recorded.push_back( e );
+}
+
+void UGTxnSetPath( ugTxn_t &t, entity_s *e, const std::string &path )
+{
+    entity_s_def *def = DefOf( e );
+    if ( !def )
+        return;
+    UGTxnRecord( t, e );
+    if ( path.empty() )
+        DeleteKey( &def->epairs, KOUT_UG_KEY );
+    else
+        SetKeyValue( def, KOUT_UG_KEY, path.c_str() );
+}
+
+// A func_group back into worldspawn; the emptied entity is freed when the record closes.
+// A func_group cannot simply lose its key - untagged it is still a group, by name.
+void UGTxnDissolve( ugTxn_t &t, entity_s *e )
+{
+    if ( !e || e == world_entity || !world_entity )
+        return;
+    UGTxnRecord( t, e );
+    entity_s_def *worldDef = (entity_s_def *)world_entity->def;
+    for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; )
+    {
+        selbrush_t *next = b->ownerNext;                 // the relink rewrites b's links
+        RelinkBrush( b, world_entity, worldDef );
+        b = next;
+    }
+    t.freeAfter.push_back( e );
+}
+
+// Snapshot `loose` for a move into `target` (null = a wrapper made later); returns what
+// will actually move.  Split from the relink because the proven order is brushes first,
+// then the new entity and its id (KiwiOutliner's original group path, pmesh.cpp:7396).
+void UGTxnRecordLoose( ugTxn_t &t, const std::vector<selbrush_t *> &loose, entity_s *target,
+                       std::vector<selbrush_t *> &move )
+{
+    FilterMovable( loose, target, move, nullptr );
+    std::vector<entity_s *> emptied;
+    RecordMoveForUndo( move, emptied );
+    for ( size_t i = 0; i < emptied.size(); ++i )
+    {
+        t.recorded.push_back( emptied[i] );
+        t.freeAfter.push_back( emptied[i] );
+    }
+}
+
+entity_s *UGTxnNewWrapper( ugTxn_t &t, const std::string &path )
+{
+    eclass_t *ec = Eclass_ForName( 0, "func_group" );            // eclass.cpp:1138
+    if ( !ec || selected_brushes.next != &selected_brushes )
+        return nullptr;
+    entity_s     *inst = Entity_Create( ec );                    // empty: its LABEL_73 tail
+    entity_s_def *def  = DefOf( inst );
+    if ( !def )
+        return nullptr;
+    Undo_SetIdForEntity( def );
+    SetKeyValue( def, KOUT_UG_KEY, path.c_str() );
+    t.recorded.push_back( inst );                                // born here: no snapshot
+    return inst;
+}
+
+void UGTxnEnd( ugTxn_t &t )
+{
+    for ( size_t i = 0; i < t.freeAfter.size(); ++i )
+        Entity_Free( (char *)t.freeAfter[i] );                   // select.cpp:5146
+    Undo_End();
+    Sel_InvalidateFromLegacy();
+    if ( !t.reselect.empty() )
+    {
+        selection_t &sel = KiwiSel();
+        for ( size_t i = 0; i < t.reselect.size(); ++i )
+            if ( Sel_BrushLive( t.reselect[i] ) )
+                Sel_Add( sel, Sel_MakeObject( t.reselect[i] ) );
+        Sel_SyncToLegacy();
+    }
+    g_nUpdateBits = -1;
+    s_structural  = true;
+}
+
+void UGReveal( const std::string &path )
+{
+    SetCollapsed( KOUT_KEY_GROUPS, false );
+    for ( std::string p = path; !p.empty(); p = UGParent( p ) )
+        SetCollapsed( UGKey( p ), false );
+}
+
+// Loose brushes into group `path`: the group's existing wrapper when it has one, else a
+// new one.  Brushes already in ANY wrapper of that group stay where they are.
+int UGTxnLooseInto( ugTxn_t &t, const std::vector<selbrush_t *> &loose, const std::string &path )
+{
+    std::vector<selbrush_t *> want;
+    for ( size_t i = 0; i < loose.size(); ++i )
+        if ( loose[i]->owner == world_entity || UGPathOf( loose[i]->owner ) != path )
+            want.push_back( loose[i] );
+    if ( want.empty() )
+        return 0;
+
+    entity_s *target = nullptr;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts && !target; e = e->next )
+        if ( e != world_entity && IsFuncGroup( e ) && UGPathOf( e ) == path )
+        {
+            bool dying = false;
+            for ( size_t k = 0; k < t.freeAfter.size() && !dying; ++k )
+                dying = ( t.freeAfter[k] == e );
+            if ( !dying )
+                target = e;
+        }
+
+    std::vector<selbrush_t *> move;
+    UGTxnRecordLoose( t, want, target, move );
+    if ( move.empty() )
+        return 0;
+    if ( !target )
+        target = UGTxnNewWrapper( t, path );
+    if ( !target )
+    {
+        Sys_Printf( "Groups: could not make a brush holder for \"%s\" - its brushes were "
+                    "left where they are.\n", path.c_str() );
+        return 0;
+    }
+    for ( size_t i = 0; i < move.size(); ++i )
+        RelinkBrush( move[i], target, DefOf( target ) );
+    return (int)move.size();
+}
+
+// Requires UGBuildTree.
+std::string UGUniqueChild( const std::string &parent )
+{
+    for ( int n = 1; ; ++n )
+    {
+        char nm[32];
+        _snprintf( nm, sizeof( nm ), "group_%i", n );
+        nm[sizeof( nm ) - 1] = '\0';
+        if ( UGFind( UGJoin( parent, nm ) ) < 0 )
+            return nm;
+    }
+}
+
+// A NEW group from `picked`.  It is made INSIDE the deepest group everything picked
+// already shares, and whatever structure the members had below that point comes along:
+//   loose brushes + models                      -> group_1
+//   parts of house_1 (a knob's brushes + model) -> house_1/group_1        (a sub-group)
+//   all of house_1 and all of house_2           -> group_1/house_1, group_1/house_2
+bool UGCreate( const std::vector<selbrush_t *> &picked, std::string *outPath )
+{
+    ugUnits_t u;
+    UGUnitsFrom( picked, u );
+    if ( u.ents.empty() && u.loose.empty() )
+    {
+        Sys_Printf( "Groups: select the brushes, models and other objects to group first.\n" );
+        return false;
+    }
+    UGBuildTree();
+
+    std::vector<std::string> entPath( u.ents.size() ), loosePath( u.loose.size() );
+    std::string common;
+    bool        first = true;
+    for ( size_t i = 0; i < u.ents.size(); ++i )
+    {
+        entPath[i] = UGPathOf( u.ents[i] );
+        common     = first ? entPath[i] : UGCommon( common, entPath[i] );
+        first      = false;
+    }
+    for ( size_t i = 0; i < u.loose.size(); ++i )
+    {
+        loosePath[i] = UGPathOf( u.loose[i]->owner );            // "" for worldspawn
+        common       = first ? loosePath[i] : UGCommon( common, loosePath[i] );
+        first        = false;
+    }
+    const std::string path = UGJoin( common, UGUniqueChild( common ) );
+
+    ugTxn_t t;
+    UGTxnBegin( t, "group", true );
+    for ( size_t i = 0; i < u.ents.size(); ++i )
+        UGTxnRecord( t, u.ents[i] );
+
+    std::map<std::string, std::vector<selbrush_t *> > byBelow;
+    for ( size_t i = 0; i < u.loose.size(); ++i )
+        byBelow[UGBelow( loosePath[i], common )].push_back( u.loose[i] );
+    int brushes = 0;
+    for ( std::map<std::string, std::vector<selbrush_t *> >::iterator it = byBelow.begin();
+          it != byBelow.end(); ++it )
+        brushes += UGTxnLooseInto( t, it->second, UGJoin( path, it->first ) );
+
+    for ( size_t i = 0; i < u.ents.size(); ++i )
+        UGTxnSetPath( t, u.ents[i], UGJoin( path, UGBelow( entPath[i], common ) ) );
+    UGTxnEnd( t );
+
+    UGReveal( path );
+    Sys_Printf( "Groups: \"%s\" - %i object(s) and %i loose brush(es).\n", path.c_str(),
+                (int)u.ents.size(), brushes );
+    if ( outPath )
+        *outPath = path;
+    return true;
+}
+
+// `picked` joins the existing group `path`, flat: whatever groups it was in are left.
+bool UGAddTo( const std::string &path, const std::vector<selbrush_t *> &picked )
+{
+    if ( path.empty() )
+        return false;
+    ugUnits_t u;
+    UGUnitsFrom( picked, u );
+    std::vector<entity_s *> ents;
+    for ( size_t i = 0; i < u.ents.size(); ++i )
+        if ( UGPathOf( u.ents[i] ) != path )
+            ents.push_back( u.ents[i] );
+    bool anyLoose = false;
+    for ( size_t i = 0; i < u.loose.size() && !anyLoose; ++i )
+        anyLoose = ( u.loose[i]->owner == world_entity || UGPathOf( u.loose[i]->owner ) != path );
+    if ( ents.empty() && !anyLoose )
+    {
+        Sys_Printf( "Groups: nothing to add - it is all in \"%s\" already.\n", path.c_str() );
+        return false;
+    }
+
+    ugTxn_t t;
+    UGTxnBegin( t, "add to group", true );
+    for ( size_t i = 0; i < ents.size(); ++i )
+        UGTxnRecord( t, ents[i] );
+    const int brushes = UGTxnLooseInto( t, u.loose, path );
+    for ( size_t i = 0; i < ents.size(); ++i )
+        UGTxnSetPath( t, ents[i], path );
+    UGTxnEnd( t );
+
+    UGReveal( path );
+    Sys_Printf( "Groups: added %i object(s) and %i loose brush(es) to \"%s\".\n",
+                (int)ents.size(), brushes, path.c_str() );
+    return true;
+}
+
+// `picked` leaves every group.  Brushes go back to worldspawn.
+bool UGRemove( const std::vector<selbrush_t *> &picked )
+{
+    ugUnits_t u;
+    UGUnitsFrom( picked, u );
+    std::vector<entity_s *>   ents;
+    std::vector<selbrush_t *> loose;
+    for ( size_t i = 0; i < u.ents.size(); ++i )
+        if ( !UGPathOf( u.ents[i] ).empty() )
+            ents.push_back( u.ents[i] );
+    for ( size_t i = 0; i < u.loose.size(); ++i )
+        if ( u.loose[i]->owner != world_entity )
+            loose.push_back( u.loose[i] );
+    if ( ents.empty() && loose.empty() )
+    {
+        Sys_Printf( "Groups: nothing selected is in a group.\n" );
+        return false;
+    }
+
+    ugTxn_t t;
+    UGTxnBegin( t, "remove from group", false );
+    std::vector<selbrush_t *> move;
+    UGTxnRecordLoose( t, loose, world_entity, move );
+    for ( size_t i = 0; i < move.size(); ++i )
+        RelinkBrush( move[i], world_entity, (entity_s_def *)world_entity->def );
+    for ( size_t i = 0; i < ents.size(); ++i )
+    {
+        if ( IsFuncGroup( ents[i] ) ) UGTxnDissolve( t, ents[i] );
+        else                          UGTxnSetPath( t, ents[i], std::string() );
+    }
+    UGTxnEnd( t );
+    Sys_Printf( "Groups: %i object(s) and %i brush(es) taken out of their groups.\n",
+                (int)ents.size(), (int)move.size() );
+    return true;
+}
+
+// Dissolve ONE level, inside an open record: members of `path` move up to its parent (out
+// of all groups when it has none) and its sub-groups become the parent's.
+int UGTxnUngroup( ugTxn_t &t, const std::string &path )
+{
+    const std::string up = UGParent( path );
+    std::vector<entity_s *>  ents;
+    std::vector<std::string> paths;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        const std::string p = UGPathOf( e );
+        if ( p.empty() || !UGIsUnder( p, path ) )
+            continue;
+        ents.push_back( e );
+        paths.push_back( p );
+    }
+    for ( size_t i = 0; i < ents.size(); ++i )
+    {
+        const std::string np = UGJoin( up, UGBelow( paths[i], path ) );
+        if ( !np.empty() )                  UGTxnSetPath( t, ents[i], np );
+        else if ( IsFuncGroup( ents[i] ) )  UGTxnDissolve( t, ents[i] );
+        else                                UGTxnSetPath( t, ents[i], std::string() );
+    }
+    return (int)ents.size();
+}
+
+bool UGUngroup( const std::string &path )
+{
+    if ( path.empty() )
+        return false;
+    ugTxn_t t;
+    UGTxnBegin( t, "ungroup", false );
+    const int n = UGTxnUngroup( t, path );
+    UGTxnEnd( t );
+    Sys_Printf( "Groups: \"%s\" dissolved (%i object(s) moved %s).\n", path.c_str(), n,
+                UGParent( path ).empty() ? "out of groups" : "up one level" );
+    return n > 0;
+}
+
+bool UGRename( const std::string &path, const char *newLeaf )
+{
+    const std::string leaf = UGCleanName( newLeaf );
+    if ( path.empty() || leaf.empty() )
+        return false;
+    const std::string np = UGJoin( UGParent( path ), leaf );
+    if ( np == path )
+        return false;
+    UGBuildTree();
+    if ( UGFind( np ) >= 0 )
+    {
+        Sys_Printf( "Groups: there is already a group called \"%s\" there.\n", np.c_str() );
+        return false;
+    }
+    std::vector<entity_s *>  ents;
+    std::vector<std::string> paths;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        const std::string p = UGPathOf( e );
+        if ( !p.empty() && UGIsUnder( p, path ) )
+        {
+            ents.push_back( e );
+            paths.push_back( p );
+        }
+    }
+    const bool wasClosed = Collapsed( UGKey( path ) );
+    ugTxn_t t;
+    UGTxnBegin( t, "rename group", false );
+    for ( size_t i = 0; i < ents.size(); ++i )
+        UGTxnSetPath( t, ents[i], UGJoin( np, UGBelow( paths[i], path ) ) );
+    UGTxnEnd( t );
+    SetCollapsed( UGKey( np ), wasClosed );
+    return true;
+}
+
+// Every live brush of every member at or below `path`.
+void UGBrushesOf( const std::string &path, std::vector<selbrush_t *> &out )
+{
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        if ( e == world_entity )
+            continue;
+        const std::string p = UGPathOf( e );
+        if ( p.empty() || !UGIsUnder( p, path ) )
+            continue;
+        for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
+            if ( Sel_BrushLive( b ) )
+                out.push_back( b );
+    }
+}
+
+// The group path of a picked brush: its entity's, "" for a worldspawn brush.
+std::string UGPathOfBrush( const selbrush_t *sb )
+{
+    return ( sb && sb->owner && sb->owner != world_entity ) ? UGPathOf( sb->owner ) : std::string();
 }
 
 // Select_Ungroup for one entity (select.cpp:5106-5146). Undo_AddEntity_W snapshots
@@ -1022,7 +1895,8 @@ bool UngroupEntity( entity_s *inst, const char *op )
 bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
-        || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER;
+        || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER
+        || k == KOUT_SECTION_GROUPS;
 }
 
 // Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
@@ -1042,6 +1916,11 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh )
         else if ( k == KOUT_BARBWIRE_FOLDER )
         {
             if ( !IsBarbwireEntity( e ) || EntitySection( e ) != KOUT_SECTION_MODELS )
+                continue;
+        }
+        else if ( k == KOUT_SECTION_GROUPS )
+        {
+            if ( UGPathOf( e ).empty() )            // everything that is in any group
                 continue;
         }
         else if ( EntitySection( e ) != k )
@@ -1166,6 +2045,9 @@ bool RowAcceptsBrushes( const koutRow_t &r )
 {
     return r.kind == KOUT_SECTION_BRUSHES      // -> worldspawn (ungroup)
         || r.kind == KOUT_SECTION_TERRAIN      // -> worldspawn as well
+        || r.kind == KOUT_SECTION_GROUPS       // -> a NEW group
+        || r.kind == KOUT_UGROUP               // -> into that group
+        || r.kind == KOUT_UGROUP_TYPE          // -> likewise (its group)
         || r.kind == KOUT_GROUP_ENTITY
         || r.kind == KOUT_ENTITY;
 }
@@ -1233,6 +2115,21 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
         if ( moving.empty() )
             moving.push_back( drag.inst );
 
+        if ( target.kind == KOUT_SECTION_GROUPS )
+        {
+            UGCreate( moving, nullptr );
+            return;
+        }
+        if ( target.kind == KOUT_UGROUP || target.kind == KOUT_UGROUP_TYPE )
+        {
+            if ( target.ugroup >= 0 && target.ugroup < (int)s_ug.size() )
+            {
+                const std::string path = s_ug[target.ugroup].path;   // copy: the op rebuilds s_ug
+                UGAddTo( path, moving );
+            }
+            return;
+        }
+
         const bool toWorld = target.kind == KOUT_SECTION_BRUSHES || target.kind == KOUT_SECTION_TERRAIN;
         entity_s *targetInst = toWorld ? world_entity : target.ent;
         ReparentBrushes( moving, targetInst, toWorld ? "outliner ungroup" : "outliner group" );
@@ -1290,6 +2187,7 @@ static void CollapseFoldersOnly()
     // KIWI (2026-09-10, user): the Terrain section is ALWAYS collapsed when a map loads —
     // the only top-level section that starts closed (its rows are hundreds of sculpt chunks).
     SetCollapsed( KOUT_KEY_TERRAIN, true );
+    SetCollapsed( KOUT_KEY_MODELS, true );    // same, 2026-09-21: 800+ model rows
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
         if ( e == world_entity )
@@ -1298,6 +2196,10 @@ static void CollapseFoldersOnly()
         if ( def )
             SetCollapsed( EntKey( def->numberId ), true );
     }
+    // Universal groups load closed: a map with forty houses lists forty lines.
+    UGBuildTree();
+    for ( size_t g = 0; g < s_ug.size(); ++g )
+        SetCollapsed( UGKey( s_ug[g].path ), true );
     const int nGroups = KiwiCon_GroupCount();
     for ( int g = 0; g < nGroups; ++g )
         SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
@@ -1310,6 +2212,7 @@ void KiwiOutliner_ResetForNewMap()
 {
     s_collapsed.clear();
     SetCollapsed( KOUT_KEY_TERRAIN, true );   // closed from the first frame (KIWI 2026-09-10)
+    SetCollapsed( KOUT_KEY_MODELS, true );    // same (KIWI 2026-09-21)
     s_collapseFoldersPending = true;
     s_rows.clear();
     s_lastSelGen = 0;
@@ -1510,8 +2413,27 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_MODELS:
                 case KOUT_SECTION_IMAGES:
                 case KOUT_BARBWIRE_FOLDER:
+                case KOUT_SECTION_GROUPS:
                     SectionEyeState( r.kind, &hidden, &hasEye );
                     break;
+                case KOUT_UGROUP:
+                case KOUT_UGROUP_TYPE:
+                {
+                    std::vector<entity_s *> ents;
+                    UGRowEntities( r, ents );
+                    int n = 0, nh = 0;
+                    for ( size_t k = 0; k < ents.size(); ++k )
+                        for ( selbrush_t *b = ents[k]->brushes.ownerNext;
+                              b && b != &ents[k]->brushes; b = b->ownerNext )
+                        {
+                            ++n;
+                            if ( BrushHidden( b ) )
+                                ++nh;
+                        }
+                    hidden = ( n > 0 && nh == n );
+                    hasEye = ( n > 0 );
+                    break;
+                }
                 default:
                     break;
                 }
@@ -1546,6 +2468,18 @@ void KiwiOutliner_Draw()
                                   b && b != &r.ent->brushes; b = b->ownerNext )
                                 SetBrushHidden( b, want );
                             KiwiVis_UndoCommit();      // commit the captured gesture
+                        }
+                        else if ( r.kind == KOUT_UGROUP || r.kind == KOUT_UGROUP_TYPE )
+                        {
+                            // The whole house (or just its models) in one record.
+                            std::vector<entity_s *> ents;
+                            UGRowEntities( r, ents );
+                            KiwiVis_UndoPush( "hide group (outliner)" );
+                            for ( size_t k = 0; k < ents.size(); ++k )
+                                for ( selbrush_t *b = ents[k]->brushes.ownerNext;
+                                      b && b != &ents[k]->brushes; b = b->ownerNext )
+                                    SetBrushHidden( b, want );
+                            KiwiVis_UndoCommit();
                         }
                         else if ( r.kind == KOUT_CON_GROUP )
                         {
@@ -1624,6 +2558,20 @@ void KiwiOutliner_Draw()
                     break;
                 case KOUT_BARBWIRE_FOLDER:
                     _snprintf( label, sizeof( label ), "Barbwire (%i)", r.count );
+                    break;
+                case KOUT_SECTION_GROUPS:
+                    _snprintf( label, sizeof( label ), "Groups (%i)", r.count );
+                    break;
+                case KOUT_UGROUP:
+                    _snprintf( label, sizeof( label ), "%s (%i)",
+                               UGLeaf( s_ug[r.ugroup].path ).c_str(), r.count );
+                    break;
+                case KOUT_UGROUP_TYPE:
+                    _snprintf( label, sizeof( label ), "%s (%i)",
+                               r.ugType == KOUT_SECTION_BRUSHES ? "Brushes"
+                             : r.ugType == KOUT_SECTION_MODELS  ? "Models"
+                             : r.ugType == KOUT_SECTION_LIGHTS  ? "Lights" : "Entities",
+                               r.count );
                     break;
                 case KOUT_GROUP_ENTITY:
                 case KOUT_ENTITY:
@@ -1707,6 +2655,12 @@ void KiwiOutliner_Draw()
                             {
                                 KiwiRefImage_SetGroupName( r.imageGroup, s_renameBuf );
                             }
+                            else if ( r.kind == KOUT_UGROUP )
+                            {
+                                // A copy: the rename rebuilds the tree this row indexes.
+                                const std::string path = s_ug[r.ugroup].path;
+                                UGRename( path, s_renameBuf );
+                            }
                             else if ( r.kind == KOUT_CON_OBJECT )
                             {
                                 // One construction snapshot covers the object rename.
@@ -1727,6 +2681,8 @@ void KiwiOutliner_Draw()
                         s_rename.active = false;
                     }
                     ImGui::PopID();
+                    if ( s_structural )
+                        break;          // a group rename rebuilt the tree the rows index
                     continue;
                 }
 
@@ -1804,6 +2760,10 @@ void KiwiOutliner_Draw()
                             {
                                 BeginRename( r, KiwiRefImage_GroupName( r.imageGroup ) );
                             }
+                            else if ( r.kind == KOUT_UGROUP )
+                            {
+                                BeginRename( r, UGLeaf( s_ug[r.ugroup].path ).c_str() );
+                            }
                             else
                             {
                                 char nm[80];
@@ -1844,10 +2804,11 @@ void KiwiOutliner_Draw()
                             g_nUpdateBits = -1;
                         }
                         else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY
-                               || r.kind == KOUT_BARBWIRE_FOLDER )
+                               || r.kind == KOUT_BARBWIRE_FOLDER || r.kind == KOUT_SECTION_GROUPS
+                               || r.kind == KOUT_UGROUP || r.kind == KOUT_UGROUP_TYPE )
                         {
-                            // The Barbwire folder acts on every member entity at once;
-                            // an entity row on its own brushes.
+                            // The Barbwire and Groups folders act on every member entity
+                            // at once; an entity row on its own brushes.
                             std::vector<entity_s *> ents;
                             if ( r.kind == KOUT_BARBWIRE_FOLDER )
                             {
@@ -1855,6 +2816,14 @@ void KiwiOutliner_Draw()
                                     if ( e != world_entity && IsBarbwireEntity( e ) )
                                         ents.push_back( e );
                             }
+                            else if ( r.kind == KOUT_SECTION_GROUPS )
+                            {
+                                for ( size_t g = 0; g < s_ug.size(); ++g )
+                                    if ( s_ug[g].parent < 0 )
+                                        UGMembers( (int)g, -1, true, ents );
+                            }
+                            else if ( r.kind == KOUT_UGROUP || r.kind == KOUT_UGROUP_TYPE )
+                                UGRowEntities( r, ents );   // the house, or just its models
                             else
                                 ents.push_back( r.ent );
 
@@ -2000,6 +2969,74 @@ void KiwiOutliner_Draw()
                         ImGui::EndPopup();
                     }
                 }
+                // Universal groups, without dragging.  On a brush / entity row the menu acts
+                // on that object, or on the whole selection when the row is part of it (the
+                // drag rule); on a group row it acts on the group.  Every action that
+                // edits groups sets s_structural, and nothing below it touches a row again.
+                else if ( r.kind == KOUT_BRUSH || r.kind == KOUT_ENTITY
+                       || r.kind == KOUT_SECTION_GROUPS || r.kind == KOUT_UGROUP
+                       || r.kind == KOUT_UGROUP_TYPE )
+                {
+                    if ( ImGui::BeginPopupContextItem( "##groupctx" ) )
+                    {
+                        const bool objectRow = ( r.kind == KOUT_BRUSH || r.kind == KOUT_ENTITY );
+                        selbrush_t *rowBrush = r.inst;
+                        if ( r.kind == KOUT_ENTITY && r.ent && r.ent->brushes.ownerNext != &r.ent->brushes )
+                            rowBrush = r.ent->brushes.ownerNext;     // any brush names its entity
+                        std::vector<selbrush_t *> picked;
+                        if ( !objectRow || ( rowBrush && Sel_BrushLive( rowBrush ) && BrushSelected( rowBrush ) ) )
+                            GatherSelectedBrushes( picked );
+                        else if ( rowBrush && Sel_BrushLive( rowBrush ) )
+                            picked.push_back( rowBrush );
+
+                        const std::string rowPath = ( r.ugroup >= 0 && r.ugroup < (int)s_ug.size() )
+                                                  ? s_ug[r.ugroup].path : std::string();
+                        char item[96];
+
+                        if ( r.kind == KOUT_UGROUP )
+                        {
+                            _snprintf( item, sizeof( item ), "Add selection to \"%s\"",
+                                       UGLeaf( rowPath ).c_str() );
+                            item[sizeof( item ) - 1] = '\0';
+                            if ( ImGui::MenuItem( item, 0, false, !picked.empty() ) )
+                                UGAddTo( rowPath, picked );
+                            if ( !s_structural && ImGui::MenuItem( "Rename" ) )
+                                BeginRename( r, UGLeaf( rowPath ).c_str() );
+                            if ( !s_structural && ImGui::MenuItem( "Ungroup" ) )
+                                UGUngroup( rowPath );
+                            if ( !s_structural )
+                                ImGui::Separator();
+                        }
+
+                        if ( !s_structural && r.kind != KOUT_UGROUP_TYPE )
+                        {
+                            _snprintf( item, sizeof( item ), "New group from %s",
+                                       ( objectRow && picked.size() == 1 ) ? "this" : "selection" );
+                            item[sizeof( item ) - 1] = '\0';
+                            if ( ImGui::MenuItem( item, 0, false, !picked.empty() ) )
+                                UGCreate( picked, nullptr );
+                        }
+
+                        if ( !s_structural && objectRow && !picked.empty()
+                          && ImGui::BeginMenu( "Add to group", !s_ugByPath.empty() ) )
+                        {
+                            const std::string mine = UGPathOfBrush( rowBrush );
+                            // Full paths, in name order: "village/house_1/door".
+                            std::string chosen;
+                            for ( std::map<std::string, int>::const_iterator it = s_ugByPath.begin();
+                                  it != s_ugByPath.end(); ++it )
+                                if ( ImGui::MenuItem( it->first.c_str(), 0, it->first == mine ) )
+                                    chosen = it->first;
+                            ImGui::EndMenu();
+                            if ( !chosen.empty() )
+                                UGAddTo( chosen, picked );      // after the loop: it rebuilds the map
+                        }
+                        if ( !s_structural && objectRow && !UGPathOfBrush( rowBrush ).empty()
+                          && ImGui::MenuItem( "Remove from group" ) )
+                            UGRemove( picked );
+                        ImGui::EndPopup();
+                    }
+                }
                 else if ( r.kind == KOUT_IMAGE_GROUP )
                 {
                     if ( ImGui::BeginPopupContextItem( "##imagegroupctx" ) )
@@ -2126,14 +3163,20 @@ void KiwiOutliner_Draw()
                 }
 
                 // Drag source
+                // An entity row (a model, a light) drags as its first brush: a picked brush
+                // already names its entity everywhere groups are concerned (UGUnitsFrom),
+                // and the plain brush drops refuse a point entity's box (FilterMovable).
+                const bool entityDrag = r.kind == KOUT_ENTITY && r.ent
+                                     && r.ent->brushes.ownerNext != &r.ent->brushes;
                 if ( !io.KeyShift && !s_paintSelecting
-                  && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT || r.kind == KOUT_IMAGE ) )
+                  && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT || r.kind == KOUT_IMAGE
+                    || entityDrag ) )
                 {
                     if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
                     {
                         koutDrag_t d;
-                        d.kind       = (int)r.kind;
-                        d.inst       = r.inst;
+                        d.kind       = entityDrag ? (int)KOUT_BRUSH : (int)r.kind;
+                        d.inst       = entityDrag ? r.ent->brushes.ownerNext : r.inst;
                         d.conIndex   = r.conIndex;
                         d.conGen     = KiwiCon_Generation();
                         d.imageIndex = r.imageIndex;
@@ -2177,83 +3220,22 @@ void KiwiOutliner_Draw()
 // Group commands
 bool KiwiOutliner_CanGroup()
 {
-    // Brush grouping is create-only and therefore requires all-world ownership.
+    // Anything selectable as an object can be grouped: brushes, patches, models, lights,
+    // other entities, existing groups.
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
-    if ( !brushes.empty() )
-    {
-        bool allWorld = true;
-        for ( size_t i = 0; i < brushes.size(); ++i )
-            if ( brushes[i]->owner != world_entity )
-                allWorld = false;
-        if ( allWorld )
-            return true;
-    }
-    return KiwiConSel_Count() > 0;
+    return !brushes.empty() || KiwiConSel_Count() > 0;
 }
 
 bool KiwiOutliner_GroupSelection()
 {
     bool did = false;
 
-    // Brush half: func_group entity.
+    // Object half: a universal group (UGCreate has the nesting rules).
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
-    if ( !brushes.empty() )
-    {
-        eclass_t *ec = Eclass_ForName( 0, "func_group" );     // eclass.cpp:1138
-        if ( !ec )
-        {
-            Sys_Printf( "Outliner: no func_group entity definition — cannot group.\n" );
-        }
-        else
-        {
-            // Entity_Create allocates only for an all-world selection; mixed owners
-            // merge or refuse (entity.cpp:1628-1756). Stamping a returned existing
-            // entity would make undo delete it, so existing groups are drag targets.
-            bool allWorld = true;
-            for ( size_t i = 0; i < brushes.size(); ++i )
-                if ( brushes[i]->owner != world_entity )
-                    allWorld = false;
-
-            if ( !allWorld )
-            {
-                Sys_Printf( "Outliner: part of the selection already belongs to an "
-                            "entity.  Ungroup it first, or DRAG the rows onto the "
-                            "group folder you want them in.\n" );
-            }
-            else
-            {
-                // xywnd.cpp:3400-3404 bracket plus pmesh.cpp:7396 entity-id tail;
-                // Entity_Create performs the relink.
-                Undo_ClearRedo();
-                Undo_GeneralStart( "outliner group" );
-                Undo_AddBrushList( &selected_brushes );
-                entity_s *inst = Entity_Create( ec );
-                if ( entity_s_def *def = DefOf( inst ) )
-                {
-                    Undo_SetIdForEntity( def );
-                    // numberId makes the generated group_N name session-unique.
-                    char nm[64];
-                    _snprintf( nm, sizeof( nm ), "group_%i", def->numberId );
-                    nm[sizeof( nm ) - 1] = '\0';
-                    SetKeyValue( def, "targetname", nm );
-                    SetCollapsed( EntKey( def->numberId ), false );
-                    did = true;
-                }
-                Undo_End();
-                g_nUpdateBits = -1;
-                Sel_InvalidateFromLegacy();
-                s_structural = true;
-                if ( did )
-                    Sys_Printf( "Outliner: grouped %i brush(es) into a func_group.\n",
-                                (int)brushes.size() );
-                else
-                    Sys_Printf( "Outliner: could not create the group "
-                                "(see the message above).\n" );
-            }
-        }
-    }
+    if ( !brushes.empty() && UGCreate( brushes, nullptr ) )
+        did = true;
 
     // Construction half: sidecar group.
     if ( KiwiConSel_Count() > 0 )
@@ -2292,20 +3274,128 @@ bool KiwiOutliner_GroupSelection()
     return did;
 }
 
-bool KiwiOutliner_CanUngroup()
+// The ONE group the selection should join: every selected object that is in a group is
+// in the same one, and at least one selected object is not in it.  "" otherwise.
+static std::string JoinTargetOfSelection( const std::vector<selbrush_t *> &brushes )
 {
-    // Brush side: any selected brush owned by a non-world brush entity.
+    std::string target;
+    bool        outsider = false;
+    for ( size_t i = 0; i < brushes.size(); ++i )
+    {
+        const std::string p = UGPathOfBrush( brushes[i] );
+        if ( p.empty() )                          outsider = true;
+        else if ( target.empty() )                target = p;
+        else if ( p != target )                   return std::string();
+    }
+    return outsider ? target : std::string();
+}
+
+bool KiwiOutliner_CanAddToGroup()
+{
+    std::vector<selbrush_t *> brushes;
+    GatherSelectedBrushes( brushes );
+    return !JoinTargetOfSelection( brushes ).empty();
+}
+
+// Select some of a house plus the new door handle, run this: the handle joins the house.
+bool KiwiOutliner_AddSelectionToGroup()
+{
+    std::vector<selbrush_t *> brushes;
+    GatherSelectedBrushes( brushes );
+    const std::string target = JoinTargetOfSelection( brushes );
+    if ( target.empty() )
+    {
+        Sys_Printf( "Groups: select members of ONE group together with the ungrouped objects "
+                    "that should join it (or right-click the group in the outliner > Add "
+                    "selection).\n" );
+        return false;
+    }
+    return UGAddTo( target, brushes );
+}
+
+bool KiwiOutliner_CanSelectGroup()
+{
     std::vector<selbrush_t *> brushes;
     GatherSelectedBrushes( brushes );
     for ( size_t i = 0; i < brushes.size(); ++i )
-    {
-        entity_s *e = brushes[i]->owner;
-        if ( !e || e == world_entity )
-            continue;
-        entity_s_def *def = DefOf( e );
-        if ( def && def->eclass && !def->eclass->fixedsize )
+        if ( !UGPathOfBrush( brushes[i] ).empty() )
             return true;
+    return false;
+}
+
+// Grow the selection to whole groups: first the group each selected object is in; run
+// again once that is fully selected and it grows to the group containing it (knob ->
+// door -> house -> village).
+bool KiwiOutliner_SelectWholeGroup()
+{
+    std::vector<selbrush_t *> brushes;
+    GatherSelectedBrushes( brushes );
+    std::map<const selbrush_t *, bool> have;
+    for ( size_t i = 0; i < brushes.size(); ++i )
+        have[brushes[i]] = true;
+
+    std::map<std::string, bool> grow;
+    for ( size_t i = 0; i < brushes.size(); ++i )
+    {
+        std::string p = UGPathOfBrush( brushes[i] );
+        if ( p.empty() )
+            continue;
+        for ( ;; )
+        {
+            std::vector<selbrush_t *> all;
+            UGBrushesOf( p, all );
+            bool full = true;
+            for ( size_t k = 0; k < all.size() && full; ++k )
+                full = have.find( all[k] ) != have.end();
+            if ( !full || UGParent( p ).empty() )
+                break;
+            p = UGParent( p );
+        }
+        grow[p] = true;
     }
+    if ( grow.empty() )
+    {
+        Sys_Printf( "Groups: nothing selected is in a group.\n" );
+        return false;
+    }
+    selection_t &sel = KiwiSel();
+    int added = 0;
+    for ( std::map<std::string, bool>::const_iterator it = grow.begin(); it != grow.end(); ++it )
+    {
+        std::vector<selbrush_t *> all;
+        UGBrushesOf( it->first, all );
+        for ( size_t k = 0; k < all.size(); ++k )
+            if ( have.find( all[k] ) == have.end() )
+            {
+                Sel_Add( sel, Sel_MakeObject( all[k] ) );
+                have[all[k]] = true;
+                ++added;
+            }
+    }
+    Sel_SyncToLegacy();
+    g_nUpdateBits = -1;
+    return added > 0;
+}
+
+// Test DSL exports (kiwi_test.cpp).
+int KiwiOutliner_TestGroupCount()
+{
+    UGBuildTree();
+    return (int)s_ug.size();
+}
+
+int KiwiOutliner_TestGroupedBrushCount()
+{
+    std::vector<selbrush_t *> all;
+    UGBrushesOf( std::string(), all );
+    return (int)all.size();
+}
+
+bool KiwiOutliner_CanUngroup()
+{
+    // Object side: anything selected that is in a group.
+    if ( KiwiOutliner_CanSelectGroup() )
+        return true;
     // Construction side: any selected grouped object.
     for ( int i = 0; i < KiwiConSel_Count(); ++i )
     {
@@ -2320,33 +3410,45 @@ bool KiwiOutliner_UngroupSelection()
 {
     bool did = false;
 
-    // Collect distinct owners before ungroup frees them and invalidates selection.
-    std::vector<entity_s *> ents;
+    // Object half: dissolve ONE level - the group each selected object is directly in.
+    // Paths are taken before anything changes and handled deepest first, so dissolving
+    // "house/door" cannot re-home objects that "house" is about to move as well.
     {
         std::vector<selbrush_t *> brushes;
         GatherSelectedBrushes( brushes );
+        std::vector<std::string> paths;
         for ( size_t i = 0; i < brushes.size(); ++i )
         {
-            entity_s *e = brushes[i]->owner;
-            if ( !e || e == world_entity )
-                continue;
-            entity_s_def *def = DefOf( e );
-            if ( !def || !def->eclass || def->eclass->fixedsize )
-                continue;
-            bool dup = false;
-            for ( size_t k = 0; k < ents.size(); ++k )
-                if ( ents[k] == e )
-                {
-                    dup = true;
-                    break;
-                }
+            const std::string p = UGPathOfBrush( brushes[i] );
+            bool dup = p.empty();
+            for ( size_t k = 0; k < paths.size() && !dup; ++k )
+                dup = ( paths[k] == p );
             if ( !dup )
-                ents.push_back( e );
+                paths.push_back( p );
+        }
+        // A group nested inside another selected group goes with its parent's pass.
+        std::vector<std::string> tops;
+        for ( size_t i = 0; i < paths.size(); ++i )
+        {
+            bool nested = false;
+            for ( size_t k = 0; k < paths.size() && !nested; ++k )
+                nested = ( k != i && paths[i] != paths[k] && UGIsUnder( paths[i], paths[k] ) );
+            if ( !nested )
+                tops.push_back( paths[i] );
+        }
+        if ( !tops.empty() )
+        {
+            ugTxn_t t;
+            UGTxnBegin( t, "ungroup", false );
+            int moved = 0;
+            for ( size_t i = 0; i < tops.size(); ++i )
+                moved += UGTxnUngroup( t, tops[i] );
+            UGTxnEnd( t );
+            Sys_Printf( "Groups: dissolved %i group(s), %i object(s) moved up.\n",
+                        (int)tops.size(), moved );
+            did = moved > 0;
         }
     }
-    for ( size_t i = 0; i < ents.size(); ++i )
-        if ( UngroupEntity( ents[i], "outliner ungroup" ) )
-            did = true;
 
     // Ungroup selected construction objects and remove groups left empty.
     {
@@ -2395,10 +3497,22 @@ void KiwiOutliner_RegisterCommands()
     // Unbound by default but searchable and remappable through radiant.ini.
     Radiant_RegisterCommand( "KiwiGroupSelection",   0, 0, KIWI_CMD_GROUP_CREATE );
     Radiant_RegisterCommand( "KiwiUngroupSelection", 0, 0, KIWI_CMD_GROUP_UNGROUP );
+    Radiant_RegisterCommand( "KiwiGroupAddSelection", 0, 0, KIWI_CMD_GROUP_ADD );
+    Radiant_RegisterCommand( "KiwiGroupSelectWhole",  0, 0, KIWI_CMD_GROUP_SELECT );
 }
 
 bool KiwiOutliner_DispatchInstant( unsigned int cmdId )
 {
+    if ( cmdId == (unsigned int)KIWI_CMD_GROUP_ADD )
+    {
+        KiwiOutliner_AddSelectionToGroup();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_GROUP_SELECT )
+    {
+        KiwiOutliner_SelectWholeGroup();
+        return true;
+    }
     if ( cmdId == (unsigned int)KIWI_CMD_GROUP_CREATE )
     {
         KiwiOutliner_GroupSelection();

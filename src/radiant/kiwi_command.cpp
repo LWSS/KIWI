@@ -382,6 +382,8 @@ namespace
 
         { KIWI_CMD_GROUP_CREATE,    { "Group Selection",              "Selection", SEL_MASK_OBJECT, KiwiOutliner_CanGroup   } },
         { KIWI_CMD_GROUP_UNGROUP,   { "Ungroup Selection",            "Selection", SEL_MASK_OBJECT, KiwiOutliner_CanUngroup } },
+        { KIWI_CMD_GROUP_ADD,       { "Add Selection to Group",       "Selection", SEL_MASK_OBJECT, KiwiOutliner_CanAddToGroup } },
+        { KIWI_CMD_GROUP_SELECT,    { "Select Whole Group",           "Selection", SEL_MASK_OBJECT, KiwiOutliner_CanSelectGroup } },
 
         { KIWI_CMD_MATINFO,         { "Material info (under cursor)", "Textures",  0, 0 } },
 

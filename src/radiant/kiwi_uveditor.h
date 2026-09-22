@@ -70,6 +70,13 @@
 // are shelved. Bucket-boundary misses also fall back to shelving. The build is capped by
 // KUVE_CHAIN_MAX_FACES/KUVE_CHAIN_MAX_EDGES.
 //
+// 2026-09-21: a shared edge need not be a WHOLE edge. Collinear edges overlapping by a
+// world unit or more (T-junctions between separate brushes) fold along the overlap, after
+// the welded pairs. Two faces of one plane keep their world sides instead of always
+// landing opposite. A face still unreached but coplanar with a placed one is positioned
+// through that face's world->display map (rigid: one corner pinned, longest diagonal
+// turned to its mapped direction). Only what is neither adjacent nor coplanar is shelved.
+//
 // A chain layout is latched on gathered row order, active anchor, and the Chain toggle—not
 // texdef/ST values or the local target set. Otherwise a completed edit would immediately
 // re-solve and rearrange the displayed shapes. "Re-fold" requests a new solve; until then,
