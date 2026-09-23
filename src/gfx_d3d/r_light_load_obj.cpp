@@ -207,6 +207,9 @@ void __cdecl R_LoadLightGridColors(uint bspVersion)
     }
     R_LoadDefaultLightGridColors(&s_world.lightGrid.colors[s_world.lightGrid.colorCount]);
     ++s_world.lightGrid.colorCount;
+    // KIWI: entries address the table with a u16 (GfxLightGridEntry::colorsIndex).
+    vassert(s_world.lightGrid.colorCount <= 0x10000, "light grid has %u colour sets, more than a u16 index reaches",
+            s_world.lightGrid.colorCount);
 }
 
 void R_LoadLightGridRowData()
@@ -232,6 +235,10 @@ uint8_t *R_LoadLightGridEntries()
     uint entryIndex; // [esp+4h] [ebp-8h]
     char *in; // [esp+8h] [ebp-4h]
 
+    // KIWI: the disk entry and GfxLightGridEntry are both {u16 colorsIndex, u8 primaryLightIndex,
+    // u8 needsTrace}; the copy below reads the disk bytes at exactly those offsets.
+    static_assert(sizeof(GfxLightGridEntry) == 4, "GfxLightGridEntry must match the 4-byte disk entry");
+    iassert(s_world.lightGrid.colors);   // R_LoadLightGridColors runs first: the checks below need colorCount
     in = Com_GetBspLump(LUMP_LIGHTGRIDENTRIES, 4u, &s_world.lightGrid.entryCount);
     result = (uint8_t *)Hunk_Alloc(4 * s_world.lightGrid.entryCount, "R_LoadLightGridPoints", 20);
     s_world.lightGrid.entries = (GfxLightGridEntry *)result;
@@ -239,9 +246,20 @@ uint8_t *R_LoadLightGridEntries()
     entryIndex = 0;
     while (entryIndex < s_world.lightGrid.entryCount)
     {
-        out->colorsIndex = *in;
+        // KIWI: the disk entry's colour index is a u16 (DiskLightGridEntry bytes 0-1).  `*in` read
+        // ONE signed char: indices >= 128 went negative -> ~65408 -> read past the colour table
+        // -> "rainbow" model lighting on any map with more than 128 grid colour clusters.
+        out->colorsIndex = *(const uint16_t *)in;
         out->primaryLightIndex = in[2];
         out->needsTrace = in[3];
+        // KIWI: a bad index here lights models from memory past the colour table (rainbow).
+        vassert(out->colorsIndex < s_world.lightGrid.colorCount,
+                "light grid entry %u: colour index %u, but only %u colour sets (bad read or bad cod4rad output)",
+                entryIndex, out->colorsIndex, s_world.lightGrid.colorCount);
+        // 255 = cod4rad's "no single primary; the cell's box sees the sun" marker.
+        vassert(out->primaryLightIndex < s_world.primaryLightCount || out->primaryLightIndex == 255,
+                "light grid entry %u: primary light index %u, but only %u primary lights",
+                entryIndex, out->primaryLightIndex, s_world.primaryLightCount);
         ++entryIndex;
         result = (byte *)(in + 4);
         in += 4;

@@ -274,11 +274,14 @@ void __cdecl R_FixedPointBlendLightGridColors(
     uint16_t accumulated[168]; // [esp+18h] [ebp-158h] BYREF
     uint colorsIter; // [esp+16Ch] [ebp-4h]
 
+    // KIWI: every index must land inside the colour table (fastfile and loose loads alike).
+    bcassert(colorsIndex[0], lightGrid->colorCount);
     R_ScaleLightGridColors(&lightGrid->colors[*colorsIndex], *fixedPointWeight, accumulated);
 
     colorsIter = 1;
     do
     {
+        bcassert(colorsIndex[colorsIter], lightGrid->colorCount);
         R_WeightedAccumulateLightGridColors(&lightGrid->colors[colorsIndex[colorsIter]], fixedPointWeight[colorsIter], accumulated);
         ++colorsIter;
     } while (colorsIter < colorsCount);
@@ -999,6 +1002,7 @@ void __cdecl R_SetLightGridColorsFromIndex(
     patch->primaryLightWeight = (int)(primaryLightWeight * 255.0f + 0.5f);
     patch->colorsCount = 1;
     iassert(colorsIndex == (ushort)colorsIndex);
+    bcassert(colorsIndex, lightGrid->colorCount);   // KIWI: the colour table index must be in range
     patch->colorsIndex[0] = colorsIndex;
 }
 

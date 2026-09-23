@@ -68,3 +68,12 @@ void KiwiUndo_SuppressEnd();
 
 // Drop journal and visibility history during map replacement.
 void KiwiUndo_Reset();
+
+// History size.  The KIWI stores (construction, visibility, reference images) keep
+// KUNDO_DOMAIN_DEPTH records each.  KiwiUndo_ApplyLimits sets the legacy brush/entity stack
+// to `levels` records (Edit > Preferences "Undo Levels") and KUNDO_LEGACY_MEMORY bytes of
+// snapshots; either change clears the legacy history, so it only acts when a value differs.
+// The journal holds as many tickets as all stores together.
+#define KUNDO_DOMAIN_DEPTH  128
+#define KUNDO_LEGACY_MEMORY ( 1024 * 1024 * 1024 )
+void KiwiUndo_ApplyLimits( int levels );

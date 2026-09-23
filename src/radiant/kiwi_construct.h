@@ -33,7 +33,7 @@ class  KiwiEditorCommand;           // kiwi_command.h
 // least 4; polygons retain their independent three-side minimum.
 #define KCON_SIDES_MIN       3
 #define KCON_MAX_POINTS      256    // per object; a polyline that long is a mistake
-#define KCON_UNDO_DEPTH      32     // whole-store snapshot depth
+#define KCON_UNDO_DEPTH      KUNDO_DOMAIN_DEPTH     // whole-store snapshot depth (kiwi_undo.h)
 #define KCON_DRAW_SEGMENTS   1600   // kiwi_lines budget for the whole construction pass
 #define KCON_ANGLE_STEP      15.0f  // bearing snap increment, degrees, in-plane
 #define KCON_JOIN_PIXELS     10.0f  // "click near the first point" closes a polyline

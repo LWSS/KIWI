@@ -9,20 +9,25 @@
 uint8_t *s_imageLoadBuf;
 uint s_imageLoadBytesUsed;
 
+// KIWI: the scratch every loose .iwi is read through.  Stock is 6 MB (0x600000, the biggest
+// stock texture: 2048^2 DXT5 + mips = 5.3 MB); KIWI's 4096^2 DXT5 textures need 21.3 MB at
+// picmip 0 (kiwi_lamppost_*), which threw "Needed to allocate at least ... to load images".
+#define KIWI_IMAGE_TEMP_BYTES ( 64 * 1024 * 1024 )
+
 uint8_t *__cdecl Image_AllocTempMemory(int bytes)
 {
     uint8_t *mem; // [esp+10h] [ebp-4h]
     uint bytesa; // [esp+1Ch] [ebp+8h]
 
     bytesa = (bytes + 3) & 0xFFFFFFFC;
-    if (bytesa + s_imageLoadBytesUsed > 0x600000)
+    if (bytesa + s_imageLoadBytesUsed > KIWI_IMAGE_TEMP_BYTES)
         Com_Error(
             ERR_DROP,
             "Needed to allocate at least %.1f MB to load images",
             (double)(bytesa + s_imageLoadBytesUsed) * 0.00000095367431640625);
     if (!s_imageLoadBuf)
     {
-        s_imageLoadBuf = (uint8_t *)Z_VirtualAlloc(6291456, "Image_AllocTempMemory", 18);
+        s_imageLoadBuf = (uint8_t *)Z_VirtualAlloc(KIWI_IMAGE_TEMP_BYTES, "Image_AllocTempMemory", 18);
         iassert( s_imageLoadBuf );
     }
     mem = &s_imageLoadBuf[s_imageLoadBytesUsed];

@@ -2,6 +2,7 @@
 #include "stdafx.h"
 #include "prefs.h"
 #include "radiant_registry.h"   // Radiant_Profile* (was AfxGetApp()->*Profile* before U-SHIM removal)
+#include "kiwi_undo.h"          // KIWI: KiwiUndo_ApplyLimits (the Undo Levels preference)
 #include <stdlib.h>   // atof
 
 // ── the one editor-wide preference instance ──────────────────────────────────
@@ -209,6 +210,9 @@ void Prefs_LoadPrefs( prefData_t *p )
     // safer default once; the first subsequent preference save makes the choice durable.
     p->preview_sun_aswell     = Radiant_ProfileGetInt( "Prefs", "SunLightPreviewGameLighting", 1 );
     p->light_preview_real_intensity = Radiant_ProfileGetInt( "Prefs", "LightPreviewRealIntensity", 1 );
+    // "UndoLevels" above was loaded and never applied (every profile holds a meaningless 10);
+    // the applied value lives under a new key (KiwiUndo_ApplyLimits, Prefs_Init).
+    p->m_nUndoLevels          = Radiant_ProfileGetInt( "Prefs", "KiwiUndoLevels", 1000 );
     // IDB 0x407180: despite its name, true is the REAL entity-intensity branch; false
     // selects retail's saturating 10000000 path.
     g_qeglobals.preview_at_max_intensity = p->light_preview_real_intensity != 0;
@@ -299,6 +303,7 @@ void Prefs_SavePrefs( prefData_t *p )
     Radiant_ProfileSetInt( "Prefs", "FloatingWindows", p->detatch_windows );
     Radiant_ProfileSetInt( "Prefs", "TransparentBackground", p->transparent_background );
     Radiant_ProfileSetInt( "Prefs", "UndoLevels", p->m_nUndoLevels );
+    Radiant_ProfileSetInt( "Prefs", "KiwiUndoLevels", p->m_nUndoLevels );   // KIWI: the applied key
     Radiant_ProfileSetInt( "Prefs", "PatchWireframe", p->patch_wireframe );
     Radiant_ProfileSetInt( "Prefs", "PatchWeld", p->g_bPatchWeld );
     Radiant_ProfileSetInt( "Prefs", "PatchDrillDown", p->patch_drill_down );
@@ -339,6 +344,7 @@ void Prefs_Init( bool loadFromRegistry )
     else
         g_qeglobals.preview_at_max_intensity =
             g_PrefsDlg->light_preview_real_intensity != 0;
+    KiwiUndo_ApplyLimits( g_PrefsDlg->m_nUndoLevels );     // KIWI: history size (kiwi_undo.h)
 }
 
 // One preferences-dialog control snapshot: every DDX-backed member of CPrefsDlg below
@@ -464,6 +470,7 @@ void Prefs_ApplyFromDialogState( prefData_t *p, const prefsDlgState_t &st )
     p->model_origin_size  = st.fModelOrg;
     p->prefab_origin_size = st.fPrefabOrg;
     Prefs_SavePrefs( p );
+    KiwiUndo_ApplyLimits( p->m_nUndoLevels );              // KIWI: clears the history only if it changed
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

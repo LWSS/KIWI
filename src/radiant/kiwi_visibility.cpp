@@ -65,7 +65,7 @@ namespace
     typedef std::vector<visEntry_t> visSnap_t;
 
     // Match the construction store's bounded undo depth.
-    const int KVIS_UNDO_DEPTH = 32;
+    const int KVIS_UNDO_DEPTH = KUNDO_DOMAIN_DEPTH;
 
     std::vector<visSnap_t> s_visUndo;
     std::vector<visSnap_t> s_visRedo;

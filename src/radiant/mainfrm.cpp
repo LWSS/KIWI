@@ -4575,12 +4575,11 @@ bool Radiant_FileSaveAs()
 }
 
 
-// CXYWnd clipboard ops.  KISAK: the binary mirrors the copied selection to the Win32 OLE
-// clipboard (RegisterClipboardFormatA("RadiantClippings")) so brushes can be pasted between
-// two running editors; that OLE + CMemFile layer is not ported.  These bodies use the in-app
-// clipboard buffer (entity.cpp), which is the full single-editor round trip (Copy ->
-// Entity_WriteSelected_R, Paste -> Map_ImportBuffer) and also carries the selection between
-// maps (Map_Free's "Copy selection?" box on File->New/Open).
+// CXYWnd clipboard ops.  The binary mirrors the copied selection to the Win32 clipboard
+// (RegisterClipboardFormatA("RadiantClippings")) so brushes can be pasted between two
+// running editors; entity.cpp does the same (KIWI 2026-09-22) around its in-app buffer
+// (Copy -> Entity_WriteSelected_R, Paste -> Map_ImportBuffer), which also carries the
+// selection between maps (Map_Free's "Copy selection?" box on File->New/Open).
 extern void RadiantClipboard_Copy();    // entity.cpp
 extern void RadiantClipboard_Paste();   // entity.cpp
 

@@ -125,7 +125,7 @@ namespace
 {
     const char *KREF_PROFILE = "KiwiRefImage";
     const float KREF_PI = 3.14159265358979323846f;
-    const int   KREF_UNDO_DEPTH = 32;
+    const int   KREF_UNDO_DEPTH = KUNDO_DOMAIN_DEPTH;
     const float KREF_MIN_SIZE = 0.125f;
 
     // Selection is an ordered set of indices (s_sel); the LAST one is the primary

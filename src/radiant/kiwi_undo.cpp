@@ -23,12 +23,19 @@ extern void  Undo_Undo();                          // undo.cpp:736  void Undo_Un
 extern void  Undo_Redo();                          // undo.cpp:1019 void Undo_Redo()
 extern bool  Undo_RedoAvailable();                 // undo.cpp:99   bool Undo_RedoAvailable()
 extern undo_s *g_lastundo;                         // undo.cpp:82   undo_s *g_lastundo (0x23F162C)
+extern void  Undo_SetMaxSize( int size );          // undo.cpp:276  (clears the legacy stack)
+extern int   Undo_GetMaxSize();                    // undo.cpp:287
+extern void  Undo_SetMaxMemorySize( int size );    // undo.cpp:295  (clears the legacy stack)
+extern int   Undo_GetMaxMemorySize();              // undo.cpp:307
 
 namespace
 {
-    // Default domain capacities total 64 + 32 + 32 + 32. Global trimming is safe
-    // only when every domain reports its own evictions before this limit is exceeded.
-    const int KUNDO_MAX_TICKETS = 160;
+    // Every store's capacity together.  Global trimming is safe only when every domain
+    // reports its own evictions before this limit is exceeded.
+    int MaxTickets()
+    {
+        return Undo_GetMaxSize() + 3 * KUNDO_DOMAIN_DEPTH;
+    }
 
     // Pointer identity does not survive legacy restore, so selection keys use a
     // snapshot-local brush ordinal and geometry values. See kiwi_undo.h.
@@ -100,7 +107,7 @@ namespace
         t.sel.swap( sel );
         t.selHasFace = hasFace;
         s_undo.push_back( t );
-        if ( (int)s_undo.size() > KUNDO_MAX_TICKETS )
+        if ( (int)s_undo.size() > MaxTickets() )
             s_undo.erase( s_undo.begin() );
         DropRedo();                     // new work destroys the redo (undo.cpp's own rule)
     }
@@ -381,6 +388,19 @@ void KiwiUndo_Reset()
     s_pendingArmed   = false;
     KiwiVis_UndoReset();                // visibility history belongs to the map
     KiwiRefImage_UndoReset();           // reference-image history belongs to the map
+}
+
+// KIWI: the ported stack kept 64 records in at most 2 MB of snapshots, and the "Undo
+// Levels" preference was loaded but never applied.  A terrain patch snapshot is ~20 KB, so
+// one wide sculpt stroke filled the whole 2 MB and evicted every older step.
+void KiwiUndo_ApplyLimits( int levels )
+{
+    if ( levels < 1 )
+        levels = 1;
+    if ( Undo_GetMaxSize() != levels )
+        Undo_SetMaxSize( levels );
+    if ( Undo_GetMaxMemorySize() != KUNDO_LEGACY_MEMORY )
+        Undo_SetMaxMemorySize( KUNDO_LEGACY_MEMORY );
 }
 
 // Depths and labels.

@@ -182,7 +182,7 @@ namespace
     // back, so nothing reads s_cursorNode without LiveCursorNode() first.
     const patchMesh_t *s_cursorDef = nullptr;
     // What the cursor landed on.  Only "Allow terrain creation" lets it leave the patches.
-    enum kterCursor_t { KCUR_NONE = 0, KCUR_PATCH, KCUR_SURFACE, KCUR_PLANE };
+    enum kterCursor_t { KCUR_NONE = 0, KCUR_PATCH, KCUR_GAP, KCUR_SURFACE, KCUR_PLANE };
     int   s_cursorKind = KCUR_NONE;
     patchMesh_t *s_scratchLike = nullptr;    // template for chunks laid with no terrain in reach
     int   s_created    = 0;                  // chunks laid by the current stroke
@@ -477,9 +477,13 @@ namespace
         return s_tool == KTER_RAISE && s_expand;
     }
 
-    // Cursor resolution.  Patches first (every mode).  With terrain creation allowed
-    // the cursor then lands on any world surface (brushes, models - KiwiDrop_Trace) and
-    // finally on the horizontal base plane, so the brush works over an empty zone.
+    bool GapCursor( const ray_t &ray, float outPoint[3] );
+
+    // Cursor resolution.  Patches first (every mode), then a GAP the terrain closes in
+    // around (every mode: the ring stays at the mouse over holes and models standing in
+    // them).  With terrain creation allowed the cursor then lands on any world surface
+    // (brushes, model boxes - KiwiDrop_Trace) and finally on the horizontal base plane, so
+    // the brush works over an empty zone.
     bool ResolveCursor( const ray_t &ray, float outPoint[3] )
     {
         if ( PickPatches( ray.origin, ray.dir, true, outPoint, nullptr, &s_cursorNode ) )
@@ -491,6 +495,11 @@ namespace
         s_cursorNode = nullptr;
         s_cursorDef  = nullptr;
         s_cursorKind = KCUR_NONE;
+        if ( GapCursor( ray, outPoint ) )
+        {
+            s_cursorKind = KCUR_GAP;
+            return true;
+        }
         // Off the patches: the texture painter lands on brush faces when it paints them too;
         // terrain creation lands on surfaces, then on the base plane.
         const bool brushPaint = s_tool == KTER_TEXTURE && s_paintBrushes && !s_paintBase && s_paintMaterial[0];
@@ -2683,6 +2692,104 @@ namespace
         return sqrtf( dx * dx + dy * dy );
     }
 
+    // Off the terrain at (x, y): the height of the nearest point of every terrain border within
+    // R, inverse-distance weighted (smooth across a gap), and how many of 8 directions from the
+    // point meet a border within R.  False when no terrain is in reach.
+    bool GapHeightAround( const float *p, float R, float *outZ, int *outSides )
+    {
+        static const float DIRS[8][2] = { { 1.0f, 0.0f }, { 0.7071f, 0.7071f }, { 0.0f, 1.0f }, { -0.7071f, 0.7071f },
+                                          { -1.0f, 0.0f }, { -0.7071f, -0.7071f }, { 0.0f, -1.0f }, { 0.7071f, -0.7071f } };
+        float wSum = 0.0f, zSum = 0.0f;
+        unsigned sides = 0;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( !PatchEligible( b ) || BoundsDistanceXY( b, p ) > R )
+                return;
+            const patchMesh_t *def = b->patch->def;
+            int ii[64], jj[64];
+            const int n = BorderRing( def, ii, jj );
+            float best = FLT_MAX, bestZ = 0.0f;
+            for ( int k = 0; k < n; ++k )
+            {
+                const float *a = def->ctrl[ii[k]][jj[k]].xyz, *c = def->ctrl[ii[( k + 1 ) % n]][jj[( k + 1 ) % n]].xyz;
+                const float dx = c[0] - a[0], dy = c[1] - a[1], l2 = dx * dx + dy * dy;
+                const float u  = l2 > 1e-6f ? ClampF( ( ( p[0] - a[0] ) * dx + ( p[1] - a[1] ) * dy ) / l2, 0.0f, 1.0f ) : 0.0f;
+                const float ex = a[0] + dx * u - p[0], ey = a[1] + dy * u - p[1];
+                if ( ex * ex + ey * ey < best )
+                {
+                    best  = ex * ex + ey * ey;
+                    bestZ = a[2] + ( c[2] - a[2] ) * u;
+                }
+                const float ax = a[0] - p[0], ay = a[1] - p[1];
+                for ( int q = 0; q < 8; ++q )
+                {
+                    if ( sides & ( 1u << q ) )
+                        continue;
+                    const float den = DIRS[q][0] * dy - DIRS[q][1] * dx;
+                    if ( fabsf( den ) < 1e-6f )
+                        continue;
+                    const float s = ( ax * dy - ay * dx ) / den, v = ( ax * DIRS[q][1] - ay * DIRS[q][0] ) / den;
+                    if ( s > 0.0f && s <= R && v >= 0.0f && v <= 1.0f )
+                        sides |= 1u << q;
+                }
+            }
+            if ( best <= R * R )
+            {
+                const float w = 1.0f / ( best + 1.0f );
+                wSum += w;
+                zSum += w * bestZ;
+            }
+        } );
+        if ( wSum <= 0.0f )
+            return false;
+        *outZ = zSum / wSum;
+        *outSides = 0;
+        for ( int q = 0; q < 8; ++q )
+            *outSides += ( sides >> q ) & 1;
+        return true;
+    }
+
+    // A ray that misses every patch over a GAP (a hole, a model standing in one) used to fall
+    // through to whatever lay below - a model's box, a brush under the map, the base plane -
+    // and the ring jumped away from the mouse.  When terrain closes the spot in from at least
+    // 6 of 8 directions, the cursor is where the ray crosses the height of that terrain.
+    bool GapCursor( const ray_t &ray, float outPoint[3] )
+    {
+        if ( fabsf( ray.dir[2] ) <= 1e-6f )
+            return false;
+        const float R = s_outer * 4.0f > 2048.0f ? s_outer * 4.0f : 2048.0f;
+        float z = s_cursorHave ? s_cursor[2] : s_createZ;
+        float p[3];
+        int   sides = 0;
+        for ( int iter = 0; iter < 6; ++iter )
+        {
+            const float t = ( z - ray.origin[2] ) / ray.dir[2];
+            if ( t <= 0.0f || t >= 131072.0f )
+                return false;
+            for ( int k = 0; k < 3; ++k )
+                p[k] = ray.origin[k] + ray.dir[k] * t;
+            float zNext;
+            if ( !TerrainHeightNear( p[0], p[1], z, &zNext ) && !GapHeightAround( p, R, &zNext, &sides ) )
+                return false;
+            const bool settled = fabsf( zNext - z ) < 0.5f;
+            z = zNext;
+            if ( settled )
+                break;
+        }
+        const float t = ( z - ray.origin[2] ) / ray.dir[2];
+        if ( t <= 0.0f || t >= 131072.0f )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            p[k] = ray.origin[k] + ray.dir[k] * t;
+        float zAround;
+        if ( !GapHeightAround( p, R, &zAround, &sides ) || sides < 6 )
+            return false;                               // open ground past the terrain's edge
+        outPoint[0] = p[0];
+        outPoint[1] = p[1];
+        outPoint[2] = z;
+        return true;
+    }
+
     // The closest SHEET within `reach` (XY): a stroke beside terrain continues its lattice.
     selbrush_t *NearestEligiblePatch( const float *p, float reach )
     {
@@ -2817,48 +2924,32 @@ namespace
 
     // ── fill a hole ──────────────────────────────────────────────────────────
     // A gap between curved patches has no lattice cell that fits it.  Creation strokes first
-    // look for a HOLE around the cursor: its outline is traced along the open terrain borders
-    // (TraceHoleOutline); the four sharpest turns are corners; opposite sides get equal point
-    // counts by splitting their longest segments (every neighbour vertex stays a fill vertex,
-    // so the seam cannot crack); the inside is a Coons blend of the sides, cut into patches
-    // of at most 16 x 16.  Outline points are 7 floats: x y z + the four weight bytes.
+    // look for a GAP under the brush (TraceHoleOutline): terrain coverage is rasterised around
+    // it, the empty region is flooded, and every terrain BORDER vertex on that region's edge
+    // joins the outline in the order the edge passes it - every neighbour vertex is a fill
+    // vertex, so the seam cannot crack.  FillOutline cuts the outline into convex pieces and
+    // fills each with a Coons blend of its sides.  Outline points are 7 floats: x y z + the
+    // four weight bytes.
+    const float KHOLE_TOL = 2.0f;           // terrain grows this much: narrower cracks are closed
+
+    char s_holeWhy[256];                    // why the last gap search failed ("" = no gap there)
+    bool s_holeSaid = false;                // a stroke says it once
+
+    void HoleWhy( const char *fmt, ... )
+    {
+        va_list args;
+        va_start( args, fmt );
+        _vsnprintf( s_holeWhy, sizeof( s_holeWhy ), fmt, args );
+        va_end( args );
+        s_holeWhy[sizeof( s_holeWhy ) - 1] = '\0';
+    }
+
     void HoleVert( const drawVert_t &v, float out[7] )
     {
         out[0] = v.xyz[0]; out[1] = v.xyz[1]; out[2] = v.xyz[2];
         const byte *c = (const byte *)&v.vert_color;
         for ( int k = 0; k < 4; ++k )
             out[3 + k] = (float)c[k];
-    }
-
-    float PointSegDist2XY( const float *p, const float *a, const float *b )
-    {
-        const float dx = b[0] - a[0], dy = b[1] - a[1];
-        const float len2 = dx * dx + dy * dy;
-        float t = len2 > 1e-6f ? ( ( p[0] - a[0] ) * dx + ( p[1] - a[1] ) * dy ) / len2 : 0.0f;
-        t = t < 0.0f ? 0.0f : ( t > 1.0f ? 1.0f : t );
-        const float ex = p[0] - ( a[0] + dx * t ), ey = p[1] - ( a[1] + dy * t );
-        return ex * ex + ey * ey;
-    }
-
-    // Bring a side up to `count` points by splitting its longest segment until it fits.
-    void HoleUpsample( std::vector<float> &side, int count )
-    {
-        while ( (int)( side.size() / 7 ) < count )
-        {
-            const int n = (int)( side.size() / 7 );
-            int   best = 0;
-            float bestLen = -1.0f;
-            for ( int k = 0; k + 1 < n; ++k )
-            {
-                const float *a = &side[k * 7], *b = &side[( k + 1 ) * 7];
-                const float l = ( b[0] - a[0] ) * ( b[0] - a[0] ) + ( b[1] - a[1] ) * ( b[1] - a[1] );
-                if ( l > bestLen ) { bestLen = l; best = k; }
-            }
-            float mid[7];
-            for ( int c = 0; c < 7; ++c )
-                mid[c] = ( side[best * 7 + c] + side[( best + 1 ) * 7 + c] ) * 0.5f;
-            side.insert( side.begin() + ( best + 1 ) * 7, mid, mid + 7 );
-        }
     }
 
     selbrush_t *CreatePatchFromGrid( const patchMesh_t *like, entity_s *owner, const std::vector<float> &grid,
@@ -2886,450 +2977,865 @@ namespace
     bool  s_holeFailValid = false;          // do not re-search the same spot every frame
     float s_holeFailAt[2] = { 0.0f, 0.0f };
 
-    // A closed COUNTER-CLOCKWISE outline around a hole (TraceHoleOutline's result, 7 floats a
-    // vertex) -> four corners -> Coons grid -> patches facing up.
-    bool FillOutline( std::vector<float> &loop, const patchMesh_t *like, entity_s *owner, bool verbose )
+    // ── convex pieces ────────────────────────────────────────────────────────
+    // One Coons blend over a NON-CONVEX outline folds: flipped (dark) triangles at the inner
+    // corners and a smeared texture.  So every inner corner turning more than ~35 degrees is
+    // cut away first - the arriving or the leaving edge extended across the gap, whichever
+    // cut is shorter - until the pieces are convex (stair-steps become rectangles).  A
+    // piece's corners are its four sharpest turns; opposite sides get equal point counts by
+    // splitting their longest segments, and splitting a cut splits it in BOTH its pieces, so
+    // the pieces meet vertex to vertex.
+    struct kterHFill_t
     {
-        int n = (int)( loop.size() / 7 );
-        if ( n < 3 || !like || !owner )
-            return false;
-        if ( n == 3 )                                    // a triangle: give it a fourth corner
+        std::vector<float>            pts;      // 7 floats a point
+        std::vector<std::vector<int>> pieces;   // counter-clockwise cycles of point indices
+    };
+
+    float HLen( const kterHFill_t &F, int a, int b )
+    {
+        const float dx = F.pts[b * 7] - F.pts[a * 7], dy = F.pts[b * 7 + 1] - F.pts[a * 7 + 1];
+        return sqrtf( dx * dx + dy * dy );
+    }
+
+    int HLerp( kterHFill_t &F, int a, int b, float t )
+    {
+        float p[7];
+        for ( int k = 0; k < 7; ++k )
+            p[k] = F.pts[a * 7 + k] + ( F.pts[b * 7 + k] - F.pts[a * 7 + k] ) * t;
+        F.pts.insert( F.pts.end(), p, p + 7 );
+        return (int)( F.pts.size() / 7 ) - 1;
+    }
+
+    // Point m goes between a and b in every piece where they are neighbours.
+    void HSplit( kterHFill_t &F, int a, int b, int m )
+    {
+        for ( std::vector<int> &P : F.pieces )
+            for ( size_t k = 0; k < P.size(); ++k )
+            {
+                const int x = P[k], y = P[( k + 1 ) % P.size()];
+                if ( ( x == a && y == b ) || ( x == b && y == a ) )
+                {
+                    P.insert( P.begin() + k + 1, m );
+                    break;
+                }
+            }
+    }
+
+    // Split the longest segment of a chain of points (cyclic: the closing segment too).
+    void HSplitLongest( kterHFill_t &F, const std::vector<int> &chain, bool cyclic )
+    {
+        const int n = (int)chain.size(), segs = cyclic ? n : n - 1;
+        int   best = -1;
+        float bestLen = -1.0f;
+        for ( int k = 0; k < segs; ++k )
         {
-            HoleUpsample( loop, 4 );
-            n = 4;
+            const float l = HLen( F, chain[k], chain[( k + 1 ) % n] );
+            if ( l > bestLen )
+            {
+                bestLen = l;
+                best = k;
+            }
+        }
+        if ( best < 0 )
+            return;
+        const int a = chain[best], b = chain[( best + 1 ) % n];
+        HSplit( F, a, b, HLerp( F, a, b, 0.5f ) );
+    }
+
+    // Direction of piece P arriving at (step -1) or leaving (step +1) its point k, measured
+    // to the first point at least minLen away, so one short segment does not decide it.
+    void HDir( const kterHFill_t &F, const std::vector<int> &P, int k, int step, float minLen, float out[2] )
+    {
+        const int n = (int)P.size();
+        const float *c = &F.pts[P[k] * 7], *o = c;
+        for ( int s = 1; s < n; ++s )
+        {
+            o = &F.pts[P[( ( k + step * s ) % n + n ) % n] * 7];
+            if ( ( o[0] - c[0] ) * ( o[0] - c[0] ) + ( o[1] - c[1] ) * ( o[1] - c[1] ) >= minLen * minLen )
+                break;
+        }
+        const float dx = ( o[0] - c[0] ) * (float)step, dy = ( o[1] - c[1] ) * (float)step;
+        const float len = sqrtf( dx * dx + dy * dy );
+        out[0] = len > 1e-6f ? dx / len : 1.0f;
+        out[1] = len > 1e-6f ? dy / len : 0.0f;
+    }
+
+    // The turn at point k: + left (a convex corner of a counter-clockwise piece), - right.
+    float HTurn( const kterHFill_t &F, const std::vector<int> &P, int k, float minLen )
+    {
+        float a[2], b[2];
+        HDir( F, P, k, -1, minLen, a );
+        HDir( F, P, k, 1, minLen, b );
+        return atan2f( a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1] );
+    }
+
+    float HArea( const kterHFill_t &F, const std::vector<int> &P )
+    {
+        float a = 0.0f;
+        for ( size_t i = 0, j = P.size() - 1; i < P.size(); j = i++ )
+            a += F.pts[P[j] * 7] * F.pts[P[i] * 7 + 1] - F.pts[P[i] * 7] * F.pts[P[j] * 7 + 1];
+        return a * 0.5f;
+    }
+
+    bool HInside( const kterHFill_t &F, const std::vector<int> &P, float x, float y )
+    {
+        bool in = false;
+        for ( size_t i = 0, j = P.size() - 1; i < P.size(); j = i++ )
+        {
+            const float *a = &F.pts[P[i] * 7], *b = &F.pts[P[j] * 7];
+            if ( ( a[1] > y ) != ( b[1] > y ) && x < ( b[0] - a[0] ) * ( y - a[1] ) / ( b[1] - a[1] ) + a[0] )
+                in = !in;
+        }
+        return in;
+    }
+
+    // Do segments p-q and a-b cross (touching ends do not count)?
+    bool HCross( const float *p, const float *q, const float *a, const float *b )
+    {
+        auto side = []( const float *o, const float *s, const float *t )
+        {
+            return ( s[0] - o[0] ) * ( t[1] - o[1] ) - ( s[1] - o[1] ) * ( t[0] - o[0] );
+        };
+        return side( p, q, a ) * side( p, q, b ) < 0.0f && side( a, b, p ) * side( a, b, q ) < 0.0f;
+    }
+
+    // Cut piece pi at its inner corner k.  The cut ends ON an existing point near its hit
+    // when the straight line there stays inside; its own points are about `spacing` apart.
+    bool HCut( kterHFill_t &F, int pi, int k, float spacing )
+    {
+        const std::vector<int> P = F.pieces[pi];
+        const int n = (int)P.size(), rid = P[k];
+        float bestT = FLT_MAX, bestU = 0.0f;
+        int   bestS = -1;
+        for ( int way = 0; way < 2; ++way )
+        {
+            float d[2];
+            HDir( F, P, k, way == 0 ? -1 : 1, spacing * 0.5f, d );
+            if ( way == 1 )                             // the leaving edge, extended backwards
+            {
+                d[0] = -d[0];
+                d[1] = -d[1];
+            }
+            const float *r = &F.pts[rid * 7];
+            for ( int s = 0; s < n; ++s )
+            {
+                if ( s == k || ( s + 1 ) % n == k )
+                    continue;                           // the corner's own sides
+                if ( HLen( F, rid, P[s] ) < spacing * 0.5f && HLen( F, rid, P[( s + 1 ) % n] ) < spacing * 0.5f )
+                    continue;                           // a stub HDir looked past
+                const float *a = &F.pts[P[s] * 7], *b = &F.pts[P[( s + 1 ) % n] * 7];
+                const float ex = b[0] - a[0], ey = b[1] - a[1];
+                const float den = d[0] * ey - d[1] * ex;
+                if ( fabsf( den ) < 1e-6f )
+                    continue;
+                const float ax = a[0] - r[0], ay = a[1] - r[1];
+                const float t = ( ax * ey - ay * ex ) / den, u = ( ax * d[1] - ay * d[0] ) / den;
+                if ( t > KHOLE_TOL && u >= 0.0f && u <= 1.0f && t < bestT )
+                {
+                    bestT = t;
+                    bestU = u;
+                    bestS = s;
+                }
+            }
+        }
+        if ( bestS < 0 )
+            return false;
+        const int a = P[bestS], b = P[( bestS + 1 ) % n];
+        const float segLen = HLen( F, a, b );
+        int x = -1;
+        for ( int e = 0; e < 2 && x < 0; ++e )
+        {
+            const int   cand  = ( e == 0 ) == ( bestU < 0.5f ) ? a : b;      // the nearer end first
+            const float along = ( cand == a ? bestU : 1.0f - bestU ) * segLen;
+            if ( along > spacing * 0.35f || cand == P[( k + 1 ) % n] || cand == P[( k + n - 1 ) % n] )
+                continue;
+            const float *r = &F.pts[rid * 7], *c = &F.pts[cand * 7];
+            bool clear = HInside( F, P, ( r[0] + c[0] ) * 0.5f, ( r[1] + c[1] ) * 0.5f );
+            for ( int s = 0; s < n && clear; ++s )
+                clear = !HCross( r, c, &F.pts[P[s] * 7], &F.pts[P[( s + 1 ) % n] * 7] );
+            if ( clear )
+                x = cand;
+        }
+        if ( x < 0 )
+        {
+            x = HLerp( F, a, b, bestU );
+            HSplit( F, a, b, x );                       // (a cut already there splits in both pieces)
         }
 
-        // corners = the four sharpest turns, kept apart along the outline
+        // corner -> along the piece -> x, back along the cut; and x -> along the piece -> corner
+        const std::vector<int> Q = F.pieces[pi];
+        const int m = (int)Q.size();
+        int ir = -1, ix = -1;
+        for ( int i = 0; i < m; ++i )
+        {
+            if ( Q[i] == rid ) ir = i;
+            if ( Q[i] == x )   ix = i;
+        }
+        if ( ir < 0 || ix < 0 || ir == ix )
+            return false;
+        int segs = (int)( HLen( F, rid, x ) / spacing + 0.5f );
+        if ( segs < 1 )
+            segs = 1;
+        std::vector<int> cut;
+        for ( int s = 1; s < segs; ++s )
+            cut.push_back( HLerp( F, rid, x, (float)s / (float)segs ) );
+        std::vector<int> A, B;
+        for ( int i = ir; ; i = ( i + 1 ) % m )
+        {
+            A.push_back( Q[i] );
+            if ( i == ix )
+                break;
+        }
+        A.insert( A.end(), cut.rbegin(), cut.rend() );
+        for ( int i = ix; ; i = ( i + 1 ) % m )
+        {
+            B.push_back( Q[i] );
+            if ( i == ir )
+                break;
+        }
+        B.insert( B.end(), cut.begin(), cut.end() );
+        if ( A.size() < 3 || B.size() < 3 || HArea( F, A ) <= 0.0f || HArea( F, B ) <= 0.0f )
+            return false;
+        F.pieces[pi] = A;
+        F.pieces.push_back( B );
+        return true;
+    }
+
+    // Piece P's four corners (point indices, in order): exactly four real corners (~30
+    // degrees and up) however close - a thin strip - else its sharpest left turns, kept 8% of
+    // the way round apart when that can be done.
+    bool HCorners( const kterHFill_t &F, const std::vector<int> &P, float minLen, int corner[4] )
+    {
+        const int n = (int)P.size();
+        if ( n < 4 )
+            return false;
         std::vector<float> turn( n ), arc( n + 1, 0.0f );
         for ( int i = 0; i < n; ++i )
         {
-            const float *p0 = &loop[( ( i + n - 1 ) % n ) * 7], *p1 = &loop[i * 7], *p2 = &loop[( ( i + 1 ) % n ) * 7];
-            float ax = p1[0] - p0[0], ay = p1[1] - p0[1], bx = p2[0] - p1[0], by = p2[1] - p1[1];
-            const float la = sqrtf( ax * ax + ay * ay ), lb = sqrtf( bx * bx + by * by );
-            float c = ( la > 1e-4f && lb > 1e-4f ) ? ( ax * bx + ay * by ) / ( la * lb ) : 1.0f;
-            c = c < -1.0f ? -1.0f : ( c > 1.0f ? 1.0f : c );
-            turn[i] = acosf( c );
-            arc[i + 1] = arc[i] + lb;
+            turn[i] = HTurn( F, P, i, minLen );
+            arc[i + 1] = arc[i] + HLen( F, P[i], P[( i + 1 ) % n] );
         }
         const float perimeter = arc[n];
-        int corner[4] = { -1, -1, -1, -1 };
-        for ( int attempt = 0; attempt < 2 && corner[3] < 0; ++attempt )
+        int at[4] = { -1, -1, -1, -1 }, real = 0;
+        for ( int i = 0; i < n; ++i )
+            if ( turn[i] > 0.5f && real++ < 4 )
+                at[real - 1] = i;
+        if ( real != 4 )
+            at[3] = -1;
+        for ( int attempt = 0; attempt < 2 && at[3] < 0; ++attempt )
         {
             const float apart = attempt == 0 ? perimeter * 0.08f : 0.0f;
-            std::vector<unsigned char> taken( n, 0 );
             for ( int c = 0; c < 4; ++c )
             {
-                corner[c] = -1;
-                float best = -1.0f;
+                at[c] = -1;
+                float best = -FLT_MAX;
                 for ( int i = 0; i < n; ++i )
                 {
-                    if ( taken[i] || turn[i] <= best )
+                    if ( turn[i] <= best )
                         continue;
                     bool crowded = false;               // ("near" is a windef.h macro)
                     for ( int o = 0; o < c && !crowded; ++o )
                     {
-                        float d = fabsf( arc[i] - arc[corner[o]] );
+                        float d = fabsf( arc[i] - arc[at[o]] );
                         if ( d > perimeter * 0.5f ) d = perimeter - d;
-                        crowded = d < apart || i == corner[o];
+                        crowded = i == at[o] || d < apart;
                     }
                     if ( crowded )
                         continue;
-                    best = turn[i];
-                    corner[c] = i;
+                    best  = turn[i];
+                    at[c] = i;
                 }
-                if ( corner[c] < 0 )
+                if ( at[c] < 0 )
                     break;
-                taken[corner[c]] = 1;
             }
         }
-        // A RAGGED outline (stair-steps, dozens of right-angle turns) has no four "sharpest"
-        // turns; with more than six the corners are its extremes along the two diagonals.
-        {
-            int realTurns = 0;
-            for ( int i = 0; i < n; ++i )
-                if ( turn[i] > 0.6f )                    // ~35 degrees
-                    ++realTurns;
-            if ( realTurns > 6 || corner[3] < 0 )
-            {
-                int ext[4] = { 0, 0, 0, 0 };
-                for ( int i = 1; i < n; ++i )
-                {
-                    const float *p = &loop[i * 7];
-                    const float s = p[0] + p[1], d = p[0] - p[1];
-                    if ( s < loop[ext[0] * 7] + loop[ext[0] * 7 + 1] ) ext[0] = i;   // bottom-left
-                    if ( d > loop[ext[1] * 7] - loop[ext[1] * 7 + 1] ) ext[1] = i;   // bottom-right
-                    if ( s > loop[ext[2] * 7] + loop[ext[2] * 7 + 1] ) ext[2] = i;   // top-right
-                    if ( d < loop[ext[3] * 7] - loop[ext[3] * 7 + 1] ) ext[3] = i;   // top-left
-                }
-                const bool distinct = ext[0] != ext[1] && ext[0] != ext[2] && ext[0] != ext[3]
-                                   && ext[1] != ext[2] && ext[1] != ext[3] && ext[2] != ext[3];
-                if ( distinct )
-                    memcpy( corner, ext, sizeof( corner ) );
-            }
-        }
-        if ( corner[3] < 0 )
-        {
-            if ( verbose )
-                Sys_Printf( "Terrain Sculpt: gap fill - the %i-vertex outline has no four usable corners.\n", n );
+        if ( at[3] < 0 )
             return false;
-        }
-        std::sort( corner, corner + 4 );
+        std::sort( at, at + 4 );
+        for ( int c = 0; c < 4; ++c )
+            corner[c] = P[at[c]];
+        return true;
+    }
 
-        // 4. four sides, opposite sides equalised, Coons blend
-        std::vector<float> side[4];
-        for ( int s = 0; s < 4; ++s )
+    // Piece P's points from corner a round to corner b, both included.
+    void HSide( const std::vector<int> &P, int a, int b, std::vector<int> &out )
+    {
+        out.clear();
+        const size_t n = P.size();
+        size_t i = 0;
+        while ( i < n && P[i] != a )
+            ++i;
+        for ( size_t s = 0; s <= n && i < n; ++s )
         {
-            int i = corner[s];
-            const int end = corner[( s + 1 ) % 4];
-            for ( ;; )
-            {
-                side[s].insert( side[s].end(), &loop[i * 7], &loop[i * 7] + 7 );
-                if ( i == end && side[s].size() > 7 )
-                    break;
-                i = ( i + 1 ) % n;
-                if ( side[s].size() / 7 > 2000 )
-                    return false;
-            }
+            out.push_back( P[( i + s ) % n] );
+            if ( s > 0 && P[( i + s ) % n] == b )
+                break;
         }
-        int W = (int)( side[0].size() / 7 ), W2 = (int)( side[2].size() / 7 );
-        int H = (int)( side[1].size() / 7 ), H2 = (int)( side[3].size() / 7 );
-        if ( W2 > W ) W = W2;
-        if ( H2 > H ) H = H2;
-        if ( W < 2 || H < 2 || W > 241 || H > 241 )
-        {
-            if ( verbose )
-                Sys_Printf( "Terrain Sculpt: gap fill - the gap's outline needs a %i x %i point grid (limit 241). Fill part "
-                            "of it with ordinary creation chunks first, then the rest.\n", W, H );
+    }
+
+    // A closed COUNTER-CLOCKWISE outline around a hole (TraceHoleOutline's result) -> convex
+    // pieces -> a Coons grid each -> patches facing up.
+    bool FillOutline( const std::vector<float> &loop, const patchMesh_t *like, entity_s *owner )
+    {
+        const int n = (int)( loop.size() / 7 );
+        if ( n < 3 || !like || !owner )
             return false;
+        kterHFill_t F;
+        F.pts = loop;
+        F.pieces.resize( 1 );
+        std::vector<float> lens( n );
+        for ( int i = 0; i < n; ++i )
+        {
+            F.pieces[0].push_back( i );
+            lens[i] = HLen( F, i, ( i + 1 ) % n );
         }
-        HoleUpsample( side[0], W ); HoleUpsample( side[2], W );
-        HoleUpsample( side[1], H ); HoleUpsample( side[3], H );
+        std::nth_element( lens.begin(), lens.begin() + n / 2, lens.end() );
+        const float spacing = lens[n / 2] > 4.0f ? lens[n / 2] : 4.0f;    // the outline's typical edge
+        const float minLen  = spacing * 0.5f;
 
-        std::vector<float> grid( (size_t)W * H * 7 );
-        const float *c0 = &side[0][0], *c1 = &side[1][0], *c2 = &side[2][0], *c3 = &side[3][0];
-        for ( int j = 0; j < H; ++j )
-            for ( int i = 0; i < W; ++i )
-            {
-                const float u = W > 1 ? (float)i / (float)( W - 1 ) : 0.0f;
-                const float v = H > 1 ? (float)j / (float)( H - 1 ) : 0.0f;
-                const float *B = &side[0][i * 7], *T = &side[2][( W - 1 - i ) * 7];
-                const float *R = &side[1][j * 7], *L = &side[3][( H - 1 - j ) * 7];
-                float *g = &grid[( (size_t)j * W + i ) * 7];
-                for ( int k = 0; k < 7; ++k )
+        // 1. cut the inner corners away, sharpest first
+        std::set<int> stuck;
+        for ( int cuts = 0; cuts < 32; ++cuts )
+        {
+            int   bp = -1, bk = -1;
+            float worst = -0.6f;                        // a right turn of ~35 degrees or more
+            for ( size_t p = 0; p < F.pieces.size(); ++p )
+                for ( int k = 0; k < (int)F.pieces[p].size(); ++k )
                 {
-                    if      ( j == 0 )     g[k] = B[k];
-                    else if ( j == H - 1 ) g[k] = T[k];
-                    else if ( i == 0 )     g[k] = L[k];
-                    else if ( i == W - 1 ) g[k] = R[k];
-                    else
-                        g[k] = ( 1.0f - v ) * B[k] + v * T[k] + ( 1.0f - u ) * L[k] + u * R[k]
-                             - ( ( 1.0f - u ) * ( 1.0f - v ) * c0[k] + u * ( 1.0f - v ) * c1[k]
-                               + u * v * c2[k] + ( 1.0f - u ) * v * c3[k] );
+                    const float t = HTurn( F, F.pieces[p], k, minLen );
+                    if ( t < worst && !stuck.count( F.pieces[p][k] ) )
+                    {
+                        worst = t;
+                        bp = (int)p;
+                        bk = k;
+                    }
                 }
-            }
+            if ( bp < 0 )
+                break;
+            const int id = F.pieces[bp][bk];
+            if ( !HCut( F, bp, bk, spacing ) )
+                stuck.insert( id );
+        }
 
-        int made = 0;
-        for ( int j0 = 0; j0 < H - 1; j0 += 15 )
-            for ( int i0 = 0; i0 < W - 1; i0 += 15 )
+        // 2. four corners a piece
+        std::vector<int> corners( F.pieces.size() * 4 );
+        for ( size_t p = 0; p < F.pieces.size(); ++p )
+        {
+            while ( F.pieces[p].size() < 4 )
             {
-                selbrush_t *node = CreatePatchFromGrid( like, owner, grid, W, i0, i0 + 15 < W - 1 ? i0 + 15 : W - 1,
-                                                        j0, j0 + 15 < H - 1 ? j0 + 15 : H - 1 );
-                if ( !node )
-                    continue;
-                if ( s_undoOpen )
-                {
-                    node->patch->def->xx22b = 1;
-                    Undo_KiwiMarkCreated( node->def );
-                }
-                Select_Brush( node, 0, 0, 0 );
-                s_targets.push_back( node );
-                ++s_created;
-                ++made;
+                const std::vector<int> P = F.pieces[p];
+                HSplitLongest( F, P, true );
             }
+            if ( !HCorners( F, F.pieces[p], minLen, &corners[p * 4] ) )
+            {
+                HoleWhy( "a piece of the %i-vertex outline has no four usable corners.", n );
+                return false;
+            }
+        }
+
+        // 3. opposite sides the same number of points
+        std::vector<int> s0, s1;
+        for ( int splits = 0; ; ++splits )
+        {
+            bool changed = false;
+            for ( size_t p = 0; p < F.pieces.size() && !changed; ++p )
+                for ( int pair = 0; pair < 2 && !changed; ++pair )
+                {
+                    const int *c = &corners[p * 4];
+                    HSide( F.pieces[p], c[pair], c[pair + 1], s0 );
+                    HSide( F.pieces[p], c[pair + 2], c[( pair + 3 ) % 4], s1 );
+                    if ( s0.size() == s1.size() )
+                        continue;
+                    if ( s0.size() > 241 || s1.size() > 241 || splits > 20000 )
+                    {
+                        HoleWhy( "the gap needs more than 241 points along one side (the limit). Fill part of it with "
+                                 "ordinary creation chunks first, then the rest." );
+                        return false;
+                    }
+                    HSplitLongest( F, s0.size() < s1.size() ? s0 : s1, false );
+                    changed = true;
+                }
+            if ( !changed )
+                break;
+        }
+        for ( size_t p = 0; p < F.pieces.size(); ++p )  // (checked before anything is made)
+        {
+            const int *c = &corners[p * 4];
+            HSide( F.pieces[p], c[0], c[1], s0 );
+            HSide( F.pieces[p], c[1], c[2], s1 );
+            if ( s0.size() > 241 || s1.size() > 241 )
+            {
+                HoleWhy( "the gap needs more than 241 points along one side (the limit). Fill part of it with "
+                         "ordinary creation chunks first, then the rest." );
+                return false;
+            }
+        }
+
+        // 4. each piece a Coons blend of its sides, cut into patches of at most 16 x 16
+        int made = 0, tris = 0;
+        std::vector<float> grid;
+        std::vector<int> side[4];
+        for ( size_t p = 0; p < F.pieces.size(); ++p )
+        {
+            const int *c = &corners[p * 4];
+            for ( int s = 0; s < 4; ++s )
+                HSide( F.pieces[p], c[s], c[( s + 1 ) % 4], side[s] );
+            const int W = (int)side[0].size(), H = (int)side[1].size();
+            if ( W < 2 || H < 2 )
+                continue;
+            grid.assign( (size_t)W * H * 7, 0.0f );
+            const float *c0 = &F.pts[c[0] * 7], *c1 = &F.pts[c[1] * 7], *c2 = &F.pts[c[2] * 7], *c3 = &F.pts[c[3] * 7];
+            for ( int j = 0; j < H; ++j )
+                for ( int i = 0; i < W; ++i )
+                {
+                    const float u = (float)i / (float)( W - 1 ), v = (float)j / (float)( H - 1 );
+                    const float *B = &F.pts[side[0][i] * 7], *T = &F.pts[side[2][W - 1 - i] * 7];
+                    const float *R = &F.pts[side[1][j] * 7], *L = &F.pts[side[3][H - 1 - j] * 7];
+                    float *g = &grid[( (size_t)j * W + i ) * 7];
+                    for ( int k = 0; k < 7; ++k )
+                    {
+                        if      ( j == 0 )     g[k] = B[k];
+                        else if ( j == H - 1 ) g[k] = T[k];
+                        else if ( i == 0 )     g[k] = L[k];
+                        else if ( i == W - 1 ) g[k] = R[k];
+                        else
+                            g[k] = ( 1.0f - v ) * B[k] + v * T[k] + ( 1.0f - u ) * L[k] + u * R[k]
+                                 - ( ( 1.0f - u ) * ( 1.0f - v ) * c0[k] + u * ( 1.0f - v ) * c1[k]
+                                   + u * v * c2[k] + ( 1.0f - u ) * v * c3[k] );
+                    }
+                }
+            for ( int j0 = 0; j0 < H - 1; j0 += 15 )
+                for ( int i0 = 0; i0 < W - 1; i0 += 15 )
+                {
+                    selbrush_t *node = CreatePatchFromGrid( like, owner, grid, W, i0, i0 + 15 < W - 1 ? i0 + 15 : W - 1,
+                                                            j0, j0 + 15 < H - 1 ? j0 + 15 : H - 1 );
+                    if ( !node )
+                        continue;
+                    if ( s_undoOpen )
+                    {
+                        node->patch->def->xx22b = 1;
+                        Undo_KiwiMarkCreated( node->def );
+                    }
+                    Select_Brush( node, 0, 0, 0 );
+                    s_targets.push_back( node );
+                    ++s_created;
+                    ++made;
+                }
+            tris += ( W - 1 ) * ( H - 1 ) * 2;
+        }
         if ( !made )
             return false;
         s_holeFailValid = false;
         GraphInvalidate();                              // new terrain: the next flush rebuilds
         // the outline dictates the density (every neighbour vertex is a fill vertex): say what it cost
-        const int tris = ( W - 1 ) * ( H - 1 ) * 2;
-        SetStatus( "Filled the gap: %i patch%s, %i x %i points, %i triangles (set by the gap's edge vertices). Ctrl+Z undoes.",
-                   made, made == 1 ? "" : "es", W, H, tris );
-        Sys_Printf( "Terrain Sculpt: filled a %i-vertex gap with %i patch%s (%i x %i points, %i triangles - the density "
-                    "is set by the vertices along the gap's edge).\n", n, made, made == 1 ? "" : "es", W, H, tris );
+        const int pieces = (int)F.pieces.size();
+        SetStatus( "Filled the gap: %i piece%s, %i patch%s, %i triangles (set by the gap's edge vertices). Ctrl+Z undoes.",
+                   pieces, pieces == 1 ? "" : "s", made, made == 1 ? "" : "es", tris );
+        Sys_Printf( "Terrain Sculpt: filled a %i-vertex gap - %i convex piece%s, %i patch%s, %i triangles (the density "
+                    "is set by the vertices along the gap's edge).\n", n, pieces, pieces == 1 ? "" : "s",
+                    made, made == 1 ? "" : "es", tris );
         g_nUpdateBits = -1;
         return true;
     }
 
-    // ── the outline tracer ───────────────────────────────────────────────────
-    // Every patch border is a planar graph whose edges END at any other patch's border vertex
-    // lying on them.  Start on the open sub-edge nearest the cursor, find which side has no
-    // terrain (the hole), and walk node to node always taking the turn that hugs the hole,
-    // back to the start.  Hole on the left => a real hole comes out counter-clockwise; a
-    // clockwise result is the outside of the terrain and is refused.
-    struct kterHRing_t
+    // ── finding the gap ──────────────────────────────────────────────────────
+    // Terrain triangles near the cursor are rasterised onto a grid of cells, each grown by
+    // KHOLE_TOL so a hairline crack between patches counts as closed; the gap is the empty
+    // region flooded from the empty cell nearest the cursor, and a region reaching the grid's
+    // edge is open ground, not a gap.  (A tracer walking patch borders edge to edge broke off
+    // wherever a corner missed its neighbour or terrain overlapped.)
+    struct kterHTri_t
     {
-        selbrush_t        *node;
-        const patchMesh_t *def;
-        int                n;
-        int                ii[64], jj[64];
+        float e[3][3];                  // edge lines: inside while e[0] * x + e[1] * y + e[2] >= -KHOLE_TOL
+        float lo[2], hi[2];             // bounds, grown by KHOLE_TOL
     };
 
-    struct kterHCand_t
+    struct kterHScan_t
     {
-        float              end[7];
-        float              theta;
-        const kterHRing_t *owner;
+        float ox, oy, res;              // cell (i, j) is centred on ox + ( i + 0.5 ) * res, oy + ( j + 0.5 ) * res
+        int   n;                        // n x n cells
+        std::vector<unsigned char> m;   // 0 empty, 1 terrain, 2 the gap
+        std::vector<kterHTri_t>    tris;
+        std::vector<selbrush_t *>  nodes;
+        std::vector<int>           first;   // nodes[k]'s triangles: first[k] .. first[k + 1] - 1
+
+        int At( int i, int j ) const
+        {
+            return ( i < 0 || j < 0 || i >= n || j >= n ) ? 1 : m[(size_t)j * n + i];
+        }
     };
 
-    const float KHOLE_TOL = 2.0f;
-
-    const drawVert_t &HRingVert( const kterHRing_t &r, int k )
+    bool HTriCovers( const kterHTri_t &t, float x, float y )
     {
-        return r.def->ctrl[r.ii[k]][r.jj[k]];
+        if ( x < t.lo[0] || x > t.hi[0] || y < t.lo[1] || y > t.hi[1] )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            if ( t.e[k][0] * x + t.e[k][1] * y + t.e[k][2] < -KHOLE_TOL )
+                return false;
+        return true;
     }
 
-    bool HRingNear( const kterHRing_t &r, const float *lo, const float *hi )
+    void HAddTri( kterHScan_t &S, const float *a, const float *b, const float *c )
     {
-        const float *mins = r.node->def->mins, *maxs = r.node->def->maxs;
-        return !( hi[0] < mins[0] - KHOLE_TOL || lo[0] > maxs[0] + KHOLE_TOL
-               || hi[1] < mins[1] - KHOLE_TOL || lo[1] > maxs[1] + KHOLE_TOL );
-    }
-
-    // Is the sub-edge a-b (on `owner`'s border) open: on nobody else's border, no other terrain under it?
-    bool HEdgeOpen( const std::vector<kterHRing_t> &rings, const kterHRing_t *owner, const float *a, const float *b )
-    {
-        const float mid[3] = { ( a[0] + b[0] ) * 0.5f, ( a[1] + b[1] ) * 0.5f, 0.0f };
-        for ( size_t q = 0; q < rings.size(); ++q )
+        const float area2 = ( b[0] - a[0] ) * ( c[1] - a[1] ) - ( b[1] - a[1] ) * ( c[0] - a[0] );
+        if ( fabsf( area2 ) < 1e-3f )
+            return;                                     // edge-on from above: covers nothing
+        if ( area2 < 0.0f )
         {
-            if ( &rings[q] == owner || !HRingNear( rings[q], mid, mid ) )
-                continue;
-            for ( int m = 0; m < rings[q].n; ++m )
-                if ( PointSegDist2XY( mid, HRingVert( rings[q], m ).xyz,
-                                      HRingVert( rings[q], ( m + 1 ) % rings[q].n ).xyz ) <= KHOLE_TOL * KHOLE_TOL )
-                    return false;
+            const float *t = b;                         // counter-clockwise
+            b = c;
+            c = t;
         }
-        const float org[3] = { mid[0], mid[1], 65536.0f };
-        const float dir[3] = { 0.0f, 0.0f, -1.0f };
-        float hit[3];
-        return !PickPatches( org, dir, true, hit, nullptr, nullptr, owner->node );
-    }
-
-    // From p toward e along owner's border: stop at the first OTHER patch's border vertex on the way.
-    void HNextEvent( const std::vector<kterHRing_t> &rings, const kterHRing_t *owner,
-                     const float *p, const drawVert_t &e, float out[7] )
-    {
-        HoleVert( e, out );
-        const float dx = e.xyz[0] - p[0], dy = e.xyz[1] - p[1];
-        const float len2 = dx * dx + dy * dy;
-        if ( len2 < 1e-4f )
-            return;
-        const float len = sqrtf( len2 );
-        const float lo[2] = { p[0] < e.xyz[0] ? p[0] : e.xyz[0], p[1] < e.xyz[1] ? p[1] : e.xyz[1] };
-        const float hi[2] = { p[0] > e.xyz[0] ? p[0] : e.xyz[0], p[1] > e.xyz[1] ? p[1] : e.xyz[1] };
-        float bestT = 1.0f - KHOLE_TOL / len;
-        for ( size_t q = 0; q < rings.size(); ++q )
+        kterHTri_t T;
+        const float *v[3] = { a, b, c };
+        for ( int k = 0; k < 3; ++k )
         {
-            if ( &rings[q] == owner || !HRingNear( rings[q], lo, hi ) )
-                continue;
-            for ( int m = 0; m < rings[q].n; ++m )
+            const float *p = v[k], *q = v[( k + 1 ) % 3];
+            const float ex = q[0] - p[0], ey = q[1] - p[1];
+            const float len = sqrtf( ex * ex + ey * ey );
+            T.e[k][0] = -ey / len;
+            T.e[k][1] =  ex / len;
+            T.e[k][2] = -( T.e[k][0] * p[0] + T.e[k][1] * p[1] );
+        }
+        for ( int k = 0; k < 2; ++k )
+        {
+            T.lo[k] = ( a[k] < b[k] ? ( a[k] < c[k] ? a[k] : c[k] ) : ( b[k] < c[k] ? b[k] : c[k] ) ) - KHOLE_TOL;
+            T.hi[k] = ( a[k] > b[k] ? ( a[k] > c[k] ? a[k] : c[k] ) : ( b[k] > c[k] ? b[k] : c[k] ) ) + KHOLE_TOL;
+        }
+        S.tris.push_back( T );
+        int i0 = (int)ceilf( ( T.lo[0] - S.ox ) / S.res - 0.5f ), i1 = (int)floorf( ( T.hi[0] - S.ox ) / S.res - 0.5f );
+        int j0 = (int)ceilf( ( T.lo[1] - S.oy ) / S.res - 0.5f ), j1 = (int)floorf( ( T.hi[1] - S.oy ) / S.res - 0.5f );
+        if ( i0 < 0 ) i0 = 0;
+        if ( j0 < 0 ) j0 = 0;
+        if ( i1 > S.n - 1 ) i1 = S.n - 1;
+        if ( j1 > S.n - 1 ) j1 = S.n - 1;
+        for ( int j = j0; j <= j1; ++j )
+            for ( int i = i0; i <= i1; ++i )
             {
-                const drawVert_t &v = HRingVert( rings[q], m );
-                const float t = ( ( v.xyz[0] - p[0] ) * dx + ( v.xyz[1] - p[1] ) * dy ) / len2;
-                if ( t * len <= KHOLE_TOL || t >= bestT )
-                    continue;
-                const float ex = v.xyz[0] - ( p[0] + dx * t ), ey = v.xyz[1] - ( p[1] + dy * t );
-                if ( ex * ex + ey * ey > KHOLE_TOL * KHOLE_TOL )
-                    continue;
-                bestT = t;
-                HoleVert( v, out );
+                unsigned char &cell = S.m[(size_t)j * S.n + i];
+                if ( cell == 0 && HTriCovers( T, S.ox + ( (float)i + 0.5f ) * S.res, S.oy + ( (float)j + 0.5f ) * S.res ) )
+                    cell = 1;
             }
-        }
     }
 
-    // Every way on from point p along any patch border passing through it.
-    void HOutEdges( const std::vector<kterHRing_t> &rings, const float *p, std::vector<kterHCand_t> &out )
+    // n x n cells over the square of half-side `half` around (cx, cy).
+    void HScanBuild( kterHScan_t &S, float cx, float cy, float half, int n )
     {
-        out.clear();
-        const float tol2 = KHOLE_TOL * KHOLE_TOL;
-        for ( size_t r = 0; r < rings.size(); ++r )
-        {
-            if ( !HRingNear( rings[r], p, p ) )
-                continue;
-            for ( int k = 0; k < rings[r].n; ++k )
-            {
-                const drawVert_t &A = HRingVert( rings[r], k ), &B = HRingVert( rings[r], ( k + 1 ) % rings[r].n );
-                if ( PointSegDist2XY( p, A.xyz, B.xyz ) > tol2 )
-                    continue;
-                const bool atA = ( A.xyz[0] - p[0] ) * ( A.xyz[0] - p[0] ) + ( A.xyz[1] - p[1] ) * ( A.xyz[1] - p[1] ) <= tol2;
-                const bool atB = ( B.xyz[0] - p[0] ) * ( B.xyz[0] - p[0] ) + ( B.xyz[1] - p[1] ) * ( B.xyz[1] - p[1] ) <= tol2;
-                for ( int way = 0; way < 2; ++way )
-                {
-                    if ( way == 0 ? atA : atB )
-                        continue;                        // already at that end
-                    kterHCand_t c;
-                    c.owner = &rings[r];
-                    c.theta = 0.0f;
-                    HNextEvent( rings, &rings[r], p, way == 0 ? A : B, c.end );
-                    if ( ( c.end[0] - p[0] ) * ( c.end[0] - p[0] ) + ( c.end[1] - p[1] ) * ( c.end[1] - p[1] ) <= tol2 )
-                        continue;
-                    out.push_back( c );
-                }
-            }
-        }
-    }
-
-    bool TraceHoleOutline( std::vector<float> &loop, selbrush_t **likeNode, bool verbose )
-    {
-        loop.clear();
-        const float tol2 = KHOLE_TOL * KHOLE_TOL;
-        std::vector<kterHRing_t> rings;
+        S.n   = n;
+        S.res = half * 2.0f / (float)n;
+        S.ox  = cx - half;
+        S.oy  = cy - half;
+        S.m.assign( (size_t)n * n, 0 );
+        S.tris.clear();
+        S.nodes.clear();
+        S.first.clear();
+        const float box[4] = { S.ox, S.oy, S.ox + half * 2.0f, S.oy + half * 2.0f };
         ForEachNode( true, [&]( selbrush_t *b )
         {
-            if ( !PatchEligible( b ) || BoundsDistanceXY( b, s_cursor ) > 16384.0f )
+            if ( !PatchEligible( b ) || !BoundsMeet( b->def->mins, b->def->maxs, box, KHOLE_TOL ) )
                 return;
-            kterHRing_t r;
-            r.node = b;
-            r.def  = b->patch->def;
-            r.n    = BorderRing( r.def, r.ii, r.jj );
-            if ( r.n >= 4 )
-                rings.push_back( r );
-        } );
-
-        // ── the start: the open sub-edge under the ring nearest the cursor ──────────
-        float sa[7], sb[7], startD = s_outer * s_outer;
-        const kterHRing_t *startRing = nullptr;
-        for ( size_t r = 0; r < rings.size(); ++r )
-        {
-            if ( BoundsDistanceXY( rings[r].node, s_cursor ) > s_outer )
-                continue;
-            for ( int k = 0; k < rings[r].n; ++k )
-            {
-                const drawVert_t &A = HRingVert( rings[r], k ), &B = HRingVert( rings[r], ( k + 1 ) % rings[r].n );
-                if ( PointSegDist2XY( s_cursor, A.xyz, B.xyz ) >= startD )
-                    continue;
-                // walk this border segment event to event
-                float from[7];
-                HoleVert( A, from );
-                for ( int guard = 0; guard < 64; ++guard )
+            S.nodes.push_back( b );
+            S.first.push_back( (int)S.tris.size() );
+            const patchMesh_t *def = b->patch->def;
+            for ( int i = 0; i + 1 < def->width; ++i )
+                for ( int j = 0; j + 1 < def->height; ++j )
                 {
-                    float to[7];
-                    HNextEvent( rings, &rings[r], from, B, to );
-                    const float d = PointSegDist2XY( s_cursor, from, to );
-                    if ( d < startD && HEdgeOpen( rings, &rings[r], from, to ) )
+                    const float *v00 = def->ctrl[i][j].xyz,     *v10 = def->ctrl[i + 1][j].xyz;
+                    const float *v01 = def->ctrl[i][j + 1].xyz, *v11 = def->ctrl[i + 1][j + 1].xyz;
+                    if ( ( def->ctrl[i][j].turned_edge & 1 ) != 0 )
                     {
-                        startD = d;
-                        startRing = &rings[r];
-                        memcpy( sa, from, sizeof( sa ) );
-                        memcpy( sb, to, sizeof( sb ) );
+                        HAddTri( S, v00, v10, v11 );
+                        HAddTri( S, v00, v11, v01 );
                     }
-                    if ( ( to[0] - B.xyz[0] ) * ( to[0] - B.xyz[0] ) + ( to[1] - B.xyz[1] ) * ( to[1] - B.xyz[1] ) <= tol2 )
-                        break;
-                    memcpy( from, to, sizeof( from ) );
+                    else
+                    {
+                        HAddTri( S, v00, v10, v01 );
+                        HAddTri( S, v10, v11, v01 );
+                    }
                 }
-            }
-        }
-        if ( !startRing )
-            return false;                               // no open edge under the ring: ordinary ground
+        } );
+        S.first.push_back( (int)S.tris.size() );
+    }
 
-        // ── which side is the hole?  (the owner patch is on the other one) ───────────
+    // Is (x, y) on any terrain (grown by KHOLE_TOL)?  Exact, not the cells.
+    bool HCovered( const kterHScan_t &S, float x, float y )
+    {
+        for ( size_t k = 0; k < S.nodes.size(); ++k )
         {
-            float dx = sb[0] - sa[0], dy = sb[1] - sa[1];
-            const float len = sqrtf( dx * dx + dy * dy );
-            dx /= len; dy /= len;
-            bool leftEmpty = false, rightEmpty = false;
-            for ( float off = 1.5f; off >= 0.4f && leftEmpty == rightEmpty; off *= 0.5f )
-            {
-                const float dir[3] = { 0.0f, 0.0f, -1.0f };
-                float hit[3];
-                const float l[3] = { ( sa[0] + sb[0] ) * 0.5f - dy * off, ( sa[1] + sb[1] ) * 0.5f + dx * off, 65536.0f };
-                const float r[3] = { ( sa[0] + sb[0] ) * 0.5f + dy * off, ( sa[1] + sb[1] ) * 0.5f - dx * off, 65536.0f };
-                leftEmpty  = !PickPatches( l, dir, true, hit, nullptr );
-                rightEmpty = !PickPatches( r, dir, true, hit, nullptr );
-            }
-            if ( leftEmpty == rightEmpty )
-            {
-                if ( verbose )
-                    Sys_Printf( "Terrain Sculpt: gap fill - cannot tell which side of the open edge at (%.0f %.0f) is the gap.\n",
-                                sa[0], sa[1] );
+            const float *mins = S.nodes[k]->def->mins, *maxs = S.nodes[k]->def->maxs;
+            if ( x < mins[0] - KHOLE_TOL || x > maxs[0] + KHOLE_TOL || y < mins[1] - KHOLE_TOL || y > maxs[1] + KHOLE_TOL )
+                continue;
+            for ( int t = S.first[k]; t < S.first[k + 1]; ++t )
+                if ( HTriCovers( S.tris[t], x, y ) )
+                    return true;
+        }
+        return false;
+    }
+
+    // Is a gap cell within rc cells of (x, y)?
+    bool HNearGap( const kterHScan_t &S, float x, float y, int rc )
+    {
+        const int ci = (int)floorf( ( x - S.ox ) / S.res ), cj = (int)floorf( ( y - S.oy ) / S.res );
+        for ( int j = cj - rc; j <= cj + rc; ++j )
+            for ( int i = ci - rc; i <= ci + rc; ++i )
+                if ( S.At( i, j ) == 2 )
+                    return true;
+        return false;
+    }
+
+    // Label the empty region around cell (si, sj) as the gap; false when it reaches the edge.
+    bool HFlood( kterHScan_t &S, int si, int sj )
+    {
+        std::vector<int> stack( 1, sj * S.n + si );
+        S.m[(size_t)sj * S.n + si] = 2;
+        while ( !stack.empty() )
+        {
+            const int c = stack.back();
+            stack.pop_back();
+            const int i = c % S.n, j = c / S.n;
+            if ( i == 0 || j == 0 || i == S.n - 1 || j == S.n - 1 )
                 return false;
-            }
-            // A hole has terrain on its far side; nothing within 8192 units straight out means
-            // the OUTSIDE of the map (nine rays, instead of walking the whole map boundary).
-            {
-                const float side = leftEmpty ? 1.0f : -1.0f;
-                bool farTerrain = false;
-                for ( float dist = 32.0f; dist <= 8192.0f && !farTerrain; dist *= 2.0f )
+            const int nb[4] = { c - 1, c + 1, c - S.n, c + S.n };
+            for ( int k = 0; k < 4; ++k )
+                if ( S.m[nb[k]] == 0 )
                 {
-                    const float dir[3] = { 0.0f, 0.0f, -1.0f };
-                    float hit[3];
-                    const float o[3] = { ( sa[0] + sb[0] ) * 0.5f - dy * dist * side,
-                                         ( sa[1] + sb[1] ) * 0.5f + dx * dist * side, 65536.0f };
-                    farTerrain = PickPatches( o, dir, true, hit, nullptr );
+                    S.m[nb[k]] = 2;
+                    stack.push_back( nb[k] );
                 }
-                if ( !farTerrain )
-                    return false;
-            }
-            if ( !leftEmpty )                           // keep the hole on the LEFT of travel
-            {
-                float t[7];
-                memcpy( t, sa, sizeof( t ) ); memcpy( sa, sb, sizeof( sa ) ); memcpy( sb, t, sizeof( sb ) );
-            }
         }
+        return true;
+    }
 
-        // ── walk, hugging the hole ──────────────────────────────────────────────────
-        loop.insert( loop.end(), sa, sa + 7 );
-        loop.insert( loop.end(), sb, sb + 7 );
-        std::vector<kterHCand_t> cands;
-        bool closed = false;
-        for ( int step = 0; step < 2000 && !closed; ++step )
+    // The gap's outer edge along the cell borders, counter-clockwise (the gap on the left),
+    // as the corners where it turns.
+    void HContour( const kterHScan_t &S, std::vector<float> &out )
+    {
+        out.clear();
+        int si = -1, sj = -1;
+        for ( int j = 0; j < S.n && si < 0; ++j )
+            for ( int i = 0; i < S.n; ++i )
+                if ( S.m[(size_t)j * S.n + i] == 2 )
+                {
+                    si = i;
+                    sj = j;
+                    break;
+                }
+        if ( si < 0 )
+            return;
+        // start on the bottom side of the lowest gap cell, heading +x (0 +x, 1 +y, 2 -x, 3 -y)
+        static const int DX[4] = { 1, 0, -1, 0 }, DY[4] = { 0, 1, 0, -1 };
+        int ci = si, cj = sj, d = 0;
+        for ( int guard = 0; guard < 4 * S.n * S.n + 8; ++guard )
         {
-            const size_t nv = loop.size() / 7;
-            float cur[7], prev[2];
-            memcpy( cur, &loop[( nv - 1 ) * 7], sizeof( cur ) );
-            prev[0] = loop[( nv - 2 ) * 7]; prev[1] = loop[( nv - 2 ) * 7 + 1];
-            const float dinx = cur[0] - prev[0], diny = cur[1] - prev[1];
-            HOutEdges( rings, cur, cands );
-            for ( size_t c = 0; c < cands.size(); ++c )
+            ci += DX[d];
+            cj += DY[d];
+            // the cells ahead-left and ahead-right of the corner just reached
+            const int lx = DX[d] - DY[d], ly = DY[d] + DX[d], rx = DX[d] + DY[d], ry = DY[d] - DX[d];
+            const bool L = S.At( ci + ( lx - 1 ) / 2, cj + ( ly - 1 ) / 2 ) == 2;
+            const bool R = S.At( ci + ( rx - 1 ) / 2, cj + ( ry - 1 ) / 2 ) == 2;
+            const int nd = !L ? ( d + 1 ) & 3 : ( R ? ( d + 3 ) & 3 : d );
+            if ( nd != d )
             {
-                const float ox = cands[c].end[0] - cur[0], oy = cands[c].end[1] - cur[1];
-                cands[c].theta = atan2f( dinx * oy - diny * ox, dinx * ox + diny * oy );   // + = left turn
+                out.push_back( S.ox + (float)ci * S.res );
+                out.push_back( S.oy + (float)cj * S.res );
             }
-            std::sort( cands.begin(), cands.end(),
-                       []( const kterHCand_t &a, const kterHCand_t &b ) { return a.theta > b.theta; } );
-            const kterHCand_t *take = nullptr;
-            for ( size_t c = 0; c < cands.size() && !take; ++c )
+            d = nd;
+            if ( ci == si && cj == sj && d == 0 )
+                break;
+        }
+    }
+
+    // The outline of the gap under the brush: every terrain border vertex with an empty point
+    // of the gap right beside it, ordered by where the gap's traced edge passes it.
+    bool TraceHoleOutline( std::vector<float> &loop, selbrush_t **likeNode )
+    {
+        loop.clear();
+        kterHScan_t S;
+
+        // anything empty under the brush at all?  Its own box first: most strokes are on ground.
+        const float half0 = s_outer + 8.0f;
+        int n0 = (int)( half0 * 0.5f ) + 1;             // 4-unit cells
+        n0 = n0 < 16 ? 16 : ( n0 > 1024 ? 1024 : n0 );
+        HScanBuild( S, s_cursor[0], s_cursor[1], half0, n0 );
+        float start[2] = { 0.0f, 0.0f }, best = FLT_MAX;
+        for ( int j = 0; j < S.n; ++j )
+            for ( int i = 0; i < S.n; ++i )
             {
-                if ( fabsf( cands[c].theta ) > 3.12f )
-                    continue;                           // straight back the way we came
-                if ( HEdgeOpen( rings, cands[c].owner, cur, cands[c].end ) )
-                    take = &cands[c];
+                if ( S.m[(size_t)j * S.n + i] != 0 )
+                    continue;
+                const float p[3] = { S.ox + ( (float)i + 0.5f ) * S.res, S.oy + ( (float)j + 0.5f ) * S.res, s_cursor[2] };
+                const float d = ( p[0] - s_cursor[0] ) * ( p[0] - s_cursor[0] ) + ( p[1] - s_cursor[1] ) * ( p[1] - s_cursor[1] );
+                if ( d < best && BrushDistance( s_cursor, p ) <= s_outer )
+                {
+                    best = d;
+                    start[0] = p[0];
+                    start[1] = p[1];
+                }
             }
-            if ( !take )
-            {
-                if ( verbose )
-                    Sys_Printf( "Terrain Sculpt: gap fill - the gap's outline breaks off at (%.0f %.0f) after %i vertices: "
-                                "no open terrain edge leads on from there (terrain stacked on that edge?).\n",
-                                cur[0], cur[1], (int)nv );
-                return false;
-            }
-            if ( ( take->end[0] - loop[0] ) * ( take->end[0] - loop[0] ) + ( take->end[1] - loop[1] ) * ( take->end[1] - loop[1] ) <= tol2 )
-                closed = true;
-            else
-                loop.insert( loop.end(), take->end, take->end + 7 );
+        if ( best == FLT_MAX )
+            return false;                               // terrain everywhere under the brush
+
+        // flood it: 4-unit cells within 2048, else 16-unit cells within 8192 (which also
+        // closes cracks of up to ~16 units that leak out of the fine scan)
+        bool closed = false;
+        for ( int pass = 0; pass < 2 && !closed; ++pass )
+        {
+            HScanBuild( S, start[0], start[1], pass == 0 ? 2048.0f : 8192.0f, 1024 );
+            const int ci = (int)floorf( ( start[0] - S.ox ) / S.res ), cj = (int)floorf( ( start[1] - S.oy ) / S.res );
+            int   si = -1, sj = -1;
+            float bd = FLT_MAX;
+            for ( int j = cj - 2; j <= cj + 2; ++j )
+                for ( int i = ci - 2; i <= ci + 2; ++i )
+                {
+                    const float dx = S.ox + ( (float)i + 0.5f ) * S.res - start[0];
+                    const float dy = S.oy + ( (float)j + 0.5f ) * S.res - start[1];
+                    if ( S.At( i, j ) == 0 && dx * dx + dy * dy < bd )
+                    {
+                        bd = dx * dx + dy * dy;
+                        si = i;
+                        sj = j;
+                    }
+                }
+            closed = si >= 0 && HFlood( S, si, sj );
         }
         if ( !closed )
         {
-            if ( verbose )
-                Sys_Printf( "Terrain Sculpt: gap fill - the outline did not close within 2000 vertices (the open map edge?).\n" );
+            HoleWhy( "the empty ground under the brush is not closed in by terrain within 8192 units (open ground, or a "
+                     "crack wider than 16 units leads out of it)." );
             return false;
         }
-        const int n = (int)( loop.size() / 7 );
+
+        std::vector<float> edge;                        // x y pairs, counter-clockwise
+        HContour( S, edge );
+        const int en = (int)( edge.size() / 2 );
+        if ( en < 4 )
+            return false;
+        std::vector<float> arc( en + 1, 0.0f );
+        float box[4] = { FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX };
+        for ( int k = 0; k < en; ++k )
+        {
+            const float *a = &edge[k * 2], *b = &edge[( ( k + 1 ) % en ) * 2];
+            arc[k + 1] = arc[k] + sqrtf( ( b[0] - a[0] ) * ( b[0] - a[0] ) + ( b[1] - a[1] ) * ( b[1] - a[1] ) );
+            box[0] = a[0] < box[0] ? a[0] : box[0];
+            box[1] = a[1] < box[1] ? a[1] : box[1];
+            box[2] = a[0] > box[2] ? a[0] : box[2];
+            box[3] = a[1] > box[3] ? a[1] : box[3];
+        }
+
+        // every terrain border vertex with an empty point of THIS gap beside it (probes 3 x
+        // KHOLE_TOL out: one hidden under a neighbour, or a seam running up to the gap, has none)
+        struct kterHV_t
+        {
+            float       p[7];
+            float       s;                              // where the gap's edge passes it
+            selbrush_t *node;
+        };
+        std::vector<kterHV_t> verts;
+        const float probe = KHOLE_TOL * 3.0f;
+        for ( size_t k = 0; k < S.nodes.size(); ++k )
+        {
+            selbrush_t *b = S.nodes[k];
+            if ( !BoundsMeet( b->def->mins, b->def->maxs, box, S.res * 2.0f ) )
+                continue;
+            const patchMesh_t *def = b->patch->def;
+            int ii[64], jj[64];
+            const int rn = BorderRing( def, ii, jj );
+            for ( int r = 0; r < rn; ++r )
+            {
+                const drawVert_t &v = def->ctrl[ii[r]][jj[r]];
+                if ( !HNearGap( S, v.xyz[0], v.xyz[1], 4 ) )
+                    continue;
+                bool beside = false;
+                for ( int a = 0; a < 16 && !beside; ++a )
+                {
+                    const float x = v.xyz[0] + probe * cosf( (float)a * ( KTER_PI / 8.0f ) );
+                    const float y = v.xyz[1] + probe * sinf( (float)a * ( KTER_PI / 8.0f ) );
+                    beside = HNearGap( S, x, y, 2 ) && !HCovered( S, x, y );
+                }
+                if ( !beside )
+                    continue;
+                kterHV_t h;
+                HoleVert( v, h.p );
+                h.node = b;
+                h.s    = 0.0f;
+                float bd = FLT_MAX;
+                for ( int e = 0; e < en; ++e )
+                {
+                    const float *a = &edge[e * 2], *c = &edge[( ( e + 1 ) % en ) * 2];
+                    const float dx = c[0] - a[0], dy = c[1] - a[1];
+                    const float l2 = dx * dx + dy * dy;
+                    const float t  = ClampF( l2 > 1e-6f ? ( ( h.p[0] - a[0] ) * dx + ( h.p[1] - a[1] ) * dy ) / l2 : 0.0f, 0.0f, 1.0f );
+                    const float ex = h.p[0] - a[0] - dx * t, ey = h.p[1] - a[1] - dy * t;
+                    if ( ex * ex + ey * ey < bd )
+                    {
+                        bd  = ex * ex + ey * ey;
+                        h.s = arc[e] + ( arc[e + 1] - arc[e] ) * t;
+                    }
+                }
+                verts.push_back( h );
+            }
+        }
+        std::sort( verts.begin(), verts.end(), []( const kterHV_t &a, const kterHV_t &b ) { return a.s < b.s; } );
+
+        // the coincident corners of neighbouring patches are ONE outline point
+        std::vector<kterHV_t> ring;
+        for ( const kterHV_t &v : verts )
+        {
+            bool dup = false;
+            for ( size_t r = 0; r < ring.size() && !dup; ++r )
+                dup = ( ring[r].p[0] - v.p[0] ) * ( ring[r].p[0] - v.p[0] )
+                    + ( ring[r].p[1] - v.p[1] ) * ( ring[r].p[1] - v.p[1] ) <= KHOLE_TOL * KHOLE_TOL;
+            if ( !dup )
+                ring.push_back( v );
+        }
+        const int n = (int)ring.size();
+        if ( n < 3 )
+        {
+            HoleWhy( "only %i terrain vertices border the gap at (%.0f %.0f).", n, start[0], start[1] );
+            return false;
+        }
+        // points closer together than two cells can project out of order: there the outline's
+        // own direction decides
+        for ( int pass = 0; pass < 4 && n >= 4; ++pass )
+        {
+            bool swapped = false;
+            for ( int i = 0; i < n; ++i )
+            {
+                kterHV_t &a = ring[i], &b = ring[( i + 1 ) % n];
+                const float dx = b.p[0] - a.p[0], dy = b.p[1] - a.p[1];
+                if ( dx * dx + dy * dy > 4.0f * S.res * S.res )
+                    continue;
+                const kterHV_t &p = ring[( i + n - 1 ) % n], &q = ring[( i + 2 ) % n];
+                if ( dx * ( q.p[0] - p.p[0] ) + dy * ( q.p[1] - p.p[1] ) < 0.0f )
+                {
+                    std::swap( a, b );
+                    swapped = true;
+                }
+            }
+            if ( !swapped )
+                break;
+        }
         float area = 0.0f;
         for ( int i = 0, j = n - 1; i < n; j = i++ )
-            area += loop[j * 7] * loop[i * 7 + 1] - loop[i * 7] * loop[j * 7 + 1];
+            area += ring[j].p[0] * ring[i].p[1] - ring[i].p[0] * ring[j].p[1];
         if ( area <= 0.0f )
-            return false;                               // clockwise with the void on the left: the OUTSIDE of the terrain
-        *likeNode = startRing->node;
+        {
+            HoleWhy( "the gap's outline at (%.0f %.0f) came out inside-out.", start[0], start[1] );
+            return false;
+        }
+        // the fill copies the patch nearest the cursor (material, layers, owner)
+        float nearest = FLT_MAX;
+        *likeNode = nullptr;
+        for ( const kterHV_t &v : ring )
+        {
+            loop.insert( loop.end(), v.p, v.p + 7 );
+            const float d = ( v.p[0] - s_cursor[0] ) * ( v.p[0] - s_cursor[0] ) + ( v.p[1] - s_cursor[1] ) * ( v.p[1] - s_cursor[1] );
+            if ( d < nearest )
+            {
+                nearest = d;
+                *likeNode = v.node;
+            }
+        }
         return true;
     }
 
@@ -3346,28 +3852,31 @@ namespace
         s_holeFailValid = true;
         s_holeFailAt[0] = s_cursor[0];
         s_holeFailAt[1] = s_cursor[1];
-
-        // runs on every creation stroke: it only SPEAKS when the cursor is off the terrain
-        const bool verbose = LiveCursorNode() == nullptr;
         std::vector<float> loop;
         selbrush_t *likeNode = nullptr;
-        return TraceHoleOutline( loop, &likeNode, verbose ) && likeNode
-            && FillOutline( loop, likeNode->patch->def, likeNode->owner, verbose );
+        return TraceHoleOutline( loop, &likeNode ) && likeNode
+            && FillOutline( loop, likeNode->patch->def, likeNode->owner );
     }
 
     void ExpandUnderBrush()
     {
         // A gap between existing patches is filled along its own outline first; the square
         // lattice below only ever lays chunks on ground that has NO terrain at all.
+        s_holeWhy[0] = '\0';
         if ( FillHoleUnderCursor() )
             return;
         kterLattice_t L;
-        if ( !ResolveLattice( &L ) )
-            return;
         float cells[64][5];
-        const int n = EmptyCellsUnderBrush( cells, L );
+        const int n = ResolveLattice( &L ) ? EmptyCellsUnderBrush( cells, L ) : 0;
         if ( !n )
+        {
+            if ( s_holeWhy[0] && !s_holeSaid )          // nothing to lay either: say why the gap stays open
+            {
+                Sys_Printf( "Terrain Sculpt: gap fill - %s\n", s_holeWhy );
+                s_holeSaid = true;
+            }
             return;
+        }
         const patchMesh_t *like = L.like ? L.like : FreshTemplate();
         for ( int c = 0; c < n; ++c )
         {
@@ -4822,6 +5331,7 @@ static bool BeginStroke( bool shift, bool ctrl )
     s_carried   = 0;
     s_coarseSpill = false;
     s_holeFailValid = false;                 // a new press may search for a gap again
+    s_holeSaid      = false;
     s_noiseSeed += 1.0f;
     s_haveLastCenter = false;
     s_accumDt   = 1.0f / 60.0f;

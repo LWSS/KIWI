@@ -43,6 +43,7 @@ extern int      modified;                                                   // m
 extern int      g_nUpdateBits;                                               // engine_stubs.cpp:773
 
 extern void Map_New();                                                       // entity.cpp:1839
+extern void RadiantClipboard_ForgetLocal();                                  // entity.cpp (test hook)
 extern void Map_SaveFile( const char *path, char region, char autosave );     // map.cpp:744
 extern void Select_Deselect( int deselectFaces );                            // select.cpp:1448
 extern void Select_Invert();                                                 // select.cpp:1196
@@ -1293,6 +1294,14 @@ static void ExecuteLine( const ScriptLine &line )
     {
         if ( w.size() != 1 ) { ScriptError( line, "new takes no arguments" ); return; }
         Map_New();
+        return;
+    }
+    if ( command == "clipboard" )
+    {
+        // `clipboard forget`: drop this editor's in-app copy, as a second instance has
+        // none - the next paste must come off the Windows clipboard (cross-instance paste).
+        if ( w.size() != 2 || Lower( w[1] ) != "forget" ) { ScriptError( line, "clipboard forget" ); return; }
+        RadiantClipboard_ForgetLocal();
         return;
     }
     if ( command == "save" || command == "saveas" )

@@ -1943,13 +1943,18 @@ extern undo_s     *g_lastundo;                                             // un
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// In-app clipboard (the buffer half of CXYWnd::Copy / Paste).
+// Clipboard (CXYWnd::Copy / Paste: the in-app buffer + the Win32 clipboard mirror).
 //
 // The binary stores the copied selection in a global CMemFile (g_Clipboard @0x25EB210)
 // AND mirrors it to the Win32 OLE clipboard (RegisterClipboardFormatA("RadiantClippings")
-// + SetClipboardData) so brushes can be pasted between two running editors. The OLE
-// clipboard + CMemFile + CString refcounting is NOT reproduced.  This in-app buffer covers
-// the entire single-editor copy/paste round trip; only cross-process paste is lost.
+// + SetClipboardData) so brushes can be pasted between two running editors.  The CMemFile
+// + CString refcounting is a heap buffer here.  KIWI (2026-09-22, user: "copy/paste from 1
+// instance of kiwi radiant to another"): the Win32 mirror is back - Copy also puts the map
+// text on the clipboard under "RadiantClippings", Paste takes the clipboard's clippings
+// when it holds some (another editor's copy, or this one's), else the in-app buffer.
+// Universal groups ride along: they are the `kiwi_group` epair on every member.
+// NOT byte-verified against 0x46E140 / 0x46E280 (the IDB was not open): the payload is
+// the NUL-terminated map text, the same bytes the in-app buffer holds.
 //
 // Copy writes the selection to the buffer via Entity_WriteSelected_R (the SAME .map
 // writer Map_SaveFile uses); Paste re-parses the buffer through Map_ImportBuffer.
@@ -2016,9 +2021,87 @@ static int RadiantClipboard_Writer( void *ctx, const char *fmt, ... )
     return n;
 }
 
-// CXYWnd::Copy core (IDB 0x46E140, minus the OLE mirror). Serialise the current
-// selection to the in-app clipboard buffer.
-void RadiantClipboard_Copy()
+// The Win32 clipboard format the binary registers for its clippings.
+static UINT RadiantClipboard_Format()
+{
+    static UINT fmt = 0;
+    if ( !fmt )
+        fmt = ::RegisterClipboardFormatA( "RadiantClippings" );
+    return fmt;
+}
+
+// OpenClipboard fails while another process holds it (a clipboard manager, the other
+// editor mid-copy): a few short retries.  The main window owns it - SetClipboardData
+// fails after EmptyClipboard when the clipboard was opened with no owner.
+static bool RadiantClipboard_OpenOS()
+{
+    for ( int attempt = 0; attempt < 8; ++attempt )
+    {
+        if ( ::OpenClipboard( g_qeglobals.d_hwndMain ) )
+            return true;
+        ::Sleep( 5 );
+    }
+    return false;
+}
+
+static bool RadiantClipboard_OSHasClippings()
+{
+    const UINT fmt = RadiantClipboard_Format();
+    return fmt && ::IsClipboardFormatAvailable( fmt );
+}
+
+// The in-app buffer onto the Win32 clipboard as "RadiantClippings".
+static void RadiantClipboard_ToOS()
+{
+    const UINT fmt = RadiantClipboard_Format();
+    if ( !fmt || !s_clipboardBuf || !s_clipboardLen || !RadiantClipboard_OpenOS() )
+        return;
+    HGLOBAL mem = ::GlobalAlloc( GMEM_MOVEABLE, s_clipboardLen + 1 );
+    char   *dst = mem ? (char *)::GlobalLock( mem ) : nullptr;
+    if ( dst )
+    {
+        memcpy( dst, s_clipboardBuf, s_clipboardLen + 1 );
+        ::GlobalUnlock( mem );
+        ::EmptyClipboard();
+        if ( ::SetClipboardData( fmt, mem ) )
+            mem = nullptr;                              // the clipboard owns it now
+    }
+    if ( mem )
+        ::GlobalFree( mem );
+    ::CloseClipboard();
+}
+
+// The Win32 clipboard's clippings into the in-app buffer; false (buffer untouched) when it
+// holds none.
+static bool RadiantClipboard_FromOS()
+{
+    if ( !RadiantClipboard_OSHasClippings() || !RadiantClipboard_OpenOS() )
+        return false;
+    bool ok = false;
+    if ( HANDLE mem = ::GetClipboardData( RadiantClipboard_Format() ) )
+    {
+        const char  *src = (const char *)::GlobalLock( mem );
+        const size_t cap = ::GlobalSize( mem );
+        if ( src )
+        {
+            size_t n = 0;
+            while ( n < cap && src[n] )                 // (GlobalSize may round up; stop at the NUL)
+                ++n;
+            if ( n )
+            {
+                RadiantClipboard_Reset();
+                RadiantClipboard_Append( src, n );
+                ok = true;
+            }
+            ::GlobalUnlock( mem );
+        }
+    }
+    ::CloseClipboard();
+    return ok;
+}
+
+// Serialise the current selection to the in-app buffer (the writer half of Copy).
+static void RadiantClipboard_Capture()
 {
     RadiantClipboard_Reset();
     // 2-slot writer object: [0] = the format fn-ptr (recovered by *writer), [1] = sink
@@ -2027,16 +2110,35 @@ void RadiantClipboard_Copy()
     writer[0] = &RadiantClipboard_Writer;
     writer[1] = nullptr;
     Entity_WriteSelected_R( writer );   // writer decays to WriteFunc_entity_t* (the handle)
-    s_clipboardSysSeq = ::GetClipboardSequenceNumber();
 }
 
-// True when the in-app clipboard holds a copy made AFTER the last change to the OS
-// clipboard, i.e. the brush/entity copy is the more recent one and Paste must not be
-// diverted to a clipboard image (KiwiRefImage_PasteClipboard).
+// CXYWnd::Copy core (IDB 0x46E140). Serialise the current selection to the in-app
+// clipboard buffer and mirror it to the Win32 clipboard.
+void RadiantClipboard_Copy()
+{
+    RadiantClipboard_Capture();
+    RadiantClipboard_ToOS();
+    s_clipboardSysSeq = ::GetClipboardSequenceNumber();   // AFTER our own SetClipboardData
+}
+
+// True when the brush/entity copy is the most recent thing copied, so Paste must not be
+// diverted to a clipboard image (KiwiRefImage_PasteClipboard): the Win32 clipboard holds
+// clippings (this editor's or another's), or the in-app copy was made AFTER the last
+// change to the Win32 clipboard.
 bool RadiantClipboard_NewerThanSystem()
 {
+    if ( RadiantClipboard_OSHasClippings() )
+        return true;
     return s_clipboardLen != 0 && s_clipboardBuf
         && ::GetClipboardSequenceNumber() == s_clipboardSysSeq;
+}
+
+// KIWI test hook (kiwi_test.cpp `clipboard forget`): drop the in-app copy the way a fresh
+// editor has none, so the next paste must come off the Win32 clipboard.
+void RadiantClipboard_ForgetLocal()
+{
+    RadiantClipboard_Reset();
+    s_clipboardSysSeq = 0;
 }
 
 // KIWI (2026-09-09): Clone = Copy + Paste through the map text, which is what the
@@ -2046,8 +2148,9 @@ bool RadiantClipboard_NewerThanSystem()
 // in-memory clone only deep-copied brush DEFs into their EXISTING owner entity, so a
 // cloned model was a second proxy brush inside the same misc_model — invisible and
 // unsaved — and fixed-size entities were skipped outright.  The user's own clipboard is
-// stashed around the round trip so Clone never clobbers a pending Ctrl+V.
-void RadiantClipboard_Paste();   // defined below
+// stashed around the round trip so Clone never clobbers a pending Ctrl+V - and Clone
+// stays off the Win32 clipboard entirely (Capture / Import, not Copy / Paste).
+static void RadiantClipboard_Import();   // defined below
 
 void RadiantClipboard_CloneSelection()
 {
@@ -2062,8 +2165,8 @@ void RadiantClipboard_CloneSelection()
         memcpy( stashBuf, s_clipboardBuf, stashLen + 1 );
     }
 
-    RadiantClipboard_Copy();
-    RadiantClipboard_Paste();
+    RadiantClipboard_Capture();
+    RadiantClipboard_Import();
 
     RadiantClipboard_Reset();
     if ( stashBuf )
@@ -2074,17 +2177,26 @@ void RadiantClipboard_CloneSelection()
     s_clipboardSysSeq = stashSeq;
 }
 
-// CXYWnd::Paste core (IDB 0x46E280, minus the OLE fetch). Re-parse the in-app clipboard
-// buffer and place + select the result. Sets up / tears down the parse session exactly
-// like the binary (Com_BeginParseSession + spaceDelimited=0/negativeNumbers=1) so the
-// version-4 .map tokens parse identically.
-// KIWI: is there map text to paste?  (kiwi_pasteplace.cpp gates its command on it.)
+// KIWI: is there map text to paste - in this editor or on the Win32 clipboard?
+// (kiwi_pasteplace.cpp gates its command on it.)
 bool RadiantClipboard_HasMapText()
 {
-    return s_clipboardLen != 0 && s_clipboardBuf != nullptr;
+    return ( s_clipboardLen != 0 && s_clipboardBuf != nullptr ) || RadiantClipboard_OSHasClippings();
 }
 
+// CXYWnd::Paste core (IDB 0x46E280). The Win32 clipboard's clippings replace the in-app
+// buffer when it holds some (the most recent copy, from any editor); then the buffer is
+// re-parsed, placed and selected.
 void RadiantClipboard_Paste()
+{
+    RadiantClipboard_FromOS();
+    RadiantClipboard_Import();
+}
+
+// Re-parse the in-app clipboard buffer. Sets up / tears down the parse session exactly
+// like the binary (Com_BeginParseSession + spaceDelimited=0/negativeNumbers=1) so the
+// version-4 .map tokens parse identically.
+static void RadiantClipboard_Import()
 {
     if ( !s_clipboardLen || !s_clipboardBuf )
         return;
