@@ -771,14 +771,15 @@ void __cdecl CG_DrawSoundOverlay(const ScreenPlacement *scrPlace)
         string = va("Listing Active Sounds of Type: %s", snd_drawInfo->domain.enumeration.strings[type]);
         CG_DrawStringExt(scrPlace, x, y, string, colorWhite, 0, 1, charHeight);
         y = y + charHeight;
-        string = va("CPU: ^3%%%i ^7kHz: ^3%i ", cpu, Int);
+        string = va("CPU: " S_COLOR_YELLOW "%%%i " S_COLOR_WHITE "kHz: " S_COLOR_YELLOW "%i ", cpu, Int);
         CG_DrawStringExt(scrPlace, x, y, string, colorWhite, 0, 1, charHeight);
         y = y + charHeight;
         for (i = 0; i < SoundOverlay; ++i)
         {
             if (info[i].pszSampleName[0])
                 string = va(
-                    "%2i (%s) %-20s -> %-50s vol^3%04.2f ^7rvol^3%04.2f ^7dist^3%5i ^7pit^3%04.2f",
+                    "%2i (%s) %-20s -> %-50s vol" S_COLOR_YELLOW "%04.2f " S_COLOR_WHITE "rvol" S_COLOR_YELLOW "%04.2f "
+                    S_COLOR_WHITE "dist" S_COLOR_YELLOW "%5i " S_COLOR_WHITE "pit" S_COLOR_YELLOW "%04.2f",
                     i,
                     info[i].entchannel,
                     info[i].aliasName,

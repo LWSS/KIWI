@@ -174,7 +174,7 @@ void QDECL Com_PrintMessage(int channel, const char* msg, int error)
 	//PbCaptureConsoleOutput(msg, 4096);
 
     // always print to stdout console
-    fprintf(stderr, "%s", msg);
+    Sys_KiwiConsolePrint(msg); // KIWI: draws the ^ colour codes (win_kiwi_console.cpp)
 
 	if (rd_buffer)
 	{
@@ -510,19 +510,23 @@ void Com_PrintError(int channel, const char *fmt, ...)
 
     va_start(va, fmt);
     if (I_stristr(fmt, "error"))
-        I_strncpyz(dest, "^1", 4096);
+        I_strncpyz(dest, S_COLOR_RED, 4096);
     else
-        I_strncpyz(dest, "^1Error: ", 4096);
+        I_strncpyz(dest, S_COLOR_RED "Error: ", 4096);
     v3 = &dest[strlen(dest) + 1] - &dest[1];
     _vsnprintf(&dest[v3], 4096 - v3, fmt, va);
     dest[4095] = 0;
     ++com_errorPrintsCount;
     Com_PrintMessage(channel, dest, 3);
 #else
-    char msg[4096] = { 0 };
+    // KIWI: keeps the retail red prefix; it was dropped here, so every error printed uncoloured
+    char msg[4096];
     va_list va;
+    const char *prefix = I_stristr(fmt, "error") ? S_COLOR_RED : S_COLOR_RED "Error: ";
+    const size_t prefixLength = strlen(prefix);
+    memcpy(msg, prefix, prefixLength);
     va_start(va, fmt);
-    vsnprintf(msg, sizeof(msg), fmt, va);
+    vsnprintf(&msg[prefixLength], sizeof(msg) - prefixLength, fmt, va);
     va_end(va);
     ++com_errorPrintsCount;
     Com_PrintMessage(channel, msg, 3);
@@ -536,7 +540,7 @@ void Com_PrintWarning(int channel, const char *fmt, ...)
     va_list va; // [esp+102Ch] [ebp+10h] BYREF
 
     va_start(va, fmt);
-    I_strncpyz(dest, "^3", 4096);
+    I_strncpyz(dest, S_COLOR_YELLOW, 4096);
     v3 = &dest[strlen(dest) + 1] - &dest[1];
     _vsnprintf(&dest[v3], 4096 - v3, fmt, va);
     dest[4095] = 0;

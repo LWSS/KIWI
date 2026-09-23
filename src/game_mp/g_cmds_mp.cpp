@@ -774,11 +774,11 @@ void __cdecl G_SayTo(
         }
         else if (ent->client->sess.cs.team == other->client->sess.cs.team)
         {
-            team_color = "^8";
+            team_color = S_COLOR_MYTEAM;
         }
         else
         {
-            team_color = "^9";
+            team_color = S_COLOR_ENEMYTEAM;
         }
         if (ent->client->sess.cs.team == TEAM_SPECTATOR)
         {
@@ -795,15 +795,15 @@ void __cdecl G_SayTo(
         }
         if (mode == 1)
         {
-            Com_sprintf(name, 0x80u, (const char*)"%s(\x14\x25\x73\x15\x29\x25\x73\x25\x73\x3a\x20", szStateString, teamString, cleanname, "^7");
+            Com_sprintf(name, 0x80u, (const char*)"%s(\x14\x25\x73\x15\x29\x25\x73\x25\x73\x3a\x20", szStateString, teamString, cleanname, S_COLOR_WHITE);
         }
         else if (mode == 2)
         {
-            Com_sprintf(name, 0x80u, "%s[%s]%s: ", szStateString, cleanname, "^7");
+            Com_sprintf(name, 0x80u, "%s[%s]%s: ", szStateString, cleanname, S_COLOR_WHITE);
         }
         else
         {
-            Com_sprintf(name, 0x80u, "%s%s%s: ", szStateString, cleanname, "^7");
+            Com_sprintf(name, 0x80u, "%s%s%s: ", szStateString, cleanname, S_COLOR_WHITE);
         }
         v7 = va("%c \"\x15\x25\x73\x25\x63\x25\x63\x25\x73\x22", (char)((mode == 1) + 104), name, 94, color, message);
         SV_GameSendServerCommand(other - g_entities, SV_CMD_CAN_IGNORE, v7);

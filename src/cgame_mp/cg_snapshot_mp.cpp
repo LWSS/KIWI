@@ -193,7 +193,7 @@ void __cdecl CG_SetNextSnap(int localClientNum, snapshot_s *snap)
                 if (ci->name[0])
                 {
                     name = clientState->name;
-                    CG_GameMessage(localClientNum, va("%s^7 %s %s", ci->name, UI_SafeTranslateString("CGAME_PLAYERRENAMES"), name));
+                    CG_GameMessage(localClientNum, va("%s" S_COLOR_WHITE " %s %s", ci->name, UI_SafeTranslateString("CGAME_PLAYERRENAMES"), name));
                 }
                 I_strncpyz(ci->name, clientState->name, 16);
             }

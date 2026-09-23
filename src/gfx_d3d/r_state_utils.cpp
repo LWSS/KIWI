@@ -148,14 +148,14 @@ int __cdecl R_PickMaterial(
     if ((_BYTE)v8 && index < 29)
         strncpy(surfaceFlags, infoParms[index - 1].name, charLimit);
     else
-        strncpy(surfaceFlags, "^1default^7", charLimit);
+        strncpy(surfaceFlags, S_COLOR_RED "default" S_COLOR_WHITE, charLimit);
     if (surfaceFlags[charLimit - 1])
         return 0;
     surfaceFlagsLen = strlen(surfaceFlags);
     if ((trace.contents & CONTENTS_SOLID) != 0)
         strncpy(contents, "solid", charLimit);
     else
-        strncpy(contents, "^3nonsolid^7", charLimit);
+        strncpy(contents, S_COLOR_YELLOW "nonsolid" S_COLOR_WHITE, charLimit);
     if (contents[charLimit - 1])
         return 0;
     contentsLen = strlen(contents);

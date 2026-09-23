@@ -272,6 +272,34 @@ int __cdecl I_DrawStrlen(const char *str);
 char *__cdecl I_CleanStr(char *string);
 uint8_t __cdecl I_CleanChar(uint8_t character);
 
+// KIWI: Quake 3 names for the colour codes. A code is '^' followed by a digit (I_CleanStr,
+// RB_DrawText). ^8 and ^9 are CoD4's team colours (RB_LookupColor): the viewer's team and the
+// other team, from g_TeamColor_Allies / g_TeamColor_Axis.
+#define Q_COLOR_ESCAPE      '^'
+#define Q_IsColorString(p)  ( (p) && *(p) == Q_COLOR_ESCAPE && *((p) + 1) >= COLOR_BLACK && *((p) + 1) <= COLOR_ENEMYTEAM )
+
+#define COLOR_BLACK         '0'
+#define COLOR_RED           '1'
+#define COLOR_GREEN         '2'
+#define COLOR_YELLOW        '3'
+#define COLOR_BLUE          '4'
+#define COLOR_CYAN          '5'
+#define COLOR_MAGENTA       '6'
+#define COLOR_WHITE         '7'
+#define COLOR_MYTEAM        '8'
+#define COLOR_ENEMYTEAM     '9'
+
+#define S_COLOR_BLACK       "^0"
+#define S_COLOR_RED         "^1"
+#define S_COLOR_GREEN       "^2"
+#define S_COLOR_YELLOW      "^3"
+#define S_COLOR_BLUE        "^4"
+#define S_COLOR_CYAN        "^5"
+#define S_COLOR_MAGENTA     "^6"
+#define S_COLOR_WHITE       "^7"
+#define S_COLOR_MYTEAM      "^8"
+#define S_COLOR_ENEMYTEAM   "^9"
+
 inline float I_fmin(float a, float b) { return a < b ? a : b; }
 inline float I_fmax(float a, float b) { return a > b ? a : b; }
 

@@ -674,7 +674,7 @@ MaterialStateMap *__cdecl Material_LoadStateMap(char *name)
     {
         text = (char*)file;
         Com_BeginParseSession(filename);
-        Com_SetScriptWarningPrefix("^1ERROR: ");
+        Com_SetScriptWarningPrefix(S_COLOR_RED "ERROR: ");
         Com_SetSpaceDelimited(0);
         v2 = strlen(name);
         nameSize = v2 + 1;
@@ -2945,9 +2945,9 @@ char __cdecl Material_ParseShaderArguments(
         }
         else
         {
-            Com_SetScriptWarningPrefix("^3WARNING: ");
+            Com_SetScriptWarningPrefix(S_COLOR_YELLOW "WARNING: ");
             Com_ScriptError("'%s' is not referenced by %s\n", paramName, shaderName);
-            Com_SetScriptWarningPrefix("^1ERROR: ");
+            Com_SetScriptWarningPrefix(S_COLOR_RED "ERROR: ");
             if (!Material_MatchToken(text, "="))
                 return 0;
             Com_SkipRestOfLine(text);
@@ -3682,7 +3682,7 @@ MaterialTechnique *__cdecl Material_LoadTechnique(char *name, GfxRenderer render
     {
         text = (const char*)file;
         Com_BeginParseSession(filename);
-        Com_SetScriptWarningPrefix("^1ERROR: ");
+        Com_SetScriptWarningPrefix(S_COLOR_RED "ERROR: ");
         Com_SetSpaceDelimited(0);
         error = 0;
         techFlags = 0;
@@ -3816,7 +3816,7 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
         Material_DirtyTechniqueSetOverrides();
         text = (const char*)file;
         Com_BeginParseSession(filename);
-        Com_SetScriptWarningPrefix("^1ERROR: ");
+        Com_SetScriptWarningPrefix(S_COLOR_RED "ERROR: ");
         Com_SetSpaceDelimited(0);
         Com_SetKeepStringQuotes(1);
         techTypeCount = 0;
@@ -3899,7 +3899,7 @@ MaterialTechniqueSet *__cdecl Material_LoadTechniqueSet(char *name, GfxRenderer 
     }
     else
     {
-        Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: Couldn't open techniqueSet '%s'\n", filename);
+        Com_PrintError(CON_CHANNEL_GFX, S_COLOR_RED "ERROR: Couldn't open techniqueSet '%s'\n", filename);
         return 0;
     }
 }
@@ -5470,14 +5470,14 @@ Material *__cdecl Material_Load(char *assetName, int imageTrack)
         else
         {
             FS_FCloseFile(fileHandle);
-            Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: material '%s' has zero length\n", assetName);
+            Com_PrintError(CON_CHANNEL_GFX, S_COLOR_RED "ERROR: material '%s' has zero length\n", assetName);
             return 0;
         }
     }
     else
     {
         if (*assetName != 36)
-            Com_PrintError(CON_CHANNEL_GFX, "^1ERROR: Couldn't find material '%s'\n", assetName);
+            Com_PrintError(CON_CHANNEL_GFX, S_COLOR_RED "ERROR: Couldn't find material '%s'\n", assetName);
         return 0;
     }
 }

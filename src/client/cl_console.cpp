@@ -2892,7 +2892,7 @@ uint __cdecl Con_GetAutoCompleteColorCodedString(
     uint prefixLen; // [esp+0h] [ebp-4h]
 
     if (isDvarCommand)
-        prefixLen = sprintf(colorCoded, "^2%s ", originalCommand);
+        prefixLen = sprintf(colorCoded, S_COLOR_GREEN "%s ", originalCommand);
     else
         prefixLen = 0;
     if (con_matchPrefixOnly->current.enabled)
@@ -2940,9 +2940,9 @@ int __cdecl Con_GetAutoCompleteColorCodedStringDiscontiguous(
         {
             wasMatching = isMatching;
             if (isMatching)
-                v9 = "^2";
+                v9 = S_COLOR_GREEN;
             else
-                v9 = "^7";
+                v9 = S_COLOR_WHITE;
             v8 = v9;
             v7 = &colorCoded[colorCodedPos];
             do
@@ -2954,7 +2954,7 @@ int __cdecl Con_GetAutoCompleteColorCodedStringDiscontiguous(
         }
         colorCoded[colorCodedPos++] = *queryPos;
     }
-    strcpy(&colorCoded[colorCodedPos], "^7");
+    strcpy(&colorCoded[colorCodedPos], S_COLOR_WHITE);
     colorCodedPosb = colorCodedPos + 2;
     colorCoded[colorCodedPosb] = 32;
     colorCodedPosa = colorCodedPosb + 1;
@@ -2991,12 +2991,12 @@ int __cdecl Con_GetAutoCompleteColorCodedStringContiguous(
     if (queryPos)
     {
         strncpy(colorCoded, query, queryPos - query);
-        strcpy(&colorCoded[queryPos - query], "^2");
+        strcpy(&colorCoded[queryPos - query], S_COLOR_GREEN);
         colorCodedPosb = queryPos - query + 2;
         v11 = strlen(matchToText);
         strncpy(&colorCoded[colorCodedPosb], queryPos, v11);
         colorCodedPosc = v11 + colorCodedPosb;
-        strcpy(&colorCoded[colorCodedPosc], "^7");
+        strcpy(&colorCoded[colorCodedPosc], S_COLOR_WHITE);
         colorCodedPosa = colorCodedPosc + 2;
         v10 = &queryPos[v11];
         v9 = &colorCoded[colorCodedPosa];

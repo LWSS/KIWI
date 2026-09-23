@@ -143,7 +143,7 @@ void __cdecl Com_VolumeFalloffCurveGraphEventCallback(const DevGraph *graph, Dev
             Com_sprintf(dest, 0x20u, "%.4f %.4f\n", graph->knots[i][0], graph->knots[i][1]);
             I_strncat(string, 0x2000, dest);
         }
-        Com_Printf(CON_CHANNEL_SOUND, "^6%s", string);
+        Com_Printf(CON_CHANNEL_SOUND, S_COLOR_MAGENTA "%s", string);
     }
 }
 

@@ -532,7 +532,7 @@ void __cdecl CL_SubtitlePrint(int localClientNum, const char *text, int duration
         Com_Error(ERR_LOCALIZATION, "Could not translate subtitle text: \"%s\"", text);
     else
         Com_PrintWarning(CON_CHANNEL_CLIENT, "WARNING: Could not translate subtitle text: \"%s\"\n", text);
-    translationa = va("^1UNLOCALIZED(^7%s^1)^7", text);
+    translationa = va(S_COLOR_RED "UNLOCALIZED(" S_COLOR_WHITE "%s" S_COLOR_RED ")" S_COLOR_WHITE, text);
     CL_ConsolePrint(localClientNum, CON_CHANNEL_SUBTITLE, translationa, duration, lineWidth, 0);
 }
 

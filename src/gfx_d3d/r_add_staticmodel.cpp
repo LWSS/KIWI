@@ -158,7 +158,7 @@ void __cdecl R_EndDumpStaticModelLodInfo()
         {
             FS_FCloseFile(g_dumpStaticModelFileHandle);
             basePath = Sys_DefaultInstallPath();
-            Com_Printf(CON_CHANNEL_AI, "^7Successfully wrote static model info [%s\\%s].\n", basePath, g_dumpStaticModelFilePath);
+            Com_Printf(CON_CHANNEL_AI, S_COLOR_WHITE "Successfully wrote static model info [%s\\%s].\n", basePath, g_dumpStaticModelFilePath);
         }
     }
 }

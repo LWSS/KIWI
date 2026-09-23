@@ -5112,6 +5112,12 @@ emits triangle soups, and builds AABB trees
 void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
 {
   #define MAX_BATCH_TRIS 21845
+  /* KIWI: each pass owns its half of the cell's root pair (+24 layered, +26 unlayered, as the
+     engine reads it).  Native stored one int per pass, so the layered pass (run second) wrote
+     0 over the unlayered root of every cell and multi-cell maps loaded unlayered overran
+     sortedSurfIndex (R_BuildNoDecalAabbTree_r). */
+  #define TRIS_CELL_AABB_ROOT(cell) (bspCells[(cell)].aabbTreeIndexPair[s_drawSurfaceContext->type])
+  #define TRIS_CELL_AABB_NONE 0xFFFF
   TriRecord_t *startRec;
   int i, batchStart, batchEnd, batchSize;
   int curBrushModel, curCullGroup;
@@ -5124,7 +5130,7 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
     for ( i = 0; i < numBSPCullGroups; i++ )
       ClearBounds(bspCullGroups[i].mins, bspCullGroups[i].maxs);
     for ( i = 0; i < numBSPCells; i++ )
-      bspCells[i].aabbTreeIndex = -1;
+      TRIS_CELL_AABB_ROOT(i) = TRIS_CELL_AABB_NONE;
   }
 
   if (numTriangles > 1)
@@ -5206,7 +5212,8 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
         curCullGroup = -1;
         if ( hasAABBTree )
           BuildTriSoupAABBTree(&bspAabbTrees[numBSPAabbTrees]);
-        bspCells[drawOrder].aabbTreeIndex = numBSPAabbTrees;
+        Assert(numBSPAabbTrees < TRIS_CELL_AABB_NONE, s_assertDisable_Tris_EmitTriangles);
+        TRIS_CELL_AABB_ROOT(drawOrder) = (unsigned short)numBSPAabbTrees;
         bspAabbTrees[numBSPAabbTrees].firstTriSoup = numBSPTriSoups;
         bspAabbTrees[numBSPAabbTrees].triSoupCount = 0;
         bspAabbTrees[numBSPAabbTrees].childIndex = 0;
@@ -5232,7 +5239,7 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
         bspCullGroups[startRec->cullGroupIdx].triSoupCount = numBSPTriSoups - bspCullGroups[startRec->cullGroupIdx].firstTriSoup;
       else
       {
-        int aabbIdx = bspCells[startRec->drawOrder].aabbTreeIndex;
+        int aabbIdx = TRIS_CELL_AABB_ROOT(startRec->drawOrder);
         bspAabbTrees[aabbIdx].triSoupCount = numBSPTriSoups - bspAabbTrees[aabbIdx].firstTriSoup;
       }
     }
@@ -5246,9 +5253,10 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
   {
     for ( i = 0; i < numBSPCells; i++ )
     {
-      if ( bspCells[i].aabbTreeIndex < 0 )
+      if ( TRIS_CELL_AABB_ROOT(i) == TRIS_CELL_AABB_NONE )
       {
-        bspCells[i].aabbTreeIndex = numBSPAabbTrees;
+        Assert(numBSPAabbTrees < TRIS_CELL_AABB_NONE, s_assertDisable_Tris_EmitTriangles);
+        TRIS_CELL_AABB_ROOT(i) = (unsigned short)numBSPAabbTrees;
         bspAabbTrees[numBSPAabbTrees].firstTriSoup = 0;
         bspAabbTrees[numBSPAabbTrees].triSoupCount = 0;
         bspAabbTrees[numBSPAabbTrees].childIndex = 0;
@@ -5256,6 +5264,8 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
       }
     }
   }
+  #undef TRIS_CELL_AABB_NONE
+  #undef TRIS_CELL_AABB_ROOT
   #undef MAX_BATCH_TRIS
 }
 

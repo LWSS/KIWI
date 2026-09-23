@@ -328,6 +328,8 @@ void __cdecl Sys_NormalExit();
 void __cdecl Sys_OpenURL(const char *url, int doexit);
 void __cdecl  Sys_Quit();
 void __cdecl Sys_Print(const char *msg);
+void Sys_KiwiConsoleInit(); // KIWI: win_kiwi_console.cpp
+void Sys_KiwiConsolePrint(const char *msg);
 char *__cdecl Sys_GetClipboardData();
 int __cdecl Sys_SetClipboardData(const char *text);
 void __cdecl Sys_QueEvent(uint time, sysEventType_t type, int value, int value2, int ptrLength, void *ptr);

@@ -847,21 +847,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	// KISAK: make a pretty console in debug mode, redirect in/out/err stream
 #if 1 || defined(KISAK_DEBUG)
-	AllocConsole();
-
-	SetConsoleTitleA("KIWI");
-	DeleteMenu(GetSystemMenu(GetConsoleWindow(), FALSE), SC_CLOSE, MF_BYCOMMAND);
-
-	SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE),
-		ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT |
-		ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN |
-		ENABLE_LVB_GRID_WORLDWIDE);
-
-	SetConsoleCtrlHandler(nullptr, true);
-
-	freopen("CONIN$", "r", stdin);
-	freopen("CONOUT$", "w", stdout);
-	freopen("CONOUT$", "w", stderr);
+	Sys_KiwiConsoleInit(); // KIWI: win_kiwi_console.cpp, draws the ^ colour codes
 #endif
 
 	Sys_InitializeCriticalSections();

@@ -1043,7 +1043,7 @@ void __cdecl SV_Status_f()
                     Com_Printf(CON_CHANNEL_DONT_FILTER, "%4i ", clients->ping);
                 }
                 Com_Printf(CON_CHANNEL_DONT_FILTER, "%32s ", clients->cdkeyHash);
-                Com_Printf(CON_CHANNEL_DONT_FILTER, "%s^7", clients->name);
+                Com_Printf(CON_CHANNEL_DONT_FILTER, "%s" S_COLOR_WHITE, clients->name);
                 l = 16 - I_DrawStrlen(clients->name);
                 for (j = 0; j < l; ++j)
                     Com_Printf(CON_CHANNEL_DONT_FILTER, " ");

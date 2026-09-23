@@ -5921,9 +5921,9 @@ char *__cdecl UI_SafeTranslateString(const char *reference)
                 Com_Error(ERR_LOCALIZATION, "Could not translate string \"%s\"", reference);
             else
                 Com_PrintWarning(CON_CHANNEL_UI, "WARNING: Could not translate string \"%s\"\n", reference);
-            strcpy(errorString, "^1UNLOCALIZED(^7");
+            strcpy(errorString, S_COLOR_RED "UNLOCALIZED(" S_COLOR_WHITE);
             I_strncat(errorString, 1024, reference);
-            I_strncat(errorString, 1024, "^1)^7");
+            I_strncat(errorString, 1024, S_COLOR_RED ")" S_COLOR_WHITE);
         }
         else
         {

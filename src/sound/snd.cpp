@@ -58,7 +58,7 @@ void __cdecl TRACK_snd()
 void __cdecl SND_DebugAliasPrint(bool condition, const snd_alias_t *alias, const char *msg)
 {
     if (condition && !I_stricmp(snd_debugAlias->current.string, alias->aliasName))
-        Com_Printf(CON_CHANNEL_DONT_FILTER, "^5SND_DEBUG_ALIAS (%s): %s\n", alias->aliasName, msg);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, S_COLOR_CYAN "SND_DEBUG_ALIAS (%s): %s\n", alias->aliasName, msg);
 }
 
 int __cdecl SND_GetEntChannelCount()

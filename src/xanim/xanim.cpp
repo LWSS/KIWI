@@ -705,7 +705,7 @@ char* __cdecl XAnimGetAnimDebugName(const XAnim_s* anims, uint animIndex)
                 : (isDefault = DB_IsXAssetDefault(ASSET_TYPE_XANIMPARTS, parts->name)),
                 isDefault))
         {
-            return va("^3%s (missing)", debugName);
+            return va(S_COLOR_YELLOW "%s (missing)", debugName);
         }
         else
         {
@@ -2105,18 +2105,18 @@ void __cdecl XAnimDisplay(
     debugName = XAnimGetAnimDebugName(tree->anims, animIndex);
     if (g_xAnimInfo[infoIndex].state.weight == 0.0)
     {
-        color = "^0";
+        color = S_COLOR_BLACK;
     }
     else if (g_xAnimInfo[infoIndex].state.goalWeight <= g_xAnimInfo[infoIndex].state.weight)
     {
         if (g_xAnimInfo[infoIndex].state.goalWeight >= g_xAnimInfo[infoIndex].state.weight)
             color = "";
         else
-            color = "^1";
+            color = S_COLOR_RED;
     }
     else
     {
-        color = "^4";
+        color = S_COLOR_BLUE;
     }
     if (info->animToModel)
     {

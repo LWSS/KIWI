@@ -586,7 +586,7 @@ void __cdecl Scr_ConstructMessageString(
             ent = Scr_GetEntity(firstParmIndex);
             if (!ent->client)
                 Scr_ParamError(firstParmIndex, "Entity is not a player");
-            token = va("%s^7", ent->client->sess.cs.name);
+            token = va("%s" S_COLOR_WHITE, ent->client->sess.cs.name);
             v11 = strlen(token);
             tokenLen = v11;
             if (stringLen + v11 + 1 >= stringLimit)

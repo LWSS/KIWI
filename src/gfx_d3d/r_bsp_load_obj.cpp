@@ -13,6 +13,7 @@
 #include "r_buffers.h"
 
 #include <algorithm>
+#include <vector> // KIWI: R_KiwiCheckCellRoots
 #include "r_model.h"
 #include "r_xsurface.h"
 #include "rb_light.h"
@@ -1638,6 +1639,46 @@ void __cdecl R_LoadAabbTrees(TrisType trisType)
     }
 }
 
+// KIWI: trees below `tree`. R_FinishLoadingAabbTrees_r packs a top-level tree and everything
+// under it into [tree, tree + 1 + this), so the next top-level tree starts right after.
+static uint R_KiwiAabbTreeDescendantCount(const GfxAabbTree *tree)
+{
+    uint count = tree->childCount;
+    const GfxAabbTree *children = (const GfxAabbTree *)((const char *)tree + tree->childrenOffset);
+    for (uint childIndex = 0; childIndex < tree->childCount; ++childIndex)
+        count += R_KiwiAabbTreeDescendantCount(&children[childIndex]);
+    return count;
+}
+
+// KIWI: every cell must name its own top-level tree. cod4map before the 2026-09-23 fix (and the
+// retail compiler) stored the root as one int per emit pass, so the layered pass wrote 0 over the
+// unlayered root and every cell walked tree 0: small maps drew only cell 0's geometry, large ones
+// ran R_BuildNoDecalAabbTree_r past sortedSurfIndex and trashed the hunk. Refuse those BSPs.
+static void R_KiwiCheckCellRoots(const char *cells, uint cellCount, uint cellSize, TrisType trisType)
+{
+    std::vector<uint8_t> isTopLevel(rgl.aabbTreeCount, 0);
+    for (uint tree = 0; tree < rgl.aabbTreeCount; tree += 1 + R_KiwiAabbTreeDescendantCount(&rgl.aabbTrees[tree]))
+        isTopLevel[tree] = 1;
+
+    std::vector<uint8_t> claimed(rgl.aabbTreeCount, 0);
+    for (uint cellIndex = 0; cellIndex < cellCount; ++cellIndex)
+    {
+        const uint16_t root = *(const uint16_t *)&cells[cellSize * cellIndex + 2 * trisType + 24];
+        if (root >= rgl.aabbTreeCount || !isTopLevel[root] || claimed[root])
+        {
+            Com_Error(
+                ERR_DROP,
+                "LoadMap: %s cell %u names %s AABB tree %u, which %s; recompile the map with KIWI cod4map",
+                s_world.name,
+                cellIndex,
+                trisType == TRIS_TYPE_LAYERED ? "layered" : "unlayered",
+                root,
+                root >= rgl.aabbTreeCount ? "does not exist" : !isTopLevel[root] ? "is not a cell root" : "another cell uses");
+        }
+        claimed[root] = 1;
+    }
+}
+
 void __cdecl R_LoadCells(uint bspVersion, TrisType trisType)
 {
     int *v2; // [esp+0h] [ebp-18h]
@@ -1662,6 +1703,9 @@ void __cdecl R_LoadCells(uint bspVersion, TrisType trisType)
     s_world.cells = out;
     s_world.dpvsPlanes.cellCount = cellCount;
     s_world.cellBitsCount = 16 * ((cellCount + 127) >> 7);
+    // KIWI: stale BSPs share cell trees; see R_KiwiCheckCellRoots
+    if (bspVersion > 0xE)
+        R_KiwiCheckCellRoots(in, cellCount, bspVersion > 0x15 ? 0x70 : 0x2C, trisType);
     for (cellIndex = 0; cellIndex < cellCount; ++cellIndex)
     {
         out->mins[0] = *(float *)in;
@@ -2204,7 +2248,12 @@ uint __cdecl R_BuildNoDecalAabbTree_r(GfxAabbTree *tree, uint startSurfIndex)
         {
             surfIndex = srcIndices[surfIter];
             if ((s_world.dpvs.surfaces[surfIndex].flags & 2) == 0)
+            {
+                // KIWI: sortedSurfIndex is two lists of models[0].surfaceCount (R_SortSurfaces); running
+                // past it means cells share trees (see R_KiwiCheckCellRoots) and trashes the hunk.
+                bcassert(startSurfIndex, 2 * (uint)s_world.models->surfaceCount);
                 s_world.dpvs.sortedSurfIndex[startSurfIndex++] = surfIndex;
+            }
         }
     }
     startSurfIndexNoDecal = tree->startSurfIndexNoDecal;

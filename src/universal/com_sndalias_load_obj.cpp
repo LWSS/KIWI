@@ -1079,7 +1079,7 @@ bool __cdecl Com_ParseSndCurveFile(const char *buffer, const char *fileName, Snd
                     curve->knots[knotCountIndexa][1] = 0.0;
                     Com_PrintWarning(
                         CON_CHANNEL_SOUND,
-                        "WARNING^7: sndcurve parse on file \"%s\": the first point must be '0.0000 1.0000' and the last point must be"
+                        "WARNING" S_COLOR_WHITE ": sndcurve parse on file \"%s\": the first point must be '0.0000 1.0000' and the last point must be"
                         " '1.0000 0.0000'.\n"
                         "adjusting sndcurve endpoints.\n",
                         fileName);

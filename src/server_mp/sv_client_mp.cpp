@@ -909,7 +909,7 @@ void __cdecl SV_SendDisconnect(
         if (translationForReason)
             SV_SendServerCommand(client, SV_CMD_RELIABLE, "%c \"%s\"", 119, reason);
         else
-            SV_SendServerCommand(client, SV_CMD_RELIABLE, "%c \"%s^7 %s\" PB", 119, clientName, reason);
+            SV_SendServerCommand(client, SV_CMD_RELIABLE, "%c \"%s" S_COLOR_WHITE " %s\" PB", 119, clientName, reason);
     }
     else
     {
@@ -993,17 +993,17 @@ void __cdecl SV_DropClient(client_t *drop, const char *reason, bool tellThem)
         if (I_stricmp(reason, "EXE_DISCONNECTED"))
         {
             if (translationForReason)
-                SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s^7 %s%s", 101, droppedClientName, "", reason);
+                SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s" S_COLOR_WHITE " %s%s", 101, droppedClientName, "", reason);
             else
-                SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s^7 %s%s", 101, droppedClientName, "", reason);
+                SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s" S_COLOR_WHITE " %s%s", 101, droppedClientName, "", reason);
         }
         else if (translationForReason)
         {
-            SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s^7 %s%s", 101, droppedClientName, "", "EXE_LEFTGAME");
+            SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s" S_COLOR_WHITE " %s%s", 101, droppedClientName, "", "EXE_LEFTGAME");
         }
         else
         {
-            SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s^7 %s%s", 101, droppedClientName, "", "EXE_LEFTGAME");
+            SV_SendServerCommand(0, SV_CMD_CAN_IGNORE, "%c %s" S_COLOR_WHITE " %s%s", 101, droppedClientName, "", "EXE_LEFTGAME");
         }
         // tell everyone why they got dropped
         Com_Printf(CON_CHANNEL_SERVER, "%i:%s %s\n", drop - svs.clients, droppedClientName, reason);

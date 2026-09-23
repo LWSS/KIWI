@@ -119,9 +119,9 @@ char *__cdecl SEH_SafeTranslateString(char *pszReference)
                 Com_Error(ERR_LOCALIZATION, "Could not translate exe string \"%s\"", pszReference);
             else
                 Com_PrintWarning(CON_CHANNEL_SYSTEM, "WARNING: Could not translate exe string \"%s\"\n", pszReference);
-            strcpy(szErrorString, "^1UNLOCALIZED(^7");
+            strcpy(szErrorString, S_COLOR_RED "UNLOCALIZED(" S_COLOR_WHITE);
             I_strncat(szErrorString, 1024, pszReference);
-            I_strncat(szErrorString, 1024, "^1)^7");
+            I_strncat(szErrorString, 1024, S_COLOR_RED ")" S_COLOR_WHITE);
         }
         else
         {
@@ -335,7 +335,7 @@ int __cdecl SEH_GetLocalizedTokenReference(
                 Com_Error(ERR_LOCALIZATION, "Could not translate part of %s: \"%s\"", messageType, reference);
             else
                 Com_PrintWarning(CON_CHANNEL_SYSTEM, "WARNING: Could not translate part of %s: \"%s\"\n", messageType, reference);
-            translation = va("^1UNLOCALIZED(^7%s^1)^7", reference);
+            translation = va(S_COLOR_RED "UNLOCALIZED(" S_COLOR_WHITE "%s" S_COLOR_RED ")" S_COLOR_WHITE, reference);
         }
         else
         {

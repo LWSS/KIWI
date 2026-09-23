@@ -7280,7 +7280,7 @@ MenuList *__cdecl UI_LoadMenus_LoadObj(char *menuFile, int imageTrack)
     len = FS_FOpenFileByMode(menuFile, &f, FS_READ);
     if (!f)
     {
-        Com_Printf(CON_CHANNEL_UI, "^3WARNING: menu file not found: %s\n", menuFile);
+        Com_Printf(CON_CHANNEL_UI, S_COLOR_YELLOW "WARNING: menu file not found: %s\n", menuFile);
         len = FS_FOpenFileByMode((char*)"ui/default.menu", &f, FS_READ);
         if (!f)
             Com_Error(ERR_DROP, "default.menu file not found. This is a default menu that you should have.");
@@ -7288,7 +7288,7 @@ MenuList *__cdecl UI_LoadMenus_LoadObj(char *menuFile, int imageTrack)
     if (len >= 0x8000)
     {
         FS_FCloseFile(f);
-        Com_Error(ERR_DROP, "^1menu file too large: %s is %i, max allowed is %i", menuFile, len, 0x8000);
+        Com_Error(ERR_DROP, S_COLOR_RED "menu file too large: %s is %i, max allowed is %i", menuFile, len, 0x8000);
     }
     FS_Read((uint8_t *)menuBuf, len, f);
     menuBuf[len] = 0;

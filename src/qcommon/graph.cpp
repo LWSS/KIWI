@@ -103,7 +103,7 @@ void __cdecl GraphFloat_SaveToFile(const GraphFloat *graph)
         }
         FS_FCloseFile(fileHandle);
         basePath = Sys_DefaultInstallPath();
-        Com_Printf(CON_CHANNEL_AI, "^7GraphFloat_SaveToFile: Successfully saved file [%s\\%s].\n", basePath, graph->name);
+        Com_Printf(CON_CHANNEL_AI, S_COLOR_WHITE "GraphFloat_SaveToFile: Successfully saved file [%s\\%s].\n", basePath, graph->name);
     }
     else
     {

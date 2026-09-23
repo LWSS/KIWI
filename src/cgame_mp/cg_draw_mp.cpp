@@ -1415,15 +1415,15 @@ void __cdecl DrawViewmodelInfo(int localClientNum)
         Com_sprintf(
             buffer,
             0x800u,
-            "^6%s\n"
-            "^7Weapon: ^2%s^7 - ^5%s\n"
-            "^7Hands: ^5%s\n"
-            "^7Goggles: ^5%s\n"
-            "^7Rocket: ^5%s\n"
-            "^7Knife: ^5%s\n"
-            "^7ADS: ^5%.2f ^7-^5 %.0f^7fov\n"
-            "^7---Anims---\n"
-            "^3",
+            S_COLOR_MAGENTA "%s\n"
+            S_COLOR_WHITE "Weapon: " S_COLOR_GREEN "%s" S_COLOR_WHITE " - " S_COLOR_CYAN "%s\n"
+            S_COLOR_WHITE "Hands: " S_COLOR_CYAN "%s\n"
+            S_COLOR_WHITE "Goggles: " S_COLOR_CYAN "%s\n"
+            S_COLOR_WHITE "Rocket: " S_COLOR_CYAN "%s\n"
+            S_COLOR_WHITE "Knife: " S_COLOR_CYAN "%s\n"
+            S_COLOR_WHITE "ADS: " S_COLOR_CYAN "%.2f " S_COLOR_WHITE "-" S_COLOR_CYAN " %.0f" S_COLOR_WHITE "fov\n"
+            S_COLOR_WHITE "---Anims---\n"
+            S_COLOR_YELLOW,
             WeaponStateNames[ps->weaponstate],
             weapDef->szInternalName,
             v1,

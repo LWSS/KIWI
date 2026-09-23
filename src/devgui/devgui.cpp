@@ -2067,7 +2067,7 @@ void __cdecl DevGui_AddGraphKnot(DevGraph *graph, int localClientNum)
     iassert(graph->selectedKnot < *graph->knotCount);
     if (*graph->knotCount == graph->knotCountMax)
     {
-        Com_Printf(CON_CHANNEL_DEVGUI, "^3Maximum number of knots have reached for this graph\n");
+        Com_Printf(CON_CHANNEL_DEVGUI, S_COLOR_YELLOW "Maximum number of knots have reached for this graph\n");
     }
     else
     {

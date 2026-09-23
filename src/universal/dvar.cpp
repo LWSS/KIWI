@@ -68,7 +68,7 @@ int __cdecl Dvar_Command()
     {
         v5 = Dvar_DisplayableResetValue(dvar);
         v2 = Dvar_DisplayableValue(dvar);
-        Com_Printf(CON_CHANNEL_DONT_FILTER, "\"%s\" is: \"%s^7\" default: \"%s^7\"\n", dvar->name, v2, v5);
+        Com_Printf(CON_CHANNEL_DONT_FILTER, "\"%s\" is: \"%s" S_COLOR_WHITE "\" default: \"%s" S_COLOR_WHITE "\"\n", dvar->name, v2, v5);
         if (Dvar_HasLatchedValue(dvar))
         {
             v3 = Dvar_DisplayableLatchedValue(dvar);
@@ -2215,7 +2215,7 @@ const dvar_s *__cdecl Dvar_RegisterColor(
     else
         v8 = 0.0;
     dvarValue.color[3] = SnapFloatToInt(v8 * 255.0f);
-    dvarValue.enabled = SnapFloatToInt(v17 * 255.0f);
+    dvarValue.color[0] = SnapFloatToInt(v17 * 255.0f); // KIWI: was `.enabled` (bool), so every default red was 0 or 1/255
     dvarValue.color[1] = SnapFloatToInt(v14 * 255.0f);
     dvarValue.color[2] = SnapFloatToInt(v11 * 255.0f);
     return Dvar_RegisterVariant(dvarName, DVAR_TYPE_COLOR, flags, dvarValue, 0, description);
