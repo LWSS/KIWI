@@ -5,11 +5,12 @@
 
 // Terrain Sculpt — the KIWI replacement for the Advanced Patch Editor (Y).
 //
-// An armed camera paint tool over the ported patch control grid: raise/dig,
-// flatten / set height, smooth, noise, texture-blend weight and vertex colour, with
-// circular or square brushes and selectable falloff.  Strokes reuse the ported
-// per-patch undo marking (Patch_Paint / sub_45E770 / PMESH_18) so a stroke is one
-// legacy undo record, exactly like the original Alt+LMB paint.
+// An armed camera paint tool over the ported patch control grid: raise/dig, set
+// height, smooth, noise, texture layers and blend, with circular or square brushes and
+// selectable falloff.  Height strokes move the terrain as ONE vertex graph (seams are
+// shared vertices, containment looks at every patch a point belongs to).  Strokes reuse
+// the ported per-patch undo marking (Patch_Paint / sub_45E770 / PMESH_18) so a stroke is
+// one legacy undo record, exactly like the original Alt+LMB paint.
 //
 // The panel owns the settings; the viewport bridge (kiwi_viewport.cpp) owns the
 // press/drag/release cycle while the tool is armed.  While armed, bare LMB in the
@@ -70,16 +71,18 @@ void KiwiTerrain_DrawWorld();
 void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // -kiwitest entry points (kiwi_test.cpp `terrain` verb): the tool by name (raise,
-// setheight, smooth, noise, texture, colour, grass, trim), a setting by name (outer,
+// setheight, smooth, noise, texture, blend, grass, trim), a setting by name (outer,
 // inner, strength, speed, falloff, shape, chunk, expand, basez, cells, surfaces,
-// targetz, unselected, carry, terrainonly), arming, and one whole stroke: a vertical ray
-// through (x, y) resolved like the camera cursor, held for `seconds`, then released.
+// targetz, unselected, carry, contain, ...), arming, and one whole stroke: a
+// vertical ray through (x, y) resolved like the camera cursor, held for `seconds`, then
+// released.
 bool KiwiTerrain_TestSetTool( const char *name );
 bool KiwiTerrain_TestSet( const char *key, float value );
 // Texture paint's brush material ("base" = erase to base).
 bool KiwiTerrain_TestSetPaintMaterial( const char *name );
 bool KiwiTerrain_TestTessellate( float cell );     // 0 = keep the panel's cell size
 bool KiwiTerrain_TestSplit( float chunk );         // 0 = keep the panel's chunk size
-int  KiwiTerrain_TestSelectStacked();              // selects terrain lying on other terrain; count
 void KiwiTerrain_TestArm( bool armed );
 bool KiwiTerrain_TestStroke( float x, float y, float seconds, bool shift, bool ctrl );
+// `expect terrainz x y z`: the highest terrain surface under (x, y) (a vertical ray).
+bool KiwiTerrain_TestHeightAt( float x, float y, float *outZ );

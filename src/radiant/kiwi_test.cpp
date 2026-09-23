@@ -787,6 +787,25 @@ static void ExecuteExpect( const ScriptLine &line )
                       std::to_string( expectedInt ) );
         return;
     }
+    if ( subject == "terrainz" )
+    {
+        // expect terrainz <x> <y> <z> [tolerance]  - the highest terrain surface under (x, y)
+        float x = 0.0f, y = 0.0f, z = 0.0f, tol = 0.01f;
+        if ( ( w.size() != 5 && w.size() != 6 ) || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y )
+          || !ParseFloat( w[4], z ) || ( w.size() == 6 && !ParseFloat( w[5], tol ) ) )
+        {
+            ScriptError( line, "expect terrainz <x> <y> <z> [tolerance]" );
+            return;
+        }
+        float have = 0.0f;
+        if ( !KiwiTerrain_TestHeightAt( x, y, &have ) )
+        {
+            ExpectResult( line, false, "no terrain", w[4] );
+            return;
+        }
+        ExpectResult( line, fabsf( have - z ) <= tol, std::to_string( have ), w[4] );
+        return;
+    }
     if ( subject == "images" )
     {
         // expect images <n> | expect images selected <n>
@@ -1091,7 +1110,7 @@ static void ExecuteTerrain( const ScriptLine &line )
     const std::string verb = Lower( w[1] );
     if ( verb == "tool" )
     {
-        if ( w.size() != 3 ) { ScriptError( line, "terrain tool <raise|setheight|smooth|noise|texture|colour|grass|trim>" ); return; }
+        if ( w.size() != 3 ) { ScriptError( line, "terrain tool <raise|setheight|smooth|noise|texture|blend|grass|trim>" ); return; }
         if ( !KiwiTerrain_TestSetTool( w[2].c_str() ) )
         { ScriptError( line, "terrain tool: unknown tool '%s'", w[2].c_str() ); return; }
         g_nUpdateBits = -1;
@@ -1161,15 +1180,7 @@ static void ExecuteTerrain( const ScriptLine &line )
         UpdateSelection( -1, nullptr );
         return;
     }
-    if ( verb == "stacked" )
-    {
-        // Select terrain lying on other terrain (the clean-up button); `expect selected N` follows.
-        KiwiTerrain_TestSelectStacked();
-        g_nUpdateBits = -1;
-        UpdateSelection( -1, nullptr );
-        return;
-    }
-    ScriptError( line, "terrain verb must be tool, set, arm, stroke, tessellate, split or stacked" );
+    ScriptError( line, "terrain verb must be tool, set, arm, stroke, tessellate or split" );
 }
 
 static void ExecuteRefImage( const ScriptLine &line )
