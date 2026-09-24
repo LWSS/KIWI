@@ -675,29 +675,17 @@ static int FilterBrush_ApplyFilterList(filter_entry_s *list, brush_t *def)
 static bool FilterBrush_CheckLayerFaces(brush_t *def)
 {
     if ( KiwiMatConvert_ShouldShowBrushInLightmap( def ) ) return true; // KIWI-UX: techset health gates the checker visibility
-    // IDA 0x46A190
-    // a1@<ebx> = (int)def (raw brush_t pointer passed in ebx register)
-    // *(DWORD*)(a1+64) = def->faceCount   (offset 0x40)
-    // *(DWORD*)(a1+68) = (int)def->faces  (offset 0x44)
-    // v1 = byte offset into faces, v4 = face index counter
-    if ( !def->faceCount )
-        return false;
-
-    int v1 = 0; // byte stride from faces base
-    int v4 = 0; // face count
-    while ( true )
+    // Use the host layout: x64 face_t is 296 bytes and mtldef starts at 40,
+    // rather than the original executable's 232-byte stride / 36-byte offset.
+    for ( int i = 0; i < def->faceCount; ++i )
     {
-        // v2 = (MaterialDef*)(v1 + faces + 36) = mtldef[0] (the base-layer MaterialDef,
-        // at face_t+36 — same offset the FilterCond_* evaluators use) of face at byte offset v1.
-        MaterialDef *md = (MaterialDef *)((char *)def->faces + v1 + 36);
+        MaterialDef *md = &def->faces[i].mtldef[0];
         dword_181F51C = 2;
         MaterialDef_02(md, MaterialDef_07);
         if ( dword_181F51C )
             return true;   // face passes layer material test
-        v1 += 232;         // sizeof(face_t) = 232
-        if ( (unsigned int)(++v4) >= (unsigned int)def->faceCount )
-            return false;
     }
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

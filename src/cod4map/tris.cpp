@@ -8014,7 +8014,7 @@ static void ValidateTriSurfEmission(void)
       sidecar = TrisPropsSidecar_Get(surf->props);
       source = sidecar ? sidecar->mapDrawSurf : NULL;
       WindingError(0, surf->winding,
-        source ? source->sourceInfo.mapInfoIndex : 0,
+        source ? MapDrawSurf_MapInfoIndex(source) : 0,
         source ? source->entityNum : -1,
         source ? source->sourceIndex.brushNum : -1,
         "surface '%s' is partially floating or needs to be aligned",

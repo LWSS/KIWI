@@ -1468,6 +1468,15 @@ typedef struct MapDrawSurf_s {
     MapDrawSurfUnion_t    u;                 /* [56] */
 } MapDrawSurf_t;
 
+/* KIWI: the map-info index for Error(), from whichever +32/+36 arm holds it.  Patches and
+   terrain keep a mapName POINTER at +36; reading it as an index handed Error() the low half
+   of a pointer, negative about half the time on x64 -> MapInfo_GetName crashed Release. */
+static inline int MapDrawSurf_MapInfoIndex(const MapDrawSurf_t *drawSurf)
+{
+    return ( drawSurf->isPatch || drawSurf->isTerrain ) ? drawSurf->sourceIndex.mapInfoIndex
+                                                       : drawSurf->sourceInfo.mapInfoIndex;
+}
+
 typedef char cod4map_meshvert_size_must_be_0x2c[
     sizeof(MeshVert_t) == 0x2C ? 1 : -1];
 typedef char cod4map_mapdrawsurfunion_size_must_be_0x0c[

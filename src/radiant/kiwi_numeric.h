@@ -43,6 +43,8 @@ void KiwiNum_Reset();
 // Install up to KNUM_MAX_FIELDS, reporting excess declarations. Clears all text
 // and chooses the first editable field, so use only on command start.
 void KiwiNum_SetFields( const kiwiNumField_t *fields, int count );
+// Change a mode's field table without losing entries in retained fields.
+void KiwiNum_UpdateFields( const kiwiNumField_t *fields, int count );
 
 // Relabel without clearing typed text; label must have static storage.
 void KiwiNum_SetFieldLabel( int field, const char *label );

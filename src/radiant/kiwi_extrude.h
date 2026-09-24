@@ -4,6 +4,8 @@
 #endif
 
 // Region and face extrusion produce ordinary brush data from plane-space profiles.
+// Analytic construction circles choose brush sides or curved-patch density during
+// extrusion (P toggles); their stored centre/radius are never polygonized in place.
 // Creation mirrors Ed_NewBrushDrag (xywnd.cpp 0x467fa0): allocate, size the face
 // array, write planepts, rebuild, link, and select.
 //

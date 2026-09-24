@@ -32,14 +32,42 @@ class KiwiEditorCommand;
 #define KPRIM_CYL_SIDES_MIN  3      // brush.cpp:3383 rejects < 3
 // Match the 64-segment construction/extrusion profile ceiling.
 #define KPRIM_CYL_SIDES_MAX  64
-// Patch cylinders use stock Radiant's fixed 9x3 quadratic control net. Smoothness
-// comes from tessellation, not `sides`; patches have neither collision nor caps.
-#define KPRIM_PATCH_SPANS    4      // quarter arcs -> width 9
+// Density 1 preserves the stock 9x3 net/tolerance; density 4 uses 15x3.
+// The 16-column patch storage permits at most seven quadratic spans.
+#define KPRIM_PATCH_DENSITY_MIN 1
+#define KPRIM_PATCH_DENSITY_MAX 4
+#define KPRIM_PATCH_DENSITY_DEF 3
 #define KPRIM_PATCH_ROWS     3      // bottom / middle / top, the stock layout
 
 // "RoundToolPatch" is loaded lazily because the profile is unavailable at init.
 bool KiwiPrim_PatchMode();
 void KiwiPrim_SetPatchMode( bool on );
+
+struct kconPlane_t;
+struct brush_t;
+// Shared by Cylinder and analytic construction-circle extrusion. Returned patch
+// brush is unlinked and rebuilt; callers own landing/undo or Brush_Free_R.
+brush_t *KiwiPrim_BuildPatchCylinder( const kconPlane_t &plane, const float centre[2],
+                                    float radius, float lo, float hi, int density );
+void KiwiPrim_PatchControlPoint( float radius, int density, int col, float uv[2] );
+int KiwiPrim_PatchDensity();
+void KiwiPrim_SetPatchDensity( int density );
+// Recover ring centres from actual geometry, so anchors survive transforms,
+// undo and map reload without relying on a bounding box or transient metadata.
+bool KiwiPrim_CylinderAxis( const brush_t *def, float ends[2][3] );
+// Creation preview: caller owns the line batch.
+void KiwiPrim_DrawCylinderAxis( const float bottom[3], const float top[3] );
+
+#include <vector>
+// Builds an open-bore wall (outer/inner/rims) or a single surface. Backfaces
+// add reversed copies. Appends only after every patch is successfully built.
+bool KiwiPrim_BuildPatchCylinderShell( const kconPlane_t &plane, const float centre[2],
+    float radius, float lo, float hi, int density, bool backfaces, float thickness,
+    std::vector<brush_t *> *out, const char **why );
+bool KiwiPrim_PatchBackfaces();
+void KiwiPrim_SetPatchBackfaces( bool enabled );
+float KiwiPrim_PatchThickness();
+void KiwiPrim_SetPatchThickness( float thickness );
 
 #define KPRIM_SPH_SIDES_DEF  8      // 64 faces; see the note above
 #define KPRIM_SPH_SIDES_MIN  4      // brush.cpp:3706 rejects < 4

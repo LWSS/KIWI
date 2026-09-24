@@ -19,6 +19,7 @@
 #include "kiwi_grid.h"
 #include "kiwi_region.h"      // KREG_JOIN_DIST weld tolerance
 #include "kiwi_lines.h"
+#include "kiwi_primitive.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
 #include "kiwi_vec.h"         // Dot3/Sub3/Cross3/Norm3
@@ -31,9 +32,40 @@ extern camera_s *Ed_Camera();             // camwnd.cpp
 // Active-list sentinel at 0x23F189C. Read only while gathering brush-edge
 // directions incident to the drawing-tool anchor.
 extern selbrush_t active_brushes;
+extern entity_s *world_entity;
 
 namespace
 {
+    bool CylinderUsable( selbrush_t *b )
+    {
+        if ( !Pick_BrushPickable( b ) ) return false;
+        return b->owner == world_entity ||
+            ( b->owner->def && b->owner->def->eclass && !b->owner->def->eclass->fixedsize );
+    }
+
+    bool CylinderNearRay( const brush_t *def, const ray_t &ray )
+    {
+        float centre[3];
+        for ( int k = 0; k < 3; ++k ) centre[k] = ( def->mins[k] + def->maxs[k] ) * 0.5f;
+        const float pad = 10.0f * KiwiCam_WorldPerPixel( centre );
+        float lo = 0.0f, hi = 1.0e30f;
+        for ( int k = 0; k < 3; ++k )
+        {
+            const float a = def->mins[k] - pad, b = def->maxs[k] + pad;
+            if ( fabsf( ray.dir[k] ) < 1.0e-8f )
+            {
+                if ( ray.origin[k] < a || ray.origin[k] > b ) return false;
+                continue;
+            }
+            float t0 = ( a-ray.origin[k] ) / ray.dir[k], t1 = ( b-ray.origin[k] ) / ray.dir[k];
+            if ( t0 > t1 ) { const float t = t0; t0 = t1; t1 = t; }
+            if ( t0 > lo ) lo = t0;
+            if ( t1 < hi ) hi = t1;
+            if ( lo > hi ) return false;
+        }
+        return true;
+    }
+
     const char *KSNAP_SECTION = "KiwiUX";
     int         s_showMarkers = -1;        // -1 = not loaded yet
     // One near-black marker color. Labels carry type colors; kiwi_lines has no
@@ -1269,6 +1301,57 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             }
         }
     }
+    // Cylinder ring centres and axis midpoint are real point targets, including
+    // hollow patches with no cap face to hit. Moving selections cannot self-snap.
+    if ( haveCursorPx )
+    {
+        std::vector<const selbrush_t *> excluded;
+        if ( pickFlags & PICKF_EXCLUDE_SELECTED )
+        {
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+                excluded.push_back( b );
+            const selection_t &selection = KiwiSel();
+            for ( const sel_item_t &item : selection.items ) excluded.push_back( item.brush );
+        }
+        float bestPixels = PICK_VERT_PIXELS, bestDepth = 1.0e30f;
+        snap_result_t best;
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            bool skip = false;
+            for ( const selbrush_t *x : excluded ) if ( x == b ) { skip = true; break; }
+            if ( skip || !CylinderUsable( b ) || !CylinderNearRay( b->def, ray ) ) continue;
+            float ends[2][3];
+            if ( !KiwiPrim_CylinderAxis( b->def, ends ) ) continue;
+            for ( int point = 0; point < 3; ++point )
+            {
+                float pos[3], x, y, depth = 0;
+                for ( int k = 0; k < 3; ++k )
+                {
+                    pos[k] = point == 2 ? ( ends[0][k]+ends[1][k] ) * 0.5f : ends[point][k];
+                    depth += ( pos[k]-ray.origin[k] ) * ray.dir[k];
+                }
+                if ( depth <= 0 || !Pick_WorldToImage( pos, &x, &y ) ) continue;
+                const float pixels = PixelDist( x, y, curX, curY );
+                if ( pixels > bestPixels || ( fabsf( pixels-bestPixels ) < 0.01f && depth >= bestDepth ) ) continue;
+                // A cylinder's own shell must not hide its centre; unrelated
+                // foreground geometry still occludes this target normally.
+                if ( surf.item.brush != b && !visible( pos ) ) continue;
+                best.valid = true;
+                best.type = SNAP_FACE_CENTER;
+                best.source = Sel_MakeObject( b );
+                Copy3( pos, best.position );
+                bestPixels = pixels; bestDepth = depth;
+            }
+        }
+        if ( best.valid )
+        {
+            out->valid = true; out->type = best.type; out->source = best.source;
+            Copy3( best.position, out->position );
+            return true;
+        }
+    }
     // Last point rank: brush-face vertex-average center within 6 SCREEN PIXELS.
     // It remains available to drawing tools; only the later area hit is planar-suppressed.
     if ( haveCursorPx )
@@ -1891,6 +1974,95 @@ void KiwiSnap_DrawAxisGuides()
 
     KiwiLines_Flush();
 }
+// Draw only selected cylinders and the hovered target, so dense maps stay legible.
+// These are overlays (like transform handles), including the centre inside a shell.
+void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
+{
+    if ( !KiwiSnap_ShowMarkers() ) return;
+    std::vector<selbrush_t *> nodes;
+    auto add = [&]( selbrush_t *b )
+    {
+        if ( !b || nodes.size() >= 32 ) return;
+        for ( selbrush_t *existing : nodes ) if ( existing == b ) return;
+        nodes.push_back( b );
+    };
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next ) add( b );
+    const selection_t &selection = KiwiSel();
+    for ( const sel_item_t &item : selection.items ) add( item.brush );
+    const ImVec2 mouse = ImGui::GetMousePos();
+    if ( mouse.x >= imgMinX && mouse.x < imgMinX+imgW && mouse.y >= imgMinY && mouse.y < imgMinY+imgH )
+    {
+        ray_t ray;
+        if ( Pick_RayFromImagePos( (int)( mouse.x-imgMinX ), (int)( mouse.y-imgMinY ), &ray ) )
+            add( Pick( ray, SEL_MASK_OBJECT ).item.brush );
+    }
+    if ( KiwiCmd_Active() && KiwiCmd_LastSnap().valid && Sel_BrushLive( KiwiCmd_LastSnap().source.brush ) )
+        add( KiwiCmd_LastSnap().source.brush );
+    ImDrawList *draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect( ImVec2( imgMinX, imgMinY ), ImVec2( imgMinX+imgW, imgMinY+imgH ), true );
+    for ( selbrush_t *b : nodes )
+    {
+        if ( !CylinderUsable( b ) ) continue;
+        float ends[2][3];
+        if ( !KiwiPrim_CylinderAxis( b->def, ends ) ) continue;
+        if ( ends[0][2] > ends[1][2] )
+            for ( int k = 0; k < 3; ++k ) { float t = ends[0][k]; ends[0][k] = ends[1][k]; ends[1][k] = t; }
+        float centre[3], delta[3], length2 = 0;
+        for ( int k = 0; k < 3; ++k )
+        {
+            centre[k] = ( ends[0][k]+ends[1][k] ) * 0.5f;
+            delta[k] = ends[1][k]-ends[0][k]; length2 += delta[k]*delta[k];
+        }
+        ImVec2 points[3];
+        if ( !Pick_WorldToImage( ends[0], &points[0].x, &points[0].y ) ||
+             !Pick_WorldToImage( ends[1], &points[1].x, &points[1].y ) ||
+             !Pick_WorldToImage( centre, &points[2].x, &points[2].y ) ) continue;
+        for ( ImVec2 &v : points ) { v.x += imgMinX; v.y += imgMinY; }
+        const ImU32 ink = IM_COL32( 255, 220, 80, 255 ), shadow = IM_COL32( 20, 20, 24, 230 );
+        draw->AddLine( points[0], points[1], shadow, 4 );
+        draw->AddLine( points[0], points[1], ink, 2 );
+        for ( int i = 0; i < 3; ++i )
+        {
+            const ImVec2 v = points[i];
+            draw->AddCircleFilled( v, 6, shadow, 16 );
+            draw->AddCircle( v, 5, ink, 16, 1.5f );
+            draw->AddLine( ImVec2(v.x-8,v.y), ImVec2(v.x+8,v.y), ink );
+            draw->AddLine( ImVec2(v.x,v.y-8), ImVec2(v.x,v.y+8), ink );
+        }
+        const float length = sqrtf( length2 );
+        float z = fabsf( delta[2] ) / length;
+        if ( z > 1 ) z = 1;
+        const float tilt = acosf( z ) * 57.295779513f;
+        // A dotted world-up reference makes actual tilt visible independently
+        // of perspective. It is intentionally not another snapping axis.
+        if ( tilt > 0.05f )
+        {
+            float up[3] = { ends[0][0], ends[0][1], ends[0][2]+length };
+            float x,y;
+            if ( Pick_WorldToImage( up, &x, &y ) )
+            {
+                ImVec2 end( x+imgMinX, y+imgMinY );
+                const ImVec2 start = points[0];
+                for ( int j = 0; j < 16; j += 2 )
+                {
+                    float t0 = j/16.0f, t1 = (j+1)/16.0f;
+                    draw->AddLine( ImVec2(start.x+(end.x-start.x)*t0,start.y+(end.y-start.y)*t0),
+                                   ImVec2(start.x+(end.x-start.x)*t1,start.y+(end.y-start.y)*t1),
+                                   IM_COL32(100,210,255,220), 1.5f );
+                }
+                draw->AddText( ImVec2(end.x+5,end.y), IM_COL32(100,210,255,255), "Z up" );
+            }
+        }
+        char label[96];
+        if ( tilt <= 0.05f ) snprintf( label, sizeof(label), "Axis: vertical (90 deg to XY)" );
+        else snprintf( label, sizeof(label), "Axis: %.1f deg from vertical", tilt );
+        const ImVec2 pos( points[2].x+12, points[2].y+9 ), size = ImGui::CalcTextSize( label );
+        draw->AddRectFilled( ImVec2(pos.x-3,pos.y-2), ImVec2(pos.x+size.x+3,pos.y+size.y+2), shadow, 3 );
+        draw->AddText( pos, ink, label );
+    }
+    draw->PopClipRect();
+}
+
 // Screen-space label drawn during the ImGui frame.
 void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
                          float imgW, float imgH )

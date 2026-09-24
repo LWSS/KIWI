@@ -9,6 +9,7 @@
 #include "mainfrm.h"        // camera_s
 
 #include "kiwi_primitive.h"
+#include "radiant_registry.h"
 #include "kiwi_camera.h"            // KiwiCam_AxisPortrayable
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
@@ -117,6 +118,9 @@ namespace
     const kiwiNumField_t KPRIM_FIELDS_RING[2] =
     { { "radius", KNUM_LENGTH, false },
       { "sides",  KNUM_COUNT,  false } };
+    const kiwiNumField_t KPRIM_FIELDS_PATCH[3] =
+    { { "radius", KNUM_LENGTH, false },
+      { "density", KNUM_COUNT, false }, { "wall thickness", KNUM_LENGTH, false } };
 
     // Shared modal command; kind controls base interpretation and commit target.
     class KiwiPrimitiveCommand : public KiwiEditorCommand
@@ -141,7 +145,7 @@ namespace
         const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
         bool        HudInvalid() const override { return m_invalid; }
 
-        // Field 0 is relabelled for the active stage; field 1 is ring side count.
+        // Field 0 follows the stage; field 1 is brush sides or patch density.
         int NumericFields( const kiwiNumField_t **out ) const override
         {
             if ( IsBox() )
@@ -149,17 +153,40 @@ namespace
                 *out = KPRIM_FIELDS_BOX;
                 return 1;
             }
-            *out = KPRIM_FIELDS_RING;
-            return 2;
+            *out = m_patchMode ? KPRIM_FIELDS_PATCH : KPRIM_FIELDS_RING;
+            return m_patchMode ? 3 : 2;
+        }
+
+        int LineBudget() const override { return m_patchMode ? 768 : 0; }
+
+        int CommandOptions( const kiwiOption_t **out ) const override
+        {
+            if ( !m_patchMode ) return 0;
+            static kiwiOption_t options[] = {
+                { "Density", KOPT_INT, nullptr, 0, 0, 1, 4, -1 },
+                { "Backside faces", KOPT_TOGGLE, nullptr, 0, 0, 0, 1, -1 },
+                { "Wall thickness (inward)", KOPT_NUMFIELD, nullptr, 0, 2, 0, 64, -1 },
+            };
+            options[2].hi = m_radius > 0.01f ? Units_ToDisplay( m_radius * 0.99f ) : 64;
+            *out = options; return 3;
+        }
+        int OptionValue( int opt ) const override
+        { return opt == 0 ? m_patchDensity : opt == 1 ? (int)m_backfaces : 0; }
+        void OptionChanged( int opt, int value ) override
+        {
+            if ( opt == 0 ) { KiwiNum_ClearField( 1 ); SetPatchDensity( value ); }
+            if ( opt == 1 ) { m_backfaces = value != 0; KiwiPrim_SetPatchBackfaces( m_backfaces ); }
+            Recompute(); g_nUpdateBits |= 1;
         }
 
         bool NumericFieldValue( int field, float *out ) const override
         {
             if ( !out )
                 return false;
+            if ( field == 2 && m_patchMode ) { *out = m_thickness; return true; }
             if ( field == 1 && !IsBox() )
             {
-                *out = (float)m_sides;
+                *out = (float)( m_patchMode ? m_patchDensity : m_sides );
                 return true;
             }
             if ( field != 0 || m_stage < 1 )
@@ -203,12 +230,23 @@ namespace
 
         void NumericFieldChanged( int field, bool has, float world ) override
         {
+            if ( field == 2 && m_patchMode )
+            {
+                if ( has && world >= 0 && world <= 65536 )
+                { m_thickness = world; KiwiPrim_SetPatchThickness( world ); }
+                Recompute(); g_nUpdateBits |= 1; return;
+            }
             if ( field == 1 && !IsBox() )
             {
                 if ( !has )
                     return;                    // cleared: keep the current count
                 // Counts pass through length conversion, so convert back to display units.
                 int n = (int)floorf( Units_ToDisplay( world ) + 0.5f );
+                if ( m_patchMode )
+                {
+                    SetPatchDensity( n );
+                    return;
+                }
                 const int lo = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_MIN : KPRIM_CYL_SIDES_MIN;
                 const int hi = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_MAX : KPRIM_CYL_SIDES_MAX;
                 if ( n < lo ) n = lo;
@@ -241,6 +279,12 @@ namespace
             m_sides    = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_DEF : KPRIM_CYL_SIDES_DEF;
             // Patch mode is a remembered cylinder preference.
             m_patchMode = ( m_kind == KPRIM_CYLINDER ) && KiwiPrim_PatchMode();
+            m_patchDensity = KiwiPrim_PatchDensity();
+            m_backfaces = KiwiPrim_PatchBackfaces();
+            m_thickness = KiwiPrim_PatchThickness();
+            const kiwiNumField_t *fields;
+            const int count = NumericFields( &fields );
+            KiwiNum_UpdateFields( fields, count );
 
             KiwiCon_AutoPlaneForTool();
             m_plane = KiwiCon_ActivePlane();
@@ -329,10 +373,21 @@ namespace
                 { "Z",   "Working plane" },
                 { "[ ]", "Sides" },
             };
+            static const kiwiPrompt_t s_cylinder[] = {
+                { "Z", "Working plane" }, { "[ ]", "Sides" }, { "P", "Patch mode" },
+            };
+            static const kiwiPrompt_t s_patch[] = {
+                { "Z", "Working plane" }, { "[ ]", "Density (1-4)" }, { "P", "Brush mode" },
+            };
             if ( IsBox() )
             {
                 *out = s_box;
                 return (int)( sizeof( s_box ) / sizeof( s_box[0] ) );
+            }
+            if ( m_kind == KPRIM_CYLINDER )
+            {
+                *out = m_patchMode ? s_patch : s_cylinder;
+                return 3;
             }
             *out = s_ring;
             return (int)( sizeof( s_ring ) / sizeof( s_ring[0] ) );
@@ -372,6 +427,11 @@ namespace
             {
                 m_patchMode = !m_patchMode;
                 KiwiPrim_SetPatchMode( m_patchMode );
+                KiwiNum_ClearField( 1 );
+                const kiwiNumField_t *fields;
+                const int count = NumericFields( &fields );
+                KiwiNum_UpdateFields( fields, count );
+                RelabelStageField();
                 UpdateHud();
                 Sys_Printf( "Cylinder: %s.\n",
                             m_patchMode
@@ -383,6 +443,12 @@ namespace
 
             if ( !IsBox() && !mods && ( vk == 0xDB || vk == 0xDD ) )
             {
+                if ( m_patchMode )
+                {
+                    KiwiNum_ClearField( 1 );
+                    SetPatchDensity( m_patchDensity + ( vk == 0xDD ? 1 : -1 ) );
+                    return true;
+                }
                 const int lo = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_MIN : KPRIM_CYL_SIDES_MIN;
                 const int hi = ( m_kind == KPRIM_SPHERE ) ? KPRIM_SPH_SIDES_MAX : KPRIM_CYL_SIDES_MAX;
                 m_sides += ( vk == 0xDD ) ? 1 : -1;
@@ -641,6 +707,56 @@ namespace
             float loW[3], hiW[3];
             Mad3( base, m_plane.normal, lo, loW );
             Mad3( base, m_plane.normal, hi, hiW );
+            if ( m_kind == KPRIM_CYLINDER )
+                KiwiPrim_DrawCylinderAxis( loW, hiW );
+            KiwiLines_Color( col[0], col[1], col[2] );
+            if ( m_patchMode )
+            {
+                // Sample the same quadratic net that will be created, rather than
+                // drawing the brush mode's unrelated polygon side count.
+                const int samples = 16;
+                for ( int span = 0; span < PatchSpans(); ++span )
+                {
+                    float c[3][2];
+                    for ( int j = 0; j < 3; ++j )
+                        PatchControlPoint( span * 2 + j, c[j] );
+                    float prev[3] = {}, prevTop[3] = {}, prevInner[3] = {}, prevInnerTop[3] = {};
+                    for ( int j = 0; j <= samples; ++j )
+                    {
+                        const float t = (float)j / samples, u = 1.0f - t;
+                        float uv[2], p[3], q[3];
+                        for ( int k = 0; k < 2; ++k )
+                            uv[k] = u*u*c[0][k] + 2*u*t*c[1][k] + t*t*c[2][k];
+                        for ( int k = 0; k < 3; ++k )
+                        {
+                            const float offset = uv[0]*m_plane.u[k] + uv[1]*m_plane.v[k];
+                            p[k] = loW[k] + offset;
+                            q[k] = hiW[k] + offset;
+                        }
+                        if ( j && ( !KiwiLines_Add( prev, p ) || !KiwiLines_Add( prevTop, q ) ) )
+                            return;
+                        if ( !j && !KiwiLines_Add( p, q ) )
+                            return;
+                        if ( m_thickness > 0 && m_thickness < m_radius )
+                        {
+                            const float scale = (m_radius-m_thickness)/m_radius;
+                            float inner[3], innerTop[3];
+                            for ( int k = 0; k < 3; ++k )
+                            {
+                                inner[k] = loW[k]+(p[k]-loW[k])*scale;
+                                innerTop[k] = hiW[k]+(q[k]-hiW[k])*scale;
+                            }
+                            if ( j && (!KiwiLines_Add( prevInner, inner ) || !KiwiLines_Add( prevInnerTop, innerTop )) ) return;
+                            if ( !j && (!KiwiLines_Add( inner, innerTop ) || !KiwiLines_Add( p, inner ) || !KiwiLines_Add( q, innerTop )) ) return;
+                            memcpy( prevInner, inner, sizeof(inner) );
+                            memcpy( prevInnerTop, innerTop, sizeof(innerTop) );
+                        }
+                        memcpy( prev, p, sizeof( p ) );
+                        memcpy( prevTop, q, sizeof( q ) );
+                    }
+                }
+                return;
+            }
             EmitRing( loW, m_plane.u, m_plane.v, m_radius, m_sides, 0.0f );
             if ( m_kind == KPRIM_CYLINDER )
                 EmitRing( hiW, m_plane.u, m_plane.v, m_radius, m_sides, 0.0f );
@@ -663,6 +779,23 @@ namespace
         }
 
     private:
+        int PatchSpans() const { return m_patchDensity + 3; }
+
+        void SetPatchDensity( int value )
+        {
+            if ( value < KPRIM_PATCH_DENSITY_MIN ) value = KPRIM_PATCH_DENSITY_MIN;
+            if ( value > KPRIM_PATCH_DENSITY_MAX ) value = KPRIM_PATCH_DENSITY_MAX;
+            m_patchDensity = value;
+            KiwiPrim_SetPatchDensity( value );
+            Recompute();
+            g_nUpdateBits |= 1;
+        }
+
+        void PatchControlPoint( int col, float uv[2] ) const
+        {
+            KiwiPrim_PatchControlPoint( m_radius, m_patchDensity, col, uv );
+        }
+
         // Box kinds share every path except BoxLoopUV's base interpretation.
         bool IsBox() const
         { return m_kind == KPRIM_BOX || m_kind == KPRIM_BOX_CENTER; }
@@ -678,6 +811,8 @@ namespace
                               : ( m_kind == KPRIM_BOX_CENTER ) ? "half-size"
                               : ( IsBox() ) ? "size" : "radius";
             KiwiNum_SetFieldLabel( 0, label );
+            if ( !IsBox() )
+                KiwiNum_SetFieldLabel( 1, m_patchMode ? "density" : "sides" );
         }
 
         void ClearNumeric()
@@ -882,6 +1017,7 @@ namespace
         {
             if ( m_stage < 1 )
                 return true;                       // nothing placed yet is not "invalid"
+            if ( m_patchMode && !( m_thickness < m_radius ) ) return false;
             if ( IsBox() )
             {
                 const float *c1 = ( m_stage >= 2 ) ? m_p1 : m_cur;
@@ -925,27 +1061,34 @@ namespace
         void UpdateHud()
         {
             char a[32], b[32];
-            // Patch mode has a fixed control grid and no collision or caps; omit sides.
+            // Patch density controls the net and tessellation; it has no caps/collision.
             if ( m_patchMode )
             {
+                if ( m_stage >= 1 && m_thickness >= m_radius )
+                {
+                    snprintf( m_hud, sizeof(m_hud), "Cylinder: wall thickness must be smaller than radius" );
+                    return;
+                }
                 if ( m_stage == 0 )
                     _snprintf( m_hud, sizeof( m_hud ),
-                               "cylinder [PATCH, experimental]  plane %s  ·  "
-                               "click: centre  ·  P: back to a brush", PlaneName() );
+                               "cylinder [PATCH]  density %i/4  plane %s  ·  "
+                               "click: centre  ·  [ ]: density  ·  P: brush", m_patchDensity, PlaneName() );
                 else if ( m_stage == 1 )
                 {
                     KiwiUnits_Format( a, sizeof( a ), m_radius );
                     _snprintf( m_hud, sizeof( m_hud ),
-                               "cylinder [PATCH]  r %s  ·  click: rim  ·  "
-                               "no collision — add caulk  ·  P: brush", a );
+                               "cylinder [PATCH]  r %s  density %i/4  ·  click: rim  ·  "
+                               "[ ]: density  ·  no collision  ·  P: brush", a, m_patchDensity );
                 }
                 else
                 {
                     KiwiUnits_Format( a, sizeof( a ), m_radius );
                     KiwiUnits_Format( b, sizeof( b ), fabsf( m_height ) );
+                    char wall[32]; KiwiUnits_Format( wall, sizeof(wall), m_thickness );
                     _snprintf( m_hud, sizeof( m_hud ),
-                               "cylinder [PATCH]  r %s  h %s  ·  q3 curve, no caps, "
-                               "no collision  ·  P: brush", a, b );
+                               "cylinder [PATCH]  r %s  h %s  density %i/4  wall %s%s  ·  "
+                               "no collision  ·  P: brush", a, b, m_patchDensity, wall,
+                               m_backfaces ? "  both faces" : "" );
                 }
                 m_hud[sizeof( m_hud ) - 1] = '\0';
                 return;
@@ -1123,100 +1266,23 @@ namespace
 
         // Build the control net directly: Patch_BrushToMesh requires and deletes a
         // selected source brush and would replace the drawn plane/radius with AABB data.
-        // The stock 9x3 net uses four quadratic quarter-arcs; odd handle columns
+        // Density refines the stock four quadratic quarter-arcs; odd handle columns
         // overshoot to r/cos(alpha/2), matching kiwi_patchfillet.cpp's ArcPoint.
         // Three height rows keep walls straight. Patches have no caps or collision.
         void CreatePatchCylinder()
         {
-            float mins[3], maxs[3];
-            if ( !SolidAabb( mins, maxs ) )
-                return;
-
             float lo, hi;
             CapOffsets( &lo, &hi );
-            if ( !( hi - lo > 1.0e-3f ) || !( m_radius > 1.0e-3f ) )
-            {
-                Sys_Printf( "Cylinder (patch): zero radius or height.\n" );
-                return;
-            }
-
-            // Match Patch_BrushToMesh's faces[0] material source via an unlinked
-            // throwaway box, then free it.
-            patchMesh_material tex = {}, lm = {};
-            bool haveMtl = false;
-            {
-                brush_t *probe = AllocBoxDef( mins, maxs );
-                if ( probe )
-                {
-                    if ( probe->faces && probe->faceCount > 0 )
-                    {
-                        tex = *(patchMesh_material *)&probe->faces[0].mtldef[0].lyrMtl;
-                        lm  = *(patchMesh_material *)&probe->faces[0].mtldef[1].lyrMtl;
-                        haveMtl = true;
-                    }
-                    Brush_Free_R( probe );     // never linked: refCount 0
-                }
-            }
-
-            patchMesh_t *p = MakeNewPatch();
-            if ( !p )
-            {
-                Sys_Printf( "Cylinder (patch): out of memory.\n" );
-                return;
-            }
-
-            const int spans = KPRIM_PATCH_SPANS;
-            p->width    = spans * 2 + 1;          // 9
-            p->height   = KPRIM_PATCH_ROWS;       // 3
-            p->type     = PATCH_CYLINDER;
-            p->contents = 0;
-            p->flags    = 0;                      // MakeNewPatch does NOT seed this
-
-            float base[3];
-            KiwiCon_PlaneToWorld( m_plane, m_p0, base );
-
-            const float alpha = 6.283185307f / (float)spans;   // per-span angle
-            for ( int col = 0; col < p->width; ++col )
-            {
-                const float psi = 0.5f * alpha * (float)col;
-                const float rad = ( col & 1 ) ? ( m_radius / cosf( alpha * 0.5f ) )
-                                              : m_radius;
-                const float ca = cosf( psi ), sa = sinf( psi );
-                for ( int row = 0; row < KPRIM_PATCH_ROWS; ++row )
-                {
-                    const float f = (float)row / (float)( KPRIM_PATCH_ROWS - 1 );
-                    const float off = lo + ( hi - lo ) * f;
-                    for ( int k = 0; k < 3; ++k )
-                        p->ctrl[col][row].xyz[k] =
-                            base[k] + m_plane.normal[k] * off
-                                    + rad * ( ca * m_plane.u[k] + sa * m_plane.v[k] );
-                }
-            }
-
-            if ( haveMtl )
-            {
-                p->texture  = tex;
-                p->lightmap = lm;
-            }
-            // Unrealized patch materials create selectable but invisible geometry.
-            KiwiMtl_RealizePatch( p );
-
-            // Empty copied/default channels can hide lightmap view and compile unlit;
-            // ensuring them is a no-op for sound inherited channels.
-            KiwiMtl_EnsurePatchChannels( p );      // kiwi_material.h:250
-
-            Patch_KiwiFinishNew( p );
-
+            std::vector<brush_t *> defs;
+            const char *why = nullptr;
+            if ( !KiwiPrim_BuildPatchCylinderShell( m_plane, m_p0, m_radius, lo, hi,
+                m_patchDensity, m_backfaces, m_thickness, &defs, &why ) )
+            { Sys_Printf( "Cylinder: %s.\n", why ); return; }
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "create patch cylinder" );
-            brush_t    *pdef = AddBrushForPatch( p, (entity_s *)world_entity->def );
-            selbrush_t *inst = Brush_AddToList( pdef, world_entity );
-            Brush_AddToList2( inst );
-
-            Sys_Printf( "Cylinder (PATCH, experimental): a q3 curve, %i spans.  It has "
-                        "NO COLLISION — add a caulk brush inside it — and no end caps "
-                        "(stock CoD4 practice).  Press P to go back to a brush.\n",
-                        spans );
+            for ( brush_t *def : defs ) KiwiExtrude_LandDef( def );
+            Sys_Printf( "Cylinder (PATCH): %i surfaces, density %i/4, %s. Patches have no collision.\n",
+                        (int)defs.size(), m_patchDensity, m_thickness > 0 ? "open bore with wall and rims" : "no end caps" );
             g_nUpdateBits = -1;
         }
 
@@ -1337,6 +1403,9 @@ namespace
         float         m_height   = 0.0f;
         int           m_sides    = KPRIM_CYL_SIDES_DEF;
         bool          m_patchMode = false;   // cylinder only
+        int           m_patchDensity = KPRIM_PATCH_DENSITY_DEF;
+        bool          m_backfaces = false;
+        float         m_thickness = 0.0f;
         bool          m_hasNum   = false;
         float         m_numWorld = 0.0f;
         bool          m_invalid  = false;
@@ -1358,6 +1427,335 @@ namespace
     KiwiPrimitiveCommand s_sphere  ( KPRIM_SPHERE );
     KiwiPrimitiveCommand s_cone    ( KPRIM_CONE );
     KiwiPrimitiveCommand s_boxCenter( KPRIM_BOX_CENTER );   // centre-origin box
+}
+
+
+bool KiwiPrim_CylinderAxis( const brush_t *def, float ends[2][3] )
+{
+    if ( !def ) return false;
+    if ( const patchMesh_t *p = def->patch )
+    {
+        if ( !( p->type & PATCH_CYLINDER ) || !Patch_DimsSane( p ) ||
+             p->width < 7 || !( p->width & 1 ) || p->height < 3 ) return false;
+        const int spans = ( p->width - 1 ) / 2;
+        for ( int end = 0; end < 2; ++end )
+        {
+            const int row = end ? p->height - 1 : 0;
+            for ( int k = 0; k < 3; ++k )
+            {
+                if ( fabsf( p->ctrl[0][row].xyz[k] - p->ctrl[p->width-1][row].xyz[k] ) > 0.01f )
+                    return false;
+                double sum = 0;
+                for ( int col = 0; col < p->width - 1; col += 2 ) sum += p->ctrl[col][row].xyz[k];
+                ends[end][k] = (float)( sum / spans );
+            }
+        }
+        // Matching translated rings identify a cylinder rather than a cone or
+        // a bent/edited closed surface. Even columns exclude tangent handles.
+        for ( int col = 0; col < p->width; ++col )
+        for ( int row = 0; row < p->height; ++row )
+        for ( int k = 0; k < 3; ++k )
+        {
+            const float expected = p->ctrl[col][0].xyz[k] +
+                ( ends[1][k] - ends[0][k] ) * row / ( p->height - 1 );
+            if ( fabsf( p->ctrl[col][row].xyz[k] - expected ) > 0.02f ) return false;
+        }
+    }
+    else
+    {
+        if ( !def->faces || def->faceCount < 5 || def->faceCount > 66 ) return false;
+        const int n = def->faceCount - 2;
+        bool found = false;
+        for ( int a = 0; a < def->faceCount && !found; ++a )
+        for ( int b = a + 1; b < def->faceCount && !found; ++b )
+        {
+            const winding_t *wa = def->faces[a].w, *wb = def->faces[b].w;
+            if ( !wa || !wb || wa->numpoints != n || wb->numpoints != n ) continue;
+            for ( int k = 0; k < 3; ++k )
+            {
+                double ca = 0, cb = 0;
+                for ( int i = 0; i < n; ++i ) { ca += wa->p[i][k]; cb += wb->p[i][k]; }
+                ends[0][k] = (float)( ca / n ); ends[1][k] = (float)( cb / n );
+            }
+            bool matching = true;
+            for ( int i = 0; i < n && matching; ++i )
+            {
+                bool match = false;
+                for ( int j = 0; j < n && !match; ++j )
+                {
+                    float d2 = 0;
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        const float d = ( wa->p[i][k] - ends[0][k] ) - ( wb->p[j][k] - ends[1][k] );
+                        d2 += d*d;
+                    }
+                    match = d2 < 0.0004f;
+                }
+                matching = match;
+            }
+            // Regular polygon caps: reject ordinary irregular extruded regions. Equal
+            // corner radii alone accept every rectangle, so edges must match too.
+            float r2 = 0, e2 = 0;
+            for ( int i = 0; i < n && matching; ++i )
+            {
+                float d2 = 0, s2 = 0;
+                for ( int k = 0; k < 3; ++k )
+                {
+                    const float d = wa->p[i][k] - ends[0][k];
+                    const float s = wa->p[( i + 1 ) % n][k] - wa->p[i][k];
+                    d2 += d*d; s2 += s*s;
+                }
+                if ( !i ) { r2 = d2; e2 = s2; }
+                else if ( fabsf( d2-r2 ) > 0.001f * r2 + 0.001f || fabsf( s2-e2 ) > 0.01f * e2 + 0.01f )
+                    matching = false;
+            }
+            found = matching;
+        }
+        if ( !found ) return false;
+        // A square-section axis-aligned box is still a regular 4-gon prism; treat it
+        // as the box it almost always is, not a cylinder.
+        if ( n == 4 )
+        {
+            bool box = true;
+            for ( int f = 0; f < def->faceCount && box; ++f )
+            {
+                const float *nrm = def->faces[f].plane.normal;
+                box = fabsf( nrm[0] ) > 0.9999f || fabsf( nrm[1] ) > 0.9999f || fabsf( nrm[2] ) > 0.9999f;
+            }
+            if ( box ) return false;
+        }
+    }
+    float length2 = 0;
+    for ( int k = 0; k < 3; ++k ) { const float d = ends[1][k] - ends[0][k]; length2 += d*d; }
+    return length2 > 1.0e-6f;
+}
+
+void KiwiPrim_DrawCylinderAxis( const float bottom[3], const float top[3] )
+{
+    KiwiLines_Color( 0.95f, 0.8f, 0.2f );
+    KiwiLines_Add( bottom, top );
+    KiwiSnap_EmitSpot( bottom, 4.0f, false );
+    KiwiSnap_EmitSpot( top, 4.0f, false );
+    float centre[3];
+    for ( int k = 0; k < 3; ++k ) centre[k] = ( bottom[k] + top[k] ) * 0.5f;
+    KiwiSnap_EmitSpot( centre, 2.5f, true );
+}
+
+brush_t *KiwiPrim_BuildPatchCylinder( const kconPlane_t &plane, const float centre[2],
+                                    float radius, float lo, float hi, int density )
+{
+    if ( !( radius > 1.0e-3f ) || !( hi - lo > 1.0e-3f ) ) return nullptr;
+    if ( density < KPRIM_PATCH_DENSITY_MIN ) density = KPRIM_PATCH_DENSITY_MIN;
+    if ( density > KPRIM_PATCH_DENSITY_MAX ) density = KPRIM_PATCH_DENSITY_MAX;
+    float origin[3], mins[3], maxs[3];
+    KiwiCon_PlaneToWorld( plane, centre, origin );
+    for ( int k = 0; k < 3; ++k )
+    {
+        const float extent = radius * sqrtf( plane.u[k]*plane.u[k] + plane.v[k]*plane.v[k] );
+        const float a = origin[k] + lo * plane.normal[k];
+        const float b = origin[k] + hi * plane.normal[k];
+        mins[k] = ( a < b ? a : b ) - extent;
+        maxs[k] = ( a > b ? a : b ) + extent;
+    }
+    // Match Patch_BrushToMesh's faces[0] material source via an unlinked
+    // throwaway box, then free it.
+    patchMesh_material tex = {}, lm = {};
+    bool haveMtl = false;
+    {
+        Ed_EnsureCurrentMaterial_Kiwi();
+        brush_t *probe = Brush_Alloc( g_qeglobals.random_texture_stuff, 0 );
+        if ( probe ) Brush_Create( mins, maxs, probe, 0 );
+        if ( probe )
+        {
+            if ( probe->faces && probe->faceCount > 0 )
+            {
+                tex = *(patchMesh_material *)&probe->faces[0].mtldef[0].lyrMtl;
+                lm  = *(patchMesh_material *)&probe->faces[0].mtldef[1].lyrMtl;
+                haveMtl = true;
+            }
+            Brush_Free_R( probe );     // never linked: refCount 0
+        }
+    }
+
+    patchMesh_t *p = MakeNewPatch();
+    if ( !p )
+    {
+        Sys_Printf( "Cylinder (patch): out of memory.\n" );
+        return nullptr;
+    }
+
+    const int spans = density + 3;
+    p->width    = spans * 2 + 1;          // 9..15, within ctrl[16][16]
+    p->height   = KPRIM_PATCH_ROWS;       // 3
+    p->subDivType = 1 << ( KPRIM_PATCH_DENSITY_MAX - density ); // 8,4,2,1
+    p->type     = PATCH_CYLINDER;
+    p->contents = 0;
+    p->flags    = 0;                      // MakeNewPatch does NOT seed this
+
+    float base[3];
+    KiwiCon_PlaneToWorld( plane, centre, base );
+
+    for ( int col = 0; col < p->width; ++col )
+    {
+        float uv[2];
+        KiwiPrim_PatchControlPoint( radius, density, col, uv );
+        for ( int row = 0; row < KPRIM_PATCH_ROWS; ++row )
+        {
+            const float f = (float)row / (float)( KPRIM_PATCH_ROWS - 1 );
+            const float off = lo + ( hi - lo ) * f;
+            for ( int k = 0; k < 3; ++k )
+                p->ctrl[col][row].xyz[k] =
+                    base[k] + plane.normal[k] * off
+                            + uv[0] * plane.u[k] + uv[1] * plane.v[k];
+        }
+    }
+
+    if ( haveMtl )
+    {
+        p->texture  = tex;
+        p->lightmap = lm;
+    }
+    // Unrealized patch materials create selectable but invisible geometry.
+    KiwiMtl_RealizePatch( p );
+
+    // Empty copied/default channels can hide lightmap view and compile unlit;
+    // ensuring them is a no-op for sound inherited channels.
+    KiwiMtl_EnsurePatchChannels( p );      // kiwi_material.h:250
+
+    Patch_KiwiFinishNew( p );
+
+    brush_t *def = AddBrushForPatch( p, nullptr );
+    KiwiValid_Rebuild( def );
+    return def;
+}
+
+bool KiwiPrim_BuildPatchCylinderShell( const kconPlane_t &plane, const float centre[2],
+    float radius, float lo, float hi, int density, bool backfaces, float thickness,
+    std::vector<brush_t *> *out, const char **why )
+{
+    if ( !( thickness >= 0.0f ) || !( thickness < radius ) )
+    {
+        *why = "wall thickness must be nonnegative and smaller than the radius";
+        return false;
+    }
+    std::vector<brush_t *> built;
+    brush_t *outer = KiwiPrim_BuildPatchCylinder( plane, centre, radius, lo, hi, density );
+    if ( !outer ) { *why = "could not build cylinder"; return false; }
+    built.push_back( outer );
+    auto reverse = []( patchMesh_t *p )
+    {
+        for ( int col = 0; col < p->width; ++col )
+        for ( int row = 0; row < p->height/2; ++row )
+        {
+            const drawVert_t v = p->ctrl[col][row];
+            p->ctrl[col][row] = p->ctrl[col][p->height-1-row];
+            p->ctrl[col][p->height-1-row] = v;
+        }
+    };
+    auto clone = []( const patchMesh_t *src ) -> patchMesh_t *
+    {
+        patchMesh_t *p = MakeNewPatch();
+        if ( !p ) return nullptr;
+        p->width = src->width; p->height = src->height;
+        p->type = src->type; p->contents = src->contents; p->flags = src->flags;
+        p->subDivType = src->subDivType;
+        p->texture = src->texture; p->lightmap = src->lightmap; p->smoothing = src->smoothing;
+        memcpy( p->ctrl, src->ctrl, sizeof(p->ctrl) );
+        return p;
+    };
+    auto landUnlinked = [&]( patchMesh_t *p )
+    {
+        Patch_KiwiFinishNew( p );
+        brush_t *def = AddBrushForPatch( p, nullptr );
+        KiwiValid_Rebuild( def );
+        built.push_back( def );
+    };
+    bool ok = true;
+    if ( thickness > 0.0f )
+    {
+        brush_t *inner = KiwiPrim_BuildPatchCylinder( plane, centre, radius-thickness, lo, hi, density );
+        if ( !inner ) ok = false;
+        else
+        {
+            built.push_back( inner );
+            // Rim rows run radially across the wall, never across the open bore.
+            for ( int end = 0; end < 2 && ok; ++end )
+            {
+                patchMesh_t *rim = clone( outer->patch );
+                if ( !rim ) { ok = false; break; }
+                rim->type = (PATCH_TYPES)( PATCH_BEVEL | PATCH_SEAM );
+                const int sourceRow = end ? 2 : 0;
+                for ( int col = 0; col < rim->width; ++col )
+                for ( int row = 0; row < 3; ++row )
+                for ( int k = 0; k < 3; ++k )
+                {
+                    const float t = end ? row*0.5f : 1.0f-row*0.5f;
+                    rim->ctrl[col][row].xyz[k] = (1-t)*outer->patch->ctrl[col][sourceRow].xyz[k]
+                                                   + t*inner->patch->ctrl[col][sourceRow].xyz[k];
+                }
+                landUnlinked( rim );
+            }
+            reverse( inner->patch );
+            Patch_KiwiFinishNew( inner->patch );
+            KiwiValid_Rebuild( inner );
+        }
+    }
+    const size_t frontCount = built.size();
+    for ( size_t i = 0; backfaces && ok && i < frontCount; ++i )
+    {
+        patchMesh_t *p = clone( built[i]->patch );
+        if ( !p ) { ok = false; break; }
+        reverse( p );
+        landUnlinked( p );
+    }
+    if ( !ok )
+    {
+        for ( brush_t *def : built ) Brush_Free_R( def );
+        *why = "could not allocate cylinder wall";
+        return false;
+    }
+    out->insert( out->end(), built.begin(), built.end() );
+    return true;
+}
+
+bool KiwiPrim_PatchBackfaces()
+{ return Radiant_ProfileGetInt( "KiwiUX", "CylinderBackfaces", 0 ) != 0; }
+void KiwiPrim_SetPatchBackfaces( bool enabled )
+{ Radiant_ProfileSetInt( "KiwiUX", "CylinderBackfaces", enabled ? 1 : 0 ); }
+float KiwiPrim_PatchThickness()
+{
+    float value = 0;
+    const std::string text = Radiant_ProfileGetString( "KiwiUX", "CylinderWallThickness", "0" );
+    if ( sscanf( text.c_str(), "%f", &value ) != 1 || !( value >= 0 && value <= 65536 ) ) return 0;
+    return value;
+}
+void KiwiPrim_SetPatchThickness( float thickness )
+{
+    char text[32]; snprintf( text, sizeof(text), "%.9g", thickness );
+    Radiant_ProfileSetString( "KiwiUX", "CylinderWallThickness", text );
+}
+
+void KiwiPrim_PatchControlPoint( float radius, int density, int col, float uv[2] )
+{
+    const int spans = density + 3;
+    if ( col == 2 * spans ) col = 0; // bit-identical seam
+    const float halfAngle = 3.14159265358979323846f / spans;
+    const float r = ( col & 1 ) ? radius / cosf( halfAngle ) : radius;
+    uv[0] = r * cosf( halfAngle * col );
+    uv[1] = r * sinf( halfAngle * col );
+}
+
+int KiwiPrim_PatchDensity()
+{
+    int d = Radiant_ProfileGetInt( "KiwiUX", "RoundToolPatchDensity", KPRIM_PATCH_DENSITY_DEF );
+    if ( d < KPRIM_PATCH_DENSITY_MIN ) d = KPRIM_PATCH_DENSITY_MIN;
+    if ( d > KPRIM_PATCH_DENSITY_MAX ) d = KPRIM_PATCH_DENSITY_MAX;
+    return d;
+}
+
+void KiwiPrim_SetPatchDensity( int density )
+{
+    Radiant_ProfileSetInt( "KiwiUX", "RoundToolPatchDensity", density );
 }
 
 // Patch preference is lazy because the profile path is unavailable at static init.
@@ -1411,8 +1809,9 @@ void KiwiPrim_MenuItems()
           "Places the box from its CENTRE and half-extents rather than from a\n"
           "corner (Shift+V)." },
         { "Cylinder", KIWI_CMD_PRIM_CYLINDER,
-          "Needs an axis-aligned construction plane (XY/XZ/YZ) — the ported\n"
-          "primitive fixes its own axes." },
+          "P: curved patch / brush. [ ] or Tab: patch density (1-4) / brush sides.\n"
+          "Patch density is remembered; higher values make a smoother cylinder.\n"
+          "Needs an axis-aligned construction plane (XY/XZ/YZ)." },
         { "Sphere",   KIWI_CMD_PRIM_SPHERE,   0 },
         { "Cone",     KIWI_CMD_PRIM_CONE,
           "Needs the XY construction plane — the ported primitive fixes its\n"

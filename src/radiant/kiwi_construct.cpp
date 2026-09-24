@@ -197,9 +197,12 @@ namespace
         return n;
     }
 
-    // Per-object circle/arc segment override; otherwise use the radius rule.
+    // Circles are analytic; this count only samples their display/region boundary.
+    // Legacy circle segment overrides must not turn them into polygons.
     int CircleSegsFor( const kconObject_t &o )
     {
+        if ( o.type == KCON_CIRCLE )
+            return KCON_SEGS_MAX;
         if ( o.segs <= 0 )
             return CircleSegs( o.radius );
         int n = ClampSides( o.segs );
@@ -2841,16 +2844,6 @@ namespace
     public:
         const char *Name() const override { return "Construct Circle"; }
 
-        bool WantsSidesField() const override { return true; }
-
-        // Always expose the effective AUTO/override count so the sides field is
-        // visible before typing and agrees with generated geometry.
-        int ToolSides() const override
-        {
-            return ( m_sidesOverride > 0 ) ? CardinalSegs( m_sidesOverride )
-                                           : CircleSegs( m_radius );
-        }
-
         bool OnClick( bool ) override
         {
             if ( PointCount() == 0 )
@@ -2865,7 +2858,6 @@ namespace
 
         void Recompute() override
         {
-            // The base owns the per-gesture side override.
             m_radius = 0.0f;
             if ( PointCount() == 1 )
             {
@@ -2887,11 +2879,7 @@ namespace
             }
             char b[32];
             KiwiUnits_Format( b, sizeof( b ), m_radius );
-            // HUD and Tab field report the same cardinal-rounded count as geometry.
-            const int hudSegs = ToolSides();
-            SetHud( "circle  radius %s  (%i segs, x4 for the quadrants)  ·  "
-                    "click: rim  ·  type = radius  ·  Tab = sides",
-                    b, hudSegs );
+            SetHud( "circle  radius %s  ·  click: rim  ·  type = radius", b );
         }
 
         void Finish() override
@@ -2915,7 +2903,7 @@ namespace
             o.radius    = m_radius;
             o.ang0      = 0.0f;
             o.ang1      = 360.0f;
-            o.segs      = m_sidesOverride;    // 0 = automatic
+            o.segs      = 0;    // display sampling is independent of extrusion
             KiwiCon_AddWithUndo( o );
             m_pts.clear();
         }
@@ -2936,8 +2924,7 @@ namespace
             preview.centre[0] = c[0];
             preview.centre[1] = c[1];
             preview.radius    = m_radius;
-            // Propagate the per-gesture count into the throwaway preview object.
-            preview.segs      = m_sidesOverride;
+            preview.segs      = 0;
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
             DrawObjectPreview( preview );
         }
@@ -3243,15 +3230,6 @@ namespace
     public:
         const char *Name() const override { return "Construct Circle (2-point)"; }
 
-        bool WantsSidesField() const override { return true; }
-
-        // Use the same cardinal-rounded density as other circles.
-        int ToolSides() const override
-        {
-            return ( m_sidesOverride > 0 ) ? CardinalSegs( m_sidesOverride )
-                                           : CircleSegs( m_radius );
-        }
-
         bool OnClick( bool ) override
         {
             if ( PointCount() == 0 )
@@ -3300,9 +3278,8 @@ namespace
             char br[32], bd[32];
             KiwiUnits_Format( br, sizeof( br ), m_radius );
             KiwiUnits_Format( bd, sizeof( bd ), m_radius * 2.0f );
-            SetHud( "circle (2-point)  dia %s  r %s  (%i segs, x4 for the quadrants)  ·  "
-                    "click: second end  ·  type = diameter  ·  Tab = sides",
-                    bd, br, ToolSides() );
+            SetHud( "circle (2-point)  dia %s  r %s  ·  click: second end  ·  "
+                    "type = diameter", bd, br );
         }
 
         void Finish() override
@@ -3324,7 +3301,7 @@ namespace
             o.radius    = m_radius;
             o.ang0      = 0.0f;
             o.ang1      = 360.0f;
-            o.segs      = m_sidesOverride;    // 0 = automatic
+            o.segs      = 0;    // display sampling is independent of extrusion
             KiwiCon_AddWithUndo( o );
             m_pts.clear();
         }
@@ -3343,7 +3320,7 @@ namespace
             preview.centre[0] = m_centre[0];
             preview.centre[1] = m_centre[1];
             preview.radius    = m_radius;
-            preview.segs      = m_sidesOverride;
+            preview.segs      = 0;
             KiwiLines_Color( KCON_COL_ACTIVE[0], KCON_COL_ACTIVE[1], KCON_COL_ACTIVE[2] );
             if ( !DrawObjectPreview( preview ) )
                 return;

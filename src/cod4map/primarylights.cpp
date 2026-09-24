@@ -748,7 +748,7 @@ static int AssignPrimaryLightToSurface(TriSurf_t *surface, const float *origin,
   if (assignedPrimaryLight == primaryLightIndex)
     return 1;
 
-  Error(0, origin, surface->props->plane, drawSurf->sourceInfo.mapInfoIndex,
+  Error(0, origin, surface->props->plane, MapDrawSurf_MapInfoIndex(drawSurf),
         drawSurf->entityNum, drawSurf->sourceIndex.brushNum,
         "Surface '%s' is affected by more than one primary light: %s and %s",
         drawSurf->material->name, DescribePrimaryLight(assignedPrimaryLight),

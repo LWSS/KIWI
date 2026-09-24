@@ -823,6 +823,17 @@ int TrisLmap_AssignGroup(TrisLmapGroup_t *group, TrisLmapAllocation_t *allocatio
         Assert(surf->lmap->group == group, s_assertDisable_TrisLmapCreateSurface);
         surf->lmap->vecs[axis0][3] += offset0;
         surf->lmap->vecs[axis1][3] += offset1;
+        /* The reserved rectangle is transposed as well as translated.  Publish
+           the projections in atlas-axis order; offsetting the original rows
+           alone leaves geometry outside its allocation (and lets the reclaim
+           pass return occupied texels to the allocator). */
+        if (allocation->isTransposed)
+        {
+            float row[4];
+            memcpy(row, surf->lmap->vecs[0], sizeof(row));
+            memcpy(surf->lmap->vecs[0], surf->lmap->vecs[1], sizeof(row));
+            memcpy(surf->lmap->vecs[1], row, sizeof(row));
+        }
     }
 
     allocation->width = width;

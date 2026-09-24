@@ -16,6 +16,10 @@
 #include "kiwi_terrain.h"      // terrain verb: tool / set / arm / stroke (test mode)
 #include "kiwi_plastbridge.h"  // plasticity_export verb (test mode, no hand-off)
 #include "kiwi_construct.h"    // construct verb: a headless line / polyline
+#include "kiwi_extrude.h"
+#include "kiwi_primitive.h"
+#include "kiwi_numeric.h"
+#include "kiwi_units.h"
 #include "kiwi_conselect.h"    // ...selected for the verbs that act on construction
 #include "kiwi_barbwire.h"     // barbwire verb (test mode, no dialog)
 #include "kiwi_outliner.h"     // group verb + groups / grouped expectations
@@ -73,6 +77,8 @@ extern LayerMaterialDef *Materialdef_GetName( MaterialDef *def );             //
 extern void Patch_Thicken( int amount, char seam );                           // pmesh.cpp:7667
 extern camera_s *Ed_Camera();                                                // camwnd.cpp:165
 extern void CamWnd_BuildMatrix();                                            // camwnd.cpp:214
+extern int Radiant_ProfileGetInt( const char *, const char *, int );
+extern bool Radiant_ProfileSetInt( const char *, const char *, int );
 
 namespace
 {
@@ -1283,6 +1289,121 @@ static void ExecuteLine( const ScriptLine &line )
     const std::vector<std::string> &w = line.words;
     if ( w.empty() ) return;
     const std::string command = Lower( w[0] );
+    if ( command == "circle_extrude_probe" )
+    {
+        // Exercise the actual modal command, source preservation, undo and patch
+        // seam on horizontal, vertical and tilted construction planes.
+        struct RestorePreferences
+        {
+            bool mode = KiwiPrim_PatchMode();
+            int density = KiwiPrim_PatchDensity();
+            int sides = Radiant_ProfileGetInt( "KiwiUX", "CircleExtrudeSides", 16 );
+            float units = KiwiUnits_PerInch();
+            bool backfaces = KiwiPrim_PatchBackfaces();
+            float thickness = KiwiPrim_PatchThickness();
+            ~RestorePreferences()
+            {
+                KiwiCmd_Cancel();
+                KiwiPrim_SetPatchMode( mode );
+                KiwiPrim_SetPatchDensity( density );
+                Radiant_ProfileSetInt( "KiwiUX", "CircleExtrudeSides", sides );
+                KiwiUnits_SetPerInch( units );
+                KiwiPrim_SetPatchBackfaces( backfaces );
+                KiwiPrim_SetPatchThickness( thickness );
+            }
+        } restore;
+        KiwiUnits_SetPerInch( 1.0f );
+        KiwiPrim_SetPatchBackfaces( false );
+        KiwiPrim_SetPatchThickness( 0 );
+        int cases = 0;
+        for ( int axis = 0; axis < 3; ++axis )
+        for ( int sign = -1; sign <= 1; sign += 2 )
+        for ( int variant = 0; variant < 7; ++variant )
+        {
+            Map_New();
+            kconObject_t circle;
+            circle.type = KCON_CIRCLE;
+            circle.closed = true;
+            circle.radius = 128;
+            circle.centre[0] = 35;
+            circle.centre[1] = -27;
+            circle.segs = 3; // old display preference must not determine output
+            if ( axis )
+            {
+                const float angle = axis == 1 ? KCON_PI * 0.5f : KCON_PI * 0.25f;
+                circle.plane.normal[0] = sinf( angle ); circle.plane.normal[2] = cosf( angle );
+                circle.plane.u[0] = cosf( angle ); circle.plane.u[2] = -sinf( angle );
+            }
+            const int object = KiwiCon_AddWithUndo( circle );
+            const auto &regions = KiwiRegion_All();
+            int region = -1;
+            for ( size_t i = 0; i < regions.size(); ++i )
+                if ( regions[i].sourceObject == object ) region = (int)i;
+            if ( region < 0 ) { ScriptError( line, "circle did not form a region" ); return; }
+            KiwiRegion_Select( region );
+            const bool patch = variant >= 3;
+            const int count = patch ? variant - 2 : variant == 0 ? 3 : variant == 1 ? 5 : 64;
+            KiwiPrim_SetPatchMode( !patch ); // switch through the real P key
+            if ( !KiwiCmd_Start( KIWI_CMD_EXTRUDE_REGION ) )
+            { ScriptError( line, "circle extrusion failed to start" ); return; }
+            KiwiCmd_KeyDown( 'P', 0 );
+            if ( KiwiNum_FieldCount() != (patch ? 3 : 2) || strcmp( KiwiNum_Field( 1 )->label, patch ? "density" : "sides" ) )
+            { ScriptError( line, "wrong circle extrusion numeric field" ); return; }
+            KiwiCmd_Active()->NumericFieldChanged( 1, true, Units_FromDisplay( (float)count ) );
+            // Toggle twice: both choices keep their own count and the source stays analytic.
+            KiwiCmd_KeyDown( 'P', 0 ); KiwiCmd_KeyDown( 'P', 0 );
+            float reported = 0;
+            KiwiCmd_Active()->NumericFieldValue( 1, &reported );
+            if ( reported != count ) { ScriptError( line, "mode switch lost circle count" ); return; }
+            if ( sign < 0 ) KiwiCmd_KeyDown( VK_OEM_MINUS, 0 );
+            KiwiCmd_KeyDown( '6', 0 ); KiwiCmd_KeyDown( '4', 0 );
+            KiwiCmd_Commit();
+            selbrush_t *selected = selected_brushes.next;
+            if ( selected == &selected_brushes || selected->next != &selected_brushes || !selected->def )
+            { ScriptError( line, "circle extrusion must select exactly one result" ); return; }
+            brush_t *def = selected->def;
+            float axisEnds[2][3], centreWorld[3];
+            KiwiCon_PlaneToWorld( circle.plane, circle.centre, centreWorld );
+            if ( !KiwiPrim_CylinderAxis( def, axisEnds ) )
+            { ScriptError( line, "circle output lost its cylinder centre anchors" ); return; }
+            for ( int k = 0; k < 3; ++k )
+                if ( fabsf( ( axisEnds[0][k]+axisEnds[1][k] ) * 0.5f -
+                            ( centreWorld[k]+circle.plane.normal[k]*sign*32 ) ) > 0.02f )
+                { ScriptError( line, "cylinder centre drifted from the analytic source" ); return; }
+            if ( !!def->patch != patch || ( !patch && def->faceCount != count + 2 ) )
+            { ScriptError( line, "wrong circle output type or brush side count" ); return; }
+            if ( patch )
+            {
+                patchMesh_t *p = def->patch;
+                if ( p->width != ( count + 3 ) * 2 + 1 || p->height != 3 || !p->curveDef || p->subDivType != ( 1 << ( 4 - count ) ) )
+                { ScriptError( line, "wrong patch density or missing render mesh" ); return; }
+                for ( int row = 0; row < 3; ++row )
+                    if ( memcmp( p->ctrl[0][row].xyz, p->ctrl[p->width-1][row].xyz, sizeof( float ) * 3 ) )
+                    { ScriptError( line, "circle patch seam is open" ); return; }
+                float delta[3];
+                for ( int k = 0; k < 3; ++k ) delta[k] = p->ctrl[0][2].xyz[k] - p->ctrl[0][0].xyz[k];
+                float depth = 0;
+                for ( int k = 0; k < 3; ++k ) depth += delta[k] * circle.plane.normal[k];
+                if ( fabsf( depth - 64 ) > 0.01f )
+                { ScriptError( line, "patch did not use the requested height/plane" ); return; }
+            }
+            const kconObject_t *after = KiwiCon_At( object );
+            if ( !after || after->type != KCON_CIRCLE || after->radius != circle.radius ||
+                 after->centre[0] != circle.centre[0] || after->centre[1] != circle.centre[1] || after->segs != 3 )
+            { ScriptError( line, "extrusion changed the analytic source circle" ); return; }
+            Undo_Undo();
+            MapCounts counts = CountMap();
+            if ( counts.brushes || counts.patches )
+            { ScriptError( line, "undo left circle output behind" ); return; }
+            Undo_Redo();
+            counts = CountMap();
+            if ( counts.brushes != ( patch ? 0 : 1 ) || counts.patches != ( patch ? 1 : 0 ) )
+            { ScriptError( line, "redo lost circle output" ); return; }
+            ++cases;
+        }
+        LogFormat( "CIRCLE-EXTRUDE", "%d cases passed: output modes/counts, planes, signed height, source, seam, undo/redo", cases );
+        return;
+    }
     if ( command == "open" )
     {
         if ( w.size() != 2 ) { ScriptError( line, "open requires one map path" ); return; }

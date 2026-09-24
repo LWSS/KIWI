@@ -113,8 +113,9 @@ struct kconObject_t
     float              radius    = 0.0f;
     float              ang0      = 0.0f;          // degrees, CCW about `plane.normal`
     float              ang1      = 360.0f;
-    // Per-object tessellation override; 0 selects the radius-driven rule.
-    // Arcs apply the full-circle count pro rata over their sweep.
+    // Arc tessellation override; 0 selects the radius-driven rule.
+    // Legacy circle values are preserved on disk but ignored: circle sampling
+    // is for display only, while extrusion chooses brush sides or patch density.
     int                segs      = 0;             // 0 = automatic (radius-driven)
     // Hidden objects are inert: not drawn, picked, snapped, or used for regions.
     // Hiding also clears their construction selection.

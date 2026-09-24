@@ -163,6 +163,8 @@ void KiwiSnap_EmitMarker( const snap_result_t &r );
 // Draws advertised snap points for the hovered face while a compatible command is
 // active and snapping is engaged. It owns its kiwi_lines batch.
 void KiwiSnap_DrawFaceAccents();
+// Selected/hovered cylinder centres and measured axis; screen-space camera overlay.
+void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // Emits one tool-owned spot into the current kiwi_lines batch. pixRadius is in
 // SCREEN PIXELS at p's depth; solid chooses a filled disc instead of a ring.

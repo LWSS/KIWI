@@ -294,15 +294,6 @@ int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
         result = 2 * (light->primaryLightIndex != surfacePrimaryLightIndex) + 1;
         spotAtten = 1.0f; /* xmm6 = 1.0 */
 
-        /* use first texel directly if falloffIdx < 0 */
-        if (falloffIdxInt < 0)
-        {
-            texData = def->data;
-            falloffR = texData[0];
-            falloffG = texData[1];
-            falloffB = texData[2];
-            goto apply_color;
-        }
     }
     else
     {
@@ -402,7 +393,17 @@ int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int traceIndex,
         }
     }
 
-do_falloff_lookup:
+    /* Clamp the inner half-texel for every distance, after visibility and
+     * spotlight evaluation.  The texture has no texel at index -1. */
+    if (falloffIdxInt < 0)
+    {
+        texData = def->data;
+        falloffR = texData[0];
+        falloffG = texData[1];
+        falloffB = texData[2];
+        goto apply_color;
+    }
+
     /* falloff texture bilinear interpolation */
     {
         long long idx = (long long)falloffIdxInt;

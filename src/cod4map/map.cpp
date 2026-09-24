@@ -119,14 +119,16 @@ int MapInfo_Add(const char *sourceMapName, const float *origin,
 
 const char *MapInfo_GetName(int mapInfoIndex)
 {
-  if ( mapInfoIndex >= s_mapInfoCount )
+  /* KIWI: also reject negative indices (a stray index must not read before s_mapInfo) */
+  if ( mapInfoIndex < 0 || mapInfoIndex >= s_mapInfoCount )
     return "(unknown map; ran out of room for map names)";
   return s_mapInfo[mapInfoIndex].sourceMapName;
 }
 
 void MapInfo_GetTransform(int mapInfoIndex, float *transformMtx, float *scale)
 {
-  if ( mapInfoIndex >= s_mapInfoCount )
+  /* KIWI: see MapInfo_GetName */
+  if ( mapInfoIndex < 0 || mapInfoIndex >= s_mapInfoCount )
   {
     VectorClear(transformMtx);
     AnglesToMatrix(vec3_origin_float, transformMtx + 3);

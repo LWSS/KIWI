@@ -1114,6 +1114,7 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     KiwiRegion_DrawFillsOverlay( imgMinX, imgMinY, imgW, imgH );   // kiwi_region.h:377
 
     DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
+    KiwiSnap_DrawCylinderOverlay( imgMinX, imgMinY, imgW, imgH );
     DrawMarquee( imgMinX, imgMinY );     // under the chips
     DrawSwipeHint( imgMinX, imgMinY, imgW, imgH );
 

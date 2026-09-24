@@ -1,8 +1,8 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// Region and face extrusion build ordinary brushes through the ported creation
-// sequence; this file owns profile math, cursor mapping, preview, and validation.
+// Region and face extrusion build brushes; analytic circles can also build curved
+// patches. This file owns profile math, cursor mapping, preview, and validation.
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -24,6 +24,7 @@
 #include "kiwi_lollipop.h"              // KiwiLollipop_FaceSide (the handle's display side)
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_primitive.h"             // shared curved-cylinder construction
 #include "kiwi_region.h"
 #include "kiwi_selection.h"             // selected-face arm
 #include "kiwi_snap.h"
@@ -43,6 +44,8 @@
 extern int         Sys_Printf( const char *fmt, ... );                     // win_qe3.cpp
 extern camera_s   *Ed_Camera();                                            // camwnd.cpp
 extern int         g_nUpdateBits;                                          // 0x25D5A74 (mainfrm.cpp)
+extern int Radiant_ProfileGetInt( const char *, const char *, int );
+extern bool Radiant_ProfileSetInt( const char *, const char *, int );
 
 // Poll the physical Ctrl key like the ported drag paths; command state cannot
 // safely latch a key whose messages are handled elsewhere.
@@ -112,6 +115,13 @@ namespace
 {
     // Static because the numeric layer copies the field but not its label string.
     const kiwiNumField_t KEXT_FIELDS[1] = { { "length", KNUM_LENGTH, false } };
+    const kiwiNumField_t KEXT_CIRCLE_FIELDS[2] = {
+        { "length", KNUM_LENGTH, false }, { "sides", KNUM_COUNT, false }
+    };
+    const kiwiNumField_t KEXT_PATCH_FIELDS[3] = {
+        { "length", KNUM_LENGTH, false }, { "density", KNUM_COUNT, false },
+        { "wall thickness", KNUM_LENGTH, false }
+    };
 
     const float KEXT_COL_PREVIEW[3] = { 0.55f, 0.85f, 1.00f };   // the prism outline
     const float KEXT_COL_BAD[3]     = { 1.00f, 0.30f, 0.25f };
@@ -446,6 +456,33 @@ namespace
         return inst;
     }
 
+    void EmitCylinderRims( const prismBuild_t &pb, const std::vector<float> &outer,
+                           const std::vector<float> &inner, const float rgb[3] )
+    {
+        const int n = (int)outer.size()/2;
+        if ( n < 3 || n > KEXT_MAX_PROFILE || inner.size() != outer.size() ) return;
+        float xyzw[4*KEXT_MAX_PROFILE][4];
+        uint16_t indices[6*KEXT_MAX_PROFILE];
+        const float color[4] = {rgb[0],rgb[1],rgb[2],0.34f};
+        for ( int end = 0; end < 2; ++end )
+        {
+            for ( int i = 0; i < n; ++i )
+            {
+                const int j = (i+1)%n;
+                const float *uv[4] = { &outer[i*2], &outer[j*2], &inner[j*2], &inner[i*2] };
+                for ( int v = 0; v < 4; ++v )
+                {
+                    PrismVertex( pb, uv[v], end != 0, xyzw[i*4+v] );
+                    xyzw[i*4+v][3] = 1;
+                }
+                const int order[6] = {0,1,2,0,2,3};
+                for ( int k = 0; k < 6; ++k ) indices[i*6+k] = (uint16_t)(i*4+order[k]);
+                KiwiLines_Add( xyzw[i*4], xyzw[i*4+3] );
+            }
+            EmitFilledTris( &xyzw[0][0], n*4, indices, n*6, color );
+        }
+    }
+
     // Region extrusion command.
     class KiwiExtrudeCommand : public KiwiEditorCommand
     {
@@ -459,8 +496,81 @@ namespace
         int NumericFields( const kiwiNumField_t **out ) const override
         { *out = KEXT_FIELDS; return 1; }
 
+        int CommandOptions( const kiwiOption_t **out ) const override
+        {
+            if ( !m_hasCircle || !m_patchMode ) return 0;
+            static kiwiOption_t options[] = {
+                { "Density", KOPT_INT, nullptr, 0, 0, 1, 4, -1 },
+                { "Backside faces", KOPT_TOGGLE, nullptr, 0, 0, 0, 1, -1 },
+                { "Wall thickness (inward)", KOPT_NUMFIELD, nullptr, 0, 2, 0, 64, -1 },
+            };
+            options[2].hi = Units_ToDisplay( MinCircleRadius() * 0.99f );
+            *out = options; return 3;
+        }
+        int OptionValue( int opt ) const override
+        { return opt == 0 ? m_density : opt == 1 ? (int)m_backfaces : 0; }
+        void OptionChanged( int opt, int value ) override
+        {
+            if ( opt == 0 ) { KiwiNum_ClearField( 1 ); SetCircleCount( value ); }
+            if ( opt == 1 ) { m_backfaces = value != 0; KiwiPrim_SetPatchBackfaces( m_backfaces ); }
+            Recompute(); g_nUpdateBits |= 1;
+        }
+
+        int HudPrompts( const kiwiPrompt_t **out ) const override
+        {
+            static const kiwiPrompt_t brush[] = { { "P", "Circle: patch" }, { "[ ]", "Sides" } };
+            static const kiwiPrompt_t patch[] = { { "P", "Circle: brush" }, { "[ ]", "Density (1-4)" } };
+            *out = m_patchMode ? patch : brush;
+            return m_hasCircle ? 2 : 0;
+        }
+
+        bool KeyDown( int vk, unsigned int mods ) override
+        {
+            if ( !m_hasCircle || mods ) return false;
+            if ( vk == 'P' )
+            {
+                m_patchMode = !m_patchMode;
+                KiwiPrim_SetPatchMode( m_patchMode );
+                KiwiNum_ClearField( 1 );
+                KiwiNum_UpdateFields( m_patchMode ? KEXT_PATCH_FIELDS : KEXT_CIRCLE_FIELDS, m_patchMode ? 3 : 2 );
+            }
+            else if ( vk == 0xDB || vk == 0xDD )
+            {
+                KiwiNum_ClearField( 1 );
+                SetCircleCount( ( m_patchMode ? m_density : m_sides ) + ( vk == 0xDD ? 1 : -1 ) );
+            }
+            else return false;
+            UpdateHud();
+            g_nUpdateBits |= 1;
+            return true;
+        }
+
+        void NumericFieldChanged( int field, bool has, float world ) override
+        {
+            if ( field == 2 && m_patchMode && m_hasCircle )
+            {
+                if ( has && world >= 0 && world <= 65536 )
+                { m_thickness = world; KiwiPrim_SetPatchThickness( world ); }
+                Recompute(); g_nUpdateBits |= 1; return;
+            }
+            if ( field == 1 && m_hasCircle )
+            {
+                if ( has ) SetCircleCount( (int)floorf( Units_ToDisplay( world ) + 0.5f ) );
+                UpdateHud();
+                g_nUpdateBits |= 1;
+                return;
+            }
+            KiwiEditorCommand::NumericFieldChanged( field, has, world );
+        }
+
         bool NumericFieldValue( int field, float *out ) const override
         {
+            if ( field == 2 && out && m_patchMode && m_hasCircle ) { *out = m_thickness; return true; }
+            if ( field == 1 && out && m_hasCircle )
+            {
+                *out = (float)( m_patchMode ? m_density : m_sides );
+                return true;
+            }
             if ( field != 0 || !out )
                 return false;
             *out = m_dist;                     // SIGNED: which way the prism grew
@@ -504,6 +614,14 @@ namespace
             m_hasNum  = false;
             m_invalid = false;
             m_hud[0]  = '\0';
+            m_hasCircle = false;
+            m_patchMode = KiwiPrim_PatchMode();
+            m_density = KiwiPrim_PatchDensity();
+            m_backfaces = KiwiPrim_PatchBackfaces();
+            m_thickness = KiwiPrim_PatchThickness();
+            m_sides = Radiant_ProfileGetInt( "KiwiUX", "CircleExtrudeSides", KPRIM_CYL_SIDES_DEF );
+            if ( m_sides < KPRIM_CYL_SIDES_MIN ) m_sides = KPRIM_CYL_SIDES_MIN;
+            if ( m_sides > KPRIM_CYL_SIDES_MAX ) m_sides = KPRIM_CYL_SIDES_MAX;
 
             const std::vector<kregion_t> &regions = KiwiRegion_All();
             if ( regions.empty() )
@@ -542,6 +660,15 @@ namespace
                 }
             }
 
+            std::vector<int> sources;
+            EachSource( &sources );
+            for ( int source : sources )
+                if ( CircleSource( regions[source] ) ) m_hasCircle = true;
+            if ( m_hasCircle )
+            {
+                KiwiNum_SetFields( m_patchMode ? KEXT_PATCH_FIELDS : KEXT_CIRCLE_FIELDS, m_patchMode ? 3 : 2 );
+            }
+
             const kregion_t &reg = regions[m_region];
             if ( (int)( reg.pts.size() / 2 ) > KEXT_MAX_PROFILE )
             {
@@ -562,12 +689,14 @@ namespace
             c[0] /= (float)n;
             c[1] /= (float)n;
             KiwiCon_PlaneToWorld( m_plane, c, m_ref );
+            if ( const kconObject_t *circle = CircleSource( reg ) )
+                KiwiCon_PlaneToWorld( circle->plane, circle->centre, m_ref );
 
             m_dist  = 0.0f;
             m_axisBlocked = false;  // recomputed on the first move
             LatchStart();
             UpdateHud();
-            // Region extrusion always lands a prism; subtraction remains the explicit Q verb.
+            // Circle output is chosen at extrusion time; subtraction remains explicit Q.
             Sys_Printf( "Extrude: drag along the region normal, or type a distance.\n" );
             return true;
         }
@@ -634,7 +763,11 @@ namespace
             EachSource( &srcs );
             int segs = 0;
             for ( size_t i = 0; i < srcs.size(); ++i )
-                segs += 3 * (int)( regions[(size_t)srcs[i]].pts.size() / 2 );
+            {
+                segs += 3 * (int)( EffectiveRegion( regions[(size_t)srcs[i]] ).pts.size() / 2 );
+                if ( CircleSource( regions[(size_t)srcs[i]] ) ) segs += 48;
+                if ( m_patchMode && m_thickness > 0 && CircleSource( regions[(size_t)srcs[i]] ) ) segs += 5 * ( m_density+3 ) * 8;
+            }
             return segs + 96;          // …plus the snap marker's own headroom
         }
 
@@ -645,21 +778,44 @@ namespace
             EachSource( &srcs );
             for ( size_t si = 0; si < srcs.size(); ++si )
             {
-            const kregion_t &reg = regions[(size_t)srcs[si]];
+            const kregion_t reg = EffectiveRegion( regions[(size_t)srcs[si]] );
 
             prismBuild_t pb;
             MakeBuildFor( reg, &pb );
 
             const float *col = m_invalid ? KEXT_COL_BAD : KEXT_COL_PREVIEW;
+            if ( const kconObject_t *circle = CircleSource( reg ) )
+            {
+                float uv[2], bottom[3], top[3];
+                CircleCentre( *circle, reg.plane, uv );
+                PrismVertex( pb, uv, false, bottom );
+                PrismVertex( pb, uv, true, top );
+                KiwiPrim_DrawCylinderAxis( bottom, top );
+            }
 
             // Draw translucent solid before wireframe; zero depth is rejected by EmitPrismSolid.
             {
                 std::vector<int> capTris;
-                KiwiRegion_Triangulate( reg.pts, &capTris );
+                if ( !( m_patchMode && CircleSource( reg ) ) )
+                    KiwiRegion_Triangulate( reg.pts, &capTris );
                 EmitPrismSolid( pb, reg.pts, capTris, col );
             }
 
             KiwiLines_Color( col[0], col[1], col[2] );
+
+            if ( const kconObject_t *circle = CircleSource( reg ) )
+            if ( m_patchMode && m_thickness > 0 && m_thickness < circle->radius )
+            {
+                std::vector<float> inner = reg.pts;
+                float uv[2]; CircleCentre( *circle, reg.plane, uv );
+                const float scale = (circle->radius-m_thickness)/circle->radius;
+                for ( size_t i = 0; i < inner.size(); i += 2 )
+                    for ( int k = 0; k < 2; ++k ) inner[i+k] = uv[k]+(inner[i+k]-uv[k])*scale;
+                const std::vector<int> noCap;
+                EmitPrismSolid( pb, inner, noCap, col );
+                EmitPrismWire( pb, inner );
+                EmitCylinderRims( pb, reg.pts, inner, col );
+            }
 
             const int n = (int)( reg.pts.size() / 2 );
             for ( int i = 0; i < n; ++i )
@@ -684,6 +840,83 @@ namespace
         }
 
     private:
+        float MinCircleRadius() const
+        {
+            float radius = 65536;
+            std::vector<int> sources; EachSource( &sources );
+            const auto &regions = KiwiRegion_All();
+            for ( int index : sources )
+                if ( const kconObject_t *circle = CircleSource( regions[index] ) )
+                    if ( circle->radius < radius ) radius = circle->radius;
+            return radius;
+        }
+        const kconObject_t *CircleSource( const kregion_t &reg ) const
+        {
+            const kconObject_t *o = KiwiCon_At( reg.sourceObject );
+            return o && o->type == KCON_CIRCLE && !o->hidden ? o : nullptr;
+        }
+
+        void SetCircleCount( int count )
+        {
+            const int lo = m_patchMode ? KPRIM_PATCH_DENSITY_MIN : KPRIM_CYL_SIDES_MIN;
+            const int hi = m_patchMode ? KPRIM_PATCH_DENSITY_MAX : KPRIM_CYL_SIDES_MAX;
+            if ( count < lo ) count = lo;
+            if ( count > hi ) count = hi;
+            if ( m_patchMode )
+            {
+                m_density = count;
+                KiwiPrim_SetPatchDensity( count );
+            }
+            else
+            {
+                m_sides = count;
+                Radiant_ProfileSetInt( "KiwiUX", "CircleExtrudeSides", count );
+            }
+        }
+
+        void CircleCentre( const kconObject_t &circle, const kconPlane_t &plane, float uv[2] ) const
+        {
+            float world[3];
+            KiwiCon_PlaneToWorld( circle.plane, circle.centre, world );
+            KiwiCon_WorldToPlane( plane, world, uv );
+        }
+
+        // Sampling belongs to the output, never to the analytic source object.
+        kregion_t EffectiveRegion( const kregion_t &reg ) const
+        {
+            kregion_t result = reg;
+            const kconObject_t *circle = CircleSource( reg );
+            if ( !circle ) return result;
+            float centre[2];
+            CircleCentre( *circle, reg.plane, centre );
+            result.pts.clear();
+            const int samples = 8;
+            const int n = m_patchMode ? ( m_density + 3 ) * samples : m_sides;
+            for ( int i = 0; i < n; ++i )
+            {
+                float uv[2];
+                if ( m_patchMode )
+                {
+                    float c[3][2];
+                    const int span = i / samples;
+                    const float t = (float)( i % samples ) / samples, u = 1.0f - t;
+                    for ( int j = 0; j < 3; ++j )
+                        KiwiPrim_PatchControlPoint( circle->radius, m_density, span * 2 + j, c[j] );
+                    for ( int k = 0; k < 2; ++k )
+                        uv[k] = u*u*c[0][k] + 2*u*t*c[1][k] + t*t*c[2][k];
+                }
+                else
+                {
+                    const float angle = 6.283185307179586f * i / n;
+                    uv[0] = circle->radius * cosf( angle );
+                    uv[1] = circle->radius * sinf( angle );
+                }
+                result.pts.push_back( centre[0] + uv[0] );
+                result.pts.push_back( centre[1] + uv[1] );
+            }
+            return result;
+        }
+
         // Every consumer builds from its current source plane; sharing the primary plane
         // would push sources on other walls sideways.
 
@@ -714,9 +947,19 @@ namespace
 
         // Append one region's unlinked, validated defs. On failure the caller frees
         // the complete accumulated list so a multi-source gesture remains all-or-nothing.
-        bool BuildRegionDefs( const kregion_t &reg, std::vector<brush_t *> *out,
+        bool BuildRegionDefs( const kregion_t &source, std::vector<brush_t *> *out,
                               const char **why ) const
         {
+            const kconObject_t *circle = CircleSource( source );
+            if ( circle && m_patchMode )
+            {
+                float centre[2];
+                CircleCentre( *circle, source.plane, centre );
+                return KiwiPrim_BuildPatchCylinderShell( source.plane, centre, circle->radius,
+                    m_dist < 0.0f ? m_dist : 0.0f, m_dist > 0.0f ? m_dist : 0.0f,
+                    m_density, m_backfaces, m_thickness, out, why );
+            }
+            const kregion_t reg = EffectiveRegion( source );
             const int n = (int)( reg.pts.size() / 2 );
             if ( n < 3 || n > KEXT_MAX_PROFILE )
             {
@@ -879,6 +1122,7 @@ namespace
 
             m_dist    = d;
             m_invalid = ( fabsf( d ) < KEXT_MIN_DIST );
+            if ( m_hasCircle && m_patchMode && m_thickness >= MinCircleRadius() ) m_invalid = true;
             UpdateHud();
         }
 
@@ -886,6 +1130,25 @@ namespace
         {
             char b[32];
             KiwiUnits_Format( b, sizeof( b ), m_dist );
+            if ( m_hasCircle )
+            {
+                if ( m_patchMode && m_thickness >= MinCircleRadius() )
+                {
+                    snprintf( m_hud, sizeof(m_hud), "Circle: wall thickness must be smaller than the smallest circle radius" );
+                    return;
+                }
+                const float nz = fabsf( m_plane.normal[2] );
+                const float tilt = acosf( nz > 1.0f ? 1.0f : nz ) * KCON_RAD2DEG;
+                const char *status = m_axisBlocked && !m_hasNum ? "ORBIT or type length" :
+                                     m_invalid ? "TOO THIN" : "Enter: commit";
+                _snprintf( m_hud, sizeof( m_hud ),
+                    "extrude circle %s  %s %i  length %s  ·  axis %.1f deg from vertical  ·  P: patch/brush  ·  %s%s",
+                    m_patchMode ? "PATCH" : "BRUSH", m_patchMode ? "density" : "sides",
+                    m_patchMode ? m_density : m_sides, b, tilt, status,
+                    m_patchMode ? (m_thickness > 0 ? "  ·  open bore, no collision" : "  ·  no caps/collision") : "" );
+                m_hud[sizeof( m_hud ) - 1] = '\0';
+                return;
+            }
             const std::vector<kregion_t> &regions = KiwiRegion_All();
             const int verts = ( m_region >= 0 && m_region < (int)regions.size() )
                             ? (int)( regions[m_region].pts.size() / 2 ) : 0;
@@ -935,11 +1198,9 @@ namespace
             std::vector<brush_t *> defs;
             const char *why = "unknown";
             bool  ok    = true;
-            int   verts = 0;
             for ( size_t s = 0; s < srcs.size() && ok; ++s )
             {
                 const kregion_t &reg = regions[(size_t)srcs[s]];
-                verts += (int)( reg.pts.size() / 2 );
                 ok = BuildRegionDefs( reg, &defs, &why );
             }
 
@@ -959,12 +1220,21 @@ namespace
             for ( size_t i = 0; i < defs.size(); ++i )
                 LandDef( defs[i] );
 
-            Sys_Printf( "Extruded %i region(s): %i brush(es) from %i profile vertices.\n",
-                        (int)srcs.size(), (int)defs.size(), verts );
+            int patches = 0;
+            for ( brush_t *def : defs ) if ( def->patch ) ++patches;
+            Sys_Printf( "Extruded %i region(s): %i brush(es), %i patch(es).%s\n",
+                        (int)srcs.size(), (int)defs.size() - patches, patches,
+                        patches ? " Patches have no caps/collision; add caulk for collision." : "" );
             g_nUpdateBits = -1;
         }
 
         int              m_region  = -1;
+        bool             m_hasCircle = false;
+        bool             m_patchMode = false;
+        int              m_sides = KPRIM_CYL_SIDES_DEF;
+        int              m_density = KPRIM_PATCH_DENSITY_DEF;
+        bool             m_backfaces = false;
+        float            m_thickness = 0.0f;
         // Other selected regions latched for this gesture; empty is single-source.
         std::vector<int> m_extra;
         kconPlane_t   m_plane;

@@ -382,6 +382,16 @@ void KiwiNum_SetFieldLabel( int field, const char *label )
     s_fields[field].label = label;
 }
 
+void KiwiNum_UpdateFields( const kiwiNumField_t *fields, int count )
+{
+    if ( !fields || count < 1 || count > KNUM_MAX_FIELDS ) return;
+    for ( int i = 0; i < KNUM_MAX_FIELDS; ++i )
+        if ( i >= count || i >= s_fieldCount ) s_text[i][0] = '\0';
+    for ( int i = 0; i < count; ++i ) s_fields[i] = fields[i];
+    s_fieldCount = count;
+    if ( s_focus >= count ) s_focus = 0;
+}
+
 int KiwiNum_FieldCount()
 {
     return s_fieldCount;
