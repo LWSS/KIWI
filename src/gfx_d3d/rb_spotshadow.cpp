@@ -52,6 +52,7 @@ void __cdecl RB_DrawSpotShadowOverlay()
         h = vidConfig.displayHeight * 0.25;
         gfxCmdBufSourceState.input.codeImageSamplerStates[TEXTURE_SRC_CODE_FEEDBACK] = (SAMPLER_CLAMP_V | SAMPLER_CLAMP_U | SAMPLER_FILTER_NEAREST);
         R_SetCodeImageTexture(&gfxCmdBufSourceState, TEXTURE_SRC_CODE_FEEDBACK, gfxRenderTargets[R_RENDERTARGET_SHADOWMAP_SPOT].image);
+        MaterialPixelShader *stockShader = RB_BeginShadowOverlayShader(); // KIWI: see rb_sunshadow.cpp
         for (spotShadowIndex = 0; spotShadowIndex < viewInfo->spotShadowCount; ++spotShadowIndex)
         {
             t0 = spotShadowIndex * 0.25;
@@ -61,6 +62,7 @@ void __cdecl RB_DrawSpotShadowOverlay()
             RB_DrawStretchPic(rgp.shadowOverlayMaterial, x, 4.0, h, h, 0.0, t0, 1.0, t1, 0xFFFFFFFF, GFX_PRIM_STATS_HUD);
             RB_EndTessSurface();
         }
+        RB_EndShadowOverlayShader(stockShader); // KIWI
         gfxCmdBufSourceState.input.codeImageSamplerStates[TEXTURE_SRC_CODE_FEEDBACK] = (SAMPLER_CLAMP_V | SAMPLER_CLAMP_U | SAMPLER_FILTER_LINEAR);
     }
 }

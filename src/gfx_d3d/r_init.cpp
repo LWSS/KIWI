@@ -2911,6 +2911,8 @@ void R_ShutdownDirect3D()
         R_UnloadGraphicsAssets();
     R_Cinematic_Shutdown();
     R_ReleaseForShutdownOrReset();
+    extern void RB_ReleaseShadowOverlayShader();         // KIWI: rb_sunshadow.cpp
+    RB_ReleaseShadowOverlayShader();
 #ifdef KISAK_RADIANT
     // Both editor pools are D3DPOOL_MANAGED: nothing to free on device reset, so they
     // are not in R_ReleaseForShutdownOrReset.  They must be freed HERE, after the
