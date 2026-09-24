@@ -1287,6 +1287,12 @@ char TriSurfPropsGroupable(TriSurfProps_t *s1, TriSurfProps_t *s2, int *testPoin
          0x43D550 always includes MapDrawSurf +52 in the key. */
       || drawSurf1->castsSunShadow != drawSurf2->castsSunShadow)
       return 0;
+    // KIWI: SubdivideTerrain cuts a terrain mesh into page-sized pieces, but the
+    // pieces share one continuous lightmap projection, so the checks below let the
+    // concave merge weld them back into one block too big for a lightmap page
+    // ("lightmap allocation failed").  Keep each terrain piece to itself.
+    if (drawSurf1 != drawSurf2 && drawSurf1->isTerrain && drawSurf2->isTerrain)
+      return 0;
   }
 
   /* basic property checks */

@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,12 @@ extern void         Patch_PaintMarkUndo( patchMesh_t *def );                   /
 extern void         Undo_ClearRedo();
 extern void         Undo_GeneralStart( const char *operation );
 extern void         Undo_End();
+extern void         Undo_EndBrushList( selbrush_t *brushlist );                // undo.cpp:576
+extern void         Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
+                                      const float *uvBase, float rotate, float crossterm ); // texturevecs.cpp
+extern void         Patch_KiwiEnsureLmapCoords( patchMesh_t *p );              // pmesh.cpp: layer-1 pass the patch creators share
+namespace LayerMat  { int GetCurrentLayer( MaterialDef *def ); }               // materialdef.cpp 0x431B30
+extern bool         Cam_MaterialIsOverlay( Material *handle );                 // camwnd.cpp (decal badge)
 extern int          TexWnd_MaterialCount();                                    // texwnd.cpp (tail)
 extern qtexture_s  *TexWnd_MaterialAt( int idx );
 extern qtexture_s  *Texture_GetHandle( const char *name );                     // texwnd.cpp:315
@@ -541,12 +548,289 @@ namespace
         brush_t    *pdef = AddBrushForPatch( p, (entity_s *)world_entity->def );
         selbrush_t *inst = Brush_AddToList( pdef, world_entity );
         Brush_AddToList2( inst );                   // selected, so the sliders edit it at once
+        Undo_EndBrushList( &selected_brushes );     // stamp the new patch into the record, or Ctrl+Z has nothing to remove
         Undo_End();
 
         s_decals[p] = r;
         ++s_placed;
         g_nUpdateBits = -1;
         SetStatus( "Armed. Placed %i decal%s this session.", s_placed, s_placed == 1 ? "" : "s" );
+        return true;
+    }
+
+    // ── overlay: one patch per selected face, sharing the face's own mapping ──
+    // A decal stamps one repeat of its material.  An overlay instead copies the FACE's
+    // texture mapping (the texMat Face_BuildLayerGeom draws it with, brush.cpp:2598), so a
+    // multiply twin such as ch_brick_wall_03_burnt lands texel-for-texel on the wall under
+    // it.  A 4-corner face is covered exactly, a triangle becomes a quad with a collapsed
+    // corner, and any other outline gets its bounding rectangle in the face plane.
+    struct overlaySrc_t
+    {
+        float corner[4][3];
+        float normal[3];
+        float texMat[8];
+        bool  exact;
+    };
+
+    bool OverlayFromFace( const face_t *f, overlaySrc_t *out )
+    {
+        const float *n = f->plane.normal;
+        float pts[64][3];
+        int   np = 0;
+        const int wn = f->w->numpoints;
+        for ( int k = 0; k < wn && np < 64; ++k )   // drop collinear winding points
+        {
+            const float *a = f->w->p[( k + wn - 1 ) % wn];
+            const float *b = f->w->p[k];
+            const float *c = f->w->p[( k + 1 ) % wn];
+            float e0[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+            float e1[3] = { c[0] - b[0], c[1] - b[1], c[2] - b[2] };
+            float cr[3];
+            Cross( e0, e1, cr );
+            if ( sqrtf( Dot( cr, cr ) ) <= 0.001f * sqrtf( Dot( e0, e0 ) * Dot( e1, e1 ) ) )
+                continue;
+            memcpy( pts[np++], b, sizeof( float ) * 3 );
+        }
+        if ( np < 3 )
+            return false;
+
+        out->exact = ( np <= 4 );
+        if ( np == 4 || np == 3 )
+        {
+            for ( int k = 0; k < 4; ++k )
+                memcpy( out->corner[k], pts[k < np ? k : np - 1], sizeof( float ) * 3 );
+        }
+        else
+        {
+            float u[3], v[3];
+            BaseAxesFor( n, u, v );
+            float lo[2] = { FLT_MAX, FLT_MAX }, hi[2] = { -FLT_MAX, -FLT_MAX };
+            for ( int k = 0; k < np; ++k )
+            {
+                float d[3] = { pts[k][0] - pts[0][0], pts[k][1] - pts[0][1], pts[k][2] - pts[0][2] };
+                const float a = Dot( d, u ), b = Dot( d, v );
+                if ( a < lo[0] ) lo[0] = a;
+                if ( a > hi[0] ) hi[0] = a;
+                if ( b < lo[1] ) lo[1] = b;
+                if ( b > hi[1] ) hi[1] = b;
+            }
+            const float ab[4][2] = { { lo[0], lo[1] }, { hi[0], lo[1] }, { hi[0], hi[1] }, { lo[0], hi[1] } };
+            for ( int c = 0; c < 4; ++c )
+                for ( int k = 0; k < 3; ++k )
+                    out->corner[c][k] = pts[0][k] + u[k] * ab[c][0] + v[k] * ab[c][1];
+        }
+
+        // The patch's front is d/di x d/dj (see Corner); make it the face's outward side.
+        float ei[3], ej[3], cr[3];
+        for ( int k = 0; k < 3; ++k )
+        {
+            ei[k] = out->corner[1][k] - out->corner[0][k];
+            ej[k] = out->corner[3][k] - out->corner[0][k];
+        }
+        Cross( ei, ej, cr );
+        if ( Dot( cr, n ) < 0.0f )
+        {
+            float t[3];
+            memcpy( t, out->corner[1], sizeof( t ) );
+            memcpy( out->corner[1], out->corner[3], sizeof( t ) );
+            memcpy( out->corner[3], t, sizeof( t ) );
+        }
+        memcpy( out->normal, n, sizeof( float ) * 3 );
+        return true;
+    }
+
+    // Front normal at control point (col,row): d/dcol x d/drow, the same side Corner()
+    // builds a decal's front on.  Collapsed rows/columns (cylinder poles, cones) step
+    // further along the grid; if that still fails the patch's average normal is used.
+    bool PatchCtrlNormal( const patchMesh_t *p, int col, int row, float *out )
+    {
+        for ( int reach = 1; reach < 16; ++reach )
+        {
+            const int c0 = col - reach < 0 ? 0 : col - reach, c1 = col + reach >= p->width  ? p->width  - 1 : col + reach;
+            const int r0 = row - reach < 0 ? 0 : row - reach, r1 = row + reach >= p->height ? p->height - 1 : row + reach;
+            float dc[3], dr[3];
+            for ( int k = 0; k < 3; ++k )
+            {
+                dc[k] = p->ctrl[c1][row].xyz[k] - p->ctrl[c0][row].xyz[k];
+                dr[k] = p->ctrl[col][r1].xyz[k] - p->ctrl[col][r0].xyz[k];
+            }
+            Cross( dc, dr, out );
+            if ( Normalize( out ) > 1e-4f )
+                return true;
+            if ( c0 == 0 && c1 == p->width - 1 && r0 == 0 && r1 == p->height - 1 )
+                break;
+        }
+        return false;
+    }
+
+    // One overlay patch from a selected curve/terrain patch: the same control grid, type
+    // and subdivision (so it tessellates the same), the source's texture coords untouched
+    // (so the overlay lines up texel-for-texel), every control point pushed out along the
+    // surface normal.  Returns the new patch, not yet linked.
+    patchMesh_t *OverlayFromPatch( const patchMesh_t *srcP, float off )
+    {
+        float avg[3] = { 0.0f, 0.0f, 0.0f };
+        for ( int i = 0; i < srcP->width; ++i )
+            for ( int j = 0; j < srcP->height; ++j )
+            {
+                float n[3];
+                if ( PatchCtrlNormal( srcP, i, j, n ) )
+                    for ( int k = 0; k < 3; ++k ) avg[k] += n[k];
+            }
+        Normalize( avg );
+
+        patchMesh_t *p = MakeNewPatch();
+        p->width      = srcP->width;
+        p->height     = srcP->height;
+        p->type       = srcP->type;
+        p->subDivType = srcP->subDivType;
+        p->contents   = 0;
+        p->flags      = 0;
+        SetMaterial( s_material, &p->texture );
+        p->lightmap = srcP->lightmap;
+        memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );    // terrain paint layers stay on the source
+        memcpy( p->ctrl, srcP->ctrl, sizeof( p->ctrl ) );
+        for ( int i = 0; i < srcP->width; ++i )
+            for ( int j = 0; j < srcP->height; ++j )
+            {
+                float n[3];
+                if ( !PatchCtrlNormal( srcP, i, j, n ) )
+                    memcpy( n, avg, sizeof( n ) );
+                drawVert_t *cp = &p->ctrl[i][j];
+                for ( int k = 0; k < 3; ++k )
+                    cp->xyz[k] += n[k] * off;
+                cp->savedTexCoord = cp->texCoord;
+                *(unsigned int *)&cp->vert_color = 0xFFFFFFFFu;
+                ( (byte *)&cp->vert_color )[3] = (byte)(int)( ClampF( s_opacity * 255.0f, 0.0f, 255.0f ) + 0.5f );
+            }
+        *(int *)&p->size_of_struct_0x504C = *(const int *)&srcP->size_of_struct_0x504C;   // same lightmap sample size
+        p->bDirty = false;                          // keep the copied lightmap coords
+        p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+        ++p->version;
+        return p;
+    }
+
+    bool OverlaySelectedFaces()
+    {
+        if ( !s_material[0] )
+        {
+            SetStatus( "Overlay: choose a material first." );
+            return false;
+        }
+        if ( !world_entity )
+            return false;
+
+        std::vector<overlaySrc_t> src;
+        int skipped = 0;
+        const int nf = g_SelectedFaces.GetSize();
+        for ( int i = 0; i < nf; ++i )
+        {
+            selface_t  &sf   = g_SelectedFaces.GetAt( i );
+            selbrush_t *node = sf.brush;
+            brush_t    *def  = node ? node->def : nullptr;
+            // Prefab contents draw through a placement transform this world-space patch lacks.
+            if ( !def || !def->faces || node->patch || sf.index < 0 || sf.index >= def->faceCount
+              || ( node->owner && node->owner->prefab ) )
+            {
+                ++skipped;
+                continue;
+            }
+            face_t      *f  = &def->faces[sf.index];
+            MaterialDef *md = &f->mtldef[0];                 // the material layer, whatever the edit layer
+            overlaySrc_t s;
+            if ( !f->w || ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 || !OverlayFromFace( f, &s ) )
+            {
+                ++skipped;
+                continue;
+            }
+            texdef_sub_t *td = &md->mat_texDef + LayerMat::GetCurrentLayer( md );
+            Face_MoveTexture( td->size, f->plane.normal, s.texMat, td->shift, td->rotate, td->crossterm );
+            src.push_back( s );
+        }
+
+        // Whole selected patches (curves, terrain): overlay the entire surface.
+        std::vector<const patchMesh_t *> patches;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !b->patch || !b->patch->def )
+                continue;
+            if ( b->owner && b->owner->prefab )
+            {
+                ++skipped;
+                continue;
+            }
+            patches.push_back( b->patch->def );
+        }
+
+        if ( src.empty() && patches.empty() )
+        {
+            SetStatus( ( nf || skipped ) ? "Overlay: none of the selected faces or curves can take one."
+                                         : "Overlay: select brush faces (Ctrl+Shift+click) or curves first." );
+            return false;
+        }
+
+        Undo_ClearRedo();
+        Undo_GeneralStart( "overlay faces" );
+        Select_Deselect( 1 );
+
+        const float off = s_offset + (float)s_layer * KDEC_LAYER_STEP;
+        int inexact = 0;
+        for ( size_t n = 0; n < src.size(); ++n )
+        {
+            const overlaySrc_t &s = src[n];
+            if ( !s.exact )
+                ++inexact;
+            patchMesh_t *p = MakeNewPatch();
+            p->width = p->height = 3;
+            p->type  = (PATCH_TYPES)0;
+            p->contents = 0;
+            p->flags    = 0;
+            SetMaterial( s_material, &p->texture );
+            for ( int i = 0; i < 3; ++i )
+                for ( int j = 0; j < 3; ++j )
+                {
+                    const float u = (float)i * 0.5f, v = (float)j * 0.5f;
+                    const float w0 = ( 1.0f - u ) * ( 1.0f - v ), w1 = u * ( 1.0f - v ),
+                                w2 = u * v,                       w3 = ( 1.0f - u ) * v;
+                    float on[3];
+                    for ( int k = 0; k < 3; ++k )
+                        on[k] = s.corner[0][k] * w0 + s.corner[1][k] * w1 + s.corner[2][k] * w2 + s.corner[3][k] * w3;
+                    drawVert_t *cp = &p->ctrl[i][j];
+                    for ( int k = 0; k < 3; ++k )
+                        cp->xyz[k] = on[k] + s.normal[k] * off;
+                    // ST from the point ON the face, so the offset cannot shift the mapping.
+                    cp->texCoord.st[0] = s.texMat[0] * on[0] + s.texMat[1] * on[1] + s.texMat[2] * on[2] + s.texMat[3];
+                    cp->texCoord.st[1] = s.texMat[4] * on[0] + s.texMat[5] * on[1] + s.texMat[6] * on[2] + s.texMat[7];
+                    cp->texCoord.lightmap[0] = u;
+                    cp->texCoord.lightmap[1] = v;
+                    cp->savedTexCoord = cp->texCoord;
+                    *(unsigned int *)&cp->vert_color = 0xFFFFFFFFu;
+                    ( (byte *)&cp->vert_color )[3] = (byte)(int)( ClampF( s_opacity * 255.0f, 0.0f, 255.0f ) + 0.5f );
+                }
+            Patch_KiwiEnsureLmapCoords( p );                // real lightmap coords at sample 16
+            p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+            ++p->version;
+
+            brush_t    *pdef = AddBrushForPatch( p, (entity_s *)world_entity->def );
+            selbrush_t *inst = Brush_AddToList( pdef, world_entity );
+            Brush_AddToList2( inst );
+        }
+        for ( size_t n = 0; n < patches.size(); ++n )
+        {
+            patchMesh_t *p    = OverlayFromPatch( patches[n], off );
+            brush_t     *pdef = AddBrushForPatch( p, (entity_s *)world_entity->def );
+            selbrush_t  *inst = Brush_AddToList( pdef, world_entity );
+            Brush_AddToList2( inst );
+        }
+        Undo_EndBrushList( &selected_brushes );
+        Undo_End();
+        g_nUpdateBits = -1;
+
+        SetStatus( "Overlay: %i from face%s, %i from curve%s%s%s.",
+                   (int)src.size(), src.size() == 1 ? "" : "s",
+                   (int)patches.size(), patches.size() == 1 ? "" : "s",
+                   inexact ? " (faces that are not 4-sided are covered by their bounding rectangle)" : "",
+                   skipped ? ", some of the selection skipped" : "" );
         return true;
     }
 
@@ -623,11 +907,11 @@ namespace
         ImGui::SetNextItemWidth( 160.0f );
         if ( ImGui::InputText( "Filter", s_filter, sizeof( s_filter ) ) )
             Save();
-        ImGui::SameLine();
-        const bool loadThumbs = ImGui::Button( "Load thumbnails" );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Register every listed material so its colormap shows here.\n"
-                               "Materials the texture browser already shows are ready." );
+
+        // Thumbnails register on their own: only tiles on screen, a few per frame so a long
+        // list never hitches, and a name that fails to register is not retried every frame.
+        static std::set<std::string> s_thumbTried;
+        int thumbBudget = 4;
 
         const int count = TexWnd_MaterialCount();
         int listed = 0;
@@ -641,15 +925,37 @@ namespace
                     continue;
                 if ( ++listed > 400 )
                     break;
-                if ( loadThumbs && !q->next )
-                    Texture_GetHandle( q->name );
                 ImGui::PushID( i );
                 IDirect3DTexture9 *tex = ColorMap( q );
                 const bool selected = strcmp( s_material, q->name ) == 0;
                 if ( tex )
+                {
                     ImGui::Image( (ImTextureID)(intptr_t)tex, ImVec2( tile, tile ) );
+                    // Same decal badge as the texture browser (camwnd.cpp Cam_MaterialIsOverlay).
+                    if ( q->next && Cam_MaterialIsOverlay( q->next ) )
+                    {
+                        const ImVec2 mx = ImGui::GetItemRectMax();
+                        const ImVec2 mn = ImGui::GetItemRectMin();
+                        ImDrawList *dl = ImGui::GetWindowDrawList();
+                        const ImVec2 p0( mx.x - 10.0f, mn.y + 2.0f ), p1( mx.x - 2.0f, mn.y + 10.0f );
+                        dl->AddRectFilled( p0, p1, IM_COL32( 255, 140, 20, 255 ) );
+                        dl->AddRect( ImVec2( p0.x - 1.0f, p0.y - 1.0f ), ImVec2( p1.x + 1.0f, p1.y + 1.0f ),
+                                     IM_COL32( 20, 20, 20, 255 ) );
+                        if ( ImGui::IsItemHovered() )
+                            ImGui::SetTooltip( "Decal / overlay material: blended, no depth write.\n"
+                                               "Put it on top of a surface, not on its own." );
+                    }
+                }
                 else
+                {
                     ImGui::Dummy( ImVec2( tile, tile ) );
+                    if ( !q->next && thumbBudget > 0 && ImGui::IsItemVisible()
+                      && s_thumbTried.insert( q->name ).second )
+                    {
+                        Texture_GetHandle( q->name );   // shows from the next frame
+                        --thumbBudget;
+                    }
+                }
                 ImGui::SameLine();
                 if ( ImGui::Selectable( q->name, selected, 0, ImVec2( 0.0f, tile ) ) )
                 {
@@ -811,6 +1117,14 @@ void KiwiDecal_Draw()
             SetArmed( !s_armed );
         ImGui::SameLine();
         ImGui::TextDisabled( "Ctrl+wheel size   Shift+wheel rotate" );
+        if ( ImGui::Button( "Overlay selection" ) )
+            OverlaySelectedFaces();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "One overlay patch per selected brush face (Ctrl+Shift+click) or\n"
+                               "selected curve, covering it and using its own texture alignment,\n"
+                               "pushed out by Surface offset + Layer.  For multiply overlays like\n"
+                               "*_burnt on their base.  Uses the chosen material and Opacity;\n"
+                               "Ctrl+Z removes them." );
         if ( s_armed )
             ImGui::TextColored( ImVec4( 0.42f, 0.92f, 0.48f, 1.0f ), "%s", s_status );
         else

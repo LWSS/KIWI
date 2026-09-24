@@ -1104,7 +1104,10 @@ void TexWnd_ShowMaterialStatus( int px, int py )
              y  >= it.rowY   && y  <= it.rowY + it.thumbH + it.labelBand )
         {
             qtexture_s *q = it.radMtl;
-            MainFrm_SetStatusText( 3, va( "%s W: %i H: %i", q->name, q->width, q->height ) );
+            extern bool Cam_MaterialIsOverlay( Material *handle );   // camwnd.cpp (KIWI-UX decal badge)
+            MainFrm_SetStatusText( 3, va( "%s W: %i H: %i%s", q->name, q->width, q->height,
+                                          q->next && Cam_MaterialIsOverlay( q->next )
+                                          ? "  [decal/overlay - needs a surface under it]" : "" ) );
             return;
         }
     }
@@ -1160,6 +1163,23 @@ void TexWnd_DrawMaterials()
         if ( mtl && mtl->techniqueSet )
             R_AddCmdDraw2DImage( x, yImg, (float)it.thumbW, (float)it.thumbH,
                                  0.0f, 0.0f, 1.0f, 1.0f, s_white, mtl );
+
+        // KIWI-UX: decal badge - an orange corner square on materials made to sit on top of
+        // something (blended, no depth write; camwnd.cpp Cam_MaterialIsOverlay).  As a brush
+        // face's main material they show whatever is behind them.
+        extern bool Cam_MaterialIsOverlay( Material *handle );   // camwnd.cpp
+        if ( mtl && mtl->techniqueSet && rgp.whiteMaterial && Cam_MaterialIsOverlay( mtl ) )
+        {
+            static const float s_badge[4]  = { 1.0f, 0.55f, 0.08f, 1.0f };
+            static const float s_border[4] = { 0.08f, 0.08f, 0.08f, 1.0f };
+            int b = it.thumbW / 6;
+            if ( b < 8 )  b = 8;
+            if ( b > 14 ) b = 14;
+            const int bx = it.thumbX + it.thumbW - b - 2, by = (int)yImg + 2;
+            R_AddCmdDraw2DImage( (float)bx, (float)by, (float)b, (float)b,
+                                 0.0f, 0.0f, 1.0f, 1.0f, s_badge, rgp.whiteMaterial );
+            R_DrawOutlineRect( bx - 1, by - 1, bx + b, by + b, s_border );
+        }
 
         // IDB 0x45ce1b: selected thumbnail gets a 1px-outset frame in the saved "selected
         // texture" colour colors[10], via R_DrawOutlineRect (R_AddCmd_Line2D) — not amber.

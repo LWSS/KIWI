@@ -806,7 +806,10 @@ int TrisLmap_AssignGroup(TrisLmapGroup_t *group, TrisLmapAllocation_t *allocatio
     if (!AllocLMBlock(width, height, &allocation->lightmapIndex, &allocation->allocY,
                       &allocation->allocX, &allocation->isTransposed))
     {
-        Com_Error("lightmap allocation failed... may be out of lightmap memory");
+        // KIWI: name the block -- a single group larger than one page lands here too.
+        Com_Error("lightmap allocation failed... may be out of lightmap memory (%i x %i texel block, material %s)",
+                  width, height,
+                  group->firstSurf->props && group->firstSurf->props->si ? group->firstSurf->props->si->name : "?");
     }
 
     /* The allocator's y/x output order is intentional and matches 0x4544B9

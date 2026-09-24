@@ -931,6 +931,28 @@ static bool Cam_MaterialIsMissing( Material *handle )
     return !Cam_MaterialWritesDepth( handle, TECHNIQUE_UNLIT );
 }
 
+// KIWI-UX: "this material is made to sit ON something" - the texture browser's decal
+// badge.  The same two facts the substitution above reads, the other way round: a world
+// material (not a $default clone, not an editor techset) that sorts after the opaque
+// class and does not write depth.  Shipped world decals sit at sortKeys 9..12 and
+// unlit_multiply overlays (ch_brick_wall_03_burnt) have no depth write either; used as a
+// brush face's main material, whatever is behind it shows through.  Skies write depth
+// (refStateBits[1] 0x0D, see the sky note in Cam_Draw) and alpha-TESTED materials sort
+// opaque, so neither is badged.
+bool Cam_MaterialIsOverlay( Material *handle )
+{
+    if ( !handle || handle == g_qeglobals.d_white )
+        return false;
+    const Material *m = Material_FromHandle( handle );
+    if ( !m || !m->techniqueSet )
+        return false;
+    if ( rgp.defaultMaterial && m->techniqueSet == rgp.defaultMaterial->techniqueSet )
+        return false;
+    if ( Cam_TechSetIsEditorClass( m->techniqueSet ) || m->info.sortKey <= CAM_SORTKEY_OPAQUE )
+        return false;
+    return !Cam_MaterialWritesDepth( handle, TECHNIQUE_UNLIT );
+}
+
 // The 3D twin of $default, registered once through the same "wc/" world-material
 // path every brush face uses (Material_Load strips the prefix and picks the
 // "wc_default" techset, which maps "unlit" to the same textured_simple technique
