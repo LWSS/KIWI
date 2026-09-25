@@ -9,7 +9,8 @@
 // Shared by the [KiwiWindows] defaults reseed and kiwi_dock<N>.ini.
 // Bump when defaults or dock placement changes so existing profiles receive both together.
 // Version 17 adds Reference Images beside Decals in the lower-right dock node.
-#define KIWI_LAYOUT_VERSION  17
+// Version 18 adds Particles beside Models (2026-09-24).
+#define KIWI_LAYOUT_VERSION  18
 
 enum kiwiWindow_t
 {
@@ -31,6 +32,8 @@ enum kiwiWindow_t
     KIWI_WIN_INSPECTOR,     // "Inspector"                      default ON
     KIWI_WIN_DECALS,        // "Decals"                         default ON
     KIWI_WIN_REFIMAGES,     // "Reference Images"               default ON
+    // Effect files under raw/fx, placed as kiwi_fx entities (kiwi_particles.h).
+    KIWI_WIN_PARTICLES,     // "Particles"                      default ON
     KIWI_WIN_COUNT,
 };
 

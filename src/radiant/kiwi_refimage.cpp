@@ -1263,6 +1263,8 @@ namespace
     bool SelectionAllowsImages()
     {
         const sel_mask_t mask = KiwiSel_GetModeMask();
+        if ( KiwiSel_ParticlesOnly() )
+            return false;                // KIWI: particles-only picks particles alone
         return mask == SEL_MASK_OBJECT || mask == SEL_MASK_EVERYTHING;
     }
 

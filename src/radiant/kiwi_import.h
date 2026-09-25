@@ -19,3 +19,10 @@ void KiwiImport_RegisterCommands();
 
 // Draw once per top-level ImGui frame; an empty queue draws nothing.
 void KiwiImport_Draw();
+
+// KIWI (2026-09-24): the decal-stamp importer (Decals window button).  Posts
+// KIWI_CMD_IMPORT_DECALS; the Open dialog and the wizard run from that command, in decal
+// mode: colour map only, alpha kept, material type locked to the alpha-blend decal family,
+// and the result becomes the Decals window's material.  Files dropped onto the Decals
+// window take the same route.
+void KiwiImport_BrowseDecals();

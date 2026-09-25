@@ -1005,6 +1005,80 @@ static Material *Cam_MissingMaterialSubstitute()
     return s_mtl;
 }
 
+// KIWI (2026-09-24, user: "special textures like mantle, ladder, etc don't draw like they
+// should ... they draw as the default texture, but should be a flat color with text"):
+// the substitution above is right for a material with no art of its own, but ~25 behaviour
+// tool materials (mantle_on/over, ladder, kill, traverse, stopspawn, auto_adjust, ...) are
+// "tools"-techset, alpha-blended (refStateBits {0x08128965, 0x0C}: SrcAlpha/InvSrcAlpha, no
+// depth write) AND carry their own label art (DXT3, flat colour at alpha 85, label at 255).
+// They are not in Cam_EditorMaterialColor's flat-colour table, so they reached the world arm
+// and were swapped for the $default3d checkerboard.
+// Their TWIN draws the material's own art with the depth write fixed: a Material_Duplicate
+// (private stateBits table, shared techset/images) whose fill entries blend SrcAlpha/Zero -
+// the art composited over black, i.e. the dark flat colour with the bright label, exactly
+// the texture-browser tile - with depth write + LESSEQUAL.  Nothing behind shows through, so
+// submission order cannot matter.  Wireframe entries are left alone.  "2d" materials
+// ($default, HUD art) and $default clones keep the checkerboard.
+static Material *Cam_ToolArtTwin( Material *handle )
+{
+    const Material *m = Material_FromHandle( handle );
+    if ( !m || !m->stateBitsTable || !m->textureTable )
+        return nullptr;
+    if ( rgp.defaultMaterial && m->techniqueSet == rgp.defaultMaterial->techniqueSet )
+        return nullptr;                                  // a Material_MakeDefault clone: no art
+    const char *base = Cam_TechSetBaseName( m->techniqueSet );
+    if ( !base || strcmp( base, "tools" ) != 0 )
+        return nullptr;
+    bool haveArt = false;
+    for ( int i = 0; i < (int)m->textureCount && !haveArt; ++i )
+        haveArt = m->textureTable[i].semantic == 2 && m->textureTable[i].u.image;   // TS_COLOR_MAP
+    if ( !haveArt )
+        return nullptr;
+
+    // Handles live as long as the editor, so a small pointer table is the whole cache.
+    static struct { Material *src, *twin; } s_twins[256];
+    static int s_twinCount = 0;
+    for ( int i = 0; i < s_twinCount; ++i )
+        if ( s_twins[i].src == handle )
+            return s_twins[i].twin;
+    if ( s_twinCount >= (int)( sizeof( s_twins ) / sizeof( s_twins[0] ) ) )
+        return nullptr;
+
+    // The pointer in the name keeps it unique: Material_Duplicate on an EXISTING name
+    // memcpy's the source over it, which would share (and let us patch) its state table.
+    char name[160];
+    _snprintf( name, sizeof( name ), "kiwi_toolart_%p_%s", (void *)handle,
+               m->info.name ? m->info.name : "" );
+    name[sizeof( name ) - 1] = '\0';
+    Material *twin = Material_Duplicate( handle, name );
+    if ( !twin || twin == handle || !twin->stateBitsTable || twin->stateBitsTable == m->stateBitsTable )
+        twin = nullptr;
+    else
+    {
+        const int wireA = twin->stateBitsEntry[TECHNIQUE_WIREFRAME_SOLID];
+        const int wireB = twin->stateBitsEntry[TECHNIQUE_WIREFRAME_SHADED];
+        for ( int e = 0; e < (int)twin->stateBitsCount; ++e )
+        {
+            if ( e == wireA || e == wireB )
+                continue;
+            unsigned int &b0 = twin->stateBitsTable[e].loadBits[0];
+            unsigned int &b1 = twin->stateBitsTable[e].loadBits[1];
+            if ( b0 & GFXS0_POLYMODE_LINE )
+                continue;
+            // RGB: src SRCALPHA (5), dst ZERO (1), op ADD (1).  No alpha test.
+            b0 = ( b0 & ~(unsigned int)( GFXS0_BLEND_RGB_MASK | GFXS0_ATEST_MASK ) ) | GFXS0_ATEST_DISABLE
+               | ( 5u << GFXS0_SRCBLEND_RGB_SHIFT ) | ( 1u << GFXS0_DSTBLEND_RGB_SHIFT )
+               | ( 1u << GFXS0_BLENDOP_RGB_SHIFT );
+            b1 = ( b1 & ~(unsigned int)( GFXS1_DEPTHTEST_DISABLE | GFXS1_DEPTHTEST_MASK ) )
+               | GFXS1_DEPTHWRITE | GFXS1_DEPTHTEST_LESSEQUAL;
+        }
+    }
+    s_twins[s_twinCount].src  = handle;
+    s_twins[s_twinCount].twin = twin;                    // null is memoised too
+    ++s_twinCount;
+    return twin;
+}
+
 // The one-liner the face emitters call.  ACCEPTED COST, stated rather than hidden:
 // textured_simple has no vertex.color and no MATERIAL_COLOR term, so a missing-
 // material face no longer takes the selected-brush red tint (it did not take a
@@ -1015,6 +1089,8 @@ static Material *Cam_DrawMaterial( Material *handle )
 {
     if ( !Cam_MaterialIsMissing( handle ) )
         return handle;
+    if ( Material *twin = Cam_ToolArtTwin( handle ) )    // KIWI: tool art keeps its picture
+        return twin;
     Material *sub = Cam_MissingMaterialSubstitute();
     return sub ? sub : handle;
 }
@@ -1071,7 +1147,9 @@ bool KiwiMtl_Diagnose( Material *handle, kiwiMatDiag_t *out )
     {
         // Material_FromHandle asserts on a null handle (r_material.cpp:866), and the
         // ladder legitimately returns null when the asset set ships neither rung.
-        Material       *subH = Cam_MissingMaterialSubstitute();
+        Material       *subH = Cam_ToolArtTwin( handle );   // KIWI: the twin comes first
+        if ( !subH )
+            subH = Cam_MissingMaterialSubstitute();
         const Material *sub  = subH ? Material_FromHandle( subH ) : nullptr;
         out->substituteName = sub ? sub->info.name : "(none - z-order WILL be wrong)";
     }

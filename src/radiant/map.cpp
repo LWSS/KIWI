@@ -89,6 +89,10 @@ extern qtexture_s *TexWnd_GetMaterialListHead();
 // ─── surface window flag / dialog ─────────────────────────────────────────────
 // surfDlgGlob (surface inspector; .hwnd = HWND when open) comes from qe3.h
 
+// KIWI: the Particles tab (kiwi_particles.cpp) - save-time script export + per-map reset.
+void KiwiParticles_ExportForMap( const char *mapPath, bool fromSave );
+void KiwiParticles_ResetForNewMap();
+
 // ─── forward declarations for functions defined in this file ──────────────────
 void Brush_FreeMapBrushes();
 void Map_NewMap();
@@ -306,6 +310,7 @@ void Map_NewMap()
         extern void KiwiOutliner_ResetForNewMap(); // kiwi_outliner.h
         KiwiOutliner_ResetForNewMap();              // KIWI-UX: drop old document row state
         extern void KiwiModelBrowser_ResetForNewMap(); KiwiModelBrowser_ResetForNewMap(); // KIWI-UX
+        KiwiParticles_ResetForNewMap();       // KIWI
         // KIWI-UX (ROUND BP, ITEM 1/3): the SECTION goes with the document too.  It
         // is view state, but it is view state that CLAMPS PICKING, and a level
         // latched in one map means nothing in the next — the round-BP autopsy's
@@ -882,6 +887,8 @@ void Map_SaveFile( const char *path, char a1, char a2 )
             if ( savedPathHeap ) free( savedPathHeap );
             return;
         }
+        // KIWI: the particles' game scripts (maps/createfx/<map>_fx.gsc + the loadfx table).
+        KiwiParticles_ExportForMap( path, true );
     }
 
     Sys_Printf( "Saved.\n" );

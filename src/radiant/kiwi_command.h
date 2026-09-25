@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34142, modal 34066.
+// 34100..34199 the second instant block. Next free: instant 34161, modal 34066.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -158,6 +158,11 @@
 #define KIWI_CMD_VIEW_LEAK_BG       34153   // View > Leak Finder Background (strobing camera clear colour)
 #define KIWI_CMD_GROUP_ADD          34154   // selection joins the ONE group it already reaches into
 #define KIWI_CMD_GROUP_SELECT       34155   // grow the selection to whole groups (again = the parent group)
+#define KIWI_CMD_WINDOW_PARTICLES   34156   // "Particles" (the effects browser, kiwi_particles)
+#define KIWI_CMD_PARTICLE_DROP      34157   // internal: place the dragged effect
+#define KIWI_CMD_SELMODE_PARTICLES  34158   // "Select Mode: Particles only" (Object sub-mode, unbound)
+#define KIWI_CMD_PARTICLE_EXPORT    34159   // "Write Particle Scripts" (maps/createfx/<map>_fx.gsc)
+#define KIWI_CMD_IMPORT_DECALS      34160   // "Import Decal Stamps..." (kiwi_import, decal mode)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

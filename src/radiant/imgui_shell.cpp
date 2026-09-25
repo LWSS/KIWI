@@ -14,6 +14,7 @@
 #include "kiwi_outliner.h"         // KIWI-UX ROUND W: the scene list dock window
 #include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
 #include "kiwi_modelbrowser.h"     // KIWI-UX: the Models tab + camera drop target
+#include "kiwi_particles.h"        // KIWI: the Particles tab + camera drop target
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
@@ -401,6 +402,18 @@ bool ImGuiShell_ViewportAtScreen( int screenX, int screenY,
         return true;
     }
     return false;
+}
+
+// KIWI: a screen point in ImGui's coordinate space (the backend window's client area), for
+// drop targets that are ImGui windows rather than viewport images (the Decals window).
+bool ImGuiShell_ScreenToImGui( int screenX, int screenY, float *outX, float *outY )
+{
+    if ( !s_backendHwnd || !outX || !outY ) return false;
+    POINT p = { screenX, screenY };
+    if ( !::ScreenToClient( s_backendHwnd, &p ) ) return false;
+    *outX = (float)p.x;
+    *outY = (float)p.y;
+    return true;
 }
 
 bool ImGuiShell_LastViewport( int *rttId, int *imgX, int *imgY )
@@ -1122,6 +1135,7 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 if ( id == RTT_CAMERA )
                     KiwiEntBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y );
                 if ( id == RTT_CAMERA ) KiwiModelBrowser_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y ); // KIWI-UX
+                if ( id == RTT_CAMERA ) KiwiParticles_CameraDropTarget( s_imgMin[id].x, s_imgMin[id].y );   // KIWI
                 // KIWI-UX: the texture browser is a DRAG SOURCE.  Dragging a thumbnail out
                 // carries its material name (KMTL_PAYLOAD) to the Terrain Sculpt layer list
                 // and the Decals window.  The hit test runs at the PRESS position, in the
@@ -1509,6 +1523,7 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     // exactly what makes them tabs of one another — no extra split.
     ImGui::DockBuilderDockWindow( "Entities",         rightBottom );
     ImGui::DockBuilderDockWindow( "Models",           rightBottom ); // KIWI-UX
+    ImGui::DockBuilderDockWindow( "Particles",        rightBottom ); // KIWI: effects browser (layout 18)
 
     // ── KIWI-UX (ROUND AZ, ITEM 3): the SKY tab, third of the same node ──────
     // USER DIRECTIVE, verbatim: "Make this a separate tab like the entity tab."
@@ -1690,18 +1705,27 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // hidden behind the overflow arrows are reachable without clicking through them.
     // Done before any window submits so this frame's tab layout already uses the new
     // scroll target; the wheel is consumed so the panel underneath does not scroll too.
+    // KIWI (2026-09-24, user: "when im moused over the tabs ... I should be able to scroll"):
+    // this walked g.TabBars, which only pools BeginTabBar() bars - a DOCK NODE's tab bar is
+    // IM_NEW'd onto the node itself (ImGuiDockNode::TabBar), so the loop never found one.
+    // Walk the dock context's nodes instead; the hovered window must be that node's host
+    // tree, so a popup or a floating window over the bar keeps its wheel.
     {
         ImGuiContext &g = *ImGui::GetCurrentContext();
         const float wheel = g.IO.MouseWheel;
-        if ( wheel != 0.0f )
+        if ( wheel != 0.0f && g.HoveredWindow )
         {
-            for ( int i = 0; i < g.TabBars.GetMapSize(); ++i )
+            ImVector<ImGuiStoragePair> &nodes = g.DockContext.Nodes.Data;
+            for ( int i = 0; i < nodes.Size; ++i )
             {
-                ImGuiTabBar *tb = g.TabBars.TryGetMapData( i );
-                if ( !tb || tb->CurrFrameVisible < g.FrameCount - 1 )
+                ImGuiDockNode *node = (ImGuiDockNode *)nodes[i].val_p;
+                ImGuiTabBar   *tb   = node ? node->TabBar : nullptr;
+                if ( !tb || !node->HostWindow || tb->CurrFrameVisible < g.FrameCount - 1 )
                     continue;                                   // not laid out last frame
                 if ( !tb->BarRect.Contains( g.IO.MousePos ) )
                     continue;
+                if ( g.HoveredWindow->RootWindowDockTree != node->HostWindow->RootWindowDockTree )
+                    continue;                                   // something is drawn over the bar
                 const float maxScroll = tb->WidthAllTabs - tb->BarRect.GetWidth();
                 if ( maxScroll <= 0.0f )
                     break;                                      // everything already fits
@@ -1795,6 +1819,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // drag starts, and at top-level window scope because it is a real window.
     KiwiEntBrowser_Draw();
     KiwiModelBrowser_Draw(); // KIWI-UX
+    KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint

@@ -49,6 +49,7 @@ namespace
         { "Inspector",        "Inspector", "&Inspector",             KIWI_CMD_WINDOW_INSPECTOR, 1 },
         { "Decals",           "Decals",  "&Decals",                 KIWI_CMD_WINDOW_DECALS,  1 },
         { "Reference Images", "RefImages", "&Reference Images",     KIWI_CMD_WINDOW_REFIMAGES, 1 },
+        { "Particles",        "Particles", "&Particles (effects)",  KIWI_CMD_WINDOW_PARTICLES, 1 },
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.

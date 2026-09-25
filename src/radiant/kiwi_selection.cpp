@@ -28,6 +28,7 @@ namespace
     selection_t s_selection;
     sel_mask_t  s_modeMask   = SEL_MASK_EVERYTHING;   // "5 Everything" is the start mode
     bool        s_modelsOnly = false;                 // Object mode restricted to models (KIWI 2026-09-09)
+    bool        s_particlesOnly = false;              // Object mode restricted to kiwi_fx (KIWI 2026-09-24)
     unsigned    s_generation = 1;
 
     // Suppress notifications driven by our own sync and guard rebuild recursion.
@@ -263,6 +264,11 @@ void KiwiSel_SetModeMask( sel_mask_t mask )
         s_modelsOnly = false;            // the sub-mode belongs to Object mode alone
         ++s_generation;
     }
+    if ( s_particlesOnly )
+    {
+        s_particlesOnly = false;         // KIWI: every mode change leaves particles-only (it re-arms itself after)
+        ++s_generation;
+    }
     if ( mask == s_modeMask )
         return;
     s_modeMask = mask;
@@ -276,9 +282,34 @@ bool KiwiSel_ModelsOnly()
 
 void KiwiSel_SetModelsOnly( bool on )
 {
+    if ( on && s_particlesOnly )
+    {
+        s_particlesOnly = false;         // the two Object sub-modes exclude each other
+        ++s_generation;
+    }
     if ( s_modelsOnly == on )
         return;
     s_modelsOnly = on;
+    ++s_generation;
+}
+
+bool KiwiSel_ParticlesOnly()
+{
+    return s_particlesOnly;
+}
+
+void KiwiSel_SetParticlesOnly( bool on )
+{
+    if ( on && s_modeMask != SEL_MASK_OBJECT )
+        return;                          // set the Object mask first (KIWI_CMD_SELMODE_PARTICLES)
+    if ( on && s_modelsOnly )
+    {
+        s_modelsOnly = false;
+        ++s_generation;
+    }
+    if ( s_particlesOnly == on )
+        return;
+    s_particlesOnly = on;
     ++s_generation;
 }
 

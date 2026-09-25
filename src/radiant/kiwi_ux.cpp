@@ -228,5 +228,6 @@ void KiwiUX_DrawSettings()
                          ( m & SEL_MASK_VERTEX ) ? "point " : "",
                          ( m & SEL_MASK_EDGE   ) ? "edge "  : "",
                          ( m & SEL_MASK_FACE   ) ? "face "  : "",
-                         ( m & SEL_MASK_OBJECT ) ? "object" : "" );
+                         KiwiSel_ParticlesOnly() ? "object (particles only)"  // KIWI: Object sub-mode
+                       : ( m & SEL_MASK_OBJECT ) ? "object" : "" );
 }

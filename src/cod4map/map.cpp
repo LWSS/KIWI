@@ -1497,6 +1497,14 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
     --num_entities;
     return 1;
   }
+  /* KIWI (2026-09-24): kiwi_fx is a particle placed in KIWI-Radiant.  The editor writes it
+     into maps/createfx/<map>_fx.gsc on save and the MP client plays it from there; left in
+     the BSP it would only cost a game entity slot (G_CallSpawn keeps unknown classnames). */
+  if ( !strcmp(val, "kiwi_fx") )
+  {
+    --num_entities;
+    return 1;
+  }
   if ( !strcmp(val, "func_group")
     || !strcmp(val, "worldspawn") && num_entities > 1 )
   {

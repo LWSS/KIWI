@@ -24,6 +24,7 @@
 #include "kiwi_decal.h"
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
+#include "kiwi_particles.h"   // particles-only hover + the particle arrows
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
@@ -601,6 +602,23 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
     if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
         return;
 
+    // KIWI (2026-09-24): particles-only promises exactly the particle ClickSelect will take.
+    if ( KiwiSel_ParticlesOnly() )
+    {
+        selbrush_t *node = nullptr;
+        float dist = 0.0f;
+        if ( KiwiParticles_PickAt( imgX, imgY, &node, &dist ) )
+        {
+            s_hover.valid = true;
+            s_hover.item  = Sel_MakeObject( node );
+            for ( int k = 0; k < 3; ++k )
+                s_hover.point[k] = ray.origin[k] + ray.dir[k] * dist;
+            if ( ctrl )
+                s_removePreview = Sel_Contains( KiwiSel(), s_hover.item );
+        }
+        return;
+    }
+
     const sel_mask_t mask = KiwiSel_GetModeMask();
     pick_result_t hit = Pick( ray, mask );
 
@@ -713,6 +731,7 @@ void KiwiHover_DrawWorld()
         KiwiTerrain_DrawWorld();
     }
     KiwiDecal_DrawWorld();
+    KiwiParticles_DrawWorld();   // KIWI: particle forward arrows + the drag ghost
 
     // Fills precede line accents so borders, edges, and vertices remain on top.
     // Every brush-backed emit is liveness-gated before dereference.

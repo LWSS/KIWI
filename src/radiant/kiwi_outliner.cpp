@@ -19,6 +19,7 @@
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
 #include "kiwi_hover.h"         // viewport row hover
+#include "kiwi_particles.h"     // KIWI_FX_CLASSNAME - the Particles section
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_visibility.h"    // shared hidden state and undo
@@ -95,6 +96,10 @@ enum koutKind_t
     KOUT_SECTION_GROUPS,
     KOUT_UGROUP,                // koutRow_t::ugroup names the node
     KOUT_UGROUP_TYPE,           // ...and ::ugType which kind (a KOUT_SECTION_* value)
+    // KIWI (2026-09-24): particle effects (kiwi_fx entities, kiwi_particles.h) get their own
+    // section after Models, and a blank separator row closes the Groups section.
+    KOUT_SECTION_PARTICLES,
+    KOUT_SPACER,                // no eye, no label, not clickable
 };
 
 struct koutRow_t
@@ -129,6 +134,7 @@ const unsigned KOUT_KEY_IMAGES = 0xF0000006u;
 const unsigned KOUT_KEY_TERRAIN = 0xF0000007u;
 const unsigned KOUT_KEY_BARBWIRE = 0xF0000008u;   // the Barbwire folder inside Models
 const unsigned KOUT_KEY_GROUPS   = 0xF0000009u;   // the top-level Groups section
+const unsigned KOUT_KEY_PARTICLES = 0xF000000Au;  // the Particles section
 
 // Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
 // out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
@@ -307,6 +313,8 @@ koutKind_t EntitySection( entity_s *inst )
 {
     if ( IsFuncGroup( inst ) )
         return KOUT_SECTION_BRUSHES;
+    if ( !_stricmp( ClassOf( inst ), KIWI_FX_CLASSNAME ) )
+        return KOUT_SECTION_PARTICLES;
 
     entity_s_def *def = DefOf( inst );
     eclass_t *ec = def ? def->eclass : 0;
@@ -344,6 +352,7 @@ unsigned SectionKey( koutKind_t kind )
     case KOUT_SECTION_LIGHTS:   return KOUT_KEY_LIGHTS;
     case KOUT_SECTION_MODELS:   return KOUT_KEY_MODELS;
     case KOUT_SECTION_IMAGES:   return KOUT_KEY_IMAGES;
+    case KOUT_SECTION_PARTICLES: return KOUT_KEY_PARTICLES;
     default:                    return 0;
     }
 }
@@ -378,6 +387,11 @@ void FolderName( entity_s *inst, char *out, int outSize )
     else if ( IsFuncGroup( inst ) )
     {
         _snprintf( out, (size_t)outSize, "Group %i", def ? def->numberId : 0 );
+    }
+    else if ( !_stricmp( ClassOf( inst ), KIWI_FX_CLASSNAME ) )
+    {
+        const char *fx = def ? ValueForKey2( def, "fx" ) : "";      // KIWI: the effect it plays
+        _snprintf( out, (size_t)outSize, "%s", fx && fx[0] ? fx : "(no effect)" );
     }
     else
     {
@@ -805,9 +819,10 @@ void FlattenUGroup( int idx, int indent )
     for ( size_t i = 0; i < s_ug[idx].kids.size(); ++i )
         FlattenUGroup( s_ug[idx].kids[i], indent + 1 );
 
-    static const koutKind_t kinds[4] = { KOUT_SECTION_BRUSHES, KOUT_SECTION_MODELS,
-                                         KOUT_SECTION_LIGHTS,  KOUT_SECTION_ENTITIES };
-    for ( int k = 0; k < 4; ++k )
+    static const koutKind_t kinds[5] = { KOUT_SECTION_BRUSHES, KOUT_SECTION_MODELS,
+                                         KOUT_SECTION_LIGHTS,  KOUT_SECTION_ENTITIES,
+                                         KOUT_SECTION_PARTICLES };
+    for ( int k = 0; k < 5; ++k )
     {
         std::vector<entity_s *> ents;
         UGMembers( idx, (int)kinds[k], false, ents );
@@ -992,12 +1007,14 @@ void Flatten()
     s_rows.clear();
     UGBuildTree();                  // the sections below skip whatever is in a group
     FlattenGroups();
+    PushRow( KOUT_SPACER, 0, 0 );   // KIWI (2026-09-24, user): a blank line closes the Groups segment
     FlattenEntitySection( KOUT_SECTION_BRUSHES );
     FlattenTerrain();
     FlattenCurves();
     FlattenEntitySection( KOUT_SECTION_ENTITIES );
     FlattenEntitySection( KOUT_SECTION_LIGHTS );
     FlattenEntitySection( KOUT_SECTION_MODELS );
+    FlattenEntitySection( KOUT_SECTION_PARTICLES );
     FlattenImages();
 }
 
@@ -1058,7 +1075,7 @@ void AutoExpandForSelection()
             if ( section == KOUT_SECTION_BRUSHES )
                 SetCollapsed( UGTypeKey( path, (int)section ), false );
         }
-        else if ( section != KOUT_SECTION_MODELS )
+        else if ( section != KOUT_SECTION_MODELS && section != KOUT_SECTION_PARTICLES )  // KIWI: same rule
             SetCollapsed( SectionKey( section ), false );
         entity_s_def *def = DefOf( e );
         if ( def )
@@ -1896,7 +1913,7 @@ bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
         || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER
-        || k == KOUT_SECTION_GROUPS;
+        || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES;
 }
 
 // Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
@@ -2349,6 +2366,20 @@ void KiwiOutliner_Draw()
                 else
                     ImGui::PushID( i );
 
+                // KIWI (2026-09-24): the blank separator row after Groups - one row tall so
+                // the clipper's fixed row height holds, a faint rule across its middle.
+                if ( r.kind == KOUT_SPACER )
+                {
+                    const ImVec2 sp = ImGui::GetCursorScreenPos();
+                    ImGui::Dummy( ImVec2( 1.0f, itemH ) );
+                    const float w = ImGui::GetContentRegionAvail().x + ImGui::GetScrollX();
+                    dl->AddLine( ImVec2( sp.x + 4.0f, sp.y + itemH * 0.5f ),
+                                 ImVec2( sp.x + ( w > 8.0f ? w - 4.0f : 4.0f ), sp.y + itemH * 0.5f ),
+                                 ImGui::GetColorU32( ImGuiCol_Separator ), 1.0f );
+                    ImGui::PopID();
+                    continue;
+                }
+
                 // Eye
                 bool hidden = false;
                 bool hasEye = false;
@@ -2414,6 +2445,7 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_IMAGES:
                 case KOUT_BARBWIRE_FOLDER:
                 case KOUT_SECTION_GROUPS:
+                case KOUT_SECTION_PARTICLES:
                     SectionEyeState( r.kind, &hidden, &hasEye );
                     break;
                 case KOUT_UGROUP:
@@ -2562,15 +2594,22 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_GROUPS:
                     _snprintf( label, sizeof( label ), "Groups (%i)", r.count );
                     break;
+                case KOUT_SECTION_PARTICLES:
+                    _snprintf( label, sizeof( label ), "Particles (%i)", r.count );
+                    break;
+                case KOUT_SPACER:
+                    label[0] = '\0';
+                    break;
                 case KOUT_UGROUP:
                     _snprintf( label, sizeof( label ), "%s (%i)",
                                UGLeaf( s_ug[r.ugroup].path ).c_str(), r.count );
                     break;
                 case KOUT_UGROUP_TYPE:
                     _snprintf( label, sizeof( label ), "%s (%i)",
-                               r.ugType == KOUT_SECTION_BRUSHES ? "Brushes"
-                             : r.ugType == KOUT_SECTION_MODELS  ? "Models"
-                             : r.ugType == KOUT_SECTION_LIGHTS  ? "Lights" : "Entities",
+                               r.ugType == KOUT_SECTION_BRUSHES   ? "Brushes"
+                             : r.ugType == KOUT_SECTION_MODELS    ? "Models"
+                             : r.ugType == KOUT_SECTION_LIGHTS    ? "Lights"
+                             : r.ugType == KOUT_SECTION_PARTICLES ? "Particles" : "Entities",
                                r.count );
                     break;
                 case KOUT_GROUP_ENTITY:

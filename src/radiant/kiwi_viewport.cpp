@@ -265,14 +265,18 @@ namespace
             // KIWI (2026-09-09): the [4 Object] chip carries the "models only" sub-mode.
             // Hovering it opens a dropdown (Objects / Models only); the label reads
             // "4 Models" while the sub-mode is on.  Double-tapping 4 does the same by key.
-            const bool objectChip = ( KCHIPS[i].mask == SEL_MASK_OBJECT );
-            const bool modelsOnly = objectChip && KiwiSel_ModelsOnly();
-            const char *label = modelsOnly ? "4 Models" : KCHIPS[i].label;
+            // KIWI (2026-09-24, user: "make it another unique selection mode on the 4
+            // sub-tier selections (similar to model-only)"): "Particles only" is the third
+            // entry; the label reads "4 Particles" while it is on.
+            const bool objectChip    = ( KCHIPS[i].mask == SEL_MASK_OBJECT );
+            const bool modelsOnly    = objectChip && KiwiSel_ModelsOnly();
+            const bool particlesOnly = objectChip && KiwiSel_ParticlesOnly();
+            const char *label = modelsOnly ? "4 Models" : particlesOnly ? "4 Particles" : KCHIPS[i].label;
             if ( ImGui::Button( label ) )
             {
                 if ( objectChip )
                     KiwiSel_SetModelsOnly( false );  // a plain click is plain Object mode
-                KiwiSel_SetModeMask( KCHIPS[i].mask );
+                KiwiSel_SetModeMask( KCHIPS[i].mask );   // (and leaves particles-only)
             }
             const ImVec2 chipMin = ImGui::GetItemRectMin();
             const ImVec2 chipMax = ImGui::GetItemRectMax();
@@ -294,7 +298,8 @@ namespace
             {
                 anyHovered = true;
                 ImGui::TextDisabled( "Object mode picks" );
-                if ( ImGui::Selectable( "Objects: brushes, patches, entities, models", !modelsOnly ) )
+                if ( ImGui::Selectable( "Objects: brushes, patches, entities, models",
+                                        !modelsOnly && !particlesOnly ) )
                 {
                     KiwiSel_SetModelsOnly( false );
                     KiwiSel_SetModeMask( SEL_MASK_OBJECT );
@@ -303,6 +308,11 @@ namespace
                 {
                     KiwiSel_SetModelsOnly( true );
                     KiwiSel_SetModeMask( SEL_MASK_OBJECT );
+                }
+                if ( ImGui::Selectable( "Particles only  (through geometry)", particlesOnly ) )
+                {
+                    KiwiSel_SetModeMask( SEL_MASK_OBJECT );   // first: a mask change leaves the sub-mode
+                    KiwiSel_SetParticlesOnly( true );
                 }
                 // KIWI (2026-09-10, user): the dropdown GOES AWAY when the mouse leaves the
                 // chip + popup area, with a generous margin, so it never sits over the view.

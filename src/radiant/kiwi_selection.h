@@ -96,6 +96,12 @@ void         KiwiSel_SetModeMask( sel_mask_t mask );
 // a plain 4 (or any other mode key) leaves it.
 bool         KiwiSel_ModelsOnly();
 void         KiwiSel_SetModelsOnly( bool on );
+// KIWI (2026-09-24): the "particles only" sub-mode of Object mode, chosen from the [4 Object]
+// chip's dropdown like models-only.  The mask stays SEL_MASK_OBJECT (move/rotate/delete treat
+// the picks as objects); clicks and marquees name kiwi_fx entities alone, through geometry
+// (kiwi_particles.h).  Any mode change, including the models-only sub-mode, leaves it.
+bool         KiwiSel_ParticlesOnly();
+void         KiwiSel_SetParticlesOnly( bool on );
 
 // ── selection_t mutation (does NOT sync — call Sel_SyncToLegacy when done) ───
 // Click/marquee grammar: plain replaces, Shift adds, Ctrl removes.  Ctrl wins

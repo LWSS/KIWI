@@ -53,6 +53,7 @@
 #include "kiwi_uv.h"
 #include "kiwi_entbrowser.h"
 #include "kiwi_modelbrowser.h"          // KIWI: the Models window + deferred drop
+#include "kiwi_particles.h"             // KIWI: the Particles window, deferred drop
 #include "kiwi_skybox.h"
 #include "kiwi_uveditor.h"
 #include "kiwi_import.h"
@@ -447,6 +448,9 @@ namespace
         { KIWI_CMD_VIEW_LEAK_BG,     { "Leak Finder Background (strobing)", "View", 0, nullptr } },
         { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
+        { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
+        { KIWI_CMD_WINDOW_PARTICLES, { "Particles",               "Windows",   0, nullptr } },
+        { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
     };
 
@@ -648,6 +652,7 @@ void KiwiCmd_RegisterCommands()
     Radiant_RegisterCommand( "KiwiSelectModeFace",   0, 0, KIWI_CMD_SELMODE_FACE );
     Radiant_RegisterCommand( "KiwiSelectModeObject", 0, 0, KIWI_CMD_SELMODE_OBJECT );
     Radiant_RegisterCommand( "KiwiSelectModeAll",    0, 0, KIWI_CMD_SELMODE_ALL );
+    Radiant_RegisterCommand( "KiwiSelectModeParticles", 0, 0, KIWI_CMD_SELMODE_PARTICLES );   // KIWI: Object sub-mode
     Radiant_RegisterCommand( "KiwiCommandPalette",   0, 0, KIWI_CMD_PALETTE );
     Radiant_RegisterCommand( "KiwiGridHalve",        0, 0, KIWI_CMD_GRID_HALVE );
     Radiant_RegisterCommand( "KiwiGridDouble",       0, 0, KIWI_CMD_GRID_DOUBLE );
@@ -675,6 +680,7 @@ void KiwiCmd_RegisterCommands()
     KiwiOutliner_RegisterCommands();
     KiwiEntBrowser_RegisterCommands();
     KiwiModelBrowser_RegisterCommands(); // KIWI      — the Models window toggle
+    KiwiParticles_RegisterCommands();    // KIWI      — the Particles window, script export
     KiwiSky_RegisterCommands();
     KiwiUvEd_RegisterCommands();
     KiwiImport_RegisterCommands();
@@ -725,6 +731,7 @@ namespace
         case KIWI_CMD_SELMODE_OBJECT:
         case KIWI_CMD_SELMODE_ALL:
         case KIWI_CMD_SELMODE_MODELS:
+        case KIWI_CMD_SELMODE_PARTICLES:
         case KIWI_CMD_SELCONV_POINT:                    // selection:convert:*
         case KIWI_CMD_SELCONV_EDGE:
         case KIWI_CMD_SELCONV_FACE:
@@ -759,6 +766,9 @@ namespace
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
         case KIWI_CMD_MODEL_DROP:
+        case KIWI_CMD_PARTICLE_DROP:
+        case KIWI_CMD_WINDOW_PARTICLES:
+        case KIWI_CMD_PARTICLE_EXPORT:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
         case KIWI_CMD_BARBWIRE:                        // opens a dialog, not a replayable verb
         case KIWI_CMD_PASTE_IN_PLACE:                  // consumes its own selection; a repeat has no targets
@@ -879,6 +889,9 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
     }
     case KIWI_CMD_SELMODE_MODELS: KiwiSel_SetModelsOnly( true ); SetModeMask( SEL_MASK_OBJECT ); return true;
     case KIWI_CMD_SELMODE_ALL:    SetModeMask( SEL_MASK_EVERYTHING ); return true;
+    // KIWI (2026-09-24): the particles-only sub-mode of Object mode - clicks and marquees pick
+    // particle effects (kiwi_fx) only.
+    case KIWI_CMD_SELMODE_PARTICLES: SetModeMask( SEL_MASK_OBJECT ); KiwiSel_SetParticlesOnly( true ); return true;
     case KIWI_CMD_PALETTE:        KiwiPalette_Toggle();               return true;
     case KIWI_CMD_GRID_HALVE:     StepGrid( false );                  return true;
     case KIWI_CMD_GRID_DOUBLE:    StepGrid( true );                   return true;
@@ -929,6 +942,8 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         if ( KiwiEntBrowser_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiModelBrowser_DispatchInstant( cmdId ) )
+            return true;
+        if ( KiwiParticles_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiSky_DispatchInstant( cmdId ) )
             return true;

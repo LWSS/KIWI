@@ -17,6 +17,7 @@
 #include "kiwi_conselect.h"          // construction selection
 #include "kiwi_droptrace.h"          // KiwiDrop_IsModelEntity: the models-only marquee
 #include "kiwi_hover.h"
+#include "kiwi_particles.h"          // particles-only: particle click + marquee
 #include "kiwi_pick.h"
 #include "kiwi_refimage.h"
 #include "kiwi_region.h"             // region click/extrude
@@ -419,6 +420,8 @@ namespace
         const sel_kind_t kind = RectKind( KiwiSel_GetModeMask() );
         // KIWI (2026-09-09): the models-only sub-mode of Object mode marquees models alone.
         const bool modelsOnly = ( kind == SEL_OBJECT ) && KiwiSel_ModelsOnly();
+        // KIWI (2026-09-24): ...and the particles-only sub-mode marquees particles alone.
+        const bool particlesOnly = ( kind == SEL_OBJECT ) && KiwiSel_ParticlesOnly();
         selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
         for ( int L = 0; L < 2; ++L )
         {
@@ -429,6 +432,8 @@ namespace
                 if ( !Pick_BrushPickable( b ) )
                     continue;
                 if ( modelsOnly && !KiwiDrop_IsModelEntity( b ) )
+                    continue;
+                if ( particlesOnly && !KiwiParticles_IsParticleNode( b ) )
                     continue;
                 CollectFromBrush( b, r, crossing, kind, out );
             }
@@ -441,8 +446,8 @@ namespace
         CollectNoRescue( r, crossing, out, KBOX_FACE_RAYS_RELEASE );   // release budget
 
         // A crossing rect wholly inside a large face touches no winding point or edge.
-        // One center ray closes that hole for area kinds.
-        if ( crossing && ( kind == SEL_OBJECT || kind == SEL_FACE ) )
+        // One center ray closes that hole for area kinds.  (Particles-only has no large faces.)
+        if ( crossing && ( kind == SEL_OBJECT || kind == SEL_FACE ) && !KiwiSel_ParticlesOnly() )
         {
             ray_t ray;
             if ( Pick_RayFromImagePos( (int)( ( r.x0 + r.x1 ) * 0.5f ),
@@ -513,6 +518,37 @@ namespace
 
     void ClickSelect( int imgX, int imgY, bool shift, bool ctrl )
     {
+        // KIWI (2026-09-24): particles-only names particle effects only, through geometry, with the
+        // same plain / Shift-add / Ctrl-remove grammar as every other mode.
+        if ( KiwiSel_ParticlesOnly() )
+        {
+            selbrush_t *node = nullptr;
+            float dist = 0.0f;
+            selection_t &sel = KiwiSel();
+            if ( !KiwiParticles_PickAt( imgX, imgY, &node, &dist ) )
+            {
+                if ( shift || ctrl )
+                    return;                      // modified click on nothing: keep the selection
+                Sel_Clear( sel );
+            }
+            else
+            {
+                const sel_item_t item = Sel_MakeObject( node );
+                if ( ctrl )       Sel_Remove( sel, item );
+                else if ( shift ) Sel_Add( sel, item );
+                else
+                {
+                    Sel_Clear( sel );
+                    Sel_Add( sel, item );
+                }
+            }
+            if ( !shift && !ctrl )
+                KiwiConSel_Clear();
+            Sel_SyncToLegacy();
+            g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+            return;
+        }
+
         // The screen-space sun glyph arbitrates before geometry and consumes the
         // click; its selection is independent of the geometry selection stores.
         const bool sunHit = KiwiSun_GlyphHit( imgX, imgY );
@@ -738,12 +774,14 @@ int KiwiBox_CollectBrushes( int x0, int y0, int x1, int y1, bool crossing,
                 continue;
             if ( KiwiSel_ModelsOnly() && !KiwiDrop_IsModelEntity( b ) )
                 continue;                // models-only sub-mode (KIWI 2026-09-09)
+            if ( KiwiSel_ParticlesOnly() && !KiwiParticles_IsParticleNode( b ) )
+                continue;                // particles-only sub-mode (KIWI 2026-09-24)
             CollectFromBrush( b, r, crossing, SEL_OBJECT, items );
         }
     }
 
     // Match Collect's center-ray rescue for crossing rects wholly inside a face.
-    if ( crossing )
+    if ( crossing && !KiwiSel_ParticlesOnly() )
     {
         ray_t ray;
         if ( Pick_RayFromImagePos( (int)( ( r.x0 + r.x1 ) * 0.5f ),
@@ -831,7 +869,8 @@ void KiwiBox_End( int imgX, int imgY )
 
     // Apply the rect independently to construction geometry: unlike a click, a
     // marquee can legitimately name both brush and construction items.
-    KiwiConSel_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
+    if ( !KiwiSel_ParticlesOnly() )                  // KIWI: particles-only marquees particles alone
+        KiwiConSel_ApplyRect( r.x0, r.y0, r.x1, r.y1, crossing, s_shift, s_ctrl );
     // KIWI (REFIMG, 2026-09-03): reference images are NEVER box-selected - a marquee over
     // a traced photo must select the geometry on it, not the photo.  Click / outliner only.
 }

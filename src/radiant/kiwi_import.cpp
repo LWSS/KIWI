@@ -33,6 +33,8 @@ extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );           
 extern bool        TexWnd_MakeMaterialCurrentByName( const char *name );                 // texwnd.cpp:792
 extern int  texWndGlob_textureOffset_usageCount();                                       // texwnd.cpp:106
 extern int  texWndGlob_textureOffset_localeCount();                                      // texwnd.cpp:107
+extern void KiwiDecal_UseImported( const char *name );                                   // kiwi_decal.cpp
+extern bool KiwiDecal_ScreenOverWindow( int screenX, int screenY );                      // kiwi_decal.cpp
 
 // FillTextureMenu loads usage/locale; surface types are compiled in.
 struct RadiantFilterEntry { char *name; int index; };
@@ -70,6 +72,11 @@ struct ImportGroup
     std::string path[SLOT_COUNT];
     std::string pairKey;            // the stripped basename the pairing agreed on ("" == none)
     bool        paired = false;     // derive and display the stripped paired name
+    // KIWI (2026-09-24, user: "add an importer for the decals that accepts a png with
+    // transparency"): a decal stamp - colour map only, material type locked to the
+    // alpha-blend family (l_sm_b0c0, cloned from ch_decal_mural: sortKey 12, polygon
+    // offset, no depth write), and on success it becomes the Decals window's material.
+    bool        decal  = false;
 };
 
 // Pending queue.
@@ -359,6 +366,31 @@ int DefaultTemplateForFilledSlots()
     return best;
 }
 
+// The decal family: plain alpha blend, colour map only (l_sm_b0c0, "World - lit, alpha blend").
+int DecalTemplateIndex()
+{
+    for ( int i = 0; i < KiwiMat_TemplateCount(); ++i )
+    {
+        const kiwiMatTemplateInfo_t *ti = KiwiMat_TemplateInfo( i );
+        if ( ti && ti->techSet && !strcmp( ti->techSet, "l_sm_b0c0" ) && ti->slots == (unsigned)KIWI_MAT_SLOT_COLOR )
+            return i;
+    }
+    return -1;
+}
+
+// A decal takes the usage its template carries (ch_decal_mural's), else "poster".
+int DecalUsageRow( int templateIndex )
+{
+    const char *tpl = templateIndex >= 0 ? KiwiMat_ResolveTemplate( templateIndex ) : nullptr;
+    kiwiMatSource_t src;
+    char err[256];
+    if ( tpl && KiwiMat_ReadSource( tpl, &src, err, sizeof( err ) ) && src.usage )
+        for ( int i = 1; i < texWndGlob_textureOffset_usageCount() && i < 256; ++i )
+            if ( filter_usage_array[i].name && filter_usage_array[i].index == (int)src.usage )
+                return i;
+    return FindUsageRowByName( "poster" );
+}
+
 // Batch mode preserves user settings but re-derives each file's name and tiling.
 void BeginFile( bool keepSettings )
 {
@@ -430,6 +462,21 @@ void BeginFile( bool keepSettings )
         s_resampleToPot = true;
         s_makeCurrent   = false;
         s_applyToRest   = false;
+    }
+
+    // KIWI: a decal stamp's material type is not a choice (see ImportGroup::decal).
+    if ( g.decal )
+    {
+        const int dt = DecalTemplateIndex();
+        if ( dt >= 0 )
+            s_templateIndex = dt;
+        if ( !keepSettings )
+        {
+            const int ur = DecalUsageRow( dt );
+            if ( ur > 0 )
+                s_usageRow = ur;
+        }
+        s_compress = true;         // DXT5 keeps the alpha channel
     }
 
     s_status[0] = '\0';
@@ -643,6 +690,13 @@ bool PerformImport( char *err, size_t errSz )
                     v.specularMapHeight, v.specularMapUploaded ? "uploaded" : "MISSING" );
     Sys_Printf( ".\n" );
 
+    if ( group.decal )
+    {
+        if ( !s_src[SLOT_COLOR].hasAlpha )
+            Sys_Printf( "        (no alpha channel: the decal covers its whole rectangle)\n" );
+        KiwiDecal_UseImported( s_name );   // the Decals window places it next
+    }
+
     g_nUpdateBits |= W_TEXTURE;
     return true;
 }
@@ -736,6 +790,85 @@ int QueuePaths( const std::vector<std::string> &paths )
     return (int)ok.size();
 }
 
+// Decal stamps: one material per file, no pairing (a stamp has no normal/specular maps).
+int QueueDecalPaths( const std::vector<std::string> &paths )
+{
+    int n = 0;
+    for ( size_t i = 0; i < paths.size(); ++i )
+    {
+        if ( !KiwiIwi_IsAcceptedExtension( paths[i].c_str() ) )
+        {
+            Sys_Printf( "Decal import: refused '%s' - only %s are supported.\n",
+                        paths[i].c_str(), KiwiIwi_AcceptedExtensionList() );
+            continue;
+        }
+        ImportGroup g;
+        g.path[SLOT_COLOR] = paths[i];
+        g.decal            = true;
+        s_queue.push_back( g );
+        ++n;
+    }
+    return n;
+}
+
+// The multi-select Open dialog both browse commands use; false = cancelled.
+bool BrowseImages( const char *title, std::vector<std::string> *out )
+{
+    // Multi-select returns one full path or a directory plus NUL-separated filenames.
+    static char buf[16384];
+    buf[0] = '\0';
+
+    // COMMDLG filters are NUL-terminated pairs followed by a final NUL.
+    char   filter[256];
+    size_t fp = 0;
+    {
+        const char *exts = KiwiIwi_AcceptedExtensionList();
+        char        label[128];
+        _snprintf( label, sizeof( label ), "Images (%s)", exts );
+        label[sizeof( label ) - 1] = '\0';
+        const char *parts[4] = { label, exts, "All files (*.*)", "*.*" };
+        for ( int i = 0; i < 4; ++i )
+        {
+            const size_t n = strlen( parts[i] );
+            if ( fp + n + 2 >= sizeof( filter ) )
+                break;
+            memcpy( filter + fp, parts[i], n );
+            fp += n;
+            filter[fp++] = '\0';
+        }
+        filter[fp++] = '\0';
+    }
+
+    OPENFILENAMEA ofn = { 0 };
+    ofn.lStructSize = sizeof( ofn );
+    ofn.hwndOwner   = ::GetActiveWindow();
+    ofn.lpstrFilter = filter;
+    ofn.lpstrFile   = buf;
+    ofn.nMaxFile    = (DWORD)sizeof( buf );
+    ofn.lpstrTitle  = title;
+    ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_EXPLORER | OFN_ALLOWMULTISELECT;
+    if ( !::GetOpenFileNameA( &ofn ) )
+        return false;
+
+    const char *dir = buf;
+    const char *p   = dir + strlen( dir ) + 1;
+    if ( !*p )
+    {
+        out->push_back( dir );                     // single selection: buf IS the path
+    }
+    else
+    {
+        for ( ; *p; p += strlen( p ) + 1 )
+        {
+            char full[MAX_PATH];
+            _snprintf( full, sizeof( full ), "%s\\%s", dir, p );
+            full[sizeof( full ) - 1] = '\0';
+            out->push_back( full );
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 // WM_DROPFILES.
@@ -755,9 +888,15 @@ bool KiwiImport_HandleDropFiles( void *hDropOpaque )
         if ( ::DragQueryFileA( hDrop, i, buf, (UINT)sizeof( buf ) ) && buf[0] )
             paths.push_back( buf );
     }
+    // KIWI: files dropped onto the Decals window import as decal stamps.  The point is in
+    // the frame's client space (the frame is the only DragAcceptFiles window).
+    POINT dropPt = { 0, 0 };
+    ::DragQueryPoint( hDrop, &dropPt );
+    ::ClientToScreen( g_qeglobals.d_hwndMain, &dropPt );
     ::DragFinish( hDrop );
 
-    const int accepted = QueuePaths( paths );
+    const int accepted = KiwiDecal_ScreenOverWindow( dropPt.x, dropPt.y ) ? QueueDecalPaths( paths )
+                                                                          : QueuePaths( paths );
     if ( !accepted )
         return false;
     return true;
@@ -768,6 +907,14 @@ void KiwiImport_RegisterCommands()
 {
     // DROPPED is an internal continuation and must remain non-bindable.
     Radiant_RegisterCommand( "KiwiImportTextures", 0, 0, KIWI_CMD_IMPORT_BROWSE );
+    Radiant_RegisterCommand( "KiwiImportDecals",   0, 0, KIWI_CMD_IMPORT_DECALS );
+}
+
+// The Decals window's button runs inside an ImGui frame; the Open dialog pumps messages,
+// so it runs from the posted command instead, outside the frame.
+void KiwiImport_BrowseDecals()
+{
+    ::PostMessageA( g_qeglobals.d_hwndMain, WM_COMMAND, (WPARAM)(unsigned int)KIWI_CMD_IMPORT_DECALS, 0 );
 }
 
 bool KiwiImport_DispatchInstant( unsigned int cmdId )
@@ -785,62 +932,14 @@ bool KiwiImport_DispatchInstant( unsigned int cmdId )
         return true;
     }
 
-    if ( cmdId == (unsigned int)KIWI_CMD_IMPORT_BROWSE )
+    if ( cmdId == (unsigned int)KIWI_CMD_IMPORT_BROWSE || cmdId == (unsigned int)KIWI_CMD_IMPORT_DECALS )
     {
-        // Multi-select returns one full path or a directory plus NUL-separated filenames.
-        static char buf[16384];
-        buf[0] = '\0';
-
-        // COMMDLG filters are NUL-terminated pairs followed by a final NUL.
-        char   filter[256];
-        size_t fp = 0;
-        {
-            const char *exts = KiwiIwi_AcceptedExtensionList();
-            char        label[128];
-            _snprintf( label, sizeof( label ), "Images (%s)", exts );
-            label[sizeof( label ) - 1] = '\0';
-            const char *parts[4] = { label, exts, "All files (*.*)", "*.*" };
-            for ( int i = 0; i < 4; ++i )
-            {
-                const size_t n = strlen( parts[i] );
-                if ( fp + n + 2 >= sizeof( filter ) )
-                    break;
-                memcpy( filter + fp, parts[i], n );
-                fp += n;
-                filter[fp++] = '\0';
-            }
-            filter[fp++] = '\0';
-        }
-
-        OPENFILENAMEA ofn = { 0 };
-        ofn.lStructSize = sizeof( ofn );
-        ofn.hwndOwner   = ::GetActiveWindow();
-        ofn.lpstrFilter = filter;
-        ofn.lpstrFile   = buf;
-        ofn.nMaxFile    = (DWORD)sizeof( buf );
-        ofn.Flags       = OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | OFN_EXPLORER | OFN_ALLOWMULTISELECT;
-        if ( !::GetOpenFileNameA( &ofn ) )
-            return true;
-
+        const bool decal = cmdId == (unsigned int)KIWI_CMD_IMPORT_DECALS;
         std::vector<std::string> paths;
-        const char *dir = buf;
-        const char *p   = dir + strlen( dir ) + 1;
-        if ( !*p )
-        {
-            paths.push_back( dir );                    // single selection: buf IS the path
-        }
-        else
-        {
-            for ( ; *p; p += strlen( p ) + 1 )
-            {
-                char full[MAX_PATH];
-                _snprintf( full, sizeof( full ), "%s\\%s", dir, p );
-                full[sizeof( full ) - 1] = '\0';
-                paths.push_back( full );
-            }
-        }
-
-        if ( QueuePaths( paths ) && !s_popupOpen )
+        if ( !BrowseImages( decal ? "Import decal stamps (PNG/TGA/DDS with transparency)" : nullptr, &paths ) )
+            return true;
+        const int queued = decal ? QueueDecalPaths( paths ) : QueuePaths( paths );
+        if ( queued && !s_popupOpen )
         {
             s_batch = false;
             BeginFile( false );
@@ -903,6 +1002,14 @@ void KiwiImport_Draw()
     }
 
     const std::string src = s_queue.front().path[SLOT_COLOR];
+    const bool decalMode = s_queue.front().decal;
+
+    if ( decalMode )
+    {
+        ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.1f, 1.0f ), "Decal stamp" );
+        ImGui::SameLine();
+        ImGui::TextDisabled( "alpha-blended, placed from the Decals window" );
+    }
 
     // Source.
     ImGui::TextDisabled( "Source" );
@@ -953,7 +1060,9 @@ void KiwiImport_Draw()
         s_templateIndex = 0;
     const kiwiMatTemplateInfo_t *cur = KiwiMat_TemplateInfo( s_templateIndex );
     ImGui::SetNextItemWidth( 320.0f );
-    if ( ImGui::BeginCombo( "Material type", cur ? cur->label : "" ) )
+    if ( decalMode )                                // a decal stamp is always the alpha-blend family
+        ImGui::Text( "Material type: %s", cur ? cur->label : "(no alpha-blend template)" );
+    else if ( ImGui::BeginCombo( "Material type", cur ? cur->label : "" ) )
     {
         for ( int i = 0; i < tmplCount; ++i )
         {
@@ -986,6 +1095,8 @@ void KiwiImport_Draw()
 
     for ( int slot = 0; slot < SLOT_COUNT; ++slot )
     {
+        if ( decalMode && slot != SLOT_COLOR )
+            continue;                               // a stamp is its colour + alpha only
         ImGui::PushID( slot );
         ImGui::Separator();
 
@@ -1031,6 +1142,10 @@ void KiwiImport_Draw()
                                         s_src[slot].potWidth, s_src[slot].potHeight );
                 if ( slot == SLOT_SPECULAR && !s_src[slot].hasAlpha )
                     ImGui::TextDisabled( "No alpha: gloss reads as 1, i.e. the sharpest reflection." );
+                if ( decalMode && slot == SLOT_COLOR && !s_src[slot].hasAlpha )
+                    ImGui::TextColored( ImVec4( 1.0f, 0.8f, 0.3f, 1.0f ),
+                                        "No alpha channel: the decal will cover its whole rectangle.\n"
+                                        "Save the image as a PNG with transparency to cut it out." );
             }
         }
 

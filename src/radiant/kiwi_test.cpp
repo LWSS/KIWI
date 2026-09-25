@@ -6,6 +6,7 @@
 #include "kiwi_test.h"
 #include "kiwi_command.h"
 #include "kiwi_modelbrowser.h"
+#include "kiwi_particles.h"     // particle_place / particle_export verbs (test mode)
 #include "kiwi_droptrace.h"
 #include "kiwi_pick.h"
 #include "kiwi_ux.h"
@@ -45,6 +46,7 @@ extern entity_s entities;                                                   // e
 extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
 extern int      modified;                                                   // map.cpp:67
 extern int      g_nUpdateBits;                                               // engine_stubs.cpp:773
+extern char     currentmap[];                                                // map.cpp (particle_export)
 
 extern void Map_New();                                                       // entity.cpp:1839
 extern void RadiantClipboard_ForgetLocal();                                  // entity.cpp (test hook)
@@ -1519,6 +1521,26 @@ static void ExecuteLine( const ScriptLine &line )
         char err[256] = { 0 };
         if ( w.size() != 2 || !KiwiModelBrowser_SwapSelected( w[1].c_str(), err, sizeof( err ) ) )
             ScriptError( line, "model_swap failed: %s", err[0] ? err : "usage: model_swap <xmodel>" );
+        return;
+    }
+    if ( command == "particle_place" )
+    {
+        // KIWI (2026-09-24): the Particles tab's drop, headless.
+        // particle_place <fx> <x> <y> <z> [nx ny nz]   (fx = path under raw/fx, no .efx)
+        if ( w.size() != 5 && w.size() != 8 )
+        { ScriptError( line, "usage: particle_place <fx> x y z [nx ny nz]" ); return; }
+        const float o[3] = { (float)atof( w[2].c_str() ), (float)atof( w[3].c_str() ), (float)atof( w[4].c_str() ) };
+        float n[3] = { 0.0f, 0.0f, 1.0f };
+        if ( w.size() == 8 )
+            for ( int k = 0; k < 3; ++k ) n[k] = (float)atof( w[5 + k].c_str() );
+        if ( !KiwiParticles_PlaceAt( w[1].c_str(), o, n ) )
+            ScriptError( line, "particle_place failed" );
+        return;
+    }
+    if ( command == "particle_export" )
+    {
+        // Write maps/createfx/<map>_fx.gsc + maps/mp/<map>_fx.gsc now (normally on save).
+        KiwiParticles_ExportForMap( currentmap, false );
         return;
     }
     if ( command == "toolkey" || command == "toolvalue" )
