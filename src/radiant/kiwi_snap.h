@@ -16,7 +16,8 @@
 //   0b. SNAP_ENDPOINT      open chain's first point (8 px)
 //   1.  SNAP_ENDPOINT      construction anchor (7 px)
 //   2.  SNAP_VERTEX        brush corner or patch control point (8 px)
-//   3.  SNAP_INTERSECTION  construction-segment crossing (7 px)
+//   3.  SNAP_INTERSECTION  construction-segment crossing - with another construction
+//                          segment or with a brush edge (7 px)
 //   3b. SNAP_EDGE_MID      construction-segment midpoint or quarter point (7 px)
 //   4.  SNAP_EDGE_MID      brush-edge midpoint or quarter point (7 px), over EVERY
 //                          edge near the cursor, not only the one the edge Pick names
@@ -37,8 +38,9 @@
 // Point snaps outrank line snaps, which outrank the area hit and grid. Construction
 // intersections use 3D closest approach within KCON_ISECT_DIST (0.25 WORLD UNITS);
 // adjacent segments, parallel/collinear pairs, and shared endpoints are rejected.
-// Brush-edge intersections are intentionally unsupported until they have an
-// occlusion policy.
+// A construction segment also crosses brush edges (KIWI 2026-09-26): same 3D test, gap
+// KCON_ISECT_DIST or one screen pixel, edges of eye-facing faces only, the surface gate
+// below as the occlusion policy.  Brush edge x brush edge crossings remain unsupported.
 // Free-tool angle capture allows 6 SCREEN PIXELS of lateral miss, floored at
 // 1 degree and capped at 0.22 of one 15-degree step.
 //

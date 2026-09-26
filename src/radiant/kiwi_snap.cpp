@@ -992,6 +992,137 @@ namespace
             }
         }
     }
+
+    // Where segments a and b cross ON SCREEN, as a's and b's fractions.  Used in orthographic
+    // views only, where a screen fraction is the world fraction.
+    bool ScreenCross( const float *a0, const float *a1, const float *b0, const float *b1,
+                      float *outS, float *outT )
+    {
+        float ax, ay, bx, by, cx, cy, dx, dy;
+        if ( !Pick_WorldToImage( a0, &ax, &ay ) || !Pick_WorldToImage( a1, &bx, &by )
+          || !Pick_WorldToImage( b0, &cx, &cy ) || !Pick_WorldToImage( b1, &dx, &dy ) )
+            return false;
+        const float rx = bx - ax, ry = by - ay, sx = dx - cx, sy = dy - cy;
+        const float den = rx * sy - ry * sx;
+        if ( fabsf( den ) < 1.0e-6f )
+            return false;
+        const float qx = cx - ax, qy = cy - ay;
+        const float s  = ( qx * sy - qy * sx ) / den;
+        const float t  = ( qx * ry - qy * rx ) / den;
+        if ( s < -1.0e-4f || s > 1.0001f || t < -1.0e-4f || t > 1.0001f )
+            return false;
+        *outS = s;
+        *outT = t;
+        return true;
+    }
+
+    // KIWI (2026-09-26, user drawing a roof profile on a cube: "it should allow me to snap where
+    // the line intersects the edge of the cube"): construction segment x brush edge crossings,
+    // by 3D closest approach like the construction pairs above.  The gap allowed is
+    // KCON_ISECT_DIST or one screen pixel at the crossing, whichever is larger (float noise at
+    // big map coordinates).  In an orthographic view a crossing ON SCREEN also counts (the
+    // line may sit on a construction plane in front of or behind the face - 2D drafting).
+    // Only segments and edges passing within the point radius of the cursor pair up, and only
+    // edges of faces turned to the eye; the query's surface gate is the occlusion policy (a
+    // planar placer's own plane is never occluded, so a screen crossing also needs the EDGE's
+    // point to pass `visible`).  The point lies ON the construction segment.
+    template <class G>
+    void ScanConBrushCrossings( const ray_t &ray, float curX, float curY, unsigned pickFlags,
+                                const G &visible, conBest_t *best )
+    {
+        const bool ortho = KiwiCam_Ortho();
+        enum { KSNAP_MAX_XSEGS = 64 };
+        float con[KSNAP_MAX_XSEGS][2][3];
+        int   nCon = 0;
+        const int count = KiwiCon_Count();
+        for ( int i = 0; i < count && nCon < KSNAP_MAX_XSEGS; ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !ConCandidateUsable( o, i ) )
+                continue;
+            const int n = KiwiCon_SegmentCount( *o );
+            for ( int s = 0; s < n && nCon < KSNAP_MAX_XSEGS; ++s )
+            {
+                if ( !KiwiCon_SegmentWorld( *o, s, con[nCon][0], con[nCon][1] ) )
+                    break;
+                if ( SegmentAimed( con[nCon][0], con[nCon][1], curX, curY, KSNAP_R_CON_POINT ) )
+                    ++nCon;
+            }
+        }
+        if ( nCon == 0 )
+            return;
+
+        std::vector<const selbrush_t *> excluded;
+        GatherExcluded( pickFlags, excluded );
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) )
+                continue;
+            const brush_t *def = b->def;
+            if ( !def || !def->faces || def->faceCount <= 0
+              || !BoundsNearRay( def, ray, KSNAP_R_CON_POINT * 2.0f ) )
+                continue;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
+                  || Dot3( def->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                    continue;
+                for ( int i = 0; i < w->numpoints; ++i )
+                {
+                    const float *p = w->p[i];
+                    const float *q = w->p[( i + 1 ) % w->numpoints];
+                    if ( !SegmentAimed( p, q, curX, curY, KSNAP_R_CON_POINT ) )
+                        continue;
+                    float e[3];
+                    Sub3( q, p, e );
+                    const float le = sqrtf( Dot3( e, e ) );
+                    if ( !( le > 1.0e-4f ) )
+                        continue;
+                    for ( int c = 0; c < nCon; ++c )
+                    {
+                        float dc[3], cr[3];
+                        Sub3( con[c][1], con[c][0], dc );
+                        Cross3( dc, e, cr );
+                        const float lc = sqrtf( Dot3( dc, dc ) );
+                        // Parallel / overlapping: no single crossing (the edge snap covers it).
+                        if ( !( lc > 1.0e-4f ) || sqrtf( Dot3( cr, cr ) ) / ( lc * le ) < 1.0e-3f )
+                            continue;
+                        float ta = 0.0f, tb = 0.0f, mid[3], on[3];
+                        const float gap = KiwiCon_SegSegClosest( con[c][0], con[c][1], p, q,
+                                                                 &ta, &tb, mid );
+                        for ( int k = 0; k < 3; ++k )
+                            on[k] = con[c][0][k] + dc[k] * ta;
+                        const float pixTol = KiwiCam_WorldPerPixel( on );
+                        if ( gap > ( pixTol > KCON_ISECT_DIST ? pixTol : KCON_ISECT_DIST ) )
+                        {
+                            float s, t, onEdge[3];     // they pass each other in depth...
+                            if ( !ortho || !ScreenCross( con[c][0], con[c][1], p, q, &s, &t ) )
+                                continue;
+                            for ( int k = 0; k < 3; ++k )  // ...but cross on an ortho screen
+                            {
+                                on[k]     = con[c][0][k] + dc[k] * s;
+                                onEdge[k] = p[k] + e[k] * t;
+                            }
+                            if ( !visible( onEdge ) )
+                                continue;              // an edge hidden behind the surface
+                        }
+                        float px, py;
+                        if ( !Pick_WorldToImage( on, &px, &py ) )
+                            continue;
+                        const float d = PixelDist( px, py, curX, curY );
+                        if ( d > KSNAP_R_CON_POINT || ( best->hit && d >= best->dist ) )
+                            continue;
+                        best->hit  = true;
+                        best->dist = d;
+                        Copy3( on, best->pos );
+                    }
+                }
+            }
+        }
+    }
     // Brush-face center target: arithmetic mean of winding vertices. SEL_MASK_FACE
     // is required so Pick resolves faceIndex; patches have no winding and are excluded.
     bool FaceCentroid( const sel_item_t &it, float *out )
@@ -1541,11 +1672,12 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     visible.surfT   = surfT;
     visible.ray     = &ray;
     // Gather each construction candidate class once.
-    conBest_t conAnchor, conSeg, conIsect, conMid;
+    conBest_t conAnchor, conSeg, conIsect, conMid, conXBrush;
     if ( haveCursorPx && KiwiCon_Count() > 0 )
     {
         ScanConAnchors      ( curX, curY, &conAnchor );
         ScanConIntersections( curX, curY, &conIsect );
+        ScanConBrushCrossings( ray, curX, curY, pickFlags, visible, &conXBrush );
         ScanConMidpoints    ( curX, curY, &conMid );
         ScanConSegments     ( curX, curY, &conSeg );
     }
@@ -1595,15 +1727,23 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[2] = vert.point[2];
         return true;
     }
-    // Point rank 3: construction crossing, 7 px and not occluded.
-    if ( conIsect.hit && visible( conIsect.pos ) )
+    // Point rank 3: a construction line crossing another construction line or a brush edge
+    // (the nearer on screen), 7 px and not occluded.
     {
-        out->valid = true;
-        out->type  = SNAP_INTERSECTION;
-        out->position[0] = conIsect.pos[0];
-        out->position[1] = conIsect.pos[1];
-        out->position[2] = conIsect.pos[2];
-        return true;
+        const conBest_t *isect = 0;
+        if ( conIsect.hit && visible( conIsect.pos ) )
+            isect = &conIsect;
+        if ( conXBrush.hit && visible( conXBrush.pos ) && ( !isect || conXBrush.dist < isect->dist ) )
+            isect = &conXBrush;
+        if ( isect )
+        {
+            out->valid = true;
+            out->type  = SNAP_INTERSECTION;
+            out->position[0] = isect->pos[0];
+            out->position[1] = isect->pos[1];
+            out->position[2] = isect->pos[2];
+            return true;
+        }
     }
     // Point rank 3b: construction midpoint or quarter point, 7 px and not occluded.
     if ( conMid.hit && visible( conMid.pos ) )

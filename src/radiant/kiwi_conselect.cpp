@@ -13,6 +13,10 @@
 #include "kiwi_refimage.h"       // Unhide All also reveals hidden reference images
 #include "kiwi_region.h"
 #include "kiwi_selection.h"
+#include "kiwi_camera.h"         // Extend: KiwiCam_RayAxis / AxisPortrayable / WorldPerPixel
+#include "kiwi_lines.h"          // Extend: the preview pieces
+#include "kiwi_units.h"          // Extend: the HUD length
+#include "kiwi_vec.h"            // Extend: Dot3 / Sub3 / Norm3 / Mad3
 
 #include <math.h>
 #include <vector>
@@ -602,6 +606,657 @@ bool KiwiConSel_Join()
     return true;
 }
 
+// Extend (KIWI 2026-09-25, user: "an 'extend line' command that takes a line/s and just
+// extends them.  It's used to fill gaps between regions after lines are moved without
+// changing their properties", then: "the extending should be an operation I control with a
+// lollipop handle").  A modal command: the lollipop sits on the selected end nearest the
+// cursor, pointing along its line; dragging it (or typing a length) moves every selected end
+// that far along its OWN end segment, so an object keeps its direction, its other points,
+// group, name and plane.  Nothing is written until Enter.
+namespace
+{
+    const float KCON_EXTEND_MAX    = 4096.0f;   // WORLD UNITS an end may travel
+    const float KCON_EXTEND_MAG_PX = 10.0f;     // the handle clicks onto a line crossing this close
+    const float KCON_EXTEND_MIN    = 0.01f;     // below this an end has not moved
+
+    struct extendEnd_t
+    {
+        int   object;
+        int   vert;                             // the end's index in pts (0 or n-1)
+        int   seg;                              // its end segment's index
+        float p[3], dir[3];                     // the end and its outward unit direction
+        float first;                            // "Stop at lines": where it must stop
+        float t;                                // live travel
+        int   hitObject, hitSeg;                // the line `first` belongs to (-1: none)
+    };
+
+    // A straight, open line / polyline Extend can lengthen.
+    bool Extendable( const kconObject_t *o )
+    {
+        return o && !o->hidden && ( o->type == KCON_LINE || o->type == KCON_POLYLINE )
+            && !o->closed && !KiwiCon_HasSmooth( *o ) && o->pts.size() >= 6;
+    }
+
+    // The ends of object `obj` (n points) the selection names: bit 0 start, bit 1 finish.
+    // *whole = the object itself is selected (Begin then takes its FREE ends); an end point
+    // (Point mode) or end segment names just that end.
+    int SelectedEnds( int obj, int n, bool *whole )
+    {
+        int ends = 0;
+        *whole = false;
+        for ( size_t i = 0; i < s_sel.size(); ++i )
+        {
+            const kconSelItem_t &it = s_sel[i];
+            if ( it.object != obj )
+                continue;
+            if ( it.kind == KCONSEL_OBJECT )
+            {
+                *whole = true;
+                return 3;
+            }
+            const int last = ( it.kind == KCONSEL_POINT ) ? n - 1 : n - 2;
+            if ( it.index == 0 )    ends |= 1;
+            if ( it.index == last ) ends |= 2;
+        }
+        return ends;
+    }
+
+    float PointSegDist2( const float *p, const float *a, const float *b )
+    {
+        float ab[3], ap[3], d[3];
+        Sub3( b, a, ab );
+        Sub3( p, a, ap );
+        const float len2 = Dot3( ab, ab );
+        float s = len2 > 0.0f ? Dot3( ap, ab ) / len2 : 0.0f;
+        s = s < 0.0f ? 0.0f : ( s > 1.0f ? 1.0f : s );
+        for ( int k = 0; k < 3; ++k )
+            d[k] = ap[k] - ab[k] * s;
+        return Dot3( d, d );
+    }
+
+    // How far along the path p + dir*t (t > tol) it comes within tol of segment a-b.  A
+    // parallel segment counts only when it lies ON the path (a collinear piece left behind
+    // by a move): the path runs into its nearer end.
+    bool PathMeetsSegment( const float *p, const float *dir, const float *a, const float *b,
+                           float tol, float *outT )
+    {
+        float e[3], w[3], r[3];
+        Sub3( b, a, e );
+        Sub3( p, a, w );
+        const float ee = Dot3( e, e );
+        if ( ee < 1.0e-8f )
+            return false;
+        const float de = Dot3( dir, e ), dw = Dot3( dir, w ), ew = Dot3( e, w );
+        const float den = ee - de * de;
+        if ( den <= 1.0e-6f * ee )
+        {
+            const float *ends[2] = { a, b };
+            bool  have = false;
+            float best = 0.0f;
+            for ( int n = 0; n < 2; ++n )
+            {
+                Sub3( ends[n], p, r );
+                const float t = Dot3( r, dir );
+                if ( t <= tol )
+                    continue;
+                for ( int k = 0; k < 3; ++k )
+                    r[k] -= dir[k] * t;
+                if ( Dot3( r, r ) > tol * tol )
+                    continue;
+                if ( !have || t < best )
+                {
+                    best = t;
+                    have = true;
+                }
+            }
+            if ( have )
+                *outT = best;
+            return have;
+        }
+        float s = ( ew - de * dw ) / den;
+        s = s < 0.0f ? 0.0f : ( s > 1.0f ? 1.0f : s );
+        for ( int k = 0; k < 3; ++k )
+            r[k] = a[k] + e[k] * s - p[k];
+        const float t = Dot3( r, dir );
+        if ( t <= tol )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            r[k] -= dir[k] * t;
+        if ( Dot3( r, r ) > tol * tol )
+            return false;
+        *outT = t;
+        return true;
+    }
+
+    // Is the end already on another visible line (so a region closes there already)?
+    bool EndTouches( const extendEnd_t &e, float tol )
+    {
+        const int count = KiwiCon_Count();
+        for ( int i = 0; i < count; ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !o || o->hidden )
+                continue;
+            const int segs = KiwiCon_SegmentCount( *o );
+            for ( int s = 0; s < segs; ++s )
+            {
+                float a[3], b[3];
+                if ( i == e.object && s == e.seg )
+                    continue;
+                if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
+                    break;
+                if ( PointSegDist2( e.p, a, b ) <= tol * tol )
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    // The first visible line ahead of the end within KCON_EXTEND_MAX.
+    bool FirstBoundary( const extendEnd_t &e, float tol, float *outT, int *outObject, int *outSeg )
+    {
+        bool  have = false;
+        float best = KCON_EXTEND_MAX;
+        const int count = KiwiCon_Count();
+        for ( int i = 0; i < count; ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !o || o->hidden )
+                continue;
+            const int segs = KiwiCon_SegmentCount( *o );
+            for ( int s = 0; s < segs; ++s )
+            {
+                float a[3], b[3], t;
+                if ( i == e.object && s == e.seg )
+                    continue;
+                if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
+                    break;
+                if ( PathMeetsSegment( e.p, e.dir, a, b, tol, &t ) && t <= best )
+                {
+                    best       = t;
+                    have       = true;
+                    *outObject = i;
+                    *outSeg    = s;
+                }
+            }
+        }
+        *outT = best;
+        return have;
+    }
+
+    // Where two free ends' paths cross, each within (tol, KCON_EXTEND_MAX]: a corner.
+    bool PathsMeet( const extendEnd_t &a, const extendEnd_t &b, float tol, float *ta, float *tb )
+    {
+        const float dd  = Dot3( a.dir, b.dir );
+        const float den = 1.0f - dd * dd;
+        if ( den <= 1.0e-6f )
+            return false;
+        float w[3], gap[3];
+        Sub3( a.p, b.p, w );
+        const float da = Dot3( a.dir, w ), db = Dot3( b.dir, w );
+        const float t = ( dd * db - da ) / den;
+        const float s = ( db - dd * da ) / den;
+        if ( t <= tol || s <= tol || t > KCON_EXTEND_MAX || s > KCON_EXTEND_MAX )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            gap[k] = ( a.p[k] + a.dir[k] * t ) - ( b.p[k] + b.dir[k] * s );
+        if ( Dot3( gap, gap ) > tol * tol )
+            return false;
+        *ta = t;
+        *tb = s;
+        return true;
+    }
+}
+
+bool KiwiConSel_CanExtend()
+{
+    std::vector<int> objs;
+    SelectedObjects( &objs );
+    for ( size_t i = 0; i < objs.size(); ++i )
+    {
+        const kconObject_t *o = KiwiCon_At( objs[i] );
+        bool whole;
+        if ( Extendable( o ) && SelectedEnds( objs[i], (int)( o->pts.size() / 3 ), &whole ) )
+            return true;
+    }
+    return false;
+}
+
+namespace
+{
+    // Every line the end's path crosses within KCON_EXTEND_MAX: the handle's magnets.
+    void PathCrossings( const extendEnd_t &e, float tol, std::vector<float> *out )
+    {
+        out->clear();
+        const int count = KiwiCon_Count();
+        for ( int i = 0; i < count; ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !o || o->hidden )
+                continue;
+            const int segs = KiwiCon_SegmentCount( *o );
+            for ( int s = 0; s < segs; ++s )
+            {
+                float a[3], b[3], t;
+                if ( i == e.object && s == e.seg )
+                    continue;
+                if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
+                    break;
+                if ( PathMeetsSegment( e.p, e.dir, a, b, tol, &t ) && t <= KCON_EXTEND_MAX )
+                    out->push_back( t );
+            }
+        }
+    }
+
+    // Screen distance from the cursor to world point p (FLT_MAX when either is unknown).
+    float CursorPixels( const float *p, bool haveCursor, int cx, int cy )
+    {
+        float x, y;
+        if ( !haveCursor || !Pick_WorldToImage( p, &x, &y ) )
+            return 3.0e38f;
+        return PixelDist( x, y, (float)cx, (float)cy );
+    }
+
+    bool s_extendStop = true;                   // "Stop at the first line" (F), kept across runs
+
+    class KiwiExtendCommand : public KiwiEditorCommand
+    {
+    public:
+        const char *Name() const override { return "Extend Lines"; }
+        bool CanExecute() override { return KiwiConSel_CanExtend(); }
+
+        // Construction grammar: the handle snaps by default, Ctrl frees it.
+        kiwiSnapCtx_t SnapContext() const override { return KSNAPCTX_CONSTRUCT; }
+
+        const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
+
+        int HudPrompts( const kiwiPrompt_t **out ) const override
+        {
+            static const kiwiPrompt_t stop[] = { { "F", "Pass lines" } };
+            static const kiwiPrompt_t pass[] = { { "F", "Stop at lines" } };
+            *out = s_extendStop ? stop : pass;
+            return 1;
+        }
+
+        int CommandOptions( const kiwiOption_t **out ) const override
+        {
+            static const kiwiOption_t options[] =
+                { { "Stop at the first line", KOPT_TOGGLE, nullptr, 0, 0, 0, 1, -1 } };
+            *out = options;
+            return 1;
+        }
+        int OptionValue( int opt ) const override { return opt == 0 ? (int)s_extendStop : 0; }
+        void OptionChanged( int opt, int value ) override
+        {
+            if ( opt != 0 )
+                return;
+            s_extendStop = value != 0;
+            Recompute();
+            g_nUpdateBits |= 1;
+        }
+
+        bool KeyDown( int vk, unsigned int mods ) override
+        {
+            if ( vk != 'F' || mods )
+                return false;
+            OptionChanged( 0, !s_extendStop );
+            return true;
+        }
+
+        bool NumericFieldValue( int field, float *out ) const override
+        {
+            if ( field != 0 || !out || m_ends.empty() )
+                return false;
+            *out = m_ends[m_primary].t;
+            return true;
+        }
+        void NumericChanged( bool has, float world ) override
+        {
+            m_hasNum   = has && KiwiNum_HasValue();
+            m_numWorld = world;
+            Recompute();
+            g_nUpdateBits |= 1;
+        }
+
+        bool BubbleAnchor( float *out3 ) const override
+        {
+            if ( m_ends.empty() || !out3 )
+                return false;
+            const extendEnd_t &e = m_ends[m_primary];
+            Mad3( e.p, e.dir, e.t, out3 );
+            return true;
+        }
+
+        // The handle rides the primary end, pointing on along its line.
+        bool LollipopHandle( float outAnchor[3], float outDir[3] ) const override
+        {
+            if ( m_ends.empty() || !outAnchor || !outDir )
+                return false;
+            const extendEnd_t &e = m_ends[m_primary];
+            Mad3( e.p, e.dir, e.t, outAnchor );
+            Copy3( e.dir, outDir );
+            return true;
+        }
+
+        // A grab drops travel the stop swallowed, so the handle answers from where it shows.
+        void Rebase() override
+        {
+            if ( !m_ends.empty() )
+                m_dist = m_ends[m_primary].t;
+            LatchStart();
+        }
+
+        bool Begin() override
+        {
+            m_ends.clear();
+            m_cross.clear();
+            m_primary   = 0;
+            m_dist      = 0.0f;
+            m_haveStart = false;
+            m_hasNum    = false;
+            m_onLine    = false;
+            m_hud[0]    = '\0';
+            const float tol = KiwiRegion_WeldDist();
+            int  cx = 0, cy = 0;
+            const bool haveCursor = KiwiCmd_LastCursor( &cx, &cy );
+
+            std::vector<int> objs;
+            SelectedObjects( &objs );
+            for ( size_t i = 0; i < objs.size(); ++i )
+            {
+                const kconObject_t *o = KiwiCon_At( objs[i] );
+                if ( !Extendable( o ) )
+                    continue;
+                const int n = (int)( o->pts.size() / 3 );
+                bool whole;
+                const int want = SelectedEnds( objs[i], n, &whole );
+                extendEnd_t cand[2];
+                bool ok[2] = { false, false }, freeEnd[2] = { false, false };
+                for ( int side = 0; side < 2; ++side )
+                {
+                    if ( !( want & ( 1 << side ) ) )
+                        continue;
+                    extendEnd_t &e = cand[side];
+                    e.object    = objs[i];
+                    e.vert      = side ? n - 1 : 0;
+                    e.seg       = side ? n - 2 : 0;
+                    e.first     = KCON_EXTEND_MAX;
+                    e.t         = 0.0f;
+                    e.hitObject = e.hitSeg = -1;
+                    const int nb = side ? n - 2 : 1;
+                    float q[3];
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        e.p[k] = o->pts[(size_t)e.vert * 3 + k];
+                        q[k]   = o->pts[(size_t)nb * 3 + k];
+                    }
+                    Sub3( e.p, q, e.dir );
+                    if ( !Norm3( e.dir, 1.0e-4f ) )
+                        continue;
+                    ok[side]      = true;
+                    freeEnd[side] = !EndTouches( e, tol );
+                }
+                // A whole object extends its FREE ends; with neither free, the one nearer the
+                // cursor.  Named ends (Point mode / end segments) extend as named.
+                if ( whole )
+                {
+                    if ( ok[0] && ok[1] && !freeEnd[0] && !freeEnd[1] )
+                    {
+                        const bool startNearer = CursorPixels( cand[0].p, haveCursor, cx, cy )
+                                              <= CursorPixels( cand[1].p, haveCursor, cx, cy );
+                        ok[startNearer ? 1 : 0] = false;
+                    }
+                    else
+                        for ( int side = 0; side < 2; ++side )
+                            if ( !freeEnd[side] )
+                                ok[side] = false;
+                }
+                for ( int side = 0; side < 2; ++side )
+                    if ( ok[side] )
+                        m_ends.push_back( cand[side] );
+            }
+            if ( m_ends.empty() )
+            {
+                Sys_Printf( "Extend: select open construction lines (or their end points in Point mode) first.\n" );
+                return false;
+            }
+
+            // Where each end stops with "Stop at the first line": the first line ahead, or
+            // where another selected end's path crosses first (a corner a move opened).
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                FirstBoundary( m_ends[i], tol, &m_ends[i].first, &m_ends[i].hitObject, &m_ends[i].hitSeg );
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                for ( size_t j = i + 1; j < m_ends.size(); ++j )
+                {
+                    float ti, tj;
+                    if ( !PathsMeet( m_ends[i], m_ends[j], tol, &ti, &tj ) )
+                        continue;
+                    if ( ti < m_ends[i].first ) m_ends[i].first = ti;
+                    if ( tj < m_ends[j].first ) m_ends[j].first = tj;
+                }
+            // Collinear pieces facing each other across a gap meet halfway.
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                for ( size_t j = i + 1; j < m_ends.size(); ++j )
+                {
+                    extendEnd_t &a = m_ends[i], &b = m_ends[j];
+                    if ( a.hitObject == b.object && a.hitSeg == b.seg
+                      && b.hitObject == a.object && b.hitSeg == a.seg
+                      && Dot3( a.dir, b.dir ) < -0.999f )
+                        a.first = b.first = a.first * 0.5f;
+                }
+
+            // The handle goes on the end nearest the cursor.
+            float bestPx = 3.0e38f;
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+            {
+                const float px = CursorPixels( m_ends[i].p, haveCursor, cx, cy );
+                if ( px < bestPx )
+                {
+                    bestPx    = px;
+                    m_primary = i;
+                }
+            }
+            PathCrossings( m_ends[m_primary], tol, &m_cross );
+            LatchStart();
+            Recompute();
+            return true;
+        }
+
+        void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
+        {
+            (void)pick;
+            m_snap = snap;
+            Recompute();
+            g_nUpdateBits |= 1;
+        }
+
+        void Commit() override
+        {
+            int moved = 0;
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                if ( m_ends[i].t > KCON_EXTEND_MIN )
+                    ++moved;
+            if ( !moved )
+            {
+                Sys_Printf( "Extend: zero length - nothing changed.\n" );
+                m_ends.clear();
+                return;
+            }
+            // ONE store-undo snapshot; the objects keep their indices, so the selection stays.
+            KiwiCon_UndoPush();
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+            {
+                const extendEnd_t &e = m_ends[i];
+                if ( e.t <= KCON_EXTEND_MIN )
+                    continue;
+                kconObject_t *o = KiwiCon_MutableAt( e.object );
+                if ( !o || o->pts.size() < (size_t)( e.vert + 1 ) * 3 )
+                    continue;
+                for ( int k = 0; k < 3; ++k )
+                    o->pts[(size_t)e.vert * 3 + k] = e.p[k] + e.dir[k] * e.t;
+            }
+            KiwiCon_NoteMutated();
+            Sys_Printf( "Extend: %i end%s extended.\n", moved, moved == 1 ? "" : "s" );
+            m_ends.clear();
+            g_nUpdateBits |= 1;
+        }
+
+        void Cancel() override
+        {
+            m_ends.clear();
+            g_nUpdateBits |= 1;
+        }
+
+        int LineBudget() const override { return (int)m_ends.size() + 96; }
+
+        // The extension pieces in construction's in-progress amber; the lines themselves are
+        // untouched until Enter.
+        void DrawWorld() override
+        {
+            KiwiLines_Color( 1.00f, 0.85f, 0.45f );
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+            {
+                const extendEnd_t &e = m_ends[i];
+                if ( e.t <= KCON_EXTEND_MIN )
+                    continue;
+                float q[3];
+                Mad3( e.p, e.dir, e.t, q );
+                if ( !KiwiLines_Add( e.p, q ) )
+                    return;
+            }
+        }
+
+    private:
+        bool CursorRay( ray_t *out ) const
+        {
+            int x, y;
+            return KiwiCmd_LastCursor( &x, &y ) && Pick_RayFromImagePos( x, y, out );
+        }
+
+        // The cursor's travel along the primary path is measured from here (rebase = relatch).
+        void LatchStart()
+        {
+            m_haveStart = false;
+            if ( m_ends.empty() )
+                return;
+            const extendEnd_t &pe = m_ends[m_primary];
+            ray_t ray;
+            float q[3], rel[3];
+            if ( !KiwiCam_AxisPortrayable( pe.dir ) || !CursorRay( &ray )
+              || !KiwiCam_RayAxis( ray, pe.p, pe.dir, q ) )
+                return;
+            Sub3( q, pe.p, rel );
+            m_start     = Dot3( rel, pe.dir ) - m_dist;
+            m_haveStart = true;
+        }
+
+        // Cursor -> travel: a typed length wins; with snapping on, the path's line crossings
+        // (magnetic), then an aimed point projected onto the path, then the soft lattice.
+        void Recompute()
+        {
+            if ( m_ends.empty() )
+                return;
+            const extendEnd_t &pe = m_ends[m_primary];
+            float d = m_dist;
+            const bool canAxis = KiwiCam_AxisPortrayable( pe.dir );
+            if ( !canAxis )
+                m_haveStart = false;                   // looking down the line: hold
+            else if ( !m_haveStart )
+                LatchStart();
+            ray_t ray;
+            float q[3], rel[3];
+            if ( canAxis && m_haveStart && CursorRay( &ray ) && KiwiCam_RayAxis( ray, pe.p, pe.dir, q ) )
+            {
+                Sub3( q, pe.p, rel );
+                d = Dot3( rel, pe.dir ) - m_start;
+            }
+
+            m_onLine = false;
+            if ( m_hasNum )
+                d = m_numWorld;
+            else if ( KiwiCmd_SnapEngaged() )
+            {
+                float bestGap = 3.0e38f;
+                for ( size_t c = 0; c < m_cross.size(); ++c )
+                {
+                    float at[3];
+                    Mad3( pe.p, pe.dir, m_cross[c], at );
+                    const float gap = fabsf( d - m_cross[c] );
+                    if ( gap <= KCON_EXTEND_MAG_PX * KiwiCam_WorldPerPixel( at ) && gap < bestGap )
+                    {
+                        bestGap  = gap;
+                        m_onLine = true;
+                        d        = m_cross[c];
+                    }
+                }
+                float sd = 0.0f;
+                if ( !m_onLine && m_snap.valid && KiwiSnap_IsGeometry( m_snap.type ) && m_snap.type != SNAP_FACE
+                  && KiwiSnap_AxisDepth( m_snap, pe.p, pe.dir, &sd ) && sd > KCON_EXTEND_MIN )
+                    d = sd;
+                else if ( !m_onLine )
+                {
+                    bool major = false;
+                    d = KiwiSnap_LatticeAxis( d, pe.p, pe.dir, false, &major );
+                }
+            }
+            if ( d < 0.0f )            d = 0.0f;             // Extend never shortens (Trim does)
+            if ( d > KCON_EXTEND_MAX ) d = KCON_EXTEND_MAX;
+            m_dist = d;
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                m_ends[i].t = ( s_extendStop && d > m_ends[i].first ) ? m_ends[i].first : d;
+            UpdateHud();
+        }
+
+        void UpdateHud()
+        {
+            char len[32];
+            KiwiUnits_Format( len, sizeof( len ), m_ends.empty() ? 0.0f : m_ends[m_primary].t );
+            int stopped = 0;
+            for ( size_t i = 0; i < m_ends.size(); ++i )
+                if ( s_extendStop && m_dist > m_ends[i].first )
+                    ++stopped;
+            const int n = (int)m_ends.size();
+            if ( stopped )
+                _snprintf( m_hud, sizeof( m_hud ), "extend %i end%s  %s  ·  %i stopped at a line",
+                           n, n == 1 ? "" : "s", len, stopped );
+            else
+                _snprintf( m_hud, sizeof( m_hud ), "extend %i end%s  %s%s",
+                           n, n == 1 ? "" : "s", len, m_onLine ? "  ·  on a line" : "" );
+            m_hud[sizeof( m_hud ) - 1] = '\0';
+        }
+
+        std::vector<extendEnd_t> m_ends;
+        std::vector<float>       m_cross;               // the primary path's line crossings
+        size_t        m_primary   = 0;
+        float         m_dist      = 0.0f;               // the handle's travel before the stops
+        float         m_start     = 0.0f;
+        bool          m_haveStart = false;
+        bool          m_hasNum    = false;
+        float         m_numWorld  = 0.0f;
+        bool          m_onLine    = false;
+        snap_result_t m_snap;
+        char          m_hud[128]  = "";
+    };
+
+    KiwiExtendCommand s_extend;
+}
+
+KiwiEditorCommand *KiwiConSel_CommandForId( int commandId )
+{
+    return ( commandId == KIWI_CMD_CONSTRUCT_EXTEND ) ? &s_extend : 0;
+}
+
+// KIWI (2026-09-25, user: "make the key (E), but only for lines"): E is Extrude's key; with
+// construction lines selected - no brush selection, no region selected - it extends them.
+// Faces (even one merely under the cursor) and regions keep E = Extrude.
+int KiwiConSel_ContextE( int commandId )
+{
+    if ( commandId != KIWI_CMD_EXTRUDE_FACE || !BrushSelectionEmpty()
+      || KiwiRegion_HasSelection() || !KiwiConSel_CanExtend() )
+        return commandId;
+    return KIWI_CMD_CONSTRUCT_EXTEND;
+}
+
 // Delete
 namespace
 {
@@ -1108,6 +1763,7 @@ void KiwiConSel_RegisterCommands()
     // Keep registrations unbound: profiles bind Join, while shared Delete/H chords
     // are arbitrated by KiwiUX_KeyFunnel.
     Radiant_RegisterCommand( "KiwiConstructJoin",   0, 0, KIWI_CMD_CONSTRUCT_JOIN );
+    Radiant_RegisterCommand( "KiwiConstructExtend", 0, 0, KIWI_CMD_CONSTRUCT_EXTEND );
     Radiant_RegisterCommand( "KiwiConstructDelete", 0, 0, KIWI_CMD_CONSTRUCT_DELETE );
     // Unhide All remains palette-only.
     Radiant_RegisterCommand( "KiwiConstructHide",      0, 0, KIWI_CMD_CONSTRUCT_HIDE );

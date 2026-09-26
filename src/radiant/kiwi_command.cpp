@@ -377,6 +377,7 @@ namespace
         { KIWI_CMD_SELCONV_OBJECT,  { "Convert Selection to Objects", "Selection", SEL_MASK_EVERYTHING, KiwiSelConv_CanConvert } },
 
         { KIWI_CMD_CONSTRUCT_JOIN,  { "Join Lines",                   "Construct", 0, KiwiConSel_CanJoin } },
+        { KIWI_CMD_CONSTRUCT_EXTEND,{ "Extend Lines",                 "Construct", 0, KiwiConSel_CanExtend } },
         { KIWI_CMD_CONSTRUCT_DELETE,{ "Construction: Delete Selected","Construct", 0, KiwiConSel_CanDelete } },
         { KIWI_CMD_CONSTRUCT_HIDE,  { "Hide Selected Lines (H)",      "Construct", 0, KiwiConSel_CanHide } },
         { KIWI_CMD_CONSTRUCT_UNHIDE,{ "Unhide All (construction)",    "Construct", 0, KiwiCon_HasHidden  } },
@@ -578,6 +579,8 @@ namespace
         if ( KiwiEditorCommand *c = KiwiMatch_CommandForId( id ) )      // Z match face
             return c;
         if ( KiwiEditorCommand *c = KiwiTrim_CommandForId( id ) )       // T trim lines
+            return c;
+        if ( KiwiEditorCommand *c = KiwiConSel_CommandForId( id ) )     // extend lines (lollipop)
             return c;
         if ( KiwiEditorCommand *c = KiwiOffset_CommandForId( id ) )     // O offset curve
             return c;
@@ -858,10 +861,11 @@ bool KiwiCmd_Dispatch( unsigned int cmdId )
     return handled;
 }
 
-// Resolve context-sensitive B before any route so keys, palette, menus, and Repeat agree.
+// Resolve context-sensitive B and E before any route so keys, palette, menus, and Repeat agree.
 static bool KiwiCmd_DispatchInner( unsigned int cmdId )
 {
     cmdId = (unsigned int)KiwiPatchFillet_ContextB( (int)cmdId );
+    cmdId = (unsigned int)KiwiConSel_ContextE( (int)cmdId );     // KIWI: E on lines = Extend
 
     // Modal ids outrank every instant feature route; any id in this block means Start.
     if ( KiwiCmd_IsModalId( (int)cmdId ) )

@@ -302,6 +302,9 @@ namespace
     {
         int n = 0;
         AddVerb( chips, &n, KIWI_CMD_CONSTRUCT_JOIN,   "Join" );
+        // E is Extrude's key; on construction lines it extends (KiwiConSel_ContextE).
+        AddVerb( chips, &n, KiwiConSel_ContextE( KIWI_CMD_EXTRUDE_FACE ) == KIWI_CMD_CONSTRUCT_EXTEND
+                            ? KIWI_CMD_EXTRUDE_FACE : KIWI_CMD_CONSTRUCT_EXTEND, "Extend" );
         AddVerb( chips, &n, KIWI_CMD_TRIM,             "Trim" );
         AddVerb( chips, &n, KIWI_CMD_OFFSET_CURVE,     "Offset" );
         AddVerb( chips, &n, KIWI_CMD_FILLET_CURVE,     "Fillet" );

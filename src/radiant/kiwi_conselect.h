@@ -66,6 +66,24 @@ bool KiwiConSel_CanJoin();
 // eligible for ordinary region derivation; invalid chains change nothing.
 bool KiwiConSel_Join();
 
+// Extend (KIWI_CMD_CONSTRUCT_EXTEND, modal)
+// A lollipop on the selected end nearest the cursor, along its line: dragging it (or a
+// typed length) moves every selected end that far along its OWN end segment - the
+// objects keep direction, other points, group, name and plane.  Whole objects offer
+// their FREE ends (not on another line within KiwiRegion_WeldDist; with neither free,
+// the end nearer the cursor); Point mode (1) end points / end segments offer those.
+// Snapping (on by default, Ctrl frees) clicks the handle onto the path's line crossings.
+// "Stop at the first line" (F, default on): each end halts at the first line ahead, at
+// another selected end's path (an opened corner), or halfway to a facing collinear end.
+// Enter commits ONE construction undo snapshot; Esc leaves the lines untouched.
+class KiwiEditorCommand;
+bool               KiwiConSel_CanExtend();
+KiwiEditorCommand *KiwiConSel_CommandForId( int commandId );
+// Contextual E (KiwiCmd_DispatchInner, beside ContextB): KIWI_CMD_EXTRUDE_FACE becomes
+// KIWI_CMD_CONSTRUCT_EXTEND when the selection is construction lines only (no brush
+// selection, no region selected, something extendable); otherwise returns commandId.
+int                KiwiConSel_ContextE( int commandId );
+
 // Delete
 // Key ownership requires construction selection and an empty selected_brushes list.
 // Fine typed brush items remain untouched; whole-object selection falls through.

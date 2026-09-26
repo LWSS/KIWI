@@ -4609,6 +4609,18 @@ void KiwiCon_MenuItems()
         ImGui::SetTooltip( "Select two or more open construction lines whose\n"
                            "ends meet (click them, or drag a marquee)." );
     ImGui::SameLine();
+    // KIWI: Extend Lines - a lollipop drags the selected lines' ends on along their lines.
+    ImGui::BeginDisabled( !KiwiConSel_CanExtend() );
+    if ( ImGui::Button( "Extend Lines" ) )
+        Radiant_ExecCommand( KIWI_CMD_CONSTRUCT_EXTEND );
+    ImGui::EndDisabled();
+    if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+        ImGui::SetTooltip( "Drag the handle to lengthen the selected lines along their own\n"
+                           "direction (or type a length).  Whole lines extend their free ends;\n"
+                           "select end points in Point mode to pick ends.  With 'Stop at the\n"
+                           "first line' each end halts on the line it reaches, closing the\n"
+                           "gaps a move left." );
+    ImGui::SameLine();
     ImGui::BeginDisabled( !KiwiConSel_CanDelete() );
     if ( ImGui::Button( "Delete Selected" ) )
         Radiant_ExecCommand( KIWI_CMD_CONSTRUCT_DELETE );

@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34161, modal 34066.
+// 34100..34199 the second instant block. Next free: instant 34161, modal 34067.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -118,6 +118,7 @@
 #define KIWI_CMD_AUTO_BOOL          34120   // "Auto Bool (consolidate brushes)"
 #define KIWI_CMD_PRIM_BOX_CENTER    34064   // MODAL: Shift+V  centre + half-extents
 #define KIWI_CMD_LOFT               34065   // MODAL: L        face + face -> a bridge
+#define KIWI_CMD_CONSTRUCT_EXTEND   34066   // MODAL: lollipop-dragged extension of the selected lines' ends
 // ENT_DROP, MODEL_DROP, and IMPORT_DROPPED are internal payload consumers;
 // never register them.
 #define KIWI_CMD_WINDOW_ENTITIES    34121   // "Entities" (the browser dock window)
