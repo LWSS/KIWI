@@ -530,8 +530,7 @@ namespace
         s_armed = armed;
         ClearCursor();
         s_warnedNoModels = false;
-        SetStatus( armed ? "Armed. Alt+LMB drag in the 3D camera; Esc disarms."
-                         : "Disarmed." );
+        SetStatus( armed ? "Armed." : "Disarmed." );   // KIWI: keys on the camera hint strip
         g_nUpdateBits |= W_CAMERA;
     }
 

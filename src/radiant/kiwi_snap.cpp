@@ -43,11 +43,12 @@ namespace
             ( b->owner->def && b->owner->def->eclass && !b->owner->def->eclass->fixedsize );
     }
 
-    bool CylinderNearRay( const brush_t *def, const ray_t &ray )
+    // Does the ray pass within padPx SCREEN PIXELS (at the box centre) of the brush bounds?
+    bool BoundsNearRay( const brush_t *def, const ray_t &ray, float padPx )
     {
         float centre[3];
         for ( int k = 0; k < 3; ++k ) centre[k] = ( def->mins[k] + def->maxs[k] ) * 0.5f;
-        const float pad = 10.0f * KiwiCam_WorldPerPixel( centre );
+        const float pad = padPx * KiwiCam_WorldPerPixel( centre );
         float lo = 0.0f, hi = 1.0e30f;
         for ( int k = 0; k < 3; ++k )
         {
@@ -243,6 +244,7 @@ namespace
         float pos[3] = { 0.0f, 0.0f, 0.0f };
         float dir[3] = { 0.0f, 0.0f, 0.0f };   // segment direction (edge arm only)
         bool  haveDir = false;
+        bool  quarter = false;                 // KIWI: a quarter point, not the midpoint
     };
 
     inline float PixelDist( float ax, float ay, float bx, float by )
@@ -496,47 +498,398 @@ namespace
             }
         }
     }
-    // Construction midpoints use the 7 SCREEN-PIXEL point radius and outrank
-    // brush midpoints and all line snaps.
-    void ScanConMidpoints( float curX, float curY, conBest_t *best )
+    // KIWI (2026-09-25, user: "the mid and quarter points should be small black nubs that I
+    // can see to point onto and lock on to"): segment DIVISION points - the midpoint, and the
+    // quarter points once the segment is KSNAP_QUARTER_MIN_PX long on screen (shorter, they
+    // would crowd the corners).  Brush edges offer them from every edge near the cursor: the
+    // edge Pick names ONE edge, often a neighbour's shorter collinear one, so the midpoint of
+    // the edge actually aimed at could be unreachable.
+    const float KSNAP_QUARTER_MIN_PX = 48.0f;
+    const float KSNAP_DIV_REACH_PX   = 60.0f;   // edges this close to the cursor show their nubs
+    const float KSNAP_MID_NUB_PX     = 2.4f;    // nub radii as drawn (user: 20% smaller than 3 / 2.25)
+    const float KSNAP_QUARTER_NUB_PX = 1.8f;
+    const float KSNAP_NUB_MIN_SEG_PX = 16.0f;   // shorter segments (curve tessellation) get no nub
+    const int   KSNAP_DIV_DRAW_MAX   = 96;      // nubs drawn per frame
+
+    struct divPt_t
     {
+        float pos[3];
+        float dir[3];                  // unit segment direction
+        float px, py;                  // camera-image pixels
+        float segPx;                   // the segment's projected length
+        bool  quarter;
+    };
+
+    // A segment's LINE (KIWI 2026-09-25, user: a side "isn't being considered as a possible
+    // long line instead of 2-3 chunks").  Modern Plasticity's snap cache (app_window.jsc:
+    // "edges.halves", "edges.circles.quarters", "segments.halves", ...) takes midpoints per
+    // TOPOLOGICAL edge, and the straight side of a solid - or of a union of solids - is one
+    // edge there.  Here a straight side is several pieces: brush edges of separate convex
+    // brushes, or construction segments split where other lines were drawn to them (the
+    // powerplant building outline: one polyline with vertices at a connector's corners).  So
+    // the aimed segment grows over every segment of its own kind lying along it that overlaps
+    // or touches it, and that line's mid / quarter points replace the pieces'.  The points are
+    // taken ON the pieces (ChainPoint), never on an idealised chord.
+    const float KSNAP_LINE_PERP   = 0.5f;       // WORLD UNITS a piece's ends may lie off the line
+    const float KSNAP_LINE_SLOPE  = 0.005f;     // ...plus this per unit beyond the aimed segment
+    const float KSNAP_LINE_GAP    = 0.5f;       // WORLD UNITS between touching pieces
+    const float KSNAP_LINE_COS    = 0.999f;     // |cos| between their directions (~2.6 deg)
+    const int   KSNAP_LINE_PASSES = 8;          // growth passes; each one can only lengthen
+    const int   KSNAP_LINE_PIECES = 64;         // pieces one line keeps
+
+    struct linePiece_t
+    {
+        float a[3], b[3];
+        float ta, tb;                           // a's and b's parameters along the line
+    };
+
+    struct edgeLine_t
+    {
+        float o[3], dir[3];                     // the aimed segment's start, unit direction
+        float s0, s1;                           // the aimed segment's own extent
+        float t0, t1;                           // the line's extent
+        std::vector<linePiece_t> pieces;
+    };
+
+    // Is world segment p-q along L (parallel, both ends within tolerance of it)?  Its ends'
+    // parameters land in *ta (p) and *tb (q).
+    bool OnLine( const edgeLine_t &L, const float *p, const float *q, float *ta, float *tb )
+    {
+        float e[3];
+        Sub3( q, p, e );
+        if ( !Norm3( e, 1.0e-4f ) || fabsf( Dot3( e, L.dir ) ) < KSNAP_LINE_COS )
+            return false;
+        const float *ends[2] = { p, q };
+        float t[2];
+        for ( int n = 0; n < 2; ++n )
+        {
+            float r[3];
+            Sub3( ends[n], L.o, r );
+            t[n] = Dot3( r, L.dir );
+            for ( int k = 0; k < 3; ++k )
+                r[k] -= L.dir[k] * t[n];
+            const float beyond = t[n] < L.s0 ? L.s0 - t[n] : ( t[n] > L.s1 ? t[n] - L.s1 : 0.0f );
+            const float tol    = KSNAP_LINE_PERP + KSNAP_LINE_SLOPE * beyond;
+            if ( Dot3( r, r ) > tol * tol )
+                return false;
+        }
+        *ta = t[0];
+        *tb = t[1];
+        return true;
+    }
+
+    // L := the line of segment p-q alone; false when degenerate.
+    bool SeedLine( edgeLine_t &L, const float *p, const float *q )
+    {
+        float e[3];
+        Sub3( q, p, e );
+        Copy3( e, L.dir );
+        if ( !Norm3( L.dir, 1.0e-4f ) )
+            return false;
+        Copy3( p, L.o );
+        L.s0 = L.t0 = 0.0f;
+        L.s1 = L.t1 = Dot3( e, L.dir );
+        L.pieces.clear();
+        linePiece_t s;
+        Copy3( p, s.a );
+        Copy3( q, s.b );
+        s.ta = L.t0;
+        s.tb = L.t1;
+        L.pieces.push_back( s );
+        return true;
+    }
+
+    // Adds p-q (ends at ta / tb along L) when it touches L and is not in it yet (a brush edge
+    // comes once per face); true when L got longer.
+    bool AddPiece( edgeLine_t &L, const float *p, const float *q, float ta, float tb )
+    {
+        const float lo = ta < tb ? ta : tb, hi = ta < tb ? tb : ta;
+        if ( hi < L.t0 - KSNAP_LINE_GAP || lo > L.t1 + KSNAP_LINE_GAP
+          || (int)L.pieces.size() >= KSNAP_LINE_PIECES )
+            return false;
+        for ( const linePiece_t &s : L.pieces )
+        {
+            const float slo = s.ta < s.tb ? s.ta : s.tb, shi = s.ta < s.tb ? s.tb : s.ta;
+            if ( fabsf( slo - lo ) < 1.0e-2f && fabsf( shi - hi ) < 1.0e-2f )
+                return false;
+        }
+        linePiece_t s;
+        Copy3( p, s.a );
+        Copy3( q, s.b );
+        s.ta = ta;
+        s.tb = tb;
+        L.pieces.push_back( s );
+        bool grew = false;
+        if ( lo < L.t0 - 1.0e-3f ) { L.t0 = lo; grew = true; }
+        if ( hi > L.t1 + 1.0e-3f ) { L.t1 = hi; grew = true; }
+        return grew;
+    }
+
+    // The point of L at parameter t, on the piece that spans it (the chord across a gap).
+    void ChainPoint( const edgeLine_t &L, float t, float *out )
+    {
+        for ( const linePiece_t &s : L.pieces )
+        {
+            const float lo = s.ta < s.tb ? s.ta : s.tb, hi = s.ta < s.tb ? s.tb : s.ta;
+            if ( t < lo - 1.0e-3f || t > hi + 1.0e-3f || hi - lo < 1.0e-4f )
+                continue;
+            const float u = ( t - s.ta ) / ( s.tb - s.ta );
+            for ( int k = 0; k < 3; ++k )
+                out[k] = s.a[k] + ( s.b[k] - s.a[k] ) * u;
+            return;
+        }
+        for ( int k = 0; k < 3; ++k )
+            out[k] = L.o[k] + L.dir[k] * t;
+    }
+
+    // Lengthens L over every segment that lies along it and touches it.  eachSegment( lo, hi,
+    // visit ) calls visit( p, q ) for the segments of L's kind whose bounds meet box lo..hi.
+    template <class E> void GrowLine( edgeLine_t &L, E eachSegment )
+    {
+        for ( int pass = 0; pass < KSNAP_LINE_PASSES; ++pass )
+        {
+            bool        grew = false;
+            float       lo[3], hi[3];
+            const float pad = KSNAP_LINE_GAP + KSNAP_LINE_PERP + KSNAP_LINE_SLOPE * ( L.t1 - L.t0 );
+            for ( int k = 0; k < 3; ++k )
+            {
+                const float s = L.o[k] + L.dir[k] * L.t0, e = L.o[k] + L.dir[k] * L.t1;
+                lo[k] = ( s < e ? s : e ) - pad;
+                hi[k] = ( s < e ? e : s ) + pad;
+            }
+            eachSegment( lo, hi, [&]( const float *p, const float *q )
+            {
+                float ta, tb;
+                if ( OnLine( L, p, q, &ta, &tb ) && AddPiece( L, p, q, ta, tb ) )
+                    grew = true;
+            } );
+            if ( !grew )
+                break;
+        }
+    }
+
+    // fn( const divPt_t & ) for each division point of L - the midpoint, and the quarter
+    // points once L is KSNAP_QUARTER_MIN_PX long on screen (shorter, they would crowd the
+    // corners) - when its projection passes within `reach` pixels of the cursor.  A line
+    // running behind the eye cannot be projected whole: then each point that projects must
+    // itself lie within `reach`.
+    template <class F> void LineDivisions( const edgeLine_t &L, float curX, float curY, float reach, F fn )
+    {
+        float a[3], b[3];
+        ChainPoint( L, L.t0, a );
+        ChainPoint( L, L.t1, b );
+        float ax, ay, bx, by, t;
+        const bool whole = Pick_WorldToImage( a, &ax, &ay ) && Pick_WorldToImage( b, &bx, &by );
+        if ( whole && Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t ) > reach )
+            return;
+        divPt_t d;
+        Copy3( L.dir, d.dir );
+        static const float FRACS[3] = { 0.5f, 0.25f, 0.75f };
+        d.segPx = whole ? PixelDist( ax, ay, bx, by ) : KSNAP_QUARTER_MIN_PX;
+        const int n = d.segPx >= KSNAP_QUARTER_MIN_PX ? 3 : 1;
+        for ( int i = 0; i < n; ++i )
+        {
+            ChainPoint( L, L.t0 + ( L.t1 - L.t0 ) * FRACS[i], d.pos );
+            if ( !Pick_WorldToImage( d.pos, &d.px, &d.py )
+              || ( !whole && PixelDist( d.px, d.py, curX, curY ) > reach ) )
+                continue;
+            d.quarter = i > 0;
+            fn( d );
+        }
+    }
+
+    // What a live transform must not snap to (PICKF_EXCLUDE_SELECTED): its own brushes.
+    void GatherExcluded( unsigned pickFlags, std::vector<const selbrush_t *> &excluded )
+    {
+        if ( !( pickFlags & PICKF_EXCLUDE_SELECTED ) )
+            return;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            excluded.push_back( b );
+        const selection_t &selection = KiwiSel();
+        for ( const sel_item_t &item : selection.items ) excluded.push_back( item.brush );
+    }
+
+    bool Excluded( const std::vector<const selbrush_t *> &excluded, const selbrush_t *b )
+    {
+        for ( const selbrush_t *x : excluded )
+            if ( x == b )
+                return true;
+        return false;
+    }
+
+    // GrowLine's segment sources, one kind each: brush edges never join construction lines.
+    struct BrushSegments
+    {
+        const std::vector<const selbrush_t *> *excluded;
+        template <class G> void operator()( const float *lo, const float *hi, G visit ) const
+        {
+            selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+            for ( selbrush_t *head : lists )
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                const brush_t *def = b->def;
+                if ( !def || !def->faces || b->patch
+                  || def->maxs[0] < lo[0] || def->mins[0] > hi[0]
+                  || def->maxs[1] < lo[1] || def->mins[1] > hi[1]
+                  || def->maxs[2] < lo[2] || def->mins[2] > hi[2]
+                  || Excluded( *excluded, b ) || !Pick_BrushPickable( b ) )
+                    continue;
+                for ( int f = 0; f < def->faceCount; ++f )
+                {
+                    const winding_t *w = def->faces[f].w;
+                    if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING )
+                        continue;
+                    for ( int i = 0; i < w->numpoints; ++i )
+                        visit( w->p[i], w->p[( i + 1 ) % w->numpoints] );
+                }
+            }
+        }
+    };
+
+    // Straight construction geometry only: a circle / arc offers its centre and quadrants
+    // (KiwiCon points) and a spline chain's tessellation segments have no meaningful middle.
+    bool ConStraight( const kconObject_t *o )
+    {
+        return !KiwiCon_IsParametric( *o ) && !KiwiCon_HasSmooth( *o );
+    }
+
+    struct ConSegments
+    {
+        template <class G> void operator()( const float *lo, const float *hi, G visit ) const
+        {
+            const int count = KiwiCon_Count();
+            for ( int i = 0; i < count; ++i )
+            {
+                const kconObject_t *o = KiwiCon_At( i );
+                if ( !ConCandidateUsable( o, i ) || !ConStraight( o ) )
+                    continue;
+                const int segs = KiwiCon_SegmentCount( *o );
+                for ( int s = 0; s < segs; ++s )
+                {
+                    float wa[3], wb[3];
+                    if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
+                        break;
+                    bool outside = false;
+                    for ( int k = 0; k < 3 && !outside; ++k )
+                        outside = ( wa[k] < lo[k] && wb[k] < lo[k] ) || ( wa[k] > hi[k] && wb[k] > hi[k] );
+                    if ( !outside )
+                        visit( wa, wb );
+                }
+            }
+        }
+    };
+
+    // Is segment p-q already part of one of `lines` (grown earlier in this query)?
+    bool Covered( const std::vector<edgeLine_t> &lines, const float *p, const float *q )
+    {
+        for ( const edgeLine_t &L : lines )
+        {
+            float ta, tb;
+            if ( OnLine( L, p, q, &ta, &tb )
+              && ( ta < tb ? ta : tb ) >= L.t0 - KSNAP_LINE_GAP
+              && ( ta < tb ? tb : ta ) <= L.t1 + KSNAP_LINE_GAP )
+                return true;
+        }
+        return false;
+    }
+
+    // Is segment p-q within `reach` pixels of the cursor (or not projectable whole, which
+    // LineDivisions settles per point)?
+    bool SegmentAimed( const float *p, const float *q, float curX, float curY, float reach )
+    {
+        float px, py, qx, qy, t;
+        return !( Pick_WorldToImage( p, &px, &py ) && Pick_WorldToImage( q, &qx, &qy )
+               && Pick_SegDist2D( curX, curY, px, py, qx, qy, &t ) > reach );
+    }
+
+    // fn( const divPt_t &, selbrush_t *, int face, int edge ) over the division points of the
+    // LINE of every pickable brush edge within `reach` pixels of the cursor (patches have no
+    // winding edges - Pick offers their control points only); the node/face/edge is the aimed
+    // piece.  Faces turned away from the cursor ray seed nothing: the nubs draw after a depth
+    // clear, and a brush's own back edges would show through it (every visible edge,
+    // silhouettes too, borders a front face).  Each line is emitted once.
+    template <class F> void BrushDivisions( const ray_t &ray, float curX, float curY, float reach,
+                                            unsigned pickFlags, F fn )
+    {
+        std::vector<const selbrush_t *> excluded;
+        GatherExcluded( pickFlags, excluded );
+        std::vector<edgeLine_t> lines;
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) )
+                continue;
+            const brush_t *def = b->def;
+            if ( !def || !def->faces || def->faceCount <= 0 || !BoundsNearRay( def, ray, reach * 2.0f ) )
+                continue;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
+                  || Dot3( def->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                    continue;
+                for ( int i = 0; i < w->numpoints; ++i )
+                {
+                    const float *p = w->p[i];
+                    const float *q = w->p[( i + 1 ) % w->numpoints];
+                    edgeLine_t   L;
+                    if ( !SegmentAimed( p, q, curX, curY, reach ) || Covered( lines, p, q )
+                      || !SeedLine( L, p, q ) )
+                        continue;
+                    GrowLine( L, BrushSegments{ &excluded } );
+                    lines.push_back( L );
+                    LineDivisions( lines.back(), curX, curY, reach,
+                                   [&]( const divPt_t &d ) { fn( d, b, f, i ); } );
+                }
+            }
+        }
+    }
+
+    // fn( const divPt_t & ) over the division points of the LINE of every usable, straight
+    // construction segment within `reach` pixels of the cursor (lines as above; each once).
+    template <class F> void ConDivisions( float curX, float curY, float reach, F fn )
+    {
+        std::vector<edgeLine_t> lines;
         const int count = KiwiCon_Count();
         for ( int i = 0; i < count; ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            if ( !ConCandidateUsable( o, i ) )
+            if ( !ConCandidateUsable( o, i ) || !ConStraight( o ) )
                 continue;
             const int segs = KiwiCon_SegmentCount( *o );
             for ( int s = 0; s < segs; ++s )
             {
-                float wa[3], wb[3];
+                float      wa[3], wb[3];
+                edgeLine_t L;
                 if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
                     break;
-                const float mid[3] = { ( wa[0] + wb[0] ) * 0.5f,
-                                       ( wa[1] + wb[1] ) * 0.5f,
-                                       ( wa[2] + wb[2] ) * 0.5f };
-                float px, py;
-                if ( !Pick_WorldToImage( mid, &px, &py ) )
+                if ( !SegmentAimed( wa, wb, curX, curY, reach ) || Covered( lines, wa, wb )
+                  || !SeedLine( L, wa, wb ) )
                     continue;
-                const float d = PixelDist( px, py, curX, curY );
-                if ( d > KSNAP_R_CON_POINT )
-                    continue;
-                if ( best->hit && d >= best->dist )
-                    continue;
-                best->hit  = true;
-                best->dist = d;
-                for ( int k = 0; k < 3; ++k )
-                {
-                    best->pos[k] = mid[k];
-                    best->dir[k] = wb[k] - wa[k];
-                }
-                const float l = sqrtf( Dot3( best->dir, best->dir ) );
-                best->haveDir = ( l > 1.0e-4f );
-                if ( best->haveDir )
-                    for ( int k = 0; k < 3; ++k )
-                        best->dir[k] /= l;
+                GrowLine( L, ConSegments() );
+                lines.push_back( L );
+                LineDivisions( lines.back(), curX, curY, reach, fn );
             }
         }
+    }
+
+    // Construction midpoints (and quarter points) use the 7 SCREEN-PIXEL point radius and
+    // outrank brush ones and all line snaps.
+    void ScanConMidpoints( float curX, float curY, conBest_t *best )
+    {
+        ConDivisions( curX, curY, KSNAP_R_CON_POINT, [&]( const divPt_t &d )
+        {
+            const float dist = PixelDist( d.px, d.py, curX, curY );
+            if ( dist > KSNAP_R_CON_POINT || ( best->hit && dist >= best->dist ) )
+                return;
+            best->hit     = true;
+            best->dist    = dist;
+            best->haveDir = true;
+            best->quarter = d.quarter;
+            Copy3( d.pos, best->pos );
+            Copy3( d.dir, best->dir );
+        } );
     }
     // Construction crossings use 3D closest approach and accept gaps up to
     // KCON_ISECT_DIST (0.25 WORLD UNITS), reporting the closest-points midpoint.
@@ -908,6 +1261,7 @@ const char *KiwiSnap_TypeName( snap_type_t t )
     case SNAP_GRID:         return "grid";
     case SNAP_VERTEX:       return "vert";
     case SNAP_EDGE_MID:     return "mid";
+    case SNAP_EDGE_QUARTER: return "quarter";
     case SNAP_EDGE:         return "edge";
     case SNAP_FACE:         return "face";
     case SNAP_FACE_CENTER:  return "center";
@@ -1251,11 +1605,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[2] = conIsect.pos[2];
         return true;
     }
-    // Point rank 3b: construction midpoint, 7 px and not occluded.
+    // Point rank 3b: construction midpoint or quarter point, 7 px and not occluded.
     if ( conMid.hit && visible( conMid.pos ) )
     {
         out->valid = true;
-        out->type  = SNAP_EDGE_MID;
+        out->type  = conMid.quarter ? SNAP_EDGE_QUARTER : SNAP_EDGE_MID;
         out->position[0] = conMid.pos[0];
         out->position[1] = conMid.pos[1];
         out->position[2] = conMid.pos[2];
@@ -1265,7 +1619,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 s_edgeDir[k] = conMid.dir[k];
         return true;                     // `source` stays null — see the header
     }
-    // One brush-edge Pick supplies both its point-rank midpoint and line-rank point.
+    // One brush-edge Pick supplies the line-rank point and its direction.
     const pick_result_t edge = Pick( ray, SEL_MASK_EDGE, pickFlags );
     if ( edge.valid )
     {
@@ -1282,23 +1636,38 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                     s_edgeDir[k] /= len;
                 s_haveEdgeDir = true;
             }
-            // Point rank 4: brush midpoint within 7 SCREEN PIXELS.
-            const float mid[3] = { ( ea[0] + eb[0] ) * 0.5f,
-                                   ( ea[1] + eb[1] ) * 0.5f,
-                                   ( ea[2] + eb[2] ) * 0.5f };
-            float mx, my;
-            if ( haveCursorPx && Pick_WorldToImage( mid, &mx, &my )
-              && PixelDist( mx, my, curX, curY ) <= KSNAP_R_EDGE_MID
-              && visible( mid ) )
-            {
-                out->valid  = true;
-                out->type   = SNAP_EDGE_MID;
-                out->source = edge.item;
-                out->position[0] = mid[0];
-                out->position[1] = mid[1];
-                out->position[2] = mid[2];
-                return true;
-            }
+        }
+    }
+    // Point rank 4: the nearest brush-edge midpoint or quarter point within 7 SCREEN PIXELS,
+    // over EVERY edge near the cursor, each taken over its merged collinear LINE (KIWI
+    // 2026-09-25: it was the picked edge's midpoint only, and the pick often names a
+    // neighbour's shorter collinear edge).
+    if ( haveCursorPx )
+    {
+        bool       have  = false;
+        float      bestD = KSNAP_R_EDGE_MID;
+        divPt_t    best;
+        sel_item_t bestSrc;
+        BrushDivisions( ray, curX, curY, KSNAP_R_EDGE_MID, pickFlags,
+                        [&]( const divPt_t &d, selbrush_t *b, int f, int i )
+        {
+            const float dist = PixelDist( d.px, d.py, curX, curY );
+            if ( dist > bestD || ( have && dist >= bestD ) || !visible( d.pos ) )
+                return;
+            have    = true;
+            bestD   = dist;
+            best    = d;
+            bestSrc = Sel_MakeEdge( b, f, i );
+        } );
+        if ( have )
+        {
+            out->valid  = true;
+            out->type   = best.quarter ? SNAP_EDGE_QUARTER : SNAP_EDGE_MID;
+            out->source = bestSrc;
+            Copy3( best.pos, out->position );
+            Copy3( best.dir, s_edgeDir );    // the marker's along-edge tick
+            s_haveEdgeDir = true;
+            return true;
         }
     }
     // Cylinder ring centres and axis midpoint are real point targets, including
@@ -1306,13 +1675,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     if ( haveCursorPx )
     {
         std::vector<const selbrush_t *> excluded;
-        if ( pickFlags & PICKF_EXCLUDE_SELECTED )
-        {
-            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
-                excluded.push_back( b );
-            const selection_t &selection = KiwiSel();
-            for ( const sel_item_t &item : selection.items ) excluded.push_back( item.brush );
-        }
+        GatherExcluded( pickFlags, excluded );
         float bestPixels = PICK_VERT_PIXELS, bestDepth = 1.0e30f;
         snap_result_t best;
         selbrush_t *lists[] = { &active_brushes, &selected_brushes };
@@ -1321,7 +1684,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         {
             bool skip = false;
             for ( const selbrush_t *x : excluded ) if ( x == b ) { skip = true; break; }
-            if ( skip || !CylinderUsable( b ) || !CylinderNearRay( b->def, ray ) ) continue;
+            if ( skip || !CylinderUsable( b ) || !BoundsNearRay( b->def, ray, 10.0f ) ) continue;
             float ends[2][3];
             if ( !KiwiPrim_CylinderAxis( b->def, ends ) ) continue;
             for ( int point = 0; point < 3; ++point )
@@ -1702,13 +2065,13 @@ void KiwiSnap_EmitMarker( const snap_result_t &r )
     const float h   = wpp * 6.0f;
     float a[3], b[3];
     // All point ranks use a dot and separated ring. Midpoints may add an along-edge tick.
-    if ( r.type == SNAP_VERTEX || r.type == SNAP_EDGE_MID
+    if ( r.type == SNAP_VERTEX || r.type == SNAP_EDGE_MID || r.type == SNAP_EDGE_QUARTER
       || r.type == SNAP_ENDPOINT || r.type == SNAP_INTERSECTION
       || r.type == SNAP_FACE_CENTER )
     {
         EmitDotAndRing( c, r.position, wpp );
         // The along-edge tick distinguishes a midpoint from an isolated point.
-        if ( r.type == SNAP_EDGE_MID && s_haveEdgeDir )
+        if ( ( r.type == SNAP_EDGE_MID || r.type == SNAP_EDGE_QUARTER ) && s_haveEdgeDir )
         {
             for ( int k = 0; k < 3; ++k )
             {
@@ -1809,9 +2172,10 @@ void KiwiSnap_EmitMarker( const snap_result_t &r )
     }
     AddNudged( c, a, b );
 }
-// Advertise the hovered face's actual point targets: corners, edge midpoints,
-// and vertex-average center. Requires a compatible live command, visible markers,
-// and engaged snapping. Own batch is capped at KSNAP_ACCENT_MAX points.
+// Advertise the actual point targets: mid/quarter nubs on the edges near the cursor, the
+// hovered face's corners and vertex-average center. Requires a compatible live command,
+// visible markers, and engaged snapping. Own batches, capped at KSNAP_DIV_DRAW_MAX nubs
+// and KSNAP_ACCENT_MAX face points.
 void KiwiSnap_DrawFaceAccents()
 {
     if ( !KiwiSnap_ShowMarkers() )
@@ -1833,6 +2197,38 @@ void KiwiSnap_DrawFaceAccents()
     ray_t ray;
     if ( !KiwiCmd_LastCursor( &x, &y ) || !Pick_RayFromImagePos( x, y, &ray ) )
         return;
+
+    // KIWI: black nubs on the midpoints and quarter points of every edge near the cursor
+    // (brush and construction), the targets snap rank 3b/4 locks onto.  Independent of the
+    // face under the cursor, so a roof edge shows its nubs with the pointer just outside it.
+    // Width-2 lines so a 3 px nub reads solid; one nub per spot (edges are shared).
+    {
+        const float curX = (float)x, curY = (float)y;
+        float drawn[KSNAP_DIV_DRAW_MAX][2];
+        int   count = 0;
+        KiwiLines_Begin( KSNAP_DIV_DRAW_MAX * ( KSNAP_ACCENT_SEGS + KSNAP_ACCENT_SEGS / 2 ), 2 );
+        KiwiLines_Color( KSNAP_COL_MARK[0], KSNAP_COL_MARK[1], KSNAP_COL_MARK[2] );
+        auto nub = [&]( const divPt_t &d )
+        {
+            if ( count >= KSNAP_DIV_DRAW_MAX || d.segPx < KSNAP_NUB_MIN_SEG_PX )
+                return;
+            for ( int i = 0; i < count; ++i )
+                if ( fabsf( drawn[i][0] - d.px ) < 1.5f && fabsf( drawn[i][1] - d.py ) < 1.5f )
+                    return;
+            drawn[count][0] = d.px;
+            drawn[count][1] = d.py;
+            ++count;
+            float p[3];
+            Nudge( c, d.pos, p );
+            EmitDisc( c, p, ( d.quarter ? KSNAP_QUARTER_NUB_PX : KSNAP_MID_NUB_PX ) * WorldPerPixel( c, d.pos ),
+                      KSNAP_ACCENT_SEGS, true );
+        };
+        ConDivisions( curX, curY, KSNAP_DIV_REACH_PX, nub );
+        BrushDivisions( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
+                        [&]( const divPt_t &d, selbrush_t *, int, int ) { nub( d ); } );
+        KiwiLines_Flush();
+    }
+
     // SEL_MASK_FACE without OBJECT is load-bearing: Pick resolves faceIndex only
     // in face-granularity mode. Selection mode does not change placement targets.
     const pick_result_t hit = Pick( ray, SEL_MASK_FACE );
@@ -1858,7 +2254,7 @@ void KiwiSnap_DrawFaceAccents()
     {
         for ( int k = 0; k < 3; ++k )
             centre[k] += w->p[i][k];
-        // Emit each corner and its outgoing edge midpoint in one bounded pass.
+        // Corners (edge midpoints are the nubs above).
         if ( emitted < KSNAP_ACCENT_MAX )
         {
             float p[3];
@@ -1867,20 +2263,8 @@ void KiwiSnap_DrawFaceAccents()
                       KSNAP_ACCENT_SEGS, true );
             ++emitted;
         }
-        if ( emitted < KSNAP_ACCENT_MAX )
-        {
-            const int j = ( i + 1 ) % w->numpoints;
-            float mid[3];
-            for ( int k = 0; k < 3; ++k )
-                mid[k] = ( w->p[i][k] + w->p[j][k] ) * 0.5f;
-            float p[3];
-            Nudge( c, mid, p );
-            EmitDisc( c, p, KSNAP_ACCENT_PIX * WorldPerPixel( c, mid ),
-                      KSNAP_ACCENT_SEGS, true );
-            ++emitted;
-        }
     }
-    // Emit the derived center last so corners and midpoints own a tight budget.
+    // Emit the derived center last so the corners own a tight budget.
     if ( emitted < KSNAP_ACCENT_MAX )
     {
         const float inv = 1.0f / (float)w->numpoints;
@@ -2117,7 +2501,7 @@ void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
     // Labels are the only per-type colors. Shared midpoint/edge types use their
     // point/line tint; construction-only types use the construction tint.
     ImU32 tint = IM_COL32( 220, 220, 235, 255 );                       // grid / off
-    if ( r.type == SNAP_VERTEX || r.type == SNAP_EDGE_MID
+    if ( r.type == SNAP_VERTEX || r.type == SNAP_EDGE_MID || r.type == SNAP_EDGE_QUARTER
       || r.type == SNAP_FACE_CENTER )
         tint = IM_COL32( 120, 255, 145, 255 );                         // point
     else if ( r.type == SNAP_EDGE || r.type == SNAP_AXIS )

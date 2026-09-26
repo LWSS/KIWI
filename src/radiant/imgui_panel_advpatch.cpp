@@ -36,9 +36,10 @@ void ImGuiPanel_AdvPatch_MenuItem()
 }
 
 // U-CMD-2: cmd 33130 (Patch -> Advanced Edit, key Y) — Radiant_DispatchCommandDirect.
+// KIWI: Y arms / disarms the terrain tool (the panel toggle stays on the Windows menu).
 void ImGuiPanel_AdvPatch_Toggle()
 {
-    KiwiTerrain_TogglePanel();
+    KiwiTerrain_ToggleArmed();
 }
 
 void ImGuiPanel_AdvPatch_Draw()

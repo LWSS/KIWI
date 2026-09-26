@@ -2260,6 +2260,99 @@ namespace
         return value;
     }
 
+    // ── GRID-LOCKED ("crisp") SCALE ──────────────────────────────────────────
+    // KIWI (2026-09-24, user: "scale up/down the texture without losing the nice crisp edge
+    // matching of the UV"): an outline edge is crisp when it sits exactly on a grid line
+    // (grid X/Y split one repeat into cells).  Scaling about an anchor A by k takes a vertex
+    // at A + n cells to A + k*n cells, so with A on a grid point every crisp vertex stays
+    // crisp iff k*n is whole for all of them.  With G = gcd of their |n| that is exactly
+    // k = m/G for whole m: each step of m adds or removes one GCD-run of cells across the
+    // shapes (one brick course / panel / tile more or fewer) and never parks an edge between
+    // two lines.  Vertices that were not on a line are left out of G - never crisp anyway.
+    bool        s_gridLock        = false;
+    const float KUVE_GRID_ON_LINE = 0.02f;   // cells: closer than this counts as on the line
+
+    int   GcdI( int a, int b )  { while ( b ) { const int t = a % b; a = b; b = t; } return a; }
+    float GridCell( int axis )  { return axis ? StripeV() : StripeU(); }
+
+    // The coordinate on its grid line: always (force), or only when it already is one.
+    float GridAnchor( float value, int axis, bool force )
+    {
+        const float d = value / GridCell( axis ), r = floorf( d + 0.5f );
+        return ( force || fabsf( d - r ) <= KUVE_GRID_ON_LINE ) ? r * GridCell( axis ) : value;
+    }
+
+    // G over the chosen axes; 0 = no crisp vertex off the anchor.  *offGrid counts the
+    // coordinates that were not on a line.
+    int GridGcd( const std::vector<uvPt_t> &pts, const float anchor[2], bool useU, bool useV,
+                 int *offGrid )
+    {
+        int g = 0;
+        for ( size_t i = 0; i < pts.size(); ++i )
+            for ( int a = 0; a < 2; ++a )
+            {
+                if ( a == 0 ? !useU : !useV )
+                    continue;
+                const float d = ( ( a ? pts[i].v : pts[i].u ) - anchor[a] ) / GridCell( a );
+                const float r = floorf( d + 0.5f );
+                if ( fabsf( d - r ) > KUVE_GRID_ON_LINE )
+                {
+                    if ( offGrid )
+                        ++*offGrid;
+                    continue;
+                }
+                const int n = ( r < 0.0f ) ? -(int)r : (int)r;
+                if ( n )
+                    g = GcdI( g, n );
+            }
+        return g;
+    }
+
+    // The crisp scale nearest k; never 0 (a flip keeps its sign).
+    float GridQuantize( float k, int g )
+    {
+        if ( g <= 0 )
+            return k;
+        float m = floorf( k * (float)g + 0.5f );
+        if ( m == 0.0f )
+            m = ( k < 0.0f ) ? -1.0f : 1.0f;
+        return m / (float)g;
+    }
+
+    // The targets' displayed outline points (faces: winding, patches: control ring) - the
+    // same sets a gesture captures as s_gTgtPts.
+    void TargetDispPoints( std::vector<uvPt_t> &out )
+    {
+        out.clear();
+        float poly[KUVE_MAX_WINDING][2];
+        for ( size_t i = 0; i < s_faces.size(); ++i )
+        {
+            if ( !FaceIsTarget( i ) )
+                continue;
+            const int n = FaceStPointsDisp( i, poly, nullptr );
+            for ( int k = 0; k < n; ++k )
+            {
+                uvPt_t p;
+                p.u = poly[k][0];
+                p.v = poly[k][1];
+                out.push_back( p );
+            }
+        }
+        for ( size_t pi = 0; pi < s_patches.size(); ++pi )
+        {
+            if ( !PatchIsTarget( pi ) )
+                continue;
+            const int n = PatchRing( pi, poly );
+            for ( int k = 0; k < n; ++k )
+            {
+                uvPt_t p;
+                p.u = poly[k][0];
+                p.v = poly[k][1];
+                out.push_back( p );
+            }
+        }
+    }
+
     float NormDeg( float a )
     {
         while ( a >= 180.0f ) a -= 360.0f;
@@ -3171,10 +3264,26 @@ namespace
                     k[i] = val;
                 }
             }
-            ApplySelection( XfAboutOrigin( k[0], 0.0f, 0.0f, k[1], o[0], o[1] ),
+            // Crisp scale: the fixed side goes exactly onto its grid line and the factor to
+            // the nearest m/G (see GRID-LOCKED SCALE), per armed axis or shared when uniform.
+            float piv[2] = { o[0], o[1] };
+            if ( s_gridLock )
+            {
+                piv[0] = GridAnchor( o[0], 0, false );
+                piv[1] = GridAnchor( o[1], 1, false );
+                int offGrid = 0;
+                if ( uniform )
+                    k[0] = k[1] = GridQuantize( k[0], GridGcd( s_gTgtPts, piv, true, true, &offGrid ) );
+                else
+                    for ( int i = 0; i < 2; ++i )
+                        if ( s_gAxis[i] )
+                            k[i] = GridQuantize( k[i], GridGcd( s_gTgtPts, piv, i == 0, i == 1, &offGrid ) );
+            }
+            ApplySelection( XfAboutOrigin( k[0], 0.0f, 0.0f, k[1], piv[0], piv[1] ),
                             nullptr, "uv scale" );
-            _snprintf( s_status, sizeof( s_status ), "scale  x%.4f, x%.4f%s%s",
-                       k[0], k[1], uniform ? "  (uniform)" : "", SnapLabel() );
+            _snprintf( s_status, sizeof( s_status ), "scale  x%.4f, x%.4f%s%s%s",
+                       k[0], k[1], uniform ? "  (uniform)" : "",
+                       s_gridLock ? "  [crisp: edges stay on grid lines]" : "", SnapLabel() );
             break;
         }
         case UVG_SHEAR:
@@ -3473,6 +3582,49 @@ namespace
         UndoCommit();
     }
 
+    // "Texture +" (bigger = the footprint covers fewer cells) / "Texture -": the nearest
+    // crisp uniform step about the grid point nearest the pivot - one GCD-run of cells, or
+    // with `big` half / double the run.  Every edge that was on a grid line stays on one.
+    void GridStepScale( bool bigger, bool big )
+    {
+        std::vector<uvPt_t> pts;
+        TargetDispPoints( pts );
+        if ( pts.empty() )
+            return;
+        const float anchor[2] = { GridAnchor( s_originU, 0, true ), GridAnchor( s_originV, 1, true ) };
+        int offGrid = 0;
+        const int g = GridGcd( pts, anchor, true, true, &offGrid );
+        float k;
+        int   m = 0;
+        if ( g <= 0 )
+        {
+            k = bigger ? 0.5f : 2.0f;       // nothing to keep crisp: a plain halving / doubling
+        }
+        else
+        {
+            m = big ? ( bigger ? g / 2 : g * 2 ) : ( bigger ? g - 1 : g + 1 );
+            if ( m < 1 )
+            {
+                _snprintf( s_status, sizeof( s_status ),
+                           "already the largest crisp texture on this grid (one cell per run) - "
+                           "raise grid X/Y to step finer" );
+                s_status[sizeof( s_status ) - 1] = '\0';
+                return;
+            }
+            k = (float)m / (float)g;
+        }
+        ApplyAffineImmediate( XfAboutOrigin( k, 0.0f, 0.0f, k, anchor[0], anchor[1] ), "uv crisp scale" );
+        if ( g <= 0 )
+            _snprintf( s_status, sizeof( s_status ),
+                       "texture %s (x%.2f): no edge sat on a grid line, so there was nothing to keep "
+                       "crisp - line an edge up with the grid first", bigger ? "bigger" : "smaller", k );
+        else
+            _snprintf( s_status, sizeof( s_status ),
+                       "texture %s: %d -> %d cells per run (footprint x%.4f)%s", bigger ? "bigger" : "smaller",
+                       g, m, k, offGrid ? " - some vertices were off the grid and are not kept crisp" : "" );
+        s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
     void ApplyField( uvField_t field, float value, const char *undoName )
     {
         if ( s_faces.empty() )
@@ -3578,6 +3730,31 @@ namespace
         ImGui::SetNextItemWidth( 70.0f );
         if ( ImGui::InputInt( "grid Y", &s_subY, 1, 1 ) )
             s_subY = ClampI( s_subY, 1, 16 );
+
+        // KIWI (2026-09-24): crisp scaling - see GRID-LOCKED SCALE.
+        ImGui::SameLine();
+        ImGui::Checkbox( "Crisp scale", &s_gridLock );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Scale handles only stop at sizes that keep every edge that is on a\n"
+                               "grid line on a grid line - whole tiles, or whole grid cells when grid\n"
+                               "X/Y split the tile (set them to the texture's panels / bricks).\n"
+                               "The fixed side is pinned exactly onto its line." );
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !canAny );
+        if ( ImGui::Button( "Texture +" ) )
+            GridStepScale( true, ImGui::GetIO().KeyShift );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Texture BIGGER on the faces, one crisp step: the shapes cover one\n"
+                               "grid-cell run less, and every edge that was on a grid line stays on\n"
+                               "one.  Scales about the grid point nearest the yellow pivot.\n"
+                               "Shift: a big step (half the cells)." );
+        ImGui::SameLine();
+        if ( ImGui::Button( "Texture -" ) )
+            GridStepScale( false, ImGui::GetIO().KeyShift );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Texture SMALLER on the faces, one crisp step (one more grid-cell\n"
+                               "run).  Shift: a big step (double the cells)." );
+        ImGui::EndDisabled();
 
         // Numeric row: face texdefs only.
         MaterialDef  *md = nullptr;
@@ -3841,27 +4018,14 @@ void KiwiUvEd_Draw()
 
         if ( !AnythingSelected() )
         {
-            ImGui::TextWrapped(
-                "Nothing selected.  Select brush faces (or whole brushes, or patches) and "
-                "their UV wireframes appear here over the active material, tiled.\n\n"
-                "Drag a shape to MOVE it - the outline follows the cursor.  The targeted "
-                "shapes (drawn in GOLD) share one transform box: corner handles scale "
-                "about the OPPOSITE corner (Shift = uniform), edge handles scale one axis "
-                "about the opposite edge, just outside a corner rotates, Alt + an edge "
-                "handle skews, and the yellow dot is the pivot for rotate / skew / the "
-                "Rot 90 and Flip buttons (drag it to move it).\n\n"
-                "Click a shape to edit only that one; click the same spot again to step "
-                "down through shapes stacked there; Shift+click adds; Ctrl+click removes; "
-                "drag on "
-                "empty canvas to rubber-band; click empty canvas (or Esc) for all of them "
-                "again.  Right/middle drag pans, the wheel zooms, HOLD CTRL while dragging "
-                "to snap "
-                "(grid, whole texels and the other shapes' vertices - drags are free "
-                "without it), Esc cancels a live drag.\n\n"
-                "Multiple faces are FOLDED OUT along the world edges they share, so they "
-                "stop stacking on top of each other (\"Chain\" in the toolbar turns that "
-                "off).  The grid is a guide and a snap target only - nothing is dragged "
-                "by it." );
+            // KIWI: one centred line; the usage lives in kiwi_uveditor.h.
+            const char  *empty = "No Faces Selected";
+            const ImVec2 avail = ImGui::GetContentRegionAvail();
+            const ImVec2 size  = ImGui::CalcTextSize( empty );
+            const ImVec2 at    = ImGui::GetCursorPos();
+            ImGui::SetCursorPos( ImVec2( at.x + ( avail.x - size.x > 0.0f ? ( avail.x - size.x ) * 0.5f : 0.0f ),
+                                         at.y + ( avail.y - size.y > 0.0f ? ( avail.y - size.y ) * 0.5f : 0.0f ) ) );
+            ImGui::TextDisabled( "%s", empty );
             if ( s_gesture != UVG_NONE )
                 GestureCancel();
         }

@@ -314,12 +314,13 @@ namespace
     }
 
     // An armed sculpt tool owns the camera's LMB, so its grammar replaces the
-    // pick/select prompts (kiwi_terrain.cpp KiwiTerrain_HudPrompts).
-    int BuildTerrainPrompts( chip_t *chips )
+    // pick/select prompts (kiwi_terrain.cpp KiwiTerrain_HudPrompts); the keys every
+    // tool shares take the verbs side (KiwiTerrain_HudKeys).
+    int BuildTerrainChips( chip_t *chips, int ( *source )( const kiwiPrompt_t ** ) )
     {
         int n = 0;
         const kiwiPrompt_t *p = 0;
-        const int count = KiwiTerrain_HudPrompts( &p );
+        const int count = source( &p );
         for ( int i = 0; i < count && p; ++i )
             AddChip( chips, &n, p[i].key ? p[i].key : "?", p[i].label ? p[i].label : "" );
         return n;
@@ -605,7 +606,8 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
         // would lie about what a click does.
         if ( KiwiTerrain_IsArmed() )
         {
-            nP = BuildTerrainPrompts( prompts );
+            nP = BuildTerrainChips( prompts, KiwiTerrain_HudPrompts );
+            nV = BuildTerrainChips( verbs,   KiwiTerrain_HudKeys );
         }
         // Sun wins because clicking elsewhere clears it, making it the most recent target.
         else if ( KiwiSun_Selected() )

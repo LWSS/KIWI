@@ -14,14 +14,16 @@
 //
 // The panel owns the settings; the viewport bridge (kiwi_viewport.cpp) owns the
 // press/drag/release cycle while the tool is armed.  While armed, bare LMB in the
-// camera sculpts (Far Cry Sandbox model); Esc disarms.
+// camera sculpts (Far Cry Sandbox model); Y arms, Y or Esc disarms.
 
 void KiwiTerrain_MenuItem();
 void KiwiTerrain_Draw();
 
-// Windows-menu / palette / Y-key route (KIWI_CMD_TERRAIN_PANEL, classic 33130).
+// Windows-menu / palette route (KIWI_CMD_TERRAIN_PANEL).
 void KiwiTerrain_TogglePanel();
 bool KiwiTerrain_PanelVisible();
+// Y (classic 33130): arm the current tool, opening the panel; Y again disarms.
+void KiwiTerrain_ToggleArmed();
 // Show the panel with a given tool selected (kiwi_grass.cpp routes here for Grass).
 void KiwiTerrain_OpenWithTool( int tool );
 
@@ -47,17 +49,19 @@ bool KiwiTerrain_CanJoinSelected();
 int  KiwiTerrain_JoinSelected();
 
 bool KiwiTerrain_IsArmed();
-// Viewport hint strip (kiwi_hints.cpp): the armed tool's key grammar as chips, so
-// "V / Ctrl+LMB pick the height under the cursor" is on screen while sculpting and
-// not only in the panel. Static storage; 0 when not armed.
+// Viewport hint strip (kiwi_hints.cpp): the armed tool's key grammar as chips - the
+// panel carries no key text.  Prompts = the tool's own keys (left strip), Keys = the
+// ones every tool shares: radius, strength, Tab, Ctrl+Tab, disarm (right strip).
+// Static storage; 0 when not armed.
 struct kiwiPrompt_t;
 int  KiwiTerrain_HudPrompts( const kiwiPrompt_t **out );
+int  KiwiTerrain_HudKeys( const kiwiPrompt_t **out );
 bool KiwiTerrain_HandleDown( int imgX, int imgY, bool shift, bool ctrl );
 void KiwiTerrain_HandleDrag( int imgX, int imgY );
 void KiwiTerrain_HandleUp();
 void KiwiTerrain_HandleAbort();
 bool KiwiTerrain_HandleEscape();
-// Esc / + / - / Ctrl+wheel radius, Shift+wheel strength.  True = consumed.
+// Esc / + / - / Ctrl+wheel radius, Shift+wheel strength, Ctrl+(Shift+)Tab tool.  True = consumed.
 bool KiwiTerrain_HandleKey( int vk );
 // Armed wheel: Ctrl = radius, Shift = strength, Alt = the tool's own value (Set height:
 // the target Z, 8 units a notch, 1 with Shift; every other sculpt tool: strength).
@@ -65,9 +69,10 @@ bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl, bool alt = fal
 
 void KiwiTerrain_Hover( int imgX, int imgY, bool over );
 void KiwiTerrain_DrawWorld();
-// Camera ImGui overlay (kiwi_viewport.cpp KiwiVP_DrawCameraOverlay): while the
-// height colours are on, a colour scale on the left edge with the heights in the
-// display units (yd / ft / in) and a marker at the cursor's height.  Never claims hover.
+// Camera ImGui overlay (kiwi_viewport.cpp KiwiVP_DrawCameraOverlay): the tool's name
+// flashed at the top centre when it is armed or swapped; while the height colours are
+// on, a colour scale on the left edge with the heights in the display units (yd / ft /
+// in) and a marker at the cursor's height.  Never claims hover.
 void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // -kiwitest entry points (kiwi_test.cpp `terrain` verb): the tool by name (raise,

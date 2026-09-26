@@ -333,6 +333,9 @@ void        KiwiCon_ClearPlaneToDefault();
 
 // Draw construction lines and points; region fills use the command-overlay slot.
 void KiwiCon_DrawWorld();
+// The selected lines and points again, white and 2 px, AFTER the region fills (which
+// otherwise wash selected and unselected into the same tint).  Nothing when none selected.
+void KiwiCon_DrawSelectionOverlay();
 
 // Remembered round-tool count: 0=automatic, otherwise clamped and persisted.
 int  KiwiCon_ToolSides();

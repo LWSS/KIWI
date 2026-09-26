@@ -73,6 +73,7 @@ extern void SunPrev_Setup();                                  // brush.cpp (Stag
 extern int  SunPrev_Active();                                 // brush.cpp — sun key present
 extern void SunPrev_FaceShade( const float *wn, float *out4 );// brush.cpp — per-face sun colour
 extern int  Sys_Printf( const char *fmt, ... );               // win_qe3.cpp — editor console (0x499e90)
+extern void KiwiCon_DrawSelectionOverlay();                   // KIWI: kiwi_construct.cpp — selection over the region fills
 
 extern entity_s *world_entity;   // entity.cpp 0x25D5B30 — worldspawn (carries the sun keys)
 // kisak's BSP sun-light parser/interpreter (r_bsp_load_obj.cpp) — the same pair the binary's
@@ -4379,9 +4380,10 @@ void CamWnd_Draw( HWND hwnd )
         // Phase 2 (§4/§6): the ACTIVE modal command's live overlay plus its snap marker,
         // in the same tail and under the same rules (bounded batch, additive only).
         // Emits nothing when no command is running.
-        // ROUND N (§6): the hovered face's SNAP ACCENTS — small dark dots at the
-        // corners, edge midpoints and centre of whatever face is under the cursor
-        // while a PLACEMENT tool is live, so the tool advertises where it can land
+        // ROUND N (§6): the SNAP ACCENTS — small dark dots at the corners and centre of
+        // whatever face is under the cursor, plus (KIWI 2026-09-25) black nubs on the
+        // midpoints and quarter points of every edge near the cursor, while a
+        // PLACEMENT tool is live, so the tool advertises where it can land
         // before the cursor is near any of them (kiwi_snap.h).  BEFORE the command's
         // own overlay so the live rubber band and the marker read on top of the
         // guidance rather than under it.  Self-budgeted; emits nothing when no
@@ -4433,6 +4435,8 @@ void CamWnd_Draw( HWND hwnd )
                 KiwiLines_Begin( 8, 2 );
                 KiwiRegion_DrawFills( -1 );
                 KiwiLines_Flush();
+                // KIWI: the fills wash the lines under them; the selection goes back on top.
+                KiwiCon_DrawSelectionOverlay();
             }
         }
         extern void KiwiCmd_DrawWorld();      // kiwi_command.cpp

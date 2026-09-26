@@ -1567,6 +1567,11 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     if ( vk == 0x1B && KiwiSun_Selected() )                          // VK_ESCAPE
         KiwiSun_ClearSelection();
 
+    // KIWI: construction lines/points are a peer as well (user 2026-09-25: "when esc is
+    // pressed, it needs to cancel the selection") - nothing cleared them on Esc.
+    if ( vk == 0x1B && !KiwiConSel_Empty() )                         // VK_ESCAPE
+        KiwiConSel_Clear();
+
     // Patch-vertex and section-pick are modes: consume one Esc level at a time.
     if ( vk == 0x1B && KiwiPatchVerts_HandleEscape() )               // VK_ESCAPE
         return true;

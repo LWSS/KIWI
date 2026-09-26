@@ -93,6 +93,7 @@ extern void         Ed_EnsureCurrentMaterial_Kiwi();                            
 extern selbrush_t  *KiwiExtrude_LandDef( brush_t *def );                              // kiwi_extrude.cpp (world + selected)
 extern void         sub_47B940( brush_t *def );                                       // brush.cpp:5841 Brush_UpdateSpecialMaterialFlag
 extern void         MarkMapModified();                                                // win_qe3.cpp
+extern void         KiwiWindows_SyncMenu();                                           // kiwi_windows.cpp
 extern void         KiwiMtl_RealizeFace( face_t *f );                                 // kiwi_material.h
 // The weight overlay re-emits a patch's flat-colour run after the reference images.
 extern int          Editor_MaterialSortKey( Material *handle );        // r_ed_scene.cpp 0x4FDBB0
@@ -124,18 +125,14 @@ namespace
     enum kterFalloff_t { KTER_FO_SMOOTH = 0, KTER_FO_LINEAR, KTER_FO_SHARP, KTER_FO_CONSTANT };
 
     const char *KTER_TOOL_NAME[KTER_TOOL_COUNT] =
-        { "Raise / Dig", "Set height", "Smooth", "Noise", "Texture paint", "Blend", "Grass", "Trim" };
-    const char *KTER_TOOL_HINT[KTER_TOOL_COUNT] =
-    {
-        "LMB raise   Ctrl+LMB dig   Shift+LMB smooth   V pick base height",
-        "LMB sets everything inside the outer ring to the target Z, instantly   V / Ctrl+LMB pick the height under the pointer   Alt+wheel target   Shift+LMB smooth",
-        "LMB smooth",
-        "LMB add noise   Ctrl+LMB subtract   Shift+LMB smooth",
-        "LMB paint the brush material onto any terrain touched   Ctrl+LMB paint it out   Shift+LMB smooth   I eyedropper",
-        "LMB blends every layer's weights with their neighbours, across patch seams too",
-        "LMB scatter models along the stroke   Esc disarms",
-        "LMB removes every terrain chunk whose centre is under the brush",
-    };
+        { "Raise / Dig", "Set height", "Smooth", "Noise", "Texture paint", "Texture Blend", "Grass", "Trim" };
+
+    // KIWI: panel and Ctrl+Tab order.  The enum order is persisted ("Tool") and kiwi_grass.cpp
+    // hard-codes KTER_GRASS, so the list reorders instead.  Smooth is not listed (Shift+LMB
+    // smooths with every tool); its slot stays for the test DSL.
+    const int KTER_TOOL_ORDER[] =
+        { KTER_RAISE, KTER_SETHEIGHT, KTER_NOISE, KTER_TRIM, KTER_TEXTURE, KTER_BLEND, KTER_GRASS };
+    enum { KTER_ORDER_COUNT = sizeof( KTER_TOOL_ORDER ) / sizeof( KTER_TOOL_ORDER[0] ) };
 
     // ── settings (persisted) ────────────────────────────────────────────────
     int   s_tool        = KTER_RAISE;
@@ -202,6 +199,11 @@ namespace
     float s_lastCenter[3] = { 0.0f, 0.0f, 0.0f };
     bool  s_haveLastCenter = false;
     char  s_status[160] = "Disarmed.";
+    // KIWI: the tool-name flash at the top centre of the camera (DrawToolFlash).
+    const float KTER_FLASH_SECS = 1.1f;      // on screen, fade included
+    const float KTER_FLASH_FADE = 0.35f;     // the fade-out tail
+    int    s_flashTool = -1;
+    double s_flashAt   = 0.0;
 
     // Texture paint carries its MATERIAL on the brush: any terrain touched gets it as a
     // layer (added on first touch, 4 max).  "Erase to base" paints every layer out.
@@ -261,6 +263,12 @@ namespace
         _vsnprintf( s_status, sizeof( s_status ), fmt, args );
         va_end( args );
         s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
+    void FlashTool()
+    {
+        s_flashTool = s_tool;
+        s_flashAt   = ImGui::GetTime();
     }
 
     float ReadFloat( const char *entry, float def )
@@ -750,14 +758,22 @@ namespace
         return BoundsMeet( def->mins, def->maxs, box, 0.0f );
     }
 
+    // KIWI: Set height has ONE radius (the ring); its falloff (Feather, Shift+LMB smooth) runs
+    // from the centre.  Every other tool keeps the inner ring.
+    float InnerRadius()
+    {
+        return s_tool == KTER_SETHEIGHT ? 0.0f : s_inner;
+    }
+
     float Falloff( float d )
     {
-        if ( d <= s_inner )
+        const float inner = InnerRadius();
+        if ( d <= inner )
             return 1.0f;
         if ( d >= s_outer )
             return 0.0f;
-        const float span = s_outer - s_inner;
-        const float t = span > 0.0f ? ( d - s_inner ) / span : 1.0f;
+        const float span = s_outer - inner;
+        const float t = span > 0.0f ? ( d - inner ) / span : 1.0f;
         switch ( s_falloff )
         {
         case KTER_FO_LINEAR:   return 1.0f - t;
@@ -4241,7 +4257,7 @@ namespace
             }
             for ( int ring = 0; ring < 2; ++ring )
             {
-                const float r = ring == 0 ? s_outer : s_inner;
+                const float r = ring == 0 ? s_outer : InnerRadius();
                 float *out = ring == 0 ? s_ringOuter[i] : s_ringInner[i];
                 out[0] = s_cursor[0] + ux * r;
                 out[1] = s_cursor[1] + uy * r;
@@ -4554,6 +4570,9 @@ namespace
                             s_layersFull ? " (some patches already carry 4 layers and were skipped)" : "" );
         }
         s_stamps = s_touched = s_created = 0;
+        // KIWI: the modifiers belong to this stroke.  A stale Shift kept Set height's target
+        // ring hidden after a Shift+LMB smooth until the next plain stroke.
+        s_modShift = s_modCtrl = false;
     }
 
     void SetArmed( bool armed )
@@ -4566,9 +4585,14 @@ namespace
         ClearCursor();
         HeatmapRefresh();                      // armed views on/off: every patch re-uploads
         KiwiGrass_SetArmed( armed && s_tool == KTER_GRASS );
-        SetStatus( armed ? ( s_tool == KTER_GRASS ? "Armed. LMB in the 3D camera scatters; Esc disarms."
-                                                  : "Armed. LMB in the 3D camera sculpts; Esc disarms." )
-                         : "Disarmed." );
+        // KIWI: the keys are on the camera's hint strip (KiwiTerrain_HudPrompts), not here.
+        if ( armed )
+        {
+            SetStatus( "Armed: %s.", KTER_TOOL_NAME[s_tool] );
+            FlashTool();
+        }
+        else
+            SetStatus( "Disarmed." );
         g_nUpdateBits |= W_CAMERA;
     }
 
@@ -4577,13 +4601,31 @@ namespace
         if ( tool < 0 || tool >= KTER_TOOL_COUNT )
             return;
         const bool wasHeat = HeatmapActive(), wasWeight = WeightViewActive();
+        const bool swapped = s_armed && tool != s_tool;
         s_tool = tool;
+        if ( swapped )
+            FlashTool();                       // KIWI: name the new tool in the camera
         KiwiGrass_SetArmed( s_armed && s_tool == KTER_GRASS );
         if ( s_armed )
             ClearCursor();
         if ( wasHeat != HeatmapActive() || wasWeight != WeightViewActive() )
             HeatmapRefresh();
         g_nUpdateBits = -1;          // wireframe hiding depends on the tool
+    }
+
+    // KIWI: Ctrl+Tab / Ctrl+Shift+Tab - the next / previous tool in panel order, while armed.
+    // A live stroke keeps its tool until the button comes up.
+    void CycleTool( int dir )
+    {
+        if ( s_stroke )
+            return;
+        int at = 0;
+        for ( int i = 0; i < KTER_ORDER_COUNT; ++i )
+            if ( KTER_TOOL_ORDER[i] == s_tool )
+                at = i;
+        SetTool( KTER_TOOL_ORDER[( at + dir + KTER_ORDER_COUNT ) % KTER_ORDER_COUNT] );
+        Save();
+        SetStatus( "Armed: %s.", KTER_TOOL_NAME[s_tool] );
     }
 
     void RadiusStep( float factor )
@@ -4676,8 +4718,8 @@ namespace
                 changed = true;
             }
             if ( ImGui::IsItemHovered() )
-                ImGui::SetTooltip( "Drop a thumbnail from the Textures tab, click a layer row below, or press\n"
-                                   "I over terrain or a brush face while armed (eyedropper).\n"
+                ImGui::SetTooltip( "Drop a thumbnail from the Textures tab, click a layer row below, or use\n"
+                                   "the eyedropper while armed.\n"
                                    "Any terrain the brush touches gets this material as a layer\n"
                                    "(added on first touch, 4 per patch) - no selection needed." );
             ImGui::SameLine();
@@ -4701,10 +4743,7 @@ namespace
                 ImGui::SetTooltip( "Upward brush faces whose centre is inside the ring take the material\n"
                                    "whole (no weights on a face), so flat spots can be brushes instead of\n"
                                    "terrain and still be painted with the same tool. The cursor lands on\n"
-                                   "brushes as well as terrain; Ctrl / Erase to base leave faces alone." );
-            ImGui::TextDisabled( s_paintBase
-                ? "LMB thins every layer under the brush back to the base material."
-                : "LMB paints the material in, Ctrl+LMB paints it out, Shift+LMB smooths it." );
+                                   "brushes as well as terrain; painting out / Erase to base leave faces alone." );
             if ( ImGui::Checkbox( "Show this material's weight in red while armed", &s_weightView ) )
             {
                 Save();
@@ -4831,6 +4870,24 @@ bool KiwiTerrain_PanelVisible()
     return s_show;
 }
 
+// KIWI: Y arms the current tool (showing the panel, which owns the armed state) and
+// disarms it again; the panel stays open.
+void KiwiTerrain_ToggleArmed()
+{
+    Load();
+    if ( s_armed )
+    {
+        SetArmed( false );
+        return;
+    }
+    if ( !s_show )
+    {
+        s_show = true;
+        KiwiWindows_SyncMenu();
+    }
+    SetArmed( true );
+}
+
 void KiwiTerrain_OpenWithTool( int tool )
 {
     Load();
@@ -4945,10 +5002,7 @@ void KiwiTerrain_Draw()
         ImGui::PushTextWrapPos( 0.0f );
         ImGui::PushItemWidth( 190.0f );
 
-        // ── LEFT: the current tool ────────────────────────────────────────────
-        ImGui::SeparatorText( KTER_TOOL_NAME[s_tool] );
-        ImGui::TextDisabled( "%s", KTER_TOOL_HINT[s_tool] );
-
+        // ── LEFT: the current tool (named by its radio button only) ───────────
         if ( s_tool == KTER_GRASS )
         {
             ImGui::SeparatorText( "Grass Scatter" );
@@ -4969,13 +5023,16 @@ void KiwiTerrain_Draw()
             static const char *s_foNames[] = { "Smooth", "Linear", "Sharp", "Constant" };
             ImGui::SetNextItemWidth( 120.0f );
             changed |= ImGui::Combo( "Falloff", &s_falloff, s_foNames, 4 );
-            changed |= ImGui::SliderFloat( "Outer radius", &s_outer, 4.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
-            changed |= ImGui::SliderFloat( "Inner radius", &s_inner, 0.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+            if ( s_tool == KTER_SETHEIGHT )          // one radius (InnerRadius)
+                changed |= ImGui::SliderFloat( "Radius", &s_outer, 4.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+            else
+            {
+                changed |= ImGui::SliderFloat( "Outer radius", &s_outer, 4.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+                changed |= ImGui::SliderFloat( "Inner radius", &s_inner, 0.0f, 3072.0f, "%.0f", ImGuiSliderFlags_Logarithmic );
+            }
             if ( s_inner > s_outer )
                 s_inner = s_outer;
             changed |= ImGui::SliderFloat( "Strength", &s_strength, 0.01f, 2.0f, "%.2f" );
-            ImGui::TextDisabled( "Resize while sculpting: [ ] or + / - (hold to repeat), Ctrl+wheel.  "
-                                 "Strength: Shift+wheel or Alt+wheel (Set height: Alt+wheel moves the target)." );
             if ( s_tool == KTER_RAISE || s_tool == KTER_SETHEIGHT || s_tool == KTER_SMOOTH || s_tool == KTER_NOISE )
             {
                 changed |= ImGui::Checkbox( "Never change anything outside the ring", &s_setHeightContain );
@@ -5041,14 +5098,15 @@ void KiwiTerrain_Draw()
                 s_targetZ = s_cursor[2];
                 changed = true;
             }
-            ImGui::TextDisabled( "Every point inside the OUTER ring is set to exactly this height, at once\n"
+            ImGui::TextDisabled( "Every point inside the ring is set to exactly this height, at once\n"
                                  "(the Far Cry flatten). Strength and falloff do not apply." );
             changed |= ImGui::Checkbox( "Feather the edge (use falloff + strength)", &s_setHeightFeather );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Off (default): an exact, hard-edged set inside the ring.\n"
-                                   "On: the band between the inner and outer ring is eased toward the\n"
-                                   "target instead - for blending a plateau into a slope. That ramp moves\n"
-                                   "ground around the spot, so leave it off next to finished work." );
+                                   "On: each stamp eases the ground toward the target by the falloff,\n"
+                                   "full at the centre and fading to nothing at the ring - for blending\n"
+                                   "a plateau into a slope. That ramp moves ground around the spot, so\n"
+                                   "leave it off next to finished work." );
             ImGui::TextDisabled( "A moved point drags the whole grid cells around it: on a sheet whose cells\n"
                                  "are wider than the brush the change spills a full cell past the ring.\n"
                                  "Tessellate that sheet to a smaller cell size first (Density, below)." );
@@ -5084,13 +5142,10 @@ void KiwiTerrain_Draw()
         ImGui::PushItemWidth( 190.0f );
 
         ImGui::SeparatorText( "Tool" );
-        // Smooth is not listed (Shift+LMB smooths with every tool); the slot stays for the test DSL.
-        int shown = 0;
-        for ( int i = 0; i < KTER_TOOL_COUNT; ++i )
+        for ( int k = 0; k < KTER_ORDER_COUNT; ++k )
         {
-            if ( i == KTER_SMOOTH )
-                continue;
-            if ( shown++ % 2 )
+            const int i = KTER_TOOL_ORDER[k];
+            if ( k % 2 )
                 ImGui::SameLine( 200.0f );
             if ( ImGui::RadioButton( KTER_TOOL_NAME[i], s_tool == i ) )
             {
@@ -5098,13 +5153,9 @@ void KiwiTerrain_Draw()
                 changed = true;
             }
         }
-        ImGui::TextColored( ImVec4( 1.0f, 0.82f, 0.35f, 1.0f ),
-                            "Smooth: hold Shift and drag with any sculpt tool." );
 
         ImGui::Spacing();
-        if ( ImGui::Button( s_armed ? "Disarm (Esc)"
-                                    : ( s_tool == KTER_GRASS ? "Scatter (LMB in camera)" : "Sculpt (LMB in camera)" ),
-                            ImVec2( -FLT_MIN, 0.0f ) ) )
+        if ( ImGui::Button( s_armed ? "Disarm" : "Arm", ImVec2( -FLT_MIN, 0.0f ) ) )
             SetArmed( !s_armed );
         if ( s_armed && s_tool != KTER_GRASS && s_tool != KTER_TRIM && !AnyTargetPatch() && !CreationAllowed() )
             ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ),
@@ -5118,11 +5169,11 @@ void KiwiTerrain_Draw()
         if ( s_tool != KTER_GRASS )
         {
             ImGui::SeparatorText( "Display" );
-            if ( ImGui::Checkbox( "Hide wireframe (Tab)", &s_hideWire ) )
+            if ( ImGui::Checkbox( "Hide wireframe", &s_hideWire ) )
                 g_nUpdateBits = -1;
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "While armed the patch wireframe is drawn only around the brush\n"
-                                   "(white = patches the stroke moves, grey = the rest). Tab hides it." );
+                                   "(white = patches the stroke moves, grey = the rest)." );
             if ( !s_hideWire )
             {
                 ImGui::SameLine();
@@ -5241,7 +5292,7 @@ void KiwiTerrain_Draw()
 
             ImGui::SeparatorText( "Scope" );
             changed |= ImGui::Checkbox( "Affect unselected patches too", &s_affectUnselected );
-            changed |= ImGui::Checkbox( "Carry objects resting on the terrain", &s_carryObjects );
+            changed |= ImGui::Checkbox( "Move models with terrain", &s_carryObjects );
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Height strokes (Raise / Dig, Set height, Smooth, Noise) also move whatever\n"
                                    "sits on the sculpted terrain - models, entities, brushes and non-terrain\n"
@@ -5397,8 +5448,9 @@ int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
         HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
         break;
     case KTER_TEXTURE:
-        HudAdd( prompts, &n, "LMB",       "Paint" );
-        HudAdd( prompts, &n, "Ctrl+LMB",  "Paint out" );
+        HudAdd( prompts, &n, "LMB",       s_paintBase ? "Erase to base" : "Paint" );
+        if ( !s_paintBase )
+            HudAdd( prompts, &n, "Ctrl+LMB", "Paint out" );
         HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
         HudAdd( prompts, &n, "I",         "Eyedropper" );
         break;
@@ -5414,14 +5466,27 @@ int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
     default:
         break;
     }
+    *out = prompts;
+    return n;
+}
+
+// KIWI: the keys every tool shares, for the right-hand strip (where selection verbs go).
+int KiwiTerrain_HudKeys( const kiwiPrompt_t **out )
+{
+    static kiwiPrompt_t keys[12];
+    if ( !out || !s_armed )
+        return 0;
+    int n = 0;
     if ( s_tool != KTER_GRASS )
     {
-        HudAdd( prompts, &n, "[ ]",         "Radius" );
-        HudAdd( prompts, &n, "Ctrl+wheel",  "Radius" );
-        HudAdd( prompts, &n, s_tool == KTER_SETHEIGHT ? "Shift+wheel" : "Alt/Shift+wheel", "Strength" );
+        HudAdd( keys, &n, "[ ] / Ctrl+wheel", "Radius" );
+        HudAdd( keys, &n, s_tool == KTER_SETHEIGHT ? "Shift+wheel" : "Alt/Shift+wheel", "Strength" );
+        HudAdd( keys, &n, "Tab", s_hideWire ? "Show wireframe" : "Hide wireframe" );
     }
-    HudAdd( prompts, &n, "Esc", "Disarm" );
-    *out = prompts;
+    HudAdd( keys, &n, "Ctrl+Tab",       "Next tool" );
+    HudAdd( keys, &n, "Ctrl+Shift+Tab", "Previous tool" );
+    HudAdd( keys, &n, "Esc / Y",        "Disarm" );
+    *out = keys;
     return n;
 }
 
@@ -5554,6 +5619,11 @@ bool KiwiTerrain_HandleKey( int vk )
         SetArmed( false );
         return true;
     }
+    if ( vk == 0x09 && ::GetKeyState( VK_CONTROL ) < 0 )   // KIWI: Ctrl+Tab / Ctrl+Shift+Tab: next / previous tool
+    {
+        CycleTool( ::GetKeyState( VK_SHIFT ) < 0 ? -1 : 1 );
+        return true;
+    }
     if ( vk == 0x09 && s_tool != KTER_GRASS )  // VK_TAB: hide / show the wireframe around the brush
     {
         s_hideWire = !s_hideWire;
@@ -5625,12 +5695,12 @@ bool KiwiTerrain_HandleWheel( float steps, bool shift, bool ctrl, bool alt )
             s_targetZ = ClampF( s_targetZ + ( steps > 0.0f ? step : -step ), -65536.0f, 65536.0f );
             char h[48];
             KiwiUnits_Format( h, sizeof( h ), s_targetZ );
-            SetStatus( "Armed. Target height %s (Alt+wheel; Shift for 1-unit steps).", h );
+            SetStatus( "Armed. Target height %s.", h );
         }
         else
         {
             s_strength = ClampF( s_strength + ( steps > 0.0f ? 0.1f : -0.1f ), 0.01f, 2.0f );
-            SetStatus( "Armed. Strength %.2f (Alt+wheel).", s_strength );
+            SetStatus( "Armed. Strength %.2f.", s_strength );
         }
         Save();
         g_nUpdateBits |= W_CAMERA;
@@ -5817,7 +5887,7 @@ void KiwiTerrain_DrawWorld()
 
     DrawWireframeAoE();
 
-    const bool showInner = s_inner > 0.0f && s_inner < s_outer && s_falloff != KTER_FO_CONSTANT;
+    const bool showInner = InnerRadius() > 0.0f && s_inner < s_outer && s_falloff != KTER_FO_CONSTANT;
     KiwiLines_Begin( s_ringCount * 2 + 4, 2 );
     // Off the patches (creation allowed) the ring turns blue on the base plane and
     // cyan on a brush/model so the operator knows where the chunks will land.
@@ -5853,8 +5923,10 @@ void KiwiTerrain_DrawWorld()
 
     if ( s_tool == KTER_SETHEIGHT && !s_modShift )
     {
+        // KIWI: the legend's target magenta.  With one radius this ring is the whole target
+        // preview, and in the ground ring's green it vanished into it near the ground.
         KiwiLines_Begin( s_ringCount * 2 + 2, 1 );
-        KiwiLines_Color( 0.3f, 1.0f, 0.4f );
+        KiwiLines_Color( 1.0f, 0.31f, 0.92f );
         for ( int ring = 0; ring < ( showInner ? 2 : 1 ); ++ring )
         {
             const float (*src)[3] = ring == 0 ? s_ringOuter : s_ringInner;
@@ -5873,9 +5945,38 @@ void KiwiTerrain_DrawWorld()
     }
 }
 
-// ── camera overlay: the height colour scale ──────────────────────────────────
+// KIWI: the new tool's name, large, at the top centre for a moment after it is armed or
+// swapped (Ctrl+Tab, the panel's radio buttons), then fades.  The pump draws ImGui at 60 Hz,
+// so the fade needs no repaint request.
+static void DrawToolFlash( float imgMinX, float imgMinY, float imgW )
+{
+    if ( s_flashTool < 0 || s_flashTool >= KTER_TOOL_COUNT || !s_armed )
+        return;
+    const float age = (float)( ImGui::GetTime() - s_flashAt );
+    if ( age < 0.0f || age >= KTER_FLASH_SECS )
+    {
+        s_flashTool = -1;
+        return;
+    }
+    const float fade = age < KTER_FLASH_SECS - KTER_FLASH_FADE ? 1.0f : ( KTER_FLASH_SECS - age ) / KTER_FLASH_FADE;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if ( !dl )
+        return;
+    const char  *name = KTER_TOOL_NAME[s_flashTool];
+    ImFont      *font = ImGui::GetFont();
+    const float  size = ImGui::GetFontSize() * 1.6f;
+    const ImVec2 ts   = font->CalcTextSizeA( size, FLT_MAX, 0.0f, name );
+    const float  x    = imgMinX + ( imgW - ts.x ) * 0.5f;
+    const float  y    = imgMinY + 40.0f;
+    dl->AddRectFilled( ImVec2( x - 14.0f, y - 7.0f ), ImVec2( x + ts.x + 14.0f, y + ts.y + 7.0f ),
+                       IM_COL32( 18, 18, 22, (int)( 190.0f * fade ) ), 4.0f );
+    dl->AddText( font, size, ImVec2( x, y ), IM_COL32( 235, 238, 245, (int)( 255.0f * fade ) ), name );
+}
+
+// ── camera overlay: the tool flash, the height colour scale ──────────────────
 void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
 {
+    DrawToolFlash( imgMinX, imgMinY, imgW );
     if ( !HeatmapActive() || !s_heatValid || imgH < 160.0f || imgW < 240.0f )
         return;
     ImDrawList *dl = ImGui::GetWindowDrawList();

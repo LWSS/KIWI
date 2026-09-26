@@ -110,6 +110,12 @@
 // target centroid. The TB issue #1350 near-axis guard refuses singular shear handles
 // (UvShearTool.cpp:284-289).
 
+// Crisp scale (KIWI 2026-09-24): an edge is crisp when it lies on a grid line (grid X/Y
+// cells). About an anchor on a grid point, a scale k keeps every crisp vertex (n cells
+// away) crisp iff k = m/G, G = gcd of all |n|. "Crisp scale" snaps handle scales to that
+// set (fixed side pinned onto its line); "Texture +/-" step m by one (Shift: half/double)
+// about the grid point nearest the pivot. Off-grid vertices are ignored.
+
 // Integration contracts
 // ---------------------
 // ImGui's D3D9 backend forces CLAMP addressing, so the background is drawn as capped unit

@@ -17,8 +17,12 @@
 //   1.  SNAP_ENDPOINT      construction anchor (7 px)
 //   2.  SNAP_VERTEX        brush corner or patch control point (8 px)
 //   3.  SNAP_INTERSECTION  construction-segment crossing (7 px)
-//   3b. SNAP_EDGE_MID      construction-segment midpoint (7 px)
-//   4.  SNAP_EDGE_MID      brush-edge midpoint (7 px)
+//   3b. SNAP_EDGE_MID      construction-segment midpoint or quarter point (7 px)
+//   4.  SNAP_EDGE_MID      brush-edge midpoint or quarter point (7 px), over EVERY
+//                          edge near the cursor, not only the one the edge Pick names
+//                          (SNAP_EDGE_QUARTER for the quarters).  An edge's points are
+//                          its LINE's: collinear brush edges that overlap or touch merge
+//                          into one (Plasticity's topological edge of a union)
 //   4b. SNAP_FACE_CENTER   brush-face vertex-average center (6 px)
 //   4c/5. LINE             axis guide (10-30 px), brush edge (6 px), or
 //                          construction segment (8 px); closest pixel distance wins.
@@ -87,6 +91,7 @@ enum snap_type_t
     SNAP_AXIS,           // axis line through the tool's last point
     SNAP_CPLANE,         // planar placement only
     SNAP_ANGLE,
+    SNAP_EDGE_QUARTER,   // KIWI: brush or construction segment quarter point
     SNAP_TYPE_COUNT
 };
 
@@ -114,7 +119,7 @@ inline bool KiwiSnap_IsGeometry( snap_type_t t )
 {
     return t == SNAP_VERTEX || t == SNAP_EDGE_MID || t == SNAP_EDGE
         || t == SNAP_FACE   || t == SNAP_FACE_CENTER || t == SNAP_ENDPOINT
-        || t == SNAP_INTERSECTION;
+        || t == SNAP_INTERSECTION || t == SNAP_EDGE_QUARTER;
 }
 
 // Resolves a geometry snap to signed WORLD-UNIT depth along a unit axis from ref.
@@ -160,8 +165,9 @@ const char *KiwiSnap_TypeName( snap_type_t t );
 // Emits into the caller's open kiwi_lines batch; no-op when invalid or hidden.
 void KiwiSnap_EmitMarker( const snap_result_t &r );
 
-// Draws advertised snap points for the hovered face while a compatible command is
-// active and snapping is engaged. It owns its kiwi_lines batch.
+// Draws advertised snap points while a compatible command is active and snapping is
+// engaged: the hovered face's corners and centre, and black nubs on the midpoints and
+// quarter points of every edge near the cursor. It owns its kiwi_lines batch.
 void KiwiSnap_DrawFaceAccents();
 // Selected/hovered cylinder centres and measured axis; screen-space camera overlay.
 void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, float imgH );

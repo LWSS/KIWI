@@ -62,6 +62,7 @@ extern void ImGuiShell_BeginFrame();              // authorize this tick's singl
 extern bool ImGuiShell_FrameAuthorized();         // ROUND U: will this paint draw a scene?
 extern void ImGuiShell_RenderViewportsToRT();     // Phase 5: render the 4 viewports to their RTs
 extern void ImGuiShell_DispatchViewportInput();   // Phase 5: viewport mouse input (post-present)
+extern void ImGuiShell_ForwardSwallowedKey( UINT msg, WPARAM wParam, LPARAM lParam );   // KIWI: the Alt release latch
 
 // ── KIWI-UX (ROUND AD): device-health reporting for the frame's own paint ──────
 // Declared against kiwi_devicereset.h (the definition is kiwi_devicereset.cpp); that
@@ -897,6 +898,15 @@ static bool Radiant_PreTranslateMessage( MSG *pMsg )
     {
         static bool s_altChordConsumed = false;
 
+        // KIWI: Alt+WHEEL is a chord too (Terrain Sculpt strength / Set height target, decal
+        // size).  Nothing latched it, so the Alt release reached DefWindowProc as a bare tap,
+        // the menu bar's modal loop took over and the idle render stopped until the next
+        // click or key (user: "after alt-scroll, the program freezes").  The wheel message
+        // itself is not consumed.
+        if ( ( pMsg->message == WM_MOUSEWHEEL || pMsg->message == WM_MOUSEHWHEEL )
+          && ::GetKeyState( VK_MENU ) < 0 )
+            s_altChordConsumed = true;
+
         if ( pMsg->message == WM_SYSKEYUP || pMsg->message == WM_KEYUP )
         {
             const unsigned vkUp = (unsigned)pMsg->wParam;
@@ -905,6 +915,8 @@ static bool Radiant_PreTranslateMessage( MSG *pMsg )
                 if ( s_altChordConsumed )
                 {
                     s_altChordConsumed = false;
+                    // KIWI: ImGui still has to see Alt come up, or io.KeyAlt sticks
+                    ImGuiShell_ForwardSwallowedKey( pMsg->message, pMsg->wParam, pMsg->lParam );
                     return true;               // swallow the release that opens the bar
                 }
             }

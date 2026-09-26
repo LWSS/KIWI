@@ -159,6 +159,15 @@ bool ImGuiShell_WantsKeyboard()
     return s_shellInited && ImGui::GetIO().WantTextInput;
 }
 
+// KIWI: a key message the pump swallows (the Alt release after an Alt chord, so the menu bar
+// stays shut) still has to reach the backend: it only re-reads the modifiers on key messages
+// (imgui_impl_win32.cpp UpdateKeyModifiers), so io.KeyAlt stayed down after the release.
+void ImGuiShell_ForwardSwallowedKey( UINT msg, WPARAM wParam, LPARAM lParam )
+{
+    if ( s_shellInited )
+        ImGui_ImplWin32_WndProcHandler( s_backendHwnd, msg, wParam, lParam );
+}
+
 // Auto-close a tool panel when the user clicks off it — called by each panel BETWEEN its
 // ImGui::Begin() and ImGui::End() (the window must be the current one). A per-window latch
 // (focused-at-least-once) means a panel just opened by a hotkey does NOT self-close before

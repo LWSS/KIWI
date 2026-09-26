@@ -3849,6 +3849,76 @@ void KiwiCon_DrawWorld()
     KiwiLines_Flush();
 }
 
+// KIWI (2026-09-25, user: "now i can't tell visually when lines are selected or not", then
+// "it's still hard to see"): the region fills draw AFTER KiwiCon_DrawWorld (camwnd.cpp, the
+// command-overlay slot), and their translucent blue washed the selected near-white and the
+// unselected rose into one lavender; white on top of them was still weak over bright aerial
+// pictures.  The selection is traced again on top of the fills in the selection amber
+// (kiwi_hover.cpp KACTIVE_COL) at 3 px over a 5 px near-black halo, so it reads on light and
+// dark ground alike; selected anchors get the same treatment.
+namespace
+{
+    const float KCON_SEL_OVER_COL [3] = { 1.00f, 0.80f, 0.25f };
+    const float KCON_SEL_HALO_COL [3] = { 0.04f, 0.04f, 0.06f };
+    const int   KCON_SEL_OVER_PX      = 3;
+    const int   KCON_SEL_HALO_PX      = 5;
+    const float KCON_SEL_HALO_DOT_PIX = KCON_DOT_PIX_SEL + 1.5f;
+
+    // One pass of the selected segments and anchors; false when the batch ran out.
+    bool TraceSelection( const camera_s *c, float dotPix )
+    {
+        for ( size_t i = 0; i < s_objects.size(); ++i )
+        {
+            const kconObject_t &o = s_objects[i];
+            if ( o.hidden || !KiwiConSel_ObjectSelected( (int)i ) )
+                continue;
+            const int segs = KiwiCon_SegmentCount( o );
+            for ( int s = 0; s < segs; ++s )
+            {
+                if ( !KiwiConSel_SegmentSelected( (int)i, s ) )
+                    continue;
+                float a[3], b[3];
+                if ( !KiwiCon_SegmentWorld( o, s, a, b ) )
+                    break;
+                if ( !KiwiLines_Add( a, b ) )
+                    return false;
+            }
+            const int anchors = KiwiCon_AnchorCount( o );
+            for ( int a = 0; a < anchors; ++a )
+            {
+                if ( !KiwiConSel_PointSelected( (int)i, a ) )
+                    continue;
+                float p[3];
+                if ( !KiwiCon_AnchorWorld( o, a, p ) )
+                    break;
+                if ( KiwiLines_Remaining() < 16 )
+                    return false;
+                DrawFilledDot( c, p, dotPix );
+            }
+        }
+        return true;
+    }
+}
+
+void KiwiCon_DrawSelectionOverlay()
+{
+    if ( !KiwiCon_ShowConstruction() || KiwiConSel_Empty() )
+        return;
+    camera_s *c = Ed_Camera();
+    if ( c->width < 1 || c->height < 1 )
+        return;
+
+    KiwiLines_Begin( KCON_DRAW_SEGMENTS, KCON_SEL_HALO_PX );
+    KiwiLines_Color( KCON_SEL_HALO_COL[0], KCON_SEL_HALO_COL[1], KCON_SEL_HALO_COL[2] );
+    TraceSelection( c, KCON_SEL_HALO_DOT_PIX );
+    KiwiLines_Flush();
+
+    KiwiLines_Begin( KCON_DRAW_SEGMENTS, KCON_SEL_OVER_PX );
+    KiwiLines_Color( KCON_SEL_OVER_COL[0], KCON_SEL_OVER_COL[1], KCON_SEL_OVER_COL[2] );
+    TraceSelection( c, KCON_DOT_PIX_SEL );
+    KiwiLines_Flush();
+}
+
 // Settings.
 // One lazy-loaded, persisted side count is shared by all round tools; 0=AUTO.
 static int s_toolSides = -1;      // -1 = not loaded yet
