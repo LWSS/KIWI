@@ -374,6 +374,14 @@ namespace
         return best * bestSign;
     }
 
+    // One extra region loop of a multi-face offset (KIWI 2026-09-28).
+    struct offsetLoop_t
+    {
+        kconPlane_t        plane;
+        std::vector<float> src;         // CCW plane-space loop, 2 floats a point
+        std::vector<float> preview;     // world loop at the current distance (empty = skipped)
+    };
+
     class KiwiOffsetCommand : public KiwiEditorCommand
     {
     public:
@@ -382,7 +390,22 @@ namespace
 
         unsigned PickFlags() const override { return PICKF_EXCLUDE_SELECTED; }
         const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
-        bool HudInvalid() const override      { return m_invalid; }
+        bool HudInvalid() const override      { return m_invalid && !Unset(); }
+
+        // KIWI (2026-09-28, user: "The offset command ... should not move with the mouse
+        // without a click+drag"): the command starts PAUSED and only a drag of its lollipop
+        // handle (on the offset curve, pointing to the positive side) or a typed value moves
+        // it.  Other presses are swallowed so a stray click cannot resume a mouse-follow.
+        bool LollipopHandle( float outAnchor[3], float outDir[3] ) const override
+        {
+            return m_have && outAnchor && outDir && HandleFrame( outAnchor, outDir );
+        }
+        void HandleGrab( bool held ) override { m_grab = held; }
+        bool PressIntercept( int imgX, int imgY ) override
+        {
+            (void)imgX;  (void)imgY;
+            return m_have;
+        }
 
         int NumericFields( const kiwiNumField_t **out ) const override
         { *out = KOFF_FIELDS; return 1; }
@@ -413,10 +436,26 @@ namespace
             Reset();
             m_object = SelectedObject();
             const kconObject_t *o = ( m_object >= 0 ) ? KiwiCon_At( m_object ) : 0;
+            // KIWI (2026-09-28, user: "allow offsetting a construction face. It works how it
+            // does in plasticity, the borders grow or shrink with the handle"): a selected
+            // region offsets its own loop, on its plane, into a new closed loop.
+            if ( ( !o || !Offsettable( *o ) ) && RegionSource() )
+            {
+                m_object = -1;
+                m_region = true;
+                m_closed = true;
+                m_have   = true;
+                Recompute();
+                KiwiCmd_Pause();
+                Sys_Printf( "Offset: drag the handle to grow or shrink the construction face, "
+                            "or type a distance.  RMB/Enter commits (a new closed loop), Esc "
+                            "cancels.\n" );
+                return true;
+            }
             if ( !o || !Offsettable( *o ) )
             {
                 Sys_Printf( "Offset: select a construction line, polyline, rectangle, "
-                            "circle or arc first.\n" );
+                            "circle, arc or construction face first.\n" );
                 return false;
             }
             m_parametric = KiwiCon_IsParametric( *o );
@@ -440,10 +479,10 @@ namespace
             }
 
             m_have = true;
-            LatchStart();
             Recompute();
-            Sys_Printf( "Offset: drag to the side you want the copy on, or type a "
-                        "distance.  RMB/Enter commits, Esc cancels.\n" );
+            KiwiCmd_Pause();                     // nothing follows the mouse until a grab
+            Sys_Printf( "Offset: drag the handle to the side you want the copy on, or "
+                        "type a distance.  RMB/Enter commits, Esc cancels.\n" );
             return true;
         }
 
@@ -511,6 +550,20 @@ namespace
 
             KiwiCon_UndoPush();
             const int added = KiwiCon_Add( o );
+            // The other selected faces land under the same snapshot (one undo).
+            int extras = 0;
+            for ( size_t i = 0; i < m_extra.size(); ++i )
+            {
+                if ( m_extra[i].preview.size() < 9 )
+                    continue;
+                kconObject_t e;
+                e.type   = KCON_POLYLINE;
+                e.plane  = m_extra[i].plane;              // a SEED; KiwiCon_Add refits
+                e.pts    = m_extra[i].preview;
+                e.closed = true;
+                if ( KiwiCon_Add( e ) >= 0 )
+                    ++extras;
+            }
             if ( added < 0 )
             {
                 // Store validation failed after the undo snapshot was pushed.
@@ -520,8 +573,12 @@ namespace
             {
                 char b[32];
                 KiwiUnits_Format( b, sizeof( b ), fabsf( m_dist ) );
-                Sys_Printf( "Offset: new %s at %s.\n",
-                            m_parametric ? "circle/arc" : ( m_closed ? "loop" : "chain" ), b );
+                if ( m_extra.empty() )
+                    Sys_Printf( "Offset: new %s at %s.\n",
+                                m_parametric ? "circle/arc" : ( m_closed ? "loop" : "chain" ), b );
+                else
+                    Sys_Printf( "Offset: %i new loops at %s%s.\n", 1 + extras, b,
+                                m_extraSkipped ? " (faces too small for this distance were skipped)" : "" );
             }
             Reset();
             g_nUpdateBits |= 1;
@@ -545,14 +602,96 @@ namespace
                     return;
             if ( m_closed && n >= 3 )
                 KiwiLines_Add( &m_preview[( (size_t)n-1 )*3], &m_preview[0] );
+            // Every other selected face's loop at the same distance.
+            for ( size_t e = 0; e < m_extra.size(); ++e )
+            {
+                const std::vector<float> &p = m_extra[e].preview;
+                const int m = (int)( p.size() / 3 );
+                for ( int i = 0; i < m; ++i )
+                    if ( !KiwiLines_Add( &p[(size_t)i*3], &p[(size_t)( ( i + 1 ) % m )*3] ) )
+                        return;
+            }
+        }
+
+        // A window grid's worth of faces is a lot of preview segments.
+        int LineBudget() const override
+        {
+            size_t segs = m_preview.size() / 3 + 8;
+            for ( size_t e = 0; e < m_extra.size(); ++e )
+                segs += m_extra[e].preview.size() / 3;
+            return segs > (size_t)KCMD_LINE_BUDGET_MAX ? KCMD_LINE_BUDGET_MAX : (int)segs;
         }
 
     private:
+        // A selected region: its CCW plane-space loop and its plane become the source chain
+        // (positive distance grows it, as the loop's outward edge normals point).
+        // KIWI (2026-09-28, user: "when i select multiple faces, it needs to do the operation on
+        // each one, i'm trying to make a series of windows on a building"): EVERY selected
+        // region offsets by the one shared distance; the first carries the handle, the rest
+        // ride in m_extra.
+        bool RegionSource()
+        {
+            const std::vector<kregion_t> &all = KiwiRegion_All();
+            m_extra.clear();
+            bool havePrimary = false;
+            const int n = KiwiRegion_SelectedCount();
+            for ( int i = 0; i < n; ++i )
+            {
+                const int r = KiwiRegion_SelectedAt( i );
+                if ( r < 0 || r >= (int)all.size() || all[r].pts.size() < 6 )
+                    continue;
+                // A ring offsets its own rim (its outer loop), never the bridged loop.
+                if ( !havePrimary )
+                {
+                    m_plane = all[r].plane;
+                    m_src   = KiwiRegion_OuterLoop( all[r] );
+                    havePrimary = true;
+                    continue;
+                }
+                offsetLoop_t e;
+                e.plane = all[r].plane;
+                e.src   = KiwiRegion_OuterLoop( all[r] );
+                m_extra.push_back( e );
+            }
+            return havePrimary;
+        }
+
+        // The other regions at the current distance; a loop that cannot take it is skipped
+        // (and counted) rather than refusing the whole set.
+        void RecomputeExtra()
+        {
+            m_extraSkipped = 0;
+            for ( size_t i = 0; i < m_extra.size(); ++i )
+            {
+                offsetLoop_t &e = m_extra[i];
+                e.preview.clear();
+                std::vector<float> out2;
+                const char *why = 0;
+                if ( fabsf( m_dist ) < KOFF_MIN_DIST
+                  || !OffsetChain2D( e.src, true, m_dist, &out2, &why ) )
+                {
+                    ++m_extraSkipped;
+                    continue;
+                }
+                const int n = (int)( out2.size() / 2 );
+                for ( int k = 0; k < n; ++k )
+                {
+                    float w[3];
+                    KiwiCon_PlaneToWorld( e.plane, &out2[(size_t)k * 2], w );
+                    e.preview.insert( e.preview.end(), w, w + 3 );
+                }
+            }
+        }
+
         void Reset()
         {
             m_object     = -1;
+            m_region     = false;
+            m_extra.clear();
+            m_extraSkipped = 0;
             m_have       = false;
             m_haveStart  = false;
+            m_grab       = false;
             m_parametric = false;
             m_closed     = false;
             m_invalid    = false;
@@ -627,7 +766,7 @@ namespace
             if ( !m_have )
                 return;
             const kconObject_t *o = ( m_object >= 0 ) ? KiwiCon_At( m_object ) : 0;
-            if ( !o )
+            if ( !o && !m_region )               // a region source copied its loop at Begin
             {
                 Sys_Printf( "Offset: the source went away — cancelled.\n" );
                 KiwiCmd_Cancel();
@@ -638,7 +777,7 @@ namespace
             {
                 m_dist = m_numWorld;
             }
-            else
+            else if ( m_grab )                   // only a held handle reads the cursor
             {
                 if ( !m_haveStart )
                     LatchStart();
@@ -646,6 +785,8 @@ namespace
                 if ( m_haveStart && RawScalar( &raw ) )
                     m_dist = SnapScalar( raw - m_start );
             }
+            if ( m_region )
+                RecomputeExtra();                // every other selected face follows
 
             m_invalid = false;
             m_why     = 0;
@@ -714,11 +855,60 @@ namespace
             }
         }
 
+        // Nothing set yet: the zero offset is a prompt, not a refusal.
+        bool Unset() const { return fabsf( m_dist ) < KOFF_MIN_DIST && !m_hasNum; }
+
+        // The handle: on the offset curve at the source's middle (edge midpoint pushed out by
+        // the distance; a circle / arc's mid angle), pointing to the positive-distance side.
+        bool HandleFrame( float anchor[3], float dir[3] ) const
+        {
+            float uv[2], d2[2];
+            const kconPlane_t *pl = &m_plane;
+            if ( m_parametric )
+            {
+                const kconObject_t *o = ( m_object >= 0 ) ? KiwiCon_At( m_object ) : 0;
+                if ( !o )
+                    return false;
+                const float a = ( o->ang0 + o->ang1 ) * 0.5f * 3.14159265358979f / 180.0f;
+                d2[0] = cosf( a );
+                d2[1] = sinf( a );
+                const float r = m_radius0 + m_dist;
+                uv[0] = SrcCentre()[0] + d2[0] * r;
+                uv[1] = SrcCentre()[1] + d2[1] * r;
+                pl = &m_srcPlane;
+            }
+            else
+            {
+                const int n     = (int)( m_src.size() / 2 );
+                const int edges = m_closed ? n : ( n - 1 );
+                if ( edges < 1 )
+                    return false;
+                const int    e = edges / 2;
+                const float *a = &m_src[(size_t)e * 2];
+                const float *b = &m_src[(size_t)( ( e + 1 ) % n ) * 2];
+                EdgeNormal( a, b, false, d2 );
+                // OffsetChain2D mirrors CW loops (the SignedDistance2D area test).
+                if ( m_closed && KiwiRegion_SignedArea( m_src ) < 0.0f )
+                {
+                    d2[0] = -d2[0];
+                    d2[1] = -d2[1];
+                }
+                uv[0] = ( a[0] + b[0] ) * 0.5f + d2[0] * m_dist;
+                uv[1] = ( a[1] + b[1] ) * 0.5f + d2[1] * m_dist;
+            }
+            KiwiCon_PlaneToWorld( *pl, uv, anchor );
+            for ( int k = 0; k < 3; ++k )
+                dir[k] = pl->u[k] * d2[0] + pl->v[k] * d2[1];
+            return Norm3( dir );
+        }
+
         void UpdateHud()
         {
             char b[32];
             KiwiUnits_Format( b, sizeof( b ), fabsf( m_dist ) );
-            if ( m_invalid )
+            if ( m_invalid && Unset() )
+                SetHud( "offset  ·  drag the handle, or type a distance  ·  Esc: cancel" );
+            else if ( m_invalid )
                 SetHud( "offset %s  ·  REFUSED: %s", b, m_why ? m_why : "invalid" );
             else
                 SetHud( "offset %s  %s  ·  RMB/Enter: commit  ·  Esc: cancel",
@@ -735,8 +925,12 @@ namespace
         }
 
         int                m_object     = -1;
+        bool               m_region     = false;   // the source is a selected region's loop
+        std::vector<offsetLoop_t> m_extra;         // the other selected regions
+        int                m_extraSkipped = 0;
         bool               m_have       = false;
         bool               m_haveStart  = false;
+        bool               m_grab       = false;   // the lollipop handle is held
         bool               m_parametric = false;
         bool               m_closed     = false;
         bool               m_invalid    = false;
@@ -759,10 +953,11 @@ namespace
 bool KiwiOffset_CanOffset()
 {
     const int idx = SelectedObject();
-    if ( idx < 0 )
-        return false;
-    const kconObject_t *o = KiwiCon_At( idx );
-    return o && Offsettable( *o );
+    const kconObject_t *o = ( idx >= 0 ) ? KiwiCon_At( idx ) : 0;
+    if ( o && Offsettable( *o ) )
+        return true;
+    const int r = KiwiRegion_SelectedIndex();        // a construction face (KIWI 2026-09-28)
+    return r >= 0 && r < (int)KiwiRegion_All().size() && KiwiRegion_All()[r].pts.size() >= 6;
 }
 
 void KiwiOffset_RegisterCommands()

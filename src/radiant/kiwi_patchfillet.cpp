@@ -357,7 +357,8 @@ namespace
             if ( !m_curve )
             {
                 // Apply already maintains the live chamfer, so committing flat mode
-                // deliberately adds nothing.
+                // deliberately adds nothing (beyond dropping a sliver it cut away).
+                DropCollapsedSlivers();
                 Sys_Printf( "Bevelled %i edge(s) at %g%s.\n", (int)m_units.size(),
                             (double)m_depth,
                             ( fabsf( m_biasDeg ) > 1.0e-3f ) ? " (biased)" : "" );
@@ -367,6 +368,7 @@ namespace
             }
 
             const int made = LandPatches();
+            DropCollapsedSlivers();            // after the patches read the chamfer faces
             // A fillet lands an arc plus two end caps; report every reason the
             // resulting patch count can be lower than three per edge.
             char skips[160];
@@ -940,7 +942,11 @@ namespace
             {
                 if ( DefFirstIndex( i ) != i )
                     continue;                               // one check per brush
-                ok = KiwiValid_CheckBrush( m_units[i].e.def, &why );
+                // KIWI: a sliver along the edge that the chamfer cut away entirely is
+                // expected to collapse; it is removed on commit (CollapsedSliver).
+                const int sl = CollapsedSliver( i );
+                ok = ( sl >= 0 ) ? KiwiValid_CheckBrushIgnoringFace( m_units[i].e.def, sl, &why )
+                                 : KiwiValid_CheckBrush( m_units[i].e.def, &why );
             }
 
             if ( !ok )
@@ -956,6 +962,51 @@ namespace
                 m_why     = 0;
             }
             g_nUpdateBits = -1;
+        }
+
+        // KIWI (2026-09-28): the sliver face (kiwiBevelEdge_t::sliver) of any unit on unit i's
+        // brush whose winding the chamfer removed, or -1.
+        int CollapsedSliver( size_t i ) const
+        {
+            const brush_t *def = m_units[i].e.def;
+            if ( !def || !def->faces )
+                return -1;
+            for ( size_t k = 0; k < m_units.size(); ++k )
+            {
+                if ( m_units[k].e.def != def )
+                    continue;
+                const int s = m_units[k].e.sliver;
+                if ( s >= 0 && s < def->faceCount && !def->faces[s].w )
+                    return s;
+            }
+            return -1;
+        }
+
+        // Strip each brush's cut-away sliver once the gesture is final.  Only called after
+        // the chamfer faces are no longer tracked by index (commit), inside the undo bracket.
+        void DropCollapsedSlivers()
+        {
+            bool dropped = false;
+            for ( size_t i = 0; i < m_units.size(); ++i )
+            {
+                if ( DefFirstIndex( i ) != i || !Sel_BrushLive( m_units[i].e.node ) )
+                    continue;
+                const int s = CollapsedSliver( i );
+                if ( s < 0 )
+                    continue;
+                Brush_RemoveFace( m_units[i].e.def, (unsigned int)s );
+                KiwiValid_Rebuild( m_units[i].e.def );
+                dropped = true;
+            }
+            // Removing a face renumbers the later ones: typed edge/face items would now
+            // name the wrong face, so let go of them.
+            if ( dropped )
+            {
+                Sel_Clear( KiwiSel() );
+                Sel_SyncToLegacy();
+                Sys_Printf( "Bevel Edge: the hair-thin sliver face along that edge was cut "
+                            "away and removed.\n" );
+            }
         }
 
         size_t DefFirstIndex( size_t i ) const

@@ -91,6 +91,8 @@ typedef struct DXGI_JPEG_QUANTIZATION_TABLE
 #pragma comment(lib, "windowscodecs.lib")
 
 extern int       Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp:121
+extern void      KiwiRegion_ClearSelection();                                // kiwi_region.cpp
+extern void      KiwiSun_ClearSelection();                                   // kiwi_sun.cpp
 extern int       g_nUpdateBits;                                              // engine_stubs.cpp:773
 extern int       modified;                                                   // map.cpp:67
 extern camera_s *Ed_Camera();                                                // camwnd.cpp:165
@@ -326,6 +328,8 @@ void KiwiRefImage_ApplyClick( int index, bool shift, bool ctrl, bool viewport )
         Sel_Clear( KiwiSel() );
         Sel_SyncToLegacy();
         KiwiConSel_Clear();
+        KiwiRegion_ClearSelection();     // KIWI (2026-09-28): every store, not just two
+        KiwiSun_ClearSelection();
         KiwiRefImage_Select( index );
     }
     else if ( ctrl )
@@ -1423,6 +1427,12 @@ namespace
         s_undo.back().images.swap( s_pending.images );
         s_undo.back().selected = s_pending.selected;
         s_undo.back().sel.swap( s_pending.sel );
+        // KIWI (2026-09-28, user: "my groups of Images keep getting deleted randomly"): the
+        // record carried images + selection only, so EVERY undo record held an empty group
+        // table and Restore() - any Ctrl+Z that reached a reference-image record, even one
+        // for a hide or a move - wiped every declared group (the next save wrote none).
+        s_undo.back().groups.swap( s_pending.groups );
+        s_undo.back().nextGroupId = s_pending.nextGroupId;
         s_pending = storeSnap_t();
         if ( (int)s_undo.size() > KREF_UNDO_DEPTH ) s_undo.erase( s_undo.begin() );
         s_redo.clear();
@@ -1452,6 +1462,7 @@ namespace
         s_pendingHave = false;
         s_pending = storeSnap_t();
         s_images = before.images;
+        s_groups = before.groups;       // KIWI: the baseline's group table, not a half edit
         RestoreSelection( before );
         s_drag = drag_t();
         Touch( false ); // restored state is not a document edit; only request a redraw

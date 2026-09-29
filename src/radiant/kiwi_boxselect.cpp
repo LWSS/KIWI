@@ -16,6 +16,7 @@
 #include "kiwi_command.h"            // face-click auto push/pull
 #include "kiwi_conselect.h"          // construction selection
 #include "kiwi_droptrace.h"          // KiwiDrop_IsModelEntity: the models-only marquee
+#include "kiwi_focus.h"              // Space aims at the clicked face of an object
 #include "kiwi_hover.h"
 #include "kiwi_particles.h"          // particles-only: particle click + marquee
 #include "kiwi_pick.h"
@@ -516,6 +517,29 @@ namespace
         KiwiConSel_ApplyClick( item, false, false );
     }
 
+    // KIWI (2026-09-28, user: "when i click something else, while not holding shift, it
+    // needs to clear all prior selections. It's not doing this with edges right now, but fix
+    // it for all"): a plain click REPLACES the whole selection, whichever store its winner
+    // lives in.  Each winning arm clears every OTHER store here and replaces its own.
+    enum { KCLK_BRUSH = 1, KCLK_CON = 2, KCLK_REGION = 4, KCLK_SUN = 8, KCLK_IMAGE = 16 };
+    void ClearStoresExcept( unsigned keep )
+    {
+        if ( !( keep & KCLK_BRUSH ) )
+        {
+            selection_t &sel = KiwiSel();
+            if ( !sel.items.empty() || selected_brushes.next != &selected_brushes )
+            {
+                Sel_Clear( sel );
+                Sel_SyncToLegacy();
+            }
+        }
+        if ( !( keep & KCLK_CON ) )    KiwiConSel_Clear();
+        if ( !( keep & KCLK_REGION ) ) KiwiRegion_ClearSelection();
+        if ( !( keep & KCLK_SUN ) )    KiwiSun_ClearSelection();
+        if ( !( keep & KCLK_IMAGE ) )  KiwiRefImage_Select( -1 );
+        g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+    }
+
     void ClickSelect( int imgX, int imgY, bool shift, bool ctrl )
     {
         // KIWI (2026-09-24): particles-only names particle effects only, through geometry, with the
@@ -543,7 +567,7 @@ namespace
                 }
             }
             if ( !shift && !ctrl )
-                KiwiConSel_Clear();
+                ClearStoresExcept( KCLK_BRUSH );
             Sel_SyncToLegacy();
             g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
             return;
@@ -560,7 +584,11 @@ namespace
                     KiwiSun_ClearSelection();
             }
             else
+            {
+                if ( !shift )
+                    ClearStoresExcept( KCLK_SUN );
                 KiwiSun_Select();
+            }
             g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
             return;
         }
@@ -576,7 +604,7 @@ namespace
 
         // Construction candidates compete in screen pixels.  They win on a brush
         // miss or area hit; against a brush vertex/edge, the closer point/line wins.
-        // A construction win consumes the click without clearing brush selection.
+        // A plain construction win replaces the brush selection too (KIWI 2026-09-28).
         bool constructionCandidate = false;
         {
             kconSelItem_t conItem;
@@ -593,16 +621,15 @@ namespace
                 if ( conWins )
                 {
                     if ( !shift && !ctrl )
-                        KiwiRefImage_Select( -1 );
+                        ClearStoresExcept( KCLK_CON );
                     ApplyConClick( conItem, shift, ctrl );
                     return;
                 }
             }
-            else if ( !shift && !ctrl )
-            {
-                // With no construction candidate, a plain click clears that store.
+            // A plain click that construction did not win clears that store - with or
+            // without a losing construction candidate under the cursor.
+            if ( !shift && !ctrl )
                 KiwiConSel_Clear();
-            }
         }
 
         // Reference images are object/area targets.  Any brush vertex/edge or any
@@ -630,6 +657,8 @@ namespace
                 }
                 if ( imageWins )
                 {
+                    if ( !shift && !ctrl )
+                        ClearStoresExcept( KCLK_IMAGE );
                     KiwiRefImage_ApplyClick( image, shift, ctrl, true );
                     return;
                 }
@@ -650,25 +679,19 @@ namespace
                 const bool brushPointish = hit.valid
                                         && ( hit.item.kind == SEL_VERTEX
                                           || hit.item.kind == SEL_EDGE );
-                bool  regionWins = !brushPointish;
-                float regDist = 0.0f;
-                if ( regionWins && hit.valid
-                  && KiwiRegion_HitDistance( rray, reg, &regDist ) )
+                bool regionWins = !brushPointish;
+                if ( regionWins && hit.valid )
                 {
+                    // KIWI: a coplanar region beats the face it is drawn on (tie band).
                     const float dx = hit.point[0] - rray.origin[0];
                     const float dy = hit.point[1] - rray.origin[1];
                     const float dz = hit.point[2] - rray.origin[2];
-                    const float brushDist = sqrtf( dx * dx + dy * dy + dz * dz );
-                    if ( brushDist < regDist )
-                        regionWins = false;
+                    regionWins = KiwiRegion_WinsOverSurface( rray, reg, sqrtf( dx * dx + dy * dy + dz * dz ) );
                 }
                 if ( regionWins )
                 {
                     if ( !shift && !ctrl )
-                    {
-                        KiwiConSel_Clear();
-                        KiwiRefImage_Select( -1 );
-                    }
+                        ClearStoresExcept( KCLK_REGION );
                     // Regions expose a toggle primitive, but the click grammar is
                     // add/remove: call it only when that operation changes this one
                     // member.  Ctrl never clears the rest of the region set.
@@ -704,6 +727,9 @@ namespace
             }
         }
 
+        // Brush geometry (or nothing) owns a plain click: every other store goes.
+        if ( !shift && !ctrl )
+            ClearStoresExcept( KCLK_BRUSH );
         selection_t &sel = KiwiSel();
         if ( !hit.valid || !Sel_ItemValid( hit.item ) )
         {
@@ -726,6 +752,13 @@ namespace
         }
         Sel_SyncToLegacy();
         g_nUpdateBits |= ( W_CAMERA | W_XY | W_Z );
+
+        // KIWI (2026-09-28): Space on an object selection aims at the face this click hit.
+        if ( !ctrl && hit.valid && hit.item.kind == SEL_OBJECT && Sel_ItemValid( hit.item ) )
+            KiwiFocus_NoteObjectClick( hit.item.brush, hit.point,
+                                       hit.haveNormal ? hit.normal : nullptr );
+        else if ( !ctrl )
+            KiwiFocus_NoteObjectClick( nullptr, nullptr, nullptr );
 
         // In face-only mode, a plain face click auto-enters the ordinary Move command,
         // whose face context is push/pull.  Start paused so selection cannot move the

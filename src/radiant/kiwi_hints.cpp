@@ -34,6 +34,7 @@
 // Keep external bindings outside the anonymous namespace so MSVC preserves their
 // linkage to definitions in other translation units.
 extern bool        KiwiPatchVerts_Active();                                 // kiwi_patchverts.cpp
+extern bool        KiwiVP_CameraCanRidePan();                               // kiwi_viewport.cpp
 // Terrain-paint armed gate from patchdialog.cpp:229 (0x401D50); it matches the
 // cursor-ring and Alt+LMB routing gate.
 extern int         sub_401D50();                                            // patchdialog.cpp:229
@@ -200,6 +201,9 @@ namespace
         const bool lolli = KiwiLollipop_Active();
         AddChip( chips, &n, clicks ? "LMB" : "Drag",
                             clicks ? "Place point" : ( lolli ? "Drag the ball" : "Adjust" ) );
+        // KIWI (2026-09-27): while a handle / tool is held, RMB pans under it.
+        if ( KiwiVP_CameraCanRidePan() )
+            AddChip( chips, &n, "+RMB drag", "Pan" );
         AddChip( chips, &n, "X/Y/Z",     "Axis" );
         // Only the MOVE command accepts a plane lock (kiwi_transform.cpp
         // HandleAxisKey's `allowPlane`; R and S pass false).
@@ -377,6 +381,8 @@ namespace
     {
         int n = 0;
         AddVerb( chips, &n, KIWI_CMD_EXTRUDE_REGION, "Extrude" );
+        AddVerb( chips, &n, KIWI_CMD_SPLIT_FACE,     "Bisect" );        // KIWI: region split line
+        AddChip( chips, &n, "Del",                   "Trim to face" );  // KIWI: region delete
         AddVerb( chips, &n, KIWI_CMD_PALETTE,        "More" );
         return n;
     }

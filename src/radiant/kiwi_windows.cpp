@@ -18,6 +18,11 @@
 // Keep Radiant_CheckMenu single-sourced in radiant_frame.h.
 extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
 extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp
+extern void ImGuiShell_ResetLayout();                                                        // imgui_shell.cpp
+extern bool KiwiGrass_PanelVisible();                                                        // kiwi_grass.cpp
+extern void KiwiGrass_TogglePanel();                                                         // kiwi_grass.cpp
+extern bool KiwiTerrain_PanelVisible();                                                      // kiwi_terrain.cpp
+extern void KiwiTerrain_TogglePanel();                                                       // kiwi_terrain.cpp
 
 namespace
 {
@@ -190,6 +195,10 @@ void KiwiWindows_BuildMenu( void *frameMenu )
     ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
     ::AppendMenuA( popup, MF_STRING | MF_GRAYED | MF_CHECKED, 0, "3D Camera (always on)" );
 
+    // KIWI (2026-09-27): every window back to its default place and open state.
+    ::AppendMenuA( popup, MF_SEPARATOR, 0, nullptr );
+    ::AppendMenuA( popup, MF_STRING, (UINT_PTR)KIWI_CMD_WINDOWS_RESET_LAYOUT, "&Reset Layout" );
+
     ::AppendMenuA( hMenu, MF_POPUP | MF_STRING, (UINT_PTR)popup, "&Windows" );
     s_menu = hMenu;
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
@@ -205,10 +214,27 @@ void KiwiWindows_SyncMenu()
     for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
         Radiant_CheckMenu( (UINT)s_def[i].commandId, s_open[i] );
     // Non-dock tool panels appended to the same popup.
-    extern bool KiwiGrass_PanelVisible();   // kiwi_grass.cpp
     Radiant_CheckMenu( (UINT)KIWI_CMD_GRASS_PANEL, KiwiGrass_PanelVisible() );
-    extern bool KiwiTerrain_PanelVisible();   // kiwi_terrain.cpp
     Radiant_CheckMenu( (UINT)KIWI_CMD_TERRAIN_PANEL, KiwiTerrain_PanelVisible() );
+}
+
+// Windows > Reset Layout: the s_def open states, the floating Terrain Sculpt / Grass Scatter
+// panel (closed by default) shut, and the shell rebuilds the default dock layout next frame.
+void KiwiWindows_ResetLayout()
+{
+    Load();
+    for ( int i = 0; i < KIWI_WIN_COUNT; ++i )
+    {
+        s_open[i]       = ( s_def[i].defOpen != 0 );
+        s_last[i]       = s_open[i];
+        s_justOpened[i] = false;          // the layout build places them; no root re-dock
+        Persist( i );
+    }
+    if ( KiwiTerrain_PanelVisible() )     // also Grass Scatter's panel (kiwi_grass.cpp)
+        KiwiTerrain_TogglePanel();
+    ImGuiShell_ResetLayout();
+    KiwiWindows_SyncMenu();
+    Sys_Printf( "Windows: layout reset to the defaults.\n" );
 }
 
 // Native View-popup toggles use KIWI ids and Radiant_CheckMenu check marks.
@@ -277,6 +303,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewShowTris",    0, 0, KIWI_CMD_VIEW_SHOW_TRIS );   // View > Show Triangle Count
     Radiant_RegisterCommand( "KiwiViewShowFacing",  0, 0, KIWI_CMD_VIEW_SHOW_FACING ); // View > Show Facing Arrows
     Radiant_RegisterCommand( "KiwiViewLeakBackground", 0, 0, KIWI_CMD_VIEW_LEAK_BG );  // View > Leak Finder Background
+    Radiant_RegisterCommand( "KiwiWindowsResetLayout", 0, 0, KIWI_CMD_WINDOWS_RESET_LAYOUT ); // Windows > Reset Layout
 }
 
 bool KiwiWindows_DispatchInstant( unsigned int cmdId )
@@ -302,14 +329,17 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     }
     if ( cmdId == (unsigned int)KIWI_CMD_GRASS_PANEL )
     {
-        extern void KiwiGrass_TogglePanel();   // kiwi_grass.cpp
         KiwiGrass_TogglePanel();
         return true;
     }
     if ( cmdId == (unsigned int)KIWI_CMD_TERRAIN_PANEL )
     {
-        extern void KiwiTerrain_TogglePanel();   // kiwi_terrain.cpp
         KiwiTerrain_TogglePanel();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_WINDOWS_RESET_LAYOUT )
+    {
+        KiwiWindows_ResetLayout();
         return true;
     }
     if ( cmdId == (unsigned int)KIWI_CMD_PERF_HUD )

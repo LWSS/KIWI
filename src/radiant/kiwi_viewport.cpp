@@ -116,12 +116,36 @@ namespace
     // click-select fallback both act at the PRESS, not at the release.
     int          s_dropPressX = 0, s_dropPressY = 0;
 
+    // KIWI (2026-09-27, user: "allow right click panning of the camera while holding
+    // left-click for an operation. Sometimes the bounds of the camera prevent you from doing
+    // the full length of what you want to do"): an RMB pan that runs ALONGSIDE a live LMB
+    // gesture.  It pans before the gesture's own move each tick, so the tool keeps reading
+    // the cursor through the moved view; if LMB lets go first it becomes a plain RMB pan.
+    bool         s_navPan  = false;
+    int          s_navX = 0, s_navY = 0;
+
     void EndGesture()
     {
         s_gesture    = KG_NONE;
         s_gestureBtn = -1;
         s_sunCtrl    = false;
         s_sunMaxX    = s_sunMaxY = 0;
+    }
+
+    // An LMB gesture a pan may run under: not the camera's own navigation gestures, and
+    // not the model placer (its RMB confirms the carry instead).
+    bool NavPanAllowed()
+    {
+        if ( s_gestureBtn != 0 )
+            return false;
+        switch ( s_gesture )
+        {
+        case KG_NONE: case KG_ORBIT: case KG_PAN: case KG_LOOK:
+        case KG_DROP: case KG_DROP_ARM: case KG_DROP_DONE:
+            return false;
+        default:
+            return true;
+        }
     }
 
     // A command marquee borrows only KiwiBox's rectangle. Sub-threshold travel is
@@ -409,27 +433,49 @@ namespace
 }
 
 // ─── input (post-present) ────────────────────────────────────────────────────
+// The hint strip's "RMB drag: Pan" chip: an LMB tool is held and an RMB would pan under it.
+bool KiwiVP_CameraCanRidePan()
+{
+    return !s_navPan && NavPanAllowed();
+}
+
+// A press while a modern gesture already owns the camera (imgui_shell.cpp dispatches the
+// second button here from its owned branch).  False = not taken; legacy never sees it.
+bool KiwiVP_CameraSecondaryDown( int btn, int imgX, int imgY )
+{
+    if ( s_gesture == KG_NONE || btn == s_gestureBtn )
+        return false;
+    // KIWI (2026-09-10, user: "right click needs to confirm a model action"): a right
+    // click while a model is being carried by the placer (LMB still held) confirms the
+    // placement where it stands, the same RMB-confirms rule the paused gesture already
+    // has after release.  The press on an ARMED-but-unmoved model, or after a confirm,
+    // is swallowed so the legacy right-click chain never runs under a held LMB.
+    if ( btn == 1 && ( s_gesture == KG_DROP || s_gesture == KG_DROP_ARM
+                    || s_gesture == KG_DROP_DONE ) )
+    {
+        if ( s_gesture == KG_DROP )
+        {
+            KiwiCmd_Commit();             // the live preview closes as one move record
+            s_gesture = KG_DROP_DONE;     // LMB is still down: eat its release
+        }
+        return true;
+    }
+    // RMB under a held LMB tool: pan (see s_navPan).
+    if ( btn == 1 && !s_navPan && NavPanAllowed() )
+    {
+        KiwiCam_PanBegin( imgX, imgY );
+        s_navPan = true;
+        s_navX   = imgX;
+        s_navY   = imgY;
+        return true;
+    }
+    return false;
+}
+
 bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl )
 {
     if ( s_gesture != KG_NONE )
-    {
-        // KIWI (2026-09-10, user: "right click needs to confirm a model action"): a right
-        // click while a model is being carried by the placer (LMB still held) confirms the
-        // placement where it stands, the same RMB-confirms rule the paused gesture already
-        // has after release.  The press on an ARMED-but-unmoved model, or after a confirm,
-        // is swallowed so the legacy right-click chain never runs under a held LMB.
-        if ( btn == 1 && ( s_gesture == KG_DROP || s_gesture == KG_DROP_ARM
-                        || s_gesture == KG_DROP_DONE ) )
-        {
-            if ( s_gesture == KG_DROP )
-            {
-                KiwiCmd_Commit();             // the live preview closes as one move record
-                s_gesture = KG_DROP_DONE;     // LMB is still down: eat its release
-            }
-            return true;
-        }
-        return false;
-    }
+        return KiwiVP_CameraSecondaryDown( btn, imgX, imgY );
 
     // KIWI (REFIMG): only a hit is consumed; misses still reach normal geometry tools.
     if ( btn == 0 && KiwiRefImage_IsArmed()
@@ -707,6 +753,15 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     if ( s_gesture == KG_NONE )
         return false;
 
+    // The RMB pan riding on an LMB gesture moves the view FIRST, so the gesture below
+    // maps this tick's cursor through the panned camera.
+    if ( s_navPan )
+    {
+        KiwiCam_PanDrag( imgX - s_navX, imgY - s_navY );
+        s_navX = imgX;
+        s_navY = imgY;
+    }
+
     if ( s_gesture == KG_DROP_DONE )
     {
         s_lastX = imgX;
@@ -835,6 +890,12 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
 {
     if ( s_gesture == KG_NONE )
         return false;
+    if ( s_navPan && btn == 1 && btn != s_gestureBtn )
+    {
+        s_navPan = false;                // the riding pan ends; the LMB gesture carries on
+        KiwiCam_PanEnd();
+        return true;
+    }
     if ( btn != s_gestureBtn )
         return true;                     // ignore a release whose press was not owned
 
@@ -919,6 +980,17 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
     else if ( s_gesture == KG_ORBIT )
         KiwiCam_OrbitEnd();              // drop the latched orbit frame
     EndGesture();
+
+    // LMB let go while the riding RMB pan is live: it carries on as a plain RMB pan
+    // (its pan scale stays latched) until RMB lets go.
+    if ( s_navPan )
+    {
+        s_navPan     = false;
+        s_gesture    = KG_PAN;
+        s_gestureBtn = 1;
+        s_lastX      = s_navX;
+        s_lastY      = s_navY;
+    }
 
     // Apply the view step after closing ownership: re-aiming drops the orbit latch.
     if ( wantViewStep )
@@ -1006,6 +1078,11 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over )
 
 bool KiwiVP_CameraAbort()
 {
+    if ( s_navPan )
+    {
+        s_navPan = false;
+        KiwiCam_PanEnd();
+    }
     if ( s_gesture == KG_NONE )
         return false;
     if ( s_gesture == KG_GRASS )

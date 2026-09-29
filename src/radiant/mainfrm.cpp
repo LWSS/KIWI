@@ -821,7 +821,7 @@ void Radiant_OpenMap( const char *path )
 
 }
 
-// U-BOOT: Radiant_CheckGridMenu / Radiant_CheckMenu are declared in radiant_frame.h now
+// U-BOOT: Radiant_CheckMenu is declared in radiant_frame.h now
 // (de-static'd â€” the raw shell's boot seeds the same menu check marks).
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -1287,16 +1287,8 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
     { "CameraStrafeRight", 0xBE, 0, 33064 },
     { "CameraStrafeLeft", 0xBC, 0, 33063 },
     { "ToggleGrid", 0x30, 0, 33065 },
-    { "SetGridPointFive", 0xC0, 0, 35021 },
-    { "SetGrid1", 0x31, 0, 35022 },
-    { "SetGrid2", 0x32, 0, 35023 },
-    { "SetGrid4", 0x33, 0, 35024 },
-    { "SetGrid8", 0x34, 0, 35025 },
-    { "SetGrid16", 0x35, 0, 35026 },
-    { "SetGrid32", 0x36, 0, 35027 },
-    { "SetGrid64", 0x37, 0, 35029 },
-    { "SetGrid256", 0x38, 0, 35032 },
-    { "SetGrid512", 0x39, 0, 35033 },
+    // KIWI (2026-09-27): SetGridPointFive..SetGrid512 (35021-35033), GridDown / GridUp
+    // (33084 / 33083) and ToggleSnapToGrid (32793) removed with the Grid menu.
     { "DragEdges", 0x45, 0, 33006 },
     { "DragVertices", 0x56, 0, 33005 },
     { "ViewEntityInfo", 0x4E, 0, 33017 },
@@ -1369,8 +1361,6 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
     { "TexLayerCycle", 0x4C, 1, 33238 },
     { "TexLayerMaterial", 0x00, 0, 33232 },
     { "TexLayerLightmap", 0x00, 0, 33233 },
-    { "GridDown", 0xDB, 0, 33084 },
-    { "GridUp", 0xDD, 0, 33083 },
     { "TexScaleLeft", 0x25, 4, 33085 },
     { "TexScaleRight", 0x27, 4, 33086 },
     { "LightShiftUp", 0xDD, 2, 33145 },
@@ -1394,7 +1384,6 @@ static const RadiantCommand g_radiantCommandsDefault[] = {
     { "SelectNudgeUp", 0x26, 2, 32849 },
     { "CycleCapTexturePatch", 0x4E, 5, 32905 },
     { "NaturalizePatch", 0x4E, 4, 32890 },
-    { "ToggleSnapToGrid", 0x47, 6, 32793 },
     { "SelectSnapPointsToGrid", 0x47, 4, 33091 },
     { "ShowAllTextures", 0x41, 4, 32973 },
     { "SelectAllOfType", 0x41, 1, 33093 },
@@ -1933,23 +1922,11 @@ static void Cmd_OnEditRedo()
 }
 
 // â”€â”€ Grid menu (IDB OnGrid1 0x424ab0 + helpers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// uIDCheckItemGrid (IDB 0x6ddf04): the 11 grid-size menu command IDs, parallel to
-// grid_sizes (IDB 0x6dde5c = {0.5,1,2,4,8,16,32,64,128,256,512}). Clicking "Grid N"
-// sets g_qeglobals.d_gridsize to the matching index.
+// KIWI (2026-09-27, user: "I want the grid menu on the win32 top-bar and all
+// sub-functionality removed, it's no longer relevant for our 3d-dominant KIWI workflow"):
+// uIDCheckItemGrid (IDB 0x6ddf04) and CheckGridMenuSelection (IDB 0x428950) are gone with
+// the menu.  d_gridsize keeps its loaded value for the ported code that reads grid_sizes.
 extern float grid_sizes[];   // engine_stubs.cpp (0x6dde5c)
-static const UINT s_gridMenuIDs[11] =
-    { 35021, 35022, 35023, 35024, 35025, 35026, 35027, 35029, 35031, 35032, 35033 };
-
-// CheckGridMenuSelection (IDB 0x428950): radio-check the active grid-size menu item.
-void Radiant_CheckGridMenu()   // U-BOOT: de-static'd (both boots seed the radio check)
-{
-    HMENU m = Radiant_FrameMenu();
-    if ( !m )
-        return;
-    for ( int i = 0; i < 11; ++i )
-        ::CheckMenuItem( m, s_gridMenuIDs[i],
-            ( i == g_qeglobals.d_gridsize ) ? MF_CHECKED : MF_UNCHECKED );
-}
 
 extern "C" int ClampGridSize();   // drag.cpp (0x463a80 â€” rotate/grid snap table)
 
@@ -1983,17 +1960,10 @@ void Radiant_CheckMenu( UINT id, bool checked )   // U-BOOT: de-static'd
 extern void PMESH_49();              // pmesh.cpp (0x4495C0) â€” rebuild all active curveDefs
 
 
-// OnSnaptogrid (IDB 0x428380) â€” toggle m_bNoClamp, persist, re-check the menu. This is
-// the interactive persistence demo: toggling snap flips the grid-snap behaviour
-// (drag.cpp / xywnd.cpp / Brush_SnapPlanepts all read m_bNoClamp) and SavePrefs writes
-// it to the registry so it survives a restart.
-static void Cmd_OnSnaptogrid()
-{
-    g_PrefsDlg->m_bNoClamp ^= 1;
-    Prefs_SavePrefs( g_PrefsDlg );
-    Radiant_CheckMenu( 32793, g_PrefsDlg->m_bNoClamp == 0 );     // snap = !NoClamp
-    Radiant_SetGridStatus();
-}
+// OnSnaptogrid (IDB 0x428380) â€” toggle m_bNoClamp, persist, re-check the menu.
+// KIWI (2026-09-27): REMOVED with the Grid menu.  m_bNoClamp keeps its persisted value for
+// the ported drag / XY code that reads it (drag.cpp / xywnd.cpp / Brush_SnapPlanepts);
+// KIWI's own snap is KiwiGrid_SnapEnabled (the viewport chip).
 
 // Texture-Lock toggles (IDB OnToggleLockMoves 0x426b80 / OnToggleLockRotations
 // 0x429230 / OnToggleLockLightmap 0x426bf0): flip the lock field, re-check the menu,
@@ -2169,18 +2139,7 @@ static void Cmd_OnEditEntityinfo()
     ImGuiPanel_Entity_Toggle();
 }
 
-// OnGrid1 (IDB 0x424ab0): set the grid size from the clicked menu item, refresh the
-// menu radio check + status, redraw the XY/Z views. ON_COMMAND_EX passes the command ID.
-static BOOL Cmd_OnGridSize( UINT nID )
-{
-    for ( int i = 0; i < 11; ++i )
-        if ( nID == s_gridMenuIDs[i] ) { g_qeglobals.d_gridsize = i; break; }
-    Radiant_CheckGridMenu();
-    Radiant_SetGridStatus();
-    extern void Sys_UpdateWindows( int bits );   // win_qe3.cpp
-    Sys_UpdateWindows( W_XY | W_Z );
-    return TRUE;
-}
+// KIWI (2026-09-27): OnGrid1 (IDB 0x424ab0, Cmd_OnGridSize) removed with the Grid menu.
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // View + Selection menu wrappers - thin command handlers forwarding to ported cores.
@@ -4879,23 +4838,8 @@ static void Cmd_OnGridToggle()             // cmd 33065
 }
 
 // â”€â”€ Grid size next/prev ( ] / [ ) â€” step d_gridsize within [0,10].  IDB 0x4289A0/D0. â”€
-static void Cmd_OnGridNext()               // cmd 33083 (])
-{
-    if ( g_qeglobals.d_gridsize < 10 )
-        ++g_qeglobals.d_gridsize;
-    Radiant_CheckGridMenu();
-    g_nUpdateBits |= 0xAu;                   // W_XY | W_Z
-    Radiant_SetGridStatus();
-}
-
-static void Cmd_OnGridPrev()               // cmd 33084 ([)
-{
-    if ( g_qeglobals.d_gridsize > 0 )
-        --g_qeglobals.d_gridsize;
-    Radiant_CheckGridMenu();
-    g_nUpdateBits |= 0xAu;
-    Radiant_SetGridStatus();
-}
+// KIWI (2026-09-27): Cmd_OnGridNext / Cmd_OnGridPrev (33083 / 33084) removed with the
+// Grid menu.
 
 // â”€â”€ Texture-shift step inc/dec (Shift+KP-/KP+) â€” walk d_savedinfo.d_gridsize as an INT
 //    counter (LODWORD bit-manip; the wrap-guard keeps it out of 0).  IDB 0x4287B0/830.
@@ -5621,7 +5565,7 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33007: Cmd_OnRegionSettallbrush(); return true;   // Region->Set Tall Brush 0x4252E0
     case 32981: Cmd_OnRegionSetbrush(); return true;   // Region->Set Brush      0x4252C0
     case 33044: Cmd_OnRegionSetselection(); return true;   // Region->Set Selected   0x4252D0
-    case 32793: Cmd_OnSnaptogrid(); return true;   // Grid->Snap to grid     0x428380
+    // KIWI (2026-09-27): 32793 Grid->Snap to grid (0x428380) removed with the Grid menu.
     case 32785: Cmd_OnToggleLockMoves(); return true;   // Texture Lock->Moves     0x426B80
     case 32835: Cmd_OnToggleLockRotations(); return true;   // Texture Lock->Rotations 0x429230
     case 33237: Cmd_OnToggleLockLightmap(); return true;   // Texture Lock->Lightmaps 0x426BF0
@@ -5795,8 +5739,8 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33063: Cmd_OnCameraStrafeleft(); return true;   // strafe left      0x4267C0
     case 33064: Cmd_OnCameraStraferight(); return true;   // strafe right     0x426820
     case 33065: Cmd_OnGridToggle(); return true;   // toggle grid      0x426930
-    case 33083: Cmd_OnGridNext(); return true;   // grid size up     0x4289A0
-    case 33084: Cmd_OnGridPrev(); return true;   // grid size down   0x4289D0
+    // KIWI (2026-09-27): 33083 / 33084 classic grid size up / down (0x4289A0 / 0x4289D0)
+    // removed with the Grid menu - KIWI's grid is the viewport's spacing chip.
     case 33072: Cmd_OnSelectionTextureSnapDec(); return true;   // tex step dec 0x4287B0
     case 33073: Cmd_OnSelectionTextureSnapInc(); return true;   // tex step inc 0x428830
     case 33074: Cmd_OnSelectionTextureFitUnk(); return true;   // texture fit      0x4287D0
@@ -5882,19 +5826,9 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 210: Cmd_OnThemeGrey(); return true;   // Themes->Gray               0x428040
     case 32854: Cmd_OnDynamicLighting(); return true;   // Dynamic Lighting - U-CMD-1 no-op, see the hazard note above
 
-    // Grid menu, 11 sizes (ON_COMMAND_EX) 0x424AB0
-    case 35021:
-    case 35022:
-    case 35023:
-    case 35024:
-    case 35025:
-    case 35026:
-    case 35027:
-    case 35029:
-    case 35031:
-    case 35032:
-    case 35033:
-        Cmd_OnGridSize( cmdId ); return true;
+    // KIWI (2026-09-27, user: "I want the grid menu on the win32 top-bar and all
+    // sub-functionality removed"): the Grid menu's 11 sizes 35021-35033 (ON_COMMAND_EX
+    // 0x424AB0) are gone with it.
     // Textures->Render Method radio 0x4243D0
     case 32990:
     case 32991:

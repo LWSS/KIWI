@@ -33,11 +33,14 @@
 #include "kiwi_validity.h"
 #include "kiwi_vec.h"     // Dot3/Sub3/...
 
+#include <algorithm>    // std::sort (face-profile convex hull)
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>     // uint16_t index buffers
 #include <stdio.h>
+#include <stdlib.h>     // getenv (failure dump path)
 #include <string.h>
+#include <utility>      // std::swap (reversed-winding retry)
 #include <vector>
 
 // Ported entry points; addresses identify mirrored ordering and ABI contracts.
@@ -206,8 +209,10 @@ namespace
     // `loopUV` is in pb.plane coordinates; capTris indexes that profile.
     // Cap and sides use separate draws so the moving cap can be more prominent.
     // The white material backface-culls, so EmitFilledTris eye-orients each triangle.
+    // `slit` (optional): a ring's bridge edges (kregion_t::bridge) - no side wall there.
     void EmitPrismSolid( const prismBuild_t &pb, const std::vector<float> &loopUV,
-                         const std::vector<int> &capTris, const float rgb[3] )
+                         const std::vector<int> &capTris, const float rgb[3],
+                         const std::vector<unsigned char> *slit = nullptr )
     {
         const int n = (int)( loopUV.size() / 2 );
         if ( n < 3 || n > KEXT_MAX_PROFILE )
@@ -244,6 +249,8 @@ namespace
             int v = 0, t = 0;
             for ( int i = 0; i < n; ++i )
             {
+                if ( slit && i < (int)slit->size() && ( *slit )[(size_t)i] )
+                    continue;
                 const int j = ( i + 1 ) % n;
                 float p[4][3];
                 PrismVertex( pb, &loopUV[(size_t)i * 2], false, p[0] );
@@ -680,11 +687,12 @@ namespace
             // Plane-space profile centroid lifted onto the region plane.
             m_plane = reg.plane;
             float c[2] = { 0.0f, 0.0f };
-            const int n = (int)( reg.pts.size() / 2 );
+            const std::vector<float> &outerLoop = KiwiRegion_OuterLoop( reg );   // a ring's own rim
+            const int n = (int)( outerLoop.size() / 2 );
             for ( int i = 0; i < n; ++i )
             {
-                c[0] += reg.pts[i * 2 + 0];
-                c[1] += reg.pts[i * 2 + 1];
+                c[0] += outerLoop[i * 2 + 0];
+                c[1] += outerLoop[i * 2 + 1];
             }
             c[0] /= (float)n;
             c[1] /= (float)n;
@@ -798,7 +806,7 @@ namespace
                 std::vector<int> capTris;
                 if ( !( m_patchMode && CircleSource( reg ) ) )
                     KiwiRegion_Triangulate( reg.pts, &capTris );
-                EmitPrismSolid( pb, reg.pts, capTris, col );
+                EmitPrismSolid( pb, reg.pts, capTris, col, &reg.bridge );
             }
 
             KiwiLines_Color( col[0], col[1], col[2] );
@@ -820,6 +828,8 @@ namespace
             const int n = (int)( reg.pts.size() / 2 );
             for ( int i = 0; i < n; ++i )
             {
+                if ( KiwiRegion_EdgeIsBridge( reg, i ) )
+                    continue;                      // a ring's slit has no wall (KIWI 2026-09-28)
                 const int j = ( i + 1 ) % n;
                 float a[3], b[3];
                 PrismVertex( pb, &reg.pts[(size_t)i * 2], true, a );
@@ -852,6 +862,8 @@ namespace
         }
         const kconObject_t *CircleSource( const kregion_t &reg ) const
         {
+            if ( !reg.holes.empty() )
+                return nullptr;             // a ring (circle with a hole): its bridged loop, not a cylinder
             const kconObject_t *o = KiwiCon_At( reg.sourceObject );
             return o && o->type == KCON_CIRCLE && !o->hidden ? o : nullptr;
         }
@@ -1637,41 +1649,137 @@ namespace
             if ( outRef )
                 Copy3( c, outRef );
 
-            std::vector<float> &loop = *outLoop;
-            loop.resize( (size_t)w->numpoints * 2 );
+            std::vector<float> raw;
+            raw.resize( (size_t)w->numpoints * 2 );
             for ( int i = 0; i < w->numpoints; ++i )
-                KiwiCon_WorldToPlane( *outPlane, w->p[i], &loop[(size_t)i * 2] );
+                KiwiCon_WorldToPlane( *outPlane, w->p[i], &raw[(size_t)i * 2] );
 
-            // The prism writer requires CCW plane-space data. Brush winding sense is not
-            // guaranteed, so reverse a negative signed area before the convexity check.
-            float area2 = 0.0f;
-            const int n = (int)( loop.size() / 2 );
-            for ( int i = 0; i < n; ++i )
-            {
-                const int j = ( i + 1 ) % n;
-                area2 += loop[(size_t)i * 2 + 0] * loop[(size_t)j * 2 + 1]
-                       - loop[(size_t)j * 2 + 0] * loop[(size_t)i * 2 + 1];
-            }
-            if ( area2 < 0.0f )
-            {
-                for ( int i = 0; i < n / 2; ++i )
-                {
-                    const int j = n - 1 - i;
-                    float t0 = loop[(size_t)i * 2 + 0], t1 = loop[(size_t)i * 2 + 1];
-                    loop[(size_t)i * 2 + 0] = loop[(size_t)j * 2 + 0];
-                    loop[(size_t)i * 2 + 1] = loop[(size_t)j * 2 + 1];
-                    loop[(size_t)j * 2 + 0] = t0;
-                    loop[(size_t)j * 2 + 1] = t1;
-                }
-            }
-            if ( !KiwiRegion_IsConvex( loop ) )
+            // KIWI (2026-09-28, user: extruding a small split-brush face "fails ... This is
+            // BS"): brush windings (the CM-style gift wrap, split halves) can carry a near-
+            // duplicate or a near-collinear vertex.  Its tiny edge became a side plane of
+            // arbitrary direction that cut the prism ("face collapsed" / "planes crossed").
+            // A brush face is convex by construction, so the profile is its CONVEX HULL:
+            // points within KEXT_HULL_WELD merged, points within that of a hull edge dropped.
+            // The hull is CCW, so the old signed-area flip and convexity gate are implied.
+            std::vector<float> &loop = *outLoop;
+            if ( !ConvexHull2D( raw, &loop ) )
             {
                 if ( verbose )
-                    Sys_Printf( "Extrude Face: that winding is not convex — it cannot "
-                                "be one brush.\n" );
+                    Sys_Printf( "Extrude Face: that face is degenerate (its corners lie "
+                                "on one line).\n" );
+                return false;
+            }
+            // The ported winding build merges corners within 0.1 per axis, so a face this
+            // narrow can never become a brush.  Say so (always - it is never obvious on
+            // screen) instead of letting it die later as "face collapsed".
+            const float width = HullWidth( loop );
+            if ( width < KEXT_MIN_FACE_WIDTH )
+            {
+                char wb[32];
+                KiwiUnits_Format( wb, sizeof( wb ), width );
+                Sys_Printf( "Extrude Face: that face is a SLIVER only %s wide - too thin to "
+                            "become a brush.  (Usually left by an old split next to an "
+                            "edge; delete the sliver brush.)\n", wb );
                 return false;
             }
             return true;
+        }
+
+        // Smallest caliper width of a CCW convex loop: per edge, the farthest point.
+        static float HullWidth( const std::vector<float> &loop )
+        {
+            const int n = (int)( loop.size() / 2 );
+            float best = 1.0e30f;
+            for ( int i = 0; i < n; ++i )
+            {
+                const int j = ( i + 1 ) % n;
+                const float ex = loop[(size_t)j * 2] - loop[(size_t)i * 2];
+                const float ey = loop[(size_t)j * 2 + 1] - loop[(size_t)i * 2 + 1];
+                const float len = sqrtf( ex * ex + ey * ey );
+                if ( len < 1.0e-6f )
+                    continue;
+                float reach = 0.0f;
+                for ( int k = 0; k < n; ++k )
+                {
+                    const float px = loop[(size_t)k * 2] - loop[(size_t)i * 2];
+                    const float py = loop[(size_t)k * 2 + 1] - loop[(size_t)i * 2 + 1];
+                    const float d = fabsf( ex * py - ey * px ) / len;
+                    if ( d > reach ) reach = d;
+                }
+                if ( reach < best ) best = reach;
+            }
+            return best;
+        }
+
+        // Andrew's monotone chain over welded points; CCW, no repeated or collinear points.
+        static bool ConvexHull2D( const std::vector<float> &in, std::vector<float> *out )
+        {
+            const float KEXT_HULL_WELD = 0.05f;          // world units
+            struct p2_t { float x, y; };
+            std::vector<p2_t> pts;
+            for ( size_t i = 0; i + 1 < in.size(); i += 2 )
+            {
+                const p2_t p = { in[i], in[i + 1] };
+                bool dup = false;
+                for ( size_t k = 0; k < pts.size() && !dup; ++k )
+                    dup = fabsf( pts[k].x - p.x ) <= KEXT_HULL_WELD
+                       && fabsf( pts[k].y - p.y ) <= KEXT_HULL_WELD;
+                if ( !dup )
+                    pts.push_back( p );
+            }
+            out->clear();
+            if ( pts.size() < 3 )
+                return false;
+            std::sort( pts.begin(), pts.end(), []( const p2_t &a, const p2_t &b )
+                       { return a.x < b.x || ( a.x == b.x && a.y < b.y ); } );
+
+            // Keep b only when it stands more than the weld off the line a -> c on the hull
+            // side; otherwise it is interior, collinear or a near-duplicate and pops.
+            auto keepsTurn = [KEXT_HULL_WELD]( const p2_t &a, const p2_t &b, const p2_t &c )
+            {
+                const float ex = c.x - a.x, ey = c.y - a.y;
+                const float len = sqrtf( ex * ex + ey * ey );
+                if ( len < 1.0e-6f )
+                    return false;
+                const float cross = ( b.x - a.x ) * ey - ( b.y - a.y ) * ex;
+                return cross / len > KEXT_HULL_WELD;
+            };
+            std::vector<p2_t> hull;
+            for ( int pass = 0; pass < 2; ++pass )
+            {
+                const size_t start = hull.size();
+                for ( size_t i = 0; i < pts.size(); ++i )
+                {
+                    const p2_t &c = pass ? pts[pts.size() - 1 - i] : pts[i];
+                    while ( hull.size() >= start + 2
+                         && !keepsTurn( hull[hull.size() - 2], hull[hull.size() - 1], c ) )
+                        hull.pop_back();
+                    hull.push_back( c );
+                }
+                hull.pop_back();                 // the next pass starts from this point
+            }
+            if ( hull.size() < 3 )
+                return false;
+            for ( size_t i = 0; i < hull.size(); ++i )
+            {
+                out->push_back( hull[i].x );
+                out->push_back( hull[i].y );
+            }
+            // The prism wants CCW; flip if the chain came out the other way.
+            float area2 = 0.0f;
+            const int n = (int)hull.size();
+            for ( int i = 0; i < n; ++i )
+            {
+                const int j = ( i + 1 ) % n;
+                area2 += hull[i].x * hull[j].y - hull[j].x * hull[i].y;
+            }
+            if ( area2 < 0.0f )
+                for ( int i = 0; i < n / 2; ++i )
+                {
+                    std::swap( ( *out )[(size_t)i * 2 + 0], ( *out )[(size_t)( n - 1 - i ) * 2 + 0] );
+                    std::swap( ( *out )[(size_t)i * 2 + 1], ( *out )[(size_t)( n - 1 - i ) * 2 + 1] );
+                }
+            return fabsf( area2 ) * 0.5f >= KVALID_MIN_FACE_AREA;
         }
 
         // Drive-face wrapper; only the drive face reports detailed profile errors.
@@ -1880,53 +1988,163 @@ namespace
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
+        // KIWI (2026-09-28, user: dual-face E "operation fails" - console "rejected ? planes
+        // crossed"): one validated prism per source face.  The winding is retried REVERSED
+        // when the first build fails the gate - only the correctly oriented prism can pass,
+        // so the retry can never land an inside-out brush - and a face that still fails is
+        // reported on its own instead of refusing every other face with it.
+        static brush_t *BuildGrowPrism( const kconPlane_t &plane, const std::vector<float> &loop,
+                                        float dist, const char **why )
+        {
+            const int n = (int)( loop.size() / 2 );
+            if ( n < 3 )
+            {
+                *why = "profile out of range";
+                return 0;
+            }
+            const char *first = 0;             // the as-built reason outranks the retry's
+            for ( int attempt = 0; attempt < 2; ++attempt )
+            {
+                if ( attempt == 1 )
+                    first = *why;
+                std::vector<float> uv = loop;
+                if ( attempt == 1 )
+                    for ( int i = 0; i < n / 2; ++i )
+                    {
+                        const int j = n - 1 - i;
+                        std::swap( uv[(size_t)i * 2 + 0], uv[(size_t)j * 2 + 0] );
+                        std::swap( uv[(size_t)i * 2 + 1], uv[(size_t)j * 2 + 1] );
+                    }
+                brush_t *def = KiwiExtrude_BuildPrismDef( plane, &uv[0], n, 0.0f, dist, why );
+                if ( !def )
+                    continue;
+                KiwiValid_Rebuild( def );
+                if ( KiwiValid_CheckBrush( def, why ) )
+                {
+                    if ( attempt == 1 )
+                        Sys_Printf( "Extrude Face: a face's winding was inverted - built it "
+                                    "reversed.\n" );
+                    return def;
+                }
+                Brush_Free_R( def );           // never linked: refCount 0, no owner chain
+            }
+            if ( first )
+                *why = first;
+            return 0;
+        }
+
+        // KIWI (2026-09-28): diagnostics for a face whose prism will not build - the source
+        // brush (full-precision planepts, faces, windings), the profile, and the rebuilt
+        // prism's planes / windings, appended to %TEMP%\kiwi_extrude_fail.txt (outside the
+        // repo) so the float32 replica can rebuild the exact case.
+        static void DumpGrowFailure( const selbrush_t *node, int face, const kconPlane_t &plane,
+                                     const std::vector<float> &loop, float dist, const char *why )
+        {
+            const char *tmp = getenv( "TEMP" );
+            char path[512];
+            _snprintf( path, sizeof( path ), "%s\\kiwi_extrude_fail.txt", tmp ? tmp : "." );
+            path[sizeof( path ) - 1] = '\0';
+            FILE *f = fopen( path, "a" );
+            if ( !f )
+                return;
+            fprintf( f, "=== extrude failure: %s  face %i  dist %.9g\n", why ? why : "?", face, dist );
+            if ( node && node->def && node->def->faces )
+            {
+                const brush_t *d = node->def;
+                fprintf( f, "source brush %i faces\n", d->faceCount );
+                for ( int i = 0; i < d->faceCount; ++i )
+                {
+                    const face_t *fc = &d->faces[i];
+                    fprintf( f, " ( %.9g %.9g %.9g ) ( %.9g %.9g %.9g ) ( %.9g %.9g %.9g )  n %.9g %.9g %.9g d %.9g  w %i%s\n",
+                             fc->planepts[0][0], fc->planepts[0][1], fc->planepts[0][2],
+                             fc->planepts[1][0], fc->planepts[1][1], fc->planepts[1][2],
+                             fc->planepts[2][0], fc->planepts[2][1], fc->planepts[2][2],
+                             fc->plane.normal[0], fc->plane.normal[1], fc->plane.normal[2],
+                             (double)fc->plane.dist, fc->w ? fc->w->numpoints : 0,
+                             i == face ? "  <== SOURCE" : "" );
+                    if ( i == face && fc->w )
+                        for ( int p = 0; p < fc->w->numpoints; ++p )
+                            fprintf( f, "     w[%i] %.9g %.9g %.9g\n", p,
+                                     fc->w->p[p][0], fc->w->p[p][1], fc->w->p[p][2] );
+                }
+            }
+            fprintf( f, "plane origin %.9g %.9g %.9g  n %.9g %.9g %.9g  u %.9g %.9g %.9g  v %.9g %.9g %.9g\n",
+                     plane.origin[0], plane.origin[1], plane.origin[2],
+                     plane.normal[0], plane.normal[1], plane.normal[2],
+                     plane.u[0], plane.u[1], plane.u[2], plane.v[0], plane.v[1], plane.v[2] );
+            for ( size_t i = 0; i + 1 < loop.size(); i += 2 )
+                fprintf( f, "  loop %.9g %.9g\n", loop[i], loop[i + 1] );
+            if ( loop.size() >= 6 )
+            {
+                const char *w2 = 0;
+                brush_t *def = KiwiExtrude_BuildPrismDef( plane, &loop[0], (int)( loop.size() / 2 ),
+                                                          0.0f, dist, &w2 );
+                if ( def )
+                {
+                    KiwiValid_Rebuild( def );
+                    fprintf( f, "prism %i faces  bounds %.9g %.9g %.9g .. %.9g %.9g %.9g\n", def->faceCount,
+                             def->mins[0], def->mins[1], def->mins[2],
+                             def->maxs[0], def->maxs[1], def->maxs[2] );
+                    for ( int i = 0; i < def->faceCount; ++i )
+                    {
+                        const face_t *fc = &def->faces[i];
+                        fprintf( f, " ( %.9g %.9g %.9g ) ( %.9g %.9g %.9g ) ( %.9g %.9g %.9g )  n %.9g %.9g %.9g d %.9g  w %i\n",
+                                 fc->planepts[0][0], fc->planepts[0][1], fc->planepts[0][2],
+                                 fc->planepts[1][0], fc->planepts[1][1], fc->planepts[1][2],
+                                 fc->planepts[2][0], fc->planepts[2][1], fc->planepts[2][2],
+                                 fc->plane.normal[0], fc->plane.normal[1], fc->plane.normal[2],
+                                 (double)fc->plane.dist, fc->w ? fc->w->numpoints : 0 );
+                    }
+                    Brush_Free_R( def );         // never linked
+                }
+                else
+                    fprintf( f, "prism build refused: %s\n", w2 ? w2 : "?" );
+            }
+            fclose( f );
+            Sys_Printf( "Extrude Face: failure details appended to %s\n", path );
+        }
+
         // Build and validate all unlinked defs before landing them with one undo bracket.
         void Grow()
         {
             // Every selected face grows by one depth along its own normal.
-            // Build and gate all unlinked prisms before landing any so one rejection
-            // cannot leave a partial multi-face edit.
+            // Build and gate every prism before landing any; failures are per face.
             const char *why = "unknown";
             std::vector<brush_t *> defs;
-            bool ok = true;
+            int failed = 0;
             const int n = (int)( m_loop.size() / 2 );
             {
-                brush_t *def = KiwiExtrude_BuildPrismDef( m_plane, &m_loop[0], n,
-                                                          0.0f, m_dist, &why );
-                if ( !def )
-                {
-                    ok = false;
-                }
+                const char *w = "unknown";
+                if ( brush_t *def = BuildGrowPrism( m_plane, m_loop, m_dist, &w ) )
+                    defs.push_back( def );
                 else
                 {
-                    defs.push_back( def );
-                    KiwiValid_Rebuild( def );
-                    if ( !KiwiValid_CheckBrush( def, &why ) )
-                        ok = false;
+                    ++failed;
+                    why = w;
+                    Sys_Printf( "Extrude Face: the active face (%i-gon) was skipped — %s.\n",
+                                n, w ? w : "invalid geometry" );
+                    DumpGrowFailure( m_node, m_faceIndex, m_plane, m_loop, m_dist, w );
                 }
             }
-            for ( size_t i = 0; i < m_extraFaces.size() && ok; ++i )
+            for ( size_t i = 0; i < m_extraFaces.size(); ++i )
             {
                 const faceSrc_t &fs = m_extraFaces[i];
-                const int fn = (int)( fs.loop.size() / 2 );
-                if ( fn < 3 )
+                if ( fs.loop.size() < 6 )
                     continue;
-                brush_t *def = KiwiExtrude_BuildPrismDef( fs.plane, &fs.loop[0], fn,
-                                                          0.0f, m_dist, &why );
-                if ( !def )
+                const char *w = "unknown";
+                if ( brush_t *def = BuildGrowPrism( fs.plane, fs.loop, m_dist, &w ) )
+                    defs.push_back( def );
+                else
                 {
-                    ok = false;
-                    break;
+                    ++failed;
+                    why = w;
+                    Sys_Printf( "Extrude Face: selected face %i (%i-gon) was skipped — %s.\n",
+                                (int)i + 2, (int)( fs.loop.size() / 2 ), w ? w : "invalid geometry" );
+                    DumpGrowFailure( fs.node, fs.face, fs.plane, fs.loop, m_dist, w );
                 }
-                defs.push_back( def );
-                KiwiValid_Rebuild( def );
-                if ( !KiwiValid_CheckBrush( def, &why ) )
-                    ok = false;
             }
-            if ( !ok )
+            if ( defs.empty() )
             {
-                for ( size_t i = 0; i < defs.size(); ++i )
-                    Brush_Free_R( defs[i] );   // never linked: refCount 0, no owner chain
                 Sys_Printf( "Extrude Face: rejected — %s.\n",
                             why ? why : "invalid geometry" );
                 return;
@@ -1941,8 +2159,9 @@ namespace
             Sel_Clear( KiwiSel() );
             Sel_RebuildFromLegacy();
 
-            Sys_Printf( "Extrude Face: %i new brush(es) from %i face(s) (%i-gon drive).\n",
-                        (int)defs.size(), (int)m_extraFaces.size() + 1, n );
+            Sys_Printf( "Extrude Face: %i new brush(es) from %i face(s) (%i-gon drive)%s.\n",
+                        (int)defs.size(), (int)m_extraFaces.size() + 1, n,
+                        failed ? ", some faces skipped (see above)" : "" );
             g_nUpdateBits = -1;
 
             // Match paste/clone handoff: start a paused Move for the selected new bodies.

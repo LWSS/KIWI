@@ -35,9 +35,10 @@ namespace
 
     const addRow_t KADD_ROWS[] =
     {
-        // Both ids intentionally address one chained-curve tool; keep Polyline
-        // as a discoverable alias.
-        { "Curves", "Line (chained curve)",  KIWI_CMD_DRAW_LINE        },
+        // Both ids intentionally address one chained-line tool; keep Polyline
+        // as a discoverable alias.  KIWI (2026-09-27): the category was "Curves" - a CoD4
+        // patch term - and is "Construction Lines" now.
+        { "Construction Lines", "Line (chained)", KIWI_CMD_DRAW_LINE   },
         { 0,        "Polyline (= Line)",     KIWI_CMD_DRAW_POLYLINE    },
         { 0,        "Spline",                KIWI_CMD_DRAW_SPLINE      },
         { 0,        "Rectangle (corner)",    KIWI_CMD_DRAW_RECT        },
@@ -54,6 +55,7 @@ namespace
         { 0,        "Cone",                  KIWI_CMD_PRIM_CONE        },
 
         { "From construction", "Extrude Region", KIWI_CMD_EXTRUDE_REGION },
+        { 0,        "Pipe (along a line / spline)", KIWI_CMD_CONSTRUCT_PIPE },
 
         // Place Sun edits worldspawn keys, so it remains outside curve/solid groups.
         { "Lighting", "Place Sun",              KIWI_CMD_PLACE_SUN        },
@@ -160,7 +162,7 @@ void KiwiAdd_MenuItem()
         KiwiAdd_Open();
     if ( ImGui::IsItemHovered() )
         ImGui::SetTooltip( "Every creation command, at the cursor (modern keymap: Shift+A).\n"
-                           "Curves, solid primitives, extrude, construction planes." );
+                           "Construction lines, solid primitives, extrude, construction planes." );
 }
 
 void KiwiAdd_Draw()

@@ -13,6 +13,8 @@
 //   V4  winding area below KVALID_MIN_FACE_AREA
 //   V5  same-facing planes within the dot and distance tolerances
 //   V6  opposed planes whose n·p <= d slab is thinner than KVALID_MIN_THICKNESS
+//       (V5/V6 offsets are measured at face i's winding centre, never from the world
+//       origin - near-parallel planes far from the origin made the old dist sums garbage)
 //   V7  non-increasing, oversized, or out-of-map rebuilt bounds
 // Full convexity is derived by Brush_BuildWindings; tiny-edge rejection would exclude
 // legitimate detail brushes, so neither is a separate check.

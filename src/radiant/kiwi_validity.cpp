@@ -46,6 +46,21 @@ namespace
         return total;
     }
 
+    // Vertex mean of a (non-null) winding: a point ON the face, used where V5/V6 need an
+    // origin-independent offset.
+    void WindingCentre( const winding_t *w, float out[3] )
+    {
+        out[0] = out[1] = out[2] = 0.0f;
+        if ( !w || w->numpoints < 1 )
+            return;
+        for ( int i = 0; i < w->numpoints; ++i )
+            for ( int k = 0; k < 3; ++k )
+                out[k] += w->p[i][k];
+        const float inv = 1.0f / (float)w->numpoints;
+        for ( int k = 0; k < 3; ++k )
+            out[k] *= inv;
+    }
+
     // BuildWindings seeds mins=+131072/maxs=-131072 and expands only from intersections;
     // non-increasing bounds therefore cover empty and inside-out results.
     bool BoundsOk( const brush_t *def, const char **outWhy )
@@ -235,26 +250,36 @@ bool KiwiValid_CheckBrushIgnoringFace( brush_t *def, int ignoreFace, const char 
     }
 
     // V5/V6: pairwise plane relations.
+    // KIWI (2026-09-28, user: a Ctrl+R face "should be fine" but Extrude refused it): the
+    // offsets used to be pi.dist -/+ pj.dist - distances from the WORLD ORIGIN - which are
+    // only a slab measure for exactly parallel planes.  "Parallel" here means within the
+    // 0.999 cone (2.6 degrees); two faces 0.8 degrees apart ~19000 units out (the slanted
+    // powerplant wall) summed to -264.8, so a 12-unit-thick prism read as "planes crossed"
+    // (%TEMP%\kiwi_extrude_fail.txt).  Measure at the brush instead: plane j's signed
+    // distance of face i's winding centre (V3 above guarantees every retained winding).
     for ( int i = 0; i < def->faceCount; ++i )
     {
         if ( i == ignoreFace )
             continue;
         const plane_t &pi = def->faces[i].plane;
+        float ci[3];
+        WindingCentre( def->faces[i].w, ci );
         for ( int j = i + 1; j < def->faceCount; ++j )
         {
             if ( j == ignoreFace )
                 continue;
             const plane_t &pj = def->faces[j].plane;
             const float d = Dot3( pi.normal, pj.normal );
+            const float off = Dot3( pj.normal, ci ) - pj.dist;     // <= 0 inside plane j
 
             if ( d > KVALID_PLANE_DOT
-              && fabsf( pi.dist - pj.dist ) < KVALID_PLANE_DIST )
+              && fabsf( off ) < KVALID_PLANE_DIST )
             {
                 if ( outWhy ) *outWhy = "duplicate plane";
                 return false;
             }
             if ( d < -KVALID_PLANE_DOT
-              && ( pi.dist + pj.dist ) < KVALID_MIN_THICKNESS )
+              && -off < KVALID_MIN_THICKNESS )                     // slab thickness at face i
             {
                 if ( outWhy ) *outWhy = "planes crossed";
                 return false;

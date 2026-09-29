@@ -270,6 +270,8 @@ set(RADIANT_SRCS
     # kiwi_command.cpp, because "what was the last command" is a framework fact.
     "${SRC_DIR}/radiant/kiwi_offset.h"       # Offset Curve (O) — parallel copy of a chain
     "${SRC_DIR}/radiant/kiwi_offset.cpp"
+    "${SRC_DIR}/radiant/kiwi_pipe.h"         # Pipe - a section swept along construction (Plasticity)
+    "${SRC_DIR}/radiant/kiwi_pipe.cpp"
     "${SRC_DIR}/radiant/kiwi_fillet.h"       # Fillet Corners (B) — round a chain's corners
     "${SRC_DIR}/radiant/kiwi_fillet.cpp"
 

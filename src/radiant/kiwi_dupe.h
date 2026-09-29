@@ -13,19 +13,25 @@
 // originals are deselected and the copies selected.  gridSize is unused in this port;
 // the import owns its own "import buffer" undo bracket (nested inside ours).
 //
-// Arrays use one mutation-style undo record. Each iteration clones the current
-// selection, then transforms it; before commit, every original saved at begin and
-// every copy must be selected so Undo_EndBrushList records a consistent after-state.
+// Arrays (KIWI 2026-09-27 redo, Plasticity's Rectangular/RadialArrayCommand flow): select
+// anything - it arrays AS ITSELF and the selection is never converted (objects clone;
+// construction, regions, brush edges and faces copy as construction, kiwi_conselect.h) -
+// start the tool, PICK a line (construction segment or brush edge; Radial: a snapped
+// centre point), then OPTIONS in the command panel - count, distance or fixed spacing,
+// flip (Radial: count, angle, axis Z / X / Y / construction-plane normal) - typed values
+// (count, Tab, length / angle), [ ] count, a lollipop on the last copy of a linear array,
+// P to pick again; Enter / RMB / Confirm writes.  Distance = the original to the last copy
+// (the picked line's length at first).  A full 360 spaces the radial copies around the
+// circle; a partial angle lands the last copy on it.
 //
-// Linear drag is a world-space offset on a camera-facing plane latched at Begin.
-// Typed input is count; Units_ToDisplay reverses the numeric layer's length conversion.
-// A picked line supplies an exact span, so count derives spacing without grid rounding.
+// Objects: one mutation-style undo record; each iteration clones the last copy and moves /
+// turns it one step, and every original and copy is selected again before commit so
+// Undo_EndBrushList records a consistent after-state; faces / edges / points picked beside
+// the objects are picked again.  Construction copies go through KiwiConSel_ArrayAdd (its own
+// construction undo snapshot, made first; the copies join the construction selection).
 //
-// Radial arrays rotate around Z through the latched session pivot, falling back to
-// selection mid. Latching once avoids drift from recomputed rotated bbox midpoints.
-//
-// Preview and snap marker share a bounded KiwiLines batch. Previews query remaining
-// segments and degrade boxes to 3-axis crosses rather than spill.
+// Preview and snap marker share a bounded KiwiLines batch: per-object boxes and
+// construction segments per copy, one box per copy when that does not fit.
 //
 // Shift+D clones, refreshes the classic special-material hints, then enters paused
 // Move via KiwiCmd_AfterPaste. Its creation-style undo bracket omits Undo_AddBrushList
@@ -38,17 +44,13 @@ class KiwiEditorCommand;
 #define KARR_DEF_LINEAR     3     // default linear count
 #define KARR_DEF_RADIAL     6
 #define KARR_MIN_OFFSET     0.5f  // world units — below this a linear array is a no-op
-#define KARR_MAX_SOURCE     512   // preview/original-tracking cap
-
-// MouseMove has no grab gate, so a picked line needs a pixel deadzone or the next
-// cursor twitch would release it. The generous radius favors avoiding a costly re-pick.
-#define KARR_LINE_BREAK_PIXELS 48.0f
+#define KARR_MAX_SOURCE     512   // preview cap (boxes, construction segments)
 
 void KiwiDupe_RegisterCommands();
 KiwiEditorCommand *KiwiDupe_CommandForId( int commandId );
 
 bool KiwiDupe_CanMirror();   // attaches to the CLASSIC ids 32956 / 32957 / 32958
-bool KiwiDupe_CanArray();    // at least one cloneable brush is selected
+bool KiwiDupe_CanArray();    // anything with a shape: objects, construction, regions, edges, faces
 bool KiwiDupe_CanDuplicate();// …the same precondition; a separate name so the two
                              // palette rows can diverge later without a rename
 

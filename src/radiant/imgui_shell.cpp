@@ -284,6 +284,7 @@ extern void TexWnd_SetScroll( int n );
 // below is exactly the pre-Phase-1b legacy one. See kiwi_viewport.h for which legacy path
 // each consumed event replaces.
 extern bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl );
+extern bool KiwiVP_CameraSecondaryDown( int btn, int imgX, int imgY );
 extern bool KiwiVP_CameraMouseMove ( int imgX, int imgY );
 extern bool KiwiVP_CameraButtonUp  ( int btn, int imgX, int imgY );
 extern bool KiwiVP_CameraWheel     ( float steps, int imgX, int imgY );
@@ -676,6 +677,14 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
     {
         if ( id == RTT_XY )
             KiwiRefImage_HoverXY( mx, my, false );
+        // KIWI (2026-09-27, user: "allow right click panning of the camera while holding
+        // left-click for an operation"): a SECOND press on the camera while a modern
+        // gesture owns it goes to the camera layer (RMB pans under a held LMB tool).  It
+        // never gets a s_legacyBtnMask bit, so the round-BU rule still holds for legacy.
+        if ( kiwiCam )
+            for ( int b = 0; b < 3; ++b )
+                if ( ImGui::IsMouseClicked( b ) )
+                    KiwiVP_CameraSecondaryDown( b, mx, my );
         // ROUND BU: the same press-seen filter the unowned branch got in round BG —
         // a button whose press the modern layer claimed (or that was pressed
         // mid-gesture and dispatched nowhere) must not reach the legacy move mask,
@@ -1033,12 +1042,33 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
     if ( !always && KiwiWindows_JustOpened( win ) )
         ImGui::SetNextWindowDockID( s_dockRoot, ImGuiCond_Always );
 
+    // KIWI (2026-09-27, user: "get rid of the black bar at the top of the 3dview. (Retain the
+    // ability to move it around via a small draggable thing somewhere)"): the camera's dock
+    // node keeps its tab bar HIDDEN - forced through the window class, so ImGui cancels the
+    // click that would show it again (imgui.cpp DockNodeUpdateFlagsAndCollapse) - and the
+    // node's top-left corner triangle stays: dragging it undocks and moves the camera like
+    // dragging its tab did.  Nothing may tab INTO the camera's node (a hidden bar would bury
+    // that tab); docking beside it still splits.  A layout saved with tabs already in the
+    // node keeps its bar until they leave.
+    if ( always )
+    {
+        ImGuiWindowClass camClass;
+        camClass.DockNodeFlagsOverrideSet = (ImGuiDockNodeFlags)ImGuiDockNodeFlags_NoDockingOverMe;
+        const ImGuiWindow *camWin = ImGui::FindWindowByName( title );
+        if ( !camWin || !camWin->DockNode || camWin->DockNode->Windows.Size <= 1 )
+            camClass.DockNodeFlagsOverrideSet |= (ImGuiDockNodeFlags)ImGuiDockNodeFlags_HiddenTabBar;
+        ImGui::SetNextWindowClass( &camClass );
+    }
+
     ImGui::PushStyleVar( ImGuiStyleVar_WindowPadding, ImVec2( 0.0f, 0.0f ) );
     const bool open = ImGui::Begin( title, p_open,
                                     ImGuiWindowFlags_NoScrollbar |
                                     ImGuiWindowFlags_NoScrollWithMouse |
                                     ImGuiWindowFlags_NoCollapse );
     ImGui::PopStyleVar();
+    // The hidden-tab-bar corner triangle Begin just submitted (imgui.cpp, "#UNHIDE" on the
+    // window's own id stack): pressing or dragging it must not also click the camera.
+    const ImGuiID camHandleId = ( always && open ) ? ImGui::GetCurrentWindow()->GetID( "#UNHIDE" ) : 0;
     if ( open )
     {
         // ── KIWI-UX (ROUND AC): the ALL / IN-USE filter, ON the Textures panel ──
@@ -1212,6 +1242,12 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                 // imgui.h:1020.)
                 if ( ImGui::GetDragDropPayload() != nullptr )
                     imgHovered = false;
+                if ( camHandleId != 0 )
+                {
+                    const ImGuiContext &gc = *ImGui::GetCurrentContext();
+                    if ( gc.HoveredId == camHandleId || gc.ActiveId == camHandleId )
+                        imgHovered = false;         // the camera's move handle, not the scene
+                }
                 // KIWI-UX: the §11 selection-mode chip row + the §12 marquee rectangle, drawn
                 // INSIDE the camera image (screen space; the world-space overlays go in the
                 // Cam_Draw tail instead). A chip under the cursor takes the image's hover for
@@ -1481,12 +1517,49 @@ void ImGuiShell_ApplyViewportDocks()
 // split later can only eat the node it was given.  Taking the columns first is
 // exactly what made the console narrow before.
 static bool s_dockLayoutPending = false;   // set at init from ini existence
+static bool s_layoutResetPending = false;  // Windows > Reset Layout (KIWI 2026-09-27)
+
+// KIWI (2026-09-27, user: "Add a 'Reset Layout' button to the Windows-> Dropdown bar that
+// resets the location and open-state of all windows"): kiwi_windows.cpp resets the open
+// states; this re-runs the first-run layout build on the next frame, which docks every
+// default window back into its node wherever it floats now (DockBuilderDockWindow is
+// ImGuiCond_Always), and re-arms each other window's FirstUseEver / Once / Appearing
+// placement so a floating panel returns to the spot and size its own code asks for.
+void ImGuiShell_ResetLayout()
+{
+    s_dockLayoutPending  = true;
+    s_layoutResetPending = true;
+}
+
+static void ImGuiShell_RearmWindowPlacement()
+{
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    const ImGuiCond rearm = ImGuiCond_Once | ImGuiCond_FirstUseEver | ImGuiCond_Appearing;
+    for ( int i = 0; i < g.Windows.Size; ++i )
+    {
+        ImGuiWindow *w = g.Windows[i];
+        if ( !w || ( w->Flags & ( ImGuiWindowFlags_ChildWindow | ImGuiWindowFlags_Popup
+                                | ImGuiWindowFlags_Tooltip ) ) )
+            continue;
+        w->SetWindowPosAllowFlags       |= rearm;
+        w->SetWindowSizeAllowFlags      |= rearm;
+        w->SetWindowCollapsedAllowFlags |= rearm;
+        w->SetWindowDockAllowFlags      |= rearm;
+        w->Collapsed = false;
+    }
+    ImGui::MarkIniSettingsDirty();
+}
 
 static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
 {
     if ( !s_dockLayoutPending )
         return;
     s_dockLayoutPending = false;
+    if ( s_layoutResetPending )
+    {
+        s_layoutResetPending = false;
+        ImGuiShell_RearmWindowPlacement();
+    }
 
     ImGui::DockBuilderRemoveNode( dockId );
     ImGui::DockBuilderAddNode( dockId, ImGuiDockNodeFlags_DockSpace );
@@ -1672,6 +1745,14 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
             ImGuiStyle &style = ImGui::GetStyle();
             style.WindowRounding = 0.0f;
             style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+            // KIWI (2026-09-27, user: "remove these ugly dropdown hide things from the imgui
+            // tabs list"): no window-menu button on any dock tab bar (docked or floating) and
+            // no collapse arrow on floating title bars; a title-bar double-click still collapses.
+            style.WindowMenuButtonPosition = ImGuiDir_None;
+            // KIWI (2026-09-28, user: "remove the small X in the top right corner of each imgui
+            // sub-window"): no close-all button at the right of a dock node's tab bar.  The
+            // Windows menu (and Reset Layout) still opens / closes every panel.
+            style.DockingNodeHasCloseButton = false;
         }
         ImGui_ImplWin32_Init( activeHwnd );
         ImGui_ImplDX9_Init( device );

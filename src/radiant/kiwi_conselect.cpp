@@ -1686,6 +1686,240 @@ void KiwiConSel_RotateApplyMatrix( const float pivot[3], const float m[3][3] )
     KiwiCon_NoteMutated();
 }
 
+// KIWI (2026-09-27): the construction half of the array tools (kiwi_dupe.cpp) - see the
+// header for what each kind of selection copies as.
+namespace
+{
+    bool ListHas( const std::vector<int> &list, int v )
+    {
+        for ( size_t i = 0; i < list.size(); ++i )
+            if ( list[i] == v )
+                return true;
+        return false;
+    }
+
+    void PushShape( std::vector<kconArrayShape_t> *out, const kconObject_t &o, int firstCopy )
+    {
+        kconArrayShape_t s;
+        s.shape = o;
+        s.shape.tessCache.clear();                 // a fresh shape: nothing cached
+        s.shape.tessGen = 0;
+        s.shape.tessKey = 0;
+        s.firstCopy = firstCopy;
+        out->push_back( s );
+    }
+
+    // Duplicate's run building: touching pieces chain into one line / polyline / ring.
+    void PushRuns( std::vector<kedge_t> &edges, int firstCopy, std::vector<kconArrayShape_t> *out )
+    {
+        for ( size_t i = 0; i < edges.size(); ++i )
+        {
+            if ( edges[i].used )
+                continue;
+            kconObject_t o;
+            bool closed = false;
+            GrowRun( edges, i, &o.pts, &closed );
+            const int nPts = (int)( o.pts.size() / 3 );
+            if ( nPts < 2 )
+                continue;
+            o.type   = ( nPts == 2 ) ? KCON_LINE : KCON_POLYLINE;
+            o.closed = closed && ( nPts >= 3 );
+            PushShape( out, o, firstCopy );
+        }
+    }
+
+    // Region loops are plane space; the copy is its world ring.  A ring (a region with holes)
+    // copies its rim and each hole as separate closed loops - never the bridged loop - so the
+    // copies derive rings again.
+    void PushLoop( const kconPlane_t &plane, const std::vector<float> &loop, int firstCopy,
+                   std::vector<kconArrayShape_t> *out )
+    {
+        const int n = (int)( loop.size() / 2 );
+        if ( n < 3 )
+            return;
+        kconObject_t o;
+        o.type   = KCON_POLYLINE;
+        o.closed = true;
+        for ( int k = 0; k < n; ++k )
+        {
+            float w[3];
+            KiwiCon_PlaneToWorld( plane, &loop[(size_t)k * 2], w );
+            o.pts.insert( o.pts.end(), w, w + 3 );
+        }
+        PushShape( out, o, firstCopy );
+    }
+
+    void PushRegion( const kregion_t &r, int firstCopy, std::vector<kconArrayShape_t> *out )
+    {
+        PushLoop( r.plane, KiwiRegion_OuterLoop( r ), firstCopy, out );
+        for ( size_t h = 0; h < r.holes.size(); ++h )
+            PushLoop( r.plane, r.holes[h], firstCopy, out );
+    }
+}
+
+bool KiwiConSel_CanArray()
+{
+    for ( size_t i = 0; i < s_sel.size(); ++i )
+        if ( s_sel[i].kind != KCONSEL_POINT )
+            return true;
+    if ( KiwiRegion_HasSelection() )
+        return true;
+    const selection_t &sel = KiwiSel();
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+        if ( ( sel.items[i].kind == SEL_EDGE || sel.items[i].kind == SEL_FACE )
+          && Sel_BrushLive( sel.items[i].brush ) )
+            return true;
+    return false;
+}
+
+int KiwiConSel_ArrayShapes( std::vector<kconArrayShape_t> *out )
+{
+    out->clear();
+
+    // Construction: whole objects, and loose segments of objects not wholly selected.
+    std::vector<int> whole;
+    for ( size_t i = 0; i < s_sel.size(); ++i )
+        if ( s_sel[i].kind == KCONSEL_OBJECT && !ListHas( whole, s_sel[i].object ) )
+            whole.push_back( s_sel[i].object );
+    std::vector<kedge_t> pieces;
+    for ( size_t i = 0; i < s_sel.size(); ++i )
+    {
+        const kconSelItem_t &it = s_sel[i];
+        if ( it.kind != KCONSEL_SEGMENT || ListHas( whole, it.object ) )
+            continue;
+        const kconObject_t *o = KiwiCon_At( it.object );
+        if ( !o || o->hidden )
+            continue;
+        if ( KiwiCon_IsParametric( *o ) || KiwiCon_HasSmooth( *o ) )
+        {
+            whole.push_back( it.object );          // a curve's piece is a chord: copy the curve
+            continue;
+        }
+        kedge_t e;
+        if ( !KiwiCon_SegmentWorld( *o, it.index, e.a, e.b ) || EdgeDist3( e.a, e.b ) <= KREG_JOIN_DIST )
+            continue;
+        e.used = false;
+        pieces.push_back( e );
+    }
+    for ( size_t i = 0; i < whole.size(); ++i )
+    {
+        const kconObject_t *o = KiwiCon_At( whole[i] );
+        if ( o && !o->hidden )
+            PushShape( out, *o, 1 );
+    }
+    PushRuns( pieces, 1, out );
+
+    // Regions: a region that IS one closed object copies that object, once.
+    const std::vector<kregion_t> &regions = KiwiRegion_All();
+    const int nRegions = KiwiRegion_SelectedCount();
+    for ( int i = 0; i < nRegions; ++i )
+    {
+        const int r = KiwiRegion_SelectedAt( i );
+        if ( r < 0 || r >= (int)regions.size() )
+            continue;
+        const int src = regions[r].sourceObject;
+        if ( src >= 0 )
+        {
+            const kconObject_t *o = KiwiCon_At( src );
+            if ( o && !ListHas( whole, src ) )
+            {
+                whole.push_back( src );
+                PushShape( out, *o, 1 );
+            }
+            continue;
+        }
+        PushRegion( regions[r], 1, out );
+    }
+
+    // Brush edges and faces become construction, from copy 0 on.
+    std::vector<kedge_t> edges;
+    GatherSelectedEdges( &edges );
+    PushRuns( edges, 0, out );
+    const selection_t &sel = KiwiSel();
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+    {
+        const sel_item_t &it = sel.items[i];
+        if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) )
+            continue;
+        kconObject_t o;
+        o.type   = KCON_POLYLINE;
+        o.closed = true;
+        for ( int v = 0; v < MAX_POINTS_ON_WINDING; ++v )
+        {
+            float p[3];
+            if ( !Sel_ItemWorldPos( Sel_MakeVertex( it.brush, it.faceIndex, v ), p, false ) )
+                break;
+            o.pts.insert( o.pts.end(), p, p + 3 );
+        }
+        if ( o.pts.size() >= 9 )
+            PushShape( out, o, 0 );
+    }
+    return (int)out->size();
+}
+
+int KiwiConSel_ArrayAdd( const std::vector<kconArrayShape_t> &shapes, int count,
+                         const float step[3], const float pivot[3], const float m[3][3] )
+{
+    if ( shapes.empty() || count < 1 || !step || !pivot || !m )
+        return 0;
+
+    std::vector<kconObject_t> made;
+    float cur[3][3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+    for ( int i = 0; i < count; ++i )
+    {
+        if ( i > 0 )
+        {
+            float next[3][3];                      // copy i turns by m^i
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    next[a][b] = m[a][0] * cur[0][b] + m[a][1] * cur[1][b] + m[a][2] * cur[2][b];
+            memcpy( cur, next, sizeof( cur ) );
+        }
+        for ( size_t s = 0; s < shapes.size(); ++s )
+        {
+            if ( i < shapes[s].firstCopy )
+                continue;
+            const kconObject_t &src = shapes[s].shape;
+            kconObject_t c = src;
+            // Frame and points as KiwiConSel_RotateApplyMatrix turns them, then the step.
+            MatAbout( pivot, cur, src.plane.origin, c.plane.origin );
+            MatVec( cur, src.plane.normal, c.plane.normal );
+            MatVec( cur, src.plane.u,      c.plane.u );
+            MatVec( cur, src.plane.v,      c.plane.v );
+            for ( int k = 0; k < 3; ++k )
+                c.plane.origin[k] += step[k] * (float)i;
+            for ( size_t k = 0; k + 2 < src.pts.size(); k += 3 )
+            {
+                MatAbout( pivot, cur, &src.pts[k], &c.pts[k] );
+                for ( int j = 0; j < 3; ++j )
+                    c.pts[k + j] += step[j] * (float)i;
+            }
+            made.push_back( c );
+        }
+    }
+    if ( made.empty() )
+        return 0;
+
+    // ONE store-undo snapshot; appends keep every selected index valid, and the copies
+    // JOIN the selection (Plasticity adds the array's items to what was selected).
+    KiwiCon_UndoPush();
+    int added = 0;
+    for ( size_t i = 0; i < made.size(); ++i )
+    {
+        const int idx = KiwiCon_Add( made[i] );
+        if ( idx < 0 )
+            continue;
+        kconSelItem_t it;
+        it.object = idx;
+        it.kind   = KCONSEL_OBJECT;
+        it.index  = -1;
+        Add( it );
+        ++added;
+    }
+    g_nUpdateBits |= 1;
+    return added;
+}
+
 void KiwiConSel_ScaleApply( const float pivot[3], const float factor[3] )
 {
     if ( !s_moveOpen || !pivot || !factor )

@@ -7,7 +7,12 @@
 // endpoint nodes are ambiguous and rejected rather than guessed.
 // Endpoint welding and plane bands are grid-aware world distances.  Arrangement
 // also finds bounded cells at mid-span crossings; all routes share acceptance.
-// Holes are unsupported: nested closed loops remain separate regions.
+// Holes (KIWI 2026-09-28, user: "expand the region code so it's more like plasticity"): a
+// region lying strictly inside another on the same plane is a HOLE of it, as in Plasticity - the
+// inner area stays its own region and the outer becomes a ring.  The ring is stored as ONE
+// bridged loop (outer, a slit in to each hole, the hole reversed, the slit back), so picking
+// (even-odd), triangulation, fills and extrusion take it unchanged; `bridge` marks the slit
+// edges that outline drawers must skip, and `outer` keeps the plain outer loop.
 // The engine fill follows the ported selected-face and 3D-marquee triangle path.
 // 0x408106
 // 0x40CC50
@@ -68,6 +73,11 @@ struct kregion_t
     kconPlane_t        plane;
     std::vector<float> pts;         // plane-space loop, CCW, first point NOT repeated
     int                sourceObject = -1;   // >= 0 when one closed object IS the region
+    // Rings only (empty otherwise): per pts edge i -> i+1, 1 = a bridge slit (never drawn);
+    // and the region's own outer loop before its holes were bridged in.
+    std::vector<unsigned char> bridge;
+    std::vector<float>         outer;
+    std::vector< std::vector<float> > holes;   // each bridged hole, plane space, clockwise
     // Carried across re-derives by the world-space match key below.
     int                flash = 0;
     float              centroid[3] = { 0.0f, 0.0f, 0.0f };   // world, the match key
@@ -76,6 +86,17 @@ struct kregion_t
 // The current regions.  Re-derived when the store generation moved; cheap to
 // call every frame.
 const std::vector<kregion_t> &KiwiRegion_All();
+
+// Ring helpers: is pts edge i -> i+1 a bridge slit (skip it when drawing an outline)?  The
+// region's outer loop (its pts when it has no holes).
+inline bool KiwiRegion_EdgeIsBridge( const kregion_t &r, int i )
+{
+    return i >= 0 && i < (int)r.bridge.size() && r.bridge[(size_t)i] != 0;
+}
+inline const std::vector<float> &KiwiRegion_OuterLoop( const kregion_t &r )
+{
+    return r.outer.empty() ? r.pts : r.outer;
+}
 
 // Force a re-derive (the store calls this on a change; callers rarely need it).
 void KiwiRegion_Invalidate();
@@ -88,6 +109,10 @@ int KiwiRegion_PickAt( const ray_t &ray );
 // kiwi_boxselect.cpp: a region only wins a click when no brush face is closer.
 // False when the index is not a region or the ray misses its plane.
 bool KiwiRegion_HitDistance( const ray_t &ray, int index, float *outDist );
+// Click / hover arbitration against a surface hit `surfaceDist` along the same ray: the
+// region wins ties - it loses only to a surface nearer by more than the plane band (>= 1
+// unit), so a region drawn on a brush face picks before the face.  True with no distance.
+bool KiwiRegion_WinsOverSurface( const ray_t &ray, int index, float surfaceDist );
 
 // Region selection is KIWI-owned because derived regions cannot enter selection_t.
 // Store a world-space match key per member: derived indices change on every rebuild,
@@ -101,6 +126,16 @@ bool KiwiRegion_HasSelection();
 int  KiwiRegion_SelectedCount();            // members that still resolve
 int  KiwiRegion_SelectedAt( int which );    // 0..count-1 -> live region index, or -1
 bool KiwiRegion_IsSelected( int index );
+
+// KIWI (2026-09-28, user: "allow deletion of a construction face, you basically select a face
+// and it'll trim all the lines on the exterior of the face away"): Delete on selected regions.
+// Every visible straight/parametric object lying on a selected region's plane AND touching
+// that region (boundary, crossing or inside, within the weld) keeps only its parts inside or
+// on the union of the selected regions of that plane; the rest is cut away at the boundary.
+// Objects that never touch a selected region are untouched.  A partially trimmed circle / arc
+// / rect freezes to polylines (as Trim does); a fully kept object is left exactly as it was.
+// Spline chains are skipped.  ONE construction undo snapshot; false = nothing changed.
+bool KiwiRegion_TrimOutsideSelected();
 
 // Engine-route fill and the sole once-per-drawn-frame owner of flash aging.
 void KiwiRegion_DrawFills( int highlightIndex );

@@ -56,11 +56,8 @@ namespace
         if ( !table || count <= 0 )
             return;
 
-        Bind( table, count, 35022, 0x00, 0 );   // SetGrid1        -> unbound
-        Bind( table, count, 35023, 0x00, 0 );   // SetGrid2        -> unbound
-        Bind( table, count, 35024, 0x00, 0 );   // SetGrid4        -> unbound
-        Bind( table, count, 35025, 0x00, 0 );   // SetGrid8        -> unbound
-        Bind( table, count, 35026, 0x00, 0 );   // SetGrid16       -> unbound
+        // KIWI (2026-09-27): the classic SetGrid rows that sat on 1-9 and ` are gone with the
+        // Grid menu (mainfrm.cpp), so the digits need no unbinding.
         Bind( table, count, 33092, 0x53, 3 );   // PatchInspector  -> Shift+Alt+S (vacate Shift+S)
         // Alt+S is the audited destination that frees both S and Shift+S.
         Bind( table, count, 33041, 0x53, 2 );   // SurfaceInspector-> Alt+S  (frees S AND Shift+S)
@@ -68,8 +65,6 @@ namespace
         // Interim destination; the final Alt+R write below frees Shift+R for Repeat.
         Bind( table, count, 32810, 0x52, 1 );   // MouseRotate     -> Shift+R     (frees R)
         Bind( table, count, 33104, 0x46, 2 );   // ViewFilters     -> Alt+F       (frees F)
-        Bind( table, count, 33084, 0xDB, 5 );   // GridDown        -> Shift+Ctrl+[
-        Bind( table, count, 33083, 0xDD, 5 );   // GridUp          -> Shift+Ctrl+]
         // Shift+Alt+G is the only free G chord after VertEdit moves to Shift+G.
         Bind( table, count, 33150, 0x47, 3 );   // AssociateEntities -> Shift+Alt+G
         Bind( table, count, 33199, 0x47, 1 );   // VertEdit          -> Shift+G   (frees G)
@@ -141,7 +136,7 @@ namespace
         // Ctrl+J remains the lines-only alias; bare J below is context-sensitive Join.
         Bind( table, count, KIWI_CMD_CONSTRUCT_JOIN, 0x4A, 4 );     // Ctrl+J
 
-        // Ctrl+1..4 are free because the classic bare digit rows were unbound above.
+        // Ctrl+1..4 are free: the classic digit rows (SetGrid) no longer exist.
         Bind( table, count, KIWI_CMD_SELCONV_POINT,  0x31, 4 );     // Ctrl+1
         Bind( table, count, KIWI_CMD_SELCONV_EDGE,   0x32, 4 );     // Ctrl+2
         Bind( table, count, KIWI_CMD_SELCONV_FACE,   0x33, 4 );     // Ctrl+3
@@ -219,6 +214,11 @@ namespace
         // before global lookup, preserving its feet/inches separator.
         Bind( table, count, 33001, 0x20, 1 );                  // Clone -> Shift+Space
         Bind( table, count, KIWI_CMD_VIEW_FACE, 0x20, 0 );     // Space -> View Face
+
+        // KIWI (2026-09-28, user: "pipe tool needs to be on 'P' key"): Preferences moves to
+        // the free Alt+P (Shift+P is ApplyPatchCap, Ctrl+Shift+P the Plasticity push).
+        Bind( table, count, 32784, 0x50, 2 );                  // Preferences -> Alt+P (frees P)
+        Bind( table, count, KIWI_CMD_CONSTRUCT_PIPE, 0x50, 0 ); // P -> Pipe
 
         // V is command-local for movable pivots and must not gain a global row;
         // modal dispatch precedes hotkey lookup, leaving DragVertices available when idle.

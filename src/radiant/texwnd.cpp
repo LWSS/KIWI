@@ -1781,7 +1781,7 @@ void CTexWnd_Shutdown()
 //    TexWnd_localFilter       0x45B490  → CMainFrame::OnFilterLocale      (ON_COMMAND_RANGE 60256..60511)
 //    TexWnd_SurfaceTypeFilter 0x45B570  → CMainFrame::OnFilterSurfaceType (ON_COMMAND_RANGE 60512..60767)
 //  Wired reachable from CMainFrame::OnCreate (the QE_LoadProject analog), after the
-//  menu is installed — FillTextureMenu needs GetSubMenu(GetMenu(d_hwndMain), 5) live.
+//  menu is installed — FillTextureMenu needs the Textures popup (KTEX_TEXTURES_MENU) live.
 // ══════════════════════════════════════════════════════════════════════════════
 extern int TexFilter_LoadMenuFile( const char *txt, void *dest, int startId );  // qe3.cpp (0x45B010)
 extern const char *Dvar_GetString( const char *dvarName );                       // qcommon (fs_basepath)
@@ -1869,10 +1869,14 @@ static const char *ResolveDeffilePath( const char *relative, char *out, size_t o
 // and seeds the decal locale bit (texWndGlob.unk_8 = 1<<localeIndex("decal")) used by filters.cpp
 // case-6 "Misc decal".  Finally radio-checks the active usage/locale/surfaceType item ("all" = 0).
 // VERBATIM from the IDB; the only deviation is the path resolution (see ResolveDeffilePath).
+// KIWI (2026-09-27): the Textures popup's top-level position.  The binary's 5 counted the
+// Grid popup, which KIWI removed (res/radiant.rc), so Textures is now 4.
+static const int KTEX_TEXTURES_MENU = 4;
+
 DWORD FillTextureMenu()
 {
     HMENU menu    = GetMenu( g_qeglobals.d_hwndMain );          // 0x45b26b
-    HMENU subMenu = GetSubMenu( menu, 5 );                      // 0x45b27f (5 = the Textures top-level menu)
+    HMENU subMenu = GetSubMenu( menu, KTEX_TEXTURES_MENU );     // 0x45b27f (binary: 5)
 
     if ( !texWndGlob_textureOffset.usageCount && !texWndGlob_textureOffset.localeCount ) // 0x45b28a
     {
@@ -1923,7 +1927,7 @@ void TexWnd_UsageFilter( int index )                           // 0x45B3B0
     iassert( index >= 0 && index < texWndGlob_textureOffset.usageCount ); // 0x45b3e9 TexWnd.cpp:618
     if ( index != texWndGlob_textureOffset.usageFilter )       // 0x45b412
     {
-        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b41f/0x45b441
+        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), KTEX_TEXTURES_MENU ); // 0x45b41f/0x45b441 (binary: 5)
         CheckMenuItem( subMenu, texWndGlob_textureOffset.usageFilter + 60000, MF_UNCHECKED ); // 0x45b445
         CheckMenuItem( subMenu, index + 60000, MF_CHECKED );   // 0x45b451
         texWndGlob_textureOffset.usageFilter = (byte)index; // 0x45b459 (mov ...usageFilter, bl)
@@ -1937,7 +1941,7 @@ void TexWnd_localFilter( int index )                           // 0x45B490
     iassert( index >= 0 && index < texWndGlob_textureOffset.localeCount ); // 0x45b4c9 TexWnd.cpp:638
     if ( index != texWndGlob_textureOffset.localeFilter )      // 0x45b4f2
     {
-        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b4ff/0x45b521
+        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), KTEX_TEXTURES_MENU ); // 0x45b4ff/0x45b521 (binary: 5)
         CheckMenuItem( subMenu, texWndGlob_textureOffset.localeFilter + 60256, MF_UNCHECKED ); // 0x45b525
         CheckMenuItem( subMenu, index + 60256, MF_CHECKED );   // 0x45b531
         texWndGlob_textureOffset.localeFilter = (byte)index; // 0x45b539 (mov ...localeFilter, bl)
@@ -1951,7 +1955,7 @@ void TexWnd_SurfaceTypeFilter( unsigned int index )            // 0x45B570
     iassert( index <= 0x1C );                                  // 0x45b5a1 TexWnd.cpp:658 (index < 29)
     if ( index != (unsigned int)texWndGlob_textureOffset.surfaceTypeFilter ) // 0x45b5cf
     {
-        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), 5 ); // 0x45b5dc/0x45b5fe
+        HMENU subMenu = GetSubMenu( GetMenu( g_qeglobals.d_hwndMain ), KTEX_TEXTURES_MENU ); // 0x45b5dc/0x45b5fe (binary: 5)
         CheckMenuItem( subMenu, texWndGlob_textureOffset.surfaceTypeFilter + 60512, MF_UNCHECKED ); // 0x45b602
         CheckMenuItem( subMenu, index + 60512, MF_CHECKED );   // 0x45b60e
         texWndGlob_textureOffset.surfaceTypeFilter = (byte)index; // 0x45b616 (mov ...surfaceTypeFilter, bl)

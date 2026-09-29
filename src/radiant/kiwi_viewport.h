@@ -22,9 +22,16 @@
 //   RMB   -> mouselook (Alt) or pan; a no-drag RMB CONFIRMS a live modal command.
 //            The classic context menu was removed (user directive) — a bare RMB
 //            click does nothing; the CamWnd_OnRButton replay helper is dormant.
+//            KIWI (2026-09-27): RMB pressed UNDER a held LMB tool pans alongside it
+//            (a carried model's RMB still confirms the carry instead).
 
 // btn: 0 = LMB, 1 = RMB, 2 = MMB (ImGui's numbering, as the shell's loop uses).
 bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl );
+// A second button pressed while a modern gesture owns the camera (the shell's owned
+// branch).  False = not taken; the press then reaches nothing, legacy included.
+bool KiwiVP_CameraSecondaryDown( int btn, int imgX, int imgY );
+// True while an LMB tool is held and an RMB press would pan under it (hint strip).
+bool KiwiVP_CameraCanRidePan();
 bool KiwiVP_CameraMouseMove ( int imgX, int imgY );
 bool KiwiVP_CameraButtonUp  ( int btn, int imgX, int imgY );
 bool KiwiVP_CameraWheel     ( float steps, int imgX, int imgY );

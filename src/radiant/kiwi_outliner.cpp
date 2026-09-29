@@ -49,6 +49,8 @@ extern void        sub_476330( selbrush_t *b );                              // 
 extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970; Brush_Select_Helper
 extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212
 extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89; "" when absent
+extern void        KiwiRegion_ClearSelection();                              // kiwi_region.cpp
+extern void        KiwiSun_ClearSelection();                                 // kiwi_sun.cpp
 // File scope on purpose: declared inside the anonymous namespace it names a
 // namespace-local function and the link fails (LNK2019, 2026-09-22).
 extern void        DeleteKey( epair_t **head, const char *key );             // entity.cpp:175 (0x483720)
@@ -161,10 +163,16 @@ const unsigned KOUT_BRUSHFLAG_SELECTED = 0x80u;
 const unsigned KOUT_HIDDEN_BIT = 4u;
 
 // Panel-local state
-std::vector<unsigned>  s_collapsed;        // keys of the folders that are CLOSED
+std::vector<unsigned>  s_expanded;         // keys of the folders that are OPEN
 std::vector<koutRow_t> s_rows;             // rebuilt every frame
-unsigned               s_lastSelGen = 0;   // for the auto-expand pass
+unsigned               s_lastSelGen = 0;   // for the selection-folder pass
 unsigned               s_lastImageGen = 0;
+unsigned               s_markImageGen = 0; // (image half of the selection-folder pass)
+// KIWI (2026-09-27, user: "When something is selected, dont automatically open the group in
+// the outliner, just highlight it and the user can expand it if they care"): the folders that
+// hold something selected.  A CLOSED one is tinted; nothing opens by itself any more.
+std::vector<unsigned>  s_selFolders;       // brushes / entities / pictures
+std::vector<unsigned>  s_selConFolders;    // construction (rebuilt every frame)
 
 // Row indices shift with the flatten. Brush anchors store identity; construction
 // anchors retain a store-generation-scoped index.
@@ -263,30 +271,33 @@ koutOpacityDrag_t s_opacityDrag;
 const float KOUT_OPACITY_PER_PIXEL = 0.005f;   // 200 px = the full 0..1 range
 
 // Small helpers
+// KIWI (2026-09-27, user: "when loading a map, start with all the outliner groups
+// collapsed"): the set holds the OPEN folders, so every folder - top-level sections, groups,
+// entity and per-kind folders, including ones that appear later - is closed until opened.
 bool Collapsed( unsigned key )
 {
     if ( !key )
         return false;
-    for ( size_t i = 0; i < s_collapsed.size(); ++i )
-        if ( s_collapsed[i] == key )
-            return true;
-    return false;
+    for ( size_t i = 0; i < s_expanded.size(); ++i )
+        if ( s_expanded[i] == key )
+            return false;
+    return true;
 }
 
 void SetCollapsed( unsigned key, bool closed )
 {
     if ( !key )
         return;
-    for ( size_t i = 0; i < s_collapsed.size(); ++i )
+    for ( size_t i = 0; i < s_expanded.size(); ++i )
     {
-        if ( s_collapsed[i] != key )
+        if ( s_expanded[i] != key )
             continue;
-        if ( !closed )
-            s_collapsed.erase( s_collapsed.begin() + i );
+        if ( closed )
+            s_expanded.erase( s_expanded.begin() + i );
         return;
     }
-    if ( closed )
-        s_collapsed.push_back( key );
+    if ( !closed )
+        s_expanded.push_back( key );
 }
 
 entity_s_def *DefOf( entity_s *inst )
@@ -638,7 +649,7 @@ const char *ConTypeName( kconType_t t )
     case KCON_RECT:     return "Rect";
     case KCON_CIRCLE:   return "Circle";
     case KCON_ARC:      return "Arc";
-    default:            return "Curve";
+    default:            return "Line";
     }
 }
 
@@ -909,6 +920,7 @@ void FlattenTerrain()
     FlattenEntityBrushes( world_entity, 1, KOUT_FILTER_TERRAIN );
 }
 
+// The "Construction Lines" section (KIWI 2026-09-27: was labelled "Curves", a CoD4 patch term).
 void FlattenCurves()
 {
     PushRow( KOUT_SECTION_CURVES, 0, KOUT_KEY_CURVES );
@@ -967,7 +979,7 @@ void FlattenImages()
     s_rows.back().count = KiwiRefImage_Count();
     if ( Collapsed( KOUT_KEY_IMAGES ) )
         return;
-    // Groups first (like the Curves section), then the ungrouped pictures.
+    // Groups first (like the Construction Lines section), then the ungrouped pictures.
     const int nGroups = KiwiRefImage_GroupCount();
     for ( int g = 0; g < nGroups; ++g )
     {
@@ -1018,69 +1030,113 @@ void Flatten()
     FlattenImages();
 }
 
-// Expand brush ancestors after the typed brush-selection generation changes
-// (Outliner.tsx:89-100).
-void AutoExpandForSelection()
+void AddFolderKey( std::vector<unsigned> &keys, unsigned key )
+{
+    if ( !key )
+        return;
+    for ( size_t i = 0; i < keys.size(); ++i )
+        if ( keys[i] == key )
+            return;
+    keys.push_back( key );
+}
+
+// Every folder a selected brush / entity / picture is listed under, mirroring Flatten's
+// nesting.  Rebuilt when either selection moves or a structural edit re-files things
+// (grouping never bumps the selection generation).  Was AutoExpandForSelection
+// (Outliner.tsx:89-100), which OPENED these folders.
+void MarkSelectionFolders( bool force )
 {
     // Fold pending legacy changes in before reading the generation they may bump.
     KiwiSel();
-    const unsigned gen = Sel_Generation();
-    if ( gen == s_lastSelGen )
+    const unsigned gen  = Sel_Generation();
+    const unsigned igen = KiwiRefImage_Generation();
+    if ( !force && gen == s_lastSelGen && igen == s_markImageGen )
         return;
-    s_lastSelGen = gen;
+    s_lastSelGen   = gen;
+    s_markImageGen = igen;
+    s_selFolders.clear();
 
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        bool any = false, anyTerrain = false, anyOther = false;
+        bool anyTerrain = false, anyOther = false;
         for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
         {
-            if ( BrushSelected( b ) )
-            {
-                any = true;
-                if ( IsTerrainNode( b ) ) anyTerrain = true;
-                else                      anyOther   = true;
-                if ( anyTerrain && anyOther )
-                    break;
-            }
+            if ( !BrushSelected( b ) )
+                continue;
+            if ( IsTerrainNode( b ) ) anyTerrain = true;
+            else                      anyOther   = true;
+            if ( anyTerrain && anyOther )
+                break;
         }
-        if ( !any )
+        if ( !anyTerrain && !anyOther )
             continue;
 
         if ( e == world_entity )
         {
             // Worldspawn lists its terrain under "Terrain", the rest under "Brushes".
-            // KIWI (2026-09-10, user: "when clicking on a terrain piece, do NOT expand the
-            // terrain group"): a selected terrain chunk never opens the Terrain section -
-            // it holds hundreds of sculpt chunks and stays closed until opened by hand.
-            (void)anyTerrain;
-            if ( anyOther )   SetCollapsed( KOUT_KEY_BRUSHES, false );
+            if ( anyOther )   AddFolderKey( s_selFolders, KOUT_KEY_BRUSHES );
+            if ( anyTerrain ) AddFolderKey( s_selFolders, KOUT_KEY_TERRAIN );
             continue;
         }
 
-        // KIWI (2026-09-21, user: "the models tab needs to not expand each time I move a
-        // model. Keep it collapsed, it's over 800"): same rule as Terrain above.  Every
-        // drag step bumps the selection generation, so this pass re-opened the section
-        // the moment it was closed.  The entity's own folder is still opened, so the
-        // selected row is in view as soon as the section is opened by hand.
+        // A grouped object is listed under its group: Groups, the chain of groups down to it
+        // and that group's per-kind folder (a group's Brushes folder lists the brushes
+        // themselves, with no entity folder between).
         const koutKind_t section = EntitySection( e );
-        // A grouped object is listed under its group: open Groups and the chain of
-        // groups down to it.  Of the per-kind folders only Brushes opens by itself - a
-        // village's Models folder is the same 800 rows the Models rule above is about.
         const std::string path = UGPathOf( e );
+        entity_s_def *def = DefOf( e );
         if ( !path.empty() )
         {
-            SetCollapsed( KOUT_KEY_GROUPS, false );
+            AddFolderKey( s_selFolders, KOUT_KEY_GROUPS );
             for ( std::string p = path; !p.empty(); p = UGParent( p ) )
-                SetCollapsed( UGKey( p ), false );
-            if ( section == KOUT_SECTION_BRUSHES )
-                SetCollapsed( UGTypeKey( path, (int)section ), false );
+                AddFolderKey( s_selFolders, UGKey( p ) );
+            AddFolderKey( s_selFolders, UGTypeKey( path, (int)section ) );
+            if ( section != KOUT_SECTION_BRUSHES && def )
+                AddFolderKey( s_selFolders, EntKey( def->numberId ) );
+            continue;
         }
-        else if ( section != KOUT_SECTION_MODELS && section != KOUT_SECTION_PARTICLES )  // KIWI: same rule
-            SetCollapsed( SectionKey( section ), false );
-        entity_s_def *def = DefOf( e );
+        AddFolderKey( s_selFolders, SectionKey( section ) );
+        if ( section == KOUT_SECTION_MODELS && IsBarbwireEntity( e ) )
+            AddFolderKey( s_selFolders, KOUT_KEY_BARBWIRE );
         if ( def )
-            SetCollapsed( EntKey( def->numberId ), false );
+            AddFolderKey( s_selFolders, EntKey( def->numberId ) );
     }
+
+    for ( int i = 0; i < KiwiRefImage_SelectedCount(); ++i )
+    {
+        AddFolderKey( s_selFolders, KOUT_KEY_IMAGES );
+        const int g = KiwiRefImage_Group( KiwiRefImage_SelectedAt( i ) );
+        if ( g >= 0 )
+            AddFolderKey( s_selFolders, ImageGroupKey( g ) );
+    }
+}
+
+// Construction selection has no generation counter; it is a short list, so every frame.
+void MarkConstructionFolders()
+{
+    s_selConFolders.clear();
+    const int n = KiwiConSel_Count();
+    for ( int i = 0; i < n; ++i )
+    {
+        const kconSelItem_t *it = KiwiConSel_At( i );
+        if ( !it )
+            continue;
+        AddFolderKey( s_selConFolders, KOUT_KEY_CURVES );
+        const int g = KiwiCon_Group( it->object );
+        if ( g >= 0 )
+            AddFolderKey( s_selConFolders, ConGroupKey( g ) );
+    }
+}
+
+bool FolderHoldsSelection( unsigned key )
+{
+    for ( size_t i = 0; i < s_selFolders.size(); ++i )
+        if ( s_selFolders[i] == key )
+            return true;
+    for ( size_t i = 0; i < s_selConFolders.size(); ++i )
+        if ( s_selConFolders[i] == key )
+            return true;
+    return false;
 }
 
 void ObserveImageGeneration()
@@ -1089,17 +1145,6 @@ void ObserveImageGeneration()
     if ( gen == s_lastImageGen )
         return;
     s_lastImageGen = gen;
-    if ( KiwiRefImage_SelectedCount() > 0 )
-    {
-        SetCollapsed( KOUT_KEY_IMAGES, false );
-        // A selected picture opens its own group folder too.
-        for ( int i = 0; i < KiwiRefImage_SelectedCount(); ++i )
-        {
-            const int g = KiwiRefImage_Group( KiwiRefImage_SelectedAt( i ) );
-            if ( g >= 0 )
-                SetCollapsed( ImageGroupKey( g ), false );
-        }
-    }
     if ( s_anchor.kind == KOUT_IMAGE
       && ( s_anchor.imageIndex < 0 || s_anchor.imageIndex >= KiwiRefImage_Count() ) )
         s_anchor = koutAnchor_t();
@@ -1124,6 +1169,9 @@ void SelectBrushRow( selbrush_t *b, bool additive, bool toggle )
     {
         Sel_Clear( sel );
         KiwiConSel_Clear();          // a plain click owns the WHOLE selection
+        KiwiRegion_ClearSelection(); // KIWI (2026-09-28): every store, not just two
+        KiwiSun_ClearSelection();
+        KiwiRefImage_Select( -1 );
     }
     const sel_item_t it = Sel_MakeObject( b );
     if ( toggle )
@@ -1145,9 +1193,12 @@ void SelectConRow( int index, bool additive, bool toggle )
     }
     if ( !additive && !toggle )
     {
-        // A plain curve click clears the brush half of the shared selection.
+        // A plain construction click clears every other store (KIWI 2026-09-28).
         Sel_Clear( KiwiSel() );
         Sel_SyncToLegacy();
+        KiwiRegion_ClearSelection();
+        KiwiSun_ClearSelection();
+        KiwiRefImage_Select( -1 );
     }
     kconSelItem_t it;
     it.object = index;
@@ -1908,7 +1959,7 @@ bool UngroupEntity( entity_s *inst, const char *op )
 //   Brushes  = worldspawn's non-terrain brushes + every func_group's brushes
 //   Terrain  = worldspawn's terrain meshes
 //   Entities / Lights / Models = every brush of every entity classed there
-//   Curves   = every construction object;  Images = every reference image.
+//   Construction Lines = every construction object;  Images = every reference image.
 bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
@@ -2195,45 +2246,18 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 
 } // namespace
 
-// Collapse identities are document-local. Reset arms a post-sidecar-load pass
-// that closes folders while leaving top-level sections open.
-static bool s_collapseFoldersPending = false;
-
-static void CollapseFoldersOnly()
-{
-    // KIWI (2026-09-10, user): the Terrain section is ALWAYS collapsed when a map loads —
-    // the only top-level section that starts closed (its rows are hundreds of sculpt chunks).
-    SetCollapsed( KOUT_KEY_TERRAIN, true );
-    SetCollapsed( KOUT_KEY_MODELS, true );    // same, 2026-09-21: 800+ model rows
-    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
-    {
-        if ( e == world_entity )
-            continue;
-        entity_s_def *def = DefOf( e );
-        if ( def )
-            SetCollapsed( EntKey( def->numberId ), true );
-    }
-    // Universal groups load closed: a map with forty houses lists forty lines.
-    UGBuildTree();
-    for ( size_t g = 0; g < s_ug.size(); ++g )
-        SetCollapsed( UGKey( s_ug[g].path ), true );
-    const int nGroups = KiwiCon_GroupCount();
-    for ( int g = 0; g < nGroups; ++g )
-        SetCollapsed( ConGroupKey( KiwiCon_GroupIdAt( g ) ), true );
-    const int nImageGroups = KiwiRefImage_GroupCount();
-    for ( int g = 0; g < nImageGroups; ++g )
-        SetCollapsed( ImageGroupKey( KiwiRefImage_GroupIdAt( g ) ), true );
-}
-
+// Collapse identities are document-local.  KIWI (2026-09-27): the store holds OPEN folders,
+// so clearing it starts a loaded map with every folder closed - top-level sections included
+// (it used to close only Terrain, Models and the nested folders).
 void KiwiOutliner_ResetForNewMap()
 {
-    s_collapsed.clear();
-    SetCollapsed( KOUT_KEY_TERRAIN, true );   // closed from the first frame (KIWI 2026-09-10)
-    SetCollapsed( KOUT_KEY_MODELS, true );    // same (KIWI 2026-09-21)
-    s_collapseFoldersPending = true;
+    s_expanded.clear();
+    s_selFolders.clear();
+    s_selConFolders.clear();
     s_rows.clear();
     s_lastSelGen = 0;
     s_lastImageGen = 0;
+    s_markImageGen = 0;
     s_anchor = koutAnchor_t();
     s_rename = koutRename_t();
     s_renameBuf[0] = '\0';
@@ -2281,15 +2305,13 @@ void KiwiOutliner_Draw()
         }
         ImGui::Separator();
 
+        // Last frame's group / ungroup / rename re-filed things without a selection change.
+        const bool refiled = s_structural;
         s_structural = false;
-        AutoExpandForSelection();
         ObserveImageGeneration();
-        if ( s_collapseFoldersPending )
-        {
-            s_collapseFoldersPending = false;
-            CollapseFoldersOnly();
-        }
         Flatten();
+        MarkSelectionFolders( refiled );         // the rows below tint what these hold
+        MarkConstructionFolders();
 
         ImGuiIO &io = ImGui::GetIO();
         // Clear the shift-drag latch before rows process this frame's press.
@@ -2574,7 +2596,9 @@ void KiwiOutliner_Draw()
                     _snprintf( label, sizeof( label ), "Terrain (%i)", r.count );
                     break;
                 case KOUT_SECTION_CURVES:
-                    _snprintf( label, sizeof( label ), "Curves (%i)", r.count );
+                    // KIWI (2026-09-27, user): "Construction lines should not be under
+                    // 'Curves'... Curves are an actual concept in the q3/cod4 engine."
+                    _snprintf( label, sizeof( label ), "Construction Lines (%i)", r.count );
                     break;
                 case KOUT_SECTION_ENTITIES:
                     _snprintf( label, sizeof( label ), "Entities (%i)", r.count );
@@ -2637,7 +2661,7 @@ void KiwiOutliner_Draw()
                         _snprintf( label, sizeof( label ), "%s", nm );
                     else
                         _snprintf( label, sizeof( label ), "%s %i",
-                                   o ? ConTypeName( o->type ) : "Curve", r.ordinal );
+                                   o ? ConTypeName( o->type ) : "Line", r.ordinal );
                     selected = KiwiConSel_ObjectSelected( r.conIndex );
                     break;
                 }
@@ -2726,13 +2750,27 @@ void KiwiOutliner_Draw()
                 }
 
                 const bool dimImageRow = r.kind == KOUT_IMAGE && hidden;
+                // KIWI (2026-09-27): a CLOSED folder holding the selection is tinted - a
+                // softer copy of the selected-row colour - instead of being opened.
+                const bool holdsSel = isFolder && Collapsed( r.key ) && FolderHoldsSelection( r.key );
+                int pushedCols = 0;
                 if ( dimImageRow )
+                {
                     ImGui::PushStyleColor( ImGuiCol_Text, ImGui::GetStyleColorVec4( ImGuiCol_TextDisabled ) );
-                const bool rowClicked = ImGui::Selectable( label, selected,
+                    ++pushedCols;
+                }
+                if ( holdsSel )
+                {
+                    ImVec4 tint = ImGui::GetStyleColorVec4( ImGuiCol_Header );
+                    tint.w *= 0.5f;
+                    ImGui::PushStyleColor( ImGuiCol_Header, tint );
+                    ++pushedCols;
+                }
+                const bool rowClicked = ImGui::Selectable( label, selected || holdsSel,
                                                            ImGuiSelectableFlags_AllowDoubleClick,
                                                            ImVec2( 0.0f, itemH ) );
-                if ( dimImageRow )
-                    ImGui::PopStyleColor();
+                if ( pushedCols )
+                    ImGui::PopStyleColor( pushedCols );
                 if ( rowClicked )
                 {
                     if ( r.kind == KOUT_IMAGE )

@@ -67,7 +67,9 @@ namespace
 
     // Fill costs one draw per face. Cap common multi-cut gestures at 32 filled
     // operands, spending newest-first; older operands fall back to the reported line budget.
-    const int KBOOL_MAX_FILL = 32;
+    // KIWI (2026-09-28): 32 -> 512 - a window grid of cutters is ~80 boxes, and the unfilled ones
+    // read as "not picked".
+    const int KBOOL_MAX_FILL = 512;
 
     // Preserve room for the framework's later snap marker and hover colour run.
     const int KBOOL_LINE_HEADROOM = 96;
@@ -439,6 +441,8 @@ namespace
     {
     public:
         const char *Name() const override { return "Boolean"; }
+        // Picks brushes, places nothing: no snap marker / label / dots (KIWI 2026-09-28).
+        bool ShowsSnap() const override { return false; }
         bool CanExecute() override { return KiwiBool_CanBoolean(); }
 
         // Clicks keep adding or replacing tools after the preview goes live;
@@ -609,10 +613,14 @@ namespace
             (void)shift;                        // Shift-only rung: it is always true
 
             // Bound a whole-map marquee: every tool costs an N-plane carve per target.
-            const int   KBOOL_MARQUEE_MAX = 256;
-            selbrush_t *found[KBOOL_MARQUEE_MAX];
+            // KIWI (2026-09-28, user: "i cant select the middle blocks, I think i'm hitting a
+            // maximum boolean #"): was 256 on the stack, and the cap is spent BEFORE the usable
+            // filter below - a marquee over a building on a 2000-chunk terrain filled it with
+            // patches it then threw away.  Heap buffer, 8192.
+            const int   KBOOL_MARQUEE_MAX = 8192;
+            std::vector<selbrush_t *> found( (size_t)KBOOL_MARQUEE_MAX, nullptr );
             const int n = KiwiBox_CollectBrushes( x0, y0, x1, y1, crossing,
-                                                  found, KBOOL_MARQUEE_MAX );
+                                                  &found[0], KBOOL_MARQUEE_MAX );
 
             int added = 0;
             for ( int i = 0; i < n; ++i )

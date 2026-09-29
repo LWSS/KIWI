@@ -7,6 +7,9 @@
 // convex result. Surviving faces keep manual CSG Merge materials; the new brush takes
 // g_activeLayer_string and the merge-list head's owner (csg.cpp:541, 548-555).
 //
+// KIWI (2026-09-28): exact duplicates (same planes + bounds) are freed first, and PAIRS use
+// the volume guard too - an unguarded diagonal pair merged into its hull over the other cells.
+//
 // Candidates use the epsilon-padded world-space bounds test from Select_Touching_R
 // (select.cpp:1678-1679), because mergeable neighbours abut rather than overlap.
 // This is bounds contact, not proof that the face windings touch.
@@ -15,7 +18,7 @@
 // Cluster results therefore must conserve total winding volume. Measurement uses fan
 // triangles relative to the cluster centre with a double accumulator; tolerance is
 // 0.1% of the input volume or one cubic world unit, whichever is larger. Originals
-// stay alive until the guard accepts the result; pairwise attempts are unguarded.
+// stay alive until the guard accepts the result; pairs take the same guard (KIWI above).
 //
 // The scalar guard can miss volume-neutral shape errors and rejects valid overlapping
 // inputs because their overlap is double-counted. It does not validate materials,

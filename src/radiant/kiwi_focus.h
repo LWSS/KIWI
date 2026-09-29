@@ -22,5 +22,13 @@ bool KiwiFocus_CanFocus();
 // KIWI_CMD_VIEW_FACE 34132, modern key Space.
 bool KiwiFocus_CanViewFace();      // Palette predicate.
 
+// KIWI (2026-09-28, user: the nearest-face rule "should instead be where my mouse originally
+// clicked on the object ... it scrambles the camera unexpectedly"): the selecting click on an
+// OBJECT records the brush, the world hit point and its surface normal; Space on an object
+// selection aims at that brush's face under the recorded point.  Selections that did not
+// come from a click (marquee, outliner) keep the nearest camera-facing face fallback.
+struct selbrush_t;
+void KiwiFocus_NoteObjectClick( selbrush_t *brush, const float point[3], const float *normal );
+
 void KiwiFocus_RegisterCommands();
 bool KiwiFocus_DispatchInstant( unsigned int cmdId );

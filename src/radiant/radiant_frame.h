@@ -123,7 +123,7 @@ void Radiant_PicMip();                                    // was CMainFrame::Pic
 void Radiant_CheckTextureScale( UINT uIDCheckItem );      // was CMainFrame::CheckTextureScale  (0x42AF50)
 void Radiant_SetEntityCheck();                            // was CMainFrame::SetEntityCheck     (0x42B1F0)
 void Radiant_CheckMenu( UINT id, bool checked );          // mainfrm.cpp:2572 (was static)
-void Radiant_CheckGridMenu();                             // mainfrm.cpp:2537 (was static)
+// KIWI (2026-09-27): Radiant_CheckGridMenu removed with the Grid menu.
 
 // ─── The boot sequence's steps (all extracted from CMainFrame::OnCreate / InitInstance) ──
 // Each was a static helper or an inline block of the MFC boot; the raw shell's WinMain runs

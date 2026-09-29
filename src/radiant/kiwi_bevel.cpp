@@ -59,6 +59,9 @@ namespace
 {
     const float KBV_EPS          = 1.0e-4f;
     const float KBV_MATCH_TOL    = 0.1f;      // the ported FindPoint / SetupVertexSelection tolerance
+    // KIWI: a face holding both ends of an edge but reaching no farther than this from the
+    // edge line is a sliver along it, not a corner face (MakeFrame drops it when 3+ match).
+    const float KBV_SLIVER_REACH = 0.5f;
 
     const float KBV_COL_OK[3]    = { 0.55f, 0.85f, 1.00f };
     const float KBV_COL_BAD[3]   = { 1.00f, 0.30f, 0.25f };
@@ -714,9 +717,22 @@ bool KiwiBevel_MakeFrame( kiwiBevelEdge_t *e )
         return false;
 
     // A chamfer requires exactly two adjacent faces at a manifold edge.
+    // KIWI (2026-09-28, user: the roof's bottom edge "wont allow it. The top edge will"): the
+    // powerplant roof slabs carry a SLIVER face along that edge - a 4-gon 0.05-0.15 units wide
+    // running the full 2862-unit length (float32 scan of powerplant.map: brushes 376/377,
+    // faces 2, 5 and 6 all hold both ends) - so three faces matched and the edge was refused.
+    // Each candidate's reach away from the edge line is measured; with more than two, faces
+    // reaching under KBV_SLIVER_REACH are dropped and the two widest remain.  The chamfer
+    // plane then cuts straight through the sliver, which is what removes it.
     e->adj[0] = -1;
     e->adj[1] = -1;
-    int nAdj  = 0;
+    e->sliver = -1;
+    int   cand[8];
+    float reach[8];
+    int   nCand = 0;
+    float edgeDir[3];
+    Sub3( e->e1, e->e0, edgeDir );
+    const bool haveDir = Norm3( edgeDir ) != 0;
     for ( int f = 0; f < def->faceCount; ++f )
     {
         winding_t *w = def->faces[f].w;
@@ -730,12 +746,42 @@ bool KiwiBevel_MakeFrame( kiwiBevelEdge_t *e )
         }
         if ( !has0 || !has1 )
             continue;
-        if ( nAdj < 2 )
-            e->adj[nAdj] = f;
-        ++nAdj;
+        if ( nCand >= 8 )
+            return false;                      // nothing manifold about that
+        float r = 0.0f;
+        for ( int i = 0; i < w->numpoints && haveDir; ++i )
+        {
+            float rel[3], perp[3];
+            Sub3( w->p[i], e->e0, rel );
+            Mad3( rel, edgeDir, -Dot3( rel, edgeDir ), perp );
+            const float d = Len3( perp );
+            if ( d > r ) r = d;
+        }
+        cand[nCand]  = f;
+        reach[nCand] = r;
+        ++nCand;
     }
-    if ( nAdj != 2 )
+    if ( nCand > 3 )
+        return false;                          // more than one sliver: leave it alone
+    if ( nCand > 2 )
+    {
+        // Keep the two widest; a third that is itself wide is not a sliver - refuse.
+        for ( int i = 0; i < nCand; ++i )
+            for ( int j = i + 1; j < nCand; ++j )
+                if ( reach[j] > reach[i] )
+                {
+                    const int   tf = cand[i];  cand[i]  = cand[j];  cand[j]  = tf;
+                    const float tr = reach[i]; reach[i] = reach[j]; reach[j] = tr;
+                }
+        if ( !( reach[2] < KBV_SLIVER_REACH ) )
+            return false;
+        e->sliver = cand[2];
+        nCand = 2;
+    }
+    if ( nCand != 2 )
         return false;
+    e->adj[0] = cand[0];
+    e->adj[1] = cand[1];
 
     // The outward bisector collapses for opposed faces, which are not a corner.
     Add3( def->faces[e->adj[0]].plane.normal, def->faces[e->adj[1]].plane.normal, e->n );

@@ -79,6 +79,10 @@ struct kiwiBevelEdge_t
     int         srcFace;        // material source face (kiwi_material.h R5)
     int         adj[2];         // the two faces sharing this edge
     float       bias;           // chamfer tilt about the edge, radians (0 = bisector)
+    // KIWI (2026-09-28): a sliver face lying along the edge (it also holds both ends but
+    // reaches < KBV_SLIVER_REACH off the edge line), -1 for none.  The chamfer cuts it away;
+    // the caller validates ignoring it once its winding is gone and removes it on commit.
+    int         sliver;
 };
 
 // Fill everything but node/def/e0/e1, which the caller supplies.  False = this is

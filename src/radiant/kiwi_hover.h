@@ -23,6 +23,9 @@ void KiwiHover_Clear();
 // The last hover result (invalid when nothing is hovered).
 const pick_result_t &KiwiHover_Get();
 
+// The hovered construction region (KiwiRegion_All index), or -1.  Space aims at it.
+int KiwiHover_RegionIndex();
+
 // True when the hovered target is selected and Ctrl would remove it.  Fine-tool
 // marker passes use the same state as the central hover renderer.
 bool KiwiHover_RemovePreview();

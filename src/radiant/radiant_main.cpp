@@ -780,11 +780,11 @@ static bool Radiant_BootFrame( HWND frame )
     // load still narrows it (map.cpp:546).
     Texture_ShowAll();
 
-    // mainfrm.cpp:1638-1644 — counts, grid status line, grid radio-check, and the
-    // Light-Preview submenu check marks seeded from the LOADED prefs.
+    // mainfrm.cpp:1638-1644 — counts, grid status line, and the Light-Preview submenu
+    // check marks seeded from the LOADED prefs.  KIWI (2026-09-27): the grid radio-check
+    // went with the Grid menu.
     QE_CountBrushesAndUpdateStatusBar();
     Radiant_SetGridStatus();
-    Radiant_CheckGridMenu();
     Radiant_CheckMenu( 33950, g_PrefsDlg->enable_light_preview != 0 );
     Radiant_CheckMenu( 36108, g_PrefsDlg->preview_sun_aswell   != 0 );
     // KIWI-UX (ROUND AV, ITEM 1): seed View->Entities-as... from the LOADED prefs too.

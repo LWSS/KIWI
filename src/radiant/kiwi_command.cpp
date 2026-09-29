@@ -13,6 +13,7 @@
 #include "kiwi_addmenu.h"                // §16b the Shift+A add menu
 #include "kiwi_bevel.h"
 #include "kiwi_boolean.h"
+#include "kiwi_cmdoptions.h"             // KiwiCmdOpts_TabFocus (Tab into the options panel)
 #include "kiwi_camera.h"                 // KiwiCam_FlySwallowKey (the fly-key funnel rung)
 #include "kiwi_construct.h"
 #include "kiwi_csg.h"
@@ -27,6 +28,7 @@
 #include "kiwi_lines.h"
 #include "kiwi_loft.h"
 #include "kiwi_offset.h"
+#include "kiwi_pipe.h"                   // KIWI: Pipe along construction
 #include "kiwi_visibility.h"
 #include "kiwi_conclip.h"
 #include "kiwi_conselect.h"
@@ -192,6 +194,8 @@ namespace
         case KIWI_CMD_CUT:
         case KIWI_CMD_BOOLEAN:
         case KIWI_CMD_LOFT:
+        case KIWI_CMD_OFFSET_CURVE:     // KIWI (2026-09-28): O on a clicked region (paused extrude)
+        case KIWI_CMD_CONSTRUCT_PIPE:   // P on a selection whose click parked a tool
         case KIWI_CMD_SELCONV_POINT:
         case KIWI_CMD_SELCONV_EDGE:
         case KIWI_CMD_SELCONV_FACE:
@@ -362,8 +366,8 @@ namespace
 
         { KIWI_CMD_BEVEL_EDGE,      { "Bevel Edge (chamfer)",        "Modeling", SEL_MASK_EDGE,   KiwiBevel_CanBevel } },
         { KIWI_CMD_INSET_FACE,      { "Inset Face (clone)",          "Modeling", SEL_MASK_FACE,   KiwiBevel_CanInset } },
-        { KIWI_CMD_ARRAY_LINEAR,    { "Array (Linear)",              "Duplicate", SEL_MASK_OBJECT, KiwiDupe_CanArray } },
-        { KIWI_CMD_ARRAY_RADIAL,    { "Array (Radial)",              "Duplicate", SEL_MASK_OBJECT, KiwiDupe_CanArray } },
+        { KIWI_CMD_ARRAY_LINEAR,    { "Linear Array (along a line)", "Duplicate", 0,               KiwiDupe_CanArray } },
+        { KIWI_CMD_ARRAY_RADIAL,    { "Radial Array (around a point)","Duplicate", 0,              KiwiDupe_CanArray } },
         { KIWI_CMD_DUPLICATE,       { "Duplicate (and move)",        "Duplicate", SEL_MASK_OBJECT, KiwiDupe_CanDuplicate } },
 
         { KIWI_CMD_SELECT_COPLANAR, { "Select Coplanar Faces",       "Selection", SEL_MASK_FACE,   KiwiSelExt_CanCoplanar } },
@@ -378,6 +382,7 @@ namespace
 
         { KIWI_CMD_CONSTRUCT_JOIN,  { "Join Lines",                   "Construct", 0, KiwiConSel_CanJoin } },
         { KIWI_CMD_CONSTRUCT_EXTEND,{ "Extend Lines",                 "Construct", 0, KiwiConSel_CanExtend } },
+        { KIWI_CMD_CONSTRUCT_PIPE,  { "Pipe (along a line / spline)", "Construct", 0, KiwiPipe_CanExecute } },
         { KIWI_CMD_CONSTRUCT_DELETE,{ "Construction: Delete Selected","Construct", 0, KiwiConSel_CanDelete } },
         { KIWI_CMD_CONSTRUCT_HIDE,  { "Hide Selected Lines (H)",      "Construct", 0, KiwiConSel_CanHide } },
         { KIWI_CMD_CONSTRUCT_UNHIDE,{ "Unhide All (construction)",    "Construct", 0, KiwiCon_HasHidden  } },
@@ -432,9 +437,6 @@ namespace
         { 33104, { "View Filters",              "View",      0, nullptr           } },
         { 32784, { "Preferences",               "Editor",    0, nullptr           } },
         { 32786, { "Map Info",                  "Editor",    0, nullptr           } },
-        { 32793, { "Toggle Snap To Grid",       "Grid",      0, nullptr           } },
-        { 33083, { "Grid Size: Next (classic)", "Grid",      0, nullptr           } },
-        { 33084, { "Grid Size: Prev (classic)", "Grid",      0, nullptr           } },
         { 33183, { "Drop To Floor",             "Edit",      0, Can_HaveSelection } },
         { 32810, { "Mouse Rotate Mode",         "Transform", 0, nullptr           } },
         { 32783, { "Toggle Clipper",            "Modeling",  0, nullptr           } },
@@ -451,6 +453,7 @@ namespace
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
         { KIWI_CMD_WINDOW_PARTICLES, { "Particles",               "Windows",   0, nullptr } },
+        { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
     };
@@ -584,6 +587,8 @@ namespace
             return c;
         if ( KiwiEditorCommand *c = KiwiOffset_CommandForId( id ) )     // O offset curve
             return c;
+        if ( KiwiEditorCommand *c = KiwiPipe_CommandForId( id ) )       // pipe along construction
+            return c;
         if ( KiwiEditorCommand *c = KiwiFillet_CommandForId( id ) )     // B fillet corners
             return c;
         if ( KiwiEditorCommand *c = KiwiPatchFillet_CommandForId( id ) ) // B on brush edges
@@ -593,6 +598,23 @@ namespace
         if ( KiwiEditorCommand *c = KiwiLoft_CommandForId( id ) )       // L loft
             return c;
         return KiwiUv_CommandForId( id );                               // §26 texture shift/rotate/scale
+    }
+
+    // KIWI (2026-09-28): every selection store let go at once (brush items, construction,
+    // regions, sun, reference images) - the after-Delete state.
+    void ClearEverySelection()
+    {
+        selection_t &sel = KiwiSel();
+        if ( !sel.items.empty() || selected_brushes.next != &selected_brushes )
+        {
+            Sel_Clear( sel );
+            Sel_SyncToLegacy();
+        }
+        KiwiConSel_Clear();
+        KiwiRegion_ClearSelection();
+        KiwiSun_ClearSelection();
+        KiwiRefImage_Select( -1 );
+        g_nUpdateBits |= 1;
     }
 
     // Same Shift=1, Alt=2, Ctrl=4, Win=8 mask used by Radiant_TryHotkey.
@@ -674,6 +696,7 @@ void KiwiCmd_RegisterCommands()
     KiwiSplit_RegisterCommands();
     KiwiBool_RegisterCommands();
     KiwiLoft_RegisterCommands();
+    KiwiPipe_RegisterCommands();        // KIWI: Pipe along construction (unbound)
     KiwiAutoBool_RegisterCommands();
     KiwiMatch_RegisterCommands();
     KiwiTrim_RegisterCommands();
@@ -771,6 +794,7 @@ namespace
         case KIWI_CMD_MODEL_DROP:
         case KIWI_CMD_PARTICLE_DROP:
         case KIWI_CMD_WINDOW_PARTICLES:
+        case KIWI_CMD_WINDOWS_RESET_LAYOUT:             // a layout action, not a verb
         case KIWI_CMD_PARTICLE_EXPORT:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
         case KIWI_CMD_BARBWIRE:                        // opens a dialog, not a replayable verb
@@ -1177,6 +1201,14 @@ bool KiwiCmd_KeyDown( int vk, unsigned int mods )
     if ( !g_activeCommand )
         return false;
 
+    // KIWI (2026-09-28): with an options panel up, Tab walks its numeric rows and opens
+    // each for typing (kiwi_cmdoptions.h); commands without a panel keep the field cycle.
+    if ( vk == 0x09 && ( mods & ~1u ) == 0 && KiwiCmdOpts_TabFocus( ( mods & 1 ) != 0 ) )
+    {
+        g_nUpdateBits |= 1;
+        return true;
+    }
+
     if ( vk == 0x09 && KiwiNum_FieldCount() <= 1 )       // VK_TAB
     {
         if ( g_activeCommand->KeyDown( vk, mods ) )
@@ -1286,7 +1318,10 @@ bool KiwiCmd_MouseMove( int imgX, int imgY )
             snapY   = ay;
         }
     }
-    KiwiSnap_Query( snapRay, snapX, snapY, &s_lastSnap, flags );
+    if ( g_activeCommand->ShowsSnap() )
+        KiwiSnap_Query( snapRay, snapX, snapY, &s_lastSnap, flags );
+    else
+        s_lastSnap = snap_result_t();        // pick-only tool: no marker, no label
     const pick_result_t pick = Pick( ray, KiwiSel_GetModeMask(), flags );
     g_activeCommand->MouseMove( pick, s_lastSnap );
     return true;
@@ -1536,6 +1571,21 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         }
     }
 
+    // KIWI (2026-09-28, user: "allow deletion of a construction face, you basically select a
+    // face and it'll trim all the lines on the exterior of the face away"): Delete on a pure
+    // region selection - idle, or over the paused extrude a region click parks.
+    if ( ( vk == 0x2E || vk == 0x08 ) && CurrentMods() == 0              // VK_DELETE / VK_BACK
+      && KiwiRegion_HasSelection() && KiwiConSel_Empty()
+      && selected_brushes.next == &selected_brushes
+      && ( !g_activeCommand || g_activeCommand->PreemptIdle() ) )
+    {
+        if ( g_activeCommand )
+            KiwiCmd_Cancel();
+        KiwiRegion_TrimOutsideSelected();
+        ClearEverySelection();
+        return true;
+    }
+
     if ( ( vk == 0x2E || vk == 0x08 )                            // VK_DELETE / VK_BACK
       && g_activeCommand && g_activeCommand->PreemptIdle()
       && !KiwiConSel_OwnsDelete()
@@ -1584,9 +1634,21 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         return true;
 
     // Construction delete owns pure construction selection before classic Delete.
+    // KIWI (2026-09-28, user: "when box selecting edges, and pressing delete, it should
+    // unselect everything after delete is pressed"): the brush edges / faces / points a box
+    // picked alongside the lines are not deletable this way and used to stay selected.
     if ( ( vk == 0x2E || vk == 0x08 ) && KiwiConSel_OwnsDelete() )   // VK_DELETE / VK_BACK
     {
         KiwiConSel_DeleteSelected();
+        ClearEverySelection();
+        return true;
+    }
+    // Only brush sub-items (nothing whole to delete): Delete just lets go of them.
+    if ( ( vk == 0x2E || vk == 0x08 ) && CurrentMods() == 0 && KiwiConSel_Empty()
+      && selected_brushes.next == &selected_brushes && !KiwiSel().items.empty()
+      && !KiwiRefImage_OwnsDelete() && !KiwiBevel_CanRemoveFace() )   // bevel restore-edge keeps its Delete
+    {
+        ClearEverySelection();
         return true;
     }
 

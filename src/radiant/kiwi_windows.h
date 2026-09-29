@@ -53,6 +53,8 @@ bool  KiwiWindows_JustOpened( kiwiWindow_t w );
 // Append the native Windows popup; frameMenu is an opaque HMENU to keep windows.h out.
 void  KiwiWindows_BuildMenu( void *frameMenu );
 void  KiwiWindows_SyncMenu();
+// Windows > Reset Layout: default open states + the default dock layout next frame.
+void  KiwiWindows_ResetLayout();
 
 // Items are appended inside View, preserving menu-bar indices used by legacy code.
 // View is popup index 2 in res/radiant.rc; Windows is appended after existing popups.

@@ -3612,11 +3612,16 @@ void CamWnd_Draw( HWND hwnd )
     // DrawLightsMain and patches through the patch loop below, so both are skipped here.
     {
         static const float s_white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        // KIWI (2026-09-28, user: "when hovering sometimes in the uv editor, it will turn the
+        // entire texture white"): MATERIAL_COLOR.w is a LERP-TO-RGB factor, not a modulate
+        // (0x4fc2c0's NULL = {0,0,0,0} is the neutral), so the "tint stands down" colour
+        // {1,1,1,1} painted every UV-gathered face flat white.  Untinted = {0,0,0,0}.
+        static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         // The second unsorted immediate loop, same fix as the world fill (0x4080e3 qsorts by
         // material sort key).  The white/red tint bracket is per-FACE and emitted ON CHANGE:
         // a sorted stream can interleave brushes, and RC_SET_MATERIAL_COLOR is CRITICAL.
         const float *tintCol = g_qeglobals.dontDrawSelectedTint
-                             ? s_white : g_qeglobals.d_savedinfo.colors[11];  // red {1,0.25,0.25}
+                             ? s_neutral : g_qeglobals.d_savedinfo.colors[11];  // red {1,0.25,0.25}
         static std::vector< CamSortFace > s_selFaces;
         s_selFaces.clear();
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -3654,7 +3659,7 @@ void CamWnd_Draw( HWND hwnd )
         for ( size_t si = 0; si < s_selFaces.size(); ++si )
         {
             const CamSortFace &ent  = s_selFaces[si];
-            const float       *want = ent.uvOwns ? s_white : tintCol;
+            const float       *want = ent.uvOwns ? s_neutral : tintCol;
             if ( want != lastSelCol )                       // pointer identity: both are stable
             {
                 R_AddCmdSetMaterialColor( want );

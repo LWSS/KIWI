@@ -204,22 +204,8 @@ BEGIN
         MENUITEM "Make Split Coplanar Geo", 33223
         MENUITEM "Make Don't Split Coplanar Geo", 33224
     END
-    POPUP "&Grid"
-    BEGIN
-        MENUITEM "Grid 0.5", 35021
-        MENUITEM "Grid 1\t&1", 35022
-        MENUITEM "Grid 2\t&2", 35023
-        MENUITEM "Grid 4\t&3", 35024
-        MENUITEM "Grid 8\t&4", 35025, CHECKED
-        MENUITEM "Grid 16\t&5", 35026
-        MENUITEM "Grid 32\t&6", 35027
-        MENUITEM "Grid 64\t&7", 35029
-        MENUITEM "Grid 128", 35031
-        MENUITEM "Grid 256\t&8", 35032
-        MENUITEM "Grid 512\t&9", 35033
-        MENUITEM SEPARATOR
-        MENUITEM "Snap to grid", 32793, CHECKED
-    END
+    // KIWI (2026-09-27): the "&Grid" popup (sizes 35021-35033, Snap to grid 32793) is removed -
+    // KIWI's grid is the viewport's spacing chip.
     POPUP "&Textures"
     BEGIN
         MENUITEM "Show &All\tCtrl-A", 32973
@@ -428,8 +414,7 @@ BEGIN
     END
     POPUP "He&lp"
     BEGIN
-        MENUITEM "Help\tF1", 57670
-        MENUITEM SEPARATOR
+        // KIWI (2026-09-27): "Help\tF1" (57670, no handler, no F1 binding) removed.
         MENUITEM "Command list...", 32790
         MENUITEM SEPARATOR
         MENUITEM "&About...", 33038

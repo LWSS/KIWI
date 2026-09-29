@@ -290,7 +290,9 @@ namespace
         {
             float cur[3];
             KiwiCon_PlaneToWorld( r.plane, &r.pts[i * 2], cur );
-            AddNudged( c, prev, cur );
+            // A ring's bridge slit (edge i-1 -> i) is not an outline (KIWI 2026-09-28).
+            if ( !KiwiRegion_EdgeIsBridge( r, i ? i - 1 : count - 1 ) )
+                AddNudged( c, prev, cur );
             memcpy( prev, cur, sizeof( prev ) );
         }
     }
@@ -578,6 +580,7 @@ void KiwiHover_OutlinerConGroup( int conGroup )
     g_nUpdateBits |= 1;
 }
 
+int KiwiHover_RegionIndex()        { return s_regionHover; }
 int KiwiHover_OutlinerConIndex()   { return s_outCon; }
 int KiwiHover_OutlinerConGroupId() { return s_outConGroup; }
 
@@ -654,15 +657,13 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
                                     && ( hit.item.kind == SEL_VERTEX
                                       || hit.item.kind == SEL_EDGE );
             bool regionWins = !brushPointish;
-            float regDist = 0.0f;
-            if ( regionWins && hit.valid
-              && KiwiRegion_HitDistance( ray, reg, &regDist ) )
+            if ( regionWins && hit.valid )
             {
+                // KIWI: a coplanar region beats the face it is drawn on (same rule as the click).
                 const float dx = hit.point[0] - ray.origin[0];
                 const float dy = hit.point[1] - ray.origin[1];
                 const float dz = hit.point[2] - ray.origin[2];
-                if ( sqrtf( dx * dx + dy * dy + dz * dz ) < regDist )
-                    regionWins = false;
+                regionWins = KiwiRegion_WinsOverSurface( ray, reg, sqrtf( dx * dx + dy * dy + dz * dz ) );
             }
             if ( regionWins )
             {

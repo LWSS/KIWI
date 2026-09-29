@@ -2472,7 +2472,7 @@ namespace
     class KiwiCurveTool : public KiwiDrawTool
     {
     public:
-        const char *Name() const override { return "Construct Curve"; }
+        const char *Name() const override { return "Construction Line"; }   // KIWI: not "Curve" (a CoD4 patch term)
         // Tab cycles length to bearing angle for each segment.
         bool WantsAngleField() const override { return true; }
         // Free curves store the resolved WORLD-space snap position.
@@ -2532,7 +2532,7 @@ namespace
                 // The live rubber band leaves the LAST placed point: retag it now.
                 if ( !m_smooth.empty() )
                     m_smooth.back() = m_splineMode ? 1 : 0;
-                Sys_Printf( "Curve: spline spans %s%s.\n", m_splineMode ? "ON" : "off",
+                Sys_Printf( "Line: spline spans %s%s.\n", m_splineMode ? "ON" : "off",
                             m_splineMode ? " (a spline never becomes a brush edge; press S again for straight spans)" : "" );
                 UpdateHud();
                 g_nUpdateBits |= 1;
@@ -2551,7 +2551,7 @@ namespace
                     m_zLock = false;                    // nothing to go up FROM
                 UpdateHud();
                 g_nUpdateBits |= 1;
-                Sys_Printf( "Curve: removed the last point (%i left%s).\n",
+                Sys_Printf( "Line: removed the last point (%i left%s).\n",
                             PointCount(),
                             m_pts.empty() ? ", Esc again to exit" : "" );
                 return true;
@@ -2581,7 +2581,7 @@ namespace
             }
             if ( PointCount() >= KCON_MAX_POINTS )
             {
-                Sys_Printf( "Curve: %i point limit reached — ending here.\n", KCON_MAX_POINTS );
+                Sys_Printf( "Line: %i point limit reached — ending here.\n", KCON_MAX_POINTS );
                 Finish();
                 return false;
             }
@@ -2641,7 +2641,7 @@ namespace
             const int n = PointCount();
             if ( n == 0 )
             {
-                SetHud( "curve%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
+                SetHud( "line%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
                         m_splineMode ? " [SPLINE]" : "",
                         m_anyLmbPoint ? "RMB: end (no point)"
                                       : "RMB: place a point and end" );
@@ -2654,7 +2654,7 @@ namespace
             KiwiUnits_Format( b,  sizeof( b ),  Len3( d ) );
             KiwiUnits_Format( dz, sizeof( dz ), d[2] );
             // Advertise both the aimable Z guide and the explicit Z lock.
-            SetHud( "curve%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
+            SetHud( "line%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
                     "Enter: finish here  ·  "
                     "Esc: drop last  ·  S: spline span  ·  vertical: aim the Z guide%s",
                     m_splineMode ? " [SPLINE]" : "",
@@ -2696,7 +2696,7 @@ namespace
                 // Only worth saying when the user HAD started a chain: finishing a
                 // tool that was opened and immediately dismissed is not an error.
                 if ( !m_pts.empty() )
-                    Sys_Printf( "Curve: needs at least two points — nothing placed.\n" );
+                    Sys_Printf( "Line: needs at least two points — nothing placed.\n" );
                 m_pts.clear();
                 m_wantClosed  = false;
                 m_noTailPoint = false;
@@ -2718,7 +2718,7 @@ namespace
                 if ( o.smooth[k] ) ++splineSpans;
             // Announce success only when the store accepted the object.
             if ( KiwiCon_AddWithUndo( o ) >= 0 )
-                Sys_Printf( "Curve: %i points%s%s.\n", (int)( pts.size() / 3 ),
+                Sys_Printf( "Line: %i points%s%s.\n", (int)( pts.size() / 3 ),
                             m_wantClosed ? ", closed" : "",
                             splineSpans ? " (with spline spans: a layout curve, never a brush edge)" : "" );
             m_pts.clear();
@@ -4026,7 +4026,8 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     const int hiddenCount = KiwiVis_SidecarBuild();
 
     if ( s_objects.empty() && hiddenCount == 0 && s_groups.empty()
-      && KiwiRefImage_Count() == 0 ) // KIWI (REFIMG): sidecar-only planes keep the file.
+      && KiwiRefImage_Count() == 0 // KIWI (REFIMG): sidecar-only planes keep the file.
+      && KiwiRefImage_GroupCount() == 0 ) // ...and so do declared (even empty) image groups
     {
         // With no objects, hidden solids or groups, remove any existing sidecar.
         // (Groups are serialized below, so an empty-groups-only map must keep its file.)

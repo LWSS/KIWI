@@ -68,8 +68,14 @@ namespace
 
     // Test original 3D segments so projection cannot invent crossings in a merely
     // near-coplanar group. This matches Trim's closest-point test and tolerance.
+    // KIWI (2026-09-27, user: "I just cant get the array tool to close off loops/make faces"
+    // on a window grid): a line END within the node weld of another segment also cuts it -
+    // a T-junction whose end missed by a hair.  Arrayed dividers crept 0.012 u per copy
+    // (the picked line was not level), so past ~20 copies their ends sat more than
+    // KCON_ISECT_DIST off the frame line and the rows the frame closes never formed.  The
+    // weld then merges the end with the cut, exactly as it merges near-touching ends.
     void GatherCuts( const std::vector<float> &world,      // 6 floats per segment
-                     std::vector< std::vector<float> > *cuts )
+                     float weld, std::vector< std::vector<float> > *cuts )
     {
         const int n = (int)( world.size() / 6 );
         cuts->assign( (size_t)n, std::vector<float>() );
@@ -83,7 +89,8 @@ namespace
                 float ta = 0.0f, tb = 0.0f;
                 const float d = KiwiCon_SegSegClosest( ai, ai + 3, aj, aj + 3,
                                                        &ta, &tb, 0 );
-                if ( d > KCON_ISECT_DIST )
+                const bool endTouch = ta <= 0.0f || ta >= 1.0f || tb <= 0.0f || tb >= 1.0f;
+                if ( d > KCON_ISECT_DIST && !( endTouch && d <= weld ) )
                     continue;
                 // Keep endpoint hits: a T-junction still needs a cut on its mid-span side.
                 // SortAndMerge discards the endpoint cut before fragmentation.
@@ -246,7 +253,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
 
     // Fragment at crossings.
     std::vector< std::vector<float> > cuts;
-    GatherCuts( world, &cuts );
+    GatherCuts( world, weld, &cuts );
 
     std::vector<seg2_t> frag;
     for ( int i = 0; i < nSeg; ++i )

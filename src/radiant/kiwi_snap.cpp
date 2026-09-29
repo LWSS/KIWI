@@ -2323,7 +2323,7 @@ void KiwiSnap_DrawFaceAccents()
     // Pivot placement and held transform handles may request the same dots.
     // A bounding-box center is omitted because no snap arm can honor it.
     KiwiEditorCommand *cmd = KiwiCmd_Active();
-    if ( !cmd || ( !cmd->WantsClicks() && !KiwiXform_WantsSnapDots() ) )
+    if ( !cmd || !cmd->ShowsSnap() || ( !cmd->WantsClicks() && !KiwiXform_WantsSnapDots() ) )
         return;
     // Do not advertise targets while snapping is disengaged.
     if ( !KiwiCmd_SnapEngaged() )

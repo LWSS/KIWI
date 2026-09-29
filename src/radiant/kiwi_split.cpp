@@ -7,6 +7,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"                // camera_s
+#include "prefs.h"                  // g_PrefsDlg->m_bNoClamp (exact split planes)
 #include <gfx_d3d/r_gfx.h>          // GfxColor
 #include <gfx_d3d/r_material.h>     // Material
 #include <gfx_d3d/r_rendercmds.h>   // MaterialTechniqueType, TECHNIQUE_UNLIT
@@ -16,17 +17,20 @@
 #include "kiwi_command.h"
 #include "kiwi_fmt.h"
 #include "kiwi_construct.h"
+#include "kiwi_conselect.h"                 // Cut fence seeded from selected lines
 #include "kiwi_grid.h"                      // world-anchored lattice
 #include "kiwi_lines.h"
 #include "kiwi_material.h"                  // split-face inheritance
 #include "kiwi_numeric.h"                   // Face Split offset
 #include "kiwi_pick.h"
+#include "kiwi_region.h"                    // Ctrl+R on construction faces
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"                      // geometry snap classification
 #include "kiwi_units.h"                     // HUD offset display
 #include "kiwi_validity.h"
 #include "kiwi_vec.h"                       // shared vector helpers
 
+#include <algorithm>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -69,9 +73,8 @@ namespace
 
     const float KSPLIT_EPS = 1.0e-4f;
 
-    // World units: accept coplanar snaps within weld-scale error and keep the cut
-    // away from both span ends so neither half is an immediate §19 sliver.
-    const float KSPLIT_FACE_EPS  = 0.1f;
+    // World units: keep the cut away from both span ends so neither half is an
+    // immediate §19 sliver.  (Snaps project onto the slide axis from any plane.)
     const float KSPLIT_MIN_SPAN  = 1.0f;
 
     // The centroid is both drawn and latched within screen-constant 8 px; Ctrl
@@ -387,6 +390,27 @@ namespace
         R_AddCmdSetMaterialColor( s_white );
     }
 
+    // KIWI (2026-09-28, user: "annoying behaviors with the snapping of the ctrl-R tool. the
+    // alignment isn't working in the same space"): the cut position comes from the point of
+    // the slide AXIS (base + s * dir) nearest the cursor ray - a face seen edge-on no longer
+    // throws a plane hit far off - and any geometry snap anywhere in the map projects onto
+    // that axis, so the cut lines up with a corner on another plane.
+    bool RayAxisClosest( const ray_t &ray, const float base[3], const float dir[3], float out[3] )
+    {
+        float w0[3];
+        Sub3( base, ray.origin, w0 );
+        const float b = Dot3( dir, ray.dir );
+        const float c = Dot3( ray.dir, ray.dir );
+        const float d = Dot3( dir, w0 );
+        const float e = Dot3( ray.dir, w0 );
+        const float den = c - b * b;          // |dir| == 1
+        if ( den < 1.0e-6f * c )
+            return false;                     // the ray runs along the axis
+        const float s = ( b * e - c * d ) / den;
+        Mad3( base, dir, s, out );
+        return true;
+    }
+
     // A convex face meets a plane in at most one segment; their union is the outline.
     void DrawIntersection( const brush_t *def, const float n[3], float d )
     {
@@ -527,8 +551,20 @@ static bool SplitDefByPlaneBody( brush_t *def,
         clipFace.planepts[2][k] = p2[k];
     }
 
+    // KIWI (2026-09-28, user: a face "created with the ctrl-R split command ... should be
+    // fine" would not extrude): the ported core rebuilds both halves with bFull = 1, whose
+    // Brush_SnapPlanepts rounds every planept to 0.5.  That moved the cut off the previewed
+    // line by up to 0.25 per axis and, on a wall that is not axis-aligned, tilted it - a cut
+    // near an existing edge left a ~0.1-unit sliver (float32 replica: 148 x 0.10 on the
+    // 1.5-degree powerplant wall) that no later extrusion could build.  The cut keeps its
+    // exact plane: the clamp is suspended for this call only (the pref is unchanged).
     brush_t *front = 0, *back = 0;
-    Brush_SplitBrushByFace( def, &clipFace, &front, &back );
+    {
+        const int savedNoClamp = g_PrefsDlg->m_bNoClamp;
+        g_PrefsDlg->m_bNoClamp = 1;
+        Brush_SplitBrushByFace( def, &clipFace, &front, &back );
+        g_PrefsDlg->m_bNoClamp = savedNoClamp;
+    }
 
     if ( !front && !back )
     {
@@ -764,6 +800,28 @@ namespace
 
             // Lines are optional because a brush edge or face also names a plane.
             m_stage = KCUT_PICK_LINE;
+
+            // KIWI: construction lines Shift-selected BEFORE C seed the fence, so a
+            // brush + many lines selected and C goes straight to the locked preview.
+            for ( int i = 0; i < KiwiConSel_Count(); ++i )
+            {
+                const kconSelItem_t *it = KiwiConSel_At( i );
+                if ( !it || it->object < 0 || it->kind == KCONSEL_POINT )
+                    continue;
+                fenceSrc_t s;
+                s.object  = it->object;
+                s.segment = ( it->kind == KCONSEL_SEGMENT ) ? it->index : -1;
+                m_fenceSrc.push_back( s );
+            }
+            if ( !m_fenceSrc.empty() )
+            {
+                m_srcKind = KCUT_SRC_LINE;
+                if ( LockFence() )
+                    return true;
+                m_fenceSrc.clear();
+                m_fence.clear();
+            }
+
             UpdateHud();
             Sys_Printf( "Cut: click %s, a brush EDGE, or a brush FACE to use its "
                         "plane (Esc cancels).\n",
@@ -807,8 +865,22 @@ namespace
         // Source clicks lock planes; only RMB/Enter commits.
         bool Click() override
         {
+            // KIWI: Shift+LMB on a construction line keeps growing the fence after the
+            // first plane locked (the preview prompt advertises it); bare clicks in
+            // preview stay inert so a stray press cannot re-aim the locked plane.
             if ( m_stage != KCUT_PICK_LINE )
-                return true;
+            {
+                if ( !KiwiCmd_LastShift() || !m_haveHover
+                  || m_hover.kind != KCUT_SRC_LINE || m_hover.object < 0 )
+                    return true;
+                if ( m_srcKind != KCUT_SRC_LINE )
+                {
+                    // An edge/face plane holds no fence; the line starts a new one.
+                    m_fenceSrc.clear();
+                    m_fence.clear();
+                }
+                m_stage = KCUT_PICK_LINE;
+            }
             if ( !m_haveHover )
             {
                 Sys_Printf( "Cut: nothing to cut along there — click a construction "
@@ -820,7 +892,7 @@ namespace
             // Edge/face sources are single planes and cannot retain a construction fence.
             if ( m_hover.kind != KCUT_SRC_LINE )
             {
-                m_fenceObjs.clear();
+                m_fenceSrc.clear();
                 m_fence.clear();
             }
 
@@ -849,19 +921,28 @@ namespace
             {
                 const bool add = KiwiCmd_LastShift();
                 if ( !add )
-                    m_fenceObjs.clear();
+                    m_fenceSrc.clear();
+                // A click toggles the WHOLE object: any entry naming it (a whole
+                // object or pre-selected segments of it) is dropped, else it joins.
                 bool removed = false;
-                for ( size_t i = 0; i < m_fenceObjs.size(); ++i )
-                    if ( m_fenceObjs[i] == m_hover.object )
+                for ( size_t i = 0; i < m_fenceSrc.size(); )
+                {
+                    if ( m_fenceSrc[i].object == m_hover.object )
                     {
-                        m_fenceObjs.erase( m_fenceObjs.begin() + i );
+                        m_fenceSrc.erase( m_fenceSrc.begin() + i );
                         removed = true;
-                        break;
+                        continue;
                     }
+                    ++i;
+                }
                 if ( !removed )
-                    m_fenceObjs.push_back( m_hover.object );
+                {
+                    fenceSrc_t s;
+                    s.object = m_hover.object;
+                    m_fenceSrc.push_back( s );
+                }
 
-                if ( m_fenceObjs.empty() )
+                if ( m_fenceSrc.empty() )
                 {
                     m_fence.clear();
                     m_stage = KCUT_PICK_LINE;
@@ -872,36 +953,17 @@ namespace
                     return true;
                 }
 
-                MeasureBounds();
-                if ( !FenceRebuild() )
+                if ( !LockFence() )
                 {
-                    m_fenceObjs.clear();
+                    m_fenceSrc.clear();
                     m_fence.clear();
+                    m_stage = KCUT_PICK_LINE;
+                    UpdateHud();
                     Sys_Printf( "Cut: that geometry gives no sweep direction — it "
                                 "points at the camera and carries no plane.  Orbit, "
                                 "then click it again.\n" );
-                    return true;                 // stay in stage 1
                 }
-
-                if ( FenceActive() )
-                {
-                    // m_p remains single-plane state; fence geometry lives separately.
-                    m_stage = KCUT_PREVIEW;
-                    CountCrossings();
-                    UpdateHud();
-                    Sys_Printf( "Cut: %i segment(s) from %i object(s), swept along "
-                                "%s — every piece is KEPT (a closed loop separates "
-                                "inside from outside).  Shift+click adds more, "
-                                "RMB / Enter cuts.\n",
-                                FenceCount(), (int)m_fenceObjs.size(),
-                                m_fenceFromPlane ? "its own plane normal"
-                                                 : "the view direction" );
-                    g_nUpdateBits = -1;
-                    return true;
-                }
-                // One segment uses the ordinary single-plane path.
-                Copy3( &m_fence[0], m_hover.a );
-                Copy3( &m_fence[3], m_hover.b );
+                return true;
             }
 
             // Lines and edges share the endpoint-plus-camera derivation.
@@ -1061,6 +1123,14 @@ namespace
             for ( size_t i = 0; i < m_targets.size(); ++i )
                 if ( Sel_BrushLive( m_targets[i] ) )
                     DrawIntersection( m_targets[i]->def, m_planeN, m_planeD );
+
+            // KIWI: the next Shift+click's line lights up, as in the fence preview.
+            if ( m_haveHover && m_hover.kind == KCUT_SRC_LINE
+              && !FenceHasObject( m_hover.object ) )
+            {
+                KiwiLines_Color( KSPLIT_HOT_COL[0], KSPLIT_HOT_COL[1], KSPLIT_HOT_COL[2] );
+                KiwiLines_Add( m_hover.a, m_hover.b );
+            }
         }
 
         void Commit() override
@@ -1141,7 +1211,7 @@ namespace
             m_crossing  = 0;
             m_haveHover = false;
             m_haveDisc  = false;      // stage-1 snap disc
-            m_fenceObjs.clear();      // additive construction sources
+            m_fenceSrc.clear();       // additive construction sources
             m_fence.clear();
             m_fenceFromPlane = false;
             m_hud[0]    = '\0';
@@ -1250,10 +1320,54 @@ namespace
 
         bool FenceHasObject( int obj ) const
         {
-            for ( size_t i = 0; i < m_fenceObjs.size(); ++i )
-                if ( m_fenceObjs[i] == obj )
+            for ( size_t i = 0; i < m_fenceSrc.size(); ++i )
+                if ( m_fenceSrc[i].object == obj )
                     return true;
             return false;
+        }
+
+        // KIWI: m_fenceSrc -> locked preview.  Several segments cut as a fence; one
+        // segment takes the ordinary single-plane path swept from the view.  False
+        // leaves the stage untouched (no usable plane).
+        bool LockFence()
+        {
+            MeasureBounds();
+            if ( !FenceRebuild() )
+                return false;
+
+            if ( FenceActive() )
+            {
+                // m_p remains single-plane state; fence geometry lives separately.
+                m_stage = KCUT_PREVIEW;
+                CountCrossings();
+                UpdateHud();
+                Sys_Printf( "Cut: %i segment(s) from %i source(s), swept along "
+                            "%s — every piece is KEPT (a closed loop separates "
+                            "inside from outside).  Shift+click adds more, "
+                            "RMB / Enter cuts.\n",
+                            FenceCount(), (int)m_fenceSrc.size(),
+                            m_fenceFromPlane ? "its own plane normal"
+                                             : "the view direction" );
+                g_nUpdateBits = -1;
+                return true;
+            }
+
+            // One segment uses the ordinary single-plane path.
+            Copy3( &m_fence[0], m_lineA );
+            Copy3( &m_fence[3], m_lineB );
+            Sub3( m_lineB, m_lineA, m_dir );
+            if ( !Norm3( m_dir ) )
+                return false;
+            MeasureBounds();                    // re-centre on the real line
+            if ( !AimFromCamera() )
+                return false;
+            m_stage = KCUT_PREVIEW;
+            CountCrossings();
+            UpdateHud();
+            Sys_Printf( "Cut: plane locked from this view — Shift+click adds lines, "
+                        "RMB / Enter cuts, Esc picks another.\n" );
+            g_nUpdateBits = -1;
+            return true;
         }
 
         // Rebuild flattened world segments and their shared sweep direction together.
@@ -1263,11 +1377,12 @@ namespace
             m_fenceFromPlane = false;
 
             bool haveN = false;
-            for ( size_t k = 0; k < m_fenceObjs.size(); ++k )
+            for ( size_t k = 0; k < m_fenceSrc.size(); ++k )
             {
-                const kconObject_t *o = KiwiCon_At( m_fenceObjs[k] );
+                const kconObject_t *o = KiwiCon_At( m_fenceSrc[k].object );
                 if ( !o || o->hidden )
                     continue;
+                const int only = m_fenceSrc[k].segment;     // -1 = every segment
 
                 // Use the first planar member so pick order determines the sweep.
                 if ( !haveN )
@@ -1284,6 +1399,8 @@ namespace
                 const int segs = KiwiCon_SegmentCount( *o );
                 for ( int s = 0; s < segs; ++s )
                 {
+                    if ( only >= 0 && s != only )
+                        continue;
                     if ( FenceCount() >= KCUT_MAX_FENCE )
                     {
                         Sys_Printf( "Cut: that is more than %i segments — the fence is "
@@ -1552,9 +1669,15 @@ namespace
         float m_p[3][3]   = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f } };
         // Invariant: MeasureBounds is the only writer and keeps m_radius > 1.
         float m_radius    = 64.0f;
-        // Fence objects stay in pick order; flattened segments use six floats each.
+        // Fence sources stay in pick order; flattened segments use six floats each.
         // FenceRebuild updates segments, sweep normal, and its source together.
-        std::vector<int>   m_fenceObjs;
+        // KIWI: segment -1 = the whole object; >= 0 = one pre-selected segment.
+        struct fenceSrc_t
+        {
+            int object  = -1;
+            int segment = -1;
+        };
+        std::vector<fenceSrc_t> m_fenceSrc;
         std::vector<float> m_fence;
         float m_fenceN[3] = { 0.0f, 0.0f, 1.0f };
         bool  m_fenceFromPlane = false;
@@ -1571,6 +1694,10 @@ namespace
     public:
         const char *Name() const override { return "Split Face"; }
         bool CanExecute() override { return KiwiSplit_CanSplitFace(); }
+
+        // KIWI: placing a cut is construction - snaps on by default, Ctrl frees (it was
+        // the transform context, raw until Ctrl, which the SNAP_NONE logic never expected).
+        kiwiSnapCtx_t SnapContext() const override { return KSNAPCTX_CONSTRUCT; }
 
         // Offset is measured from the low slide-axis edge; one field preserves Tab.
         int NumericFields( const kiwiNumField_t **out ) const override
@@ -1624,6 +1751,10 @@ namespace
             return (int)( sizeof( s_prompts ) / sizeof( s_prompts[0] ) );
         }
 
+        // KIWI: the brush face under a selected construction region (the region wins the
+        // click on a face it is drawn on) - one Begin only; the selection is not converted.
+        void SetTarget( selbrush_t *node, int face ) { m_tgtNode = node; m_tgtFace = face; }
+
         bool Begin() override
         {
             m_valid = false;
@@ -1632,6 +1763,33 @@ namespace
             m_hasNum   = false;
             m_numWorld = 0.0f;
             m_haveT    = false;             // seed at centroid until mouse movement
+
+            selbrush_t *tgtNode = m_tgtNode;
+            const int   tgtFace = m_tgtFace;
+            m_tgtNode = 0;
+            m_tgtFace = -1;
+            m_fromRegion = false;
+            if ( tgtNode && Sel_BrushLive( tgtNode ) )
+            {
+                if ( !Splittable( tgtNode ) )
+                {
+                    Sys_Printf( "Split Face: that brush cannot be split.\n" );
+                    return false;
+                }
+                m_node = tgtNode;
+                m_face = tgtFace;
+                m_fromRegion = true;
+                if ( !Derive() )
+                {
+                    Sys_Printf( "Split Face: that face is degenerate.\n" );
+                    return false;
+                }
+                UpdateHud();
+                Sys_Printf( "Split Face: the construction face lies on a brush face - "
+                            "splitting that brush (move slides, Tab flips U/V, RMB / "
+                            "Enter splits).\n" );
+                return true;
+            }
 
             const selection_t &sel = KiwiSel();
             const sel_item_t  *face = 0;
@@ -1698,24 +1856,27 @@ namespace
                 float world[3];
                 bool  have = false;
 
-                // Global geometry snaps qualify only on this face plane. Exclude
-                // SNAP_FACE because it is the unsnapped surface hit and would starve grid snap.
-                if ( snap.valid && KiwiSnap_IsGeometry( snap.type )
-                  && snap.type != SNAP_FACE
-                  && fabsf( Dot3( n, snap.position ) - d ) <= KSPLIT_FACE_EPS )
+                // KIWI: a geometry snap ANYWHERE projects onto the slide axis (a window
+                // corner on the wall above aligns the cut).  SNAP_FACE is the unsnapped
+                // surface hit and would starve grid snap.
+                const bool tookGeometry = snap.valid && KiwiSnap_IsGeometry( snap.type )
+                                       && snap.type != SNAP_FACE;
+                if ( tookGeometry )
                 {
                     Copy3( snap.position, world );
                     have = true;
                 }
-                // Otherwise intersect the selected face plane and grid-snap it.
-                // A valid SNAP_NONE signals Ctrl suppression and preserves the raw hit.
+                // Otherwise the slide-axis point nearest the cursor ray, grid-snapped.
+                // A valid SNAP_NONE signals Ctrl suppression and preserves the raw point.
+                const bool suppressed = snap.valid && snap.type == SNAP_NONE;
                 if ( !have )
                 {
                     ray_t ray;
                     float hit[3];
-                    if ( Pick_RayFromCursor( &ray ) && RayPlane( ray, n, d, hit ) )
+                    if ( Pick_RayFromCursor( &ray )
+                      && ( RayAxisClosest( ray, m_centre, OffDir(), hit )
+                        || RayPlane( ray, n, d, hit ) ) )
                     {
-                        const bool suppressed = snap.valid && snap.type == SNAP_NONE;
                         float snapped[3];
                         if ( !suppressed && KiwiGrid_Snap( hit, snapped ) )
                             Copy3( snapped, world );
@@ -1731,10 +1892,6 @@ namespace
 
                     // Apply the screen-space center latch last so explicit geometry
                     // snaps win; SNAP_NONE/Ctrl and typed input suppress it.
-                    const bool suppressed = snap.valid && snap.type == SNAP_NONE;
-                    const bool tookGeometry = snap.valid && KiwiSnap_IsGeometry( snap.type )
-                                           && snap.type != SNAP_FACE
-                                           && fabsf( Dot3( n, snap.position ) - d ) <= KSPLIT_FACE_EPS;
                     if ( !suppressed && !tookGeometry && !m_hasNum )
                     {
                         const float wpp  = KiwiCam_WorldPerPixel( m_centre );
@@ -1777,6 +1934,8 @@ namespace
             Select_Deselect( 1 );
             Select_Brush( m_node, 0, 0, 0 );
             Sel_Clear( KiwiSel() );
+            if ( m_fromRegion )
+                KiwiRegion_ClearSelection();    // the halves are the selection now
 
             KiwiCmd_UndoBegin( "split face" );
             std::vector<selbrush_t *> one;
@@ -1964,6 +2123,9 @@ namespace
 
         selbrush_t *m_node = 0;
         int   m_face   = -1;
+        selbrush_t *m_tgtNode = 0;          // KIWI: SetTarget, consumed by Begin
+        int   m_tgtFace    = -1;
+        bool  m_fromRegion = false;
         int   m_axis   = 0;                 // 0 = U, 1 = V
         bool  m_valid  = false;
         // Typed offset outranks cursor projection; m_t is the resolved position.
@@ -1989,8 +2151,479 @@ namespace
         char  m_hud[160]  = { 0 };
     };
 
-    KiwiCutCommand       s_cut;
-    KiwiSplitFaceCommand s_splitFace;
+    // KIWI (2026-09-28, user: "allow the ctrl-R to be used on construction faces to add a
+    // perfect bisecting line in the plane of the face"): Ctrl+R with regions selected lays a
+    // construction line across each one, in its plane, clipped to its interior (a ring's line
+    // stops at the hole, the even-odd way the region itself is filled).  It STARTS PAUSED at
+    // the exact half of each region's span, so Ctrl+R, Enter is the perfect bisect; LMB
+    // resumes and slides it (on-plane geometry snap, grid, the half latch within 8 px), Tab
+    // flips U/V, a typed number is the offset from the low edge.  The line crosses the
+    // region's longest edge (U) or runs along it (V).  Several regions each take their own
+    // line at the same fraction of their own span.  ONE construction undo snapshot.
+    class KiwiSplitRegionCommand : public KiwiEditorCommand
+    {
+    public:
+        const char *Name() const override { return "Split Region"; }
+        bool CanExecute() override { return KiwiRegion_HasSelection(); }
+        kiwiSnapCtx_t SnapContext() const override { return KSNAPCTX_CONSTRUCT; }   // Ctrl frees
+
+        int NumericFields( const kiwiNumField_t **out ) const override
+        { *out = KSPLITFACE_FIELDS; return 1; }
+
+        bool NumericFieldValue( int field, float *out ) const override
+        {
+            if ( field != 0 || !out || m_regs.empty() )
+                return false;
+            const regSplit_t &r = m_regs[0];
+            *out = TOf( r ) - r.lo;
+            return true;
+        }
+
+        bool BubbleAnchor( float *out3 ) const override
+        {
+            if ( !out3 || m_lines.empty() )
+                return false;
+            for ( int k = 0; k < 3; ++k )
+                out3[k] = ( m_lines[k] + m_lines[3 + k] ) * 0.5f;
+            return true;
+        }
+
+        void NumericChanged( bool has, float world ) override
+        {
+            m_hasNum   = has && KiwiNum_HasValue();
+            m_numWorld = world;
+            Rebuild();
+            g_nUpdateBits |= 1;
+        }
+
+        const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
+        bool        HudInvalid() const override { return m_lines.empty(); }
+
+        int HudPrompts( const kiwiPrompt_t **out ) const override
+        {
+            static const kiwiPrompt_t s_prompts[] = {
+                { "Enter", "Add the line (starts at the exact half)" },
+                { "LMB",   "Slide it" },
+                { "Tab",   "Flip U / V" },
+                { "0-9",   "Exact offset" },
+            };
+            *out = s_prompts;
+            return (int)( sizeof( s_prompts ) / sizeof( s_prompts[0] ) );
+        }
+
+        bool Begin() override
+        {
+            m_regs.clear();
+            m_lines.clear();
+            m_axis     = 0;
+            m_frac     = 0.5f;
+            m_hasNum   = false;
+            m_numWorld = 0.0f;
+            m_hud[0]   = '\0';
+
+            const std::vector<kregion_t> &all = KiwiRegion_All();
+            const int n = KiwiRegion_SelectedCount();
+            for ( int i = 0; i < n; ++i )
+            {
+                const int ri = KiwiRegion_SelectedAt( i );
+                if ( ri < 0 || ri >= (int)all.size() )
+                    continue;
+                const kregion_t &src = all[(size_t)ri];
+                regSplit_t r;
+                r.plane = src.plane;
+                r.loops.push_back( KiwiRegion_OuterLoop( src ) );
+                for ( size_t h = 0; h < src.holes.size(); ++h )
+                    r.loops.push_back( src.holes[h] );
+                if ( !LongestEdge( r.loops[0], r.edge ) )
+                    continue;
+                m_regs.push_back( r );
+            }
+            if ( m_regs.empty() )
+            {
+                Sys_Printf( "Split Region: the selected region is degenerate.\n" );
+                return false;
+            }
+
+            Rebuild();
+            KiwiCmd_Pause();                    // the exact half, until LMB slides it
+            Sys_Printf( "Split Region: %i region(s) — Enter adds the bisecting line, LMB "
+                        "slides it, Tab flips U/V, type an exact offset.\n",
+                        (int)m_regs.size() );
+            return true;
+        }
+
+        bool KeyDown( int vk, unsigned mods ) override
+        {
+            (void)mods;
+            if ( vk != 0x09 )                   // VK_TAB
+                return false;
+            m_axis = ( m_axis + 1 ) & 1;
+            m_frac = 0.5f;                      // a new axis re-seats at the half
+            Rebuild();
+            g_nUpdateBits |= 1;
+            return true;
+        }
+
+        void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
+        {
+            (void)pick;
+            if ( m_regs.empty() )
+                return;
+            const regSplit_t &r = m_regs[0];
+            if ( !( r.hi - r.lo > KSPLIT_MIN_SPAN ) )
+                return;
+
+            float world[3];
+            bool  have = false;
+            float uv[2], off[2], dir[2];
+            Axes( r, dir, off );
+            // Geometry snaps from ANY plane project onto the slide axis (see RayAxisClosest).
+            const bool tookGeometry = snap.valid && KiwiSnap_IsGeometry( snap.type )
+                                   && snap.type != SNAP_FACE;
+            if ( tookGeometry )
+            {
+                Copy3( snap.position, world );
+                have = true;
+            }
+            const bool suppressed = snap.valid && snap.type == SNAP_NONE;
+            if ( !have )
+            {
+                // The slide axis in world space, through the span middle.
+                float base[3], axis[3];
+                MidWorld( r, base );
+                for ( int k = 0; k < 3; ++k )
+                    axis[k] = r.plane.u[k] * off[0] + r.plane.v[k] * off[1];
+                ray_t ray;
+                float hit[3];
+                if ( Norm3( axis ) && Pick_RayFromCursor( &ray )
+                  && ( RayAxisClosest( ray, base, axis, hit )
+                    || KiwiCon_RayPlane( r.plane, ray, hit ) ) )
+                {
+                    float snapped[3];
+                    if ( !suppressed && KiwiGrid_Snap( hit, snapped ) )
+                        Copy3( snapped, world );
+                    else
+                        Copy3( hit, world );
+                    have = true;
+                }
+            }
+            if ( !have )
+                return;
+
+            KiwiCon_WorldToPlane( r.plane, world, uv );
+            const float t = off[0] * uv[0] + off[1] * uv[1];
+            m_frac = ( t - r.lo ) / ( r.hi - r.lo );
+
+            // The exact half latches within 8 px unless Ctrl / typing / a geometry snap.
+            if ( !suppressed && !tookGeometry && !m_hasNum )
+            {
+                float mid[3];
+                MidWorld( r, mid );
+                const float px = KSPLIT_CENTRE_SNAP_PIX * KiwiCam_WorldPerPixel( mid );
+                if ( px > 0.0f && fabsf( t - ( r.lo + r.hi ) * 0.5f ) <= px )
+                    m_frac = 0.5f;
+            }
+            Rebuild();
+        }
+
+        void DrawWorld() override
+        {
+            KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
+            for ( size_t i = 0; i + 6 <= m_lines.size(); i += 6 )
+                if ( !KiwiLines_Add( &m_lines[i], &m_lines[i + 3] ) )
+                    break;
+            if ( m_regs.empty() )
+                return;
+            float mid[3];
+            MidWorld( m_regs[0], mid );
+            KiwiLines_Color( KSPLIT_CENTRE_COL[0], KSPLIT_CENTRE_COL[1], KSPLIT_CENTRE_COL[2] );
+            KiwiSnap_EmitSpot( mid, KiwiSnap_AccentPixels() * 2.0f, true  );
+            KiwiSnap_EmitSpot( mid, KiwiSnap_RingPixels(),          false );
+        }
+
+        int LineBudget() const override
+        {
+            return (int)( m_lines.size() / 6 ) * 2 + 64;
+        }
+
+        void Commit() override
+        {
+            if ( m_lines.empty() )
+            {
+                Sys_Printf( "Split Region: nothing to add.\n" );
+                return;
+            }
+            KiwiCon_UndoPush();
+            int added = 0;
+            size_t li = 0;
+            for ( size_t r = 0; r < m_regs.size(); ++r )
+                for ( int k = 0; k < m_regs[r].count; ++k, li += 6 )
+                {
+                    kconObject_t o;
+                    o.type       = KCON_LINE;
+                    o.plane      = m_regs[r].plane;
+                    o.planeValid = true;
+                    o.pts.assign( m_lines.begin() + li, m_lines.begin() + li + 6 );
+                    if ( KiwiCon_Add( o ) >= 0 )
+                        ++added;
+                }
+            Sys_Printf( "Split Region: %i line(s) added across %i region(s).\n",
+                        added, (int)m_regs.size() );
+            m_regs.clear();
+            m_lines.clear();
+            g_nUpdateBits = -1;
+        }
+
+        void Cancel() override
+        {
+            m_regs.clear();
+            m_lines.clear();
+            g_nUpdateBits |= 1;
+        }
+
+    private:
+        struct regSplit_t
+        {
+            kconPlane_t plane;
+            std::vector< std::vector<float> > loops;    // outer + holes, plane space
+            float edge[2] = { 1.0f, 0.0f };             // longest outer edge, unit
+            float lo = 0.0f, hi = 0.0f;                 // span along the slide axis
+            int   count = 0;                            // m_lines entries it owns
+        };
+
+        static bool LongestEdge( const std::vector<float> &loop, float out[2] )
+        {
+            const int n = (int)( loop.size() / 2 );
+            float best = 0.0f;
+            for ( int i = 0; i < n; ++i )
+            {
+                const int j = ( i + 1 ) % n;
+                const float ex = loop[(size_t)j * 2]     - loop[(size_t)i * 2];
+                const float ey = loop[(size_t)j * 2 + 1] - loop[(size_t)i * 2 + 1];
+                const float l  = sqrtf( ex * ex + ey * ey );
+                if ( l > best ) { best = l; out[0] = ex / l; out[1] = ey / l; }
+            }
+            return best > KSPLIT_EPS;
+        }
+
+        // dir = the line's direction, off = the slide axis (both plane space, unit).
+        void Axes( const regSplit_t &r, float dir[2], float off[2] ) const
+        {
+            if ( m_axis == 0 ) { dir[0] = -r.edge[1]; dir[1] = r.edge[0]; }   // crosses it
+            else               { dir[0] =  r.edge[0]; dir[1] = r.edge[1]; }   // along it
+            off[0] = -dir[1];
+            off[1] =  dir[0];
+        }
+
+        // The resolved slide position for one region: typed offset, else the fraction.
+        float TOf( const regSplit_t &r ) const
+        {
+            const float guard = KSPLIT_MIN_SPAN * 0.5f;
+            float t = m_hasNum ? ( r.lo + m_numWorld ) : ( r.lo + m_frac * ( r.hi - r.lo ) );
+            if ( t < r.lo + guard ) t = r.lo + guard;
+            if ( t > r.hi - guard ) t = r.hi - guard;
+            return t;
+        }
+
+        // World point at the middle of the region's span on the (current) line.
+        void MidWorld( const regSplit_t &r, float out[3] ) const
+        {
+            float dir[2], off[2];
+            Axes( r, dir, off );
+            float slo = 1e30f, shi = -1e30f;
+            const std::vector<float> &L = r.loops[0];
+            for ( size_t i = 0; i + 1 < L.size(); i += 2 )
+            {
+                const float s = dir[0] * L[i] + dir[1] * L[i + 1];
+                if ( s < slo ) slo = s;
+                if ( s > shi ) shi = s;
+            }
+            const float t  = ( r.lo + r.hi ) * 0.5f;
+            const float s  = ( slo + shi ) * 0.5f;
+            const float uv[2] = { off[0] * t + dir[0] * s, off[1] * t + dir[1] * s };
+            KiwiCon_PlaneToWorld( r.plane, uv, out );
+        }
+
+        // Re-derive every region's span and interior intervals of its line.
+        void Rebuild()
+        {
+            m_lines.clear();
+            for ( size_t ri = 0; ri < m_regs.size(); ++ri )
+            {
+                regSplit_t &r = m_regs[ri];
+                r.count = 0;
+                float dir[2], off[2];
+                Axes( r, dir, off );
+                r.lo = 1e30f; r.hi = -1e30f;
+                const std::vector<float> &L = r.loops[0];
+                for ( size_t i = 0; i + 1 < L.size(); i += 2 )
+                {
+                    const float t = off[0] * L[i] + off[1] * L[i + 1];
+                    if ( t < r.lo ) r.lo = t;
+                    if ( t > r.hi ) r.hi = t;
+                }
+                if ( !( r.hi - r.lo > KSPLIT_MIN_SPAN ) )
+                    continue;                   // a sliver: nothing to split
+                const float t = TOf( r );
+
+                // Even-odd crossings of the line off.p == t with every loop edge; the
+                // half-open side test counts a vertex exactly on the line once.
+                std::vector<float> hits;
+                for ( size_t l = 0; l < r.loops.size(); ++l )
+                {
+                    const std::vector<float> &P = r.loops[l];
+                    const int n = (int)( P.size() / 2 );
+                    for ( int i = 0; i < n; ++i )
+                    {
+                        const int j = ( i + 1 ) % n;
+                        const float ax = P[(size_t)i * 2], ay = P[(size_t)i * 2 + 1];
+                        const float bx = P[(size_t)j * 2], by = P[(size_t)j * 2 + 1];
+                        const float da = off[0] * ax + off[1] * ay - t;
+                        const float db = off[0] * bx + off[1] * by - t;
+                        if ( ( da > 0.0f ) == ( db > 0.0f ) )
+                            continue;
+                        const float f  = da / ( da - db );
+                        const float hx = ax + ( bx - ax ) * f;
+                        const float hy = ay + ( by - ay ) * f;
+                        hits.push_back( dir[0] * hx + dir[1] * hy );
+                    }
+                }
+                std::sort( hits.begin(), hits.end() );
+                for ( size_t h = 0; h + 1 < hits.size(); h += 2 )
+                {
+                    if ( !( hits[h + 1] - hits[h] > KSPLIT_MIN_SPAN ) )
+                        continue;
+                    for ( int e = 0; e < 2; ++e )
+                    {
+                        const float s = hits[h + (size_t)e];
+                        const float uv[2] = { off[0] * t + dir[0] * s, off[1] * t + dir[1] * s };
+                        float w[3];
+                        KiwiCon_PlaneToWorld( r.plane, uv, w );
+                        m_lines.push_back( w[0] );
+                        m_lines.push_back( w[1] );
+                        m_lines.push_back( w[2] );
+                    }
+                    ++r.count;
+                }
+            }
+            UpdateHud();
+        }
+
+        void UpdateHud()
+        {
+            if ( m_lines.empty() || m_regs.empty() )
+            {
+                _snprintf( m_hud, sizeof( m_hud ), "split region  %s  (no room to split)",
+                           ( m_axis == 0 ) ? "U" : "V" );
+            }
+            else
+            {
+                const regSplit_t &r = m_regs[0];
+                char offset[48], span[48];
+                _snprintf( m_hud, sizeof( m_hud ),
+                           "split region  %s  offset %s / %s%s%s  (Tab flips)",
+                           ( m_axis == 0 ) ? "U" : "V",
+                           KiwiFmt_Num( offset, sizeof( offset ),
+                                        Units_ToDisplay( TOf( r ) - r.lo ), 6 ),
+                           KiwiFmt_Num( span, sizeof( span ),
+                                        Units_ToDisplay( r.hi - r.lo ), 6 ),
+                           ( !m_hasNum && m_frac == 0.5f ) ? "  [half]" : "",
+                           m_hasNum ? "  [typed]" : "" );
+            }
+            m_hud[sizeof( m_hud ) - 1] = '\0';
+        }
+
+        std::vector<regSplit_t> m_regs;
+        std::vector<float>      m_lines;        // world segments, 6 floats each, by region
+        int   m_axis     = 0;
+        float m_frac     = 0.5f;
+        bool  m_hasNum   = false;
+        float m_numWorld = 0.0f;
+        char  m_hud[160] = { 0 };
+    };
+
+    KiwiCutCommand         s_cut;
+    KiwiSplitFaceCommand   s_splitFace;
+    KiwiSplitRegionCommand s_splitRegion;
+
+    // KIWI (2026-09-28, user: "ctrl-R is now broken on brush faces"): a region drawn ON a
+    // brush face wins the click over that face (KiwiRegion_WinsOverSurface), so Ctrl+R saw a
+    // region and laid a construction line.  The brush face whose plane holds the primary
+    // selected region and whose winding covers the region's middle is the real target.
+    bool RegionBrushFace( selbrush_t **outNode, int *outFace )
+    {
+        const int ri = KiwiRegion_SelectedIndex();
+        const std::vector<kregion_t> &all = KiwiRegion_All();
+        if ( ri < 0 || ri >= (int)all.size() )
+            return false;
+        const kregion_t &r = all[(size_t)ri];
+        const std::vector<float> &L = KiwiRegion_OuterLoop( r );
+        const int n = (int)( L.size() / 2 );
+        if ( n < 3 )
+            return false;
+        float uv[2] = { 0.0f, 0.0f };
+        for ( int i = 0; i < n; ++i )
+        {
+            uv[0] += L[(size_t)i * 2];
+            uv[1] += L[(size_t)i * 2 + 1];
+        }
+        uv[0] /= (float)n;
+        uv[1] /= (float)n;
+        float mid[3];
+        KiwiCon_PlaneToWorld( r.plane, uv, mid );
+
+        const float band = KiwiRegion_PlaneBand();
+        selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
+        for ( int l = 0; l < 2; ++l )
+            for ( selbrush_t *b = lists[l]->next; b && b != lists[l]; b = b->next )
+            {
+                if ( !Pick_BrushPickable( b ) || !Splittable( b ) || !b->def->faces )
+                    continue;
+                const brush_t *def = b->def;
+                for ( int f = 0; f < def->faceCount; ++f )
+                {
+                    const winding_t *w = def->faces[f].w;
+                    if ( !w || w->numpoints < 3 || w->numpoints > MAX_POINTS_ON_WINDING )
+                        continue;
+                    float fn[3];
+                    Copy3( def->faces[f].plane.normal, fn );
+                    if ( !Norm3( fn ) || fabsf( Dot3( fn, r.plane.normal ) ) < 0.999f )
+                        continue;
+                    if ( fabsf( Dot3( fn, mid ) - Dot3( fn, w->p[0] ) ) > band )
+                        continue;
+                    // Inside the convex winding (either winding order).
+                    int pos = 0, neg = 0;
+                    for ( int i = 0; i < w->numpoints; ++i )
+                    {
+                        const float *a = w->p[i];
+                        const float *c = w->p[( i + 1 ) % w->numpoints];
+                        float e[3], p[3], x[3];
+                        Sub3( c, a, e );
+                        Sub3( mid, a, p );
+                        Cross3( e, p, x );
+                        const float s = Dot3( x, fn );
+                        if ( s >  0.01f ) ++pos;
+                        if ( s < -0.01f ) ++neg;
+                    }
+                    if ( pos && neg )
+                        continue;
+                    *outNode = b;
+                    *outFace = f;
+                    return true;
+                }
+            }
+        return false;
+    }
+
+    // Ctrl+R routes to the region split when regions are selected and no brush face is.
+    bool SplitFaceSelected()
+    {
+        const selection_t &sel = KiwiSel();
+        for ( size_t i = 0; i < sel.items.size(); ++i )
+            if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) )
+                return true;
+        return false;
+    }
 }
 
 // Cut needs only a selected splittable brush; the cutter is picked in the gesture.
@@ -2010,6 +2643,8 @@ bool KiwiSplit_CanSplitFace()
     for ( size_t i = 0; i < sel.items.size(); ++i )
         if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) )
             ++n;
+    if ( n == 0 && KiwiRegion_HasSelection() )
+        return true;                    // KIWI: Ctrl+R on regions = bisecting line
     return n == 1;
 }
 
@@ -2025,6 +2660,18 @@ KiwiEditorCommand *KiwiSplit_CommandForId( int commandId )
     if ( commandId == KIWI_CMD_CUT )
         return &s_cut;
     if ( commandId == KIWI_CMD_SPLIT_FACE )
+    {
+        // KIWI: a selected construction face (region) takes the bisecting-line split -
+        // unless it is drawn on a brush face, which then splits that brush.
+        if ( !SplitFaceSelected() && KiwiRegion_HasSelection() )
+        {
+            selbrush_t *node = 0;
+            int         face = -1;
+            if ( !RegionBrushFace( &node, &face ) )
+                return &s_splitRegion;
+            s_splitFace.SetTarget( node, face );
+        }
         return &s_splitFace;
+    }
     return 0;
 }

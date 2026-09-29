@@ -28,6 +28,9 @@ struct brush_t;                   // qe3.h:474 (the 88-byte brush DEFINITION)
 struct selbrush_t;                // qe3.h:429 (the 56-byte brush INSTANCE / list node)
 
 #define KEXT_MIN_DIST      0.5f   // world units; below this the gesture is a no-op
+// KIWI: narrowest source face Extrude Face accepts - the ported winding build merges corners
+// within 0.1 per axis, so anything near that collapses (0.25 leaves margin on slanted walls).
+#define KEXT_MIN_FACE_WIDTH 0.25f
 
 // Source geometry lies at depth zero and would otherwise pin the drag there.
 // Refuse geometry snaps within this world-unit band around the source plane.

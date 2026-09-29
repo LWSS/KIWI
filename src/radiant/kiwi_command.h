@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34161, modal 34067.
+// 34100..34199 the second instant block. Next free: instant 34162, modal 34068.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -119,6 +119,7 @@
 #define KIWI_CMD_PRIM_BOX_CENTER    34064   // MODAL: Shift+V  centre + half-extents
 #define KIWI_CMD_LOFT               34065   // MODAL: L        face + face -> a bridge
 #define KIWI_CMD_CONSTRUCT_EXTEND   34066   // MODAL: lollipop-dragged extension of the selected lines' ends
+#define KIWI_CMD_CONSTRUCT_PIPE     34067   // MODAL: Pipe - a section swept along construction (kiwi_pipe)
 // ENT_DROP, MODEL_DROP, and IMPORT_DROPPED are internal payload consumers;
 // never register them.
 #define KIWI_CMD_WINDOW_ENTITIES    34121   // "Entities" (the browser dock window)
@@ -164,6 +165,7 @@
 #define KIWI_CMD_SELMODE_PARTICLES  34158   // "Select Mode: Particles only" (Object sub-mode, unbound)
 #define KIWI_CMD_PARTICLE_EXPORT    34159   // "Write Particle Scripts" (maps/createfx/<map>_fx.gsc)
 #define KIWI_CMD_IMPORT_DECALS      34160   // "Import Decal Stamps..." (kiwi_import, decal mode)
+#define KIWI_CMD_WINDOWS_RESET_LAYOUT 34161 // Windows > Reset Layout (default dock layout + open states)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );
@@ -372,6 +374,11 @@ public:
         return WantsClicks() ? KSNAPCTX_CONSTRUCT : KSNAPCTX_TRANSFORM;
     }
 
+    // KIWI (2026-09-28, user: "do not show the snap preview while doing boolean operations on
+    // brushes!!"): false = a pick-only tool that places nothing, so no snap is resolved, and no
+    // marker, label or snap dots are drawn while it runs.
+    virtual bool ShowsSnap() const { return true; }
+
     // Relatches delta origins on PAUSED->HOT so resume cannot teleport geometry.
     virtual void Rebase()                        {}
 };
@@ -433,7 +440,7 @@ void KiwiCmd_DrawWorld();
 // Default covers the largest ordinary preview plus its marker; the ceiling limits
 // render-command pressure while allowing set-sized overlays.
 #define KCMD_LINE_BUDGET      288
-#define KCMD_LINE_BUDGET_MAX  1536
+#define KCMD_LINE_BUDGET_MAX  16384   // KIWI (2026-09-28): was 1536 (~100 box outlines); the batch auto-flushes
 
 // Polls Ctrl and applies the active inversion; KSNAPCTX_ALWAYS ignores Ctrl.
 bool KiwiCmd_SnapEngaged();

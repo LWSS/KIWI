@@ -15,6 +15,7 @@
 #include "kiwi_droptrace.h"          // KiwiDrop_Trace — the orbit pivot's any-surface fallback
 #include "kiwi_section.h"            // KiwiSection_Active: the sweep guard yields to a section cut
 #include "kiwi_construct.h"          // KiwiCon_PlaneIsExplicit: ...and to a chosen construction plane
+#include "kiwi_skybox.h"             // KiwiSky_IsSkyBrush: the sky shell never pivots an orbit
 #include "radiant_registry.h"        // Radiant_Profile* (the fly-speed multiplier)
 #include "kiwi_vec.h"     // shared Dot3/Sub3/... helpers
 
@@ -71,6 +72,9 @@ namespace
     const float KCAM_DOLLY_STEP  = 0.95f;      // multiplicative per wheel step
     // One inch permits detail work; perspective surface anchoring prevents punch-through.
     const float KCAM_MIN_DIST    = 1.0f;
+    // KIWI: an orbit pivot from the any-surface fallback (sky / Z=0 ground) deeper than this
+    // many times the working depth is replaced by the cursor-ray point at the working depth.
+    const float KCAM_PIVOT_DEPTH_RATIO = 4.0f;
     // KIWI (2026-09-16): how short of the first solid the sweep guard parks the eye.
     // Larger than KCAM_MIN_DIST so the near plane never slices the surface it stopped at.
     const float KCAM_SWEEP_MARGIN = 2.0f;
@@ -388,6 +392,48 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
 {
     camera_s *c = Ed_Camera();
 
+    // KIWI (2026-09-28, user: "when using the deadspace(empty) below what i'm working on
+    // sometimes the camera just jumps and rotates to a seemingly random spot"): two pivot
+    // sources sat far from the work - the SKY SHELL (pickable like any brush, so the void
+    // below a building resolved to the skybox floor) and the drop trace's Z=0 ground
+    // fallback at a grazing angle (anything under 65536 units was accepted).  Orbiting
+    // around a point that far swings the eye across the map.  Sky never pivots now, and a
+    // fallback hit much deeper than the working depth (the stored pivot, else the centre
+    // pick) is replaced by the point on the cursor ray AT the working depth.
+    float fwd[3];
+    ViewForward( c, fwd );
+    auto isSky = []( const pick_result_t &p )
+    {
+        return p.valid && p.item.brush && p.item.brush->def
+            && KiwiSky_IsSkyBrush( p.item.brush->def );
+    };
+    float workDepth = 0.0f;
+    {
+        if ( PivotUsable( c ) )
+        {
+            const float relP[3] = { s_lookAt[0] - c->origin[0],
+                                    s_lookAt[1] - c->origin[1],
+                                    s_lookAt[2] - c->origin[2] };
+            workDepth = Dot3( relP, fwd );
+        }
+        else
+        {
+            ray_t cray;
+            pick_result_t centre;
+            if ( Pick_RayFromImagePos( c->width / 2, c->height / 2, &cray ) )
+                centre = Pick( cray, SEL_MASK_OBJECT | SEL_MASK_FACE );
+            if ( centre.valid && !isSky( centre ) )
+            {
+                const float relC[3] = { centre.point[0] - c->origin[0],
+                                        centre.point[1] - c->origin[1],
+                                        centre.point[2] - c->origin[2] };
+                workDepth = Dot3( relC, fwd );
+            }
+        }
+        if ( !( workDepth > 1.0f ) )
+            workDepth = ( s_dist > 1.0f ) ? s_dist : KCAM_MIN_DIST;
+    }
+
     bool havePivot = false;
     ray_t ray;
     if ( Pick_RayFromImagePos( imgX, imgY, &ray ) )
@@ -395,7 +441,7 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
         // Area granularity only: an orbit pivot wants the SURFACE point under the
         // cursor, not the nearest vertex/edge snap the mode mask might prefer.
         const pick_result_t r = Pick( ray, SEL_MASK_OBJECT | SEL_MASK_FACE );
-        if ( r.valid )
+        if ( r.valid && !isSky( r ) )
         {
             s_lookAt[0] = r.point[0];
             s_lookAt[1] = r.point[1];
@@ -416,9 +462,25 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
             // ground-plane fallback from seating a grazing-angle pivot in the void.
             if ( KiwiDrop_Trace( ray, false, &hit ) && hit.dist < 65536.0f )
             {
-                s_lookAt[0] = hit.point[0];
-                s_lookAt[1] = hit.point[1];
-                s_lookAt[2] = hit.point[2];
+                // KIWI: this trace also answers sky and the Z=0 ground fallback, so a hit
+                // far past the working depth stays on the cursor ray AT that depth.
+                const float relH[3] = { hit.point[0] - c->origin[0],
+                                        hit.point[1] - c->origin[1],
+                                        hit.point[2] - c->origin[2] };
+                const float hitDepth = Dot3( relH, fwd );
+                const float along    = Dot3( ray.dir, fwd );
+                if ( hitDepth > workDepth * KCAM_PIVOT_DEPTH_RATIO && along > 1.0e-3f )
+                {
+                    const float t = workDepth / along;
+                    for ( int k = 0; k < 3; ++k )
+                        s_lookAt[k] = ray.origin[k] + ray.dir[k] * t;
+                }
+                else
+                {
+                    s_lookAt[0] = hit.point[0];
+                    s_lookAt[1] = hit.point[1];
+                    s_lookAt[2] = hit.point[2];
+                }
                 s_have      = true;
                 havePivot   = true;
             }
@@ -434,7 +496,7 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
         pick_result_t centre;                    // .valid defaults false (kiwi_pick.h:82)
         if ( Pick_RayFromImagePos( c->width / 2, c->height / 2, &cray ) )
             centre = Pick( cray, SEL_MASK_OBJECT | SEL_MASK_FACE );
-        if ( centre.valid )
+        if ( centre.valid && !isSky( centre ) )     // KIWI: the sky shell is not the work
         {
             float f[3];
             ViewForward( c, f );

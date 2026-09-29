@@ -131,49 +131,69 @@ namespace
         return x;
     }
 
-    // CSG_Merge's list surgery (csg.cpp:605-648) restricted to two brushes. Returns
-    // the linked result, or relinks both inputs and returns nullptr on refusal.
-    selbrush_t *TryMergePair( selbrush_t *a, selbrush_t *b )
+    // KIWI (2026-09-28, user: "autobool leaves tons of duplicates occupying the same 3d space
+    // as the old un-bool'd blocks"): a pair merge used to skip the volume guard.  Two DIAGONAL
+    // cells of a grid pass BoundsTouch (they meet along an edge) and Brush_MergeList calls
+    // both of their shared-plane faces interior, so the pair came back as the 2x2 HULL - a
+    // brush lying over the two other cells, which stayed.  Pairs now go through the same
+    // guarded path as clusters (TryMergeCluster with two members; identical list surgery).
+    //
+    // Exact duplicates (same plane set, same bounds) are pure redundancy - a stacked copy the
+    // guard could never merge (its volume double-counts) - so the first copy is kept and the
+    // rest are freed before any merging.  Returns the number freed.
+    bool PlaneSame( const plane_t &a, const plane_t &b )
     {
-        // Prepending matches csg.cpp:607-616. The head selects the result owner and
-        // fixes the face order used by the core's duplicate-plane skip.
-        selbrush_t *mergeList = nullptr;
-        selbrush_t *pair[2] = { a, b };
-        for ( int k = 0; k < 2; ++k )
-        {
-            selbrush_t *n = pair[k];
-            Brush_RemoveFromList( n );
-            n->next = mergeList;
-            n->prev = nullptr;
-            mergeList = n;
-        }
+        const float KAB_NORMAL_EPS = 0.0001f;
+        const float KAB_DIST_EPS   = 0.01f;
+        return fabsf( a.normal[0] - b.normal[0] ) < KAB_NORMAL_EPS
+            && fabsf( a.normal[1] - b.normal[1] ) < KAB_NORMAL_EPS
+            && fabsf( a.normal[2] - b.normal[2] ) < KAB_NORMAL_EPS
+            && fabs( (double)a.dist - (double)b.dist ) < KAB_DIST_EPS;
+    }
 
-        selbrush_t *merged = Brush_MergeList( mergeList );
-
-        if ( merged )
+    bool SameSolid( const brush_t *a, const brush_t *b )
+    {
+        if ( !a || !b || !a->faces || !b->faces )
+            return false;
+        for ( int i = 0; i < 3; ++i )
+            if ( fabsf( a->mins[i] - b->mins[i] ) > 0.1f || fabsf( a->maxs[i] - b->maxs[i] ) > 0.1f )
+                return false;
+        // Every face plane of each has a match in the other (duplicate planes allowed).
+        for ( int pass = 0; pass < 2; ++pass )
         {
-            for ( selbrush_t *cur = mergeList; cur; )
+            const brush_t *x = pass ? b : a;
+            const brush_t *y = pass ? a : b;
+            for ( int f = 0; f < x->faceCount; ++f )
             {
-                selbrush_t *next = cur->next;
-                cur->next = nullptr;
-                cur->prev = nullptr;
-                Brush_Free( cur );
-                cur = next;
+                bool found = false;
+                for ( int g = 0; g < y->faceCount && !found; ++g )
+                    found = PlaneSame( x->faces[f].plane, y->faces[g].plane );
+                if ( !found )
+                    return false;
             }
-            // Brush_MergeList returns an instance unlinked from the display lists.
-            Brush_AddToList2( merged );
-            return merged;
         }
+        return true;
+    }
 
-        for ( selbrush_t *cur = mergeList; cur; )
+    int DropDuplicates( std::vector<selbrush_t *> &set )
+    {
+        int dropped = 0;
+        for ( size_t i = 0; i < set.size(); ++i )
         {
-            selbrush_t *next = cur->next;
-            cur->next = nullptr;
-            cur->prev = nullptr;
-            Brush_AddToList2( cur );
-            cur = next;
+            if ( !set[i] || !set[i]->def )
+                continue;
+            for ( size_t j = i + 1; j < set.size(); ++j )
+            {
+                if ( !set[j] || !set[j]->def )
+                    continue;
+                if ( !SameSolid( set[i]->def, set[j]->def ) )
+                    continue;
+                Brush_Free( set[j] );           // selected: the undo bracket cloned it
+                set[j] = 0;
+                ++dropped;
+            }
         }
-        return nullptr;
+        return dropped;
     }
 
     // N-way merge with a volume guard. Inputs remain live until acceptance, so either
@@ -315,8 +335,10 @@ namespace
                     if ( !BoundsTouch( a->def, b->def ) )
                         continue;              // cannot possibly share a face
 
-                    selbrush_t *merged = TryMergePair( a, b );
-                    if ( !merged )
+                    // KIWI: guarded - a hull that grows past the pair's volume is refused.
+                    selbrush_t *pair[2] = { a, b };
+                    selbrush_t *merged  = nullptr;
+                    if ( TryMergeCluster( pair, 2, &merged ) != 1 )
                         continue;              // refused; both were relinked
 
                     // The result stays in i and can merge again during this sweep.
@@ -468,6 +490,9 @@ namespace
         // is required because Undo_GeneralStart stores the pointer.
         KiwiCmd_UndoBegin( "auto bool" );
 
+        // KIWI: stacked exact copies go first; no merge can absorb them.
+        const int dupes = DropDuplicates( set );
+
         // Forward pairs shrink the risky cluster input; guarded clusters see survivors;
         // reverse pairs recover order-dependent misses. Each phase preserves slots and
         // revalidates brush liveness.
@@ -481,7 +506,9 @@ namespace
 
         const int reverseMerges = PairwiseFixedPoint( set, true );
 
-        const int merges = pairMerges + clusterMerges + reverseMerges;
+        const int merges = pairMerges + clusterMerges + reverseMerges + dupes;
+        if ( dupes )
+            Sys_Printf( "Auto-bool: removed %i exact duplicate brush(es).\n", dupes );
 
         KiwiCmd_UndoCommit();
 

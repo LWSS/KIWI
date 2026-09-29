@@ -137,6 +137,28 @@ void KiwiConSel_ScaleApply ( const float pivot[3], const float factor[3] );
 // latched move set explicitly so an absolute drag cannot repeatedly snap to itself.
 bool KiwiConSel_SnapMuted( int objectIndex );
 
+// Arrays (kiwi_dupe.cpp).  KIWI (2026-09-27, user: "it should allow anything to be arrayed.
+// Stop converting my selection to an object"): each selected thing arrays AS ITSELF and the
+// selection is never converted.  A whole construction object copies whole; selected segments
+// copy as lines (touching ones chain into a polyline; a curve's piece copies the curve); brush
+// edges become lines / polylines and brush faces their closed outlines, the way Duplicate
+// turns edges into lines; a region copies its loop (a region that IS one closed object copies
+// that object).  Points alone have no shape and are skipped.  Brush-made shapes start at copy
+// 0 - the original is a brush, so the array lays one on it too; construction starts at 1.
+struct kconArrayShape_t
+{
+    kconObject_t shape;
+    int          firstCopy = 1;
+};
+bool KiwiConSel_CanArray();                       // anything above selected (cheap gate)
+int  KiwiConSel_ArrayShapes( std::vector<kconArrayShape_t> *out );
+// Copy i (firstCopy <= i < count) of every shape is turned by m^i about `pivot` (identity for
+// a linear array), then moved by step * i; circles / arcs stay parametric.  ONE construction
+// undo snapshot; the new objects JOIN the construction selection and nothing already selected
+// changes.  Returns the objects made.
+int  KiwiConSel_ArrayAdd( const std::vector<kconArrayShape_t> &shapes, int count,
+                          const float step[3], const float pivot[3], const float m[3][3] );
+
 // Commands
 void KiwiConSel_RegisterCommands();
 bool KiwiConSel_DispatchInstant( unsigned int cmdId );
