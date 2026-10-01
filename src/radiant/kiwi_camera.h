@@ -13,6 +13,10 @@
 // A mid-orbit wheel keeps the pivot fixed and relatches the offset afterward.
 void KiwiCam_OrbitBegin( int imgX, int imgY );
 
+// View > Debug: Orbit Pivot Probe - world-space rays of the last orbit press's pivot
+// probe (camwnd.cpp world-overlay tail); nothing while the toggle is off.
+void KiwiCam_DrawOrbitDebug();
+
 // Orbit uses 360/viewport-height degrees per pixel on both axes. Pitch stops at
 // ±89, widened only on a pole-exact starting side; clamping rewinds refused pixels.
 // The rigid eye-offset rotation preserves orbit radius and pivot screen position.

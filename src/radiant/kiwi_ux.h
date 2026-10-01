@@ -22,7 +22,12 @@ void KiwiUX_SetShowHover( bool on );
 // of the background colour, so a gap in the terrain (or any hole to the void) flashes.
 bool KiwiUX_LeakBackground();
 void KiwiUX_SetLeakBackground( bool on );
-bool KiwiUX_ShowTriCount();                // camera bottom-right "N tris" readout (View menu)
+// View > Debug: Orbit Pivot Probe: each MMB orbit press records the pivot probe (cursor
+// ray, ring rays, old/new pivot) and the camera draws it in world space until the next
+// press (kiwi_camera.cpp KiwiCam_DrawOrbitDebug).
+bool KiwiUX_DebugOrbitPivot();
+void KiwiUX_SetDebugOrbitPivot( bool on );
+bool KiwiUX_ShowTriCount();               // camera bottom-right "N tris" readout (View menu)
 void KiwiUX_SetShowTriCount( bool on );
 
 // KIWI (2026-09-09): the selected-entity facing arrows (kiwi_entarrow) — View menu toggle.

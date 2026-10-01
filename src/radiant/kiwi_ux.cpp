@@ -42,6 +42,7 @@ namespace
     kuxFlag_t s_showTris    = { "ShowTriCount", -1, 1 };
     kuxFlag_t s_showFacing  = { "ShowFacingArrows", -1, 1 };   // KIWI 2026-09-09: View menu
     kuxFlag_t s_leakBack    = { "LeakBackground", -1, 0 };     // KIWI 2026-09-18: strobing camera clear colour
+    kuxFlag_t s_orbitDebug  = { "DebugOrbitPivot", -1, 0 };    // KIWI 2026-09-29: orbit pivot probe rays
 
     bool Get( kuxFlag_t &f )
     {
@@ -70,6 +71,8 @@ bool KiwiUX_ShowHover()                { return Get( s_showHover ); }
 void KiwiUX_SetShowHover( bool on )    { Set( s_showHover, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_LeakBackground()             { return Get( s_leakBack ); }
 void KiwiUX_SetLeakBackground( bool on ) { Set( s_leakBack, on ); g_nUpdateBits |= 1; }
+bool KiwiUX_DebugOrbitPivot()             { return Get( s_orbitDebug ); }
+void KiwiUX_SetDebugOrbitPivot( bool on ) { Set( s_orbitDebug, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_ShowTriCount()             { return Get( s_showTris ); }
 void KiwiUX_SetShowTriCount( bool on ) { Set( s_showTris, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_ShowFacingArrows()             { return Get( s_showFacing ); }

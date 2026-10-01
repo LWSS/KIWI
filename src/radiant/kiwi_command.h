@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34162, modal 34068.
+// 34100..34199 the second instant block. Next free: instant 34163, modal 34068.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -166,6 +166,7 @@
 #define KIWI_CMD_PARTICLE_EXPORT    34159   // "Write Particle Scripts" (maps/createfx/<map>_fx.gsc)
 #define KIWI_CMD_IMPORT_DECALS      34160   // "Import Decal Stamps..." (kiwi_import, decal mode)
 #define KIWI_CMD_WINDOWS_RESET_LAYOUT 34161 // Windows > Reset Layout (default dock layout + open states)
+#define KIWI_CMD_VIEW_DEBUG_ORBIT   34162   // View > Debug: Orbit Pivot Probe (draw the MMB pivot probe rays)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

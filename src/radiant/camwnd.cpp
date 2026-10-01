@@ -4482,6 +4482,8 @@ void CamWnd_Draw( HWND hwnd )
         KiwiLight_DrawWorld();                // KIWI-UX: Draw bounded selected-light extents before the sun helper.
         KiwiSun_DrawWorld();
         KiwiEntArrow_DrawWorld();             // KIWI-UX: Draw facing arrows immediately after the sun helper.
+        extern void KiwiCam_DrawOrbitDebug(); // kiwi_camera.cpp: View > Debug: Orbit Pivot Probe
+        KiwiCam_DrawOrbitDebug();
         // KIWI-UX (ROUND AX, ITEM 6): the entity-browser DRAG GHOST — the box the
         // entity would land in, drawn while its payload hovers the camera image.
         // Self-gated (nothing while no drag is over the camera) and self-budgeted

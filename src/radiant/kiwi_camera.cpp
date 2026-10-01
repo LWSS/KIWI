@@ -20,6 +20,10 @@
 #include "kiwi_vec.h"     // shared Dot3/Sub3/... helpers
 
 #include <math.h>
+#include <stdio.h>                   // sprintf_s: the orbit-probe console line
+#include "kiwi_lines.h"              // KiwiLines_*: the orbit-probe debug draw
+#include "kiwi_ux.h"                 // KiwiUX_DebugOrbitPivot
+#include <float.h>                  // FLT_MAX: the orbit ring probe's open bound
 
 // Ported entry points.
 extern camera_s *Ed_Camera();          // camwnd.cpp
@@ -384,6 +388,140 @@ namespace
         s_orbActive = true;
         s_have      = true;
     }
+
+    // KIWI (2026-09-29, user: "clicking here between the house and this pipe will warp it
+    // around instead of normal movement" / "still happens" pressing in the empty space
+    // just left of a building): a press off the work sent the cursor ray past it onto the
+    // SKY SHELL or geometry far behind, and the orbit swung around that distant point.
+    // SurfaceDepthAt is the VISIBLE surface a ray meets: brushes/patches through the pick
+    // (the sky shell does not count - Pick_TraceSolid cannot tell it apart) and every model
+    // by its mesh whatever the selection prefs say.  Depth is along the view forward.
+    // View > Debug: Orbit Pivot Probe (kiwi_ux.h).  While recording, every SurfaceDepthAt
+    // ray lands here; KiwiCam_DrawOrbitDebug draws the last press until the next one.
+    enum orbDbgKind_t
+    {
+        KORBDBG_CURSOR_HIT,     // white   the cursor ray met a visible surface
+        KORBDBG_CURSOR_MISS,    // grey    the cursor ray met only void / sky
+        KORBDBG_RING_USED,      // green   ring ray hit, near enough to count
+        KORBDBG_RING_FAR,       // yellow  ring ray hit, but not nearer than the bound
+        KORBDBG_RING_MISS,      // red     ring ray met only void / sky
+    };
+    struct orbDbgRay_t
+    {
+        float a[3];
+        float b[3];             // hit point; a miss holds the ray DIR until finalized
+        int   kind;
+        bool  hit;
+    };
+    const int   KORBDBG_MAX_RAYS = 48;
+    bool        s_dbgRec   = false;
+    bool        s_dbgHave  = false;
+    orbDbgRay_t s_dbgRays[KORBDBG_MAX_RAYS];
+    int         s_dbgCount = 0;
+    float       s_dbgOldPivot[3];
+    float       s_dbgNewPivot[3];
+    float       s_dbgEye[3];
+
+    const float KCAM_PIVOT_GAP_RATIO = 2.0f;   // pivot deeper than this x the near depth = a gap
+    bool SurfaceDepthAt( const camera_s *c, int x, int y, const float *fwd, float *outDepth )
+    {
+        if ( x < 0 || y < 0 || x >= c->width || y >= c->height )
+            return false;
+        ray_t ray;
+        if ( !Pick_RayFromImagePos( x, y, &ray ) )
+            return false;
+        bool  have = false;
+        float best = 0.0f;
+        float bestPt[3] = { 0.0f, 0.0f, 0.0f };
+        const pick_result_t r = Pick( ray, SEL_MASK_OBJECT | SEL_MASK_FACE );
+        if ( r.valid && !( r.item.brush && r.item.brush->def
+                           && KiwiSky_IsSkyBrush( r.item.brush->def ) ) )
+        {
+            const float rel[3] = { r.point[0] - c->origin[0], r.point[1] - c->origin[1],
+                                   r.point[2] - c->origin[2] };
+            best = Dot3( rel, fwd );
+            have = best > 1.0f;
+            Copy3( r.point, bestPt );
+        }
+        // Models by mesh, as Pick_TraceSolid does (section-clamped start).
+        float s[3] = { ray.origin[0], ray.origin[1], ray.origin[2] };
+        KiwiSection_ClampRayStart( s, ray.dir );
+        selbrush_t *node = nullptr;
+        float md = 0.0f, mn[3];
+        if ( KiwiDrop_PickModelMesh( s, ray.dir, FLT_MAX, false, &node, &md, mn ) && md > 0.0f )
+        {
+            const float pt[3] = { s[0] + ray.dir[0] * md, s[1] + ray.dir[1] * md,
+                                  s[2] + ray.dir[2] * md };
+            const float rel[3] = { pt[0] - c->origin[0], pt[1] - c->origin[1],
+                                   pt[2] - c->origin[2] };
+            const float d = Dot3( rel, fwd );
+            if ( d > 1.0f && ( !have || d < best ) )
+            {
+                best = d;
+                have = true;
+                Copy3( pt, bestPt );
+            }
+        }
+        if ( s_dbgRec && s_dbgCount < KORBDBG_MAX_RAYS )
+        {
+            orbDbgRay_t &e = s_dbgRays[s_dbgCount++];
+            Copy3( ray.origin, e.a );
+            Copy3( have ? bestPt : ray.dir, e.b );
+            e.hit  = have;
+            e.kind = have ? KORBDBG_RING_USED : KORBDBG_RING_MISS;   // callers reclassify
+        }
+        if ( have )
+            *outDepth = best;
+        return have;
+    }
+
+    const int   KCAM_RING_RADII[] = { 12, 32, 64, 128, 256 };
+    const int   KCAM_RING_COUNT   = (int)( sizeof( KCAM_RING_RADII ) / sizeof( KCAM_RING_RADII[0] ) );
+    // Four opposite pairs: the second ray of each pair is the first one negated.
+    const float KCAM_RING_DIRS[4][2] = { { 1.0f, 0.0f }, { 0.0f, 1.0f },
+                                         { 0.7071f, 0.7071f }, { 0.7071f, -0.7071f } };
+
+    // Walk rings outward over the first `rings` radii, counting surfaces nearer than
+    // `below`.  At the first ring that sees any, report the nearest one-sided depth, and -
+    // when both rays of some pair hit - the tightest bracketing depth (the farther of the
+    // pair).
+    struct ringProbe_t
+    {
+        bool  anyHave;  float any;
+        bool  pairHave; float pair;
+    };
+    ringProbe_t RingProbe( const camera_s *c, int imgX, int imgY, const float *fwd, int rings,
+                           float below )
+    {
+        ringProbe_t p = { false, 0.0f, false, 0.0f };
+        for ( int ri = 0; ri < rings && ri < KCAM_RING_COUNT; ++ri )
+        {
+            for ( int di = 0; di < 4; ++di )
+            {
+                const int ox = (int)( KCAM_RING_DIRS[di][0] * (float)KCAM_RING_RADII[ri] );
+                const int oy = (int)( KCAM_RING_DIRS[di][1] * (float)KCAM_RING_RADII[ri] );
+                float a = 0.0f, b = 0.0f;
+                int rec = s_dbgCount;
+                const bool ha = SurfaceDepthAt( c, imgX + ox, imgY + oy, fwd, &a ) && a < below;
+                if ( s_dbgCount > rec && s_dbgRays[rec].hit && !ha )
+                    s_dbgRays[rec].kind = KORBDBG_RING_FAR;
+                rec = s_dbgCount;
+                const bool hb = SurfaceDepthAt( c, imgX - ox, imgY - oy, fwd, &b ) && b < below;
+                if ( s_dbgCount > rec && s_dbgRays[rec].hit && !hb )
+                    s_dbgRays[rec].kind = KORBDBG_RING_FAR;
+                if ( ha && ( !p.anyHave || a < p.any ) ) { p.any = a; p.anyHave = true; }
+                if ( hb && ( !p.anyHave || b < p.any ) ) { p.any = b; p.anyHave = true; }
+                if ( ha && hb )
+                {
+                    const float pr = ( a > b ) ? a : b;
+                    if ( !p.pairHave || pr < p.pair ) { p.pair = pr; p.pairHave = true; }
+                }
+            }
+            if ( p.anyHave )
+                break;                           // the tightest ring that sees work wins
+        }
+        return p;
+    }
 }
 
 // Orbit: latch pivot, eye offset, and angles once, then apply total drag delta.
@@ -402,6 +540,18 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
     // pick) is replaced by the point on the cursor ray AT the working depth.
     float fwd[3];
     ViewForward( c, fwd );
+
+    // View > Debug: Orbit Pivot Probe - record this press (drawn by KiwiCam_DrawOrbitDebug).
+    const bool  dbgOn          = KiwiUX_DebugOrbitPivot();
+    bool        dbgHadPivot    = false;
+    const char *dbgCase        = "cursor ray unavailable (legacy fallbacks)";
+    float       dbgCursorDepth = -1.0f;
+    float       dbgSeatDepth   = -1.0f;
+    s_dbgRec   = dbgOn;
+    s_dbgCount = 0;
+    if ( dbgOn )
+        Copy3( c->origin, s_dbgEye );
+
     auto isSky = []( const pick_result_t &p )
     {
         return p.valid && p.item.brush && p.item.brush->def
@@ -485,6 +635,78 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
                 havePivot   = true;
             }
         }
+
+        // KIWI (2026-09-29): re-seat the pivot against the VISIBLE work (SurfaceDepthAt):
+        //  - cursor over a real surface: pivot on it (a model the selection pick skipped
+        //    included), unless that surface sits well behind near work either bracketing
+        //    the cursor (a gap) or beside it while the surface is also far past the
+        //    working depth (the background seen past an edge);
+        //  - cursor over void / sky: pivot on the cursor ray at the depth of the nearest
+        //    surface on a widening ring, so an orbit off the edge of a building turns
+        //    about the building's depth instead of the sky shell or the Z=0 fallback.
+        const float along = Dot3( ray.dir, fwd );
+        if ( dbgOn )
+        {
+            dbgHadPivot = havePivot;
+            Copy3( s_lookAt, s_dbgOldPivot );
+        }
+        if ( along > 1.0e-3f )
+        {
+            bool  seat = false;
+            float seatDepth = 0.0f;
+            float cursorDepth = 0.0f;
+            const int cursorRec = s_dbgCount;
+            const bool cursorHit = SurfaceDepthAt( c, imgX, imgY, fwd, &cursorDepth );
+            if ( s_dbgCount > cursorRec )
+                s_dbgRays[cursorRec].kind = cursorHit ? KORBDBG_CURSOR_HIT : KORBDBG_CURSOR_MISS;
+            if ( cursorHit )
+            {
+                dbgCase = "cursor on surface";
+                seat = true;
+                seatDepth = cursorDepth;
+                const float limit = cursorDepth / KCAM_PIVOT_GAP_RATIO;
+                const ringProbe_t p = RingProbe( c, imgX, imgY, fwd, 3, limit );
+                if ( p.pairHave )
+                {
+                    dbgCase = "cursor on surface, GAP bracketed by near work";
+                    seatDepth = p.pair;
+                }
+                else if ( p.anyHave && cursorDepth > workDepth * KCAM_PIVOT_DEPTH_RATIO )
+                {
+                    dbgCase = "cursor on far background, near work beside it";
+                    seatDepth = p.any;
+                }
+            }
+            else
+            {
+                dbgCase = "cursor over void/sky, ring found nothing (old fallback)";
+                const ringProbe_t p = RingProbe( c, imgX, imgY, fwd, KCAM_RING_COUNT, FLT_MAX );
+                if ( p.anyHave )
+                {
+                    dbgCase = "cursor over void/sky, nearest ring surface";
+                    seat = true;
+                    seatDepth = p.any;
+                }
+            }
+            if ( dbgOn )
+            {
+                dbgCursorDepth = cursorHit ? cursorDepth : -1.0f;
+                dbgSeatDepth   = seat ? seatDepth : -1.0f;
+            }
+            if ( seat )
+            {
+                // Ortho rays start on the pseudo-eye plane, not at the eye: solve for the
+                // ray point whose depth from the eye is seatDepth.
+                const float relO[3] = { ray.origin[0] - c->origin[0],
+                                        ray.origin[1] - c->origin[1],
+                                        ray.origin[2] - c->origin[2] };
+                const float t = ( seatDepth - Dot3( relO, fwd ) ) / along;
+                for ( int k = 0; k < 3; ++k )
+                    s_lookAt[k] = ray.origin[k] + ray.dir[k] * t;
+                s_have    = true;
+                havePivot = true;
+            }
+        }
     }
 
     // On a cursor miss, use the framed surface's center-pick depth. Keep a stored
@@ -540,6 +762,104 @@ void KiwiCam_OrbitBegin( int imgX, int imgY )
         PivotOnAxis( c );
 
     LatchOrbit( c );
+
+    if ( dbgOn )
+    {
+        s_dbgRec  = false;
+        s_dbgHave = true;
+        Copy3( s_orbPivot, s_dbgNewPivot );
+        // Misses carry their DIR: draw them out past the deeper of the two pivots.
+        const float relN[3] = { s_dbgNewPivot[0] - s_dbgEye[0], s_dbgNewPivot[1] - s_dbgEye[1],
+                                s_dbgNewPivot[2] - s_dbgEye[2] };
+        float missLen = sqrtf( Dot3( relN, relN ) );
+        if ( dbgHadPivot )
+        {
+            const float relO[3] = { s_dbgOldPivot[0] - s_dbgEye[0], s_dbgOldPivot[1] - s_dbgEye[1],
+                                    s_dbgOldPivot[2] - s_dbgEye[2] };
+            const float lo = sqrtf( Dot3( relO, relO ) );
+            if ( lo > missLen )
+                missLen = lo;
+        }
+        missLen = ( missLen > 64.0f ? missLen : 64.0f ) * 1.5f;
+        if ( missLen > 8192.0f )
+            missLen = 8192.0f;
+        for ( int i = 0; i < s_dbgCount; ++i )
+        {
+            orbDbgRay_t &e = s_dbgRays[i];
+            if ( !e.hit )
+                Mad3( e.a, e.b, missLen, e.b );
+        }
+        if ( !dbgHadPivot )
+            Copy3( s_dbgNewPivot, s_dbgOldPivot );
+        const float relF[3] = { s_orbPivot[0] - c->origin[0], s_orbPivot[1] - c->origin[1],
+                                s_orbPivot[2] - c->origin[2] };
+        char cursorTxt[32] = "miss", seatTxt[32] = "none";
+        if ( dbgCursorDepth >= 0.0f )
+            sprintf_s( cursorTxt, "%.0f", dbgCursorDepth );
+        if ( dbgSeatDepth >= 0.0f )
+            sprintf_s( seatTxt, "%.0f", dbgSeatDepth );
+        //Sys_Printf( "OrbitPivot: %s | work %.0f, cursor %s, seat %s, final %.0f (%d rays)\n",dbgCase, workDepth, cursorTxt, seatTxt, Dot3( relF, fwd ), s_dbgCount );
+        g_nUpdateBits |= 1;
+    }
+}
+
+// View > Debug: Orbit Pivot Probe - the last press's probe, in world space, so orbiting
+// away shows each ray from the side.  Rays: white cursor hit, grey cursor miss, green
+// ring hit that counted, yellow ring hit too deep to count, red ring miss.  Crosses:
+// orange = the pivot BEFORE the probe re-seat, cyan = the pivot the orbit latched.
+void KiwiCam_DrawOrbitDebug()
+{
+    if ( !s_dbgHave || !KiwiUX_DebugOrbitPivot() )
+        return;
+    static const float kColor[5][3] = { { 1.0f, 1.0f, 1.0f }, { 0.45f, 0.45f, 0.45f },
+                                        { 0.2f, 1.0f, 0.2f }, { 1.0f, 0.9f, 0.1f },
+                                        { 1.0f, 0.2f, 0.2f } };
+    KiwiLines_Begin( KORBDBG_MAX_RAYS * 4 + 6, 2 );
+    for ( int k = 0; k < 5; ++k )                // one colour run per kind
+    {
+        KiwiLines_Color( kColor[k][0], kColor[k][1], kColor[k][2] );
+        for ( int i = 0; i < s_dbgCount; ++i )
+        {
+            const orbDbgRay_t &e = s_dbgRays[i];
+            if ( e.kind != k )
+                continue;
+            KiwiLines_Add( e.a, e.b );
+            if ( !e.hit )
+                continue;
+            // A small cross where the ray met the surface, sized by its distance.
+            const float rel[3] = { e.b[0] - e.a[0], e.b[1] - e.a[1], e.b[2] - e.a[2] };
+            const float h = sqrtf( Dot3( rel, rel ) ) * 0.01f + 0.5f;
+            for ( int ax = 0; ax < 3; ++ax )
+            {
+                float p0[3], p1[3];
+                Copy3( e.b, p0 );
+                Copy3( e.b, p1 );
+                p0[ax] -= h;
+                p1[ax] += h;
+                KiwiLines_Add( p0, p1 );
+            }
+        }
+    }
+    for ( int which = 0; which < 2; ++which )
+    {
+        const float *p = which ? s_dbgNewPivot : s_dbgOldPivot;
+        if ( which )
+            KiwiLines_Color( 0.1f, 0.9f, 1.0f );
+        else
+            KiwiLines_Color( 1.0f, 0.5f, 0.0f );
+        const float rel[3] = { p[0] - s_dbgEye[0], p[1] - s_dbgEye[1], p[2] - s_dbgEye[2] };
+        const float h = sqrtf( Dot3( rel, rel ) ) * ( which ? 0.04f : 0.03f ) + 1.0f;
+        for ( int ax = 0; ax < 3; ++ax )
+        {
+            float p0[3], p1[3];
+            Copy3( p, p0 );
+            Copy3( p, p1 );
+            p0[ax] -= h;
+            p1[ax] += h;
+            KiwiLines_Add( p0, p1 );
+        }
+    }
+    KiwiLines_Flush();
 }
 
 void KiwiCam_OrbitDrag( int dx, int dy )

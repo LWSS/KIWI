@@ -780,7 +780,7 @@ void __cdecl Bullet_FirePenetrate(BulletFireParams *bp, const WeaponDef *weapDef
                 return;
 #endif
 
-            Com_Memcpy((char *)&revBp, (char *)bp, 64);
+            revBp = *bp; // Com_Memcpy(&revBp, bp, sizeof(BulletFireParams));
 
             //diff[4] = bp->dir[0]; // KISAKTODO check float here
             revBp.dir[0] = -bp->dir[0];
@@ -793,7 +793,7 @@ void __cdecl Bullet_FirePenetrate(BulletFireParams *bp, const WeaponDef *weapDef
 
             Vec3Mad(lastHitPos, 0.01f, revBp.dir, revBp.end);
 
-            Com_Memcpy((char *)&revBr, (char *)&br, 68);
+            revBr = br; // Com_Memcpy((char *)&revBr, (char *)&br, 68); 68 = x86 sizeof, x64 is 80
 
             revBr.trace.normal[0] = -revBr.trace.normal[0];
             revBr.trace.normal[1] = -revBr.trace.normal[1];

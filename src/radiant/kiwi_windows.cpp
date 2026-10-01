@@ -261,6 +261,7 @@ void KiwiWindows_BuildViewMenu( void *frameMenu )
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_TRIS, "Show &Triangle Count" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_FACING, "Show &Facing Arrows" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_LEAK_BG, "&Leak Finder Background (strobing)" );
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_DEBUG_ORBIT, "Debug: Orbit &Pivot Probe" );
     s_viewMenuBuilt = true;
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 
@@ -277,6 +278,7 @@ void KiwiWindows_SyncViewMenu()
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_TRIS, KiwiUX_ShowTriCount() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_FACING, KiwiUX_ShowFacingArrows() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_LEAK_BG, KiwiUX_LeakBackground() );
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_DEBUG_ORBIT, KiwiUX_DebugOrbitPivot() );
 }
 
 // Command registration and dispatch.
@@ -303,6 +305,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewShowTris",    0, 0, KIWI_CMD_VIEW_SHOW_TRIS );   // View > Show Triangle Count
     Radiant_RegisterCommand( "KiwiViewShowFacing",  0, 0, KIWI_CMD_VIEW_SHOW_FACING ); // View > Show Facing Arrows
     Radiant_RegisterCommand( "KiwiViewLeakBackground", 0, 0, KIWI_CMD_VIEW_LEAK_BG );  // View > Leak Finder Background
+    Radiant_RegisterCommand( "KiwiViewDebugOrbitPivot", 0, 0, KIWI_CMD_VIEW_DEBUG_ORBIT ); // View > Debug: Orbit Pivot Probe
     Radiant_RegisterCommand( "KiwiWindowsResetLayout", 0, 0, KIWI_CMD_WINDOWS_RESET_LAYOUT ); // Windows > Reset Layout
 }
 
@@ -357,6 +360,12 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     if ( cmdId == (unsigned int)KIWI_CMD_VIEW_LEAK_BG )
     {
         KiwiUX_SetLeakBackground( !KiwiUX_LeakBackground() );
+        KiwiWindows_SyncViewMenu();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_VIEW_DEBUG_ORBIT )
+    {
+        KiwiUX_SetDebugOrbitPivot( !KiwiUX_DebugOrbitPivot() );
         KiwiWindows_SyncViewMenu();
         return true;
     }

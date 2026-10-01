@@ -449,6 +449,7 @@ namespace
         { KIWI_CMD_PERF_HUD,         { "Perf HUD",         "View",    0, nullptr    } },
         { KIWI_CMD_VIEW_SHOW_TRIS,   { "Show Triangle Count", "View", 0, nullptr    } },
         { KIWI_CMD_VIEW_LEAK_BG,     { "Leak Finder Background (strobing)", "View", 0, nullptr } },
+        { KIWI_CMD_VIEW_DEBUG_ORBIT, { "Debug: Orbit Pivot Probe",          "View", 0, nullptr } },
         { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
@@ -788,6 +789,7 @@ namespace
         case KIWI_CMD_PERF_HUD:                         // a HUD toggle, not a verb
         case KIWI_CMD_VIEW_SHOW_TRIS:                   // View readout toggle
         case KIWI_CMD_VIEW_LEAK_BG:                     // View toggle
+        case KIWI_CMD_VIEW_DEBUG_ORBIT:                 // View toggle
         case KIWI_CMD_VIEW_SHOW_FACING:                 // View overlay toggle (facing arrows)
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
         case KIWI_CMD_ENT_DROP:
