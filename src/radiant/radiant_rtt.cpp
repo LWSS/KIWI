@@ -26,6 +26,9 @@ namespace
     // KIWI-UX (ROUND AV, ITEM 3) — the entity-browser thumbnail RT.  A standalone slot,
     // NOT a fifth rttViewport_t; see radiant_rtt.h for why that distinction matters.
     rtSlot_t s_thumbSlot;
+    // KIWI (2026-10-01): the Model Import window's preview RT — standalone like the
+    // thumbnail slot, and freed EXPLICITLY in RTT_ReleaseForReset for the same reason.
+    rtSlot_t s_previewSlot;
 
     void FreeSlot( rtSlot_t &s )
     {
@@ -152,6 +155,30 @@ IDirect3DSurface9 *RTT_ThumbSurface()
     return s_thumbSlot.surface;
 }
 
+// KIWI (2026-10-01): the Model Import preview — RTT_BeginThumb's body on its own slot.
+bool RTT_BeginPreview( int w, int h )
+{
+    if ( !dx.device || dx.deviceLost )
+        return false;
+    if ( dx.device->TestCooperativeLevel() != D3D_OK )
+        return false;
+    if ( !EnsureSlot( s_previewSlot, w, h ) )
+        return false;
+    g_rbSuppressPresent = true;
+    R_SetupRenderTargetTexture( s_previewSlot.surface, s_previewSlot.w, s_previewSlot.h );
+    return true;
+}
+
+void RTT_EndPreview()
+{
+    RTT_End();
+}
+
+IDirect3DTexture9 *RTT_PreviewTexture()
+{
+    return s_previewSlot.tex;
+}
+
 // ── KIWI-UX (ROUND AX, ITEM 1) — THE LEAK THAT MADE EVERY Reset() FAIL FOREVER ─────
 // USER REPORT: "hit this while loading a new map ... consistently reproduce this hang
 // while loading kisak_trash.map.  Unusable!"  The round-AD escape hatch fired with
@@ -188,6 +215,11 @@ void RTT_ReleaseForReset()
     for ( rtSlot_t &s : s_slots )
         FreeSlot( s );
     FreeSlot( s_thumbSlot );        // ROUND AX: NOT covered by the loop — see above.
+    FreeSlot( s_previewSlot );      // KIWI (model importer): standalone too — same rule.
+    // The Model Import window's preview content went with s_previewSlot: it must render
+    // again.  (Its texture swatches are D3DPOOL_MANAGED and survive the reset.)
+    extern void KiwiModelImport_ReleaseForReset();   // kiwi_modelimport.cpp
+    KiwiModelImport_ReleaseForReset();
     // The viewport textures the dirty-flag skip lets ImGui keep sampling have just been
     // DESTROYED, so every view must render again regardless of the editor's update bits.
     KiwiViewDirty_MarkAll();
@@ -224,16 +256,16 @@ int RTT_DescribeLiveSlots( char *out, int outSize )
     // device-loss diagnostic, i.e. exactly when you least want one.
     static_assert( RTT_COUNT == 4, "RTT_DescribeLiveSlots' name/pointer tables are "
                                    "hand-written — extend both when RTT_COUNT moves" );
-    static const char *const s_names[RTT_COUNT + 1] = { "cam", "xy", "z", "tex", "thumb" };
-    const rtSlot_t *const    s_all[RTT_COUNT + 1]   = { &s_slots[RTT_CAMERA], &s_slots[RTT_XY],
+    static const char *const s_names[RTT_COUNT + 2] = { "cam", "xy", "z", "tex", "thumb", "preview" };
+    const rtSlot_t *const    s_all[RTT_COUNT + 2]   = { &s_slots[RTT_CAMERA], &s_slots[RTT_XY],
                                                         &s_slots[RTT_Z],      &s_slots[RTT_TEXTURE],
-                                                        &s_thumbSlot };
+                                                        &s_thumbSlot,         &s_previewSlot };
     int    live = 0;
     size_t used = 0;
     if ( out && outSize > 0 )
         out[0] = '\0';
 
-    for ( int i = 0; i < RTT_COUNT + 1; ++i )
+    for ( int i = 0; i < RTT_COUNT + 2; ++i )
     {
         if ( !s_all[i]->tex && !s_all[i]->surface )
             continue;

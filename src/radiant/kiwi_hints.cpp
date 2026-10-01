@@ -669,3 +669,20 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     DrawStrip( prompts, nP,  KHINT_PROMPTS_LEFT, leftX, rightX, bottomY, maxW, false );
     DrawStrip( verbs,   nV, !KHINT_PROMPTS_LEFT, leftX, rightX, bottomY, maxW, false );
 }
+
+void KiwiHints_DrawKeys( float imgMinX, float imgMinY, float imgW, float imgH,
+                         const char *const ( *keys )[2], int count )
+{
+    if ( !KiwiHints_Show() || !keys || count <= 0 )
+        return;
+    const float maxW = imgW - 2.0f * KHINT_EDGE;
+    if ( maxW < 80.0f || imgH < 120.0f )
+        return;                                  // no room — draw nothing
+    chip_t chips[KHINT_MAX_CHIPS];
+    int    n = 0;
+    for ( int i = 0; i < count; ++i )
+        AddChip( chips, &n, keys[i][0], keys[i][1] );
+    MeasureChips( chips, n );
+    DrawStrip( chips, n, true, imgMinX + KHINT_EDGE, imgMinX + imgW - KHINT_EDGE,
+               imgMinY + imgH - KHINT_EDGE, maxW, false );
+}

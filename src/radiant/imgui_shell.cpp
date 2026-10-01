@@ -15,6 +15,7 @@
 #include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
 #include "kiwi_modelbrowser.h"     // KIWI-UX: the Models tab + camera drop target
 #include "kiwi_particles.h"        // KIWI: the Particles tab + camera drop target
+#include "kiwi_modelimport.h"      // KIWI: the Model Import window + its preview RT
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
@@ -1461,6 +1462,10 @@ void ImGuiShell_RenderViewportsToRT()
     // — see kiwi_entthumb.h.
     extern void KiwiEntThumb_Tick();   // kiwi_entthumb.cpp
     KiwiEntThumb_Tick();
+    // KIWI (2026-10-01): the Model Import window's 3D view, on the same terms as the
+    // thumbnails: behind both gates above, its own standalone RT slot, and an early
+    // return unless the window showed the view last frame and something changed.
+    KiwiModelImport_RenderPreview();
 }
 
 // Post-present (frame WM_PAINT): every native viewport child is a render-target IMAGE now, and
@@ -1910,6 +1915,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     KiwiEntBrowser_Draw();
     KiwiModelBrowser_Draw(); // KIWI-UX
     KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
+    KiwiModelImport_Draw();  // KIWI: FBX/OBJ -> xmodel importer (its preview renders in RenderViewportsToRT)
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint

@@ -44,6 +44,10 @@ bool s_saveFirst   = true;
 bool s_verbose     = true;
 bool s_onlyEnts    = false;
 bool s_leakTest    = false;
+// KIWI (2026-09-30, model importer): stamp collmaps\<model>.map player-collision hulls
+// on every placed misc_model (cod4map map.cpp ProcessMiscModels). xmodel collision is
+// bullets only, so without this imported props never block players.
+bool s_modelCollMaps = true;
 
 int  s_threads     = 0;         // cod4rad -Threads N  (0 = "not resolved yet")
 int  s_quality     = 1;         // 0 = -Fast, 1 = (neither), 2 = -Extra
@@ -785,6 +789,7 @@ bool StartBsp( const launchPaths_t &p )
     if ( s_verbose )  cmd += " -v";
     if ( s_onlyEnts ) cmd += " -onlyEnts";
     if ( s_leakTest ) cmd += " -leakTest";
+    if ( s_modelCollMaps ) cmd += " -staticModelCollMaps";
     if ( p.useLoadFrom )
     {
         cmd += " -loadFrom \"";
@@ -1167,6 +1172,12 @@ void DrawStageRows( bool busy )
     ImGui::Checkbox( "Entities only (-onlyEnts)", &s_onlyEnts );
     ImGui::SameLine();
     ImGui::Checkbox( "Leak test (-leakTest)", &s_leakTest );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Model collision (collmaps)", &s_modelCollMaps );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "-staticModelCollMaps: every placed model with a collmaps\\<model>.map\n"
+                           "(written by the model importer) gets its clip-brush hull, so players\n"
+                           "collide with it. Without it xmodels only stop bullets." );
     ImGui::EndDisabled();
     ImGui::PopID();
 

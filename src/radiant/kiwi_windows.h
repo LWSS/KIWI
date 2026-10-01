@@ -34,6 +34,9 @@ enum kiwiWindow_t
     KIWI_WIN_REFIMAGES,     // "Reference Images"               default ON
     // Effect files under raw/fx, placed as kiwi_fx entities (kiwi_particles.h).
     KIWI_WIN_PARTICLES,     // "Particles"                      default ON
+    // FBX/OBJ -> xmodel importer with preview, surfaces, variants, collision
+    // (kiwi_modelimport.h). Closed by default; first opens floating over the editor.
+    KIWI_WIN_MODELIMPORT,   // "Model Import"                   default OFF
     KIWI_WIN_COUNT,
 };
 

@@ -1184,6 +1184,13 @@ bool KiwiModelBrowser_DispatchInstant( unsigned int cmdId )
     return true;
 }
 
+// KIWI (2026-10-01, model importer): re-list raw\xmodel on the next draw (a build just
+// added models); the filter and picked prefix stay.
+void KiwiModelBrowser_RequestRefresh()
+{
+    s_enumerated = false;
+}
+
 void KiwiModelBrowser_ResetForNewMap()
 {
     s_models.clear();

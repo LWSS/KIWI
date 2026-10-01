@@ -79,6 +79,13 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_subdirectory(${SCRIPTS_DIR}/linker_pc64)
 endif()
 
+# KIWI: the model importer's command line + MCP server (the Radiant Model Import
+# window compiles the same core from scripts/modelimport/modelimport_files.cmake).
+option(KIWI_BUILD_MODELIMPORT "Build the KIWI-modelimport model importer tool" ON)
+if(KIWI_BUILD_MODELIMPORT AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_subdirectory(${SCRIPTS_DIR}/modelimport)
+endif()
+
 # Native x64 builds include database64. Raw asset loading remains available at
 # runtime; Win32 builds retain the raw-only implementation.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)

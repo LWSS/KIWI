@@ -68,6 +68,15 @@ void RTT_EndThumb();
 // first successful RTT_BeginThumb.
 IDirect3DSurface9 *RTT_ThumbSurface();
 
+// KIWI (2026-10-01, model importer): the Model Import window's 3D PREVIEW RT.  A second
+// standalone slot built exactly like the thumbnail one above (same device gates, same
+// lazy EnsureSlot, released by RTT_ReleaseForReset and named "preview" by
+// RTT_DescribeLiveSlots), sized to the window's preview area.  Pair every `true` with
+// RTT_EndPreview().
+bool RTT_BeginPreview( int w, int h );
+void RTT_EndPreview();
+IDirect3DTexture9 *RTT_PreviewTexture();
+
 // KIWI-UX (ROUND AX, ITEM 1) — the audit that would have made this round a one-liner.
 // Writes a comma-separated list of the RTT slots that STILL hold a D3DPOOL_DEFAULT
 // texture ("cam,xy,z,tex,thumb"), or "none", into `out`, and returns how many.  Called

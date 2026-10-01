@@ -10,6 +10,16 @@ include(${SCRIPTS_DIR}/common_files.cmake)
 # Editor file list + radiant-specific engine subset
 include(radiant_files.cmake)
 
+# The model importer core (FBX/OBJ -> xmodel, collision, recipes) behind the Model Import
+# window; the same sources build KIWI-modelimport.exe.  Plain C++20 that does not include
+# stdafx.h, so it gets its own NOMINMAX / lean windows.h and the flags it builds with there.
+# Its stb / nlohmann headers (src/radiant/deps) are on the include path of these files only.
+include(${SCRIPTS_DIR}/modelimport/modelimport_files.cmake)
+set_source_files_properties(${MODELIMPORT_CORE_SOURCES} PROPERTIES
+    COMPILE_DEFINITIONS "_CRT_SECURE_NO_WARNINGS;NOMINMAX;WIN32_LEAN_AND_MEAN"
+    COMPILE_OPTIONS "/bigobj;/utf-8"
+    INCLUDE_DIRECTORIES "${MODELIMPORT_DEPS_INCLUDE_DIRS}")
+
 # DXSDK — select libraries for the configured target architecture.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(RADIANT_ARCH x64)
@@ -65,6 +75,7 @@ add_executable(${PROJECT_NAME} WIN32
     ${RADIANT_QCOMMON}
     ${RADIANT_GFX_D3D}
     ${IMGUI_SRCS}
+    ${MODELIMPORT_CORE_SOURCES}
 )
 
 # Tracy — same FetchContent client the mp/sp/dedi targets use.
@@ -192,5 +203,6 @@ source_group(TREE ${SRC_DIR} PREFIX "src" FILES
     ${RADIANT_PHYSICS}
     ${RADIANT_QCOMMON}
     ${RADIANT_GFX_D3D}
+    ${MODELIMPORT_CORE_SOURCES}
 )
 source_group(TREE ${DEPS_DIR} PREFIX "deps" FILES ${ZLIB} ${IMGUI_SRCS})

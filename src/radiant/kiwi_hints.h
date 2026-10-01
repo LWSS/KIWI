@@ -14,6 +14,12 @@
 // there is nothing to say.
 void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH );
 
+// The same keycap strip, bottom-left, for a viewport of another window (the Model
+// Import preview): `keys` holds { key, label } pairs.  Honours KiwiHints_Show();
+// takes no slot in the camera's HUD band.
+void KiwiHints_DrawKeys( float imgMinX, float imgMinY, float imgW, float imgH,
+                         const char *const ( *keys )[2], int count );
+
 // Persisted, default-on switch independent of the modern-input master toggle.
 bool KiwiHints_Show();
 void KiwiHints_SetShow( bool on );

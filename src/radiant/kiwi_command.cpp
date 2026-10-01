@@ -56,6 +56,7 @@
 #include "kiwi_entbrowser.h"
 #include "kiwi_modelbrowser.h"          // KIWI: the Models window + deferred drop
 #include "kiwi_particles.h"             // KIWI: the Particles window, deferred drop
+#include "kiwi_modelimport.h"           // KIWI: the Model Import window
 #include "kiwi_skybox.h"
 #include "kiwi_uveditor.h"
 #include "kiwi_import.h"
@@ -454,6 +455,7 @@ namespace
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
         { KIWI_CMD_WINDOW_PARTICLES, { "Particles",               "Windows",   0, nullptr } },
+        { KIWI_CMD_WINDOW_MODELIMPORT, { "Model Import (FBX/OBJ to xmodel)", "Windows", 0, nullptr } },
         { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
@@ -708,6 +710,7 @@ void KiwiCmd_RegisterCommands()
     KiwiEntBrowser_RegisterCommands();
     KiwiModelBrowser_RegisterCommands(); // KIWI      — the Models window toggle
     KiwiParticles_RegisterCommands();    // KIWI      — the Particles window, script export
+    KiwiModelImport_RegisterCommands();  // KIWI      — the Model Import window toggle
     KiwiSky_RegisterCommands();
     KiwiUvEd_RegisterCommands();
     KiwiImport_RegisterCommands();
@@ -796,6 +799,7 @@ namespace
         case KIWI_CMD_MODEL_DROP:
         case KIWI_CMD_PARTICLE_DROP:
         case KIWI_CMD_WINDOW_PARTICLES:
+        case KIWI_CMD_WINDOW_MODELIMPORT:               // a window toggle, not a verb
         case KIWI_CMD_WINDOWS_RESET_LAYOUT:             // a layout action, not a verb
         case KIWI_CMD_PARTICLE_EXPORT:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
