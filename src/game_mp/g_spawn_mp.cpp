@@ -52,7 +52,9 @@ const SpawnFuncEntry s_bspOrDynamicSpawns[6] =
   { "script_origin", &SP_script_origin },
   { "script_vehicle_collmap", &G_VehCollmapSpawner }
 }; // idb
-const SpawnFuncEntry s_bspOnlySpawns[14] =
+// KIWI GLASS
+const SpawnFuncEntry s_bspOnlySpawns[15] = // was [14]
+// KIWI END
 {
   { "trigger_use", &trigger_use },
   { "trigger_use_touch", &trigger_use },
@@ -67,7 +69,10 @@ const SpawnFuncEntry s_bspOnlySpawns[14] =
   { "misc_turret", &SP_turret },
   { "script_brushmodel", &SP_script_brushmodel },
   { "script_struct", &G_FreeEntity },
-  { "script_vehicle_mp", &G_VehSpawner }
+  // KIWI GLASS
+  { "script_vehicle_mp", &G_VehSpawner },
+  { "glass", &G_FreeEntity } // panes come from the BSP, no entity
+  // KIWI END
 }; // idb
 
 int __cdecl G_CallSpawnEntity(gentity_s *ent)
@@ -679,9 +684,9 @@ void G_CallSpawn()
             else
             {
                 // check normal spawn functions
-                spawnFunc = G_FindSpawnFunc(classname, s_bspOrDynamicSpawns, 6);
+                spawnFunc = G_FindSpawnFunc(classname, s_bspOrDynamicSpawns, ARRAY_COUNT(s_bspOrDynamicSpawns));
                 if (!spawnFunc)
-                    spawnFunc = G_FindSpawnFunc(classname, s_bspOnlySpawns, 14);
+                    spawnFunc = G_FindSpawnFunc(classname, s_bspOnlySpawns, ARRAY_COUNT(s_bspOnlySpawns));
                 if (spawnFunc != G_FreeEntity)
                 {
                     ent = G_Spawn();

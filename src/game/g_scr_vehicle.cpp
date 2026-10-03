@@ -7,6 +7,9 @@
 #ifdef KISAK_MP
 #include <game_mp/g_public_mp.h>
 #include <game_mp/g_utils_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "g_main.h"
 #include "g_local.h"
@@ -948,6 +951,9 @@ void __cdecl VEH_TouchEntities(gentity_s *ent)
             }
         }
     }
+    // KIWI GLASS
+    GlassSv_PredictTouch(ent);
+    // KIWI END
 #endif
 }
 

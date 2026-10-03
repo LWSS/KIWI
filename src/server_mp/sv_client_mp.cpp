@@ -617,12 +617,14 @@ void __cdecl SV_DirectConnect(netadr_t from)
     Com_DPrintf(CON_CHANNEL_SERVER, "SV_DirectConnect()\n");
     I_strncpyz(userinfo, SV_Cmd_Argv(1), 1024);
     version = atoi(Info_ValueForKey(userinfo, "protocol"));
-    if (version != 1)
+    // KIWI GLASS
+    if (version != PROTOCOL_VERSION)
     {
         NET_OutOfBandPrint(NS_SERVER, from, va("EXE_SERVER_IS_DIFFERENT_VER %s", "1.0"));
-        Com_DPrintf(CON_CHANNEL_SERVER, "    rejected connect from protocol version %i (should be %i)\n", version, 1);
+        Com_DPrintf(CON_CHANNEL_SERVER, "    rejected connect from protocol version %i (should be %i)\n", version, PROTOCOL_VERSION);
         return;
     }
+    // KIWI END
     challenge = atoi(Info_ValueForKey(userinfo, "challenge"));
     qport = atoi(Info_ValueForKey(userinfo, "qport"));
     // quick reject
@@ -1885,14 +1887,16 @@ gentity_s *__cdecl SV_AddTestClient()
         ++i;
     if (i == sv_maxclients->current.integer)
         return 0;
+    // KIWI GLASS
     snprintf(
         file,
         ARRAYSIZE(file),
         "connect \"\\cg_predictItems\\1\\cl_punkbuster\\0\\cl_anonymous\\0\\color\\4\\head\\default\\model\\multi\\snaps\\20\\"
         "rate\\5000\\name\\bot%d\\protocol\\%d\\qport\\%d\"",
         botport,
-        1,
+        PROTOCOL_VERSION,
         botport + 1);
+    // KIWI END
     SV_Cmd_TokenizeString(file);
     *(uint *)a.ip = 0;
     memset(a.ipx, 0, sizeof(a.ipx));

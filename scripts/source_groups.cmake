@@ -13,6 +13,9 @@ source_group("devgui" FILES ${DEVGUI})
 source_group("game" FILES ${GAME})
 source_group("game_mp" FILES ${GAME_MP})
 source_group("gfx_d3d" FILES ${GFX_D3D})
+# KIWI GLASS
+source_group("glass" FILES ${GLASS})
+# KIWI END
 source_group("groupvoice" FILES ${GROUPVOICE})
 source_group("groupvoice/speex" FILES ${GROUPVOICE_SPEEX})
 source_group("msslib" FILES ${MSSLIB})

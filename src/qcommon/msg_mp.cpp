@@ -327,6 +327,18 @@ void __cdecl MSG_WriteLong(msg_t *msg, int c)
     }
 }
 
+// KIWI GLASS
+void __cdecl MSG_WriteFloat(msg_t *sb, double f)
+{
+    float value;
+    int bits;
+
+    value = (float)f;
+    memcpy(&bits, &value, sizeof(bits));
+    MSG_WriteBits(sb, bits, 0x20u);
+}
+// KIWI END
+
 void __cdecl MSG_WriteString(msg_t *sb, const char *s)
 {
     uint8_t v2; // al
@@ -455,6 +467,18 @@ int __cdecl MSG_ReadLong(msg_t *msg)
         return c;
     }
 }
+
+// KIWI GLASS
+float __cdecl MSG_ReadFloat(msg_t *msg)
+{
+    int bits;
+    float f;
+
+    bits = MSG_ReadBits(msg, 0x20u);
+    memcpy(&f, &bits, sizeof(f));
+    return f;
+}
+// KIWI END
 
 static char string[1024];
 char *__cdecl MSG_ReadString(msg_t *msg)

@@ -28,6 +28,9 @@
 #include "rb_postfx.h"
 #include "r_meshdata.h"
 #include <qcommon/com_bsp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #include "r_cinematic.h"
 #include <win32/win_net.h>
 #include <universal/profile.h>
@@ -135,6 +138,39 @@ void __cdecl R_AddBrushModelToSceneFromAngles(
         }
     }
 }
+
+// KIWI GLASS
+// intact / cracked pane (its own compiled submodel)
+void __cdecl R_AddGlassBrushToScene(
+    const GfxBrushModel *bmodel,
+    const float *origin,
+    const float *angles,
+    Material *altStreamingMaterial) // unused (texture streaming)
+{
+    GfxSceneGlassBrush *glassBrush;
+    uint glassIndex;
+
+    iassert( bmodel );
+    if (!bmodel->surfaceCount)
+        return;
+    iassert( rg.inFrame );
+    glassIndex = InterlockedExchangeAdd(&scene.glassBrushCount, 1);
+    if (glassIndex < ARRAY_COUNT(scene.glassBrush))
+    {
+        glassBrush = &scene.glassBrush[glassIndex];
+        glassBrush->bmodel = bmodel;
+        glassBrush->placement.origin[0] = origin[0];
+        glassBrush->placement.origin[1] = origin[1];
+        glassBrush->placement.origin[2] = origin[2];
+        AnglesToQuat(angles, glassBrush->placement.quat);
+    }
+    else
+    {
+        scene.glassBrushCount = ARRAY_COUNT(scene.glassBrush);
+        R_WarnOncePerFrame(R_WARN_KNOWN_MODELS, ARRAY_COUNT(scene.glassBrush));
+    }
+}
+// KIWI END
 
 void __cdecl R_AddDObjToScene(
     const DObj_s *obj,
@@ -1081,6 +1117,9 @@ void __cdecl R_ClearScene(uint localClientNum)
     Com_Memset(scene.sceneDObj, 0, sizeof(GfxSceneEntity) * scene.sceneDObjCount);
     Com_Memset(scene.sceneModel, 0, sizeof(GfxSceneModel) * scene.sceneModelCount);
     Com_Memset(scene.sceneBrush, 0, sizeof(GfxSceneBrush) * scene.sceneBrushCount);
+    // KIWI GLASS
+    Com_Memset(scene.glassBrush, 0, sizeof(GfxSceneGlassBrush) * scene.glassBrushCount);
+    // KIWI END
     scene.addedLightCount = 0;
     memset((uint8_t *)scene.drawSurfCount, 0, sizeof(scene.drawSurfCount));
     for (viewIndex = 0; viewIndex < 7; ++viewIndex)
@@ -1088,6 +1127,9 @@ void __cdecl R_ClearScene(uint localClientNum)
     scene.sceneDObjCount = 0;
     scene.sceneModelCount = 0;
     scene.sceneBrushCount = 0;
+    // KIWI GLASS
+    scene.glassBrushCount = 0;
+    // KIWI END
     if (rgp.world)
         R_ClearDpvsScene();
 }
@@ -1674,6 +1716,10 @@ void __cdecl R_GenerateSortedDrawSurfs(
         if (fx_marks_ents->current.enabled)
             R_GenerateMarkVertsForDynamicModels();
     }
+    // KIWI GLASS
+    // shard verts; must run before the lit FX list is sorted
+    GlassKiwi_RenderFrame(viewInfo->localClientNum);
+    // KIWI END
     KISAK_NULLSUB();
     R_SortDrawSurfs(scene.drawSurfs[6], scene.drawSurfCount[6]);
     decalInfo = &viewInfo->decalInfo;

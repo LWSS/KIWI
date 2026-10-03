@@ -45,6 +45,9 @@ uint __cdecl R_TessTrianglesList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufC
 uint __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
 uint __cdecl R_TessMarkMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
 uint __cdecl R_TessParticleCloudList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+// KIWI GLASS
+uint __cdecl R_TessGlassMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext);
+// KIWI END
 uint __cdecl R_TessXModelSkinnedDrawSurfList(
     const GfxDrawSurfListArgs *listArgs,
     GfxCmdBufContext prepassContext);

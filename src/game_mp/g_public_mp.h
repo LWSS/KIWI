@@ -684,6 +684,9 @@ void Scr_AmbientPlay();
 void Scr_AmbientStop();
 void Scr_GrenadeExplosionEffect();
 void GScr_RadiusDamage();
+// KIWI GLASS
+void GScr_GlassRadiusDamage();
+// KIWI END
 void __cdecl GScr_RadiusDamageInternal(gentity_s *inflictor);
 void __cdecl GScr_EntityRadiusDamage(scr_entref_t entref);
 void __cdecl GScr_Detonate(scr_entref_t entref);

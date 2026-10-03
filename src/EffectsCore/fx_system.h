@@ -340,6 +340,9 @@ void __cdecl FX_CreateImpactMark(
     uint markEntnum);
 FxMark *__cdecl FX_MarkFromHandle(FxMarksSystem *marksSystem, uint16_t handle);
 void __cdecl FX_MarkEntDetachAll(int localClientNum, int entnum);
+// KIWI GLASS
+void __cdecl FX_MarkGlassDetachAll(int localClientNum, unsigned int glassIndex);
+// KIWI END
 void __cdecl FX_MarkEntUpdateHidePartBits(
     const uint *oldHidePartBits,
     const uint *newHidePartBits,

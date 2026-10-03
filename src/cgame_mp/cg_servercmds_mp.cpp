@@ -20,6 +20,9 @@
 #include <gfx_d3d/r_model.h>
 #include <gfx_d3d/r_primarylights.h>
 #include <qcommon/com_bsp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 struct $59835072FC2CD3936CE4A4C9F556010B // sizeof=0x48
 {                                       // ...
@@ -226,6 +229,9 @@ void __cdecl CG_MapRestart(int localClientNum, int savepersist)
     cgameGlob->cursorHintFade = 0;
     cgameGlob->lastHealthLerpDelay = 1;
     CG_InitLocalEntities(localClientNum);
+    // KIWI GLASS
+    GlassKiwi_ClientMapRestart(localClientNum); // before Phys_Shutdown (shard bodies)
+    // KIWI END
     FX_KillAllEffects(localClientNum);
     FX_ShutdownSystem(localClientNum);
     DynEntCl_Shutdown(localClientNum);

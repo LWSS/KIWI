@@ -76,6 +76,31 @@ set(GAME_MP
     "${SRC_DIR}/game_mp/player_use_mp.cpp"
 )
 
+# KIWI GLASS
+set(GLASS
+    "${SRC_DIR}/glass/glass.h"
+    "${SRC_DIR}/glass/glass_allocator.cpp"
+    "${SRC_DIR}/glass/glass_allocator.h"
+    "${SRC_DIR}/glass/glass_client.cpp"
+    "${SRC_DIR}/glass/glass_client.h"
+    "${SRC_DIR}/glass/glass_kiwi.cpp"
+    "${SRC_DIR}/glass/glass_kiwi.h"
+    "${SRC_DIR}/glass/glass_kiwi_defaults.h"
+    "${SRC_DIR}/glass/glass_kiwi_hooks.h"
+    "${SRC_DIR}/glass/glass_kiwi_load.cpp"
+    "${SRC_DIR}/glass/glass_kiwi_phys.cpp"
+    "${SRC_DIR}/glass/glass_kiwi_phys.h"
+    "${SRC_DIR}/glass/glass_load_obj.cpp"
+    "${SRC_DIR}/glass/glass_load_obj.h"
+    "${SRC_DIR}/glass/glass_renderer.cpp"
+    "${SRC_DIR}/glass/glass_renderer.h"
+    "${SRC_DIR}/glass/glass_server.cpp"
+    "${SRC_DIR}/glass/glass_server.h"
+    "${SRC_DIR}/glass/glass_shard.cpp"
+    "${SRC_DIR}/glass/glass_shard.h"
+)
+# KIWI END
+
 set(GROUPVOICE
     "${SRC_DIR}/groupvoice/decode.cpp"
     "${SRC_DIR}/groupvoice/directsound.h"

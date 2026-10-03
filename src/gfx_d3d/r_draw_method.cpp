@@ -139,6 +139,17 @@ void R_SetDefaultLitTechTypes()
     gfxDrawMethod.litTechType[12][4] = TECHNIQUE_NONE;
     gfxDrawMethod.litTechType[12][5] = TECHNIQUE_NONE;
     gfxDrawMethod.litTechType[12][6] = TECHNIQUE_NONE;
+
+    // KIWI GLASS
+    // lit like SF_MARK_MESH (row 11)
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][0] = TECHNIQUE_LIT_BEGIN;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][1] = TECHNIQUE_LIT_SUN;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][2] = TECHNIQUE_LIT_SPOT;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][3] = TECHNIQUE_LIT_OMNI;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][4] = TECHNIQUE_LIT_SUN_SHADOW;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][5] = TECHNIQUE_LIT_SPOT_SHADOW;
+    gfxDrawMethod.litTechType[SF_GLASS_MESH][6] = TECHNIQUE_LIT_OMNI_SHADOW;
+    // KIWI END
 }
 
 void __cdecl R_ForceLitTechType(MaterialTechniqueType litTechType)

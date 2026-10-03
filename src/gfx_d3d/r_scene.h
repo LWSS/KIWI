@@ -116,6 +116,17 @@ struct GfxSceneBrush // sizeof=0x28
     // padding byte
 };
 
+// KIWI GLASS
+// lit brush model with no entnum; casts no shadows
+struct GfxSceneGlassBrush
+{
+    GfxPlacement placement;
+    const GfxBrushModel *bmodel;
+    BModelDrawInfo info;
+    uint8_t reflectionProbeIndex;
+};
+// KIWI END
+
 union GfxEntCellRefInfo // sizeof=0x4
 {                                       // ...
     float radius;
@@ -193,6 +204,11 @@ struct __declspec(align(64)) GfxScene // sizeof=0x154D00
     volatile uint sceneBrushCount;       // ...
     GfxSceneBrush sceneBrush[512];      // ...
     uint8_t sceneBrushVisData[3][512]; // ...
+    // KIWI GLASS
+    volatile uint glassBrushCount;
+    GfxSceneGlassBrush glassBrush[1024];
+    uint8_t glassBrushVisData[1024]; // 0 skip, 1 visible, 2 culled
+    // KIWI END
     uint sceneDynModelCount;    // ...
     uint sceneDynBrushCount;    // ...
     DpvsPlane shadowFarPlane[2];        // ...
@@ -210,6 +226,13 @@ void __cdecl R_AddBrushModelToSceneFromAngles(
     const float *origin,
     const float *angles,
     uint16_t entnum);
+// KIWI GLASS
+void __cdecl R_AddGlassBrushToScene(
+    const GfxBrushModel *bmodel,
+    const float *origin,
+    const float *angles,
+    Material *altStreamingMaterial);
+// KIWI END
 void __cdecl R_AddDObjToScene(
     const DObj_s *obj,
     const cpose_t *pose,

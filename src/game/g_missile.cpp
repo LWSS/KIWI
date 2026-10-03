@@ -9,6 +9,9 @@
 
 #ifdef KISAK_MP
 #include <game_mp/g_utils_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "g_local.h"
 #include "g_main.h"
@@ -1029,6 +1032,27 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
     explodeOnImpact = weapDef->bProjImpactExplode;
     explosionType = weapDef->projExplosion;
     damage = weapDef->damage;
+    // KIWI GLASS
+    // shatter the pane and grenades keep flying (no impact/explosion)
+    if (trace->hitType == TRACE_HITTYPE_GLASS)
+    {
+        float direction_vector[3];
+
+        BG_EvaluateTrajectoryDelta(&ent->s.lerp.pos, level.time, direction_vector);
+        if (Vec3LengthSq(direction_vector) >= 0.001f)
+        {
+            Vec3Normalize(direction_vector);
+        }
+        else
+        {
+            direction_vector[0] = 0.0f;
+            direction_vector[1] = 0.0f;
+            direction_vector[2] = 1.0f;
+        }
+        GlassSv_Damage(trace->hitId, damage, MOD_IMPACT, ent->r.currentOrigin, direction_vector);
+        return;
+    }
+    // KIWI END
     ent->s.surfType = SURF_TYPEINDEX(trace->surfaceFlags);
     if (GrenadeDud(ent, weapDef) || JavelinDud(ent, weapDef))
     {

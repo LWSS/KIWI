@@ -77,6 +77,10 @@
 #endif
 #endif
 
+// Network protocol
+//#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2 // 2 = snapshots carry glass state
+
 // angle indexes
 #define	PITCH				0		// up / down
 #define	YAW					1		// left / right
@@ -807,6 +811,9 @@ enum TraceHitType : __int32
 	TRACE_HITTYPE_ENTITY = 0x1,
 	TRACE_HITTYPE_DYNENT_MODEL = 0x2,
 	TRACE_HITTYPE_DYNENT_BRUSH = 0x3,
+	// KIWI GLASS
+	TRACE_HITTYPE_GLASS = 0x4, // hitId = pane index
+	// KIWI END
 };
 
 struct trace_t // sizeof=0x2C

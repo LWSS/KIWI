@@ -180,4 +180,22 @@ struct ModelSpaceMesh {
 bool BuildModelSpaceMesh(const ConvertRequest& request, const pieces::PieceSet& pieceSet,
                          ModelSpaceMesh& out, std::string& error);
 
+// KIWI GLASS
+// PNGs -> <name>_col/_nml/_spc.iwi + a clone of templateMaterial.
+// Normal is DirectX (green down) unless normalGreen is Flip.
+struct ImageMaterialRequest {
+    std::filesystem::path rawRoot;
+    std::string name;
+    std::filesystem::path templateMaterial;   // raw\materials\<stock material> to clone
+    std::filesystem::path color;              // required
+    std::filesystem::path normal;             // optional; the template needs a normal slot
+    std::filesystem::path specularGloss;      // optional
+    NormalGreen normalGreen = NormalGreen::Keep;
+    int surfaceType = -1;                     // -1 keeps the template's
+};
+
+bool WriteImageMaterial(const ImageMaterialRequest& request, const LogFn& log,
+                        std::vector<std::filesystem::path>& written, std::string& error);
+// KIWI END
+
 }  // namespace kimport

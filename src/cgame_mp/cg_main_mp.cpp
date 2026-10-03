@@ -28,6 +28,9 @@
 #include <gfx_d3d/r_model.h>
 #include <script/scr_vm.h>
 #include <game_mp/g_main_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 bool g_mapLoaded;
 bool g_ambientStarted;
@@ -1827,6 +1830,9 @@ void __cdecl CG_Init(int localClientNum, int serverMessageNum, int serverCommand
     CG_InitEntities(localClientNum);
     CG_InitLocalEntities(localClientNum);
     DynEntCl_InitEntities(localClientNum);
+    // KIWI GLASS
+    GlassKiwi_ClientInit(localClientNum);
+    // KIWI END
     cgameGlob->isLoading = 0;	// future players will be deferred
     // Make sure we have update values (scores)
     CG_SetConfigValues(localClientNum);
@@ -2178,6 +2184,9 @@ void __cdecl CG_Shutdown(int localClientNum)
         }
     }
     Ragdoll_Shutdown();
+    // KIWI GLASS
+    GlassKiwi_ClientShutdown(localClientNum); // before Phys_Shutdown (shard bodies)
+    // KIWI END
     g_ambientStarted = 0;
     g_mapLoaded = 0;
     Mantle_ShutdownAnims();

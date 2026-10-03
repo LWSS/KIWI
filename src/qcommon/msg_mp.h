@@ -101,12 +101,18 @@ void __cdecl MSG_WriteByte(msg_t *msg, uint8_t c);
 void __cdecl MSG_WriteData(msg_t *buf, uint8_t *data, uint length);
 void __cdecl MSG_WriteShort(msg_t *msg, __int16 c);
 void __cdecl MSG_WriteLong(msg_t *msg, int c);
+// KIWI GLASS
+void __cdecl MSG_WriteFloat(msg_t *sb, double f);
+// KIWI END
 void __cdecl MSG_WriteString(msg_t *sb, const char *s);
 void __cdecl MSG_WriteBigString(msg_t *sb, char *s);
 void __cdecl MSG_WriteAngle16(msg_t *sb, float f);
 int __cdecl MSG_ReadByte(msg_t *msg);
 int __cdecl MSG_ReadShort(msg_t *msg);
 int __cdecl MSG_ReadLong(msg_t *msg);
+// KIWI GLASS
+float __cdecl MSG_ReadFloat(msg_t *msg);
+// KIWI END
 char *__cdecl MSG_ReadString(msg_t *msg);
 char *__cdecl MSG_ReadBigString(msg_t *msg);
 char *__cdecl MSG_ReadStringLine(msg_t *msg);

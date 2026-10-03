@@ -260,7 +260,9 @@ struct FxCodeMeshData // sizeof=0x10
     uint16_t *indices;
     uint16_t argOffset;
     uint16_t argCount;
-    uint pad;
+    // KIWI GLASS
+    uint lightHandle; // was pad; 0 for FX
+    // KIWI END
 };
 
 struct GfxParticleCloud // sizeof=0x40
@@ -527,7 +529,9 @@ const struct __declspec(align(16)) GfxBackEndData // sizeof=0x11E780
     FxCodeMeshData codeMeshes[2048];
     uint primDrawSurfsBuf[65536]; // ...
     GfxViewParms viewParms[28];
-    uint8_t primaryLightTechType[13][256];
+    // KIWI GLASS
+    uint8_t primaryLightTechType[SF_NUM_SURFACE_TYPES][256]; // was [13][256]
+    // KIWI END
     float codeMeshArgs[256][4];
     GfxParticleCloud clouds[256];
     GfxDrawSurf drawSurfs[32768];
@@ -551,6 +555,9 @@ const struct __declspec(align(16)) GfxBackEndData // sizeof=0x11E780
     volatile long markMeshCount;
     FxMarkMeshData markMeshes[1536];
     GfxMeshData markMesh;
+    // KIWI GLASS
+    GfxMeshData glassMesh; // shard verts, filled on the main thread
+    // KIWI END
     GfxVertexBufferState *skinnedCacheVb;
     IDirect3DQuery9 *endFence;
     uint8_t *tempSkinBuf;
@@ -1001,6 +1008,10 @@ void __cdecl R_InitTempSkinBuf();
 void R_AddCmdSetViewportValues(int x, int y, int width, int height);
 
 void __cdecl R_ShutdownDynamicMesh(GfxMeshData *mesh);
+// KIWI GLASS
+void __cdecl R_InitGlassRenderBuffers(uint numIndices, uint numVerts, uint vertSize);
+void __cdecl R_FreeGlassRenderBuffers();
+// KIWI END
 void __cdecl R_ShutdownRenderBuffers();
 
 void __cdecl R_ShutdownRenderCommands();

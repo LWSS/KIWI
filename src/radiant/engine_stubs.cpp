@@ -28,6 +28,9 @@
 #include <gfx_d3d/r_workercmds_common.h>
 #include <qcommon/graph.h>         // DevGraph
 #include <stringed/stringed_hooks.h> // msgLocErrType_t, SEH_*
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h> // declarations only
+// KIWI END
 #include <cgame/cg_pose.h>
 #include <cgame/cg_ents.h>
 #include <xanim/dobj_utils.h>
@@ -144,6 +147,12 @@ void __cdecl CL_FlushDebugClientData() {}
 void __cdecl CL_UpdateDebugClientData() {}
 void __cdecl CG_CalculateFPS() {}
 void __cdecl CL_UpdateSound() {}
+
+// KIWI GLASS
+// glass is MP-only: no panes in the editor
+void GlassKiwi_RenderFrame(int localClientNum) {}
+char __cdecl R_MarkFragments_Glass(MarkInfo *markInfo) { return 1; }
+// KIWI END
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Dvars the compiled engine subset dereferences but whose registrar file is not in

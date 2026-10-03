@@ -828,6 +828,25 @@ void __cdecl FX_MarkEntDetachAll(int localClientNum, int entnum)
     }
 }
 
+// KIWI GLASS
+// pane marks are world marks with modelIndex glassIndex + 1
+void __cdecl FX_MarkGlassDetachAll(int localClientNum, unsigned int glassIndex)
+{
+    FxMarksSystem *marksSystem;
+    FxMark *mark;
+    uint16_t markHandle;
+
+    marksSystem = FX_GetMarksSystem(localClientNum);
+    markHandle = marksSystem->firstActiveWorldMarkHandle;
+    while (markHandle != FX_HANDLE_NONE)
+    {
+        mark = FX_MarkFromHandle(marksSystem, markHandle);
+        markHandle = mark->nextMark;
+        if (mark->context.modelIndex == glassIndex + 1)
+            FX_FreeMark(marksSystem, mark);
+    }
+}
+// KIWI END
 void __cdecl FX_MarkEntUpdateHidePartBits(
     const uint *oldHidePartBits,
     const uint *newHidePartBits,

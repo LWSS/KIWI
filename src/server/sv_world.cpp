@@ -6,6 +6,9 @@
 
 #ifdef KISAK_MP
 #include <game_mp/g_utils_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include <bgame/bg_public.h>
 #include <game/g_local.h>
@@ -1025,6 +1028,9 @@ void __cdecl SV_Trace(
         }
         // clip to other solid entities
         CM_PointTraceToEntities(&clip, results);
+        // KIWI GLASS
+        GlassSv_PointTrace(&clip, results); // intact panes only
+        // KIWI END
     }
     else
     {
@@ -1088,6 +1094,9 @@ void __cdecl SV_Trace(
         CM_CalcTraceExtents(&result.extents);
         // clip to other solid entities
         CM_ClipMoveToEntities(&result, results);
+        // KIWI GLASS
+        GlassSv_ClipMoveTrace(&result, results); // intact panes block movement
+        // KIWI END
     }
 }
 

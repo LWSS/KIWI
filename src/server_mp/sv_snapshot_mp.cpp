@@ -10,6 +10,9 @@
 #include <universal/com_files.h>
 #include <qcommon/files.h>
 #include <universal/profile.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 serverStaticHeader_t svsHeader;
 //struct dvar_s const *const sv_clientArchive 84ff2600     sv_snapshot_mp.obj
@@ -185,6 +188,11 @@ void __cdecl SV_WriteSnapshotToClient(client_t *client, msg_t *msg)
     SV_PacketDataIsUnknown(clientNum, msg);
     SV_EmitPacketClients(&snapInfo, from_num_clients, from_first_client, frame->num_clients, frame->first_client, msg);
     SV_PacketDataIsUnknown(clientNum, msg);
+    // KIWI GLASS
+    // pane changes since the acked frame (all if non-delta)
+    GlassKiwi_WriteSnapshot(msg, lastServerTime);
+    SV_PacketDataIsUnknown(clientNum, msg);
+    // KIWI END
     // padding for rate debugging
     for (i = 0; i < sv_padPackets->current.integer; ++i)
         MSG_WriteByte(msg, 0);

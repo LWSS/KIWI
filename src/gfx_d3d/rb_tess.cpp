@@ -206,6 +206,107 @@ uint __cdecl R_TessCodeMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufCo
     return drawSurfIndex;
 }
 
+// KIWI GLASS
+// shard groups, each lit by its lightHandle + reflection probe
+uint __cdecl R_TessGlassMeshList(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext)
+{
+    GfxCmdBufContext context;
+    const GfxDrawSurfListInfo *info;
+    const GfxBackEndData *data;
+    const GfxDrawSurf *drawSurfList;
+    const FxCodeMeshData *codeMesh;
+    GfxDrawSurf drawSurf;
+    GfxDrawPrimArgs args;
+    GfxDepthRangeType depthRangeType;
+    unsigned __int64 drawSurfKey;
+    uint drawSurfCount;
+    uint drawSurfIndex;
+    uint lightHandle;
+    uint reflectionProbeIndex;
+    uint8_t *indices;
+
+    PROF_SCOPED("TessGlassMesh");
+
+    context = listArgs->context;
+    info = listArgs->info;
+    drawSurfCount = info->drawSurfCount - listArgs->firstDrawSurfIndex;
+    drawSurfList = &info->drawSurfs[listArgs->firstDrawSurfIndex];
+    R_SetupPassCriticalPixelShaderArgs(context);
+    iassert(prepassContext.state == NULL || context.source == prepassContext.source);
+    if (info->baseTechType == TECHNIQUE_LIT_BEGIN)
+    {
+        if (sc_enable->current.enabled)
+            R_SetCodeImageTexture(context.source, TEXTURE_SRC_CODE_DYNAMIC_SHADOWS, gfxRenderTargets[R_RENDERTARGET_DYNAMICSHADOWS].image);
+        else
+            R_SetCodeImageTexture(context.source, TEXTURE_SRC_CODE_DYNAMIC_SHADOWS, rgp.whiteImage);
+    }
+    drawSurf.fields = drawSurfList->fields;
+    if (context.source->objectPlacement != &rg.identityPlacement)
+        R_ChangeObjectPlacement(context.source, &rg.identityPlacement);
+    R_ChangeDepthHackNearClip(context.source, 0);
+    R_SetVertexDeclTypeNormal(context.state, VERTDECL_PACKED);
+    depthRangeType = context.source->cameraView ? GFX_DEPTH_RANGE_SCENE : GFX_DEPTH_RANGE_FULL;
+    if (depthRangeType != context.state->depthRangeType)
+        R_ChangeDepthRange(context.state, depthRangeType);
+    data = context.source->input.data;
+    R_SetMeshStream(context.state, (GfxMeshData *)&data->glassMesh);
+    indices = 0;
+    lightHandle = 0;
+    reflectionProbeIndex = 0;
+    args.baseIndex = 0;
+    args.vertexCount = data->glassMesh.vb.total / data->glassMesh.vertSize;
+    args.triCount = 0;
+    drawSurfKey = drawSurf.packed & DRAWSURF_KEY_MASK;
+    R_TrackPrims(context.state, GFX_PRIM_STATS_FX);
+    drawSurfIndex = 0;
+    do
+    {
+        codeMesh = &data->codeMeshes[drawSurf.fields.objectId];
+        iassert(codeMesh->triCount > 0);
+        iassert(codeMesh->indices >= data->glassMesh.indices
+            && &codeMesh->indices[3 * codeMesh->triCount] <= &data->glassMesh.indices[data->glassMesh.totalIndexCount]);
+        if (!indices
+            || lightHandle != codeMesh->lightHandle
+            || reflectionProbeIndex != drawSurf.fields.reflectionProbeIndex
+            || &indices[6 * args.triCount] != (uint8_t *)codeMesh->indices)
+        {
+            if (args.triCount)
+            {
+                R_SetupPassPerPrimArgs(context);
+                args.baseIndex = R_SetIndexData(&context.state->prim, indices, args.triCount);
+                R_DrawIndexedPrimitive(&context.state->prim, &args);
+                args.triCount = 0;
+            }
+            indices = (uint8_t *)codeMesh->indices;
+            if (drawSurfIndex == 0
+                || lightHandle != codeMesh->lightHandle
+                || reflectionProbeIndex != drawSurf.fields.reflectionProbeIndex)
+            {
+                lightHandle = codeMesh->lightHandle;
+                reflectionProbeIndex = drawSurf.fields.reflectionProbeIndex;
+                R_SetModelLightingCoordsForSource((uint16_t)lightHandle, context.source);
+                R_SetReflectionProbe(context, reflectionProbeIndex);
+                R_SetupPassPerObjectArgs(context);
+            }
+        }
+        args.triCount += codeMesh->triCount;
+        g_frameStatsCur.fxIndexCount += 3 * codeMesh->triCount;
+        if (++drawSurfIndex == drawSurfCount)
+            break;
+        drawSurf.fields = drawSurfList[drawSurfIndex].fields;
+    } while ((drawSurf.packed & DRAWSURF_KEY_MASK) == drawSurfKey);
+
+    if (args.triCount)
+    {
+        R_SetupPassPerPrimArgs(context);
+        args.baseIndex = R_SetIndexData(&context.state->prim, indices, args.triCount);
+        R_DrawIndexedPrimitive(&context.state->prim, &args);
+    }
+    g_primStats = 0;
+    return drawSurfIndex;
+}
+// KIWI END
+
 void __cdecl R_SetVertexDeclTypeNormal(GfxCmdBufState *state, MaterialVertexDeclType vertDeclType)
 {
     state->prim.vertDeclType = vertDeclType;

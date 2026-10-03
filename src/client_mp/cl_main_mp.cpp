@@ -35,6 +35,9 @@
 #include <qcommon/com_bsp.h>
 
 #include <ui_mp/ui_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 #ifdef WIN32
 #include <win32/win_steam.h>
@@ -491,6 +494,9 @@ void __cdecl CL_Disconnect(int localClientNum)
             clc->demoplaying = 0;
             clc->demorecording = 0;
         }
+        // KIWI GLASS
+        GlassKiwi_ClientDisconnect();
+        // KIWI END
         SCR_StopCinematic(localClientNum);
         // send a disconnect message to the server
         // send it a few times in case one is dropped
@@ -512,6 +518,9 @@ void __cdecl CL_Disconnect(int localClientNum)
         if (!cls.wwwDlDisconnected)
             CL_ClearStaticDownload();
         DynEntCl_Shutdown(localClientNum);
+        // KIWI GLASS
+        GlassCl_Reset(localClientNum);
+        // KIWI END
         SND_DisconnectListener(localClientNum);
         // shutting down the client so enter full screen ui mode
         if (connstate >= CA_CONNECTING)
@@ -1156,7 +1165,9 @@ void __cdecl CL_CheckForResend(int localClientNum)
             case CA_CHALLENGING:
                 v3 = Dvar_InfoString(localClientNum, 2);
                 I_strncpyz(dest, v3, 1024);
-                v4 = va("%i", 1);
+                // KIWI GLASS
+                v4 = va("%i", PROTOCOL_VERSION);
+                // KIWI END
                 Info_SetValueForKey(dest, "protocol", v4);
                 v5 = va("%i", clc->challenge);
                 Info_SetValueForKey(dest, "challenge", v5);

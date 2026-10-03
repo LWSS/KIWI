@@ -245,8 +245,11 @@ enum CriticalSection : int
 	CRITSECT_CINEMATIC_TARGET_CHANGE = 0x13,
 	CRITSECT_FX_ALLOC = 0x14,
 	CRITSECT_CBUF = 0x15,
+	// KIWI GLASS
+	CRITSECT_GLASS_ACTIONS = 0x16, // glass renderer action ring
 
-	CRITSECT_COUNT = 0x16,
+	CRITSECT_COUNT = 0x17, // was 0x16
+	// KIWI END
 };
 #elif KISAK_SP
 enum CriticalSection : int

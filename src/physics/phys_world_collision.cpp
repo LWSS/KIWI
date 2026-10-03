@@ -19,6 +19,9 @@
 #ifdef KISAK_MP
 #include <game_mp/g_main_mp.h>
 #include <cgame_mp/cg_local_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include <game/g_main.h>
 #endif
@@ -608,6 +611,9 @@ static int dCollideWorldGeom(dxGeom *o1, dxGeom *o2, int flags, dContactGeomExt 
             input.radius = RadiusFromBounds(bounds[0], bounds[1]);
             for (i = 0; i < ll.count; ++i)
                 CM_TestGeomInLeaf(&cm.leafs[leafs[i]], &input, &results);
+            // KIWI GLASS
+            GlassKiwi_PhysTestPanes(&input, &results, Body);
+            // KIWI END
             if (phys_collUseEntities->current.enabled)
                 Phys_TestAgainstEntities(&input, &results);
             for (i = 0; i < results.contactCount; ++i)

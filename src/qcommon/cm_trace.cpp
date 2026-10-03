@@ -12,11 +12,25 @@ uint16_t __cdecl Trace_GetEntityHitId(const trace_t *trace)
     iassert( trace );
     if (trace->hitType == TRACE_HITTYPE_DYNENT_MODEL || trace->hitType == TRACE_HITTYPE_DYNENT_BRUSH)
         return ENTITYNUM_WORLD;
+    // KIWI GLASS
+    if (trace->hitType == TRACE_HITTYPE_GLASS) // panes count as world
+        return ENTITYNUM_WORLD;
+    // KIWI END
     if (trace->hitType == TRACE_HITTYPE_ENTITY)
         return trace->hitId;
     else
         return ENTITYNUM_NONE;
 }
+
+// KIWI GLASS
+int __cdecl Trace_GetGlassHitId(const trace_t *trace)
+{
+    iassert( trace );
+    if (trace->hitType == TRACE_HITTYPE_GLASS)
+        return trace->hitId;
+    return -1;
+}
+// KIWI END
 
 uint16_t __cdecl Trace_GetDynEntHitId(const trace_t *trace, DynEntityDrawType *drawType)
 {

@@ -11,6 +11,9 @@
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
 #include <cgame_mp/cg_local_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "cg_main.h"
 #include "cg_pose.h"
@@ -262,6 +265,10 @@ void __cdecl CG_Trace(
         clip.bLocational = locational;
         clip.priorityMap = 0;
         CG_PointTraceToEntities(&clip, results);
+        // KIWI GLASS
+        if (locational)// bullets only
+            GlassCl_TracePoint(&clip, results);
+        // KIWI END
     }
     else
     {
@@ -286,6 +293,9 @@ void __cdecl CG_Trace(
         CM_CalcTraceExtents(&result.extents);
         CG_ClipMoveToEntities(&result, results);
         DynEntCl_ClipMoveTrace(&result, results);
+        // KIWI GLASS
+        GlassCl_ClipMoveTrace(&result, results);
+        // KIWI END
     }
 }
 

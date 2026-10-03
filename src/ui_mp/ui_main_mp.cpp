@@ -5870,7 +5870,9 @@ void __cdecl UI_StartServerRefresh(int localClientNum, int full)
                 }
                 else
                 {
-                    v10 = va("globalservers %d %d full empty\n", i, 1);
+                    // KIWI GLASS
+                    v10 = va("globalservers %d %d full empty\n", i, PROTOCOL_VERSION);
+                    // KIWI END
                 }
                 v5 = CL_ControllerIndexFromClientNum(localClientNum);
                 Cmd_ExecuteSingleCommand(localClientNum, v5, v10);

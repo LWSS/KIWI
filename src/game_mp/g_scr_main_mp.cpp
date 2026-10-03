@@ -33,6 +33,9 @@
 #include <universal/surfaceflags.h>
 #include <qcommon/cmd.h>
 #include <universal/com_files.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 //   struct BuiltinFunctionDef *functions 827b5700     g_scr_main_mp.obj
 //   struct scr_data_t g_scr_data 82e8a4b8     g_scr_main_mp.obj
@@ -155,6 +158,9 @@ BuiltinFunctionDef functions[] =
   { "setexpfog", &Scr_SetExponentialFog, 0 },
   { "grenadeexplosioneffect", &Scr_GrenadeExplosionEffect, 0 },
   { "radiusdamage", &GScr_RadiusDamage, 0 },
+  // KIWI GLASS
+  { "glassradiusdamage", &GScr_GlassRadiusDamage, 0 },
+  // KIWI END
   { "setplayerignoreradiusdamage", (void(__cdecl *)()) & GScr_SetPlayerIgnoreRadiusDamage, 0 },
   { "getnumparts", &GScr_GetNumParts, 0 },
   { "getpartname", &GScr_GetPartName, 0 },
@@ -390,6 +396,13 @@ void __cdecl GScr_LoadGameTypeScript()
         "maps/mp/gametypes/_callbacksetup",
         "CodeCallback_PlayerLastStand",
         1);
+    // KIWI GLASS
+    // optional; script callback when a pane shatters
+    g_glassSmashCallback = GScr_LoadScriptAndLabel(
+        "maps/mp/gametypes/_callbacksetup",
+        "CodeCallback_GlassSmash",
+        0);
+    // KIWI END
 }
 
 int __cdecl GScr_LoadScriptAndLabel(const char *filename, const char *label, int bEnforceExists)
@@ -3917,6 +3930,26 @@ void __cdecl GScr_RadiusDamageInternal(gentity_s *inflictor)
     level.bPlayerIgnoreRadiusDamage = 0;
 }
 
+// KIWI GLASS
+// glassradiusdamage(origin, range, max, min [, mod]): panes only
+void GScr_GlassRadiusDamage()
+{
+    meansOfDeath_t mod;
+    float max_damage;
+    float origin[3];
+    float range;
+    float min_damage;
+
+    Scr_GetVector(0, origin);
+    range = Scr_GetFloat(1);
+    max_damage = Scr_GetFloat(2);
+    min_damage = Scr_GetFloat(3);
+    mod = MOD_EXPLOSIVE;
+    if (Scr_GetNumParam() > 4 && Scr_GetType(4))
+        mod = (meansOfDeath_t)G_MeansOfDeathFromScriptParam(4);
+    GlassSv_RadiusDamage(origin, range, 1.0f, 0, max_damage, min_damage, mod);
+}
+// KIWI END
 void __cdecl GScr_EntityRadiusDamage(scr_entref_t entref)
 {
     gentity_s *ent; // [esp+0h] [ebp-4h]
@@ -6507,7 +6540,7 @@ void(__cdecl *__cdecl Scr_GetFunction(const char **pName, int *type))()
 {
     uint i; // [esp+18h] [ebp-4h]
 
-    for (i = 0; i < 0xCD; ++i)
+    for (i = 0; i < ARRAY_COUNT(functions); ++i)
     {
         if (!strcmp(*pName, functions[i].actionString))
         {

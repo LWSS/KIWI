@@ -34,6 +34,9 @@
 #include <universal/com_sndalias.h>
 #include <dynentity/DynEntity_client.h>
 #include <database64/db_package.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_defaults.h>
+// KIWI END
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -187,6 +190,148 @@ static bool QueueDiscoveredAsset(const char *type, const char *path, void *conte
 {
     return !strcmp(type, "sound") ? QueueSoundAlias(path, context) : QueueScriptAsset(type, path, context);
 }
+
+// KIWI GLASS
+// Info_ValueForKey on a "\key\value\..." infostring
+static bool GlassInfoValue(const char *info, const char *key, char *out, size_t outSize)
+{
+    const size_t keyLength = strlen(key);
+    for (const char *p = info; *p == '\\';)
+    {
+        const char *value = strchr(p + 1, '\\');
+        if (!value)
+        {
+            return false;
+        }
+        const char *end = strchr(++value, '\\');
+        const size_t valueLength = end ? end - value : strlen(value);
+        if ((size_t)(value - p - 2) == keyLength && !_strnicmp(p + 1, key, keyLength))
+        {
+            snprintf(out, outSize, "%.*s", (int)valueLength, value);
+            return true;
+        }
+        if (!end)
+        {
+            return false;
+        }
+        p = end;
+    }
+    return false;
+}
+
+// A glass def's file and the materials, effects and sounds GlassKiwi_ResolveClientAssets registers.
+static bool QueueGlassDef(const char *root, const char *def, ManifestScriptContext *context)
+{
+    const struct
+    {
+        const char *key, *type, *prefix, *value;
+    } fields[] = {
+        {"pristineMaterial", "material", "wc/", ""},
+        {"crackedMaterial", "material", "wc/", GLASS_KIWI_DEFAULT_CRACKED_MATERIAL},
+        {"shardMaterial", "material", "mc/", GLASS_KIWI_DEFAULT_SHARD_MATERIAL},
+        {"crackEffect", "fx", "", ""},
+        {"shatterEffect", "fx", "", GLASS_KIWI_DEFAULT_SHATTER_EFFECT},
+        {"crackSound", "sound", "", GLASS_KIWI_DEFAULT_CRACK_SOUND},
+        {"shatterSound", "sound", "", GLASS_KIWI_DEFAULT_SHATTER_SOUND},
+        {"autoShatterSound", "sound", "", GLASS_KIWI_DEFAULT_SHATTER_SOUND},
+    };
+    char path[DB64_PACKAGE_PATH];
+    const int length = snprintf(path, sizeof(path), "glass/%s", def);
+    if (length < 0 || length >= sizeof(path) || !DB64_NormalizePath(path, path, sizeof(path)))
+    {
+        return false;
+    }
+    void *source = NULL;
+    size_t size = 0;
+    bool found = false;
+    const char *info = "";
+    bool ok = true;
+    if (Linker_ReadRawAssetFile(root, path, &source, &size, 65536, &found))
+    {
+        if (!strncmp((const char *)source, "GLASSDEF", 8))
+        {
+            info = (const char *)source + 8;
+            ok = QueueScriptAsset("rawfile", path, context);
+        }
+        else
+        {
+            fprintf(stderr, "WARNING: %s is not a glass def, packing defaults\n", path);
+        }
+    }
+    else if (found)
+    {
+        fprintf(stderr, "Cannot read glass def: %s\n", path);
+        return false;
+    }
+    else
+    {
+        fprintf(stderr, "WARNING: glass def %s not found, packing defaults\n", path);
+    }
+    for (int i = 0; ok && i < ARRAY_COUNT(fields); ++i)
+    {
+        char value[256], name[DB64_PACKAGE_PATH];
+        if (!GlassInfoValue(info, fields[i].key, value, sizeof(value)) || !value[0])
+        {
+            snprintf(value, sizeof(value), "%s", fields[i].value);
+        }
+        if (!value[0])
+        {
+            continue;
+        }
+        snprintf(name, sizeof(name), "%s%s", fields[i].prefix, value);
+        ok = !strcmp(fields[i].type, "sound") ? QueueSoundAlias(name, context)
+                                               : DB64_NormalizePath(name, name, sizeof(name)) &&
+                                                     QueueScriptAsset(fields[i].type, name, context);
+    }
+    free(source);
+    return ok;
+}
+
+// "glass" entities (glass_kiwi_load.cpp): every def they name, plus the shard preset and hit sounds
+static bool QueueGlassDependencies(const char *root, const char *entities, ManifestScriptContext *context)
+{
+    char pair[2][256] = {};
+    char def[256] = {};
+    int field = 0;
+    bool glass = false;
+    for (const char *p = entities; *p; ++p)
+    {
+        if (*p == '"')
+        {
+            const char *close = strchr(p + 1, '"');
+            if (!close)
+            {
+                break;
+            }
+            snprintf(pair[field], sizeof(pair[field]), "%.*s", (int)(close - p - 1), p + 1);
+            if (field && !_stricmp(pair[0], "classname"))
+            {
+                glass = !_stricmp(pair[1], "glass");
+            }
+            else if (field && !_stricmp(pair[0], "glassdef"))
+            {
+                snprintf(def, sizeof(def), "%s", pair[1]);
+            }
+            field ^= 1;
+            p = close;
+        }
+        else if (*p == '}')
+        {
+            if (glass && !(QueueGlassDef(root, def[0] ? def : GLASS_KIWI_DEFAULT_DEF, context) &&
+                           QueueScriptAsset("physpreset", GLASS_KIWI_SHARD_PHYSPRESET, context) &&
+                           QueueSoundAlias(GLASS_KIWI_BULLET_HIT_SOUND, context) &&
+                           QueueSoundAlias(GLASS_KIWI_MELEE_HIT_SOUND, context)))
+            {
+                return false;
+            }
+            glass = false;
+            def[0] = 0;
+            field = 0;
+        }
+    }
+    return true;
+}
+// KIWI END
 
 static bool QueueMapDependencies(const char *root, const char *bsp, ManifestScriptContext *scripts)
 {
@@ -2115,6 +2260,12 @@ static bool CompileManifestText(const char *root, const char *manifest, uint8_t 
                 {
                     ok = Fail(error, errorSize, "Cannot queue native map dependencies");
                 }
+                // KIWI GLASS
+                else if (!QueueGlassDependencies(root, input->assets[2].header.mapEnts->entityString, &scripts))
+                {
+                    ok = Fail(error, errorSize, "Cannot queue glass dependencies");
+                }
+                // KIWI END
             }
             if (input->count == 1 && input->assets[0].type == ASSET_TYPE_RAWFILE)
             {

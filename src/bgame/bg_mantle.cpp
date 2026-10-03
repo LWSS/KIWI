@@ -11,6 +11,9 @@ const dvar_t *mantle_debug = nullptr;
 const dvar_t *mantle_check_range = nullptr;
 const dvar_t *mantle_check_radius = nullptr;
 const dvar_t *mantle_check_angle = nullptr;
+// KIWI GLASS
+const dvar_t *mantle_check_glass_extra_range = nullptr;
+// KIWI END
 const dvar_t *mantle_view_yawcap = nullptr;
 
 XAnim_s *s_mantleAnims = nullptr;
@@ -92,6 +95,19 @@ void __cdecl Mantle_RegisterDvars()
         minb,
         DVAR_CHEAT | DVAR_TEMP,
         "The minimum angle from the player to a mantle surface to allow a mantle");
+    // KIWI GLASS
+    {
+        DvarLimits glassRange;
+        glassRange.value.max = 32.0f;
+        glassRange.value.min = 0.0f;
+        mantle_check_glass_extra_range = Dvar_RegisterFloat(
+            "mantle_check_glass_extra_range",
+            10.0f,
+            glassRange,
+            DVAR_CHEAT | DVAR_TEMP,
+            "The extra distance to test if glass is in the way");
+    }
+    // KIWI END
     minc.value.max = 180.0f;
     minc.value.min = 0.0f;
     mantle_view_yawcap = Dvar_RegisterFloat(
@@ -282,6 +298,20 @@ char __cdecl Mantle_CheckLedge(pmove_t *pm, pml_t *pml, MantleResults *mresults,
             }
             else
             {
+                // KIWI GLASS
+                // Check if glass is blocking the mantle, there is an extra distance check, for window sills I assume
+                start[0] = mresults->startPos[0];
+                start[1] = mresults->startPos[1];
+                start[2] = mresults->startPos[2] + height;
+                Vec3Mad(start, mantle_check_glass_extra_range->current.value + 16.0f, mresults->dir, end);
+                maxs[2] = (float)15.0 + (float)15.0;
+                PM_trace(pm, &trace, start, mins, maxs, end, ps->clientNum, pm->tracemask & ~(CONTENTS_PLAYER | CONTENTS_FAKE_ACTOR));
+                if (trace.startsolid || trace.fraction < 1.0f && trace.hitType == TRACE_HITTYPE_GLASS)
+                {
+                    Mantle_DebugPrint("Mantle Failed: Glass is no the way");
+                    return 0;
+                }
+                // KIWI END
                 ps->mantleState.flags |= 8u;
                 mresults->flags |= 8u;
                 Mantle_DebugPrint("Mantle available!");

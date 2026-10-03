@@ -16,6 +16,10 @@
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
 #include <server_mp/server_mp.h>
+// KIWI GLASS
+#include <game_mp/g_public_mp.h> // meansOfDeath_t
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "cg_main.h"
 #include "cg_ents.h"
@@ -404,6 +408,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                 return;
             case EV_FIRE_MELEE:
                 DynEntCl_MeleeEvent(localClientNum, ent->number);
+                // KIWI GLASS
+                GlassCl_MeleeEvent(localClientNum, ent->number);
+                // KIWI END
                 return;
             case EV_PREP_OFFHAND:
                 if (clientNum != cgameGlob->predictedPlayerState.clientNum)
@@ -589,6 +596,15 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     1.0,
                     weaponDef->iExplosionInnerDamage,
                     weaponDef->iExplosionOuterDamage);
+                // KIWI GLASS
+                GlassCl_ExplosionEvent(
+                    localClientNum,
+                    position,
+                    (float)weaponDef->iExplosionInnerDamage,
+                    (float)weaponDef->iExplosionOuterDamage,
+                    innerRadius_4,
+                    MOD_GRENADE_SPLASH);
+                // KIWI END
 
                 bcassert(ent->surfType, SURF_TYPECOUNT);
 
@@ -629,6 +645,15 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     1.0,
                     weaponDef->iExplosionInnerDamage,
                     weaponDef->iExplosionOuterDamage);
+                // KIWI GLASS
+                GlassCl_ExplosionEvent(
+                    localClientNum,
+                    position,
+                    (float)weaponDef->iExplosionInnerDamage,
+                    (float)weaponDef->iExplosionOuterDamage,
+                    innerRadius_4a,
+                    cgameGlob->nomarks ? MOD_PROJECTILE : MOD_PROJECTILE_SPLASH);
+                // KIWI END
 
                 bcassert(ent->surfType, SURF_TYPECOUNT);
 
@@ -678,6 +703,15 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     1.0,
                     weaponDef->iExplosionInnerDamage,
                     weaponDef->iExplosionOuterDamage);
+                // KIWI GLASS
+                GlassCl_ExplosionEvent(
+                    localClientNum,
+                    position,
+                    (float)weaponDef->iExplosionInnerDamage,
+                    (float)weaponDef->iExplosionOuterDamage,
+                    innerRadius_4b,
+                    MOD_EXPLOSIVE);
+                // KIWI END
                 ByteToDir(ent->eventParm, axis[0]);
                 Vec3Basis_RightHanded(axis[0], axis[1], axis[2]);
                 CG_ImpactEffectForWeapon(weaponIdx, ent->surfType, 0, (const FxEffectDef **)&def, &v30);
@@ -792,6 +826,9 @@ void __cdecl CG_EntityEvent(int localClientNum, centity_s *cent, int event)
                     ent->lerp.u.explosion.magnitude,
                     0,
                     0);
+                // KIWI GLASS
+                GlassCl_ExplosionEvent(localClientNum, position, 0.0f, 0.0f, innerRadius_4c, MOD_EXPLOSIVE);
+                // KIWI END
                 return;
             case EV_PHYS_EXPLOSION_CYLINDER:
                 p_4d = (float)ent->eventParm;

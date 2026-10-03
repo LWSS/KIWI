@@ -342,6 +342,20 @@ void __cdecl R_AddAllSceneEntSurfacesCamera(const GfxViewInfo *viewInfo)
                 R_AddBModelSurfacesCamera(&sceneBrush->info, sceneBrush->bmodel, drawSurfs, lastDrawSurfs, reflectionProbeIndex);
             }
         }
+        // KIWI GLASS
+        // lit like a script_brushmodel (lightmap, probe)
+        sceneEntCount = scene.glassBrushCount;
+        for (sceneEntIndex = 0; sceneEntIndex < sceneEntCount; ++sceneEntIndex)
+        {
+            if (scene.glassBrushVisData[sceneEntIndex] == 1)
+            {
+                GfxSceneGlassBrush *glassBrush = &scene.glassBrush[sceneEntIndex];
+                reflectionProbeIndex = R_CalcReflectionProbeIndex(glassBrush->placement.origin);
+                glassBrush->reflectionProbeIndex = reflectionProbeIndex;
+                R_AddBModelSurfacesCamera(&glassBrush->info, glassBrush->bmodel, drawSurfs, lastDrawSurfs, reflectionProbeIndex);
+            }
+        }
+        // KIWI END
         sceneEntCount = scene.sceneDynBrushCount;
         sceneEntVisData = rgp.world->dpvsDyn.dynEntVisData[1][0];
         for (sceneEntIndex = 0; sceneEntIndex < sceneEntCount; ++sceneEntIndex)
@@ -875,6 +889,18 @@ void __cdecl R_DrawAllSceneEnt(const GfxViewInfo *viewInfo)
                 sceneEntVisData[viewIndex][sceneEntIndex] = 0;
         }
     }
+
+    // KIWI GLASS
+    for (sceneEntIndex = 0; sceneEntIndex < scene.glassBrushCount; ++sceneEntIndex)
+    {
+        GfxSceneGlassBrush *glassBrush = &scene.glassBrush[sceneEntIndex];
+        if ((scene.glassBrushVisData[sceneEntIndex] & 1) != 0
+            && !R_DrawBModel(&glassBrush->info, glassBrush->bmodel, &glassBrush->placement))
+        {
+            scene.glassBrushVisData[sceneEntIndex] = 0; // surface buffer full: skip this frame
+        }
+    }
+    // KIWI END
 }
 
 int __cdecl R_DrawBModel(BModelDrawInfo *bmodelInfo, const GfxBrushModel *bmodel, const GfxPlacement *placement)
@@ -1542,6 +1568,26 @@ void __cdecl R_FilterEntitiesIntoCells(int cameraCellIndex)
                 scene.dpvs.entVisData[viewIndex][entnum] = 2;
         }
     }
+
+    // KIWI GLASS
+    // camera frustum only; writable.mins/maxs = pane world bounds
+    for (sceneEntIndex = 0; sceneEntIndex < (int)scene.glassBrushCount; ++sceneEntIndex)
+    {
+        const float *minmax = scene.glassBrush[sceneEntIndex].bmodel->writable.mins;
+        const DpvsView *cameraView = &view[0];
+        uint8_t visData = 1;
+
+        for (int planeIndex = 0; planeIndex < cameraView->frustumPlaneCount; ++planeIndex)
+        {
+            if (R_DpvsPlaneMaxSignedDistToBox(&cameraView->frustumPlanes[planeIndex], minmax) <= 0.0f)
+            {
+                visData = 2;
+                break;
+            }
+        }
+        scene.glassBrushVisData[sceneEntIndex] = visData;
+    }
+    // KIWI END
 }
 
 // [ viewIndex ]
@@ -3511,6 +3557,25 @@ float __cdecl R_DpvsPlaneMaxSignedDistToBox(const DpvsPlane *plane, const float 
             + (float)((float)(*(const float *)((char *)minmax + plane->side[0]) * plane->coeffs[0])
                 + plane->coeffs[3])));
 }
+
+// KIWI GLASS
+// nonzero = box outside the view frustum
+int __cdecl R_CullBoxCurDpvs_SceneSelect(const float *minmax, uint viewIndex, int sceneIndex)
+{
+    const DpvsView *view;
+    int planeIndex;
+
+    bcassert(viewIndex, ARRAY_COUNT(dpvsGlob.views));
+    bcassert(sceneIndex, ARRAY_COUNT(dpvsGlob.views[0]));
+    view = &dpvsGlob.views[viewIndex][sceneIndex];
+    for (planeIndex = 0; planeIndex < view->frustumPlaneCount; ++planeIndex)
+    {
+        if (R_DpvsPlaneMaxSignedDistToBox(&view->frustumPlanes[planeIndex], minmax) <= 0.0f)
+            return 1;
+    }
+    return 0;
+}
+// KIWI END
 
 float __cdecl R_DpvsPlaneMinSignedDistToBox(const DpvsPlane *plane, const float *minmax)
 {

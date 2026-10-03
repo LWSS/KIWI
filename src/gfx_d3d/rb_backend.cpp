@@ -726,7 +726,8 @@ void __cdecl R_DrawSurfs(GfxCmdBufContext context, GfxCmdBufState *prepassState,
 }
 
 
-uint(__cdecl *const rb_tessTable[13])(const GfxDrawSurfListArgs *, GfxCmdBufContext) =
+// KIWI GLASS
+uint(__cdecl *const rb_tessTable[SF_NUM_SURFACE_TYPES])(const GfxDrawSurfListArgs *, GfxCmdBufContext) = // was [13]
 {
   &R_TessTrianglesList,
   &R_TessTrianglesPreTessList,
@@ -740,8 +741,10 @@ uint(__cdecl *const rb_tessTable[13])(const GfxDrawSurfListArgs *, GfxCmdBufCont
   &R_TessXModelSkinnedDrawSurfList,
   &R_TessCodeMeshList,
   &R_TessMarkMeshList,
-  &R_TessParticleCloudList
+  &R_TessParticleCloudList,
+  &R_TessGlassMeshList
 }; // idb
+// KIWI END
 
 uint __cdecl R_RenderDrawSurfListMaterial(const GfxDrawSurfListArgs *listArgs, GfxCmdBufContext prepassContext)
 {

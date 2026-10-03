@@ -232,10 +232,12 @@ void __cdecl CL_ServerInfoPacket(netadr_t from, msg_t *msg, int time)
     v3 = Info_ValueForKey(infoString, "protocol");
     prot = atoi(v3);
     ptr = Dvar_GetString("debug_protocol");
+    // KIWI GLASS
     if (*ptr)
         v8 = atoi(ptr);
     else
-        v8 = 1;
+        v8 = PROTOCOL_VERSION;
+    // KIWI END
     // if this isn't the correct protocol version, ignore it
     if (prot == v8)
     {

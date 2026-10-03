@@ -297,6 +297,9 @@ void __cdecl R_FreeHullPoints(GfxHullPointsPool *hullPoints);
 void __cdecl R_SetDpvsPlaneSides(DpvsPlane *plane);
 float __cdecl R_DpvsPlaneMinSignedDistToBox(const DpvsPlane *plane, const float *minmax);
 float __cdecl R_DpvsPlaneMaxSignedDistToBox(const DpvsPlane *plane, const float *minmax);
+// KIWI GLASS
+int __cdecl R_CullBoxCurDpvs_SceneSelect(const float *minmax, uint viewIndex, int sceneIndex);
+// KIWI END
 
 void R_SetCullDist(float dist);
 

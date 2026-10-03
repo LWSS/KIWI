@@ -1393,4 +1393,72 @@ bool BuildModelSpaceMesh(const ConvertRequest& request, const pieces::PieceSet& 
     return true;
 }
 
+// KIWI GLASS
+bool WriteImageMaterial(const ImageMaterialRequest& request, const LogFn& log,
+                        std::vector<fs::path>& written, std::string& error) {
+    if (request.color.empty()) {
+        error = "a colour image is required";
+        return false;
+    }
+    struct Slot {
+        const fs::path* png;
+        const char* suffix;
+        cod4::IwiKind kind;
+    };
+    const Slot slots[3] = {
+        {&request.color, "_col", cod4::IwiKind::Color},
+        {&request.normal, "_nml", cod4::IwiKind::Normal},
+        {&request.specularGloss, "_spc", cod4::IwiKind::SpecularGloss},
+    };
+    cod4::MaterialEditOptions edits;
+    for (const Slot& slot : slots) {
+        if (slot.png->empty()) continue;
+        int width = 0;
+        int height = 0;
+        std::vector<std::uint8_t> pixels;
+        if (!LoadRgba(*slot.png, width, height, pixels, error)) return false;
+        if (slot.kind == cod4::IwiKind::Normal && request.normalGreen == NormalGreen::Flip)
+            for (std::size_t offset = 1u; offset < pixels.size(); offset += 4u)
+                pixels[offset] = static_cast<std::uint8_t>(255u - pixels[offset]);
+        TextureSet textures;
+        textures.width = static_cast<std::uint32_t>(width);
+        textures.height = static_cast<std::uint32_t>(height);
+        const std::string image = request.name + slot.suffix;
+        const fs::path path = request.rawRoot / "images" / (image + ".iwi");
+        if (!WriteAndValidateIwi(path, textures, pixels, slot.kind, log, error)) {
+            error = "IWI export failed: " + error;
+            return false;
+        }
+        written.push_back(path);
+        if (slot.kind == cod4::IwiKind::Color) {
+            edits.replaceColorMap = true;
+            edits.colorMap = image;
+        } else if (slot.kind == cod4::IwiKind::Normal) {
+            edits.replaceNormalMap = true;
+            edits.normalMap = image;
+        } else {
+            edits.replaceSpecularGlossMap = true;
+            edits.specularGlossMap = image;
+        }
+    }
+    if (request.surfaceType > 0)
+        edits.surfaceTypeBits = request.surfaceType << cod4::kSurfaceTypeShift;
+    cod4::MaterialWriteResult result;
+    if (!cod4::WriteEditedMaterial(request.templateMaterial, request.rawRoot, request.name,
+                                   edits, &result, error)) {
+        error = "material export failed: " + error;
+        return false;
+    }
+    if (!cod4::RoundTripMaterial(result.path, error)) {
+        error = "material round-trip failed: " + error;
+        return false;
+    }
+    written.push_back(result.path);
+    LogPrintf(log, "Wrote + validated %s (template %s, technique %s)",
+              result.path.string().c_str(), result.templatePath.string().c_str(),
+              result.techniqueSet.c_str());
+    return true;
+}
+// KIWI END
+
 }  // namespace kimport

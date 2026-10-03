@@ -10,6 +10,9 @@
 #include <server/sv_world.h>
 #include <server_mp/server_mp.h>
 #include <xanim/dobj.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 
 // byte *bulletPriorityMap  827b4d2c     g_combat_mp.obj
@@ -967,6 +970,9 @@ int __cdecl G_RadiusDamage(
             }
         }
     }
+    // KIWI GLASS
+    GlassSv_RadiusDamage(origin, radius, coneAngleCos, coneDirection, fInnerDamage, fOuterDamage, mod); // no LOS check
+    // KIWI END
     return v27;
 }
 

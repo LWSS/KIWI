@@ -100,6 +100,22 @@ void __cdecl R_AddCodeMeshDrawSurf(
 float (*__cdecl R_GetCodeMeshArgs(uint argOffset))[4];
 GfxPackedVertex* __cdecl R_GetCodeMeshVerts(uint16_t baseVertex);
 
+// KIWI GLASS
+void R_BeginGlassMeshVerts();
+void R_EndGlassMeshVerts();
+char __cdecl R_ReserveGlassMeshIndices(int indexCount, r_double_index_t **indicesOut);
+char __cdecl R_ReserveGlassMeshVerts(int vertCount, uint16_t *baseVertex);
+GfxPackedVertex *__cdecl R_GetGlassMeshVerts(uint16_t baseVertex);
+void __cdecl R_AddGlassDrawSurf(
+    Material *material,
+    uint16_t *indices,
+    int indexCount,
+    uint lightHandle,
+    uint primaryLightIndex,
+    uint reflectionProbeIndex,
+    uint drawsurfRegion);
+// KIWI END
+
 char __cdecl R_ReserveMarkMeshVerts(int vertCount, uint16_t *baseVertex);
 char __cdecl R_ReserveMarkMeshIndices(int indexCount, r_double_index_t** indicesOut);
 

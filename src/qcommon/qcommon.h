@@ -851,6 +851,9 @@ inline DynEntityDrawType& operator++(DynEntityDrawType &e, int i)
 }
 uint16_t __cdecl Trace_GetEntityHitId(const trace_t *trace);
 uint16_t __cdecl Trace_GetDynEntHitId(const trace_t *trace, DynEntityDrawType *drawType);
+// KIWI GLASS
+int __cdecl Trace_GetGlassHitId(const trace_t *trace);
+// KIWI END
 uint __cdecl CM_TempBoxModel(const float *mins, const float *maxs, int contents);
 void __cdecl CM_GetBox(struct cbrush_t **box_brush, struct cmodel_t **box_model);
 bool __cdecl CM_ClipHandleIsValid(uint handle);

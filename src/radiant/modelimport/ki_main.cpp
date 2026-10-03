@@ -10,6 +10,11 @@
 //   KIWI-modelimport collide <name pattern|*> [--material <clip>] [--dry-run]
 //                        player collision for already-built raw\xmodel models (no recipe)
 //   KIWI-modelimport dump <xmodel name>   read back a built raw\xmodel
+// KIWI GLASS
+//   KIWI-modelimport material <name> --template <stock material> --color <png> [--normal <png>]
+//                        [--spec <png>] [--surface <type>] [--normal-green keep|flip]
+//                        material over authored PNGs (e.g. glass)
+// KIWI END
 //   KIWI-modelimport --mcp   MCP server on stdin/stdout (JSON-RPC 2.0, one message per line)
 //
 // Recipes live in <game root>\model_source\<asset>.kimport; the game root is the exe's
@@ -655,8 +660,51 @@ void Usage() {
                  "KIWI-modelimport scan <folder> [--since <hours>]\n"
                  "KIWI-modelimport collide <name pattern|*> [--material m] [--dry-run]\n"
                  "KIWI-modelimport dump <xmodel name>\n"
+                 // KIWI GLASS
+                 "KIWI-modelimport material <name> --template <stock material> --color <png>\n"
+                 "                     [--normal <png>] [--spec <png>] [--surface t] [--normal-green keep|flip]\n"
+                 // KIWI END
                  "KIWI-modelimport --mcp\n");
 }
+
+// KIWI GLASS
+// Clones a stock material over PNGs used as authored.
+int RunMaterialCli(const std::string& name, std::map<std::string, std::string>& flags) {
+    if (!flags.count("--template") || !flags.count("--color")) {
+        Usage();
+        return 2;
+    }
+    const GameRoot root = DefaultGameRoot();
+    ImageMaterialRequest request;
+    request.rawRoot = root.Raw();
+    request.name = name;
+    request.templateMaterial = root.Raw() / "materials" / flags["--template"];
+    request.color = flags["--color"];
+    if (flags.count("--normal")) request.normal = flags["--normal"];
+    if (flags.count("--spec")) request.specularGloss = flags["--spec"];
+    if (flags.count("--normal-green") &&
+        (!ParseNormalGreen(flags["--normal-green"], request.normalGreen) ||
+         request.normalGreen == NormalGreen::Auto)) {
+        std::fprintf(stderr, "Error: --normal-green is keep or flip\n");
+        return 2;
+    }
+    if (flags.count("--surface") && !cod4::ParseSurfaceType(flags["--surface"], request.surfaceType)) {
+        std::fprintf(stderr, "Error: '%s' is not a CoD4 surface type\n", flags["--surface"].c_str());
+        return 2;
+    }
+    const LogFn log = [](const std::string& line) { std::fprintf(stderr, "%s\n", line.c_str()); };
+    std::vector<fs::path> written;
+    std::string error;
+    if (!WriteImageMaterial(request, log, written, error)) {
+        std::fprintf(stderr, "Error: %s\n", error.c_str());
+        return 1;
+    }
+    json out = {{"material", name}, {"written", json::array()}};
+    for (const fs::path& path : written) out["written"].push_back(path.string());
+    std::printf("%s\n", out.dump(2).c_str());
+    return 0;
+}
+// KIWI END
 
 int RunCli(int argc, char** argv) {
     if (argc < 3) {
@@ -679,6 +727,9 @@ int RunCli(int argc, char** argv) {
         Usage();
         return 2;
     }
+    // KIWI GLASS
+    if (verb == "material") return RunMaterialCli(positional.at(0), flags);
+    // KIWI END
     Session session;
     json args;
     std::string tool;

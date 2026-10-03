@@ -10,6 +10,9 @@
 #ifdef KISAK_MP
 #include <game_mp/g_utils_mp.h>
 #include <server_mp/server_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "g_main.h"
 #include "g_local.h"
@@ -177,6 +180,13 @@ gentity_s *__cdecl Weapon_Melee_internal(gentity_s *ent, weaponParms *wp, float 
     damage = wp->weapDef->iMeleeDamage;
     if (!Melee_Trace(ent, wp, damage, range, width, height, &tr, endpos))
         return 0;
+    // KIWI GLASS
+    if (tr.hitType == TRACE_HITTYPE_GLASS)
+    {
+        GlassSv_Damage(tr.hitId, 5 /* GLASS_MIN_DAMAGE */, MOD_MELEE, endpos, wp->forward);
+        return 0;
+    }
+    // KIWI END
     hitEntId = Trace_GetEntityHitId(&tr);
     traceEnt = &g_entities[hitEntId];
 

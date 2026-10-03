@@ -30,6 +30,9 @@
 #include <universal/com_files.h>
 #include <universal/com_sndalias.h>
 #include <universal/profile.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 //struct entityHandler_t *entityHandlers 827b5088     g_main_mp.obj
 // 
@@ -342,6 +345,9 @@ void __cdecl G_InitGame(int levelTime, int randomSeed, int restart, int savepers
     BG_LoadPenetrationDepthTable();
     G_VehiclesInit(restart);
     G_InitTurrets();
+    // KIWI GLASS
+    GlassKiwi_ServerInit();
+    // KIWI END
     // parse the key/value pairs and spawn gentities
     G_SpawnEntitiesFromString();
     G_VehiclesSetupSpawnedEnts();
@@ -850,6 +856,9 @@ void __cdecl G_ShutdownGame(int freeScripts)
     }
     bgs = 0;
     G_FreeEntities();
+    // KIWI GLASS
+    GlassSv_Shutdown();
+    // KIWI END
     HudElem_DestroyAll();
     if (Scr_IsSystemActive() && !level.savepersist)
         SV_FreeClientScriptPers();
@@ -1417,6 +1426,9 @@ void __cdecl G_RunFrame(int levelTime)
     if (g_oldVoting->current.enabled)
         CheckVote();
     SendScoreboardMessageToAllIntermissionClients();
+    // KIWI GLASS
+    GlassSv_Update();
+    // KIWI END
     if (g_listEntity->current.enabled)
     {
         for (i = 0; i < 1024; ++i)

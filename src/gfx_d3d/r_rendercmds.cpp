@@ -18,6 +18,9 @@
 #include <client/client.h>
 #include "r_bsp.h"
 #include "r_sky.h"
+// KIWI GLASS
+#include "r_init.h" // g_allocateMinimalResources
+// KIWI END
 #include "r_draw_method.h"
 #include <xanim/xmodel.h>
 #include <win32/win_net.h>
@@ -93,6 +96,48 @@ void __cdecl R_ShutdownRenderCommands()
     R_ShutdownSceneBuffers();
 }
 
+// KIWI GLASS
+// sizes kept so a device reset can recreate the glass mesh
+static uint s_glassMeshIndexCount;
+static uint s_glassMeshVertCount;
+static uint s_glassMeshVertSize;
+
+static void R_FreeGlassMeshData(GfxMeshData *mesh)
+{
+    if (mesh->indices || mesh->vb.buffer)
+        R_ShutdownDynamicMesh(mesh);
+    Com_Memset(mesh, 0, sizeof(*mesh)); // R_ShutdownDynamicMesh leaves mesh->indices dangling
+}
+
+void __cdecl R_InitGlassRenderBuffers(uint numIndices, uint numVerts, uint vertSize)
+{
+    uint dataIndex;
+
+    iassert( numVerts <= 0x10000 ); // 16-bit base vertex
+    iassert( vertSize == sizeof(GfxPackedVertex) );
+    s_glassMeshIndexCount = numIndices;
+    s_glassMeshVertCount = numVerts;
+    s_glassMeshVertSize = vertSize;
+    for (dataIndex = 0; dataIndex < 2; ++dataIndex)
+    {
+        R_FreeGlassMeshData(&s_backEndData[dataIndex].glassMesh);
+        if (dx.device && !dx.deviceLost && !g_allocateMinimalResources) // else R_InitRenderBuffers does it
+            R_InitDynamicMesh(&s_backEndData[dataIndex].glassMesh, numIndices, numVerts, vertSize);
+    }
+}
+
+void __cdecl R_FreeGlassRenderBuffers()
+{
+    uint dataIndex;
+
+    s_glassMeshIndexCount = 0;
+    s_glassMeshVertCount = 0;
+    s_glassMeshVertSize = 0;
+    for (dataIndex = 0; dataIndex < 2; ++dataIndex)
+        R_FreeGlassMeshData(&s_backEndData[dataIndex].glassMesh);
+}
+// KIWI END
+
 void __cdecl R_ShutdownRenderBuffers()
 {
     GfxBackEndData *data; // [esp+0h] [ebp-10h]
@@ -108,6 +153,9 @@ void __cdecl R_ShutdownRenderBuffers()
         data->preTessIb = 0;
         R_ShutdownDynamicMesh(&data->codeMesh);
         R_ShutdownDynamicMesh(&data->markMesh);
+        // KIWI GLASS
+        R_FreeGlassMeshData(&data->glassMesh);
+        // KIWI END
         for (viewIndex = 0; viewIndex < 4; ++viewIndex)
         {
             for (partitionIndex = 0; partitionIndex < 4; ++partitionIndex)
@@ -186,6 +234,10 @@ void __cdecl R_InitRenderBuffers()
     {
         R_InitDynamicMesh(&s_backEndData[dataIndex].codeMesh, 0x6000u, 0x4000u, 0x20u);
         R_InitDynamicMesh(&s_backEndData[dataIndex].markMesh, 0x2400u, 0x1800u, 0x2Cu);
+        // KIWI GLASS
+        if (s_glassMeshIndexCount) // device reset with a glass map loaded
+            R_InitDynamicMesh(&s_backEndData[dataIndex].glassMesh, s_glassMeshIndexCount, s_glassMeshVertCount, s_glassMeshVertSize);
+        // KIWI END
         for (viewIndex = 0; viewIndex < 4; ++viewIndex)
         {
             for (partitionIndex = 0; partitionIndex < 4; ++partitionIndex)
@@ -951,6 +1003,9 @@ DebugGlobals *R_ToggleSmpFrame()
     R_ResetMesh(&frontEndDataOut->codeMesh);
     frontEndDataOut->markMeshCount = 0;
     R_ResetMesh(&frontEndDataOut->markMesh);
+    // KIWI GLASS
+    R_ResetMesh(&frontEndDataOut->glassMesh);
+    // KIWI END
     frontEndDataOut->viewParmCount = 0;
     frontEndDataOut->cmds = 0;
     debugGlobalsEntry = &frontEndDataOut->debugGlobals;

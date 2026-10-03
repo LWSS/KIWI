@@ -32,6 +32,9 @@ add_executable(${PROJECT_NAME}
     ${GAME} 
     ${GAME_MP} 
     ${GFX_D3D} 
+    # KIWI GLASS
+    ${GLASS}
+    # KIWI END
     ${GROUPVOICE} 
     ${GROUPVOICE_SPEEX} 
     ${MSSLIB} 

@@ -20,6 +20,9 @@
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
 #include <server_mp/server_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "cg_main.h"
 #include <server/server.h>
@@ -608,6 +611,9 @@ void __cdecl CG_DrawFullScreenDebugOverlays(int localClientNum)
                 if (phys_drawDebugInfo->current.enabled)
                     Phys_DrawDebugText(&scrPlaceFull);
                 Ragdoll_DebugDraw();
+                // KIWI GLASS
+                GlassCl_DrawDebug();
+                // KIWI END
             }
         }
         else

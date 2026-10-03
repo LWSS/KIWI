@@ -583,7 +583,9 @@ void __cdecl SVC_Info(netadr_t from)
     // to prevent timed spoofed reply packets that add ghost servers
     v1 = SV_Cmd_Argv(1);
     Info_SetValueForKey(infostring, "challenge", v1);
-    v2 = va("%i", 1);
+    // KIWI GLASS
+    v2 = va("%i", PROTOCOL_VERSION);
+    // KIWI END
     Info_SetValueForKey(infostring, "protocol", v2);
     Info_SetValueForKey(infostring, "hostname", sv_hostname->current.string);
     Info_SetValueForKey(infostring, "mapname", sv_mapname->current.string);

@@ -21,6 +21,9 @@
 #include <gfx_d3d/r_workercmds_common.h>
 #include <universal/profile.h>
 #include <game_mp/g_main_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 TestEffect s_testEffect[1];
 ClientViewParams clientViewParamsArray[1][1];
@@ -1419,6 +1422,9 @@ int __cdecl CG_DrawActiveFrame(
                     viewlocked_entNum = cgameGlob->predictedPlayerState.viewlocked_entNum;
                 else
                     viewlocked_entNum = ENTITYNUM_NONE;
+                // KIWI GLASS
+                GlassKiwi_ClientUpdate(localClientNum);
+                // KIWI END
                 if (!cgameGlob->predictedPlayerState.locationSelectionInfo
                     || (cgameGlob->predictedPlayerState.otherFlags & 2) != 0)
                 {

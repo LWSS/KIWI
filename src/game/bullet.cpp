@@ -12,6 +12,9 @@
 #include <game_mp/g_public_mp.h>
 #include <server_mp/server_mp.h>
 #include <game_mp/g_utils_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 #elif KISAK_SP
 #include "g_local.h"
 #include "g_main.h"
@@ -444,6 +447,11 @@ void __cdecl Bullet_Process(
 
     hitEntId = Trace_GetDynEntHitId(&br->trace, &drawType);
 
+    // KIWI GLASS
+    // runs per penetration, so every pane passed is hit
+    if (br->trace.hitType == TRACE_HITTYPE_GLASS)
+        GlassSv_Damage(Trace_GetGlassHitId(&br->trace), damage, bp->methodOfDeath, br->hitPos, (float *)bp->dir);
+    // KIWI END
     if (br->hitEnt && br->hitEnt->takedamage && !br->ignoreHitEnt)
     {
         if (weapDef->armorPiercing)

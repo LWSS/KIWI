@@ -130,7 +130,10 @@ enum surfaceType_t : int
     SF_MARK_MESH = 0xB,
     SF_PARTICLE_CLOUD = 0xC,
     SF_END_FX = 0xD,
-    SF_NUM_SURFACE_TYPES = 0xD,
+    // KIWI GLASS
+    SF_GLASS_MESH = 0xD,
+    SF_NUM_SURFACE_TYPES = 0xE, // was 0xD
+    // KIWI END
     SF_FORCE_32_BITS = -0x1,
 };
 

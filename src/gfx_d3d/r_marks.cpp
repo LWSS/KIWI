@@ -17,6 +17,9 @@
 #include <cgame/cg_pose.h>
 #include <cgame/cg_ents.h>
 #endif
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 
 void  R_BoxSurfaces(
@@ -1108,6 +1111,10 @@ void __cdecl R_MarkFragments_Go(
             v7 = R_MarkFragments_EntBrushes(markInfo) != 0;
         else
             v7 = 0;
+        // KIWI GLASS
+        if (v7)
+            v7 = R_MarkFragments_Glass(markInfo) != 0;
+        // KIWI END
         if (!v7)
             error = 1;
     }

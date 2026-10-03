@@ -16,6 +16,9 @@
 #include <qcommon/files.h>
 #include <client/client.h>
 #include <server_mp/server_mp.h>
+// KIWI GLASS
+#include <glass/glass_kiwi_hooks.h>
+// KIWI END
 
 const char* svc_strings[256] = {
     "svc_nop",
@@ -702,6 +705,10 @@ void __cdecl CL_ParseSnapshot(int localClientNum, msg_t *msg)
     MSG_ClearLastReferencedEntity(msg);
     SHOWNET(msg, (char*)"packet clients");
     CL_ParsePacketClients(LocalClientGlobals, msg, newSnap.serverTime, old, &newSnap);
+    // KIWI GLASS
+    SHOWNET(msg, (char *)"glass");
+    GlassKiwi_ParseSnapshot(localClientNum, msg);
+    // KIWI END
     // if not valid, dump the entire thing now that it has
     // been properly read
     if (msg->overflowed)
@@ -1148,6 +1155,9 @@ void __cdecl CL_ParseGamestate(int localClientNum, msg_t *msg)
 
     // wipe local client state
     CL_ClearState(localClientNum);
+    // KIWI GLASS
+    GlassKiwi_ClientGamestate();
+    // KIWI END
     MSG_ClearLastReferencedEntity(msg);
     Vec3Clear(cls.mapCenter);
     // a gamestate always marks a server command sequence

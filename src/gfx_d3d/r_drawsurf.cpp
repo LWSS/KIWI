@@ -182,6 +182,99 @@ void R_BeginCodeMeshVerts()
     R_BeginMeshVerts(&frontEndDataOut->codeMesh);
 }
 
+// KIWI GLASS
+// own mesh: filled on main thread while FX may hold codeMesh
+static bool g_processGlassMesh;
+
+void R_BeginGlassMeshVerts()
+{
+    iassert( !g_processGlassMesh );
+    iassert( frontEndDataOut->glassMesh.vb.buffer );
+    g_processGlassMesh = 1;
+    R_BeginMeshVerts(&frontEndDataOut->glassMesh);
+}
+
+void R_EndGlassMeshVerts()
+{
+    g_processGlassMesh = 0;
+    R_EndMeshVerts(&frontEndDataOut->glassMesh);
+}
+
+char __cdecl R_ReserveGlassMeshIndices(int indexCount, r_double_index_t **indicesOut)
+{
+    iassert( g_processGlassMesh );
+    if (R_ReserveMeshIndices(&frontEndDataOut->glassMesh, indexCount, indicesOut))
+        return 1;
+    R_WarnOncePerFrame(R_WARN_MAX_CODE_INDS);
+    return 0;
+}
+
+char __cdecl R_ReserveGlassMeshVerts(int vertCount, uint16_t *baseVertex)
+{
+    iassert( g_processGlassMesh );
+    if (R_ReserveMeshVerts(&frontEndDataOut->glassMesh, vertCount, baseVertex))
+        return 1;
+    R_WarnOncePerFrame(R_WARN_MAX_CODE_VERTS);
+    return 0;
+}
+
+GfxPackedVertex *__cdecl R_GetGlassMeshVerts(uint16_t baseVertex)
+{
+    iassert( g_processGlassMesh );
+    return (GfxPackedVertex *)R_GetMeshVerts(&frontEndDataOut->glassMesh, baseVertex);
+}
+
+// drawsurfRegion is ignored: always the lit FX list
+void __cdecl R_AddGlassDrawSurf(
+    Material *material,
+    uint16_t *indices,
+    int indexCount,
+    uint lightHandle,
+    uint primaryLightIndex,
+    uint reflectionProbeIndex,
+    uint drawsurfRegion)
+{
+    const MaterialTechnique *technique;
+    FxCodeMeshData *codeMesh;
+    GfxDrawSurf *drawSurf;
+    uint codeMeshIndex;
+
+    iassert( indexCount );
+    iassert( g_processGlassMesh );
+    iassert( rgp.sortedMaterials[material->info.drawSurf.fields.materialSortedIndex] == material );
+
+    // model-lit packed-vertex materials only
+    technique = Material_GetTechnique(material, TECHNIQUE_LIT);
+    if (!technique || !technique->passArray[0].vertexDecl || !technique->passArray[0].vertexDecl->routing.decl[VERTDECL_PACKED])
+    {
+        R_WarnOncePerFrame(R_WARN_NONEMISSIVE_FX_MATERIAL, material->info.name, "glass shard");
+        return;
+    }
+    codeMeshIndex = InterlockedExchangeAdd(&frontEndDataOut->codeMeshCount, 1);
+    if (codeMeshIndex >= ARRAY_COUNT(frontEndDataOut->codeMeshes))
+    {
+        R_WarnOncePerFrame(R_WARN_GFX_CODE_MESH_LIMIT);
+        return;
+    }
+    codeMesh = &frontEndDataOut->codeMeshes[codeMeshIndex];
+    codeMesh->triCount = indexCount / 3;
+    codeMesh->indices = indices;
+    codeMesh->argOffset = 0;
+    codeMesh->argCount = 0;
+    codeMesh->lightHandle = lightHandle;
+    drawSurf = R_AllocFxDrawSurf(DRAW_SURF_FX_CAMERA_LIT);
+    if (!drawSurf)
+        return;
+    drawSurf->packed = R_GetMaterialInfoPacked(material).packed;
+    drawSurf->fields.objectId = codeMeshIndex;
+    drawSurf->fields.surfType = SF_GLASS_MESH;
+    drawSurf->fields.prepass = MTL_PREPASS_NONE;
+    drawSurf->fields.primaryLightIndex = primaryLightIndex;
+    drawSurf->fields.reflectionProbeIndex = reflectionProbeIndex;
+    drawSurf->fields.customIndex = 0;
+}
+// KIWI END
+
 void R_EndMarkMeshVerts()
 {
     g_processMarkMesh = 0;
