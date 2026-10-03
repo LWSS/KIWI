@@ -113,6 +113,13 @@ bool KiwiRegion_HitDistance( const ray_t &ray, int index, float *outDist );
 // region wins ties - it loses only to a surface nearer by more than the plane band (>= 1
 // unit), so a region drawn on a brush face picks before the face.  True with no distance.
 bool KiwiRegion_WinsOverSurface( const ray_t &ray, int index, float surfaceDist );
+// KIWI (2026-10-03): the whole click / hover rule against a Pick() result on the same ray.
+// A brush vertex / edge always wins; otherwise the region competes with the nearer of the
+// pick's area hit and the camera solid trace, which sees model MESHES (face-mode picks skip
+// models, and a model's proxy box is no surface) - so a region inside a model's bounds is
+// clickable wherever the model itself does not cover it.
+struct pick_result_t;                // kiwi_pick.h
+bool KiwiRegion_WinsOverPick( const ray_t &ray, int index, const pick_result_t &hit );
 
 // Region selection is KIWI-owned because derived regions cannot enter selection_t.
 // Store a world-space match key per member: derived indices change on every rebuild,

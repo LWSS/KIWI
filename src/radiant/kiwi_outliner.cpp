@@ -20,6 +20,9 @@
 #include "kiwi_construct.h"
 #include "kiwi_hover.h"         // viewport row hover
 #include "kiwi_particles.h"     // KIWI_FX_CLASSNAME - the Particles section
+// KIWI GLASS
+#include "kiwi_glass.h"         // KIWI_GLASS_CLASSNAME - the Glass section
+// KIWI END
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_visibility.h"    // shared hidden state and undo
@@ -102,6 +105,9 @@ enum koutKind_t
     // section after Models, and a blank separator row closes the Groups section.
     KOUT_SECTION_PARTICLES,
     KOUT_SPACER,                // no eye, no label, not clickable
+    // KIWI GLASS
+    KOUT_SECTION_GLASS,         // breakable glass panes (kiwi_glass.h)
+    // KIWI END
 };
 
 struct koutRow_t
@@ -137,6 +143,9 @@ const unsigned KOUT_KEY_TERRAIN = 0xF0000007u;
 const unsigned KOUT_KEY_BARBWIRE = 0xF0000008u;   // the Barbwire folder inside Models
 const unsigned KOUT_KEY_GROUPS   = 0xF0000009u;   // the top-level Groups section
 const unsigned KOUT_KEY_PARTICLES = 0xF000000Au;  // the Particles section
+// KIWI GLASS
+const unsigned KOUT_KEY_GLASS     = 0xF000000Bu;  // the Glass section
+// KIWI END
 
 // Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
 // out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
@@ -326,6 +335,10 @@ koutKind_t EntitySection( entity_s *inst )
         return KOUT_SECTION_BRUSHES;
     if ( !_stricmp( ClassOf( inst ), KIWI_FX_CLASSNAME ) )
         return KOUT_SECTION_PARTICLES;
+    // KIWI GLASS
+    if ( !_stricmp( ClassOf( inst ), KIWI_GLASS_CLASSNAME ) )
+        return KOUT_SECTION_GLASS;
+    // KIWI END
 
     entity_s_def *def = DefOf( inst );
     eclass_t *ec = def ? def->eclass : 0;
@@ -364,6 +377,9 @@ unsigned SectionKey( koutKind_t kind )
     case KOUT_SECTION_MODELS:   return KOUT_KEY_MODELS;
     case KOUT_SECTION_IMAGES:   return KOUT_KEY_IMAGES;
     case KOUT_SECTION_PARTICLES: return KOUT_KEY_PARTICLES;
+    // KIWI GLASS
+    case KOUT_SECTION_GLASS:    return KOUT_KEY_GLASS;
+    // KIWI END
     default:                    return 0;
     }
 }
@@ -404,6 +420,13 @@ void FolderName( entity_s *inst, char *out, int outSize )
         const char *fx = def ? ValueForKey2( def, "fx" ) : "";      // KIWI: the effect it plays
         _snprintf( out, (size_t)outSize, "%s", fx && fx[0] ? fx : "(no effect)" );
     }
+    // KIWI GLASS
+    else if ( def && !_stricmp( ClassOf( inst ), KIWI_GLASS_CLASSNAME ) )
+    {
+        const char *set = ValueForKey2( def, "glassdef" );          // its glass set
+        _snprintf( out, (size_t)outSize, "%s %i", set && set[0] ? set : "default_clear", def->numberId );
+    }
+    // KIWI END
     else
     {
         _snprintf( out, (size_t)outSize, "%s %i", ClassOf( inst ), def ? def->numberId : 0 );
@@ -830,10 +853,12 @@ void FlattenUGroup( int idx, int indent )
     for ( size_t i = 0; i < s_ug[idx].kids.size(); ++i )
         FlattenUGroup( s_ug[idx].kids[i], indent + 1 );
 
-    static const koutKind_t kinds[5] = { KOUT_SECTION_BRUSHES, KOUT_SECTION_MODELS,
+    // KIWI GLASS
+    static const koutKind_t kinds[6] = { KOUT_SECTION_BRUSHES, KOUT_SECTION_MODELS,
                                          KOUT_SECTION_LIGHTS,  KOUT_SECTION_ENTITIES,
-                                         KOUT_SECTION_PARTICLES };
-    for ( int k = 0; k < 5; ++k )
+                                         KOUT_SECTION_PARTICLES, KOUT_SECTION_GLASS }; // was kinds[5]
+    for ( int k = 0; k < 6; ++k ) // was 5
+    // KIWI END
     {
         std::vector<entity_s *> ents;
         UGMembers( idx, (int)kinds[k], false, ents );
@@ -1027,6 +1052,9 @@ void Flatten()
     FlattenEntitySection( KOUT_SECTION_LIGHTS );
     FlattenEntitySection( KOUT_SECTION_MODELS );
     FlattenEntitySection( KOUT_SECTION_PARTICLES );
+    // KIWI GLASS
+    FlattenEntitySection( KOUT_SECTION_GLASS );
+    // KIWI END
     FlattenImages();
 }
 
@@ -1964,7 +1992,10 @@ bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
         || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER
-        || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES;
+        || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES
+        // KIWI GLASS
+        || k == KOUT_SECTION_GLASS;
+        // KIWI END
 }
 
 // Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
@@ -2468,6 +2499,9 @@ void KiwiOutliner_Draw()
                 case KOUT_BARBWIRE_FOLDER:
                 case KOUT_SECTION_GROUPS:
                 case KOUT_SECTION_PARTICLES:
+                // KIWI GLASS
+                case KOUT_SECTION_GLASS:
+                // KIWI END
                     SectionEyeState( r.kind, &hidden, &hasEye );
                     break;
                 case KOUT_UGROUP:
@@ -2621,6 +2655,11 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_PARTICLES:
                     _snprintf( label, sizeof( label ), "Particles (%i)", r.count );
                     break;
+                // KIWI GLASS
+                case KOUT_SECTION_GLASS:
+                    _snprintf( label, sizeof( label ), "Glass (%i)", r.count );
+                    break;
+                // KIWI END
                 case KOUT_SPACER:
                     label[0] = '\0';
                     break;
@@ -2633,7 +2672,11 @@ void KiwiOutliner_Draw()
                                r.ugType == KOUT_SECTION_BRUSHES   ? "Brushes"
                              : r.ugType == KOUT_SECTION_MODELS    ? "Models"
                              : r.ugType == KOUT_SECTION_LIGHTS    ? "Lights"
-                             : r.ugType == KOUT_SECTION_PARTICLES ? "Particles" : "Entities",
+                             : r.ugType == KOUT_SECTION_PARTICLES ? "Particles"
+                             // KIWI GLASS
+                             : r.ugType == KOUT_SECTION_GLASS     ? "Glass"
+                             // KIWI END
+                             : "Entities",
                                r.count );
                     break;
                 case KOUT_GROUP_ENTITY:

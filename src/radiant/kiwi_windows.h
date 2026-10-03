@@ -37,6 +37,11 @@ enum kiwiWindow_t
     // FBX/OBJ -> xmodel importer with preview, surfaces, variants, collision
     // (kiwi_modelimport.h). Closed by default; first opens floating over the editor.
     KIWI_WIN_MODELIMPORT,   // "Model Import"                   default OFF
+    // KIWI GLASS
+    // Breakable glass sets + panes (kiwi_glass.h). Closed by default (no layout reseed);
+    // docks into the main node when opened.
+    KIWI_WIN_GLASS,         // "Glass"                          default OFF
+    // KIWI END
     KIWI_WIN_COUNT,
 };
 

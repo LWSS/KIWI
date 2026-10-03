@@ -436,6 +436,8 @@ namespace
                     continue;
                 if ( particlesOnly && !KiwiParticles_IsParticleNode( b ) )
                     continue;
+                if ( kind != SEL_OBJECT && Pick_IsModelProxy( b ) )
+                    continue;                // KIWI: a model's box has no points/edges/faces
                 CollectFromBrush( b, r, crossing, kind, out );
             }
         }
@@ -676,18 +678,9 @@ namespace
                 reg = KiwiRegion_PickAt( rray );
             if ( reg >= 0 )
             {
-                const bool brushPointish = hit.valid
-                                        && ( hit.item.kind == SEL_VERTEX
-                                          || hit.item.kind == SEL_EDGE );
-                bool regionWins = !brushPointish;
-                if ( regionWins && hit.valid )
-                {
-                    // KIWI: a coplanar region beats the face it is drawn on (tie band).
-                    const float dx = hit.point[0] - rray.origin[0];
-                    const float dy = hit.point[1] - rray.origin[1];
-                    const float dz = hit.point[2] - rray.origin[2];
-                    regionWins = KiwiRegion_WinsOverSurface( rray, reg, sqrtf( dx * dx + dy * dy + dz * dz ) );
-                }
+                // KIWI: a coplanar region beats the face it is drawn on (tie band); model
+                // meshes occlude, their proxy boxes do not (KiwiRegion_WinsOverPick).
+                const bool regionWins = KiwiRegion_WinsOverPick( rray, reg, hit );
                 if ( regionWins )
                 {
                     if ( !shift && !ctrl )

@@ -89,6 +89,10 @@ extern qtexture_s *TexWnd_GetMaterialListHead();
 // ─── surface window flag / dialog ─────────────────────────────────────────────
 // surfDlgGlob (surface inspector; .hwnd = HWND when open) comes from qe3.h
 
+// KIWI GLASS
+void KiwiGlass_BeforeMapSave();   // kiwi_glass.cpp: every pane's uvscale
+// KIWI END
+
 // KIWI: the Particles tab (kiwi_particles.cpp) - save-time script export + per-map reset.
 void KiwiParticles_ExportForMap( const char *mapPath, bool fromSave );
 void KiwiParticles_ResetForNewMap();
@@ -814,6 +818,9 @@ void Map_SaveFile( const char *path, char a1, char a2 )
             Sys_Printf( "Material layers: repaired %i brush(es) and %i patch(es) before "
                         "writing.\n", healedBrushes, healedPatches );
     }
+    // KIWI GLASS
+    KiwiGlass_BeforeMapSave();
+    // KIWI END
 
     FILE *fout = Map_SaveFileToPerforce( path, (char)(a2 == 0) );
     if ( !fout )

@@ -60,6 +60,10 @@ namespace
         // Place Sun edits worldspawn keys, so it remains outside curve/solid groups.
         { "Lighting", "Place Sun",              KIWI_CMD_PLACE_SUN        },
 
+        // KIWI GLASS
+        { "Gameplay", "Breakable Glass",        KIWI_CMD_GLASS_MAKE       },
+        // KIWI END
+
         // Keep drawing-plane controls adjacent to creation commands.
         { "Construction plane", "XY",        KIWI_CMD_CPLANE_XY        },
         { 0,        "XZ",                    KIWI_CMD_CPLANE_XZ        },

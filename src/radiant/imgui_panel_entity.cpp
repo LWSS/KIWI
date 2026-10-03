@@ -3,6 +3,9 @@
 #include "qe3.h"
 #include "kiwi_entinspect.h"
 #include "kiwi_fmt.h"
+// KIWI GLASS
+#include "kiwi_glass.h"
+// KIWI END
 #include "kiwi_windows.h"
 #include "radiant_ui_actions.h"
 
@@ -1116,6 +1119,11 @@ namespace
             s_editWorldspawn = false;
 
         const char *classname = EntityClassname( edit_entity );
+        // KIWI GLASS
+        if ( edit_entity && !selectionEmpty && classname && !_stricmp( classname, KIWI_GLASS_CLASSNAME ) )
+            KiwiGlass_Focus();                   // a pane: the Glass window, not the Inspector
+        else
+        // KIWI END
         if ( edit_entity && !selectionEmpty && classname &&
              _stricmp( classname, "worldspawn" ) && !StartsNoCase( classname, "light" ) )
         {

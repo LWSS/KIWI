@@ -28,6 +28,7 @@
 #include "kiwi_vec.h"     // Dot3
 
 #include <algorithm>        // std::sort (face-delete breakpoints)
+#include <float.h>          // FLT_MAX (KiwiRegion_WinsOverPick)
 #include <math.h>
 #include <vector>           // scratch vectors
 #include <string.h>
@@ -1331,6 +1332,23 @@ bool KiwiRegion_WinsOverSurface( const ray_t &ray, int index, float surfaceDist 
     if ( band < 1.0f )
         band = 1.0f;
     return !( surfaceDist < regDist - band );
+}
+
+bool KiwiRegion_WinsOverPick( const ray_t &ray, int index, const pick_result_t &hit )
+{
+    if ( hit.valid && ( hit.item.kind == SEL_VERTEX || hit.item.kind == SEL_EDGE ) )
+        return false;                           // aimed-at points and lines keep priority
+    float surface = FLT_MAX;
+    if ( hit.valid )
+    {
+        const float d[3] = { hit.point[0] - ray.origin[0], hit.point[1] - ray.origin[1],
+                             hit.point[2] - ray.origin[2] };
+        surface = sqrtf( Dot3( d, d ) );
+    }
+    float solid = 0.0f;
+    if ( Pick_TraceSolid( ray.origin, ray.dir, &solid ) && solid < surface )
+        surface = solid;
+    return surface == FLT_MAX || KiwiRegion_WinsOverSurface( ray, index, surface );
 }
 
 // Region selection is stored as world-space match keys, not derived indices.

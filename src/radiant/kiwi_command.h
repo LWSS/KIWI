@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34164, modal 34068.
+// 34100..34199 the second instant block. Next free: instant 34168, modal 34068.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -168,6 +168,12 @@
 #define KIWI_CMD_WINDOWS_RESET_LAYOUT 34161 // Windows > Reset Layout (default dock layout + open states)
 #define KIWI_CMD_VIEW_DEBUG_ORBIT   34162   // View > Debug: Orbit Pivot Probe (draw the MMB pivot probe rays)
 #define KIWI_CMD_WINDOW_MODELIMPORT 34163   // Windows > Model Import (kiwi_modelimport: FBX/OBJ -> xmodel)
+// KIWI GLASS
+#define KIWI_CMD_GLASS_MAKE         34164   // "Make Breakable Glass" (kiwi_glass)
+#define KIWI_CMD_GLASS_UNMAKE       34165   // "Make Regular Brush"
+#define KIWI_CMD_GLASS_APPLY        34166   // "Apply Glass Set" (selected panes take the active set)
+#define KIWI_CMD_WINDOW_GLASS       34167   // Windows > Glass
+// KIWI END
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

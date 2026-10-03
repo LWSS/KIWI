@@ -653,18 +653,9 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
         const int reg = KiwiRegion_PickAt( ray );
         if ( reg >= 0 )
         {
-            const bool brushPointish = hit.valid
-                                    && ( hit.item.kind == SEL_VERTEX
-                                      || hit.item.kind == SEL_EDGE );
-            bool regionWins = !brushPointish;
-            if ( regionWins && hit.valid )
-            {
-                // KIWI: a coplanar region beats the face it is drawn on (same rule as the click).
-                const float dx = hit.point[0] - ray.origin[0];
-                const float dy = hit.point[1] - ray.origin[1];
-                const float dz = hit.point[2] - ray.origin[2];
-                regionWins = KiwiRegion_WinsOverSurface( ray, reg, sqrtf( dx * dx + dy * dy + dz * dz ) );
-            }
+            // KIWI: the click's rule (KiwiRegion_WinsOverPick): coplanar tie band, model
+            // meshes occlude, model proxy boxes do not.
+            const bool regionWins = KiwiRegion_WinsOverPick( ray, reg, hit );
             if ( regionWins )
             {
                 s_regionHover   = reg;

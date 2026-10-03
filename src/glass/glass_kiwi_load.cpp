@@ -4,6 +4,7 @@
 
 #include "glass_kiwi.h"
 #include "glass_kiwi_defaults.h"
+#include "glass_kiwi_slab.h"
 #include "glass_load_obj.h"
 #include "glass_server.h"
 #include "glass_client.h"
@@ -25,12 +26,7 @@
 extern GlassesServer svGlasses;
 char *__cdecl CM_EntityString(); // game/g_load_utils.cpp
 
-#define GLASS_KIWI_MAX_PANES        1000   // GlassesServer::glasses[1000]
-#define GLASS_KIWI_MAX_OUTLINE      22     // GlassRenderer::vertexList[22]
-#define GLASS_KIWI_MAX_POLYS        32
 #define GLASS_KIWI_MAX_POLY_VERTS   1024
-#define GLASS_KIWI_MIN_THICKNESS    0.1f
-#define GLASS_KIWI_MAX_THICKNESS    16.0f
 
 struct GlassKiwiDef
 {
@@ -99,13 +95,13 @@ static void GlassKiwi_SetDefDefaults(GlassKiwiDef *kd, const char *name)
     I_strncpyz(kd->shatterSound, GLASS_KIWI_DEFAULT_SHATTER_SOUND, sizeof(kd->shatterSound));
     I_strncpyz(kd->autoShatterSound, GLASS_KIWI_DEFAULT_SHATTER_SOUND, sizeof(kd->autoShatterSound));
     I_strncpyz(kd->shatterEffect, GLASS_KIWI_DEFAULT_SHATTER_EFFECT, sizeof(kd->shatterEffect));
-    kd->uvScale = 1.0f / 128.0f;
+    kd->uvScale = 1.0f / 64.0f;     // BO1's glass numbers (every BO1 glass def uses them)
     kd->frameEdges = 1;
 
-    kd->def.maxHealth = 100;
-    kd->def.minShardSize = 25.0f;
-    kd->def.maxShardSize = 400.0f;
-    kd->def.shardLifeProbablility = 0.25f;
+    kd->def.maxHealth = 120;
+    kd->def.minShardSize = 40.0f;
+    kd->def.maxShardSize = 200.0f;
+    kd->def.shardLifeProbablility = 0.5f;
     kd->def.maxShards = 0;
 }
 
@@ -184,7 +180,7 @@ static void GlassKiwi_LoadDefFile(GlassKiwiDef *kd)
     if (kd->def.maxHealth < 1)
         kd->def.maxHealth = 1;
     if (kd->uvScale <= 0.0f)
-        kd->uvScale = 1.0f / 128.0f;
+        kd->uvScale = 1.0f / 64.0f;
 
     kd->fileFound = true;
     Com_UnloadRawTextFile(buffer);
@@ -241,23 +237,6 @@ static void __cdecl GlassKiwi_CollectBrush(const cbrush_t *brush, void *userData
     ++collect->numBrushes;
 }
 
-// Newell normal of a winding; returns twice the polygon area.
-static float GlassKiwi_PolyArea(const Poly *poly)
-{
-    float normal[3] = { 0.0f, 0.0f, 0.0f };
-    unsigned int i;
-
-    for (i = 0; i < poly->ptCount; ++i)
-    {
-        const float *a = poly->pts[i];
-        const float *b = poly->pts[(i + 1) % poly->ptCount];
-        normal[0] += (a[1] - b[1]) * (a[2] + b[2]);
-        normal[1] += (a[2] - b[2]) * (a[0] + b[0]);
-        normal[2] += (a[0] - b[0]) * (a[1] + b[1]);
-    }
-    return Vec3Length(normal);
-}
-
 static void GlassKiwi_GetSidePlane(const cbrush_t *brush, const float (*axialPlanes)[4], unsigned int sideIndex, float *plane)
 {
     if (sideIndex < 6)
@@ -293,14 +272,10 @@ static bool GlassKiwi_BuildPane(Glass *glass, unsigned int brushModel, const flo
     float axialPlanes[6][4];
     Poly polys[GLASS_KIWI_MAX_POLYS];
     float polyVerts[GLASS_KIWI_MAX_POLY_VERTS][3];
-    float frontPlane[4], backPlane[4], plane[4];
-    float pts[GLASS_KIWI_MAX_POLY_VERTS][3];
-    float uv[GLASS_KIWI_MAX_OUTLINE + 1][2];
-    float axis[3][3];
-    float centroid[3];
-    float slab, bestArea, bestDot, signedArea, len, bestLen;
+    GlassKiwiSlabFace faces[GLASS_KIWI_MAX_POLYS];
+    GlassKiwiSlab slab;
     const cbrush_t *brush;
-    unsigned int sideCount, side, frontSide, backSide, i, numPts;
+    unsigned int sideCount, side, i;
     int k;
 
     if (!CM_ClipHandleIsValid(brushModel) || brushModel == 0 || brushModel >= cm.numSubModels)
@@ -342,161 +317,36 @@ static bool GlassKiwi_BuildPane(Glass *glass, unsigned int brushModel, const flo
     CM_BuildAxialPlanes(brush, &axialPlanes);
     Phys_BuildWindingsForBrush2(brush, polys, GLASS_KIWI_MAX_POLYS, polyVerts, GLASS_KIWI_MAX_POLY_VERTS);
 
-    // front = largest face
-    frontSide = sideCount;
-    bestArea = 0.0f;
     for (side = 0; side < sideCount; ++side)
     {
-        float area;
-
-        if (polys[side].ptCount < 3)
-            continue;
-        area = GlassKiwi_PolyArea(&polys[side]);
-        if (area > bestArea)
-        {
-            bestArea = area;
-            frontSide = side;
-        }
+        faces[side].pts = (const float *)polys[side].pts;
+        faces[side].ptCount = polys[side].ptCount;
+        faces[side].ptStride = 3;
+        GlassKiwi_GetSidePlane(brush, axialPlanes, side, faces[side].plane);
     }
-    if (frontSide == sideCount)
+
+    switch (GlassKiwi_BuildSlab(faces, sideCount, origin, &slab))
     {
+    case GLASS_SLAB_OK:
+        break;
+    case GLASS_SLAB_NO_FACES:
         Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): brush has no faces\n", entityIndex, brushModel);
         return false;
-    }
-    GlassKiwi_GetSidePlane(brush, axialPlanes, frontSide, frontPlane);
-
-    // back = the face most opposite the front
-    backSide = sideCount;
-    bestDot = -0.9999f;
-    for (side = 0; side < sideCount; ++side)
-    {
-        float dot;
-
-        if (side == frontSide || polys[side].ptCount < 3)
-            continue;
-        GlassKiwi_GetSidePlane(brush, axialPlanes, side, plane);
-        dot = Vec3Dot(plane, frontPlane);
-        if (dot < bestDot)
-        {
-            bestDot = dot;
-            backSide = side;
-        }
-    }
-    if (backSide == sideCount)
-    {
-        Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): no face opposite the largest face, a pane must be a flat slab\n",
-            entityIndex, brushModel);
+    case GLASS_SLAB_NOT_SLAB:
+        Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): back face is %.2f deg off parallel to the largest face (max %.0f), a pane must be a flat slab\n",
+            entityIndex, brushModel, slab.wedgeDeg, GLASS_KIWI_MAX_WEDGE_DEG);
         return false;
-    }
-    GlassKiwi_GetSidePlane(brush, axialPlanes, backSide, backPlane);
-
-    // planes are n.x = d with outward normals, so the slab is d_front + d_back thick
-    slab = frontPlane[3] + backPlane[3];
-    if (slab < GLASS_KIWI_MIN_THICKNESS || slab > GLASS_KIWI_MAX_THICKNESS)
-    {
+    case GLASS_SLAB_THICKNESS:
         Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): pane is %.2f units thick, must be %.1f..%.0f\n",
-            entityIndex, brushModel, slab, GLASS_KIWI_MIN_THICKNESS, GLASS_KIWI_MAX_THICKNESS);
+            entityIndex, brushModel, slab.thickness, GLASS_KIWI_MIN_THICKNESS, GLASS_KIWI_MAX_THICKNESS);
         return false;
-    }
-
-    // front face points in world space, near-duplicates merged
-    numPts = 0;
-    for (i = 0; i < polys[frontSide].ptCount; ++i)
-    {
-        float p[3];
-
-        Vec3Add(polys[frontSide].pts[i], origin, p);
-        if (numPts && Vec3DistanceSq(p, pts[numPts - 1]) < 0.01f * 0.01f)
-            continue;
-        pts[numPts][0] = p[0];
-        pts[numPts][1] = p[1];
-        pts[numPts][2] = p[2];
-        ++numPts;
-    }
-    while (numPts > 1 && Vec3DistanceSq(pts[0], pts[numPts - 1]) < 0.01f * 0.01f)
-        --numPts;
-    if (numPts < 3 || numPts > GLASS_KIWI_MAX_OUTLINE)
-    {
+    case GLASS_SLAB_POINT_COUNT:
         Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): front face has %u points, must be 3..%d\n",
-            entityIndex, brushModel, numPts, GLASS_KIWI_MAX_OUTLINE);
+            entityIndex, brushModel, slab.numPts, GLASS_KIWI_MAX_OUTLINE);
         return false;
-    }
-
-    // axis[2] = front outward normal, thickness negative (back face inside the slab): keeps
-    // BO1's shard mesh caps and winding facing out
-    axis[2][0] = frontPlane[0];
-    axis[2][1] = frontPlane[1];
-    axis[2][2] = frontPlane[2];
-    if (fabs(axis[2][2]) < 0.99f)
-    {
-        // vertical-ish pane: axis[1] is up projected onto the pane, axis[0] horizontal
-        axis[1][0] = -axis[2][2] * axis[2][0];
-        axis[1][1] = -axis[2][2] * axis[2][1];
-        axis[1][2] = 1.0f - axis[2][2] * axis[2][2];
-        Vec3Normalize(axis[1]);
-        Vec3Cross(axis[1], axis[2], axis[0]);
-    }
-    else
-    {
-        // horizontal pane: axis[0] along the longest front edge
-        bestLen = -1.0f;
-        for (i = 0; i < numPts; ++i)
-        {
-            float edge[3];
-
-            Vec3Sub(pts[(i + 1) % numPts], pts[i], edge);
-            len = Vec3Length(edge);
-            if (len > bestLen)
-            {
-                bestLen = len;
-                axis[0][0] = edge[0];
-                axis[0][1] = edge[1];
-                axis[0][2] = edge[2];
-            }
-        }
-        Vec3Normalize(axis[0]);
-        Vec3Cross(axis[2], axis[0], axis[1]);
-        Vec3Normalize(axis[1]);
-        Vec3Cross(axis[1], axis[2], axis[0]);
-    }
-
-    centroid[0] = 0.0f;
-    centroid[1] = 0.0f;
-    centroid[2] = 0.0f;
-    for (i = 0; i < numPts; ++i)
-        Vec3Add(centroid, pts[i], centroid);
-    Vec3Scale(centroid, 1.0f / (float)numPts, centroid);
-
-    signedArea = 0.0f;
-    for (i = 0; i < numPts; ++i)
-    {
-        float d[3];
-
-        Vec3Sub(pts[i], centroid, d);
-        uv[i][0] = Vec3Dot(d, axis[0]);
-        uv[i][1] = Vec3Dot(d, axis[1]);
-    }
-    for (i = 0; i < numPts; ++i)
-    {
-        unsigned int j = (i + 1) % numPts;
-        signedArea += uv[i][0] * uv[j][1] - uv[j][0] * uv[i][1];
-    }
-    if (fabs(signedArea) < 0.0001f)
-    {
+    case GLASS_SLAB_NO_AREA:
         Com_PrintError(CON_CHANNEL_SYSTEM, "ERROR: glass entity %d (*%u): front face has no area\n", entityIndex, brushModel);
         return false;
-    }
-    if (signedArea > 0.0f)
-    {
-        // the ear clipper (GlassShard::Triangles::Triangulate) only accepts clockwise outlines
-        for (i = 0; i < numPts / 2; ++i)
-        {
-            float tmp[2] = { uv[i][0], uv[i][1] };
-            uv[i][0] = uv[numPts - 1 - i][0];
-            uv[i][1] = uv[numPts - 1 - i][1];
-            uv[numPts - 1 - i][0] = tmp[0];
-            uv[numPts - 1 - i][1] = tmp[1];
-        }
     }
 
     glass->brushModel = brushModel;
@@ -527,17 +377,18 @@ static bool GlassKiwi_BuildPane(Glass *glass, unsigned int brushModel, const flo
         glass->absmax[k] += 0.5f;
     }
 
-    glass->numOutlineVerts = (unsigned __int8)numPts;
-    for (i = 0; i < numPts; ++i)
+    glass->numOutlineVerts = (unsigned __int8)slab.numPts;
+    for (i = 0; i < slab.numPts; ++i)
     {
-        glass->outline[i][0] = uv[i][0];
-        glass->outline[i][1] = uv[i][1];
+        glass->outline[i][0] = slab.outline[i][0];
+        glass->outline[i][1] = slab.outline[i][1];
     }
-    memcpy(glass->outlineAxis, axis, sizeof(axis));
-    glass->outlineOrigin[0] = centroid[0];
-    glass->outlineOrigin[1] = centroid[1];
-    glass->outlineOrigin[2] = centroid[2];
-    glass->thickness = -slab;
+    memcpy(glass->outlineAxis, slab.axis, sizeof(slab.axis));
+    glass->outlineOrigin[0] = slab.centroid[0];
+    glass->outlineOrigin[1] = slab.centroid[1];
+    glass->outlineOrigin[2] = slab.centroid[2];
+    // negative: back face inside the slab, keeps BO1's shard caps and winding facing out
+    glass->thickness = -slab.thickness;
     return true;
 }
 

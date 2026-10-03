@@ -13,6 +13,7 @@
 #include "kiwi_camera.h"    // shared ortho-aware screen scale
 #include "kiwi_command.h"   // active command and cursor
 #include "kiwi_snap.h"
+#include "kiwi_droptrace.h" // xmodel mesh vertices (rank 2)
 #include "kiwi_conselect.h" // construction self-snap exclusion
 #include "kiwi_construct.h"
 #include "kiwi_transform.h" // pivot placement and snap-dot state
@@ -80,6 +81,10 @@ namespace
     const float KSNAP_ACCENT_PIX  = 1.5f;
     const int   KSNAP_ACCENT_SEGS = 6;
     const int   KSNAP_ACCENT_MAX  = 40;    // maximum advertised face targets
+    // KIWI (2026-10-03): xmodel mesh vertices - candidates tried per snap query (nearest
+    // first, until one passes the depth gate) and dots drawn near the cursor.
+    const int   KSNAP_MODEL_VERT_TRY = 8;
+    const int   KSNAP_MODEL_DOTS_MAX = 48;
     const int   KSNAP_DOT_SEGS  = 6;       // hexagon — reads as solid at 2 px
     const int   KSNAP_RING_SEGS = 12;      // 12 chords read as round at 6 px
 
@@ -732,7 +737,7 @@ namespace
                   || def->maxs[0] < lo[0] || def->mins[0] > hi[0]
                   || def->maxs[1] < lo[1] || def->mins[1] > hi[1]
                   || def->maxs[2] < lo[2] || def->mins[2] > hi[2]
-                  || Excluded( *excluded, b ) || !Pick_BrushPickable( b ) )
+                  || Excluded( *excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
                     continue;
                 for ( int f = 0; f < def->faceCount; ++f )
                 {
@@ -818,7 +823,7 @@ namespace
         for ( selbrush_t *head : lists )
         for ( selbrush_t *b = head->next; b && b != head; b = b->next )
         {
-            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) )
+            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
                 continue;
             const brush_t *def = b->def;
             if ( !def || !def->faces || def->faceCount <= 0 || !BoundsNearRay( def, ray, reach * 2.0f ) )
@@ -1058,7 +1063,7 @@ namespace
         for ( selbrush_t *head : lists )
         for ( selbrush_t *b = head->next; b && b != head; b = b->next )
         {
-            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) )
+            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
                 continue;
             const brush_t *def = b->def;
             if ( !def || !def->faces || def->faceCount <= 0
@@ -1308,7 +1313,7 @@ namespace
             // Sentinel walk: init from .next, advance via ->next.
             for ( selbrush_t *b = head->next; b && b != head && budget > 0; b = b->next )
             {
-                if ( !Pick_BrushPickable( b ) )
+                if ( !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
                     continue;
                 brush_t *def = b->def;
                 if ( !def || !def->faces || b->patch )
@@ -1715,9 +1720,55 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[2] = conAnchor.pos[2];
         return true;                     // `source` stays the null item — see the header
     }
-    // Point rank 2: brush corner or patch control point, 8 px and not occluded.
+    // Point rank 2: brush corner, patch control point or xmodel mesh vertex (KIWI 2026-10-03),
+    // 8 px and not occluded; the nearer on screen wins.
     const pick_result_t vert = Pick( ray, SEL_MASK_VERTEX, pickFlags );
-    if ( vert.valid && visible( vert.point ) )
+    const bool brushVert = vert.valid && visible( vert.point );
+    kiwiModelVert_t modelVerts[KSNAP_MODEL_VERT_TRY];
+    const int modelVertCount = haveCursorPx
+        ? KiwiDrop_ModelVertsNear( curX, curY, KSNAP_R_VERTEX, ( pickFlags & PICKF_EXCLUDE_SELECTED ) != 0,
+                                   modelVerts, KSNAP_MODEL_VERT_TRY )
+        : 0;
+    const kiwiModelVert_t *modelVert = 0;
+    if ( modelVertCount > 0 )
+    {
+        // Object-mode Pick skips models that are not selectable; the camera's solid trace
+        // sees every resident mesh, so model vertices answer to the nearer of the two.
+        CandGate modelVisible = visible;
+        float solidDist = 0.0f;
+        if ( Pick_TraceSolid( ray.origin, ray.dir, &solidDist ) )
+        {
+            modelVisible.on    = true;
+            modelVisible.surfT = haveSurfDepth && visible.surfT < solidDist ? visible.surfT : solidDist;
+            if ( haveCPlane )
+            {
+                const float rel[3] = { cplaneHit[0] - ray.origin[0], cplaneHit[1] - ray.origin[1],
+                                       cplaneHit[2] - ray.origin[2] };
+                const float t = Dot3( rel, ray.dir );
+                if ( t > modelVisible.surfT )
+                    modelVisible.surfT = t;      // a planar placer works on its own plane
+            }
+        }
+        for ( int i = 0; i < modelVertCount && !modelVert; ++i )
+            if ( modelVisible( modelVerts[i].pos ) )
+                modelVert = &modelVerts[i];
+    }
+    if ( modelVert && brushVert )
+    {
+        float bx, by;
+        if ( Pick_WorldToImage( vert.point, &bx, &by ) && PixelDist( bx, by, curX, curY ) <= modelVert->distPx )
+            modelVert = 0;                       // the brush point is at least as near
+    }
+    if ( modelVert )
+    {
+        out->valid = true;
+        out->type  = SNAP_VERTEX;                // `source` stays null: no brush item names it
+        out->position[0] = modelVert->pos[0];
+        out->position[1] = modelVert->pos[1];
+        out->position[2] = modelVert->pos[2];
+        return true;
+    }
+    if ( brushVert )
     {
         out->valid  = true;
         out->type   = SNAP_VERTEX;
@@ -2367,6 +2418,30 @@ void KiwiSnap_DrawFaceAccents()
         BrushDivisions( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
                         [&]( const divPt_t &d, selbrush_t *, int, int ) { nub( d ); } );
         KiwiLines_Flush();
+    }
+
+    // KIWI (2026-10-03, user: "snapping points for each vertex on each xmodel near the
+    // cursor"): a dot on every xmodel mesh vertex within the nub reach (rank 2 targets);
+    // vertices on a model's far side are dropped by KiwiDrop_ModelVertsNear.
+    {
+        // A live transform snaps with PICKF_EXCLUDE_SELECTED: its own model vertices are
+        // not targets, so they get no dots either.
+        kiwiModelVert_t mv[KSNAP_MODEL_DOTS_MAX];
+        const int n = KiwiDrop_ModelVertsNear( (float)x, (float)y, KSNAP_DIV_REACH_PX,
+                                               ( cmd->PickFlags() & PICKF_EXCLUDE_SELECTED ) != 0,
+                                               mv, KSNAP_MODEL_DOTS_MAX );
+        if ( n > 0 )
+        {
+            KiwiLines_Begin( n * ( KSNAP_ACCENT_SEGS + KSNAP_ACCENT_SEGS / 2 ), 1 );
+            KiwiLines_Color( KSNAP_COL_MARK[0], KSNAP_COL_MARK[1], KSNAP_COL_MARK[2] );
+            for ( int i = 0; i < n; ++i )
+            {
+                float p[3];
+                Nudge( c, mv[i].pos, p );
+                EmitDisc( c, p, KSNAP_ACCENT_PIX * WorldPerPixel( c, mv[i].pos ), KSNAP_ACCENT_SEGS, true );
+            }
+            KiwiLines_Flush();
+        }
     }
 
     // SEL_MASK_FACE without OBJECT is load-bearing: Pick resolves faceIndex only

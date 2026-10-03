@@ -188,7 +188,7 @@ namespace
         for ( size_t c = 0; c < cand.size() && added < KSELX_MAX_FACES; ++c )
         {
             selbrush_t *b = cand[c];
-            if ( b->patch )                       // patches have no plane faces
+            if ( b->patch || Pick_IsModelProxy( b ) )   // patches / model boxes have no plane faces
                 continue;
             brush_t *def = b->def;
             if ( !def || !def->faces )
@@ -263,6 +263,8 @@ namespace
                 continue;
             if ( faceMode )
             {
+                if ( Pick_IsModelProxy( b ) )     // KIWI: a model's box has no faces
+                    continue;
                 for ( int f = 0; f < b->def->faceCount && added < KSELX_MAX_FACES; ++f )
                     if ( SameMaterial( FaceMaterial( b->def, f ), ref )
                          && Sel_Add( sel, Sel_MakeFace( b, f ) ) )

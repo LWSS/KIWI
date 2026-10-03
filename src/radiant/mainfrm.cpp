@@ -896,6 +896,9 @@ void Radiant_SeedCurrentTexdefs()
 }
 
 void KiwiParticles_RegisterEclass();   // KIWI: kiwi_particles.cpp
+// KIWI GLASS
+void KiwiGlass_RegisterEclass();       // kiwi_glass.cpp
+// KIWI END
 
 // OnCreate step 6a-ter) Scan the AI-type + gametype def folders, then the weapon defs, into
 //     the eclass list - the binary's QE_LoadProject runs Load_Defs("aitype") /
@@ -944,6 +947,9 @@ void Radiant_LoadEclassDefs()
     Load_Defs( "maps/mp/gametypes" );
     ScanWeapAiFiles();
     KiwiParticles_RegisterEclass();   // KIWI: kiwi_fx, the Particles tab's entity class (after every FreeAll)
+    // KIWI GLASS
+    KiwiGlass_RegisterEclass();       // the glass brush class
+    // KIWI END
 }
 
 // OnCreate tail) SetButtonMenuStates 0x420000 runs CheckTextureScale after project load.  Its

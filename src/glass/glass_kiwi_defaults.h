@@ -3,8 +3,9 @@
 // These are fallback default assets for the glass
 
 #define GLASS_KIWI_DEFAULT_DEF              "default_clear"
-#define GLASS_KIWI_DEFAULT_CRACKED_MATERIAL "com_glass_shattered_outside"
-#define GLASS_KIWI_DEFAULT_SHARD_MATERIAL   "mtl_80s_econ_glass"
+#define GLASS_KIWI_DEFAULT_CRACKED_MATERIAL "kglass_c_clear"                     // the upscaled BO1 crack (glass_sets); was com_glass_shattered_outside
+#define GLASS_KIWI_DEFAULT_SHARD_MATERIAL   "kglass_c_clear"                     // was mtl_80s_econ_glass
+#define GLASS_KIWI_DEFAULT_PANE_MATERIAL    "com_glass_clear"                    // editor: non-glass pane faces, set without one
 #define GLASS_KIWI_DEFAULT_CRACK_SOUND      "veh_glass_break_small"
 #define GLASS_KIWI_DEFAULT_SHATTER_SOUND    "kiwi_glass_shatter"                 // defined in: raw/soundaliases/kiwi_glass.csv
 #define GLASS_KIWI_DEFAULT_SHATTER_EFFECT   "breakables/kiwi_glass_shatter_edge" // up to 10x along the frame edges

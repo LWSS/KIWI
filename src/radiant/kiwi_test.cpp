@@ -24,6 +24,12 @@
 #include "kiwi_conselect.h"    // ...selected for the verbs that act on construction
 #include "kiwi_barbwire.h"     // barbwire verb (test mode, no dialog)
 #include "kiwi_outliner.h"     // group verb + groups / grouped expectations
+// KIWI GLASS
+#include "kiwi_glass.h"        // glass_* verbs + expectations
+#include "kiwi_selection.h"    // select face
+// KIWI END
+#include "kiwi_boxselect.h"    // click_at: the camera's real click path
+#include "kiwi_region.h"       // expect regions_selected
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -72,6 +78,9 @@ extern void Undo_Undo();                                                     // 
 extern void Undo_Redo();                                                     // undo.cpp:1019
 
 extern void SetKeyValue( entity_s_def *ent, const char *key, const char *value ); // entity.cpp:213
+// KIWI GLASS
+extern char *ValueForKey2( const entity_s *e, const char *key );            // entity.cpp:91; "" when absent
+// KIWI END
 extern int  Entity_GetVec3ForKey( entity_s_def *ent, float *out, const char *key ); // entity.cpp:100
 extern void MarkMapModified();                                               // win_qe3.cpp:198
 extern bool TexWnd_MakeMaterialCurrentByName( const char *name );             // texwnd.cpp:793
@@ -944,6 +953,81 @@ static void ExecuteExpect( const ScriptLine &line )
         ExpectResult( line, exists, exists ? "exists" : "missing", "exists" );
         return;
     }
+    // KIWI GLASS
+    if ( subject == "class" )
+    {
+        // expect class <classname> <count>   (saved entities, as select class counts them)
+        if ( w.size() != 4 || !ParseInt( w[3], expectedInt ) )
+        {
+            ScriptError( line, "expect class syntax is: expect class <classname> <count>" );
+            return;
+        }
+        for ( entity_s *ent : SavedEntities() )
+            if ( ent->eclass && ent->eclass->name && _stricmp( ent->eclass->name, w[2].c_str() ) == 0 )
+                ++actualInt;
+        ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ), w[3] );
+        return;
+    }
+    if ( subject == "key" )
+    {
+        // expect key <classname> <nth> <key> <value>   ("" = the key is absent)
+        int nth = -1;
+        if ( w.size() != 6 || !ParseInt( w[3], nth ) || nth < 0 )
+        {
+            ScriptError( line, "expect key syntax is: expect key <classname> <nth> <key> <value>" );
+            return;
+        }
+        entity_s *match = nullptr;
+        for ( entity_s *ent : SavedEntities() )
+            if ( ent->eclass && ent->eclass->name && _stricmp( ent->eclass->name, w[2].c_str() ) == 0 && nth-- == 0 )
+            {
+                match = ent;
+                break;
+            }
+        if ( !match )
+        {
+            ScriptError( line, "class '%s' has no match %s", w[2].c_str(), w[3].c_str() );
+            return;
+        }
+        const char *v = ValueForKey2( match, w[4].c_str() );
+        const std::string actual = v ? v : "";
+        ExpectResult( line, actual == w[5], actual.empty() ? "(absent)" : actual, w[5] );
+        return;
+    }
+    if ( subject == "glass_errors" || subject == "glass_warnings" || subject == "glass_panes" )
+    {
+        if ( w.size() != 3 || !ParseInt( w[2], expectedInt ) )
+        {
+            ScriptError( line, "expect %s requires a count", subject.c_str() );
+            return;
+        }
+        int warnings = 0, panes = 0;
+        const int errors = KiwiGlass_Validate( false, &warnings, &panes );
+        actualInt = subject == "glass_errors" ? errors : subject == "glass_warnings" ? warnings : panes;
+        ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ), w[2] );
+        return;
+    }
+    if ( subject == "glass_can_make" )
+    {
+        if ( w.size() != 3 || ( w[2] != "0" && w[2] != "1" ) )
+        {
+            ScriptError( line, "expect glass_can_make requires 0 or 1" );
+            return;
+        }
+        const bool can = KiwiGlass_CanMake();
+        ExpectResult( line, ( w[2] == "1" ) == can, can ? "1" : "0", w[2] );
+        return;
+    }
+    // KIWI END
+    if ( subject == "regions_selected" )
+    {
+        // KIWI (2026-10-03): members of the region selection that still resolve.
+        if ( w.size() != 3 || !ParseInt( w[2], expectedInt ) )
+        { ScriptError( line, "expect regions_selected requires a count" ); return; }
+        actualInt = KiwiRegion_SelectedCount();
+        ExpectResult( line, actualInt == expectedInt, std::to_string( actualInt ), w[2] );
+        return;
+    }
     if ( subject == "mapequal" )
     {
         if ( w.size() != 4 )
@@ -1001,6 +1085,30 @@ static void ExecuteSelect( const ScriptLine &line )
                          w.size() > 2 ? w[2].c_str() : "?", w.size() > 3 ? w[3].c_str() : "?" );
         return;
     }
+    // KIWI GLASS
+    if ( mode == "face" )
+    {
+        // select face <entity-index> <ordinal> <face>   (one face of that brush, nothing else)
+        int entityIndex = 0, brushIndex = 0, faceIndex = 0;
+        if ( w.size() != 5 || !ParseInt( w[2], entityIndex ) || !ParseInt( w[3], brushIndex ) ||
+             !ParseInt( w[4], faceIndex ) || !SelectBrushOrdinal( entityIndex, brushIndex ) )
+        {
+            ScriptError( line, "select face syntax is: select face <entity-index> <ordinal> <face>" );
+            return;
+        }
+        selbrush_t *node = selected_brushes.next;
+        if ( !node || node == &selected_brushes || faceIndex < 0 || faceIndex >= node->def->faceCount )
+        {
+            ScriptError( line, "brush has no face %d", faceIndex );
+            return;
+        }
+        Sel_Clear( KiwiSel() );
+        Sel_Add( KiwiSel(), Sel_MakeFace( node, faceIndex ) );
+        Sel_SyncToLegacy();
+        g_nUpdateBits = -1;
+        return;
+    }
+    // KIWI END
     if ( mode == "entity" )
     {
         int entityIndex = 0;
@@ -1497,6 +1605,74 @@ static void ExecuteLine( const ScriptLine &line )
         else LogFormat("PICK-BVH","%d models passed 243 rays each",count);
         return;
     }
+    if ( command == "click_at" )
+    {
+        // KIWI (2026-10-03): click_at x y z [shift] [ctrl] - a plain camera click on the
+        // pixel a world point projects to, through ClickSelect (construction, images,
+        // regions, brushes in the real arbitration order).
+        if ( w.size() < 4 || w.size() > 6 ) { ScriptError( line, "usage: click_at x y z [shift] [ctrl]" ); return; }
+        float p[3];
+        for ( int i = 0; i < 3; ++i )
+            if ( !ParseFloat( w[(size_t)i + 1], p[i] ) ) { ScriptError( line, "click_at coordinate %d is not numeric", i + 1 ); return; }
+        bool shift = false, ctrl = false;
+        for ( size_t i = 4; i < w.size(); ++i )
+        {
+            if ( Lower( w[i] ) == "shift" ) shift = true;
+            else if ( Lower( w[i] ) == "ctrl" ) ctrl = true;
+            else { ScriptError( line, "click_at modifier must be shift or ctrl" ); return; }
+        }
+        float ix, iy;
+        if ( !Pick_WorldToImage( p, &ix, &iy ) ) { ScriptError( line, "click_at point is off camera" ); return; }
+        KiwiBox_ClickSelectAt( (int)floorf( ix + 0.5f ), (int)floorf( iy + 0.5f ), shift, ctrl );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "model_vert_probe" )
+    {
+        // KIWI (2026-10-03): xmodel vertex snapping.  Per selected model: the vertex nearest
+        // its screen centre lies inside the model's world bounds, re-queries to itself at
+        // 0 px, and the picker's own mesh trace finds nothing in front of it (a ray aimed
+        // exactly at a vertex may slip between its triangles, so a miss passes).
+        int count = 0;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !KiwiDrop_IsModelEntity( b ) || b->owner->prefab ) continue;
+            float mins[3], maxs[3], angles[3], scale, origin[3], rmin[3], rmax[3];
+            if ( !KiwiDrop_GetModelInfo( b, mins, maxs, angles, &scale, origin )
+              || !KiwiDrop_TransformBounds( mins, maxs, angles, scale, rmin, rmax ) )
+            { ScriptError( line, "model_vert_probe: no model info" ); return; }
+            float centre[3], sx, sy;
+            for ( int k = 0; k < 3; ++k ) centre[k] = origin[k] + 0.5f * ( rmin[k] + rmax[k] );
+            if ( !Pick_WorldToImage( centre, &sx, &sy ) )
+            { ScriptError( line, "model_vert_probe: model centre is off camera" ); return; }
+            kiwiModelVert_t cands[64], v, again;
+            const int found = KiwiDrop_ModelVertsNear( sx, sy, 100000.0f, false, cands, 64 );
+            int pickIndex = -1;
+            for ( int i = 0; i < found && pickIndex < 0; ++i )
+                if ( cands[i].node == b ) pickIndex = i;         // other models' vertices may be nearer
+            if ( pickIndex < 0 )
+            { ScriptError( line, "model_vert_probe: no vertex found on the model" ); return; }
+            v = cands[pickIndex];
+            for ( int k = 0; k < 3; ++k )
+                if ( v.pos[k] < origin[k] + rmin[k] - 0.01f || v.pos[k] > origin[k] + rmax[k] + 0.01f )
+                { ScriptError( line, "model_vert_probe: vertex outside the model bounds" ); return; }
+            if ( KiwiDrop_ModelVertsNear( v.px, v.py, 0.5f, false, &again, 1 ) != 1
+              || fabsf( again.pos[0] - v.pos[0] ) + fabsf( again.pos[1] - v.pos[1] ) + fabsf( again.pos[2] - v.pos[2] ) > 0.01f )
+            { ScriptError( line, "model_vert_probe: the vertex does not re-query to itself" ); return; }
+            const float *eye = Ed_Camera()->origin;
+            float dir[3] = { v.pos[0] - eye[0], v.pos[1] - eye[1], v.pos[2] - eye[2] };
+            const float len = sqrtf( dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] );
+            for ( int k = 0; k < 3; ++k ) dir[k] /= len;
+            float hit = 0.0f;
+            if ( KiwiDrop_TraceModelCached( b, eye, dir, &hit, nullptr ) == 1 && hit < len - ( 0.05f + len * 1.0e-3f ) )
+            { ScriptError( line, "model_vert_probe: vertex %.2f %.2f %.2f is behind the model's own surface (%.3f vs %.3f)",
+                           v.pos[0], v.pos[1], v.pos[2], hit, len ); return; }
+            LogFormat( "MODEL-VERT", "vertex %.3f %.3f %.3f at %.1f %.1f px", v.pos[0], v.pos[1], v.pos[2], v.px, v.py );
+            ++count;
+        }
+        if ( !count ) ScriptError( line, "model_vert_probe requires selected model instances" );
+        return;
+    }
     if ( command == "facing_toggle_probe" )
     {
         // Warm cache first (script frames); either transition must age captures.
@@ -1543,6 +1719,31 @@ static void ExecuteLine( const ScriptLine &line )
         KiwiParticles_ExportForMap( currentmap, false );
         return;
     }
+    // KIWI GLASS
+    if ( command == "glass_set" )
+    {
+        // glass_set <set>   (the active set, a file under raw/glass)
+        if ( w.size() != 2 )
+        { ScriptError( line, "usage: glass_set <set>" ); return; }
+        if ( !KiwiGlass_SetActiveSet( w[1].c_str() ) )
+            ScriptError( line, "glass set '%s' is not in raw/glass", w[1].c_str() );
+        return;
+    }
+    if ( command == "glass_make" || command == "glass_unmake" || command == "glass_apply" )
+    {
+        const bool ok = command == "glass_make"   ? KiwiGlass_Make()
+                      : command == "glass_unmake" ? KiwiGlass_Unmake()
+                                                  : KiwiGlass_ApplySetToSelection();
+        if ( !ok )
+            ScriptError( line, "%s changed nothing", command.c_str() );
+        return;
+    }
+    if ( command == "glass_validate" )
+    {
+        KiwiGlass_Validate( true, nullptr, nullptr );   // one console line per bad pane
+        return;
+    }
+    // KIWI END
     if ( command == "toolkey" || command == "toolvalue" )
     {
         if ( !KiwiCmd_Active() || w.size() != 2 )

@@ -16,6 +16,9 @@
 #include "kiwi_modelbrowser.h"     // KIWI-UX: the Models tab + camera drop target
 #include "kiwi_particles.h"        // KIWI: the Particles tab + camera drop target
 #include "kiwi_modelimport.h"      // KIWI: the Model Import window + its preview RT
+// KIWI GLASS
+#include "kiwi_glass.h"
+// KIWI END
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
@@ -1916,6 +1919,9 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     KiwiModelBrowser_Draw(); // KIWI-UX
     KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
     KiwiModelImport_Draw();  // KIWI: FBX/OBJ -> xmodel importer (its preview renders in RenderViewportsToRT)
+    // KIWI GLASS
+    KiwiGlass_Draw();
+    // KIWI END
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint

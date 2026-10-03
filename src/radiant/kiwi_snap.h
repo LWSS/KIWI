@@ -15,7 +15,12 @@
 //
 //   0b. SNAP_ENDPOINT      open chain's first point (8 px)
 //   1.  SNAP_ENDPOINT      construction anchor (7 px)
-//   2.  SNAP_VERTEX        brush corner or patch control point (8 px)
+//   2.  SNAP_VERTEX        brush corner, patch control point, or xmodel mesh vertex
+//                          (8 px, nearer on screen wins; KiwiDrop_ModelVertsNear drops a
+//                          model's own far side, and model vertices also pass the camera
+//                          solid trace along the cursor ray so unselectable models still
+//                          occlude; the accent dots for them are not occlusion-gated
+//                          against other geometry, like the edge nubs)
 //   3.  SNAP_INTERSECTION  construction-segment crossing - with another construction
 //                          segment or with a brush edge (7 px)
 //   3b. SNAP_EDGE_MID      construction-segment midpoint or quarter point (7 px)
@@ -83,7 +88,7 @@ enum snap_type_t
 {
     SNAP_NONE = 0,
     SNAP_GRID,
-    SNAP_VERTEX,         // brush winding corner or patch control point
+    SNAP_VERTEX,         // brush winding corner, patch control point or xmodel mesh vertex
     SNAP_EDGE_MID,       // brush or construction segment midpoint
     SNAP_EDGE,           // brush edge or construction segment
     SNAP_FACE,

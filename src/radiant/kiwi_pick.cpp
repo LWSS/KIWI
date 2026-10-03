@@ -243,7 +243,7 @@ namespace
 
         for ( selbrush_t *b = sentinel->next; b && b != sentinel; b = b->next )
         {
-            if ( !BrushPickable( b ) )
+            if ( !BrushPickable( b ) || Pick_IsModelProxy( b ) )   // KIWI: no model box points/edges
                 continue;
             if ( exclude && exclude->Has( b ) )
                 continue;
@@ -352,6 +352,14 @@ bool Pick_BrushPickable( selbrush_t *b )
     return BrushPickable( b );
 }
 
+bool Pick_IsModelProxy( const selbrush_t *b )
+{
+    if ( !b || !b->owner || b->owner == world_entity || !b->owner->def )
+        return false;
+    const entity_s *def = b->owner->def;
+    return def->eclass && def->eclass->fixedsize && KiwiDrop_IsModelEntity( b );
+}
+
 // ─── ray construction ────────────────────────────────────────────────────────
 bool Pick_RayFromImagePos( int imgX, int imgY, ray_t *out )
 {
@@ -387,6 +395,25 @@ bool Pick_WorldToImage( const float *world, float *outX, float *outY )
     CamWnd_BuildMatrix();
     const projCtx_t p = MakeProjCtx();
     return ProjectRaw( p, world, outX, outY );
+}
+
+namespace
+{
+    projCtx_t s_bulkProj;
+}
+
+bool Pick_ProjectBegin()
+{
+    CamWnd_BuildMatrix();
+    s_bulkProj = MakeProjCtx();
+    return s_bulkProj.ok;
+}
+
+bool Pick_Project( const float *world, float *outX, float *outY )
+{
+    if ( !world || !outX || !outY )
+        return false;
+    return ProjectRaw( s_bulkProj, world, outX, outY );
 }
 
 int Pick_CameraContents()
@@ -477,7 +504,12 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     // In the models-only sub-mode (KiwiSel_ModelsOnly) brushes never select at all.
     const bool wantObjects   = ( kindMask & SEL_MASK_OBJECT ) != 0;
     const bool modelsAllowed = wantObjects && ( baseContents & ( 0x200 | 0x400 ) ) == 0;
-    const int  contents      = modelsAllowed ? ( baseContents | 0x400 ) : baseContents;
+    // KIWI (2026-10-03, user: "its impossible to select construction faces when they're within
+    // an xmodel bbox"): a face-only pick skips the model PROXY boxes too.  It used to stop on
+    // one and return a box face - nearer than any region or face inside the box - although a
+    // model has no editable faces.  The model MESH still occludes, just below.
+    const bool faceOnly      = !wantObjects && ( kindMask & SEL_MASK_FACE ) != 0;
+    const int  contents      = ( modelsAllowed || faceOnly ) ? ( baseContents | 0x400 ) : baseContents;
 
     edTrace_t t;
     {
@@ -513,6 +545,16 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
         }
         if ( KiwiSel_ModelsOnly() )
             return r;                              // brushes occlude but never select here
+    }
+    else if ( faceOnly )
+    {
+        // A model in front of the brush hit owns the pixel but has no faces: no pick.
+        selbrush_t *modelNode = nullptr;
+        float modelDist = 0.0f, modelNormal[3] = { 0.0f, 0.0f, 1.0f };
+        const float occluder = hb && !( hb->owner && hb->owner->prefab ) ? t.dist : FLT_MAX;
+        if ( KiwiDrop_PickModelMesh( start, dir, occluder, pExcl != nullptr,
+                                     &modelNode, &modelDist, modelNormal ) )
+            return r;
     }
 
     if ( !hb )
@@ -553,7 +595,7 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     const bool faceGranularity = ( kindMask & SEL_MASK_FACE ) != 0
                               && ( kindMask & SEL_MASK_OBJECT ) == 0;
     int faceIndex = -1;
-    if ( faceGranularity && !hb->patch && hb->faces && t.hit.face )
+    if ( faceGranularity && !hb->patch && hb->faces && t.hit.face && !Pick_IsModelProxy( hb ) )
     {
         const int idx = (int)( t.hit.face - hb->faces );
         if ( idx >= 0 && idx < hb->faceCount )

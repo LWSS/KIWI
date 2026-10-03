@@ -8,6 +8,9 @@
 #include "kiwi_command.h"
 #include "kiwi_launch.h"
 #include "kiwi_matconvert.h"
+// KIWI GLASS
+#include "kiwi_glass.h"
+// KIWI END
 #include "radiant_frame.h"
 
 #include <stdarg.h>
@@ -1427,6 +1430,9 @@ void DrawWindow()
     }
 
     KiwiMatConvert_DrawMapHealth();
+    // KIWI GLASS
+    KiwiGlass_DrawBuildCheck();   // panes that won't break, non-blocking
+    // KIWI END
 
     const bool canBuild = p.haveRoot && p.haveMap;
     const bool busy     = Busy();

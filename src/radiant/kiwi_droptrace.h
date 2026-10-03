@@ -45,6 +45,23 @@ bool KiwiDrop_TransformBounds( const float mins[3], const float maxs[3],
 bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
                      kiwiDropHit_t *outHit );
 
+// KIWI (2026-10-03, user: "there should be snapping points for each vertex on each xmodel
+// near the cursor"): mesh vertices of visible resident xmodels within `reachPx` of the
+// camera-image pixel (curX, curY), nearest first, at most maxOut.  Vertices the model itself
+// hides from the eye (its far side) are dropped; occlusion by OTHER geometry is the caller's
+// gate.  Coincident vertices (UV seams) appear once.  excludeSelected = live transforms.
+// One gather per frame (cursor, camera, exclusion) serves every reach up to 64 px; a model
+// with more than 0x40000 LOD-0 vertices, or past that budget in one gather, is skipped.
+struct kiwiModelVert_t
+{
+    float       pos[3];      // world
+    float       px, py;      // camera-image pixels
+    float       distPx;      // to (curX, curY)
+    selbrush_t *node;
+};
+int KiwiDrop_ModelVertsNear( float curX, float curY, float reachPx, bool excludeSelected,
+                             kiwiModelVert_t *out, int maxOut );
+
 // KIWI (2026-09-09): the pick-side model test — the node whose MESH the ray hits first
 // within `maxDist` (the occluding brush hit, or FLT_MAX), or false.  Same bounded
 // candidate gather as KiwiDrop_Trace; the ray must already be section-clamped.

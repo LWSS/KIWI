@@ -5,9 +5,12 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "prefs.h"
+#include "mainfrm.h"            // camera_s (model vertex snapping's eye)
+#include <imgui/imgui.h>        // ImGui::GetFrameCount (the per-frame vertex gather)
 #include <xanim/xmodel.h>
 
 #include "kiwi_droptrace.h"
+#include "kiwi_camera.h"        // KiwiCam_Ortho
 #include "kiwi_pick.h"
 #include "kiwi_section.h"
 #include "kiwi_shadowcache.h"
@@ -216,6 +219,25 @@ namespace
     };
     std::unordered_map<XModel *, meshTree_t> s_meshTrees;
 
+    // Vertex counts for model vertex snapping, keyed like the mesh trees: a reloaded model
+    // brings new geometry pointers.  Extraction packs LOD-0 surfaces with biased indices,
+    // so max + 1 = vertex count.
+    struct vertCount_t { const unsigned short *indices; int indexCount; int count; };
+    std::unordered_map<XModel *, vertCount_t> s_modelVertCount;
+
+    int ModelVertCount( XModel *model, const unsigned short *indices, int indexCount )
+    {
+        vertCount_t &e = s_modelVertCount[model];
+        if ( e.indices == indices && e.indexCount == indexCount )
+            return e.count;
+        e.indices    = indices;
+        e.indexCount = indexCount;
+        e.count      = 0;
+        for ( int i = 0; i < indexCount; ++i )
+            e.count = (std::max)( e.count, (int)indices[i] + 1 );
+        return e.count;
+    }
+
     void TraceMesh( XModel *model, const float *verts, const unsigned short *indices,
                     int indexCount, const float *start, const float *dir, float &best, float *normal )
     {
@@ -410,6 +432,7 @@ namespace
 void KiwiDrop_ClearModelTrees()
 {
     s_meshTrees.clear();
+    s_modelVertCount.clear();
 }
 
 int KiwiDrop_TraceModelCached( selbrush_t *node, const float *start, const float *dir,
@@ -732,4 +755,269 @@ bool KiwiDrop_PickModelMesh( const float start[3], const float dir[3], float max
         outNormal[2] = bestNormal[2];
     }
     return true;
+}
+
+// ─── xmodel vertex snapping (2026-10-03) ─────────────────────────────────────
+extern camera_s *Ed_Camera();                                          // camwnd.cpp
+
+namespace
+{
+    const int   KDROP_VERT_BUDGET    = 0x40000;   // vertices projected per gather
+    const int   KDROP_VERT_POOL      = 64;        // nearest kept for the self-occlusion test
+    const float KDROP_VERT_GATHER_PX = 64.0f;     // one gather per frame serves every smaller reach
+
+    struct vertModel_t
+    {
+        XModel *model;
+        float   origin[3];
+        float   axis[3][3];
+        float   scale;
+        float   extent;      // unscaled bounds diagonal: an ortho ray starts just outside it
+    };
+
+    struct vertCand_t
+    {
+        kiwiModelVert_t v;
+        int             model;      // index into the query's vertModel_t list
+        float           local[3];   // unscaled model space
+    };
+
+    // Sorted insert, nearest first; a coincident vertex (UV seam) is kept once.
+    void KeepNearest( const vertCand_t &c, vertCand_t *pool, int *count )
+    {
+        for ( int i = 0; i < *count; ++i )
+        {
+            const float dx = pool[i].v.pos[0] - c.v.pos[0];
+            const float dy = pool[i].v.pos[1] - c.v.pos[1];
+            const float dz = pool[i].v.pos[2] - c.v.pos[2];
+            if ( dx * dx + dy * dy + dz * dz < 1.0e-4f )
+                return;
+        }
+        int at = *count;
+        if ( at == KDROP_VERT_POOL )
+        {
+            if ( c.v.distPx >= pool[at - 1].v.distPx )
+                return;
+            --at;
+        }
+        else
+            ++*count;
+        while ( at > 0 && pool[at - 1].v.distPx > c.v.distPx )
+        {
+            pool[at] = pool[at - 1];
+            --at;
+        }
+        pool[at] = c;
+    }
+
+    // A ray from the eye to the vertex through the model's own mesh BVH (winding
+    // independent): true when the model's surface is in front of the vertex.
+    bool SelfOccluded( const vertModel_t &m, const float local[3], const camera_s *cam, bool ortho )
+    {
+        const float *verts = 0;
+        const unsigned short *indices = 0;
+        int indexCount = 0;
+        if ( !KiwiShadowCache_ModelGeo( m.model, &verts, &indices, &indexCount ) )
+            return false;
+        float start[3], dir[3], len, slack;
+        if ( ortho )
+        {
+            // Start just outside the model so the epsilon stays absolute (a thin frame's far
+            // side is only a few units behind its near side).
+            WorldToAxisDir( m.axis, cam->vpn, dir );
+            len = m.extent + 1.0f;
+            for ( int k = 0; k < 3; ++k )
+                start[k] = local[k] - dir[k] * len;
+            slack = 0.02f;
+        }
+        else
+        {
+            const float rel[3] = { cam->origin[0] - m.origin[0], cam->origin[1] - m.origin[1],
+                                   cam->origin[2] - m.origin[2] };
+            WorldToAxisDir( m.axis, rel, start );
+            for ( int k = 0; k < 3; ++k )
+            {
+                start[k] /= m.scale;
+                dir[k] = local[k] - start[k];
+            }
+            len = sqrtf( dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] );
+            if ( !( len > 1.0e-4f ) )
+                return false;
+            for ( int k = 0; k < 3; ++k )
+                dir[k] /= len;
+            slack = 0.02f + len * 1.0e-4f;          // the real eye distance
+        }
+        const float limit = len - slack;
+        float best = limit;
+        float normal[3];
+        TraceMesh( m.model, verts, indices, indexCount, start, dir, best, normal );
+        return best < limit;
+    }
+}
+
+// One gather: the KDROP_VERT_POOL vertices nearest (curX, curY) within reachPx, the
+// self-occluded ones dropped, nearest first, into out[KDROP_VERT_POOL].
+static int GatherModelVerts( float curX, float curY, float reachPx, bool excludeSelected,
+                             kiwiModelVert_t *out )
+{
+    const int maxOut = KDROP_VERT_POOL;
+    if ( g_PrefsDlg->entities_off || !Pick_ProjectBegin() )
+        return 0;
+    const camera_s *cam   = Ed_Camera();
+    const bool      ortho = KiwiCam_Ortho();
+    const float     reach2 = reachPx * reachPx;
+    int             budget = KDROP_VERT_BUDGET;
+
+    static std::vector<vertModel_t>      models;
+    static std::vector<const entity_s *> seen;
+    models.clear();
+    seen.clear();
+    vertCand_t pool[KDROP_VERT_POOL];
+    int        poolCount = 0;
+
+    selbrush_t *heads[2] = { &active_brushes, &selected_brushes };
+    for ( int h = 0; h < 2; ++h )
+    {
+        for ( selbrush_t *node = heads[h]->next; node && node != heads[h]; node = node->next )
+        {
+            if ( !Pick_BrushPickable( node ) || !KiwiDrop_IsModelEntity( node )
+              || !node->owner || node->owner->prefab || !ModelMeshVisible( node ) )
+                continue;
+            if ( excludeSelected && ( node->brushFlags & BRUSHFLAG_SELECTED ) != 0 )
+                continue;
+            if ( std::find( seen.begin(), seen.end(), node->owner ) != seen.end() )
+                continue;
+            seen.push_back( node->owner );
+
+            vertModel_t m;
+            float mins[3], maxs[3], angles[3];
+            m.model = 0;
+            if ( !KiwiDrop_GetModelInfo( node, mins, maxs, angles, &m.scale, m.origin, &m.model )
+              || !m.model || !( m.scale > 0.0f ) )
+                continue;
+            m.extent = sqrtf( ( maxs[0] - mins[0] ) * ( maxs[0] - mins[0] ) + ( maxs[1] - mins[1] ) * ( maxs[1] - mins[1] )
+                            + ( maxs[2] - mins[2] ) * ( maxs[2] - mins[2] ) );
+
+            // Models whose projected bounds stay farther than the reach are skipped.
+            float rmin[3], rmax[3], corners[8][3];
+            if ( !KiwiDrop_TransformBounds( mins, maxs, angles, m.scale, rmin, rmax, corners ) )
+                continue;
+            float lo[2] = { FLT_MAX, FLT_MAX }, hi[2] = { -FLT_MAX, -FLT_MAX };
+            bool allProjected = true;
+            for ( int c = 0; c < 8 && allProjected; ++c )
+            {
+                const float w[3] = { m.origin[0] + corners[c][0], m.origin[1] + corners[c][1],
+                                     m.origin[2] + corners[c][2] };
+                float x, y;
+                allProjected = Pick_Project( w, &x, &y );     // straddling the eye: test the vertices
+                if ( !allProjected )
+                    break;
+                lo[0] = (std::min)( lo[0], x ); lo[1] = (std::min)( lo[1], y );
+                hi[0] = (std::max)( hi[0], x ); hi[1] = (std::max)( hi[1], y );
+            }
+            if ( allProjected && ( curX < lo[0] - reachPx || curX > hi[0] + reachPx
+                                || curY < lo[1] - reachPx || curY > hi[1] + reachPx ) )
+                continue;
+
+            const float *verts = 0;
+            const unsigned short *indices = 0;
+            int indexCount = 0;
+            if ( !KiwiShadowCache_ModelGeo( m.model, &verts, &indices, &indexCount ) )
+                continue;
+            const int nv = ModelVertCount( m.model, indices, indexCount );
+            if ( nv > budget )
+                continue;
+            budget -= nv;
+
+            AnglesToAxis( angles, m.axis );
+            const int modelIndex = (int)models.size();
+            models.push_back( m );
+            for ( int i = 0; i < nv; ++i )
+            {
+                vertCand_t c;
+                const float scaled[3] = { verts[3 * i] * m.scale, verts[3 * i + 1] * m.scale,
+                                          verts[3 * i + 2] * m.scale };
+                AxisToWorldDir( m.axis, scaled, c.v.pos );
+                for ( int k = 0; k < 3; ++k )
+                    c.v.pos[k] += m.origin[k];
+                if ( !Pick_Project( c.v.pos, &c.v.px, &c.v.py ) )
+                    continue;
+                const float dx = c.v.px - curX, dy = c.v.py - curY;
+                const float d2 = dx * dx + dy * dy;
+                if ( d2 > reach2 )
+                    continue;
+                c.v.distPx = sqrtf( d2 );
+                c.v.node   = node;
+                c.model    = modelIndex;
+                for ( int k = 0; k < 3; ++k )
+                    c.local[k] = verts[3 * i + k];
+                KeepNearest( c, pool, &poolCount );
+            }
+        }
+    }
+
+    int count = 0;
+    for ( int i = 0; i < poolCount && count < maxOut; ++i )
+        if ( !SelfOccluded( models[pool[i].model], pool[i].local, cam, ortho ) )
+            out[count++] = pool[i].v;
+    return count;
+}
+
+namespace
+{
+    // The snap query (8 px) and the accent dots (60 px) ask every frame at the same cursor:
+    // one gather at the larger reach answers both.
+    struct vertCache_t
+    {
+        int             frame = -1;
+        float           x = 0.0f, y = 0.0f, reach = 0.0f;
+        bool            excludeSelected = false;
+        float           eye[3] = { 0.0f, 0.0f, 0.0f };
+        float           vpn[3] = { 0.0f, 0.0f, 0.0f };
+        int             count = 0;
+        kiwiModelVert_t v[KDROP_VERT_POOL];
+    };
+    vertCache_t s_vertCache;
+}
+
+int KiwiDrop_ModelVertsNear( float curX, float curY, float reachPx, bool excludeSelected,
+                             kiwiModelVert_t *out, int maxOut )
+{
+    if ( !out || maxOut <= 0 || !( reachPx > 0.0f ) )
+        return 0;
+    const float     gather = (std::max)( reachPx, KDROP_VERT_GATHER_PX );
+    const camera_s *cam    = Ed_Camera();
+    const int       frame  = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -2;
+    vertCache_t    &c      = s_vertCache;
+    // The query's cursor comes back from a projected ray (float), the accent pass's is the
+    // integer pixel: half a pixel apart is the same cursor.
+    bool reuse = frame >= 0 && c.frame == frame && fabsf( c.x - curX ) <= 0.5f && fabsf( c.y - curY ) <= 0.5f
+              && c.reach >= gather
+              && c.excludeSelected == excludeSelected;
+    for ( int k = 0; k < 3 && reuse; ++k )
+        reuse = c.eye[k] == cam->origin[k] && c.vpn[k] == cam->vpn[k];
+    if ( !reuse )
+    {
+        c.count           = GatherModelVerts( curX, curY, gather, excludeSelected, c.v );
+        c.frame           = frame;
+        c.x               = curX;
+        c.y               = curY;
+        c.reach           = gather;
+        c.excludeSelected = excludeSelected;
+        for ( int k = 0; k < 3; ++k )
+        {
+            c.eye[k] = cam->origin[k];
+            c.vpn[k] = cam->vpn[k];
+        }
+    }
+    int n = 0;
+    for ( int i = 0; i < c.count && n < maxOut; ++i )
+    {
+        kiwiModelVert_t v = c.v[i];
+        const float dx = v.px - curX, dy = v.py - curY;
+        v.distPx = sqrtf( dx * dx + dy * dy );       // against this caller's cursor
+        if ( v.distPx <= reachPx )
+            out[n++] = v;
+    }
+    return n;
 }

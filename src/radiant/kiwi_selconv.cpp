@@ -10,6 +10,7 @@
 
 #include "kiwi_selconv.h"
 #include "kiwi_command.h"
+#include "kiwi_pick.h"              // Pick_IsModelProxy
 #include "kiwi_selection.h"
 
 #include <math.h>
@@ -73,8 +74,11 @@ namespace
             items.push_back( Sel_MakeObject( b ) );
         }
 
+        // KIWI: a model's proxy box converts to nothing (kiwi_pick.h Pick_IsModelProxy).
         void AddFace( selbrush_t *b, int faceIndex )
         {
+            if ( Pick_IsModelProxy( b ) )
+                return;
             for ( size_t i = 0; i < items.size(); ++i )
                 if ( items[i].brush == b && items[i].faceIndex == faceIndex )
                     return;
@@ -85,6 +89,8 @@ namespace
         void AddEdge( selbrush_t *b, int faceIndex, int edgeIndex,
                       const float *a, const float *c )
         {
+            if ( Pick_IsModelProxy( b ) )
+                return;
             for ( size_t i = 0; i < items.size(); ++i )
             {
                 if ( !items[i].brush || items[i].brush->def != b->def )
@@ -102,6 +108,8 @@ namespace
         // Winding faces repeat physical corners; deduplicate by definition and position.
         void AddVertex( selbrush_t *b, int faceIndex, int vertIndex, const float *p )
         {
+            if ( Pick_IsModelProxy( b ) )
+                return;
             for ( size_t i = 0; i < items.size(); ++i )
             {
                 if ( !items[i].brush || items[i].brush->def != b->def )

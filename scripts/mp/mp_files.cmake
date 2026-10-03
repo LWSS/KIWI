@@ -90,6 +90,7 @@ set(GLASS
     "${SRC_DIR}/glass/glass_kiwi_load.cpp"
     "${SRC_DIR}/glass/glass_kiwi_phys.cpp"
     "${SRC_DIR}/glass/glass_kiwi_phys.h"
+    "${SRC_DIR}/glass/glass_kiwi_slab.h"
     "${SRC_DIR}/glass/glass_load_obj.cpp"
     "${SRC_DIR}/glass/glass_load_obj.h"
     "${SRC_DIR}/glass/glass_renderer.cpp"

@@ -63,6 +63,19 @@ bool Pick_RayFromCursor( ray_t *out );
 // invalid viewport, or for perspective points at or behind the eye plane.
 bool Pick_WorldToImage( const float *world, float *outX, float *outY );
 
+// KIWI (2026-10-03, user: "there is no functionality that even requires clicking the bbox of
+// an xmodel anyway. Just remove the option of clicking bbox faces of an xmodel"): the proxy
+// box brush of a model entity.  It is never a vertex, edge or face target - picks, hover,
+// marquee, snap points, select-similar, selection conversion; models select as OBJECTS, by
+// their mesh (KiwiDrop_PickModelMesh).
+bool Pick_IsModelProxy( const selbrush_t *b );
+
+// Bulk form for thousands of points (xmodel vertex snapping): Pick_ProjectBegin builds the
+// camera matrix once (false = no usable viewport), then Pick_Project maps exactly like
+// Pick_WorldToImage until the next Begin.
+bool Pick_ProjectBegin();
+bool Pick_Project( const float *world, float *outX, float *outY );
+
 // Camera-image pixel distance to a segment. Optional outT returns the clamped
 // parameter for mapping the screen result onto the world segment; callers own
 // acceptance radii and behind-eye policy.

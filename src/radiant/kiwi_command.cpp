@@ -57,6 +57,9 @@
 #include "kiwi_modelbrowser.h"          // KIWI: the Models window + deferred drop
 #include "kiwi_particles.h"             // KIWI: the Particles window, deferred drop
 #include "kiwi_modelimport.h"           // KIWI: the Model Import window
+// KIWI GLASS
+#include "kiwi_glass.h"
+// KIWI END
 #include "kiwi_skybox.h"
 #include "kiwi_uveditor.h"
 #include "kiwi_import.h"
@@ -456,6 +459,12 @@ namespace
         { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
         { KIWI_CMD_WINDOW_PARTICLES, { "Particles",               "Windows",   0, nullptr } },
         { KIWI_CMD_WINDOW_MODELIMPORT, { "Model Import (FBX/OBJ to xmodel)", "Windows", 0, nullptr } },
+        // KIWI GLASS
+        { KIWI_CMD_GLASS_MAKE,       { "Make Breakable Glass",    "Gameplay",  SEL_MASK_EVERYTHING, KiwiGlass_CanMake } },
+        { KIWI_CMD_GLASS_UNMAKE,     { "Make Regular Brush",      "Gameplay",  SEL_MASK_EVERYTHING, KiwiGlass_CanUnmake } },
+        { KIWI_CMD_GLASS_APPLY,      { "Apply Glass Set",         "Gameplay",  SEL_MASK_EVERYTHING, KiwiGlass_CanApply } },
+        { KIWI_CMD_WINDOW_GLASS,     { "Glass",                   "Windows",   0, nullptr } },
+        // KIWI END
         { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
@@ -711,6 +720,9 @@ void KiwiCmd_RegisterCommands()
     KiwiModelBrowser_RegisterCommands(); // KIWI      — the Models window toggle
     KiwiParticles_RegisterCommands();    // KIWI      — the Particles window, script export
     KiwiModelImport_RegisterCommands();  // KIWI      — the Model Import window toggle
+    // KIWI GLASS
+    KiwiGlass_RegisterCommands();
+    // KIWI END
     KiwiSky_RegisterCommands();
     KiwiUvEd_RegisterCommands();
     KiwiImport_RegisterCommands();
@@ -800,6 +812,9 @@ namespace
         case KIWI_CMD_PARTICLE_DROP:
         case KIWI_CMD_WINDOW_PARTICLES:
         case KIWI_CMD_WINDOW_MODELIMPORT:               // a window toggle, not a verb
+        // KIWI GLASS
+        case KIWI_CMD_WINDOW_GLASS:
+        // KIWI END
         case KIWI_CMD_WINDOWS_RESET_LAYOUT:             // a layout action, not a verb
         case KIWI_CMD_PARTICLE_EXPORT:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
@@ -979,6 +994,10 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
             return true;
         if ( KiwiParticles_DispatchInstant( cmdId ) )
             return true;
+        // KIWI GLASS
+        if ( KiwiGlass_DispatchInstant( cmdId ) )
+            return true;
+        // KIWI END
         if ( KiwiSky_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiImport_DispatchInstant( cmdId ) )

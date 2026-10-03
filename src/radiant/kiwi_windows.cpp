@@ -56,6 +56,9 @@ namespace
         { "Reference Images", "RefImages", "&Reference Images",     KIWI_CMD_WINDOW_REFIMAGES, 1 },
         { "Particles",        "Particles", "&Particles (effects)",  KIWI_CMD_WINDOW_PARTICLES, 1 },
         { "Model Import",     "ModelImport", "&Model Import (FBX/OBJ)", KIWI_CMD_WINDOW_MODELIMPORT, 0 },
+        // KIWI GLASS
+        { "Glass",            "Glass",   "&Glass (breakable glass sets)", KIWI_CMD_WINDOW_GLASS, 0 },
+        // KIWI END
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.
