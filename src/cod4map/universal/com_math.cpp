@@ -1350,14 +1350,17 @@ void SnapPlaneIntersection(float **planes, float *point, float gridSize, float t
     float maxAllowed = tolerance;
     float maxError = 0.0f;
 
+    /* KIWI: the allowance is the UNSNAPPED point's own error (as the engine's twin,
+       universal/com_math.cpp) - both came from the snapped point, so a snap that improved
+       an intersection already off its planes by more than tolerance was refused. */
     for (axis = 0; axis < 3; axis++) {
       float *plane = planes[axis];
-      float dist = DotProduct210(snapped, plane) - plane[3];
-      float absDist = fabs(dist);
+      float absDist = fabs(DotProduct210(snapped, plane) - plane[3]);
+      float baseDist = fabs(DotProduct210(point, plane) - plane[3]);
       if (absDist > maxError)
         maxError = absDist;
-      if (absDist > maxAllowed)
-        maxAllowed = absDist;
+      if (baseDist > maxAllowed)
+        maxAllowed = baseDist;
     }
 
     if (maxError < maxAllowed) {

@@ -860,9 +860,10 @@ struct MaterialIter_t
     float       texwndscale;       // 0x28  m_nTextureWindowScale / 100
 };
 
-// Ed_RoundToInt (IDB sub_40A7D0) — (int)(x + 2^-30). cvttsd2si truncates; the epsilon
-// only nudges values sitting exactly on an integer boundary. Faithful.
-static inline int Ed_RoundToInt( float x ) { return (int)( x + 9.313225746154785e-10f ); }
+// Ed_RoundToInt (IDB sub_40A7D0) — round(x + 2^-30): the binary converts with fistp
+// (0x40A7E5, no fldcw), which ROUNDS.  KIWI (2026-10-05, fistp audit): lrint - the old
+// truncating cast made thumbnails up to a pixel small.
+static inline int Ed_RoundToInt( float x ) { return (int)lrint( (double)x + 9.313225746154785e-10 ); }
 
 // TexWnd_SetupIter (IDB 0x45ba00).
 static int TexWnd_SetupIter( MaterialIter_t *it, Font_s *font )

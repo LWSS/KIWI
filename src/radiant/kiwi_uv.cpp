@@ -40,6 +40,7 @@ extern void  UpdatePatchInspector();                                    // patch
 // File scope avoids MSVC namespace-mangling mismatch; pick uses the browser's
 // patch normalization after applying a material.
 extern void  Patch_KiwiReNaturalizeSelected();                          // pmesh.cpp:1641
+extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );            // pmesh.cpp:2172
 
 extern float grid_sizes[];                                              // engine_stubs.cpp:771  0x6DDE5C
 
@@ -463,7 +464,38 @@ namespace
         void Commit() override
         {
             if ( ( m_sSteps || m_tSteps ) && KiwiUv_CanEdit() )
+            {
+                // KIWI (2026-10-05, reversibility): the core hands a patch the raw step count
+                // as a MULTIPLIER (Patch_ScaleTexture( def, a1, a2 )): +1 left it, -1 mirrored
+                // its texture, +2 doubled it - a size step means nothing to a patch, which has
+                // no texture size.  Patches keep their texcoords (the Patch Inspector scales them).
+                std::vector<patchMesh_t *> patches;
+                std::vector<pmesh_texcoord> keep;
+                for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+                {
+                    patchMesh_t *p = b->patch ? b->patch->def : nullptr;
+                    if ( !p )
+                        continue;
+                    patches.push_back( p );
+                    for ( int c = 0; c < p->width; ++c )
+                        for ( int r = 0; r < p->height; ++r )
+                            keep.push_back( p->ctrl[c][r].texCoord );
+                }
                 Brush_ScaleTexture( m_sSteps, m_tSteps );   // core owns "scale texture"
+                size_t k = 0;
+                for ( size_t i = 0; i < patches.size(); ++i )
+                {
+                    patchMesh_t *p = patches[i];
+                    for ( int c = 0; c < p->width; ++c )
+                        for ( int r = 0; r < p->height; ++r )
+                            p->ctrl[c][r].texCoord = keep[k++];
+                    Patch_Rebuild( p, 0 );
+                }
+                if ( !patches.empty() )
+                    Sys_Printf( "Texture Scale: %i patch(es) kept their texture - a patch has no "
+                                "texture size (the Patch Inspector scales patch texcoords).\n",
+                                (int)patches.size() );
+            }
             m_sSteps = m_tSteps = 0;
             g_nUpdateBits = -1;
         }

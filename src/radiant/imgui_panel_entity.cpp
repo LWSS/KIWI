@@ -409,12 +409,7 @@ namespace
 
     void FormatVec3Epair( char *out, size_t outSize, const float value[3] )
     {
-        char x[48], y[48], z[48];
-        _snprintf( out, outSize, "%s %s %s",
-                   KiwiFmt_Num( x, sizeof( x ), value[0], 6 ),
-                   KiwiFmt_Num( y, sizeof( y ), value[1], 6 ),
-                   KiwiFmt_Num( z, sizeof( z ), value[2], 6 ) );
-        out[outSize - 1] = '\0';
+        KiwiFmt_Vec3Exact( out, outSize, value );     // KIWI: 6 decimals rounded the untouched axes
     }
 
     void GatherSelectedEntities( std::vector<entity_s_def *> *out )
@@ -760,7 +755,7 @@ namespace
             if ( commit )
             {
                 char value[64];
-                KiwiFmt_Num( value, sizeof( value ), state.floatValue[0], 6 );
+                KiwiFmt_Exact( value, sizeof( value ), state.floatValue[0] );
                 *outValue = value;
             }
         }
@@ -827,9 +822,18 @@ namespace
         {
             const KiwiEntParameter &parameter = properties[i];
             epair_t *epair = FindEpair( edit_entity, parameter.name.c_str() );
-            const bool present = epair != nullptr;
-            const std::string currentValue = present ? epair->value : "";
-            const std::string writeKey = present ? epair->key : parameter.name;
+            bool present = epair != nullptr;
+            std::string currentValue = present ? epair->value : "";
+            // KIWI: a point entity's live origin - its "origin" epair is only rewritten at
+            // save / copy, so after a move editing X wrote back the OLD Y / Z.
+            if ( !_stricmp( parameter.name.c_str(), "origin" ) && edit_entity && edit_entity->eclass
+              && edit_entity->eclass->fixedsize )
+            {
+                char live[160];
+                currentValue = KiwiFmt_Vec3Exact( live, sizeof( live ), edit_entity->origin );
+                present = true;
+            }
+            const std::string writeKey = epair ? epair->key : parameter.name;   // live origin: no epair yet
             const bool mixed = IsMixedValue( selectedEntities, parameter.name.c_str() );
 
             ImGui::PushID( parameter.name.c_str() );

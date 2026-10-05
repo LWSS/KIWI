@@ -529,7 +529,7 @@ void __cdecl UpdateShellShockCamera(int localClientNum, const shellshock_parms_t
         scalea = (3.0 - scale * 2.0) * scale * scale;
         radius = parms->view.kickRadius * scalea;
         ta = (double)time * parms->view.kickRate;
-        base = (int)(ta - 0.4999999990686774);
+        base = (int)lrint(ta - 0.4999999990686774);   // KIWI: fistp floor idiom (a C cast truncated)
         t = ta - (double)base;
         perturb = cg_perturbations[(base + 61 * duration) & 0x7F];
 

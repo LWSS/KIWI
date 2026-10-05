@@ -1287,7 +1287,7 @@ void __cdecl Item_ListBox_MouseEnter(int localClientNum, itemDef_s *item, float 
                 if (Rect_ContainsPoint(localClientNum, &r, x, y))
                 {
                     v8 = (x - r.x) / listPtr->elementWidth;
-                    mousePos = (int)(v8 - 0.4999999990686774) + listPtr->startPos[localClientNum];
+                    mousePos = (int)lrint(v8 - 0.4999999990686774) + listPtr->startPos[localClientNum];   // KIWI: fistp floor idiom
                     if (listPtr->endPos[localClientNum] < mousePos)
                         v6 = listPtr->endPos[localClientNum];
                     else
@@ -1308,7 +1308,7 @@ void __cdecl Item_ListBox_MouseEnter(int localClientNum, itemDef_s *item, float 
                 if (Rect_ContainsPoint(localClientNum, &r, x, y))
                 {
                     v7 = (y - r.y) / listPtr->elementHeight;
-                    mousePos = (int)(v7 - 0.4999999990686774) + listPtr->startPos[localClientNum];
+                    mousePos = (int)lrint(v7 - 0.4999999990686774) + listPtr->startPos[localClientNum];   // KIWI: fistp floor idiom
                     if (listPtr->endPos[localClientNum] < mousePos)
                         v5 = listPtr->endPos[localClientNum];
                     else

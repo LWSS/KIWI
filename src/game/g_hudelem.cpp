@@ -765,7 +765,7 @@ void __cdecl HECmd_SetTimer_Internal(scr_entref_t entref, he_type_t type, const 
         Scr_Error(v3);
     }
     v5 = Scr_GetFloat(0) * 1000.0;
-    time = (int)(v5 + 0.4999999990686774);
+    time = (int)lrint(v5 + 0.4999999990686774);   // KIWI: fistp ceil idiom (a C cast truncated)
     if (time <= 0 && type != HE_TYPE_TIMER_UP)
     {
         v4 = va("time %g should be > 0", (double)time * EQUAL_EPSILON);

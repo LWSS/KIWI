@@ -1925,7 +1925,11 @@ int BrushToPoints(
         /* compute 3-plane intersection point */
         if ( PlaneIntersection3(stk.planePointers, stk.intersectPoint) )
         {
-          SnapPlaneIntersection(stk.planePointers, stk.intersectPoint, SNAP_GRID_SIZE, SNAP_EPSILON);
+          // KIWI (2026-10-05, load/save gauntlet): noise-only, as the editor (radiant brush.cpp
+          // CM_ForEachBrushPlaneIntersection, 0.001).  SNAP_EPSILON (0.01) moved every corner
+          // within 0.01 of the quarter grid onto it - a rotated trim's -443.508 corner was drawn
+          // and bounded at -443.5 in game while the editor showed -443.508.
+          SnapPlaneIntersection(stk.planePointers, stk.intersectPoint, SNAP_GRID_SIZE, 0.001f);
           stk.pointCount = addPointFn(brush, sides, numSides, capsuleRadius, capsuleHalfHeight,
                                       stk.storedPlaneIdx, checkBevel, stk.intersectPoint, stk.pointCount);
         }

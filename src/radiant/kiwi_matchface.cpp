@@ -319,8 +319,18 @@ namespace
             if ( !slid )
                 memcpy( pts, m_pts, sizeof( pts ) );   // edge-on: plane only, no lock below
 
+            // KIWI (2026-10-05, precision gauntlet): the STORED plane is the target face's own
+            // three points (oriented like the source).  The slid points lie on a plane rebuilt
+            // from the target's normal and winding centre - a float near-copy, which cod4map
+            // (planes merge only within 1e-7 / 0.001) keeps as a second plane beside the one
+            // the face was matched to.  The slid points still drive the texture-lock solve
+            // below; a planar projection does not depend on which points define the plane.
+            float exact[3][3];
+            const bool haveExact = TargetPlanePts( exact );
+            const float ( *stored )[3] = haveExact ? exact : pts;
+
             // Trial: no undo bracket or texture lock.
-            WritePlanePts( pts );
+            WritePlanePts( stored );
             KiwiValid_Rebuild( m_node->def );
 
             // A copied chamfer plane may duplicate an existing V5 half-space.
@@ -388,6 +398,8 @@ namespace
             // a planar projection is already the "nothing moved in the plane" answer.
             if ( f->w && slid )
                 Ed_FaceTexLockReproject( f, saveBuf, lockFlags );
+            if ( haveExact )
+                WritePlanePts( exact );             // the same plane, on the target's own points
 
             KiwiValid_Rebuild( m_node->def );
             Sys_Printf( "Match Face: plane copied.\n" );
@@ -725,6 +737,21 @@ namespace
                     if ( !( fabsf( out[p][k] ) <= KVALID_MAX_COORD ) )
                         return false;
             }
+            return true;
+        }
+
+        // The target face's own plane points, reversed when its normal opposes the source's
+        // (BuildPlanePts keeps the source's outward sense).  False: no brush-face target.
+        bool TargetPlanePts( float out[3][3] ) const
+        {
+            const selbrush_t *tb = m_target.brush;
+            if ( !tb || !tb->def || !tb->def->faces || m_target.faceIndex < 0
+              || m_target.faceIndex >= tb->def->faceCount )
+                return false;
+            const face_t *tf   = &tb->def->faces[m_target.faceIndex];
+            const bool    flip = Dot3( tf->plane.normal, m_srcNormal ) < 0.0f;
+            for ( int p = 0; p < 3; ++p )
+                Copy3( tf->planepts[flip ? 2 - p : p], out[p] );
             return true;
         }
 

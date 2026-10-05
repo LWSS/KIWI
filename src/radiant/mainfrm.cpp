@@ -34,6 +34,7 @@
 #include "kiwi_refimage.h"             // KIWI: ...and reference images
 #include "kiwi_viewdirty.h"            // KIWI: the fitted 2D view must re-render
 #include "kiwi_camera.h"               // KIWI: KiwiCam_LookAlong / KiwiCam_FrameBounds (3D fit)
+#include "kiwi_fmt.h"                  // KIWI: exact key values
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
@@ -2480,7 +2481,8 @@ static void Cmd_OnDropSelected()
             float base  = (float)g_PrefsDlg->scale_base  / 100.0f;
             float range = (float)g_PrefsDlg->scale_range / 100.0f;
             float scale = (float)( (double)rand() * 0.000030517578125 ) * ( range + range ) + base - range;
-            SetKeyValue( def, "modelscale", va( "%f", scale ) );
+            char scaleText[48];   // KIWI: exact, not %f
+            SetKeyValue( def, "modelscale", KiwiFmt_Exact( scaleText, sizeof( scaleText ), scale ) );
         }
 
         // â”€â”€ trace straight down from the entity origin (fixed-size starts +16 up) â”€â”€
@@ -3179,6 +3181,7 @@ extern void DoFlip( int axis, const char *opName );                         // (
 extern void Select_GetMid( float *mid );                                    // select.cpp (0x48FC70)
 extern void Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] ); // select.cpp (0x48FF40)
 extern void Select_FlipAxis( int axis );                                    // select.cpp (0x48FD50)
+extern void Select_GetTrueMid( float *center );                             // select.cpp (0x48FC20)
 extern void Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char bSwap ); // select.cpp (0x48FD10)
 extern void sub_47B940( brush_t *def );                                     // brush.cpp (Brush_UpdateSpecialMaterialFlag, real)
 extern int  UpdateSelection( int wParam, eclass_t *cls );                   // win_ent.cpp (0x497180)
@@ -3236,7 +3239,8 @@ static void Radiant_RotateSelection( int axis, const char *opName )
     Undo_GeneralStart( opName );
     Undo_AddBrushList( &selected_brushes );
     float rot_around[4][3];
-    Select_GetMid( rot_around[0] );
+    // KIWI: the true centre, not Select_GetMid's 16-grid floor (it moved the selection).
+    Select_GetTrueMid( rot_around[0] );
     Select_RotateAxis( axis, 90.0f, (float (*)[4][3])rot_around );
     Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], 90.0f, 0 );
     g_nUpdateBits = -1;

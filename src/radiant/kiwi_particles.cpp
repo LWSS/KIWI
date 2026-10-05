@@ -304,10 +304,14 @@ namespace
         }
     }
 
-    // The "origin" key (what the .map carries), else the entity's cached origin.
+    // The "origin" key (what the .map carries), else the entity's cached origin.  A point
+    // entity's live origin wins: its key is only rewritten at save, so an export after a
+    // move wrote where the effect WAS.
     void FxOrigin( const entity_s_def *def, float out[3] )
     {
         memcpy( out, def->origin, sizeof( float ) * 3 );
+        if ( def->eclass && def->eclass->fixedsize )
+            return;
         const char *o = ValueForKey2( def, "origin" );
         float v[3];
         if ( o && o[0] && sscanf( o, "%f %f %f", &v[0], &v[1], &v[2] ) == 3 )
@@ -747,12 +751,13 @@ void KiwiParticles_ExportForMap( const char *mapPath, bool fromSave )
         const fxEnt_t &r = ents[i];
         const std::string &id = idOf[r.fx];
         fxText += "\tent = maps\\mp\\_utility::createOneshotEffect( \"" + id + "\" );\n";
-        fxText += std::string( "\tent.v[ \"origin\" ] = ( " ) + KiwiFmt_Num( num[0], 32, r.origin[0] ) + ", "
-                + KiwiFmt_Num( num[1], 32, r.origin[1] ) + ", " + KiwiFmt_Num( num[2], 32, r.origin[2] ) + " );\n";
-        fxText += std::string( "\tent.v[ \"angles\" ] = ( " ) + KiwiFmt_Num( num[0], 32, r.angles[0] ) + ", "
-                + KiwiFmt_Num( num[1], 32, r.angles[1] ) + ", " + KiwiFmt_Num( num[2], 32, r.angles[2] ) + " );\n";
+        // Exact: 3 decimals moved every effect off its entity (100.12345 -> 100.123).
+        fxText += std::string( "\tent.v[ \"origin\" ] = ( " ) + KiwiFmt_Exact( num[0], 32, r.origin[0] ) + ", "
+                + KiwiFmt_Exact( num[1], 32, r.origin[1] ) + ", " + KiwiFmt_Exact( num[2], 32, r.origin[2] ) + " );\n";
+        fxText += std::string( "\tent.v[ \"angles\" ] = ( " ) + KiwiFmt_Exact( num[0], 32, r.angles[0] ) + ", "
+                + KiwiFmt_Exact( num[1], 32, r.angles[1] ) + ", " + KiwiFmt_Exact( num[2], 32, r.angles[2] ) + " );\n";
         fxText += "\tent.v[ \"fxid\" ] = \"" + id + "\";\n";
-        fxText += std::string( "\tent.v[ \"delay\" ] = " ) + KiwiFmt_Num( num[0], 32, r.delay ) + ";\n\n";
+        fxText += std::string( "\tent.v[ \"delay\" ] = " ) + KiwiFmt_Exact( num[0], 32, r.delay ) + ";\n\n";
     }
     fxText += "}\n";
 

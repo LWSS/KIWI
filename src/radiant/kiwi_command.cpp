@@ -59,6 +59,7 @@
 #include "kiwi_modelimport.h"           // KIWI: the Model Import window
 // KIWI GLASS
 #include "kiwi_glass.h"
+#include "kiwi_fragile.h"           // KIWI: Clean Up Precision
 // KIWI END
 #include "kiwi_skybox.h"
 #include "kiwi_uveditor.h"
@@ -490,6 +491,7 @@ namespace
         // KIWI END
         { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
+        { KIWI_CMD_CLEAN_PRECISION,  { "Clean Up Precision (square near-axial faces, flatten near-flat patches)", "Build", 0, nullptr } },
         { 33972,                     { "Show Angle Arrows",   "View", 0, nullptr    } },   // View->Show->Angles (native)
     };
 
@@ -652,9 +654,17 @@ namespace
         g_nUpdateBits |= 1;
     }
 
+    // KIWI (2026-10-05, precision gauntlet): the test modes' modifier override (-1 = off;
+    // KiwiCmd_SetTestMods).  A hidden test instance never has focus, yet a typed "0.5" once
+    // arrived as ").5" while the user typed in another window - the harness injects its own
+    // modifiers, and the physical keyboard must not reach the instance at all.
+    int s_testMods = -1;
+
     // Same Shift=1, Alt=2, Ctrl=4, Win=8 mask used by Radiant_TryHotkey.
     unsigned int CurrentMods()
     {
+        if ( s_testMods >= 0 )
+            return (unsigned int)s_testMods;
         unsigned int mods = 0;
         if ( ::GetKeyState( VK_MENU )    < 0 ) mods |= 2;
         if ( ::GetKeyState( VK_CONTROL ) < 0 ) mods |= 4;
@@ -662,6 +672,18 @@ namespace
         if ( ::GetKeyState( VK_LWIN )    < 0 ) mods |= 8;
         return mods;
     }
+}
+
+void KiwiCmd_SetTestMods( int mods )
+{
+    s_testMods = mods;
+}
+
+bool KiwiCmd_CtrlHeld()
+{
+    if ( s_testMods >= 0 )
+        return ( s_testMods & 4 ) != 0;
+    return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
 }
 
 // Exported grid controls share StepGrid's ladder, clamp, and console report.
@@ -746,6 +768,7 @@ void KiwiCmd_RegisterCommands()
     // KIWI GLASS
     KiwiGlass_RegisterCommands();
     // KIWI END
+    KiwiFragile_RegisterCommands();      // KIWI      — Clean Up Precision
     KiwiSky_RegisterCommands();
     KiwiUvEd_RegisterCommands();
     KiwiImport_RegisterCommands();
@@ -1021,6 +1044,8 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
         if ( KiwiGlass_DispatchInstant( cmdId ) )
             return true;
         // KIWI END
+        if ( KiwiFragile_DispatchInstant( cmdId ) )
+            return true;
         if ( KiwiSky_DispatchInstant( cmdId ) )
             return true;
         if ( KiwiImport_DispatchInstant( cmdId ) )
@@ -1221,7 +1246,7 @@ void KiwiCmd_Resume()
 // and pivot placement is always snapped. Poll physical state; never latch it.
 bool KiwiCmd_SnapEngaged()
 {
-    const bool ctrl = ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+    const bool ctrl = KiwiCmd_CtrlHeld();
     const KiwiEditorCommand::kiwiSnapCtx_t ctx =
         g_activeCommand ? g_activeCommand->SnapContext()
                         : KiwiEditorCommand::KSNAPCTX_TRANSFORM;

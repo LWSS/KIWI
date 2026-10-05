@@ -10,6 +10,10 @@
 // Full path of the settings file beside the exe: <exedir>\kiwi_radiant.ini.
 const char *Radiant_IniPath();
 
+// KIWI (test modes): settings, dock layout and MRU go to `fullPath` instead, so a test
+// instance never writes the user's files.  Must run before the first Radiant_IniPath call.
+void Radiant_SetIniPath( const char *fullPath );
+
 int         Radiant_ProfileGetInt   ( const char *section, const char *entry, int defVal );
 std::string Radiant_ProfileGetString( const char *section, const char *entry, const char *defVal = "" );
 bool        Radiant_ProfileSetInt   ( const char *section, const char *entry, int value );

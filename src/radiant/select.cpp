@@ -19,6 +19,8 @@
 #include <math.h>
 #include <stdlib.h>
 #include <vector>     // Test_Ray cycle-pick (contents&0x40) brush gather (IDB CPtrArray)
+#include "kiwi_fmt.h" // KIWI: KiwiFmt_Vec3Exact ("angles" that read back exactly)
+#include "kiwi_angles.h" // KIWI: double "angles" composition (RotateFixedSize, DoFlip)
 
 // ─── CRT import thunk (IDA: j__free_0 = __imp__free) ─────────────────────────
 static inline void j__free_0( void *p ) { free( p ); }
@@ -2196,10 +2198,9 @@ void Select_Move( const float *delta, char bSnap )
 //  declare `float v2[3]` + `float v3[9]` at CONTIGUOUS stack offsets and pass only &v2, so
 //  they are declared here as one `float rot_around[4][3]`.  Select_ApplyMatrix's `mid` arg
 //  IS that block; it casts to orientation_t* and calls OrientationPosToWorldPos.
-//  KISAK: the texture/lightmap-lock reproject (sub_470570/sub_4706F0) is gated per layer
-//  on MaterialDef_04(layer) > 0, which the degenerate materialdef shim reports as 0, so it
-//  no-ops; the geometry plane rebuild it would do is redundant with the final
-//  Brush_BuildWindings.  Same ruling already taken for Brush_Move.
+//  The texture / lightmap lock (sub_470570 / sub_4706F0, lockFlags { m_bRotateLock,
+//  m_bLightmapLock, 1 }) is live - MaterialDef_04 is > 0 for real materials.  KIWI does it
+//  exactly (kiwi_texlock.h: Face_TexLockAffineBegin / End).
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ── deps for the transform core ──────────────────────────────────────────────
@@ -2338,31 +2339,43 @@ void Select_RotateFixedSize( selbrush_t *sb, float (*mid_point)[3], const float 
     float distSq = moveDelta[0] * moveDelta[0] + moveDelta[1] * moveDelta[1]
                  + moveDelta[2] * moveDelta[2];
     // mid_point[1..3] is the 3x3 axis of the orientation block (mid_point[0] = pivot).
-    const mat3x3 &rotM = *reinterpret_cast<const mat3x3 *>( &mid_point[1] );
+    // KIWI (2026-10-05, precision): in double.  Ed_SinCos' float noise (cos 90 = -4.4e-8) is
+    // cleaned off the matrix, the origin lands on pivot + rel * rotM in one rounding (not
+    // origin + (rotated - rel)), and the angles compose from their own text (kiwi_angles.h) -
+    // the float AnglesToAxis / AxisToAngles left noise the exact writer then printed.
+    double turn[3][3];
+    for ( int a = 0; a < 3; ++a )
+        for ( int b = 0; b < 3; ++b )
+        {
+            const double m = mid_point[1 + a][b];
+            const double r = floor( m + 0.5 );                 // 0 / +-1: a quarter turn's entries
+            turn[a][b] = ( fabs( m - r ) < 1.0e-7 && fabs( r ) <= 1.0 ) ? r + 0.0 : m;
+        }
     if ( distSq != 0.0f )
     {
         // rotated offset of the origin about the pivot
-        float rotated[3];
-        Vec3RotateTranspose( moveDelta, rotM, rotated );
-        moveDelta[0] = rotated[0] - moveDelta[0];
-        moveDelta[1] = rotated[1] - moveDelta[1];
-        moveDelta[2] = rotated[2] - moveDelta[2];
-        Brush_Move( moveDelta, sb->def, 1 );
+        double want[3];
+        float  move[3];
+        for ( int j = 0; j < 3; ++j )
+            want[j] = (double)mid_point[0][j] + moveDelta[0] * turn[0][j] + moveDelta[1] * turn[1][j]
+                    + moveDelta[2] * turn[2][j];
+        for ( int j = 0; j < 3; ++j )
+            move[j] = (float)( want[j] - def->origin[j] );
+        Brush_Move( move, sb->def, 1 );
+        for ( int j = 0; j < 3; ++j )
+            def->origin[j] = (float)want[j];
     }
 
-    float angles[3];
-    if ( !Entity_GetVec3ForKey( def, angles, "angles" ) )
-    {
-        angles[0] = angles[1] = angles[2] = 0.0f;
-    }
-    float curAxis[3][3], newAxis[3][3];
-    AnglesToAxis( angles, curAxis );
     // IDA 0x47cd62: MatrixMultiply(in1=curAxis, in2=rotM, out=newAxis), i.e. newAxis =
     // curAxis * rotM (in2@eax=mid_point+0Ch=rotM, in1@ecx=curAxis, out@edx).  NOT commutative.
-    MatrixMultiply( curAxis, rotM, newAxis );
-    AxisToAngles( newAxis, angles );
-    char *v = va( "%g %g %g", angles[0], angles[1], angles[2] );
-    SetKeyValue( def, "angles", v );
+    double base[3] = { 0.0, 0.0, 0.0 }, turned[3];
+    const char *text = ValueForKey2( def, "angles" );
+    if ( !text || sscanf( text, "%lf %lf %lf", &base[0], &base[1], &base[2] ) != 3 )
+        base[0] = base[1] = base[2] = 0.0;
+    KiwiAng_Turn( base, turn, turned );
+    const float angles[3] = { (float)turned[0], (float)turned[1], (float)turned[2] };
+    char v[160];
+    SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( v, sizeof( v ), angles, 0 ) );   // bare, as %g
 
     Brush_BuildWindings( sb->def, 1 );
     if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
@@ -2452,11 +2465,37 @@ void Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] )
 //  the pivot. Builds an identity 3x3 with the chosen axis negated, then applies it
 //  with bSwap=1 (winding reverse so reflected faces stay outward-facing).
 // ═════════════════════════════════════════════════════════════════════════════
+// KIWI (2026-10-05, reversibility): the fixed-size entities of a selection, as points.
+static bool Select_FixedSizeOwner( const selbrush_t *b )
+{
+    const entity_s_def *ent = b->owner ? (const entity_s_def *)b->owner->def : nullptr;
+    return ent && ent->eclass && *(int *)&ent->eclass->fixedsize;
+}
+
 // The -1.0 is flt_6F40C4; rot_around[4][3] keeps the binary's v2/v3 stack contiguity.
 void Select_FlipAxis( int axis )
 {
     float rot_around[4][3];
-    Select_GetMid( rot_around[0] );
+    // KIWI: the true centre.  The binary's Select_GetMid floors it to the legacy grid
+    // (16), so a mirror threw the selection up to a grid step sideways.
+    // KIWI (2026-10-05, reversibility): a model counts as its origin, not its box - DoFlip
+    // turns a model 180 instead of mirroring it, so its box moves to the far side of the
+    // origin, and a second mirror pivoted somewhere else (mirror twice walked the selection).
+    float mins[3] = {  131072.0f,  131072.0f,  131072.0f };
+    float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
+    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+    {
+        const bool fixed = Select_FixedSizeOwner( b );
+        const float *lo = fixed ? ( (const entity_s_def *)b->owner->def )->origin : b->def->mins;
+        const float *hi = fixed ? ( (const entity_s_def *)b->owner->def )->origin : b->def->maxs;
+        for ( int i = 0; i < 3; ++i )
+        {
+            if ( lo[i] < mins[i] ) mins[i] = lo[i];
+            if ( hi[i] > maxs[i] ) maxs[i] = hi[i];
+        }
+    }
+    for ( int i = 0; i < 3; ++i )
+        rot_around[0][i] = ( maxs[i] + mins[i] ) * 0.5f;
 
     // identity 3x3, then negate the chosen axis (a reflection)
     float (*m)[3] = &rot_around[1];
@@ -2466,6 +2505,19 @@ void Select_FlipAxis( int axis )
     m[axis][axis] = -1.0f;
 
     Select_ApplyMatrix_SelectedBrushes( 1, rot_around[0], 0.0f, 1 );
+
+    // KIWI (2026-10-05): Select_ApplyMatrix leaves a fixed-size entity where it is on a
+    // mirror (deg 0), so a lamp mirrored with its wall stayed on the old side.  Its origin
+    // mirrors with the selection; DoFlip still turns the model.
+    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+    {
+        if ( !Select_FixedSizeOwner( b ) )
+            continue;
+        float delta[3] = { 0.0f, 0.0f, 0.0f };
+        delta[axis] = 2.0f * ( rot_around[0][axis] - ( (const entity_s_def *)b->owner->def )->origin[axis] );
+        if ( delta[axis] != 0.0f )
+            Brush_Move( delta, b->def, 0 );
+    }
     g_nUpdateBits = -1;
 }
 
@@ -2491,14 +2543,19 @@ void DoFlip( int axis, const char *opName )
 
         // Read the entity's `angles` epair (default 0 0 0), flip the mirror axis by 180,
         // normalize, write it back. (IDB: sscanf "%f %f %f"; ToAngles = AngleNormalize360.)
-        float ang[3] = { 0.0f, 0.0f, 0.0f };
+        // KIWI (2026-10-05, precision): the text in double and a flip that is its own inverse
+        // (KiwiAng_Flip180), written exact - AngleNormalize360 in float sent "-90" to 90 and
+        // back to 270, and 12.3456 to 192.345596 and back to 12.345596.
+        double angD[3] = { 0.0, 0.0, 0.0 };
         const char *val = "0 0 0";
         for ( epair_t *e = def->epairs; e; e = e->next )
             if ( _stricmp( e->key, "angles" ) == 0 ) { val = e->value; break; }
-        if ( sscanf( val, "%f %f %f", &ang[0], &ang[1], &ang[2] ) != 3 )
-            ang[0] = ang[1] = ang[2] = 0.0f;
-        ang[axis] = AngleNormalize360( ang[axis] + 180.0f );
-        SetKeyValue( def, "angles", va( "%g %g %g", ang[0], ang[1], ang[2] ) );
+        if ( sscanf( val, "%lf %lf %lf", &angD[0], &angD[1], &angD[2] ) != 3 )
+            angD[0] = angD[1] = angD[2] = 0.0;
+        angD[axis] = KiwiAng_Flip180( angD[axis] );
+        const float ang[3] = { (float)angD[0], (float)angD[1], (float)angD[2] };
+        char angText[160];
+        SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), ang, 0 ) );
 
         Brush_BuildWindings( b->def, 1 );
         if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
@@ -3326,6 +3383,17 @@ void Brush_ScaleTexture( int a1, int a2 )
     g_nUpdateBits |= 1u;
 }
 
+// The binary's new texture angle: (fistp)( sum + 2^-30 ) % 360, whole degrees.  KIWI (2026-10-05,
+// reversibility): an angle that is not whole within noise keeps its fraction (fmod, the same
+// sign) - a rotate / mirror texture lock leaves e.g. 37.21, which +90 then -90 rounded to 37.
+static float Ed_TexRotateSum( float sum )
+{
+    const double whole = (double)lrint( (double)sum + 9.313225746154785e-10 );
+    if ( fabs( (double)sum - whole ) <= 1.0e-4 )
+        return (float)( (int)whole % 360 );
+    return (float)fmod( (double)sum, 360.0 );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x4929F0  Brush_RotateTexture  (1008 bytes)
 //  Fistp rounding: (int)(val + 9.313225746154785e-10) % 360.
@@ -3352,7 +3420,9 @@ void Brush_RotateTexture( int a1 )
             texdef_sub_t *v5    = &v3->mat_texDef + curL;
             float         v28   = (float)a1 + v5->rotate;
             // Inline-fistp rounding: the 2^-30 bias must survive in DOUBLE.
-            v5->rotate = (float)( (int)(v28 + 9.313225746154785e-10) % 360 );
+            // KIWI (2026-10-05, reversibility): lrint, not (int) - the cast truncated, so
+            // -45 + 2^-30 became -44 (Texture Rotate -45 then +45 left the texture 1 degree off).
+            v5->rotate = Ed_TexRotateSum( v28 );
             TexMatToFakeTexCoords( v3, v5 );
         }
         Brush_BuildWindings( b->def, 1 );
@@ -3391,7 +3461,8 @@ void Brush_RotateTexture( int a1 )
         texdef_sub_t *v15 = &v13->mat_texDef + v14;
         float         v29 = (float)a1 + v15->rotate;
         // Inline-fistp rounding: the 2^-30 bias must survive in DOUBLE.
-        v15->rotate = (float)( (int)(v29 + 9.313225746154785e-10) % 360 );
+        // KIWI (2026-10-05): lrint, as above; a fractional angle keeps its fraction.
+        v15->rotate = Ed_TexRotateSum( v29 );
         TexMatToFakeTexCoords( v13, v15 );
 
         Brush_BuildWindings( v10->def, 1 );
@@ -3756,7 +3827,8 @@ void Entity_SetAngles( float a1, int a2 )
                 v8 = v9 = v10 = 0.0f;
             float angles[3] = { v8, v9, v10 };
             angles[a2] = a1;
-            SetKeyValue( def, "angles", va( "%g %g %g", angles[0], angles[1], angles[2] ) );
+            char angText[160];                             // KIWI: exact, not %g
+            SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), angles, 0 ) );
         }
     }
     Undo_End();
@@ -3780,7 +3852,8 @@ void Entity_SetAngles_Old( float *a1 )
         if ( *(int *)&def->eclass->fixedsize )
         {
             Undo_AddEntity_W( (entity_s *)def );
-            SetKeyValue( def, "angles", va( "%g %g %g", (double)a1[0], (double)a1[1], (double)a1[2] ) );
+            char angText[160];                             // KIWI: exact, not %g
+            SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), a1, 0 ) );
         }
     }
     Undo_End();

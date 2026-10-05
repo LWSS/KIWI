@@ -481,14 +481,15 @@ static int Lighting_ClampColor(float color[3])
 
 static unsigned char Lighting_EncodeCod4Byte(float value)
 {
-    /* Native cod4rad truncates here (the tiny positive bias is below one ULP
-     * for useful values); it does not use the rounded CoD2 byte encoder. */
+    /* KIWI: ROUND to the nearest byte.  The truncating port darkened every lightmap byte
+     * by half a step on average (0.5 -> 127, 0.0145 -> 3 of a true 3.7), and a direction
+     * byte accepted by Lighting_RefineNativeDirection came back one lower after its
+     * decode / re-encode (2 -> 1.99999988 -> 1) - 260 of 1536 in a float32 replay. */
     if (value <= 0.0f)
         return 0;
     if (value >= 1.0f)
         return 255;
-    return (unsigned char)(int)(value * 255.0f
-                              + 9.313225746154785e-10f);
+    return (unsigned char)(int)((double)value * 255.0 + 0.5);
 }
 
 /* lighting.cpp 0x4144F0. */
@@ -1064,15 +1065,14 @@ static void Lighting_RefineNativeDirection(const float *colors, int count,
             continue;
         }
 
-        /* Native keeps the same gradient while reducing a rejected step and
-         * truncates its signed delta toward zero. */
+        /* Native keeps the same gradient while reducing a rejected step.  KIWI: the signed
+         * delta ROUNDS - truncation turned the dominant axis' 3.9999998 into 3 (step 1 into
+         * 0, ending the search early) and sent -0.7 to 0. */
         for (;;)
         {
             float gradientScale = (float)step / maxGradient;
-            int trialX = encodedX + (int)(gradient[0] * gradientScale
-                                         + 9.313225746154785e-10f);
-            int trialY = encodedY + (int)(gradient[1] * gradientScale
-                                         + 9.313225746154785e-10f);
+            int trialX = encodedX + (int)floor((double)gradient[0] * gradientScale + 0.5);
+            int trialY = encodedY + (int)floor((double)gradient[1] * gradientScale + 0.5);
             float trialDirection[3];
             float trialAmbient[3];
             float trialDirectional[3];

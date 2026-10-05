@@ -259,10 +259,11 @@ void LerpDrawVertAmount(MeshVert_t *a, MeshVert_t *b, float amount, MeshVert_t *
   ca = (unsigned char *)&a->color;
   cb = (unsigned char *)&b->color;
   co = (unsigned char *)&out->color;
-  co[0] = (int)((double)(cb[0] - ca[0]) * amount + (double)ca[0]);
-  co[1] = (int)((double)(cb[1] - ca[1]) * amount + (double)ca[1]);
-  co[2] = (int)((double)(cb[2] - ca[2]) * amount + (double)ca[2]);
-  co[3] = (int)((double)(cb[3] - ca[3]) * amount + (double)ca[3]);
+  /* KIWI: rounded - truncation darkened every subdivided patch colour half a step */
+  co[0] = (int)((double)(cb[0] - ca[0]) * amount + (double)ca[0] + 0.5);
+  co[1] = (int)((double)(cb[1] - ca[1]) * amount + (double)ca[1] + 0.5);
+  co[2] = (int)((double)(cb[2] - ca[2]) * amount + (double)ca[2] + 0.5);
+  co[3] = (int)((double)(cb[3] - ca[3]) * amount + (double)ca[3] + 0.5);
   out->normal[0] = (float)LERPF(a->normal[0], b->normal[0], amount);
   out->normal[1] = (float)LERPF(a->normal[1], b->normal[1], amount);
   out->normal[2] = (float)LERPF(a->normal[2], b->normal[2], amount);

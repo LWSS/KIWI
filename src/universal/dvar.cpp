@@ -2304,8 +2304,10 @@ void __cdecl Dvar_SetVec2FromSource(dvar_s *dvar, float x, float y, DvarSetSourc
 
     iassert(dvar);
     iassert(dvar->name);
-    vassert((dvar->type == DVAR_TYPE_FLOAT_4 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
-    if (dvar->type == DVAR_TYPE_FLOAT_4)
+    // KIWI: FLOAT_2 (the port tested FLOAT_4, so a vec2 dvar took the string branch and its
+    // char* was read back as two floats).
+    vassert((dvar->type == DVAR_TYPE_FLOAT_2 || (dvar->type == DVAR_TYPE_STRING && (dvar->flags & (1 << 14)))), "(dvar->name) = %s", dvar->name);
+    if (dvar->type == DVAR_TYPE_FLOAT_2)
     {
         newValue.value = x;
         newValue.vector[1] = y;

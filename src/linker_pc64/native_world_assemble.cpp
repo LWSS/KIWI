@@ -294,7 +294,7 @@ static bool GenerateOutdoorImage(LinkerAssembledWorld *owner, const LinkerWorldS
             {
                 const double worldHeight = start[2] + ((double)end[2] - start[2]) * fraction;
                 const double texel = (worldHeight - mins[2]) * zScale - 0.4999999990686774;
-                pixels[(size_t)y * width + x] = texel <= 0 ? 0 : (texel >= 255 ? 255 : (uint8_t)texel);
+                pixels[(size_t)y * width + x] = texel <= 0 ? 0 : (texel >= 255 ? 255 : (uint8_t)lrint(texel));   // KIWI: the floor idiom rounds
             }
         }
     }

@@ -1475,3 +1475,216 @@ bool KiwiFragile_DrawBuildRow( bool offerBuildAnyway )
     ImGui::EndChild();
     return buildAnyway;
 }
+
+// ── Clean Up Precision ───────────────────────────────────────────────────────────
+// KIWI (2026-10-05, precision gauntlet; user: "it's easy to make geometry that fails the
+// compiler"): repair what the old 0.5 plane-point rounding and per-frame rotation residuals
+// left in existing maps (new edits no longer make it).  cod4map squares a normal onto an
+// axis only within 1e-7 and merges planes within 1e-7 / 0.001, and a layered (l_sm_*)
+// material coalesces only onto an exactly aligned surface (kisak_trash had 5 such faces and a
+// chimney cap patch 0.004 out of flat).
+//  * a brush face within KFRAG_AXIAL_TILT of an axis becomes exactly axial (its three
+//    points take their mean coordinate on that axis);
+//  * a patch whose control points all lie within KFRAG_FLAT_DEV of one plane is flattened
+//    onto it - onto the exact axial plane when that plane is within 1e-3 of an axis.
+// Scope: the selection, else the whole map.  One undo record.
+extern void Patch_Rebuild( patchMesh_t *p, char doBounds );                         // pmesh.cpp
+
+namespace
+{
+    const double KFRAG_AXIAL_TILT = 1e-4;     // rad (0.006 deg): never meant as a slope
+    const double KFRAG_FLAT_DEV   = 0.02;     // units: a patch this flat was meant flat
+    const double KFRAG_FLAT_AXIAL = 1e-3;     // a flat patch this near an axis goes axial
+
+    int DominantAxis( const double n[3] )
+    {
+        int a = 0;
+        for ( int k = 1; k < 3; ++k )
+            if ( fabs( n[k] ) > fabs( n[a] ) )
+                a = k;
+        return a;
+    }
+
+    // Square one face onto its axis; false = nothing to do.  `apply` false = dry run.
+    bool SquareFace( face_t *f, bool apply )
+    {
+        double p[3][3];
+        for ( int i = 0; i < 3; ++i )
+            for ( int k = 0; k < 3; ++k )
+                p[i][k] = f->planepts[i][k];
+        const double u[3] = { p[0][0] - p[1][0], p[0][1] - p[1][1], p[0][2] - p[1][2] };
+        const double v[3] = { p[2][0] - p[1][0], p[2][1] - p[1][1], p[2][2] - p[1][2] };
+        double n[3] = { u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0] };
+        const double len = sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+        if ( !( len > 0.0 ) )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            n[k] /= len;
+        const int a = DominantAxis( n );
+        double tilt = 0.0;
+        for ( int k = 0; k < 3; ++k )
+            if ( k != a )
+                tilt += n[k] * n[k];
+        tilt = sqrt( tilt );
+        if ( !( tilt > 0.0 ) || tilt > KFRAG_AXIAL_TILT )
+            return false;
+        const float m = (float)( ( p[0][a] + p[1][a] + p[2][a] ) / 3.0 );
+        if ( f->planepts[0][a] == m && f->planepts[1][a] == m && f->planepts[2][a] == m )
+            return false;
+        if ( apply )
+            for ( int i = 0; i < 3; ++i )
+                f->planepts[i][a] = m;
+        return true;
+    }
+
+    // Flatten a near-flat patch; false = not near-flat, or already exact.  *dev: how far
+    // the worst control point was off the plane.
+    bool FlattenPatch( patchMesh_t *pm, bool apply, double *dev )
+    {
+        *dev = 0.0;
+        if ( !pm || pm->width < 2 || pm->height < 2 || pm->width > 16 || pm->height > 16 )
+            return false;
+        // Newell normal around the grid's boundary ring
+        std::vector<const float *> ring;
+        for ( int c = 0; c < pm->width; ++c )       ring.push_back( pm->ctrl[c][0].xyz );
+        for ( int r = 1; r < pm->height; ++r )      ring.push_back( pm->ctrl[pm->width - 1][r].xyz );
+        for ( int c = pm->width - 2; c >= 0; --c )  ring.push_back( pm->ctrl[c][pm->height - 1].xyz );
+        for ( int r = pm->height - 2; r >= 1; --r ) ring.push_back( pm->ctrl[0][r].xyz );
+        double n[3] = { 0.0, 0.0, 0.0 };
+        for ( size_t i = 0; i < ring.size(); ++i )
+        {
+            const float *a = ring[i];
+            const float *b = ring[( i + 1 ) % ring.size()];
+            n[0] += ( (double)a[1] - b[1] ) * ( (double)a[2] + b[2] );
+            n[1] += ( (double)a[2] - b[2] ) * ( (double)a[0] + b[0] );
+            n[2] += ( (double)a[0] - b[0] ) * ( (double)a[1] + b[1] );
+        }
+        const double len = sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+        if ( !( len > 0.0 ) )
+            return false;                           // a degenerate ring (a wrapped curve)
+        for ( int k = 0; k < 3; ++k )
+            n[k] /= len;
+        double cen[3] = { 0.0, 0.0, 0.0 };
+        const int count = pm->width * pm->height;
+        for ( int c = 0; c < pm->width; ++c )
+            for ( int r = 0; r < pm->height; ++r )
+                for ( int k = 0; k < 3; ++k )
+                    cen[k] += pm->ctrl[c][r].xyz[k] / (double)count;
+        // The axial plane when the patch is that near an axis - exact for cod4map.
+        const int a = DominantAxis( n );
+        double tilt = 0.0;
+        for ( int k = 0; k < 3; ++k )
+            if ( k != a )
+                tilt += n[k] * n[k];
+        const bool axial = sqrt( tilt ) < KFRAG_FLAT_AXIAL;
+        if ( axial )
+            for ( int k = 0; k < 3; ++k )
+                n[k] = ( k == a ) ? ( n[a] > 0.0 ? 1.0 : -1.0 ) : 0.0;
+        for ( int c = 0; c < pm->width; ++c )
+            for ( int r = 0; r < pm->height; ++r )
+            {
+                const float *p = pm->ctrl[c][r].xyz;
+                const double d = ( p[0] - cen[0] ) * n[0] + ( p[1] - cen[1] ) * n[1] + ( p[2] - cen[2] ) * n[2];
+                if ( fabs( d ) > *dev )
+                    *dev = fabs( d );
+            }
+        if ( *dev > KFRAG_FLAT_DEV || *dev < 1e-6 )
+            return false;                           // shaped on purpose, or already flat
+        if ( !apply )
+            return true;
+        for ( int c = 0; c < pm->width; ++c )
+            for ( int r = 0; r < pm->height; ++r )
+            {
+                float *p = pm->ctrl[c][r].xyz;
+                const double d = ( p[0] - cen[0] ) * n[0] + ( p[1] - cen[1] ) * n[1] + ( p[2] - cen[2] ) * n[2];
+                for ( int k = 0; k < 3; ++k )
+                    p[k] = (float)( p[k] - d * n[k] );
+                if ( axial )
+                    p[a] = (float)cen[a];           // exactly on the axial plane
+            }
+        return true;
+    }
+}
+
+void KiwiFragile_CleanPrecision()
+{
+    std::vector<selbrush_t *> nodes;
+    const bool selection = selected_brushes.next && selected_brushes.next != &selected_brushes;
+    for ( selbrush_t *head : { &selected_brushes, &active_brushes } )
+    {
+        if ( head == &active_brushes && selection )
+            break;
+        for ( selbrush_t *i = head->next; i && i != head; i = i->next )
+            if ( i->def )
+                nodes.push_back( i );
+    }
+    KiwiCmd_UndoBegin( "clean up precision" );
+    int faces = 0, patches = 0;
+    double worst = 0.0;
+    std::vector<const brush_t *> done;
+    for ( selbrush_t *node : nodes )
+    {
+        brush_t *def = node->def;
+        bool seen = false;
+        for ( const brush_t *d : done )
+            seen = seen || d == def;
+        if ( seen )
+            continue;
+        done.push_back( def );
+        const entity_s *owner = def->owner;
+        if ( owner && owner->eclass && owner->eclass->fixedsize )
+            continue;                               // model / light proxies
+        if ( def->patch )
+        {
+            double dev = 0.0;
+            if ( !FlattenPatch( def->patch, false, &dev ) )
+                continue;
+            KiwiCmd_UndoCoverBrush( node );
+            FlattenPatch( def->patch, true, &dev );
+            Patch_Rebuild( def->patch, 1 );
+            ++patches;
+            if ( dev > worst )
+                worst = dev;
+            continue;
+        }
+        if ( !def->faces )
+            continue;
+        int n = 0;
+        for ( int f = 0; f < def->faceCount; ++f )
+            n += SquareFace( &def->faces[f], false ) ? 1 : 0;
+        if ( !n )
+            continue;
+        KiwiCmd_UndoCoverBrush( node );
+        for ( int f = 0; f < def->faceCount; ++f )
+            SquareFace( &def->faces[f], true );
+        KiwiValid_Rebuild( def );
+        faces += n;
+    }
+    if ( faces || patches )
+        KiwiCmd_UndoCommit();
+    else
+        KiwiCmd_UndoCancel();
+    g_nUpdateBits = W_ALL;
+    KiwiViewDirty_Mark( KIWI_DIRTYVIEW_XY );
+    if ( patches )
+        Sys_Printf( "Clean Up Precision (%s): %d face(s) squared onto an axis, %d patch(es) flattened "
+                    "(the worst was %.4g units off flat).\n", selection ? "selection" : "whole map",
+                    faces, patches, worst );
+    else
+        Sys_Printf( "Clean Up Precision (%s): %d face(s) squared onto an axis, no patch needed "
+                    "flattening.\n", selection ? "selection" : "whole map", faces );
+}
+
+void KiwiFragile_RegisterCommands()
+{
+    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
+    Radiant_RegisterCommand( "KiwiCleanPrecision", 0, 0, KIWI_CMD_CLEAN_PRECISION );
+}
+
+bool KiwiFragile_DispatchInstant( unsigned int cmdId )
+{
+    if ( cmdId != KIWI_CMD_CLEAN_PRECISION )
+        return false;
+    KiwiFragile_CleanPrecision();
+    return true;
+}

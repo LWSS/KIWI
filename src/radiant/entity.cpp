@@ -17,6 +17,7 @@ extern void KiwiWalkCache_MarkStructural();  // kiwi_walkcache.h
 extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
 extern int   Sys_Printf( const char *fmt, ... );
 extern char *AllocMaterialString( const char *src );
+extern void  sub_483500( epair_t **head, const char *key, const char *value );   // eclass.cpp: raw epair set
 extern void  Error( const char *fmt, ... );    // wraps Com_Error (engine_stubs.cpp)
 extern void  MarkMapModified();
 extern void  SetupVertexSelection();
@@ -33,6 +34,7 @@ extern void         *zero;                      // engine_stubs.cpp (MFC empty s
 extern void         *lpBuffer;                  // engine_stubs.cpp
 #include "mainfrm.h"
 #include "xywnd.h"                             // xywndState_t / Ed_ActiveXY (U-GLOBALS)
+#include "kiwi_fmt.h"                          // KIWI: KiwiFmt_Exact (entity origins)
 extern void XYWnd_PasteClip();                 // mainfrm.cpp (U-CMD-1 free fn)
 extern camera_s     *Ed_Camera();              // camwnd.cpp — THE editor camera (never NULL)
 
@@ -1216,6 +1218,26 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
         }
     }
 
+    // KIWI (2026-10-05, load/save gauntlet): a misc_model is placed in game by R_LoadMiscModel,
+    // where a non-zero "angle" (yaw) wins over "angles"; the editor (Entity_GetOrientationMatrix)
+    // and its rotate tools read "angles" only, so such a model showed unrotated here and turned
+    // in game.  Say it as "angles" - the orientation the game already used - and drop "angle".
+    if ( !a2 && !_stricmp( ValueForKey2( ent45, "classname" ), "misc_model" ) )
+    {
+        const char *angle = ValueForKey2( ent45, "angle" );   // the first, as the game reads
+        if ( atof( angle ) != 0.0 )
+        {
+            char value[96];
+            _snprintf( value, sizeof( value ), "0 %s 0", angle );
+            value[sizeof( value ) - 1] = '\0';
+            Sys_Printf( "misc_model: \"angle\" \"%s\" read as \"angles\" \"%s\" (the game takes \"angle\" first)\n",
+                        angle, value );
+            sub_483500( &ent45->epairs, "angles", value );
+        }
+        for ( int i = 0; i < 8; ++i )            // every copy; an "angle" of 0 the game ignores too
+            DeleteKey( &ent45->epairs, "angle" );
+    }
+
     // Check if we should return the raw parsed entity (group_info or force-return flag)
     if ( !strcmp( ValueForKey2( ent45, "classname" ), "group_info" ) || a2 )
         return ent45;
@@ -1319,8 +1341,12 @@ void Entity_WriteSelected( entity_s_def *world_ent, WriteFunc_entity_t *MemFile_
 
     if ( *(int *)&world_ent->eclass->fixedsize )
     {
-        char v8[132];
-        sprintf( v8, "%.1f %.1f %.1f", world_ent->origin[0], world_ent->origin[1], world_ent->origin[2] );
+        // KIWI: exact origins (kiwi_fmt.h), not "%.1f": a copy / clone / paste is re-parsed
+        // from this text, so every copy of a model landed on the 0.1 grid.
+        char v8[132], ox[40], oy[40], oz[40];
+        sprintf( v8, "%s %s %s", KiwiFmt_Exact( ox, sizeof( ox ), world_ent->origin[0] ),
+                 KiwiFmt_Exact( oy, sizeof( oy ), world_ent->origin[1] ),
+                 KiwiFmt_Exact( oz, sizeof( oz ), world_ent->origin[2] ) );
         SetKeyValue( world_ent, "origin", v8 );
     }
 
@@ -1644,8 +1670,8 @@ void AlignEntityToFace_OrientToFloor( entity_s_def *ent, float *dir )
     if ( !Entity_GetVec3ForKey( ent, angles, "angles" ) )
         angles[0] = angles[1] = angles[2] = 0.0f;
     sub_4859B0( angles, dir );
-    char *v2 = va( "%g %g %g", angles[0], angles[1], angles[2] );
-    SetKeyValue( ent, "angles", v2 );
+    char v2[160];                                          // KIWI: exact, not %g
+    SetKeyValue( ent, "angles", KiwiFmt_Vec3Exact( v2, sizeof( v2 ), angles, 0 ) );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

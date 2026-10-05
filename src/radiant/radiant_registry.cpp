@@ -6,9 +6,16 @@
 #include "stdafx.h"
 #include "radiant_registry.h"
 
+static char s_ini[MAX_PATH];
+
+void Radiant_SetIniPath( const char *fullPath )
+{
+    _snprintf( s_ini, sizeof( s_ini ), "%s", fullPath ? fullPath : "" );
+    s_ini[sizeof( s_ini ) - 1] = 0;
+}
+
 const char *Radiant_IniPath()
 {
-    static char s_ini[MAX_PATH];
     if ( !s_ini[0] )
     {
         char exeDir[MAX_PATH] = { 0 };

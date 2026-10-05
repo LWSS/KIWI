@@ -156,14 +156,14 @@ int __cdecl Outdoor_TransformToTextureClamped(int dimension, float inWorld)
     float transformed; // [esp+18h] [ebp-4h]
 
     transformed = inWorld * outdoorGlob.scale[dimension] + outdoorGlob.add[dimension];
-    unclamped = (int)(transformed - 0.4999999990686774);
+    unclamped = (int)lrint(transformed - 0.4999999990686774);   // KIWI: fistp floor idiom (a cast truncated)
     max = outdoorMapSize[dimension] - 1;
     iassert(max > 0); // lwss: changed assert
     //iassert( min < max );
     if (unclamped < 0)
         return 0;
     if (unclamped <= max)
-        return (int)(transformed - 0.4999999990686774);
+        return (int)lrint(transformed - 0.4999999990686774);
     return max;
 }
 

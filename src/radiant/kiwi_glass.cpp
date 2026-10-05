@@ -182,11 +182,11 @@ namespace
         auto inum = [&]( const char *k, int v ) { _snprintf( buf, sizeof( buf ) - 1, "%i", v ); buf[sizeof( buf ) - 1] = '\0'; t += "\\"; t += k; t += "\\"; t += buf; };
         auto str  = [&]( const char *k, const std::string &v ) { if ( !v.empty() ) { t += "\\"; t += k; t += "\\"; t += v; } };
         inum( "maxHealth", s.maxHealth );
-        num( "minShardSize", "%g", s.minShardSize );
-        num( "maxShardSize", "%g", s.maxShardSize );
-        num( "shardLifeProbability", "%g", s.keep );
+        num( "minShardSize", "%.9g", s.minShardSize );          // %.9g: %g kept 6 digits
+        num( "maxShardSize", "%.9g", s.maxShardSize );
+        num( "shardLifeProbability", "%.9g", s.keep );
         inum( "maxShards", s.maxShards );
-        num( "uvScale", "%g", s.uvScale );
+        num( "uvScale", "%.9g", s.uvScale );
         inum( "frameEdges", s.frameEdges );
         str( "pristineMaterial", s.pristine );
         str( "crackedMaterial", s.cracked );
@@ -430,7 +430,7 @@ namespace
         const texdef_sub_t &td = def->faces[slab.frontFace].mtldef[0].mat_texDef;
         const float sx = td.size[0] != 0.0f ? fabsf( td.size[0] ) : 128.0f;
         char buf[32];
-        _snprintf( buf, sizeof( buf ) - 1, "%g", 1.0 / (double)sx );
+        _snprintf( buf, sizeof( buf ) - 1, "%.9g", (double)(float)( 1.0 / (double)sx ) );   // the float the game reads
         buf[sizeof( buf ) - 1] = '\0';
         out = buf;
         return true;

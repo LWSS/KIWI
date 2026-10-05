@@ -4,6 +4,8 @@
 
 #include "stdafx.h"
 #include "kiwi_test.h"
+#include "kiwi_testprobe.h"     // probe verbs: geometry / camera / tool driving (remote suite)
+#include "radiant_registry.h"   // Radiant_SetIniPath: isolated test profile
 #include "kiwi_command.h"
 #include "kiwi_modelbrowser.h"
 #include "kiwi_particles.h"     // particle_place / particle_export verbs (test mode)
@@ -126,6 +128,21 @@ struct TestState
     std::string consoleText;
     std::string consolePending;
     std::vector<FailRule> failRules;
+
+    // KIWI (2026-10-05): -kiwiremote.  Lines arrive over a named pipe and queue in `lines`;
+    // each command's log lines (capture) go back once its frame / sleep waits are over,
+    // then "@@END OK|FAIL".  `run <script>` inlines a script whose lines answer as one.
+    bool remote = false;
+    bool quitRequested = false;
+    HANDLE pipe = INVALID_HANDLE_VALUE;
+    bool pipeConnected = false;
+    std::string pipeIn;
+    int nextNumber = 0;
+    bool replyOpen = false;
+    bool cmdFailed = false;
+    size_t batchEnd = 0;            // lines before this index belong to the open reply
+    bool capturing = false;
+    std::string capture;
 };
 
 TestState s_test;
@@ -174,6 +191,15 @@ static void RawWrite( const char *text, size_t length )
 
 static void WriteOneLine( const char *channel, const char *text, size_t length )
 {
+    if ( s_test.capturing )                     // -kiwiremote: this command's reply
+    {
+        s_test.capture += '[';
+        s_test.capture += channel ? channel : "TEST";
+        s_test.capture += "] ";
+        if ( text && length )
+            s_test.capture.append( text, length );
+        s_test.capture += '\n';
+    }
     if ( s_test.log == INVALID_HANDLE_VALUE )
         return;
     SYSTEMTIME now;
@@ -403,6 +429,13 @@ static void Finish( int requestedCode )
 {
     if ( s_test.finished )
         return;
+    if ( s_test.remote && !s_test.quitRequested )
+    {
+        // A remote session survives a failed command: the reply says FAIL, the editor stays.
+        if ( requestedCode != 0 )
+            s_test.cmdFailed = true;
+        return;
+    }
     if ( !s_test.consolePending.empty() )
     {
         WriteOneLine( "CONSOLE", s_test.consolePending.data(), s_test.consolePending.size() );
@@ -437,6 +470,7 @@ static void ExpectResult( const ScriptLine &line, bool pass,
                actual.c_str(), expected.c_str() );
     if ( pass )
         return;
+    s_test.cmdFailed = true;
     if ( s_test.result == 0 )
         s_test.result = 1;
     if ( s_test.strict )
@@ -504,7 +538,7 @@ static bool SelectEntityDef( entity_s *def )
     return true;
 }
 
-static bool SelectBrushOrdinal( int entityIndex, int brushIndex )
+static bool SelectBrushOrdinal( int entityIndex, int brushIndex, bool add = false )
 {
     entity_s *ent = SavedEntityAt( entityIndex );
     if ( !ent || brushIndex < 0 || !ent->eclass || ent->eclass->fixedsize )
@@ -519,7 +553,8 @@ static bool SelectBrushOrdinal( int entityIndex, int brushIndex )
     if ( wanted == sentinel || brushIndex != 0 )
         return false;
 
-    Select_Deselect( 1 );
+    if ( !add )                             // KIWI: `select brush+` keeps the selection
+        Select_Deselect( 1 );
     for ( selbrush_t *node : SelectableNodes() )
     {
         if ( node->def == wanted )
@@ -1076,11 +1111,12 @@ static void ExecuteSelect( const ScriptLine &line )
         g_nUpdateBits = -1;
         return;
     }
-    if ( mode == "brush" )
+    if ( mode == "brush" || mode == "brush+" )
     {
+        // KIWI (2026-10-05): `select brush+ e b` adds to the selection (Shift-click).
         int entityIndex = 0, brushIndex = 0;
         if ( w.size() != 4 || !ParseInt( w[2], entityIndex ) || !ParseInt( w[3], brushIndex ) ||
-             !SelectBrushOrdinal( entityIndex, brushIndex ) )
+             !SelectBrushOrdinal( entityIndex, brushIndex, mode == "brush+" ) )
             ScriptError( line, "no saved brush at entity %s ordinal %s",
                          w.size() > 2 ? w[2].c_str() : "?", w.size() > 3 ? w[3].c_str() : "?" );
         return;
@@ -1394,11 +1430,44 @@ static void ExecuteRefImage( const ScriptLine &line )
     ScriptError( line, "unknown refimage verb '%s'", w[1].c_str() );
 }
 
+static bool LoadScriptLines( const std::string &path, std::vector<ScriptLine> &out, std::string &error );
+
 static void ExecuteLine( const ScriptLine &line )
 {
     const std::vector<std::string> &w = line.words;
     if ( w.empty() ) return;
     const std::string command = Lower( w[0] );
+    // KIWI (2026-10-05): remote-session plumbing and the probe verbs (kiwi_testprobe.cpp).
+    if ( command == "__noop" )
+        return;
+    if ( command == "__parse_error" )
+    {
+        ScriptError( line, "%s", w.size() > 1 ? w[1].c_str() : "unparsable line" );
+        return;
+    }
+    if ( command == "run" )
+    {
+        // Inline a script after this line; in a remote session its lines answer as one.
+        if ( w.size() != 2 ) { ScriptError( line, "usage: run <script.kt>" ); return; }
+        std::vector<ScriptLine> more;
+        std::string error;
+        if ( !LoadScriptLines( FullPath( w[1].c_str() ), more, error ) )
+        { ScriptError( line, "run: %s", error.c_str() ); return; }
+        s_test.lines.insert( s_test.lines.begin() + (std::ptrdiff_t)s_test.nextLine, more.begin(), more.end() );
+        if ( s_test.remote )
+            s_test.batchEnd = s_test.nextLine + more.size();
+        LogFormat( "RUN", "%u lines from %s", (unsigned)more.size(), w[1].c_str() );
+        return;
+    }
+    {
+        std::string error;
+        if ( KiwiTestProbe_Execute( w, error ) )
+        {
+            if ( !error.empty() )
+                ScriptError( line, "%s", error.c_str() );
+            return;
+        }
+    }
     if ( command == "circle_extrude_probe" )
     {
         // Exercise the actual modal command, source preservation, undo and patch
@@ -2063,6 +2132,7 @@ static void ExecuteLine( const ScriptLine &line )
         int code = 0;
         if ( w.size() > 2 || ( w.size() == 2 && ( !ParseInt( w[1], code ) || code < 0 || code > 255 ) ) )
         { ScriptError( line, "quit accepts one optional code from 0 through 255" ); return; }
+        s_test.quitRequested = true;            // a remote session ends only here
         Finish( code );
         return;
     }
@@ -2070,15 +2140,256 @@ static void ExecuteLine( const ScriptLine &line )
 }
 } // namespace
 
-bool KiwiTest_Init( const char *scriptPath, const char *logPath, bool keepOpen, bool strict )
+namespace
 {
-    if ( s_test.active )
+static bool LoadScriptLines( const std::string &path, std::vector<ScriptLine> &out, std::string &error )
+{
+    std::ifstream input( path, std::ios::binary );
+    if ( !input )
+    {
+        error = "could not open script " + path;
         return false;
-    s_test = TestState();
-    s_test.active = true;
-    s_test.strict = strict;
-    s_test.keepOpen = keepOpen;
+    }
+    std::string textLine;
+    int lineNumber = 0;
+    while ( std::getline( input, textLine ) )
+    {
+        ++lineNumber;
+        if ( !textLine.empty() && textLine.back() == '\r' ) textLine.pop_back();
+        if ( lineNumber == 1 && textLine.size() >= 3 &&
+             (unsigned char)textLine[0] == 0xEF && (unsigned char)textLine[1] == 0xBB &&
+             (unsigned char)textLine[2] == 0xBF )
+            textLine.erase( 0, 3 );
+        ScriptLine parsed;
+        parsed.number = lineNumber;
+        parsed.raw = textLine;
+        std::string why;
+        if ( !ParseWords( textLine, parsed.words, why ) )
+        {
+            char buf[64];
+            _snprintf( buf, sizeof( buf ), "line %d: ", lineNumber );
+            buf[sizeof( buf ) - 1] = '\0';
+            error = buf + why;
+            return false;
+        }
+        if ( !parsed.words.empty() )
+            out.push_back( parsed );
+    }
+    return true;
+}
 
+// ── -kiwiremote transport ────────────────────────────────────────────────────
+// One client at a time on a byte-mode named pipe in PIPE_NOWAIT mode, polled once per
+// pump tick: no thread, and nothing ever blocks the editor.
+
+static void RemoteDisconnect( const char *why )
+{
+    if ( s_test.pipe == INVALID_HANDLE_VALUE || !s_test.pipeConnected )
+        return;
+    DisconnectNamedPipe( s_test.pipe );
+    s_test.pipeConnected = false;
+    s_test.pipeIn.clear();
+    LogFormat( "REMOTE", "client disconnected (%s)", why );
+}
+
+static void RemoteSend( const std::string &text )
+{
+    if ( !s_test.pipeConnected )
+        return;
+    size_t done = 0;
+    const ULONGLONG giveUp = GetTickCount64() + 10000;
+    while ( done < text.size() )
+    {
+        DWORD wrote = 0;
+        const DWORD want = (DWORD)( text.size() - done < 32768 ? text.size() - done : 32768 );
+        if ( !WriteFile( s_test.pipe, text.data() + done, want, &wrote, nullptr ) )
+        {
+            RemoteDisconnect( "write failed" );
+            return;
+        }
+        done += wrote;
+        if ( !wrote )
+        {
+            if ( GetTickCount64() > giveUp )
+            {
+                RemoteDisconnect( "client stopped reading" );
+                return;
+            }
+            Sleep( 1 );                         // the client drains the pipe buffer
+        }
+    }
+}
+
+// The open command's reply: its captured log lines, then the verdict.
+static void RemoteReply()
+{
+    if ( !s_test.replyOpen )
+        return;
+    s_test.replyOpen = false;
+    s_test.capturing = false;
+    if ( !s_test.consolePending.empty() )       // a console line without its newline yet
+    {
+        s_test.capture += "[CONSOLE] " + s_test.consolePending + "\n";
+        WriteOneLine( "CONSOLE", s_test.consolePending.data(), s_test.consolePending.size() );
+        s_test.consolePending.clear();
+    }
+    std::string reply;
+    reply.swap( s_test.capture );
+    reply += s_test.cmdFailed ? "@@END FAIL\n" : "@@END OK\n";
+    RemoteSend( reply );
+}
+
+// Accept a client, read what it sent, queue every complete line.
+static void RemotePoll()
+{
+    if ( s_test.pipe == INVALID_HANDLE_VALUE )
+        return;
+    if ( !s_test.pipeConnected )
+    {
+        if ( ConnectNamedPipe( s_test.pipe, nullptr ) )
+            s_test.pipeConnected = true;
+        else
+        {
+            const DWORD err = GetLastError();
+            if ( err == ERROR_PIPE_CONNECTED )
+                s_test.pipeConnected = true;
+            else if ( err == ERROR_NO_DATA )
+                DisconnectNamedPipe( s_test.pipe );     // a client came and went
+        }
+        if ( !s_test.pipeConnected )
+            return;
+        LogFormat( "REMOTE", "client connected" );
+    }
+    for ( ;; )
+    {
+        DWORD avail = 0;
+        if ( !PeekNamedPipe( s_test.pipe, nullptr, 0, nullptr, &avail, nullptr ) )
+        {
+            RemoteDisconnect( "pipe closed" );
+            return;
+        }
+        if ( !avail )
+            break;
+        char buf[4096];
+        DWORD got = 0;
+        if ( !ReadFile( s_test.pipe, buf, avail < sizeof( buf ) ? avail : (DWORD)sizeof( buf ), &got, nullptr ) || !got )
+            break;
+        s_test.pipeIn.append( buf, got );
+    }
+    size_t newline;
+    while ( ( newline = s_test.pipeIn.find( '\n' ) ) != std::string::npos )
+    {
+        std::string text = s_test.pipeIn.substr( 0, newline );
+        s_test.pipeIn.erase( 0, newline + 1 );
+        if ( !text.empty() && text.back() == '\r' )
+            text.pop_back();
+        ScriptLine parsed;
+        parsed.number = ++s_test.nextNumber;
+        parsed.raw = text;
+        std::string error;
+        if ( !ParseWords( text, parsed.words, error ) )
+            parsed.words = { "__parse_error", error };
+        else if ( parsed.words.empty() )
+            parsed.words = { "__noop" };       // every line sent gets a reply
+        s_test.lines.push_back( parsed );
+    }
+}
+
+// The remote branch of KiwiTest_Tick: a command runs, and its reply goes once its waits
+// (frames / sleep_ms / a run batch) are over.
+static void RemoteTick()
+{
+    RemotePoll();
+    if ( s_test.waitFrames > 0 )
+    {
+        --s_test.waitFrames;
+        return;
+    }
+    if ( s_test.sleepUntil )
+    {
+        if ( GetTickCount64() < s_test.sleepUntil )
+            return;
+        s_test.sleepUntil = 0;
+    }
+    if ( s_test.replyOpen && s_test.nextLine >= s_test.batchEnd )
+        RemoteReply();
+    if ( s_test.nextLine >= s_test.lines.size() )
+    {
+        if ( s_test.nextLine > 4096 )           // keep the queue from growing for ever
+        {
+            s_test.lines.clear();
+            s_test.nextLine = 0;
+            s_test.batchEnd = 0;
+        }
+        return;
+    }
+    const ScriptLine line = s_test.lines[s_test.nextLine++];
+    if ( !s_test.replyOpen )
+    {
+        s_test.replyOpen  = true;
+        s_test.cmdFailed  = false;
+        s_test.capturing  = true;
+        s_test.capture.clear();
+    }
+    LogFormat( "SCRIPT", "%d: %s", line.number, line.raw.c_str() );
+    ExecuteLine( line );
+    if ( s_test.finished )                      // `quit`: answer before WM_QUIT ends the pump
+    {
+        s_test.batchEnd = 0;
+        RemoteReply();
+    }
+    else if ( s_test.waitFrames == 0 && !s_test.sleepUntil && s_test.nextLine >= s_test.batchEnd )
+        RemoteReply();                          // nothing to wait for: answer this tick
+}
+
+// Test instances must never take the user's focus.  Every activation in this thread is
+// refused; a dialog (a message box) is logged and cancelled so it can neither wait for a
+// click nor sit on the user's screen.
+HHOOK s_cbtHook = nullptr;
+
+BOOL CALLBACK CollectDialogText( HWND child, LPARAM out )
+{
+    char text[256] = {};
+    if ( GetWindowTextA( child, text, sizeof( text ) ) > 0 )
+    {
+        std::string &s = *(std::string *)out;
+        if ( !s.empty() )
+            s += " | ";
+        s += text;
+    }
+    return TRUE;
+}
+
+LRESULT CALLBACK TestCbtProc( int code, WPARAM wParam, LPARAM lParam )
+{
+    if ( code == HCBT_ACTIVATE )
+    {
+        HWND hwnd = (HWND)wParam;
+        char cls[64] = {};
+        GetClassNameA( hwnd, cls, sizeof( cls ) );
+        if ( strcmp( cls, "#32770" ) == 0 )
+        {
+            char caption[256] = {};
+            GetWindowTextA( hwnd, caption, sizeof( caption ) );
+            std::string text;
+            EnumChildWindows( hwnd, CollectDialogText, (LPARAM)&text );
+            // A Yes/No box has no Cancel and ignores IDCANCEL (the instance then sat in its
+            // modal loop): answer with a button it has - Cancel, else No, else Ignore (an
+            // Abort/Retry/Ignore assert box), else OK.
+            const int answer = GetDlgItem( hwnd, IDCANCEL ) ? IDCANCEL : GetDlgItem( hwnd, IDNO ) ? IDNO
+                             : GetDlgItem( hwnd, IDIGNORE ) ? IDIGNORE : IDOK;
+            LogFormat( "DIALOG", "answered %s to \"%s\": %s",
+                       answer == IDCANCEL ? "Cancel" : answer == IDNO ? "No" : answer == IDIGNORE ? "Ignore" : "OK",
+                       caption, text.c_str() );
+            PostMessageA( hwnd, WM_COMMAND, answer, 0 );
+        }
+        return 1;
+    }
+    return CallNextHookEx( s_cbtHook, code, wParam, lParam );
+}
+
+static bool OpenLogAndHandlers( const char *logPath, const char *defaultName )
+{
     if ( logPath && logPath[0] )
         s_test.logPath = FullPath( logPath );
     else
@@ -2087,7 +2398,7 @@ bool KiwiTest_Init( const char *scriptPath, const char *logPath, bool keepOpen, 
         DWORD length = GetTempPathA( (DWORD)sizeof( temp ), temp );
         if ( !length || length >= sizeof( temp ) )
             strcpy( temp, ".\\" );
-        s_test.logPath = std::string( temp ) + "kiwitest.log";
+        s_test.logPath = std::string( temp ) + defaultName;
     }
     s_test.log = CreateFileA( s_test.logPath.c_str(), GENERIC_WRITE,
                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS,
@@ -2104,6 +2415,92 @@ bool KiwiTest_Init( const char *scriptPath, const char *logPath, bool keepOpen, 
                    (unsigned long)GetLastError() );
         return false;
     }
+    return true;
+}
+} // namespace
+
+bool KiwiTest_InitRemote( const char *pipeName, const char *logPath )
+{
+    if ( s_test.active || !pipeName || !pipeName[0] )
+        return false;
+    s_test = TestState();
+    s_test.active = true;
+    s_test.remote = true;
+    KiwiCmd_SetTestMods( 0 );               // the user's keyboard never reaches a test instance
+    if ( !OpenLogAndHandlers( logPath, "kiwiremote.log" ) )
+        return false;
+    const std::string name = std::string( "\\\\.\\pipe\\" ) + pipeName;
+    s_test.pipe = CreateNamedPipeA( name.c_str(), PIPE_ACCESS_DUPLEX,
+                                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
+                                    1, 1u << 16, 1u << 16, 0, nullptr );
+    if ( s_test.pipe == INVALID_HANDLE_VALUE )
+    {
+        LogFormat( "SCRIPT-ERROR", "CreateNamedPipe %s failed with Win32 error %lu", name.c_str(),
+                   (unsigned long)GetLastError() );
+        return false;
+    }
+    LogFormat( "START", "remote session on %s, log=%s", name.c_str(), s_test.logPath.c_str() );
+    return true;
+}
+
+void KiwiTest_IsolateProfile()
+{
+    if ( !s_test.active )
+        return;
+    char exe[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameA( nullptr, exe, sizeof( exe ) );
+    if ( !n || n >= sizeof( exe ) )
+        return;
+    char *slash = strrchr( exe, '\\' );
+    if ( !slash )
+        return;
+    slash[1] = '\0';
+    const std::string dir = std::string( exe ) + "kiwi_cache";
+    CreateDirectoryA( dir.c_str(), nullptr );
+    const std::string sub = dir + "\\kiwitest";
+    CreateDirectoryA( sub.c_str(), nullptr );
+    const std::string ini = sub + "\\kiwi_radiant.ini";
+    // The user's settings as they are now (grid, snapping, units); the dock layout starts
+    // fresh because its file is not copied.
+    CopyFileA( ( std::string( exe ) + "kiwi_radiant.ini" ).c_str(), ini.c_str(), FALSE );
+    Radiant_SetIniPath( ini.c_str() );
+    LogFormat( "START", "settings isolated in %s", ini.c_str() );
+}
+
+int KiwiTest_PrepareFrame( HWND frame, int nCmdShow, bool show )
+{
+    if ( !s_test.active || !frame || show )
+        return nCmdShow;
+    // A tool window (no taskbar button, no Alt+Tab) that refuses activation, parked past
+    // the right edge of the whole desktop at the size it was created with: still "visible",
+    // so the editor's frame keeps rendering and laying out its viewports.
+    LONG_PTR ex = GetWindowLongPtrA( frame, GWL_EXSTYLE );
+    ex = ( ex & ~(LONG_PTR)WS_EX_APPWINDOW ) | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    SetWindowLongPtrA( frame, GWL_EXSTYLE, ex );
+    RECT r;
+    GetWindowRect( frame, &r );
+    const int x = GetSystemMetrics( SM_XVIRTUALSCREEN ) + GetSystemMetrics( SM_CXVIRTUALSCREEN ) + 64;
+    const int y = GetSystemMetrics( SM_YVIRTUALSCREEN );
+    SetWindowPos( frame, HWND_BOTTOM, x, y, r.right - r.left, r.bottom - r.top,
+                  SWP_NOACTIVATE | SWP_FRAMECHANGED );
+    if ( !s_cbtHook )
+        s_cbtHook = SetWindowsHookExA( WH_CBT, TestCbtProc, nullptr, GetCurrentThreadId() );
+    LogFormat( "START", "frame parked at %d,%d (not activatable)", x, y );
+    return SW_SHOWNOACTIVATE;
+}
+
+bool KiwiTest_Init( const char *scriptPath, const char *logPath, bool keepOpen, bool strict )
+{
+    if ( s_test.active )
+        return false;
+    s_test = TestState();
+    s_test.active = true;
+    s_test.strict = strict;
+    s_test.keepOpen = keepOpen;
+    KiwiCmd_SetTestMods( 0 );               // the user's keyboard never reaches a test instance
+
+    if ( !OpenLogAndHandlers( logPath, "kiwitest.log" ) )
+        return false;
     s_test.scriptPath = FullPath( scriptPath );
     LogFormat( "START", "script=%s", s_test.scriptPath.empty() ? "<missing>" : s_test.scriptPath.c_str() );
     LogFormat( "START", "log=%s strict=%d keep=%d", s_test.logPath.c_str(), strict ? 1 : 0,
@@ -2114,33 +2511,11 @@ bool KiwiTest_Init( const char *scriptPath, const char *logPath, bool keepOpen, 
         return false;
     }
 
-    std::ifstream input( s_test.scriptPath, std::ios::binary );
-    if ( !input )
+    std::string error;
+    if ( !LoadScriptLines( s_test.scriptPath, s_test.lines, error ) )
     {
-        LogFormat( "SCRIPT-ERROR", "could not open script" );
+        LogFormat( "SCRIPT-ERROR", "%s", error.c_str() );
         return false;
-    }
-    std::string textLine;
-    int lineNumber = 0;
-    while ( std::getline( input, textLine ) )
-    {
-        ++lineNumber;
-        if ( !textLine.empty() && textLine.back() == '\r' ) textLine.pop_back();
-        if ( lineNumber == 1 && textLine.size() >= 3 &&
-             (unsigned char)textLine[0] == 0xEF && (unsigned char)textLine[1] == 0xBB &&
-             (unsigned char)textLine[2] == 0xBF )
-            textLine.erase( 0, 3 );
-        ScriptLine parsed;
-        parsed.number = lineNumber;
-        parsed.raw = textLine;
-        std::string error;
-        if ( !ParseWords( textLine, parsed.words, error ) )
-        {
-            LogFormat( "SCRIPT-ERROR", "line %d: %s", lineNumber, error.c_str() );
-            return false;
-        }
-        if ( !parsed.words.empty() )
-            s_test.lines.push_back( parsed );
     }
     LogFormat( "START", "loaded %u executable script lines", (unsigned int)s_test.lines.size() );
     return true;
@@ -2155,6 +2530,11 @@ void KiwiTest_Tick()
 {
     if ( !s_test.active || s_test.finished )
         return;
+    if ( s_test.remote )
+    {
+        RemoteTick();
+        return;
+    }
     if ( s_test.stopAtNextTick )
     {
         Finish( s_test.result ? s_test.result : 1 );
@@ -2208,6 +2588,7 @@ void KiwiTest_ConsoleTap( const char *text )
         if ( scan.find( rule.needle ) != std::string::npos )
         {
             rule.tripped = true;
+            s_test.cmdFailed = true;
             if ( s_test.result == 0 ) s_test.result = 1;
             LogFormat( "EXPECT-FAIL", "console matched fail_on_console substring: %s",
                        rule.needle.c_str() );
@@ -2227,9 +2608,25 @@ void KiwiTest_Log( const char *fmt, ... )
     va_end( args );
 }
 
+void KiwiTest_LogChannel( const char *channel, const char *fmt, ... )
+{
+    if ( !s_test.active || !fmt ) return;
+    va_list args;
+    va_start( args, fmt );
+    LogFormatV( channel, fmt, args );
+    va_end( args );
+}
+
+void KiwiTest_WaitFrames( int frames )
+{
+    if ( s_test.active && frames > s_test.waitFrames )
+        s_test.waitFrames = frames;
+}
+
 void KiwiTest_Fail( const char *message )
 {
     if ( !s_test.active ) return;
+    s_test.cmdFailed = true;
     if ( s_test.result == 0 ) s_test.result = 1;
     LogFormat( "FAIL", "%s", message ? message : "unspecified failure" );
     if ( s_test.strict ) s_test.stopAtNextTick = true;

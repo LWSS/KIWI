@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <numeric>
@@ -239,10 +240,16 @@ bool Inside(const Hull& hull, const P3& p, double epsilon) {
     return true;
 }
 
+// The fewest decimals that read back (atof, as cod4map / Radiant) as the same float - "%.4f"
+// re-rounded a hand-edited master's plane points every time its variants were written.
 std::string FormatNumber(double value) {
-    if (std::abs(value) < 5e-5) value = 0.0;
+    if (std::abs(value) < 1e-6) value = 0.0;   // hull arithmetic noise
+    const float f = static_cast<float>(value);
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer), "%.4f", value);
+    for (int decimals = 1; decimals <= 12; ++decimals) {
+        std::snprintf(buffer, sizeof(buffer), "%.*f", decimals, static_cast<double>(f));
+        if (static_cast<float>(std::strtod(buffer, nullptr)) == f) break;
+    }
     std::string text = buffer;
     if (text.find('.') != std::string::npos) {
         while (!text.empty() && text.back() == '0') text.pop_back();

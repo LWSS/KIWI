@@ -40,6 +40,8 @@
 #include <stdlib.h>   // atof, atol, atoi, free
 #include <string.h>
 #include <stdio.h>    // sprintf
+#include "kiwi_floatsnap.h"   // KIWI: noise-only half-grid snap
+#include "kiwi_angles.h"      // KIWI: exact sin / cos of degrees
 
 #define PMESH_CPP "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\PMESH.CPP"
 
@@ -1176,10 +1178,11 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
         if ( p->kiwiLayer[slot][0] )
             WRITE( writer, "   kiwilayer %i %s\n", slot, p->kiwiLayer[slot] );
 
-    // IDA uses plain "%g" for the LOD size (6 sig figs); stock patch sizes are
-    // integer-valued (0 in blackout) so no exponent arises — match IDA verbatim.
+    // IDA uses plain "%g" for the LOD size (6 sig figs).  KIWI: Fmt8g - a scaled patch's
+    // 21.333334 saved as 21.3333; stock integer sizes (0 in blackout) print as before.
     float sizeVal = p->bDirty ? *(float *)&p->size_of_struct_0x504C : 0.0f;
-    WRITE( writer, "   %i %i %g %i\n", p->width, p->height, (double)sizeVal, p->subDivType );
+    char sizeBuf[40];
+    WRITE( writer, "   %i %i %s %i\n", p->width, p->height, Fmt8g( sizeBuf, (double)sizeVal ), p->subDivType );
 
     for ( int col = 0; col < p->width; ++col )
     {
@@ -3312,9 +3315,11 @@ void Patch_RotateTexture( patchMesh_t *p, float deg )
     Patch_CalcBounds( mins, maxs, p, false );          // IDB call (output vestigial here)
 
     // IDA: v13 (FLOAT slot) = deg*PI/180, then cos/sin(v13) — round the angle to float first.
-    const float  rad = (float)( (double)deg * 3.141592741012573 / 180.0 );
-    const float  c   = (float)cos( (double)rad );
-    const float  s   = (float)sin( (double)rad );
+    // KIWI: true PI in double, exact at multiples of 90 (kiwi_angles.h) - cos( (float)(PI / 2) )
+    // is -4.4e-8, so four 90 degree turns did not give the texture coords back.
+    double sd, cd;
+    KiwiAng_SinCos( (double)deg, &sd, &cd );
+    const float c = (float)cd, s = (float)sd;
 
     for ( int w = 0; w < p->width; ++w )
         for ( int h = 0; h < p->height; ++h )
@@ -3622,9 +3627,14 @@ void Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap )
             rel[1] = xyz[1] - orient->origin[1];
             rel[2] = xyz[2] - orient->origin[2];
             OrientationPosToWorldPos( xyz, rel, orient );
+            // KIWI: noise-only, as Brush_SnapPlanepts (engine_stubs.cpp) - the binary rounds
+            // every rotated / flipped control point to 0.5, which bends off-grid patches.
             if ( snap )
-                for ( int i = 0; i < 3; ++i )
-                    xyz[i] = (float)floor( 0.5 + xyz[i] + xyz[i] ) * 0.5f;
+            {
+                double scale = sqrt( (double)rel[0] * rel[0] + (double)rel[1] * rel[1] + (double)rel[2] * rel[2] );
+                for ( int i = 0; i < 3; ++i )   // the turn radius or the point, whichever is larger
+                    xyz[i] = KiwiSnap_NoiseHalf( xyz[i], scale );
+            }
         }
 
     Patch_Rebuild( p, 1 );
@@ -4587,12 +4597,13 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
     if ( outRow ) *outRow = bestRow;
     if ( outColor )
     {
-        // inline-fistp rounds (the binary adds 2^-30 before the cvt); colours are
-        // byte-ranged so this matches the rounded original.
-        outColor[0] = (byte)(int)( color[0] + 9.313225746154785e-10 );
-        outColor[1] = (byte)(int)( color[1] + 9.313225746154785e-10 );
-        outColor[2] = (byte)(int)( color[2] + 9.313225746154785e-10 );
-        outColor[3] = (byte)(int)( color[3] + 9.313225746154785e-10 );
+        // inline fistp ROUNDS (0x44B153..0x44B19D; the binary adds 2^-30 first).
+        // KIWI (2026-10-05, fistp audit): lrint - the (int) cast truncated (a picked colour
+        // came out 1 low whenever its fraction was >= .5).
+        outColor[0] = (byte)lrint( color[0] + 9.313225746154785e-10 );
+        outColor[1] = (byte)lrint( color[1] + 9.313225746154785e-10 );
+        outColor[2] = (byte)lrint( color[2] + 9.313225746154785e-10 );
+        outColor[3] = (byte)lrint( color[3] + 9.313225746154785e-10 );
     }
     return found;
 }
@@ -4780,17 +4791,20 @@ static const unsigned int kNoiseValBits[256] = {    // 0x24BA660 (float bit patt
 
 // sub_4B75E0 (0x4B75E0) — quadrilinear value noise over a 4D integer lattice.  Two w-layers
 //  (the do/while runs twice with the low byte of the w-index advancing) are interpolated by
-//  the w-fraction.  Lattice cell origin uses (int)(c - 0.49999999907) (truncating _ftol2, so
-//  effectively floor for the +c range the caller feeds it).  All perm indexing wraps mod 256.
+//  the w-fraction.  Lattice cell origin = round(c - 0.49999999907) = floor(c): the binary's
+//  fistp ROUNDS (0x4B75F8 / 0x4B7613 / 0x4B762E / 0x4B7649, no fldcw).  All perm indexing wraps
+//  mod 256.
+// KIWI (2026-10-05, fistp audit): the port truncated, so half of every cell took the cell below
+// (fraction 1..1.5): the Noise brush extrapolated and stepped at each half-lattice point.
 float Radiant_ValueNoise4D( float a1, float a2, float a3, float a4 )
 {
     const int   *P = kNoisePerm;
     const float *G = (const float *)kNoiseValBits;
 
-    int ix = (int)( a1 - 0.4999999990686774 );  float fx = a1 - (double)ix;   // v30/v27
-    int iy = (int)( a2 - 0.4999999990686774 );  float fy = a2 - (double)iy;   // v31/v28
-    int iz = (int)( a3 - 0.4999999990686774 );  float fz = a3 - (double)iz;   // v29/v34
-    int iw = (int)( a4 - 0.4999999990686774 );  float fw = a4 - (double)iw;   // v33/v25
+    int ix = (int)lrint( a1 - 0.4999999990686774 );  float fx = a1 - (double)ix;   // v30/v27
+    int iy = (int)lrint( a2 - 0.4999999990686774 );  float fy = a2 - (double)iy;   // v31/v28
+    int iz = (int)lrint( a3 - 0.4999999990686774 );  float fz = a3 - (double)iz;   // v29/v34
+    int iw = (int)lrint( a4 - 0.4999999990686774 );  float fw = a4 - (double)iw;   // v33/v25
 
     byte bx = (byte)ix;        // v5
     byte by = (byte)iy;        // v4
@@ -5385,7 +5399,9 @@ static byte PMESH_16_PaintByte( PaintCallback cb, float *cp, int channel,
     float v = cb( cp, channel, (float)cur, cellInfo * 0.0625f, weight );   // dbl_6F4520 = 0.0625
     if ( v < 0.0f )        v = 0.0f;                                       // dbl_6F40B8 = 0
     else if ( v > 255.0f ) v = 255.0f;                                     // dbl_6F4190 / flt_6F4720 = 255
-    return (byte)lrintf( v + 9.313225746154785e-10f );            // dbl_6F4220 = 2^-30, fistp rounds
+    // dbl_6F4220 = 2^-30 added in DOUBLE, then fistp: a float add lost it, so 126.5 rounded
+    // to even (126) where the binary gives 127 (KIWI).
+    return (byte)lrint( (double)v + 9.313225746154785e-10 );
 }
 
 void PMESH_16( selbrush_t *b, char channelMask, float *center, float cellInfo, PaintCallback cb )
@@ -9329,8 +9345,11 @@ selbrush_t *PMESH_07_Width( selbrush_t *a1 )
         layerMesh[i] = ( i == 2 ) ? Patch_GenericMesh2( def, 0, 0, 0 )
                                   : Patch_GenericMesh2( def, i, 0, 0 );
 
-    int numPatchesX = (int)( (double)( def->curveDef->width  - 1 ) / 15.0 + 0.4999999990686774 );
-    int numPatchesY = (int)( (double)( def->curveDef->height - 1 ) / 15.0 + 0.4999999990686774 );
+    // KIWI (2026-10-05, fistp audit): the binary ROUNDS (fistp 0x43B9F5 / 0x43BA28, no fldcw),
+    // so x + 0.49999999907 is ceil(x).  The truncating cast gave one block too few whenever
+    // (W-1) % 15 is 1..7 (W 17..23): the last block came out 17..23 wide - past ctrl[16][16].
+    int numPatchesX = (int)lrint( (double)(float)( (double)( def->curveDef->width  - 1 ) / 15.0 ) + 0.4999999990686774 );
+    int numPatchesY = (int)lrint( (double)(float)( (double)( def->curveDef->height - 1 ) / 15.0 ) + 0.4999999990686774 );
     if ( numPatchesX < 1 ) Assert( PMESH_CPP, 1791, 0, "%s", "numPatchesX >= 1" );
     if ( numPatchesY < 1 ) Assert( PMESH_CPP, 1792, 0, "%s", "numPatchesY >= 1" );
 

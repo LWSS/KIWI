@@ -1794,6 +1794,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     ImGui_ImplDX9_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    // KIWI: InputScalar / Drag / Slider apply typed text live, as before ImGui 1.92.9.  With
+    // the new default they re-parse their ROUNDED display text ("%.2f") when focus leaves,
+    // so clicking through a field rewrote the key (sunlight 1.234 -> 1.23) with an undo.
+    ImGui::PushItemFlag( ImGuiItemFlags_LiveEditOnInputScalar, true );
     // KIWI-UX (ROUND Y, ITEM 6): from here on, the io state the post-present
     // dispatch reads is THIS tick's.  See s_frameLive at the top of the file.
     s_frameLive = true;
@@ -2000,6 +2004,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
 
     {
         PROF_SCOPED( "ImGui render" );
+        ImGui::PopItemFlag();               // the frame-wide LiveEditOnInputScalar above
         ImGui::Render();
         ImGui_ImplDX9_RenderDrawData( ImGui::GetDrawData() );   // main viewport (this surface)
     }

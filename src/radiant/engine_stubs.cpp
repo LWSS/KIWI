@@ -15,6 +15,7 @@
 #include <gfx_d3d/rb_state.h>     // gfxCmdBufInput (cinematic code-image seed)
 #include <gfx_d3d/r_bsp.h>        // GfxWorld
 #include <universal/com_memory.h>  // fileData_s
+#include "kiwi_floatsnap.h"        // KIWI: noise-only half-grid snap
 #include <universal/com_math.h>    // mat4x4 + typed MatrixInverse44(const mat4x4&, mat4x4&)
 #include <qcommon/qcommon.h>       // Com_*, errorParm_t, CM_*, DObj_s, dvar_t (via q_shared.h)
 #include <qcommon/threads.h>       // ThreadContext_t, WinThreadLock
@@ -848,6 +849,15 @@ char Byte4PackPixelColor(float *from, GfxColor *out)
 // 0x471420 — grid-snap every face planept to the nearest half unit on the bFull
 // Brush_BuildWindings edit path (brush create/resize, csg).  Skipped when prefs
 // m_bNoClamp.  The loader uses bFull=0 and never reaches it.
+//
+// KIWI (2026-10-05, user: "identify why the snapping was there and if we should remove it,
+// we probably should"): noise-only.  The binary rounds all 9 points of every face to 0.5 —
+// Quake's integer plane points, kept so shared faces hash to identical planes and float
+// noise after a rotate is cleaned.  On rotated / off-grid geometry it rounds each point
+// independently, which tilts thin faces: a 2-unit trim at 1.5 deg gets end faces 17 deg
+// off and up to 0.5 thickness change on every paste / texture / group rebuild (the
+// trapezoid windows).  Now a face snaps only when ALL its coordinates already sit within
+// noise of the half grid (63.99998 -> 64 still cleans up); any other face is left exact.
 unsigned int Brush_SnapPlanepts(brush_t *b)
 {
     if ( g_PrefsDlg->m_bNoClamp )
@@ -855,8 +865,16 @@ unsigned int Brush_SnapPlanepts(brush_t *b)
     for ( int f = 0; f < b->faceCount; ++f )
     {
         float *p = &b->faces[f].planepts[0][0];
+        double scale = 0.0;                    // the face's magnitude (kiwi_floatsnap.h)
         for ( int i = 0; i < 9; ++i )
-            p[i] = (float)( floor( 2.0 * (double)p[i] + 0.5 ) * 0.5 );
+            if ( fabs( (double)p[i] ) > scale )
+                scale = fabs( (double)p[i] );
+        float snapped[9];
+        bool onGrid = true;
+        for ( int i = 0; i < 9 && onGrid; ++i )
+            onGrid = KiwiSnap_Half( p[i], scale, &snapped[i] );
+        if ( onGrid )
+            memcpy( p, snapped, sizeof( snapped ) );
     }
     return (unsigned int)b->faceCount;
 }
@@ -1008,7 +1026,10 @@ float sub_4AACC0( float f, int threshold )
 // (a,b) per axis: X->(1,2) Y->(2,0) Z->(0,1) (the index table baked into the binary; the
 // decompiler renders the X pair as a stack-adjacency read of the preceding local).
 // dbl_6F42B0 is the float-rounded PI widened to double — exactly what the x87 code loads.
-static const double SUB4AA220_PI = 3.141592741012573;   // dbl_6F42B0
+// KIWI: the true PI here and in RAD_PI below (they pair: physics-primitive parse goes
+// AxisToAngles -> sub_4AA220), so the angles written for the game's exact AnglesToAxis
+// are not biased by float PI's -2.8e-8.
+static const double SUB4AA220_PI = 3.14159265358979323846;   // dbl_6F42B0 was float PI
 
 void sub_4AA220( const float *in, const float *anglesDeg, float *out )   // 0x4aa220
 {
@@ -1038,7 +1059,7 @@ void sub_4AA220( const float *in, const float *anglesDeg, float *out )   // 0x4a
 // vector->angle helpers: vectoangles 0x4a5020, vectosignedpitch 0x4a4f70, AxisToAngles
 // 0x4a8a00.  The originals are inline x87; the math is the standard Quake form.  Reached
 // on the prefab-enter camera reframe, not on the .map round-trip path.
-static const double RAD_PI = 3.1415927410125732;   // dbl_6F42B0 (float PI widened)
+static const double RAD_PI = 3.14159265358979323846;   // KIWI: dbl_6F42B0 was float PI widened
 
 void Radiant_VecToAngles( float *ang, const float *vec )         // 0x4a5020
 {

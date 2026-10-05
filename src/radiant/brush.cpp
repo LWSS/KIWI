@@ -16,6 +16,9 @@
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
 #include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L face diagnostic
 #include "kiwi_ux.h"                // KIWI: unified facing-arrow visibility
+#include "kiwi_fmt.h"               // KIWI: exact key values
+#include "kiwi_floatsnap.h"         // KIWI: noise-only half-grid snap
+#include "kiwi_texlock.h"           // KIWI: exact texture lock (translate / rotate / flip)
 
 // faceVisuals_s / faceVis_s are now in qe3.h (moved so select.cpp can use them).
 // The static_asserts remain in qe3.h.
@@ -1357,7 +1360,12 @@ int CM_ForEachBrushPlaneIntersection( brush_t *def, BrushPt_t *brushPts )
                 float xyz[3];
                 if ( IntersectPlanes( planes, xyz ) )
                 {
-                    SnapPointToIntersectingPlanes( planes, xyz, 0.25f, 0.01f );
+                    // KIWI (2026-10-05): snap epsilon 0.001, not the binary's 0.01.  At 0.01 a
+                    // rotated trim's corner at 2576.508 was drawn, bounded and vertex-snapped
+                    // at 2576.5: Mirror / R pivots drifted per use, and tools that copy
+                    // winding points into new planes (extrude, bevel, edge move) built faces
+                    // tilted against their neighbours.  cod4map (BrushToPoints) uses the same 0.001.
+                    SnapPointToIntersectingPlanes( planes, xyz, 0.25f, 0.001f );
                     int sideIdx[3] = { i, j, k };
                     ptCount = CM_AddSimpleBrushPoint( def, sideIdx, xyz, ptCount, 1024, brushPts );
                 }
@@ -1575,10 +1583,20 @@ extern void MarkMapModified();                               // win_qe3.cpp (0x4
 void Brush_RebuildBrush( brush_t *b, float *mins, float *maxs )
 {
     // 1. round + expand-degenerate (IDA: floor(0.5 + x + x)*0.5 per axis)
+    // KIWI (2026-10-05, precision gauntlet): noise-only, as Brush_SnapPlanepts.  These bounds
+    // are every patch's selection bounds - Select_GetTrueMid, the R / S / Mirror pivot - and
+    // rounding them to 0.5 put an off-grid patch's pivot up to 0.25 off: 4 x R 90 drifted the
+    // control points 0.25, R X 90 / -90 0.56.
+    double scale = 0.0;                    // the box's magnitude (kiwi_floatsnap.h)
     for ( int i = 0; i < 3; ++i )
     {
-        float lo = (float)( floorf( 0.5f + mins[i] + mins[i] ) * 0.5f );
-        float hi = (float)( floorf( 0.5f + maxs[i] + maxs[i] ) * 0.5f );
+        if ( fabs( (double)mins[i] ) > scale ) scale = fabs( (double)mins[i] );
+        if ( fabs( (double)maxs[i] ) > scale ) scale = fabs( (double)maxs[i] );
+    }
+    for ( int i = 0; i < 3; ++i )
+    {
+        float lo = KiwiSnap_NoiseHalf( mins[i], scale );
+        float hi = KiwiSnap_NoiseHalf( maxs[i], scale );
         mins[i] = lo;
         maxs[i] = hi;
         if ( (int)lo == (int)hi )
@@ -4216,6 +4234,14 @@ const char *Fmt8g( char *buf, double v )
         }
     }
 
+    // KIWI (2026-10-05, load/save gauntlet): 8 significant digits do not hold every float
+    // (1000.00006 saved as 1000.0001, the next float up), so a save + reload moved plane
+    // points and patch vertices by an ulp.  When 8 digits do not read back as the same float,
+    // write 9 - which always do.  Values that survive 8 digits (every stock file's) are
+    // written exactly as before.
+    if ( (float)strtod( buf, nullptr ) != (float)v )
+        sprintf( buf, "%.9g", v );
+
     char *e = strchr( buf, 'e' );
     if ( e && ( e[1] == '+' || e[1] == '-' ) )
     {
@@ -4809,6 +4835,9 @@ static winding_t *MV_NewWindingFromTemplate( face_t *f, const void *tmpl28 )
     return w;
 }
 
+// KIWI: set by kiwi_transform.cpp around its calls — `end` is used exactly, unsnapped.
+bool g_kiwiExactVertexEnd = false;
+
 int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end )
 {
     struct WTmpl { int numpoints; float p[3][3]; };   // 0x28 winding template (IDA &v123)
@@ -4831,6 +4860,9 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end )
     end[1] = delta[1] + move_points[1];
     end[2] = delta[2] + move_points[2];
 
+    // KIWI: KIWI vertex G (kiwi_transform.cpp) has already snapped through its own grid;
+    // this legacy-grid (16) snap dragged every typed vertex move onto a 16 lattice.
+    if ( !g_kiwiExactVertexEnd )
     for ( unsigned int axis = 0; axis < 3; ++axis )   // grid-snap end
     {
         int gs = g_qeglobals.d_gridsize;
@@ -4838,7 +4870,9 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end )
         end[axis] = (float)( snapped * grid_sizes[gs] );
     }
 
-    if ( Point_Equal( start, end, 0.30000001f ) )
+    // KIWI: the exact (KIWI-driven) path moves by any amount.  A 0.3 floor refused every
+    // small step - typing "1.25" applies 1, 1.2, 1.25 as steps, and 0.2 / 0.05 were dropped.
+    if ( Point_Equal( start, end, g_kiwiExactVertexEnd ? 0.001f : 0.30000001f ) )
         return 0;
 
     // Phase 1: originalFaceIndex[i]=i; abort if `end` lands on an existing vertex.
@@ -4852,6 +4886,10 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end )
             {
                 for ( unsigned int k = 0; k < (unsigned int)w->numpoints; ++k )
                 {
+                    // KIWI: on the exact path the moving vertex itself is not "an existing
+                    // vertex" - a step under 0.3 landed within 0.3 of its own start and aborted.
+                    if ( g_kiwiExactVertexEnd && Point_Equal( w->p[k], start, 0.2f ) )
+                        continue;
                     if ( Point_Equal( w->p[k], end, 0.30000001f ) )
                     {
                         end[0] = move_points[0];
@@ -5564,7 +5602,7 @@ void OverbrightShift( float a1 )
             float v = Entity_GetFloatValueForKey( def, "overbrightShift" ) + a1;
             if ( v > 1.0f )        v = 1.0f;
             else if ( v < 0.0f )   v = 0.0f;
-            sprintf( buf, "%f", v );
+            KiwiFmt_Exact( buf, sizeof( buf ), v );   // KIWI: %f kept 6 decimals
             SetKeyValue( def, "overbrightShift", buf );
         }
         else
@@ -5573,7 +5611,7 @@ void OverbrightShift( float a1 )
             if ( v == 0.0f )   v = 256.0f;
             v = v - a1 * 320.0f;
             if ( v < 0.0f )   v = 0.0f;
-            sprintf( buf, "%f", v );
+            KiwiFmt_Exact( buf, sizeof( buf ), v );   // KIWI: %f kept 6 decimals
             SetKeyValue( def, "fixedNodeSafeRadius", buf );
         }
     }
@@ -5602,7 +5640,7 @@ void Light_01( float a1 )
             if ( v == 0.0f )   v = 300.0f;
             v = v * a1;
             if ( v < 0.0f )   v = 0.0f;
-            sprintf( buf, "%f", v );
+            KiwiFmt_Exact( buf, sizeof( buf ), v );   // KIWI: %f kept 6 decimals
             SetKeyValue( def, "light", buf );
         }
         else
@@ -5611,7 +5649,7 @@ void Light_01( float a1 )
             if ( v == 0.0f )   v = 256.0f;
             v = v * a1;
             if ( v < 0.0f )   v = 0.0f;
-            sprintf( buf, "%f", v );
+            KiwiFmt_Exact( buf, sizeof( buf ), v );   // KIWI: %f kept 6 decimals
             SetKeyValue( def, "radius", buf );
         }
     }
@@ -5640,7 +5678,7 @@ void Light_Height( float a1 )
         v = v * a1;
         if ( v < 0.0f )   v = 0.0f;
         char buf[32];
-        sprintf( buf, "%f", v );
+        KiwiFmt_Exact( buf, sizeof( buf ), v );       // KIWI: %f kept 6 decimals
         SetKeyValue( def, "height", buf );
     }
 }
@@ -7821,8 +7859,93 @@ void Ed_BrushSetFaceCount( brush_t *def, int faceCount )
 //  for geometry; geometry is unaffected, only the texdef-lock behaviour is added.
 //  Default m_bTextureLock=1 so brush moves now reproject the texture by default
 //  (matching the binary); .map texdefs change on move iff the lock is on (faithful).
+//
+//  KIWI (float round trip): the Save / Reproject pair is replaced by Face_TexLockTranslate,
+//  the same lock done exactly.  The LU re-solve (float S/T in the hundreds, then
+//  texturevecs_02's snapping) turned / sheared the texture slightly on every nudge, array
+//  copy or paste-place far from the origin, and there-and-back did not return.
 // ─────────────────────────────────────────────────────────────────────────────
 extern curvePatchDef_t *Patch_Move( const float *move, patchMesh_t *p );   // 0x441dd0 (pmesh.cpp)
+
+// KIWI: texture lock for a pure translation - shift by size x (row . d) per locked channel /
+// layer (Face_TexLock_Save's walk); size / rotate / crossterm untouched.  Call it BEFORE the
+// planepts move (the normal it projects with is the face's own).
+void Face_TexLockTranslate( face_t *f, const float *d, const byte *lockFlags )
+{
+    for ( int ch = 0; ch < 3; ++ch )
+    {
+        if ( !lockFlags[ch] )
+            continue;
+        MaterialDef *mtl = &f->mtldef[ch];
+        const int layers = MaterialDef_04( mtl );
+        for ( int L = 0; L < layers; ++L )
+        {
+            texdef_sub_t *td = &mtl->mat_texDef + L;    // the contiguous layer walk
+            float tm[8];
+            Face_MoveTexture( td->size, f->plane.normal, tm, td->shift, td->rotate, td->crossterm );
+            const float sx = td->size[0] != 0.0f ? td->size[0] : 128.0f;   // Face_MoveTexture's default
+            const float sy = td->size[1] != 0.0f ? td->size[1] : 128.0f;
+            td->shift[0] += sx * ( tm[0] * d[0] + tm[1] * d[1] + tm[2] * d[2] );
+            td->shift[1] += sy * ( tm[4] * d[0] + tm[5] * d[1] + tm[6] * d[2] );
+        }
+    }
+}
+
+// KIWI (2026-10-05, IDA 0x47CDE0): the rotate / flip texture lock Select_ApplyMatrix applies
+// (the port had dropped it as a no-op), with the rows turned in double.  For x' = o + (x - o) T,
+// S'(x') = S(x) gives row' = row T and offset' = offset + row.o - row'.o; texturevecs_02_exact
+// (the binary's decomposition in double, snapping only float noise) then writes the texdef
+// against the moved face - not Save / Reproject's float LU solve from S/T at the plane
+// points, which tilted textures far from the origin (Face_TexLockTranslate's reason).
+// Begin: BEFORE the planepts move, with the face's pre-move normal.  End: after they moved.
+void Face_TexLockAffineBegin( face_t *f, const float *normal, const double ( *turn )[3],
+                              const double *origin, const byte *lockFlags, double ( *rows )[KTEXLOCK_LAYERS][8] )
+{
+    for ( int ch = 0; ch < 3; ++ch )
+    {
+        if ( !lockFlags[ch] )
+            continue;
+        MaterialDef *mtl = &f->mtldef[ch];
+        const int layers = MaterialDef_04( mtl );
+        for ( int L = 0; L < layers && L < KTEXLOCK_LAYERS; ++L )
+        {
+            const texdef_sub_t *td = &mtl->mat_texDef + L;
+            float tm[8];
+            Face_MoveTexture( td->size, normal, tm, td->shift, td->rotate, td->crossterm );
+            for ( int row = 0; row < 2; ++row )
+            {
+                const float *r   = tm + row * 4;
+                double      *out = rows[ch][L] + row * 4;
+                double ro = 0.0, rno = 0.0;
+                for ( int j = 0; j < 3; ++j )
+                {
+                    out[j] = r[0] * turn[0][j] + r[1] * turn[1][j] + r[2] * turn[2][j];
+                    ro  += r[j] * origin[j];
+                    rno += out[j] * origin[j];
+                }
+                out[3] = r[3] + ro - rno;
+            }
+        }
+    }
+}
+
+void Face_TexLockAffineEnd( face_t *f, double ( *rows )[KTEXLOCK_LAYERS][8], const byte *lockFlags )
+{
+    Face_MakePlane( f );
+    for ( int ch = 0; ch < 3; ++ch )
+    {
+        if ( !lockFlags[ch] )
+            continue;
+        MaterialDef *mtl = &f->mtldef[ch];
+        const int layers = MaterialDef_04( mtl );
+        for ( int L = 0; L < layers && L < KTEXLOCK_LAYERS; ++L )
+        {
+            texdef_sub_t *td = &mtl->mat_texDef + L;
+            texturevecs_02_exact( td->size, rows[ch][L], f->plane.normal, f->plane.dist,
+                                  td->shift, &td->rotate, &td->crossterm );
+        }
+    }
+}
 
 entity_s *Brush_Move( const float *move, brush_t *def, char snap )
 {
@@ -7833,19 +7956,15 @@ entity_s *Brush_Move( const float *move, brush_t *def, char snap )
     lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );   // lightmapLock
     lockFlags[2] = 1;                                                     // const1
 
-    // saveBuf: IDA `int a3[19]` (76 bytes) on Brush_Move's stack, passed to both
-    // Save and Reproject.  Per face it stashes the channel/layer world S/T.
-    float saveBuf[19];
-
-    // Translate every face that has a built winding (IDA gates on face->w @0xE0),
-    // wrapping the planept translate with Save (before) and Reproject (after).
+    // Translate every face.  The binary gates on face->w @0xE0 and wraps it in
+    // Face_TexLock_Save / Face_TexLock_Reproject (0x470570 / 0x4706F0).  KIWI: every face
+    // (a windingless one stayed behind and could cut the brush at its new spot; KIWI G
+    // moves them all), locked exactly (Face_TexLockTranslate above).
     for ( int i = 0; i < def->faceCount; ++i )
     {
         face_t *f = &def->faces[i];
-        if ( !f->w )
-            continue;
 
-        Face_TexLock_Save( saveBuf, f );           // 0x470570 (snapshot pre-move S/T)
+        Face_TexLockTranslate( f, move, lockFlags );
 
         for ( int p = 0; p < 3; ++p )
         {
@@ -7853,8 +7972,6 @@ entity_s *Brush_Move( const float *move, brush_t *def, char snap )
             f->planepts[p][1] += move[1];
             f->planepts[p][2] += move[2];
         }
-
-        Face_TexLock_Reproject( f, saveBuf, lockFlags );   // 0x4706F0 (re-derive texdef)
     }
 
     Brush_BuildWindings( def, snap );          // recomputes planes (Face_MakePlane) + windings
@@ -8374,6 +8491,16 @@ void Select_ApplyMatrix( float *mat, selbrush_t *b, int bSnap, float deg, char b
     // Brush_BuildFaceVis on the camera draw, so 0 headless / before the first 3D draw).
     // Loop the DEF count (authoritative, identical when valid) so the transform also
     // applies headless.  Same adaptation as SetupVertexSelection.
+    const byte lockFlags[3] = { (byte)( g_PrefsDlg->m_bRotateLock != 0 ),
+                                (byte)( g_PrefsDlg->m_bLightmapLock != 0 ), 1 };
+    double turn[3][3], origin[3];
+    for ( int a = 0; a < 3; ++a )
+    {
+        origin[a] = mat[a];
+        for ( int c = 0; c < 3; ++c )
+            turn[a][c] = mat[3 + a * 3 + c];          // the orientation's axis rows
+    }
+    double rows[3][KTEXLOCK_LAYERS][8];
     if ( b->def->faceCount )
     {
         for ( int fi = 0; fi < b->def->faceCount; ++fi )
@@ -8390,7 +8517,10 @@ void Select_ApplyMatrix( float *mat, selbrush_t *b, int bSnap, float deg, char b
                 f->planepts[2][1] = t1;
                 f->planepts[2][2] = t2;
             }
-            // sub_470570 (texture-basis stash) is layer-gated → no-op in this build.
+            // KIWI (IDA 0x47cf23 / 0x47cf66): the binary brackets this with Face_TexLock_Save /
+            // Face_TexLock_Reproject, lockFlags { m_bRotateLock, m_bLightmapLock, 1 } - the
+            // port had dropped them as no-ops.  Done exactly (kiwi_texlock.h).
+            Face_TexLockAffineBegin( f, f->plane.normal, turn, origin, lockFlags, rows );
             for ( int pi = 0; pi < 3; ++pi )
             {
                 float rel[3];
@@ -8400,8 +8530,7 @@ void Select_ApplyMatrix( float *mat, selbrush_t *b, int bSnap, float deg, char b
                 OrientationPosToWorldPos( f->planepts[pi], rel,
                                           reinterpret_cast<const orientation_t *>( mat ) );
             }
-            // sub_4706F0 (Face_MakePlane + texture reproject) — Face_MakePlane is
-            // redundant with Brush_BuildWindings below; reproject is layer-gated → no-op.
+            Face_TexLockAffineEnd( f, rows, lockFlags );
         }
     }
 

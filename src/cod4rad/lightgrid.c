@@ -188,9 +188,11 @@ static void LightGrid_AdjustCod4Contrast(float *colors)
 
 static unsigned char LightGrid_EncodeCod4Byte(float value)
 {
+    /* KIWI: ROUND (as Lighting_EncodeCod4Byte) - truncation left grid-lit models half a
+     * byte step dark (0.6 * 0.5 * 255 = 76.5 -> 76). */
     if (value <= 0.0f) return 0;
     if (value >= 1.0f) return 255;
-    return (unsigned char)(int)(value * 255.0f + 9.313225746e-10f);
+    return (unsigned char)(int)((double)value * 255.0 + 0.5);
 }
 
 static void LightGrid_StoreProducerVector(int gridIndex, const float *producer)
@@ -2326,10 +2328,12 @@ void ExpandStaticModelOrigins(void)
         /* unlink from list */
         g_gridSampleList = node->next;
 
-        /* convert float position to grid coordinates */
-        gridX = (int)floorf((*(float *)&node->data[0] - GRID_ORIGIN_OFFSET) * GRID_SCALE_XY);
-        gridY = (int)floorf((*(float *)&node->data[1] - GRID_ORIGIN_OFFSET) * GRID_SCALE_XY);
-        gridZ = (int)floorf((*(float *)&node->data[2] - GRID_ORIGIN_OFFSET) * GRID_SCALE_Z);
+        /* convert float position to grid coordinates.  KIWI: in double - the float add of
+         * the 131072 offset rounded origins within 1/64 below a grid plane into the next
+         * cell, so the seeded corners missed the cell holding the model. */
+        gridX = (int)floor(((double)*(float *)&node->data[0] - GRID_ORIGIN_OFFSET) * GRID_SCALE_XY);
+        gridY = (int)floor(((double)*(float *)&node->data[1] - GRID_ORIGIN_OFFSET) * GRID_SCALE_XY);
+        gridZ = (int)floor(((double)*(float *)&node->data[2] - GRID_ORIGIN_OFFSET) * GRID_SCALE_Z);
 
         /* generate 8 corner grid points */
         for (corner = 0; corner < 8; corner++)

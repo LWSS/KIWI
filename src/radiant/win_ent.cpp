@@ -42,6 +42,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_fmt.h"
 #include <string>
 #include <vector>
 
@@ -59,6 +60,7 @@ extern void        SetKeyValue( entity_s_def *e, const char *key, const char *va
 extern void        DeleteKey( epair_t **head, const char *key );                       // entity.cpp 0x483720
 extern char       *ValueForKey2( const entity_s *e, const char *key );                             // entity.cpp 0x4825C0
 extern int         Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );// entity.cpp 0x483860
+extern void        Entity_RebuildBounds( entity_s *e );                                  // entity.cpp 0x485390
 extern void        Checkkey_Model( entity_s_def *e, const char *key );                 // entity.cpp 0x482F70
 extern void        Checkkey_Color( entity_s_def *e, const char *key );                 // entity.cpp 0x483210
 
@@ -233,7 +235,7 @@ void EntityKeyValues_Gather( entity_s_def *def, std::vector<entKvRow_t> &rows )
     if ( def->origin[0] != 0.0f || def->origin[1] != 0.0f || def->origin[2] != 0.0f )
     {
         char sz[4100];
-        sprintf( sz, "%g %g %g", def->origin[0], def->origin[1], def->origin[2] );
+        KiwiFmt_Vec3Exact( sz, sizeof( sz ), def->origin );   // KIWI: %g, which a row re-commit wrote back
         entKvRow_t row;
         row.key   = "origin";
         row.value = sz;
@@ -287,6 +289,13 @@ void EntSetKey_Apply( const char *key, const char *value )
             entity_s_def *def = (entity_s_def *)sb->owner->def;
             Undo_AddEntity_W( (entity_s *)def );
             SetKeyValue( def, key, value );
+            if ( !strcmp( "origin", key ) )     // KIWI: as the single edit - else save wrote the old origin
+            {
+                Entity_GetVec3ForKey( def, def->origin, "origin" );
+                ++def->version;
+                if ( def->eclass && def->eclass->fixedsize )
+                    Entity_RebuildBounds( (entity_s *)def );   // KIWI: the box / picking follow
+            }
         }
     }
     else
@@ -297,6 +306,8 @@ void EntSetKey_Apply( const char *key, const char *value )
         {
             Entity_GetVec3ForKey( edit_entity, edit_entity->origin, "origin" );
             ++edit_entity->version;
+            if ( edit_entity->eclass && edit_entity->eclass->fixedsize )
+                Entity_RebuildBounds( (entity_s *)edit_entity );   // KIWI: the box / picking follow
         }
     }
     SetKeyValuePairs();

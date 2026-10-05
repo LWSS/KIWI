@@ -40,3 +40,11 @@ void KiwiFragile_DrawXY( int viewType, float scale );
 // `offerBuildAnyway` (the last build stopped at these) it also shows "Build anyway" and
 // returns true when it is clicked.
 bool KiwiFragile_DrawBuildRow( bool offerBuildAnyway );
+
+// Clean Up Precision (KIWI_CMD_CLEAN_PRECISION): square brush faces within 1e-4 rad of an axis
+// onto it and flatten patches within 0.02 of a plane (axial when near one) - the selection,
+// else the whole map, one undo record.  Repairs what the old 0.5 rounding / rotation
+// residuals left behind (planes cod4map keeps apart or cannot square onto an axis).
+void KiwiFragile_CleanPrecision();
+void KiwiFragile_RegisterCommands();
+bool KiwiFragile_DispatchInstant( unsigned int cmdId );

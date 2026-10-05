@@ -40,7 +40,6 @@ extern char FilterBrush( selbrush_t *a1, int a2 );      // filters.cpp:718 - hid
 namespace
 {
     const double METERS_PER_UNIT = 0.0254;
-    const float OBJ_METERS_PER_UNIT = 0.0254f;
     const double STEP_WELD_TOLERANCE = 0.001;
     const double STEP_PLANE_TOLERANCE = 0.01;
     const char *PLASTICITY_PROCESS = "Plasticity.exe";
@@ -73,7 +72,7 @@ namespace
 
     struct ObjVertex
     {
-        float x, y, z;
+        double x, y, z;     // KIWI: metres in double - a float 0.0254 moved 100.00001 to 100.0
     };
 
     struct ObjObject
@@ -152,17 +151,17 @@ namespace
 
     ObjVertex InMeters( const float *point )
     {
-        ObjVertex vertex = { point[0] * OBJ_METERS_PER_UNIT,
-                             point[1] * OBJ_METERS_PER_UNIT,
-                             point[2] * OBJ_METERS_PER_UNIT };
+        ObjVertex vertex = { point[0] * METERS_PER_UNIT,
+                             point[1] * METERS_PER_UNIT,
+                             point[2] * METERS_PER_UNIT };
         return vertex;
     }
 
     ObjVertex InMeters( const double point[3] )
     {
-        ObjVertex vertex = { (float)( point[0] * METERS_PER_UNIT ),
-                             (float)( point[1] * METERS_PER_UNIT ),
-                             (float)( point[2] * METERS_PER_UNIT ) };
+        ObjVertex vertex = { point[0] * METERS_PER_UNIT,
+                             point[1] * METERS_PER_UNIT,
+                             point[2] * METERS_PER_UNIT };
         return vertex;
     }
 
@@ -1559,7 +1558,7 @@ namespace
             for ( size_t i = 0; i < object.vertices.size(); ++i )
             {
                 const ObjVertex &vertex = object.vertices[i];
-                fprintf( file, "v %.6f %.6f %.6f\n", vertex.x, vertex.y, vertex.z );
+                fprintf( file, "v %.17g %.17g %.17g\n", vertex.x, vertex.y, vertex.z );   // KIWI: %.6f m = 0.04 units
             }
             for ( size_t faceIndex = 0; faceIndex < object.faces.size(); ++faceIndex )
             {
@@ -2707,9 +2706,9 @@ namespace
                 const double in[3] = { vertex.x, vertex.y, vertex.z };
                 double out[3];
                 FrameLocalPoint( metres, in, out );
-                vertex.x = (float)out[0];
-                vertex.y = (float)out[1];
-                vertex.z = (float)out[2];
+                vertex.x = out[0];
+                vertex.y = out[1];
+                vertex.z = out[2];
             }
         }
     }

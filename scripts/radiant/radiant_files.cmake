@@ -329,6 +329,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_terrain.cpp"
     "${SRC_DIR}/radiant/kiwi_test.h"         # KIWI-TEST: scripted unattended editor runner
     "${SRC_DIR}/radiant/kiwi_test.cpp"
+    "${SRC_DIR}/radiant/kiwi_testprobe.h"    # KIWI-TEST: probe verbs (dumps, camera, tool driving)
+    "${SRC_DIR}/radiant/kiwi_testprobe.cpp"
     "${SRC_DIR}/radiant/kiwi_decal.h"
     "${SRC_DIR}/radiant/kiwi_decal.cpp"
     "${SRC_DIR}/radiant/kiwi_refimage.h"     # KIWI: editor-only construction images
@@ -378,6 +380,9 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_particles.cpp"
     "${SRC_DIR}/radiant/kiwi_fragile.h"      # KIWI (2026-10-04): flashing cod4map "fragile corner" spots
     "${SRC_DIR}/radiant/kiwi_fragile.cpp"
+    "${SRC_DIR}/radiant/kiwi_floatsnap.h"    # KIWI (2026-10-05): the one noise-only half-grid snap
+    "${SRC_DIR}/radiant/kiwi_angles.h"       # KIWI (2026-10-05): entity "angles" composed in double
+    "${SRC_DIR}/radiant/kiwi_texlock.h"      # KIWI (2026-10-05): exact texture lock (translate / rotate / flip)
     # KIWI GLASS
     "${SRC_DIR}/radiant/kiwi_glass.h"        # breakable glass: panes, texture sets, Glass window
     "${SRC_DIR}/radiant/kiwi_glass.cpp"

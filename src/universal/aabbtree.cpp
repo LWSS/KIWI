@@ -70,7 +70,7 @@ static bool PickAabbSplitPlane(
     for (i = 0; i < 3; ++i)
     {
         v12 = (globalMaxs[i] - globalMins[i] + 1.0) * 10.0 / (globalMaxs[smallestAxis] - globalMins[smallestAxis] + 1.0);
-        LODWORD(globalMins[i + 3]) = (v12 + 0.4999999990686774);
+        LODWORD(globalMins[i + 3]) = (int)lrint(v12 + 0.4999999990686774);   // KIWI: fistp ceil idiom
     }
     bestHeuristic = 0x80000000;
     for (axisIndex = 0; axisIndex < 3; ++axisIndex)

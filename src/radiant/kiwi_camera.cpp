@@ -83,6 +83,21 @@ namespace
     // Larger than KCAM_MIN_DIST so the near plane never slices the surface it stopped at.
     const float KCAM_SWEEP_MARGIN = 2.0f;
 
+    // KIWI (2026-10-05, camera audit C#1/C#2): the closest a notch may bring the surface
+    // under the cursor, measured along the VIEW axis: past the near plane (r_znear,
+    // default 4; camwnd.cpp floors it at 0.01) with a margin.  The old 1-unit floor sat
+    // inside the near plane - the surface was clipped ~60 notches before the zoom stopped
+    // (and still picked), and parked at the 1-unit floor the next notch toward a far wall
+    // computed a zero factor and did nothing.
+    float KCam_NearFloor()
+    {
+        float zNear = (float)Dvar_GetFloat( "r_znear" );
+        if ( !( zNear > 0.01f ) )
+            zNear = 0.01f;
+        const float floor = zNear * 1.5f;
+        return floor > KCAM_MIN_DIST ? floor : KCAM_MIN_DIST;
+    }
+
     // Equal and opposite wheel deltas must use reciprocal factors.  Computing the
     // zoom-out arm as the reciprocal of the same positive-magnitude powf keeps the
     // algebra symmetric instead of asking two independently rounded powf calls to
@@ -1029,15 +1044,31 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
         }
     }
 
+    // KIWI (2026-10-05, camera audit C#2): with a hit, the notch scales the distance to
+    // THAT surface, not the standoff - an eye parked at the floor of one wall still zooms
+    // toward a wall 3000 units away (newDist / d0 was 1 there, so the wheel died).
+    if ( haveHit )
+    {
+        kEff = KCam_DollyFactor( wheelSteps );
+        if ( kEff > 1.0f && surface * kEff > maxDist )
+            kEff = maxDist / surface;
+    }
+
     // Clamp the factor so punch-through guard, distance, and lateral correction
-    // describe one transform; inside the guard, an inward notch is a no-op.
+    // describe one transform; inside the guard, an inward notch is a no-op.  The floor is
+    // the anchor's depth along the VIEW axis past the near plane (KCam_NearFloor, C#1):
+    // scaling about the anchor scales that depth by kEff.
     if ( haveHit && kEff < 1.0f )
     {
-        if ( !( surface > KCAM_MIN_DIST ) )
+        float fwd[3];
+        ViewForward( c, fwd );
+        const float depth     = Dot3( toAnchor, fwd );
+        const float nearFloor = KCam_NearFloor();
+        if ( !( depth > nearFloor ) )
             kEff = 1.0f;
         else
         {
-            const float hitFloor = KCAM_MIN_DIST / surface;
+            const float hitFloor = nearFloor / depth;
             if ( kEff < hitFloor )
                 kEff = hitFloor;
         }
@@ -1065,11 +1096,13 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
         {
             const float tdir[3] = { travel[0] / travelLen, travel[1] / travelLen,
                                     travel[2] / travelLen };
+            // The margin clears the near plane too (KCam_NearFloor), or the stop is clipped.
+            const float margin = KCam_NearFloor() > KCAM_SWEEP_MARGIN ? KCam_NearFloor() : KCAM_SWEEP_MARGIN;
             float solid = 0.0f;
             if ( Pick_TraceSolid( c->origin, tdir, &solid )
-              && solid < travelLen + KCAM_SWEEP_MARGIN )
+              && solid < travelLen + margin )
             {
-                const float allowed = solid - KCAM_SWEEP_MARGIN;
+                const float allowed = solid - margin;
                 if ( !( allowed > 0.0f ) )
                     return;                     // already against it: hard stop
                 // Same scale-about-anchor identity, shortened to the allowed travel.

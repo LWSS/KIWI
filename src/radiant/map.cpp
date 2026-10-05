@@ -31,6 +31,7 @@
 // Shift+L render method and compiles unlit; load repairs it, save never writes it.
 #include "kiwi_material.h"      // KiwiMtl_HealMapLayersOnLoad / KiwiMtl_HealMapLayers
 #include "kiwi_matconvert.h"    // KIWI-UX: reset/load-time loaded-techset health scan
+#include "kiwi_fmt.h"           // KIWI: KiwiFmt_Exact (entity origins)
 // the 1-2 minute synchronous load, made measurable.
 #include <universal/profile.h>
 #include <universal/com_memory.h>   // Hunk_Used (com_memory.h:93) — the hunk high-water plot
@@ -1606,8 +1607,10 @@ char MapFile_WriteEntity( entity_s_def *a1, FILE *a2, char a3 )
             }
             fprintf( a2, "{\n" );
             fprintf( a2, "\"classname\" \"info_player_start\"\n" );
-            fprintf( a2, "\"origin\" \"%.1f %.1f %.1f\"\n", camOri[0], camOri[1], camOri[2] );
-            return (char)fprintf( a2, "\"angles\" \"0 %.0f 0\"\n}\n", camAng[1] );
+            // KIWI: exact - "%.1f" / "%.0f" spawned the region test off the camera.
+            char camText[160], yawText[48];
+            fprintf( a2, "\"origin\" \"%s\"\n", KiwiFmt_Vec3Exact( camText, sizeof( camText ), camOri ) );
+            return (char)fprintf( a2, "\"angles\" \"0 %s 0\"\n}\n", KiwiFmt_Exact( yawText, sizeof( yawText ), camAng[1] ) );
         }
 
         // Region filter (0x484608): walk the DEF-list — first = brushes.oprev
@@ -1639,9 +1642,11 @@ char MapFile_WriteEntity( entity_s_def *a1, FILE *a2, char a3 )
     // "000_Global" BEFORE null-checking it, and only writes the line on mismatch.
     if ( a1->eclass && a1->eclass->fixedsize )
     {
-        char originStr[132];
-        sprintf( originStr, "%.1f %.1f %.1f",
-                 a1->origin[0], a1->origin[1], a1->origin[2] );
+        // KIWI: exact origins (kiwi_fmt.h).  The binary's "%.1f" moved every model, light
+        // and spawn to the 0.1 grid on each save - modular pieces opened 0.1 seams.
+        char originStr[132], ox[40], oy[40], oz[40];
+        sprintf( originStr, "%s %s %s", KiwiFmt_Exact( ox, sizeof( ox ), a1->origin[0] ),
+                 KiwiFmt_Exact( oy, sizeof( oy ), a1->origin[1] ), KiwiFmt_Exact( oz, sizeof( oz ), a1->origin[2] ) );
         SetKeyValue( a1, "origin", originStr );
 
         const char *layerName = ( (brush_t *)a1->brushes.prev )->parent_layer_string;

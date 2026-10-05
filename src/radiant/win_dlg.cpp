@@ -19,7 +19,7 @@ extern int        Sys_Printf( const char *fmt, ... );           // 0x499E90
 extern void       Assert( const char *file, int line, int type, const char *fmt, ... ); // 0x49CEA0
 extern void       Select_Brush( selbrush_t *b, char overwrite, char status, char center ); // select.cpp (0x48DCC0)
 extern void       Select_Deselect( int bDeselectFaces );        // select.cpp (0x48E800)
-extern void       Select_GetMid( float *mid );                  // select.cpp (0x48FC70)
+extern void       Select_GetTrueMid( float *center );           // select.cpp (0x48FC20)
 extern void       Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] ); // select.cpp (0x48FF40)
 extern void       Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char bSwap ); // select.cpp (0x48FD10)
 extern int        g_nUpdateBits;                                // 0x25D5A74 (engine_stubs.cpp)
@@ -227,7 +227,9 @@ static void ArbRot_ApplyAxis( int axis, float deg )
     if ( deg == 0.0f )
         return;
     float rot_around[4][3];
-    Select_GetMid( rot_around[0] );
+    // KIWI: the true centre - Select_GetMid floors to the grid, so a typed 37 deg also
+    // shifted the selection by up to a grid step (as Radiant_RotateSelection).
+    Select_GetTrueMid( rot_around[0] );
     Select_RotateAxis( axis, deg, (float (*)[4][3])rot_around );
     Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], deg, 0 );
     g_nUpdateBits = -1;

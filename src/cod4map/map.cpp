@@ -947,16 +947,14 @@ Brush_t *AddBrushToWorld(int mapInfoIndex)
     else
     {
       float origin[3];
-      char buf[32];
+      char buf[64];
       int axis;
 
+      /* KIWI: the origin brush's exact centre - rounding it to a whole unit swung a door
+         whose hinge brush sits at 100.25 about 100 (the native "%.0f" of floor(c + 0.5)). */
       for ( axis = 0; axis < 3; ++axis )
-      {
-        origin[axis] = floorf(
-          (g_buildBrush->eMins[axis] + g_buildBrush->eMaxs[axis]) * 0.5f
-          + 0.5f);
-      }
-      sprintf(buf, "%.0f %.0f %.0f", origin[0], origin[1], origin[2]);
+        origin[axis] = (g_buildBrush->eMins[axis] + g_buildBrush->eMaxs[axis]) * 0.5f;
+      sprintf(buf, "%.9g %.9g %.9g", origin[0], origin[1], origin[2]);
       SetKeyValue(&g_entities[num_entities - 1], "origin", buf);
       VectorCopy(origin, g_entities[num_entities - 1].origin);
     }
@@ -1094,6 +1092,72 @@ static int ParseSmoothing(char **parsePtr)
   return 0;
 }
 
+/*
+================
+KiwiSnapNearAxialSides
+
+KIWI (2026-10-05, precision): SnapPlaneNormal squares a normal within 1e-7 of an axis - any
+tilt under ~3.4e-4 rad - but FindFloatPlane kept dist, pivoting the face about the WORLD
+origin (10 units at 29000 out).  Each such side pivots about the brush's centre projected
+onto its own plane instead, and every later side on the SAME tilted plane (one wall split
+into brushes) reuses that first squared plane, so neighbours stay one plane.
+================
+*/
+typedef struct
+{
+  float normal[3];    /* the side's own (unsquared) plane */
+  float dist;
+  int   planenum;     /* the squared plane it became */
+} kiwiSnappedPlane_t;
+
+static kiwiSnappedPlane_t *s_kiwiSnapped;
+static int                 s_kiwiSnappedCount, s_kiwiSnappedMax;
+
+static void KiwiSnapNearAxialSides(Brush_t *bb, const int *sides, float (*orig)[4], int count,
+                                   const double *sum, int sumCount)
+{
+  double centre[3];
+  int i, j, k;
+
+  for ( k = 0; k < 3; ++k )
+    centre[k] = sumCount ? sum[k] / sumCount : 0.0;
+  for ( i = 0; i < count; ++i )
+  {
+    const float *n = orig[i];
+    float snapped[3], q[3];
+    double off = (double)n[0] * centre[0] + (double)n[1] * centre[1] + (double)n[2] * centre[2] - n[3];
+    int planenum = -1;
+
+    for ( k = 0; k < 3; ++k )
+      q[k] = (float)(centre[k] - n[k] * off);          /* the centre on the side's plane */
+    VectorCopy(n, snapped);
+    SnapPlaneNormal(snapped);
+    for ( j = 0; j < s_kiwiSnappedCount && planenum < 0; ++j )
+    {
+      const kiwiSnappedPlane_t *s = &s_kiwiSnapped[j];
+      const Plane_t *p = &mapplanes[s->planenum];
+      if ( !VectorCompare((float *)p->normal, snapped) || DotProduct(s->normal, n) < 1.0 - 1.0e-8
+        || fabs(DotProduct(s->normal, q) - s->dist) > 0.01 )
+        continue;                                          /* not the same tilted plane */
+      planenum = s->planenum;
+    }
+    if ( planenum < 0 )
+    {
+      planenum = FindFloatPlane(snapped, (float)DotProduct(snapped, q));
+      if ( s_kiwiSnappedCount == s_kiwiSnappedMax )
+      {
+        s_kiwiSnappedMax = s_kiwiSnappedMax ? s_kiwiSnappedMax * 2 : 256;
+        s_kiwiSnapped = (kiwiSnappedPlane_t *)realloc(s_kiwiSnapped, s_kiwiSnappedMax * sizeof(kiwiSnappedPlane_t));
+      }
+      VectorCopy(n, s_kiwiSnapped[s_kiwiSnappedCount].normal);
+      s_kiwiSnapped[s_kiwiSnappedCount].dist = n[3];
+      s_kiwiSnapped[s_kiwiSnappedCount].planenum = planenum;
+      ++s_kiwiSnappedCount;
+    }
+    bb->sides[sides[i]].planenum = planenum;
+  }
+}
+
 char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, const char *mapName)
 {
   Brush_t *bb;
@@ -1105,9 +1169,17 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
   const char *token;
   int brushFlags, toolFlags;
   char layerName[1028];
+  /* KIWI: near-axial sides, resolved once the brush's plane points are all known */
+  static int   kiwiSide[MAX_BUILD_SIDES];
+  static float kiwiOrig[MAX_BUILD_SIDES][4];
+  int          kiwiDeferred, kiwiCount;
+  double       kiwiSum[3];
 
   bb = g_buildBrush;
   scaleSquared = brushScale * brushScale;
+  kiwiDeferred = 0;
+  kiwiCount = 0;
+  kiwiSum[0] = kiwiSum[1] = kiwiSum[2] = 0.0;
 
   Assert(scaleSquared > EQUAL_EPSILON_SQ, s_assertDisable_ParseRawBrush);
 
@@ -1152,7 +1224,30 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
 
     /* compute and register plane */
     TransformPlane(transformMtx, brushScale, rawPlane, transformedPlane);
-    side->planenum = FindFloatPlane(transformedPlane, transformedPlane[3]);
+    /* KIWI: a near-axial side (SnapPlaneNormal would square it but keep dist, pivoting the
+       face about the WORLD origin: 10 units at 29000 out) is resolved after the loop, about
+       the brush's centre (KiwiSnapNearAxialSides). */
+    {
+      float *pts[3] = { planePoint0, planePoint1, planePoint2 };
+      float snapped[3], world[3];
+      int k;
+      for ( k = 0; k < 3; ++k )
+      {
+        MatrixVecScaleAddTransform43(transformMtx, brushScale, pts[k], world);
+        kiwiSum[0] += world[0]; kiwiSum[1] += world[1]; kiwiSum[2] += world[2];
+        ++kiwiCount;
+      }
+      VectorCopy(transformedPlane, snapped);
+      if ( SnapPlaneNormal(snapped) && !VectorCompare(snapped, transformedPlane) )
+      {
+        kiwiSide[kiwiDeferred] = bb->numSides - 1;
+        Vector4Copy(transformedPlane, kiwiOrig[kiwiDeferred]);
+        ++kiwiDeferred;
+        side->planenum = -1;
+      }
+      else
+        side->planenum = FindFloatPlane(transformedPlane, transformedPlane[3]);
+    }
 
     /* parse texture layer and lightmap layer */
     side->shaderInfo = ParseBrushSideTexture(parsePtr, side->texVecs[0], scaleSquared, mapName, rawPlane, transformMtx, brushScale, 1.0);
@@ -1176,6 +1271,8 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
     side->surfaceFlags = side->shaderInfo->surfaceFlags;
     side->toolFlags = toolFlags | side->shaderInfo->toolFlagsWord;
   }
+  if ( kiwiDeferred )
+    KiwiSnapNearAxialSides(bb, kiwiSide, kiwiOrig, kiwiDeferred, kiwiSum, kiwiCount);
   return result;
 }
 
@@ -1463,6 +1560,22 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
   {
     GetVectorForKey(g_currentEntity, "origin", originAndMatrix);
     GetVectorForKey(g_currentEntity, "angles", entityAngles);
+    // KIWI (2026-10-05, load/save gauntlet): a misc_model is placed by the game's rule
+    // (R_LoadMiscModel): a non-zero "angle" (yaw) wins over "angles".  Composition read only
+    // "angles" and left "angle" in place, so a prefab's inner model kept its local yaw in game.
+    // Compose from what the game would read, and drop the stale key: "angles" now says it.
+    bool tookAngle = false;
+    if ( !_stricmp(ValueForKey(g_currentEntity, "classname"), "misc_model") )
+    {
+      const float angle = (float)FloatForKey(g_currentEntity, "angle");
+      if ( angle != 0.0f )
+      {
+        entityAngles[0] = 0.0f;
+        entityAngles[1] = angle;
+        entityAngles[2] = 0.0f;
+        tookAngle = true;
+      }
+    }
     AnglesToMatrix(entityAngles, entityRotation);
     TransformPoint(originAndMatrix, transformMtx, childTransform);
     ApplyRotationToAngles(&childTransform[3], entityAngles);
@@ -1470,15 +1583,19 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
     g_currentEntity->origin[0] = childTransform[0];
     g_currentEntity->origin[1] = childTransform[1];
     g_currentEntity->origin[2] = childTransform[2];
+    // KIWI (2026-10-05): %.9g - the float the editor placed, exactly.  FMT_VECTOR3 (%g, 6
+    // digits) put a model at 30001.066 at 30001.1 in game and rounded composed angles.
     SetKeyValue(g_currentEntity, "origin",
-      va(FMT_VECTOR3, g_currentEntity->origin[0], g_currentEntity->origin[1], g_currentEntity->origin[2]));
+      va("%.9g %.9g %.9g", g_currentEntity->origin[0], g_currentEntity->origin[1], g_currentEntity->origin[2]));
 
-    if ( !VectorCompare(entityAngles, vec3_origin_float) || *ValueForKey(g_currentEntity, "angles") )
+    if ( !VectorCompare(entityAngles, vec3_origin_float) || *ValueForKey(g_currentEntity, "angles") || tookAngle )
     {
       /* +0.0f flushes negative zero (MSVC6 prints "0" for -0, modern prints "-0") */
       SetKeyValue(g_currentEntity, "angles",
-        va(FMT_VECTOR3, entityAngles[0] + 0.0f, entityAngles[1] + 0.0f, entityAngles[2] + 0.0f));
+        va("%.9g %.9g %.9g", entityAngles[0] + 0.0f, entityAngles[1] + 0.0f, entityAngles[2] + 0.0f));
     }
+    if ( tookAngle )
+      DeleteKey(g_currentEntity, "angle");
   }
 
   /* classify entity */

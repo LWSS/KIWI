@@ -95,7 +95,8 @@ void WriteDebugSurfaceToFile(TerrainNode_t *tn)
     }
 
     v = &tn->verts[tn->indexes[i]];
-    fprintf(g_debugPolyFile, "( %g %g %g %g %g )\n",
+    /* KIWI: %.9g - cod4rad casts shadows from these; "%g" moved them 0.03 at 30000. */
+    fprintf(g_debugPolyFile, "( %.9g %.9g %.9g %.9g %.9g )\n",
             v->pos[0], v->pos[1], v->pos[2], v->st[0], v->st[1]);
   }
 }
@@ -276,7 +277,7 @@ void WriteDebugWindingToFile(BrushSide_t *side, Winding_t *winding)
     s = side->texVecs[0][0] * p[0] + p[1] * side->texVecs[0][1] + side->texVecs[0][2] * p[2] + side->texVecs[0][3];
     t = p[1] * side->texVecs[1][1] + side->texVecs[1][2] * p[2] + p[0] * side->texVecs[1][0] + side->texVecs[1][3];
 
-    fprintf(g_debugPolyFile, "( %g %g %g %g %g )\n", p[0], p[1], p[2], s, t);
+    fprintf(g_debugPolyFile, "( %.9g %.9g %.9g %.9g %.9g )\n", p[0], p[1], p[2], s, t);   /* KIWI: %.9g */
   }
 }
 

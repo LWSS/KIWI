@@ -2127,7 +2127,9 @@ static char TerrainQuadVertexMatches(const ShaderInfo_t *si, const MeshVert_t *v
   {
     value = TrisDotProductFloat(vertex->pos, colorVecs + channel * 4)
           + colorVecs[channel * 4 + 3];
-    if ((int)(value + 9.313225746154785e-10f) != color[channel])
+    /* KIWI: sub_416540 rounds (as the generator at ComputePackedVertexColorChannel);
+     * truncation rejected 127.99998 vs 128 and changed the terrain triangulation. */
+    if (RoundFloatToInt(value) != color[channel])
       return 0;
   }
   return 1;
@@ -5346,7 +5348,7 @@ static unsigned char Tris_PackLayerBasisDot(float value)
 {
   if (value < -1.0f) value = -1.0f;
   else if (value > 1.0f) value = 1.0f;
-  return (unsigned char)(int)(value * 127.5f + 128.0f);
+  return (unsigned char)(int)(value * 127.5 + 128.0);   /* KIWI: double, as PackNormalBasisComponent */
 }
 
 /* Native 0x44ACA0/0x44B4D0/0x44B560. */

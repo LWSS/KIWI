@@ -4089,7 +4089,9 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
         // Parametric planes are authoritative; point-object planes are derived caches.
         if ( KiwiCon_IsParametric( o ) )
         {
-            fprintf( f, "plane %g %g %g  %g %g %g  %g %g %g  %g %g %g\n",
+            // KIWI (2026-10-05): %.9g round-trips a float exactly; %g's 6 digits moved
+            // construction geometry up to 0.05 on every save + reopen (30000.123 -> 30000.1).
+            fprintf( f, "plane %.9g %.9g %.9g  %.9g %.9g %.9g  %.9g %.9g %.9g  %.9g %.9g %.9g\n",
                      (double)o.plane.origin[0], (double)o.plane.origin[1], (double)o.plane.origin[2],
                      (double)o.plane.normal[0], (double)o.plane.normal[1], (double)o.plane.normal[2],
                      (double)o.plane.u[0],      (double)o.plane.u[1],      (double)o.plane.u[2],
@@ -4119,14 +4121,14 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
             // Omit AUTO tessellation so older KIWI2 output remains stable.
             if ( o.segs > 0 )
                 fprintf( f, "segs %i\n", o.segs );
-            fprintf( f, "arc %g %g %g %g %g\n",
+            fprintf( f, "arc %.9g %.9g %.9g %.9g %.9g\n",
                      (double)o.centre[0], (double)o.centre[1], (double)o.radius,
                      (double)o.ang0, (double)o.ang1 );
         }
         else
         {
             for ( size_t k = 0; k + 2 < o.pts.size(); k += 3 )
-                fprintf( f, "wpt %g %g %g\n",
+                fprintf( f, "wpt %.9g %.9g %.9g\n",
                          (double)o.pts[k], (double)o.pts[k + 1], (double)o.pts[k + 2] );
         }
         fprintf( f, "end\n" );

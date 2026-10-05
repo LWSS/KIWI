@@ -1165,7 +1165,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     {
         bool testMode = false;
         for ( int i = 1; i < __argc; ++i )
-            if ( _stricmp( __argv[i], "-kiwitest" ) == 0 )
+            if ( _stricmp( __argv[i], "-kiwitest" ) == 0 || _stricmp( __argv[i], "-kiwiremote" ) == 0 )
                 testMode = true;
         if ( !testMode )
             ::SetUnhandledExceptionFilter( Kiwi_UnhandledFilter );
@@ -1177,7 +1177,9 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     // KIWI-TEST: parse only this mode's switches; normal startup arguments remain untouched.
     const char *testScript = nullptr;
     const char *testLog = nullptr;
+    const char *remotePipe = nullptr;                    // KIWI: -kiwiremote <pipe>
     bool testRequested = false, testKeep = false, testStrict = false, testArgsValid = true;
+    bool testShow = false;                               // KIWI: -kiwitest-show
     for ( int i = 1; i < __argc; ++i )
     {
         if ( _stricmp( __argv[i], "-kiwitest" ) == 0 )
@@ -1186,6 +1188,12 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
             if ( i + 1 < __argc && __argv[i + 1][0] != '-' ) testScript = __argv[++i];
             else testArgsValid = false;
         }
+        else if ( _stricmp( __argv[i], "-kiwiremote" ) == 0 )
+        {
+            if ( i + 1 < __argc && __argv[i + 1][0] != '-' ) remotePipe = __argv[++i];
+            else testArgsValid = false;
+        }
+        else if ( _stricmp( __argv[i], "-kiwitest-show" ) == 0 ) testShow = true;
         else if ( _stricmp( __argv[i], "-kiwitest-log" ) == 0 )
         {
             if ( i + 1 < __argc && __argv[i + 1][0] != '-' ) testLog = __argv[++i];
@@ -1194,11 +1202,19 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
         else if ( _stricmp( __argv[i], "-kiwitest-keep" ) == 0 ) testKeep = true;
         else if ( _stricmp( __argv[i], "-kiwitest-strict" ) == 0 ) testStrict = true;
     }
-    if ( testRequested )
+    if ( remotePipe )
+    {
+        if ( !KiwiTest_InitRemote( remotePipe, testLog ) ) return 2;
+        if ( testRequested ) { KiwiTest_Log( "-kiwitest and -kiwiremote cannot be combined" ); return 2; }
+        if ( !testArgsValid ) { KiwiTest_Log( "invalid or incomplete -kiwiremote arguments" ); return 2; }
+    }
+    else if ( testRequested )
     {
         if ( !KiwiTest_Init( testScript, testLog, testKeep, testStrict ) ) return 2;
         if ( !testArgsValid ) { KiwiTest_Log( "invalid or incomplete -kiwitest arguments" ); return 2; }
     }
+    if ( KiwiTest_Active() )
+        KiwiTest_IsolateProfile();          // KIWI: before Prefs_Init reads kiwi_radiant.ini
 
     // Map loads are straight-line synchronous and never pump; without this the DWM
     // ghost paints a white copy over the frame once Windows marks it unresponsive.
@@ -1282,7 +1298,9 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
         return 1;
     }
 
-    // radiantapp.cpp:90-91.
+    // radiantapp.cpp:90-91.  KIWI: a test instance parks off screen and never activates.
+    if ( KiwiTest_Active() )
+        nCmdShow = KiwiTest_PrepareFrame( s_hwndFrame, nCmdShow, testShow );
     ::ShowWindow( s_hwndFrame, nCmdShow );
     ::UpdateWindow( s_hwndFrame );
 

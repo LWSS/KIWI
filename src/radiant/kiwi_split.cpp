@@ -76,6 +76,8 @@ namespace
     // World units: keep the cut away from both span ends so neither half is an
     // immediate §19 sliver.  (Snaps project onto the slide axis from any plane.)
     const float KSPLIT_MIN_SPAN  = 1.0f;
+    const char *const KSPLIT_TOO_SMALL_MSG =
+        "Split Face: that face is under 1 unit across that way - too small to split (Tab tries the other way).\n";
 
     // The centroid is both drawn and latched within screen-constant 8 px; Ctrl
     // suppresses the latch with other snapping.
@@ -202,7 +204,7 @@ namespace
         out->node      = r.item.brush;
         out->faceIndex = fi;
         Copy3( n, out->n );
-        out->d    = Dot3( n, w->p[0] );
+        out->d    = Dot3( n, f->planepts[1] );     // KIWI: a plane point, not a (CM-snapped) winding point
         out->dist = r.screenDist;
         return true;
     }
@@ -1300,6 +1302,17 @@ namespace
             Copy3( c, m_p[0] );
             Mad3( c, e1, arm, m_p[1] );
             Mad3( c, e2, arm, m_p[2] );
+            // KIWI (2026-10-05, precision gauntlet): cut on the picked face's OWN plane points.
+            // Rebuilt from (n, d) the cut came out ~2e-7 rad / 1e-5 off that face, and cod4map
+            // merges planes only within 1e-7 (FindFloatPlane): a wall cut flush to a
+            // neighbour's face got two near-identical planes along the joint.
+            if ( m_hover.node && Sel_BrushLive( m_hover.node ) && m_hover.node->def
+              && m_hover.faceIndex >= 0 && m_hover.faceIndex < m_hover.node->def->faceCount )
+            {
+                const face_t *sf = &m_hover.node->def->faces[m_hover.faceIndex];
+                for ( int k = 0; k < 3; ++k )
+                    Copy3( sf->planepts[k], m_p[k] );
+            }
 
             Copy3( n,  m_planeN );
             m_planeD = d;
@@ -1814,7 +1827,7 @@ namespace
                 m_fromRegion = true;
                 if ( !Derive() )
                 {
-                    Sys_Printf( "Split Face: that face is degenerate.\n" );
+                    Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
                     return false;
                 }
                 UpdateHud();
@@ -1848,7 +1861,7 @@ namespace
             m_face = face->faceIndex;
             if ( !Derive() )
             {
-                Sys_Printf( "Split Face: that face is degenerate.\n" );
+                Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
                 return false;
             }
             UpdateHud();
@@ -2024,6 +2037,7 @@ namespace
         // Rebuild face basis and projected span independently of cut position.
         bool DeriveBasis()
         {
+            m_tooSmall = false;
             if ( !Sel_BrushLive( m_node ) || !m_node->def || !m_node->def->faces )
                 return false;
             if ( m_face < 0 || m_face >= m_node->def->faceCount )
@@ -2083,7 +2097,8 @@ namespace
                 if ( s < m_lo ) m_lo = s;
                 if ( s > m_hi ) m_hi = s;
             }
-            if ( !( m_hi - m_lo > KSPLIT_MIN_SPAN ) )
+            m_tooSmall = !( m_hi - m_lo > KSPLIT_MIN_SPAN );
+            if ( m_tooSmall )
                 return false;               // a sliver: no room for two halves
 
             m_half     = radius * 1.05f;
@@ -2161,6 +2176,7 @@ namespace
         bool  m_fromRegion = false;
         int   m_axis   = 0;                 // 0 = U, 1 = V
         bool  m_valid  = false;
+        bool  m_tooSmall = false;           // DeriveBasis: the face spans under KSPLIT_MIN_SPAN
         // Typed offset outranks cursor projection; m_t is the resolved position.
         bool  m_haveT     = false;
         float m_cursorT   = 0.0f;

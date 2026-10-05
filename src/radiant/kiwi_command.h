@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34168, modal 34068.
+// 34100..34199 the second instant block. Next free: instant 34169, modal 34068.
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -174,6 +174,7 @@
 #define KIWI_CMD_GLASS_APPLY        34166   // "Apply Glass Set" (selected panes take the active set)
 #define KIWI_CMD_WINDOW_GLASS       34167   // Windows > Glass
 // KIWI END
+#define KIWI_CMD_CLEAN_PRECISION    34168   // Build > Clean Up Precision (kiwi_fragile)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );
@@ -458,6 +459,14 @@ void KiwiCmd_DrawWorld();
 
 // Polls Ctrl and applies the active inversion; KSNAPCTX_ALWAYS ignores Ctrl.
 bool KiwiCmd_SnapEngaged();
+
+// Ctrl held - the physical key, or (test modes) the harness's injected modifiers.
+bool KiwiCmd_CtrlHeld();
+
+// KIWI (test modes): every KIWI modifier query (CurrentMods, KiwiCmd_CtrlHeld) returns
+// `mods` (Shift=1 Alt=2 Ctrl=4 Win=8) instead of the keyboard; -1 = off.  A hidden test
+// instance must not read keys the user holds while typing elsewhere.
+void KiwiCmd_SetTestMods( int mods );
 
 // Shell key funnel after ImGui text input and before accelerators/hotkeys.
 bool KiwiUX_KeyFunnel( unsigned int vk );

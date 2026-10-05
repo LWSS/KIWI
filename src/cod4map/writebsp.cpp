@@ -754,13 +754,14 @@ int EmitDrawNode_r( Node_t *node )
   nodeIdx = numBSPNodes++;
   n = &bspNodes[nodeIdx];
 
-  /* bounding box — float to int truncation */
-  n->mins[0] = (int)node->mins[0];
-  n->mins[1] = (int)node->mins[1];
-  n->mins[2] = (int)node->mins[2];
-  n->maxs[0] = (int)node->maxs[0];
-  n->maxs[1] = (int)node->maxs[1];
-  n->maxs[2] = (int)node->maxs[2];
+  /* bounding box.  KIWI: floor / ceil so the integer box CONTAINS the node - truncation
+     shrank it toward zero on both sides (-100.5 -> -100, 100.5 -> 100). */
+  n->mins[0] = (int)floorf(node->mins[0]);
+  n->mins[1] = (int)floorf(node->mins[1]);
+  n->mins[2] = (int)floorf(node->mins[2]);
+  n->maxs[0] = (int)ceilf(node->maxs[0]);
+  n->maxs[1] = (int)ceilf(node->maxs[1]);
+  n->maxs[2] = (int)ceilf(node->maxs[2]);
 
   if ( node->planenum & 1 )
     Com_Error( "WriteDrawNodes_r: odd planenum" );
@@ -937,9 +938,12 @@ static qboolean SampleEntitySolidForMass(const vec3_t point, const vec3_t sample
       for ( sideIndex = 0; sideIndex < (unsigned int)brush->numSides; ++sideIndex )
       {
         const Plane_t *plane = &mapplanes[brush->sides[sideIndex].planenum];
-        double planeScale = log(plane->normal[0] * sampleSize[0])
-                          + log(plane->normal[1] * sampleSize[1])
-                          + log(plane->normal[2] * sampleSize[2]);
+        /* KIWI: fabs - the native calls ?log@@YAMM@Z_0 (0x405330), a mislabelled _fabs
+         * wrapper.  log() gave -inf on an axial plane, so box dyn_* got no solid samples
+         * and "centerofmass" etc. came out 0 0 0. */
+        double planeScale = fabs(plane->normal[0] * sampleSize[0])
+                          + fabs(plane->normal[1] * sampleSize[1])
+                          + fabs(plane->normal[2] * sampleSize[2]);
         double distance = DotProduct(point, plane->normal) - plane->dist - planeScale;
 
         if ( distance > 0.1 )
@@ -1056,9 +1060,10 @@ static void EmitEntityMassProperties(Entity_t *ent)
   }
 
   ComputeEntityMassPropertiesBySampling(mins, maxs, ent, center, moments, products);
-  SetKeyValue(ent, "centerofmass", va("%g %g %g", center[0], center[1], center[2]));
-  SetKeyValue(ent, "momofinertia", va("%g %g %g", moments[0], moments[1], moments[2]));
-  SetKeyValue(ent, "prodofinertia", va("%g %g %g", products[0], products[1], products[2]));
+  /* KIWI: %.9g - the native "%g" kept 6 digits (30001.066 -> 30001.1). */
+  SetKeyValue(ent, "centerofmass", va("%.9g %.9g %.9g", center[0], center[1], center[2]));
+  SetKeyValue(ent, "momofinertia", va("%.9g %.9g %.9g", moments[0], moments[1], moments[2]));
+  SetKeyValue(ent, "prodofinertia", va("%.9g %.9g %.9g", products[0], products[1], products[2]));
 }
 
 /*

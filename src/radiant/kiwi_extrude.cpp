@@ -54,7 +54,7 @@ extern bool Radiant_ProfileSetInt( const char *, const char *, int );
 // safely latch a key whose messages are handled elsewhere.
 bool KiwiExt_AbsoluteHeld()
 {
-    return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+    return KiwiCmd_CtrlHeld();              // physical, or the test modes' injected state
 }
 
 // One-axis snap ladder: aimed named geometry, face-plane magnet, then hard lattice.
@@ -2033,6 +2033,71 @@ namespace
             return 0;
         }
 
+        // KIWI (2026-10-05, user: "it's easy to make geometry that fails the compiler"): seat
+        // the new body on the SOURCE brush's own plane points.  The frame's origin is the
+        // winding centroid and winding points sit up to the CM snap off their planes, so the
+        // base was ~0.005 off its source face, and a side lying in a source face was ~1e-6
+        // rad off it.  cod4map merges planes only within 1e-7 (normal) / 0.001 (dist)
+        // (FindFloatPlane), so both became distinct near-coplanar planes: slivers and
+        // fragile corners.  The base is now the source face reversed, the top the same
+        // points + dist * n, and a side in the plane of a source face takes its points.
+        static void SeatCapsOnSource( brush_t *def, const selbrush_t *node, int faceIndex, float dist )
+        {
+            if ( !def || def->faceCount < 2 || !node || !node->def
+              || faceIndex < 0 || faceIndex >= node->def->faceCount )
+                return;
+            const brush_t *srcDef = node->def;
+            const face_t  *src    = &srcDef->faces[faceIndex];
+            const float   *n      = src->plane.normal;
+            std::vector<float> saved( (size_t)def->faceCount * 9 );
+            for ( int c = 0; c < def->faceCount; ++c )
+                memcpy( &saved[(size_t)c * 9], def->faces[c].planepts, sizeof( float ) * 9 );
+            for ( int c = 0; c < def->faceCount; ++c )
+            {
+                face_t *f = &def->faces[c];
+                const float d = Dot3( f->plane.normal, n );
+                // The caps, by normal: the body spans offsets 0..dist along n, so the cap facing
+                // +n sits at max(0, dist), the one facing -n at min(0, dist) (an inward E puts
+                // the source plane on the +n cap).  Offset 0 copies the source points exactly.
+                if ( fabsf( d ) > 0.999f )
+                {
+                    const bool  up     = d > 0.0f;
+                    const float offset = up ? ( dist > 0.0f ? dist : 0.0f ) : ( dist < 0.0f ? dist : 0.0f );
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        const float *p = src->planepts[up ? k : 2 - k];   // -n: reversed winding
+                        for ( int a = 0; a < 3; ++a )
+                            f->planepts[k][a] = offset != 0.0f ? p[a] + n[a] * offset : p[a];
+                    }
+                    continue;
+                }
+                if ( !f->w || f->w->numpoints < 3 )
+                    continue;
+                float centre[3] = { 0.0f, 0.0f, 0.0f };
+                for ( int p = 0; p < f->w->numpoints; ++p )
+                    for ( int a = 0; a < 3; ++a )
+                        centre[a] += f->w->p[p][a] / (float)f->w->numpoints;
+                for ( int s = 0; s < srcDef->faceCount; ++s )
+                {
+                    const face_t *sf = &srcDef->faces[s];
+                    if ( s == faceIndex || Dot3( sf->plane.normal, f->plane.normal ) < 0.999999f
+                      || fabsf( Dot3( sf->plane.normal, centre ) - sf->plane.dist ) > 0.01f )
+                        continue;
+                    for ( int k = 0; k < 3; ++k )   // a side in a source face's plane
+                        Copy3( sf->planepts[k], f->planepts[k] );
+                    break;
+                }
+            }
+            KiwiValid_Rebuild( def );
+            const char *why = 0;
+            if ( !KiwiValid_CheckBrush( def, &why ) )
+            {
+                for ( int c = 0; c < def->faceCount; ++c )   // keep the as-built planes
+                    memcpy( def->faces[c].planepts, &saved[(size_t)c * 9], sizeof( float ) * 9 );
+                KiwiValid_Rebuild( def );
+            }
+        }
+
         // KIWI (2026-09-28): diagnostics for a face whose prism will not build - the source
         // brush (full-precision planepts, faces, windings), the profile, and the rebuilt
         // prism's planes / windings, appended to %TEMP%\kiwi_extrude_fail.txt (outside the
@@ -2116,7 +2181,10 @@ namespace
             {
                 const char *w = "unknown";
                 if ( brush_t *def = BuildGrowPrism( m_plane, m_loop, m_dist, &w ) )
+                {
+                    SeatCapsOnSource( def, m_node, m_faceIndex, m_dist );
                     defs.push_back( def );
+                }
                 else
                 {
                     ++failed;
@@ -2133,7 +2201,10 @@ namespace
                     continue;
                 const char *w = "unknown";
                 if ( brush_t *def = BuildGrowPrism( fs.plane, fs.loop, m_dist, &w ) )
+                {
+                    SeatCapsOnSource( def, fs.node, fs.face, m_dist );
                     defs.push_back( def );
+                }
                 else
                 {
                     ++failed;

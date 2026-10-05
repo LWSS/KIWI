@@ -41,7 +41,7 @@ namespace
     void WriteFloat( const char *entry, float v )
     {
         char buf[64];
-        KiwiFmt_Num( buf, sizeof( buf ), v, 6 );
+        KiwiFmt_Exact( buf, sizeof( buf ), v );     // 6 decimals moved a 1/3 grid's snap points
         Radiant_ProfileSetString( KUX_SECTION, entry, buf );
     }
 

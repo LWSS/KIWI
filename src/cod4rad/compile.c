@@ -1058,10 +1058,12 @@ static int FindLightingSamplesAndNormalMode(int sampleIdx, float *position,
 
     {
         LightingHit_t *hits = (LightingHit_t *)outputLighting;
-        int baseS = (int)floorf(u);
-        int baseT = (int)floorf(v);
-        float fracS = u - (float)baseS;
-        float fracT = v - (float)baseT;
+        /* KIWI: texel s's centre is s + 0.5 - interpolate from there (the floor of u itself
+         * blended a centre sample 50/50 with its right neighbour: a half-texel shift). */
+        int baseS = (int)floorf(u - 0.5f);
+        int baseT = (int)floorf(v - 0.5f);
+        float fracS = (u - 0.5f) - (float)baseS;
+        float fracT = (v - 0.5f) - (float)baseT;
         float sWeights[2] = { 1.0f - fracS, fracS };
         float tWeights[2] = { 1.0f - fracT, fracT };
         float totalWeight = 0.0f;

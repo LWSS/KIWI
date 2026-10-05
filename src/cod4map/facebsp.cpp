@@ -539,9 +539,10 @@ int SelectSplitPlane_BlockSubdivision(Node_t *node, Face_t *windingList, int axi
       {
         double midpoint = node->maxs[ax] + node->mins[ax];
         float ratio = midpoint / blockSize * 0.5f;
-        /* CoD4's helper adds 2^-30 and truncates to int; it does not round
-         * to the nearest block as the CoD2 donor did. */
-        float dist = (float)((int)(ratio + 9.313225746154785e-10f) * blockSize);
+        /* KIWI: CoD4's helper (sub_416540: 2^-30 + fistp, the RoundFloatToInt of every
+         * other caller) ROUNDS.  The truncating port put the split ON node->mins for
+         * ratio 1.96 (mins 1024, maxs 3000): the asserts below fired, no progress. */
+        float dist = (float)(RoundFloatToInt(ratio) * blockSize);
         int planenum;
 
         VectorClear(normal);

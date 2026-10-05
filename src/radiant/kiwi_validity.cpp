@@ -20,6 +20,8 @@ extern void MarkMapModified();                                // win_qe3.cpp 0x4
 
 extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4712 (0x471260)
 extern void       Winding_Free( winding_t *w );                      // winding.cpp:153
+extern size_t     Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
+extern face_t    *Face_Alloc( brush_t *b, face_t *f );                     // brush.cpp:310  0x471500
 
 namespace
 {
@@ -59,6 +61,36 @@ namespace
         const float inv = 1.0f / (float)w->numpoints;
         for ( int k = 0; k < 3; ++k )
             out[k] *= inv;
+    }
+
+    // Every point of `w` within `tol` of `p` (a missing winding is on any plane).
+    bool WindingOnPlane( const winding_t *w, const plane_t &p, float tol )
+    {
+        if ( !w )
+            return true;
+        for ( int i = 0; i < w->numpoints; ++i )
+            if ( fabsf( Dot3( p.normal, w->p[i] ) - p.dist ) >= tol )
+                return false;
+        return true;
+    }
+
+    // Same-facing, and each face lies on the other's plane: one face of the solid.
+    bool FacesCoplanar( const face_t &a, const face_t &b, float tol )
+    {
+        return ( a.w || b.w )
+            && Dot3( a.plane.normal, b.plane.normal ) > 0.0f
+            && WindingOnPlane( a.w, b.plane, tol ) && WindingOnPlane( b.w, a.plane, tol );
+    }
+
+    bool WindingHasPoint( const winding_t *w, const float ( *pts )[3], int count )
+    {
+        for ( int k = 0; w && k < count; ++k )
+            for ( int i = 0; i < w->numpoints; ++i )
+                if ( fabsf( w->p[i][0] - pts[k][0] ) < KVALID_PLANE_DIST
+                  && fabsf( w->p[i][1] - pts[k][1] ) < KVALID_PLANE_DIST
+                  && fabsf( w->p[i][2] - pts[k][2] ) < KVALID_PLANE_DIST )
+                    return true;
+        return false;
     }
 
     // BuildWindings seeds mins=+131072/maxs=-131072 and expands only from intersections;
@@ -168,6 +200,60 @@ void KiwiValid_Rebuild( brush_t *def )
     Brush_BuildWindings( def, 0 );      // bFull 0 avoids legacy power-of-two snapping
     MarkMapModified();
     ++def->version;                     // what invalidates the instance faceVis cache
+}
+
+// KIWI: a face on another face's plane is the same face of the convex solid, so
+// dropping one leaves the solid unchanged (within the tolerance).
+int KiwiValid_MergeCoplanarFaces( brush_t *def, const float ( *moved )[3], int movedCount )
+{
+    if ( !def || !def->faces || def->patch )
+        return 0;
+    int removed = 0;
+    std::vector<face_t> dropped;    // KIWI: windingless copies, re-inserted if the merge fails
+    std::vector<int>    droppedAt;
+    while ( def->faceCount > 4 )
+    {
+        int drop = -1;
+        for ( int i = 0; i < def->faceCount && drop < 0; ++i )
+        {
+            const bool ti = WindingHasPoint( def->faces[i].w, moved, movedCount );
+            for ( int j = i + 1; j < def->faceCount && drop < 0; ++j )
+            {
+                const bool tj  = WindingHasPoint( def->faces[j].w, moved, movedCount );
+                const float tol = ( ti || tj ) ? KVALID_FOLD_DIST : KVALID_PLANE_DIST;
+                if ( !FacesCoplanar( def->faces[i], def->faces[j], tol ) )
+                    continue;
+                if ( ti != tj )
+                    drop = ti ? j : i;
+                else
+                    drop = ( WindingArea( def->faces[i].w ) < WindingArea( def->faces[j].w ) ) ? i : j;
+            }
+        }
+        if ( drop < 0 )
+            break;
+        dropped.push_back( def->faces[drop] );
+        dropped.back().w = nullptr;
+        droppedAt.push_back( drop );
+        Brush_RemoveFace( def, (unsigned int)drop );
+        KiwiValid_Rebuild( def );
+        ++removed;
+    }
+    // KIWI: a fold merge moves the corners around the kept face; when that leaves a brush
+    // the gate rejects, put every dropped face back where it was (the file order too).
+    if ( removed && !KiwiValid_CheckBrush( def ) )
+    {
+        for ( int r = (int)dropped.size() - 1; r >= 0; --r )
+        {
+            Face_Alloc( def, &dropped[r] );     // appended; slid back to its old index
+            const face_t back = def->faces[def->faceCount - 1];
+            memmove( &def->faces[droppedAt[r] + 1], &def->faces[droppedAt[r]],
+                     sizeof( face_t ) * (size_t)( def->faceCount - 1 - droppedAt[r] ) );
+            def->faces[droppedAt[r]] = back;
+        }
+        KiwiValid_Rebuild( def );
+        return 0;
+    }
+    return removed;
 }
 
 // A snapshot contains either patch controls or brush planepts, never both.

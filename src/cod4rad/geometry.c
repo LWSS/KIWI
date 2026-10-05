@@ -1152,8 +1152,9 @@ static void RadiosityColorSample(float areaX2, float *centroid,
 {
     RadiosityColorAccum_t *accum = (RadiosityColorAccum_t *)userData;
     MaterialDef_t *material = accum->material;
-    int x = ((int)centroid[0]) & (material->width - 1);
-    int y = ((int)centroid[1]) & (material->height - 1);
+    /* KIWI: floor - truncation read the neighbouring texel for negative (tiled) UVs. */
+    int x = ((int)floorf(centroid[0])) & (material->width - 1);
+    int y = ((int)floorf(centroid[1])) & (material->height - 1);
     int blockWidth = material->width / 4;
     const unsigned char *rgb = (const unsigned char *)material->colorMask
                              + 3 * ((x / 4) + blockWidth * (y / 4));

@@ -1103,7 +1103,7 @@ void __cdecl CheckVote()
         if (level.time - level.voteTime >= 0)
         {
             v3 = (double)(level.numVotingClients - (level.voteNo + level.voteYes)) * g_voteAbstainWeight->current.value;
-            if (level.voteYes <= (int)(v3 + 0.4999999990686774f) + level.voteNo)
+            if (level.voteYes <= (int)lrint((double)v3 + 0.4999999990686774) + level.voteNo)   // KIWI: fistp ceil idiom
                 goto LABEL_11;
         LABEL_9:
             // execute the command, then remove the vote

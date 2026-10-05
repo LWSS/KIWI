@@ -25,6 +25,8 @@
 #include "kiwi_pick.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
+#include "kiwi_angles.h"             // double entity-angle composition
+#include "kiwi_texlock.h"            // exact texture lock (G, R)
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
@@ -37,6 +39,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <vector>
+#include <algorithm>    // std::find (SelectionMedian)
 
 // Ported entry points.
 extern int   Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
@@ -45,24 +48,23 @@ extern void  CamWnd_BuildMatrix();                                     // camwnd
 extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:100
 extern void  SetKeyValue( entity_s_def *e, const char *key, const char *value );    // entity.cpp:213
+extern void  DeleteKey( epair_t **head, const char *key );                          // entity.cpp:177
 extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );      // entity.cpp:115
 extern entity_s *Brush_Move( const float *move, brush_t *def, char snap );          // brush.cpp 0x47BA40
-extern void  Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
-extern void  Select_Scale( float sx, float sy, float sz );             // select.cpp 0x48FDC0
-extern void  Select_GetMid( float *mid );                              // select.cpp 0x48FC70
 extern void  Select_GetTrueMid( float *center );                       // select.cpp 0x48FC20
 extern void  Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] );  // select.cpp 0x48FF40
+extern char  g_nScaleHow;                                              // drag.cpp 0x23F16DC (axis mask)
 extern void  Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
                                                   float deg, char bSwap );          // select.cpp 0x48FD10
 
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp 0x470470
 extern int   Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end ); // brush.cpp 0x471C30
+extern bool  g_kiwiExactVertexEnd;                                    // brush.cpp: skip its legacy-grid snap
 extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );           // pmesh.cpp
 extern void  MarkMapModified();                                        // win_qe3.cpp 0x499BB0
+extern void  Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp 0x477AC0
 
-// Forwarders for brush.cpp's file-static texture-lock halves.
-extern void  Ed_FaceTexLockSave( float *saveBuf, face_t *face );
-extern void  Ed_FaceTexLockReproject( face_t *face, const float *saveBuf, const byte *lockFlags );
+extern void  SetupVertexSelection();                                    // select.cpp 0x494bc0
 
 // Face selections need per-brush undo coverage beyond selected_brushes.
 extern void  Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  (0x45E680)
@@ -163,6 +165,64 @@ namespace
         }
         h = h * 31u + (unsigned)KiwiConSel_Count();
         return h;
+    }
+
+    // KIWI (2026-10-05, reversibility): the default R / S pivot - the mean of each selected
+    // object's centre (brush: its winding points; patch: its controls; fixed-size: its
+    // origin).  A transform carries it along, so R +a / -a and S k / 1/k land back exactly;
+    // the bounds centre did not.  Falls back to the bounds centre with nothing to average.
+    bool SelectionMedian( float out[3] )
+    {
+        double sum[3] = { 0.0, 0.0, 0.0 };
+        int count = 0;
+        std::vector<const brush_t *> seen;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            const brush_t *def = b->def;
+            if ( !def || std::find( seen.begin(), seen.end(), def ) != seen.end() )
+                continue;
+            seen.push_back( def );
+            double c[3] = { 0.0, 0.0, 0.0 };
+            int n = 0;
+            const entity_s_def *owner = b->owner ? (const entity_s_def *)b->owner->def : nullptr;
+            if ( owner && owner->eclass && owner->eclass->fixedsize )
+            {
+                for ( int k = 0; k < 3; ++k )
+                    c[k] = owner->origin[k];
+                n = 1;
+            }
+            else if ( def->patch )
+            {
+                const patchMesh_t *p = def->patch;
+                for ( int col = 0; col < p->width; ++col )
+                    for ( int row = 0; row < p->height; ++row, ++n )
+                        for ( int k = 0; k < 3; ++k )
+                            c[k] += p->ctrl[col][row].xyz[k];
+            }
+            else if ( def->faces )
+            {
+                for ( int f = 0; f < def->faceCount; ++f )
+                {
+                    const winding_t *w = def->faces[f].w;
+                    for ( int i = 0; w && i < w->numpoints; ++i, ++n )
+                        for ( int k = 0; k < 3; ++k )
+                            c[k] += w->p[i][k];
+                }
+            }
+            if ( n <= 0 )
+                continue;
+            for ( int k = 0; k < 3; ++k )
+                sum[k] += c[k] / n;
+            ++count;
+        }
+        if ( count <= 0 )
+        {
+            Select_GetTrueMid( out );
+            return false;
+        }
+        for ( int k = 0; k < 3; ++k )
+            out[k] = (float)( sum[k] / count );
+        return true;
     }
 
     // Session pivot self-expires when the selection signature changes.
@@ -271,6 +331,125 @@ namespace
         return true;
     }
 
+    // KIWI (2026-10-05, precision): texture lock for a pure TRANSLATION of a face's plane,
+    // exactly.  The ported Save / Reproject (Brush_Move's bracket) re-solves the texdef from
+    // the S/T at the three plane points - in float, from texcoords in the hundreds far from
+    // the origin, across a face that may be 2 units wide - so G on a trim 30000 out turned
+    // its texture 0.02 deg, sheared it and changed its size, and G there and back did not
+    // return.  A translation only slides the texture: shift by size x (row . d) per locked
+    // channel / layer (Face_TexLockTranslate, which Brush_Move now uses too).
+    void TexLockTranslateFace( face_t *f, const float d[3] )
+    {
+        const byte lock[3] = { (byte)( g_PrefsDlg->m_bTextureLock != 0 ),
+                               (byte)( g_PrefsDlg->m_bLightmapLock != 0 ), 1 };
+        Face_TexLockTranslate( f, d, lock );
+    }
+
+    // Brush_Move for a plain brush with the exact lock above (every face - Brush_Move skips
+    // faces without a winding).
+    void TranslateBrushLocked( brush_t *def, const float d[3] )
+    {
+        for ( int i = 0; i < def->faceCount; ++i )
+        {
+            face_t *f = &def->faces[i];
+            TexLockTranslateFace( f, d );
+            for ( int p = 0; p < 3; ++p )
+                Add3( f->planepts[p], d, f->planepts[p] );
+        }
+        Brush_BuildWindings( def, 0 );
+        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
+            SetupVertexSelection();
+        MarkMapModified();
+        ++def->version;
+    }
+
+    // KIWI (2026-10-05, reversibility): faces a vertex move bent into triangles merge back
+    // once flat again - out and back is the original brush, not coplanar twins (V5) - and
+    // a sub-0.1 fold keeps the face through the moved vertex (KiwiValid_MergeCoplanarFaces).
+    // Merging renumbers the faces, so every component picked on the brush is re-found
+    // (vertex by position, edge by its ends, face by its plane) or dropped.
+    void MergeCoplanarKeepVerts( brush_t *def, const std::vector<float> &moved )
+    {
+        selection_t &sel = KiwiSel();
+        const size_t n = sel.items.size();
+        std::vector<float> key( ( n + 1 ) * 6 );    // vertex: pos; edge: ends; face: normal, dist
+        std::vector<char>  on( n + 1, 0 ), onDef( n + 1, 0 );
+        for ( size_t i = 0; i <= n; ++i )
+        {
+            const sel_item_t &it = ( i < n ) ? sel.items[i] : sel.active;
+            if ( it.kind == SEL_OBJECT || it.faceIndex < 0 || !it.brush || it.brush->def != def )
+                continue;
+            onDef[i] = 1;                       // a component of this brush: re-found or dropped
+            if ( it.faceIndex >= def->faceCount )
+                continue;
+            float *k = &key[i * 6];
+            const face_t    *f = &def->faces[it.faceIndex];
+            const winding_t *w = f->w;
+            if ( it.kind == SEL_VERTEX )
+                on[i] = Sel_ItemWorldPos( it, k, false );
+            else if ( it.kind == SEL_EDGE && w && it.edgeIndex >= 0 && it.edgeIndex < w->numpoints )
+            {
+                Copy3( w->p[it.edgeIndex], k );
+                Copy3( w->p[( it.edgeIndex + 1 ) % w->numpoints], k + 3 );
+                on[i] = 1;
+            }
+            else if ( it.kind == SEL_FACE )
+            {
+                Copy3( f->plane.normal, k );
+                k[3] = f->plane.dist;
+                on[i] = 1;
+            }
+        }
+        if ( !KiwiValid_MergeCoplanarFaces( def, (const float ( * )[3])moved.data(), (int)( moved.size() / 3 ) ) )
+            return;
+        std::vector<char> lost( n + 1, 0 );
+        for ( size_t i = 0; i <= n; ++i )
+        {
+            if ( !on[i] )
+            {
+                lost[i] = onDef[i];             // unkeyed: its indices may now be past the end
+                continue;
+            }
+            sel_item_t  &it    = ( i < n ) ? sel.items[i] : sel.active;
+            const float *k     = &key[i * 6];
+            bool         found = false;
+            for ( int f = 0; f < def->faceCount && !found; ++f )
+            {
+                const face_t    *fc = &def->faces[f];
+                const winding_t *w  = fc->w;
+                if ( it.kind == SEL_FACE )
+                {
+                    found = Dot3( fc->plane.normal, k ) > 0.9999f && fabsf( fc->plane.dist - k[3] ) < 0.01f;
+                    if ( found )
+                        it.faceIndex = f;
+                    continue;
+                }
+                for ( int v = 0; w && v < w->numpoints && !found; ++v )
+                {
+                    if ( !PointNear( w->p[v], k, 0.01f ) )
+                        continue;
+                    if ( it.kind == SEL_EDGE && !PointNear( w->p[( v + 1 ) % w->numpoints], k + 3, 0.01f ) )
+                        continue;
+                    it.faceIndex = f;
+                    ( it.kind == SEL_EDGE ? it.edgeIndex : it.vertIndex ) = v;
+                    found = true;
+                }
+            }
+            lost[i] = !found;
+        }
+        if ( lost[n] )
+            sel.active = sel_item_t();
+        for ( size_t i = n; i-- > 0; )
+        {
+            bool twin = false;      // two faces merged into one survivor
+            for ( size_t j = 0; j < i && !twin && !lost[i]; ++j )
+                twin = !lost[j] && Sel_ItemEqual( sel.items[j], sel.items[i] );
+            if ( lost[i] || twin )
+                sel.items.erase( sel.items.begin() + i );
+        }
+        Sel_SyncToLegacy();                     // the legacy face list holds the old indices
+    }
+
 
     // Dominance is objects > faces > edges > vertices. Palette-rate checks skip
     // the display-list liveness walk; Begin performs it.
@@ -296,67 +475,6 @@ namespace
         return selected_brushes.next != &selected_brushes;
     }
 
-    struct xformEntityAngles_t
-    {
-        entity_s_def *def;
-        float angles[3];
-        float axisAligned[3];
-        bool  isAxisAligned;
-    };
-
-    double XformRoundNearest( double value )
-    {
-        return value >= 0.0 ? floor( value + 0.5 ) : ceil( value - 0.5 );
-    }
-
-    double XformSnapAngleScalar( double value )
-    {
-        value = XformRoundNearest( value * 1000.0 ) / 1000.0;
-        const double integer = XformRoundNearest( value );
-        if ( fabs( value - integer ) <= 0.01 )
-            value = integer;
-        return value;
-    }
-
-    float XformNormalizeAngle( double value )
-    {
-        value = fmod( value, 360.0 );
-        if ( value < 0.0 )
-            value += 360.0;
-        if ( fabs( value ) < 0.0005 || fabs( value - 360.0 ) < 0.0005 )
-            value = 0.0;
-        return (float)value;
-    }
-
-    float XformSnapAngle( float value )
-    {
-        return XformNormalizeAngle( XformSnapAngleScalar( value ) );
-    }
-
-    float XformAngleDistance( float a, float b )
-    {
-        double d = fabs( (double)XformNormalizeAngle( a )
-                       - (double)XformNormalizeAngle( b ) );
-        if ( d > 180.0 )
-            d = 360.0 - d;
-        return (float)d;
-    }
-
-    bool XformAxisAlignedAngles( const float angles[3], float exact[3] )
-    {
-        for ( int i = 0; i < 3; ++i )
-        {
-            if ( !_finite( angles[i] ) )
-                return false;
-            const float normalized = XformNormalizeAngle( angles[i] );
-            const double multiple = XformRoundNearest( normalized / 90.0 ) * 90.0;
-            exact[i] = XformNormalizeAngle( multiple );
-            if ( XformAngleDistance( normalized, exact[i] ) > 0.01f )
-                return false;
-        }
-        return true;
-    }
-
     const char *XformEntityKey( const entity_s_def *def, const char *key )
     {
         if ( !def || !key )
@@ -365,122 +483,6 @@ namespace
             if ( ep->key && !_stricmp( ep->key, key ) )
                 return ep->value ? ep->value : "";
         return nullptr;
-    }
-
-    void KiwiXform_CaptureEntityAngles( std::vector<xformEntityAngles_t> &out )
-    {
-        out.clear();
-        for ( selbrush_t *brush = selected_brushes.next;
-              brush && brush != &selected_brushes; brush = brush->next )
-        {
-            entity_s_def *def = brush->owner
-                              ? (entity_s_def *)brush->owner->def : nullptr;
-            if ( !def || !def->eclass || !def->eclass->fixedsize )
-                continue;
-
-            bool duplicate = false;
-            for ( size_t i = 0; i < out.size(); ++i )
-                if ( out[i].def == def ) { duplicate = true; break; }
-            if ( duplicate )
-                continue;
-
-            xformEntityAngles_t base;
-            base.def = def;
-            if ( !Entity_GetVec3ForKey( def, base.angles, "angles" ) )
-                base.angles[0] = base.angles[1] = base.angles[2] = 0.0f;
-            base.isAxisAligned = XformAxisAlignedAngles( base.angles,
-                                                         base.axisAligned );
-            out.push_back( base );
-        }
-    }
-
-    bool XformExpectedAngles( const xformEntityAngles_t &base, float exactDelta,
-                              const float result[3], float out[3] )
-    {
-        if ( !base.isAxisAligned || !_finite( exactDelta ) )
-            return false;
-
-        const double delta = XformSnapAngleScalar( exactDelta );
-        for ( int component = 0; component < 3; ++component )
-        {
-            for ( int sign = 1; sign >= -1; sign -= 2 )
-            {
-                float candidate[3] =
-                {
-                    base.axisAligned[0], base.axisAligned[1], base.axisAligned[2]
-                };
-                candidate[component] = XformNormalizeAngle(
-                    (double)candidate[component] + (double)sign * delta );
-                if ( XformAngleDistance( candidate[0], result[0] ) <= 0.05f
-                     && XformAngleDistance( candidate[1], result[1] ) <= 0.05f
-                     && XformAngleDistance( candidate[2], result[2] ) <= 0.05f )
-                {
-                    out[0] = candidate[0];
-                    out[1] = candidate[1];
-                    out[2] = candidate[2];
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    void KiwiXform_SnapEntityAngles( const std::vector<xformEntityAngles_t> &baseline,
-                                     float exactDelta )
-    {
-        std::vector<entity_s_def *> defs;
-        for ( size_t i = 0; i < baseline.size(); ++i )
-            defs.push_back( baseline[i].def );
-
-        for ( selbrush_t *brush = selected_brushes.next;
-              brush && brush != &selected_brushes; brush = brush->next )
-        {
-            entity_s_def *def = brush->owner
-                              ? (entity_s_def *)brush->owner->def : nullptr;
-            if ( !def || !def->eclass || !def->eclass->fixedsize )
-                continue;
-            bool duplicate = false;
-            for ( size_t i = 0; i < defs.size(); ++i )
-                if ( defs[i] == def ) { duplicate = true; break; }
-            if ( !duplicate )
-                defs.push_back( def );
-        }
-
-        for ( size_t i = 0; i < defs.size(); ++i )
-        {
-            entity_s_def *def = defs[i];
-            const char *current = XformEntityKey( def, "angles" );
-            float result[3];
-            if ( !current || sscanf( current, "%f %f %f",
-                                     result, result + 1, result + 2 ) != 3
-                 || !_finite( result[0] ) || !_finite( result[1] )
-                 || !_finite( result[2] ) )
-                continue;
-
-            float clean[3] =
-            {
-                XformSnapAngle( result[0] ),
-                XformSnapAngle( result[1] ),
-                XformSnapAngle( result[2] )
-            };
-            for ( size_t j = 0; j < baseline.size(); ++j )
-            {
-                if ( baseline[j].def == def )
-                {
-                    XformExpectedAngles( baseline[j], exactDelta, result, clean );
-                    break;
-                }
-            }
-
-            char x[48], y[48], z[48], value[160];
-            _snprintf( value, sizeof( value ), "%s %s %s",
-                       KiwiFmt_Num( x, sizeof( x ), clean[0], 6 ),
-                       KiwiFmt_Num( y, sizeof( y ), clean[1], 6 ),
-                       KiwiFmt_Num( z, sizeof( z ), clean[2], 6 ) );
-            value[sizeof( value ) - 1] = '\0';
-            if ( strcmp( current, value ) )
-                SetKeyValue( def, "angles", value );
-        }
     }
 
 
@@ -727,6 +729,129 @@ namespace
                 return;
             KiwiCmd_UndoBegin( literalOp );     // string LITERAL — stored by pointer
             m_undoOpen = true;
+        }
+
+        // ── absolute brush / patch transforms (KIWI 2026-10-05) ──────────────────────
+        // User: "We need to get this stable and solid ... it's easy to make geometry that
+        // fails the compiler".  R and S used to apply per-frame residuals to the float plane
+        // points: every mouse frame (or typed digit) rounded them again, and S typed "0.5"
+        // passed through "0" - the brush squashed to KX_SCALE_MIN, went winding-less, and
+        // the re-centring Brush_Move (which skips faces without a winding) dropped the
+        // shift: the trim landed 406 units away.  Now the first edit snapshots every
+        // selected brush's plane points (patches: control points) and each update writes
+        // f(baseline) once, in double.  Fixed-size entities keep their own paths.
+        struct geomBase_t
+        {
+            brush_t                 *def;
+            std::vector<float>       v;        // planepts (9 per face) or patch ctrl xyz
+            std::vector<MaterialDef> mtl;      // brushes: every face's mtldef[], face order
+            std::vector<float>       n;        // brushes: every face's normal (the lock projects with it)
+        };
+        std::vector<geomBase_t> m_geomBase;
+        bool                    m_geomBaseHave = false;
+
+        static bool NodeIsFixedSize( const selbrush_t *b )
+        {
+            const entity_s_def *owner = b->owner ? (const entity_s_def *)b->owner->def : nullptr;
+            return owner && owner->eclass && owner->eclass->fixedsize;
+        }
+
+        void GeomBaseReset()
+        {
+            m_geomBase.clear();
+            m_geomBaseHave = false;
+        }
+
+        void GeomBaseCapture()
+        {
+            if ( m_geomBaseHave )
+                return;
+            m_geomBaseHave = true;
+            m_geomBase.clear();
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            {
+                brush_t *def = b->def;
+                if ( !def || NodeIsFixedSize( b ) )
+                    continue;
+                bool dup = false;
+                for ( size_t i = 0; i < m_geomBase.size() && !dup; ++i )
+                    dup = m_geomBase[i].def == def;
+                if ( dup )
+                    continue;
+                geomBase_t g;
+                g.def = def;
+                if ( def->patch )
+                {
+                    const patchMesh_t *p = def->patch;
+                    for ( int c = 0; c < p->width; ++c )
+                        for ( int r = 0; r < p->height; ++r )
+                            g.v.insert( g.v.end(), p->ctrl[c][r].xyz, p->ctrl[c][r].xyz + 3 );
+                }
+                else
+                {
+                    const size_t per = sizeof( def->faces[0].mtldef ) / sizeof( MaterialDef );
+                    for ( int f = 0; f < def->faceCount; ++f )
+                    {
+                        const face_t *fc = &def->faces[f];
+                        g.v.insert( g.v.end(), &fc->planepts[0][0], &fc->planepts[0][0] + 9 );
+                        g.mtl.insert( g.mtl.end(), fc->mtldef, fc->mtldef + per );
+                        g.n.insert( g.n.end(), fc->plane.normal, fc->plane.normal + 3 );
+                    }
+                }
+                m_geomBase.push_back( g );
+            }
+        }
+
+        // Every captured point becomes fn( baseline point ), then each brush / patch rebuilds.
+        // Brush texdefs go back to the baseline too; with `lockTurn` (R: x' = o + (x - o) T) each
+        // face's texture is locked to it from the baseline, as Select_ApplyMatrix (0x47CDE0).
+        template <typename Fn>
+        void GeomBaseApply( Fn fn, const double ( *lockTurn )[3] = nullptr, const double *lockOrigin = nullptr )
+        {
+            const byte lockFlags[3] = { (byte)( g_PrefsDlg->m_bRotateLock != 0 ),
+                                        (byte)( g_PrefsDlg->m_bLightmapLock != 0 ), 1 };
+            for ( size_t i = 0; i < m_geomBase.size(); ++i )
+            {
+                geomBase_t &g = m_geomBase[i];
+                brush_t *def = g.def;
+                size_t k = 0;
+                if ( def->patch )
+                {
+                    patchMesh_t *p = def->patch;
+                    if ( (size_t)p->width * p->height * 3 != g.v.size() )
+                        continue;                          // edited mid-gesture: leave it
+                    for ( int c = 0; c < p->width; ++c )
+                        for ( int r = 0; r < p->height; ++r, k += 3 )
+                            fn( &g.v[k], p->ctrl[c][r].xyz );
+                    Patch_Rebuild( p, 1 );
+                    continue;
+                }
+                if ( (size_t)def->faceCount * 9 != g.v.size() )
+                    continue;
+                const size_t per = sizeof( def->faces[0].mtldef ) / sizeof( MaterialDef );
+                const bool   tex = g.mtl.size() == (size_t)def->faceCount * per && g.n.size() == (size_t)def->faceCount * 3;
+                for ( int f = 0; f < def->faceCount; ++f )
+                {
+                    face_t *fc = &def->faces[f];
+                    double  rows[3][KTEXLOCK_LAYERS][8];
+                    if ( tex )
+                    {
+                        memcpy( fc->mtldef, &g.mtl[(size_t)f * per], sizeof( MaterialDef ) * per );
+                        if ( lockTurn )
+                            Face_TexLockAffineBegin( fc, &g.n[(size_t)f * 3], lockTurn, lockOrigin, lockFlags, rows );
+                    }
+                    for ( int pt = 0; pt < 3; ++pt, k += 3 )
+                        fn( &g.v[k], fc->planepts[pt] );
+                    if ( tex && lockTurn )
+                        Face_TexLockAffineEnd( fc, rows, lockFlags );
+                }
+                Brush_BuildWindings( def, 0 );
+                ++def->version;
+            }
+            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
+                SetupVertexSelection();
+            MarkMapModified();
+            g_nUpdateBits = -1;
         }
 
         // X/Y/Z lock; repeat the same axis to release. Shift selects a plane where
@@ -1400,7 +1525,14 @@ namespace
                     for ( size_t k = 0; k < i && !done; ++k )
                         done = ( !m_verts[k].patchPoint && m_verts[k].def == m_verts[i].def );
                     if ( !done )
+                    {
                         KiwiValid_Rebuild( m_verts[i].def );
+                        std::vector<float> moved;
+                        for ( size_t k = i; k < m_verts.size(); ++k )
+                            if ( !m_verts[k].patchPoint && m_verts[k].def == m_verts[i].def )
+                                moved.insert( moved.end(), m_verts[k].curPos, m_verts[k].curPos + 3 );
+                        MergeCoplanarKeepVerts( m_verts[i].def, moved );
+                    }
                 }
             }
 
@@ -1508,6 +1640,8 @@ namespace
             m_edges.clear();
             m_verts.clear();
             m_base.clear();
+            m_objBase.clear();
+            m_objBaseHave  = false;
             m_haveMapStart = false;
             m_axisWarned   = false;
             m_invalid      = false;
@@ -1617,10 +1751,37 @@ namespace
             }
             if ( m_kind == SEL_OBJECT && m_undoOpen )
             {
-                // Object rollback is the exact inverse of residual Select_Move calls.
+                // Brushes / patches / fixed-size entities: their baseline, exactly.
                 const float back[3] = { -m_applied[0], -m_applied[1], -m_applied[2] };
-                if ( Len3( back ) > KX_EPS && SelectionHasObjects() )
-                    Select_Move( back, 0 );
+                const float none[3] = { 0.0f, 0.0f, 0.0f };
+                std::vector<char> done( m_objBase.size(), 0 );
+                for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+                {
+                    if ( !b->def )
+                        continue;
+                    const size_t i = ObjBaseIndex( b->def );
+                    if ( NodeIsFixedSize( b ) )
+                    {
+                        if ( i < m_objBase.size() && done[i] )
+                            continue;
+                        if ( i < m_objBase.size() && ObjBaseRestoreOnly( m_objBase[i] ) )
+                            Brush_Move( none, b->def, 0 );  // rebuild + version bumps only
+                        else if ( Len3( back ) > KX_EPS )
+                            Brush_Move( back, b->def, 0 );
+                        if ( i < m_objBase.size() )
+                            done[i] = 1;
+                        continue;
+                    }
+                    if ( i < m_objBase.size() && !done[i] && ObjBaseRestoreOnly( m_objBase[i] ) )
+                    {
+                        if ( b->def->patch )
+                            Patch_Rebuild( b->def->patch, 1 );
+                        else
+                            KiwiValid_Rebuild( b->def );
+                    }
+                    if ( i < m_objBase.size() )
+                        done[i] = 1;
+                }
                 m_applied[0] = m_applied[1] = m_applied[2] = 0.0f;
             }
         }
@@ -2580,6 +2741,74 @@ namespace
             }
         }
 
+        // KIWI (2026-10-05, precision): objects move ABSOLUTELY - each frame restores the
+        // baseline (plane points / patch controls / texdefs; fixed-size: proxy + origin) and
+        // makes ONE Brush_Move of the gesture total.  Per-frame residuals re-rounded every
+        // point (a trim 30000 out drifted 0.06 in 50 frames).
+        struct objBase_t
+        {
+            kiwiBaseBrush_t          geo;
+            std::vector<MaterialDef> mtl;          // every face's mtldef[], face order
+            entity_s                *ent = nullptr;   // fixed-size: the owner Brush_Move moves
+            float                    origin[3] = { 0.0f, 0.0f, 0.0f };
+        };
+        std::vector<objBase_t> m_objBase;
+        bool                   m_objBaseHave = false;
+
+        void ObjBaseCapture()
+        {
+            if ( m_objBaseHave )
+                return;
+            m_objBaseHave = true;
+            m_objBase.clear();
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            {
+                if ( !b->def )
+                    continue;
+                bool dup = false;
+                for ( size_t i = 0; i < m_objBase.size() && !dup; ++i )
+                    dup = m_objBase[i].geo.def == b->def;
+                objBase_t o;
+                if ( dup || !KiwiValid_Snapshot( b->def, &o.geo ) )
+                    continue;
+                if ( NodeIsFixedSize( b ) )
+                {
+                    if ( !b->def->owner )
+                        continue;
+                    o.ent = b->def->owner;
+                    Copy3( o.ent->origin, o.origin );
+                }
+                const size_t per = sizeof( b->def->faces[0].mtldef ) / sizeof( MaterialDef );
+                if ( !b->def->patch && b->def->faces )
+                    for ( int f = 0; f < b->def->faceCount; ++f )
+                        o.mtl.insert( o.mtl.end(), b->def->faces[f].mtldef, b->def->faces[f].mtldef + per );
+                m_objBase.push_back( o );
+            }
+        }
+
+        size_t ObjBaseIndex( const brush_t *def ) const
+        {
+            for ( size_t i = 0; i < m_objBase.size(); ++i )
+                if ( m_objBase[i].geo.def == def )
+                    return i;
+            return m_objBase.size();
+        }
+
+        // The baseline back in place (no rebuild); false = the brush changed shape since.
+        static bool ObjBaseRestoreOnly( const objBase_t &o )
+        {
+            if ( !KiwiValid_RestoreOnly( o.geo ) )
+                return false;
+            brush_t *def = o.geo.def;
+            if ( o.ent && def->owner == o.ent )
+                Copy3( o.origin, o.ent->origin );
+            const size_t per = sizeof( def->faces[0].mtldef ) / sizeof( MaterialDef );
+            if ( !o.mtl.empty() && o.mtl.size() == (size_t)def->faceCount * per )
+                for ( int f = 0; f < def->faceCount; ++f )
+                    memcpy( def->faces[f].mtldef, &o.mtl[(size_t)f * per], sizeof( MaterialDef ) * per );
+            return true;
+        }
+
         void ApplyObjects()
         {
             float d[3];
@@ -2587,14 +2816,48 @@ namespace
             if ( Len3( d ) <= KX_EPS )
                 return;
             OpenUndo( "move selection" );          // the FIRST real mutation
-            Select_Move( d, 0 );                   // bSnap 0 — this layer owns snapping
+            ObjBaseCapture();
+            // Walk the live selection (a freed node is never touched); each def once.
+            std::vector<char> done( m_objBase.size(), 0 );
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            {
+                if ( !b->def )
+                    continue;
+                const size_t i = ObjBaseIndex( b->def );
+                if ( NodeIsFixedSize( b ) )
+                {
+                    if ( i < m_objBase.size() && done[i] )
+                        continue;
+                    if ( i < m_objBase.size() && ObjBaseRestoreOnly( m_objBase[i] ) )
+                        Brush_Move( m_total, b->def, 0 );   // proxy + origin from the baseline
+                    else
+                        Brush_Move( d, b->def, 0 );         // no baseline: the residual
+                    if ( i < m_objBase.size() )
+                        done[i] = 1;
+                    continue;
+                }
+                if ( i < m_objBase.size() && !done[i] && ObjBaseRestoreOnly( m_objBase[i] ) )
+                {
+                    if ( !b->def->patch )
+                        TranslateBrushLocked( b->def, m_total );   // exact texture lock
+                    else
+                    {
+                        Brush_Move( m_total, b->def, 0 );   // bSnap 0: this layer snaps
+                        // KIWI: the baseline holds controls only - rebuild the bounds box
+                        // Brush_Move slid from last frame's spot (Mirror pivots on it).
+                        Patch_Rebuild( b->def->patch, 1 );
+                    }
+                }
+                if ( i < m_objBase.size() )
+                    done[i] = 1;
+            }
             Copy3( m_total, m_applied );
             m_invalid = false;
             m_why     = 0;
             g_nUpdateBits = -1;
         }
 
-        // Each face starts from its own plane/texture baseline and uses the ported lock.
+        // Each face starts from its own plane/texture baseline and slides its texture with it.
         void ApplyFaces()
         {
             if ( m_faces.empty() )
@@ -2604,12 +2867,6 @@ namespace
             if ( !m_undoOpen && fabsf( m_scalar ) <= KX_EPS )
                 return;
             OpenUndoForBrushes();
-
-            byte  lockFlags[3];
-            lockFlags[0] = (byte)( g_PrefsDlg->m_bTextureLock  != 0 );
-            lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );
-            lockFlags[2] = 1;
-            float saveBuf[19];
 
             for ( size_t i = 0; i < m_faces.size(); ++i )
             {
@@ -2624,19 +2881,18 @@ namespace
                 else                     Copy3( u.normal,  dir );
 
                 // Restore plane and texture baselines before one texture-lock pass.
-                // Face_MakePlane must refresh the baseline normal before TexLockSave.
+                // Face_MakePlane must refresh the baseline normal before the lock.
                 memcpy( &f->mtldef[0], u.baseMtl, sizeof( u.baseMtl ) );
                 memcpy( &f->planepts[0][0], u.basePts, sizeof( float ) * 9 );
                 Face_MakePlane( f );
 
-                if ( f->w )
-                    Ed_FaceTexLockSave( saveBuf, f );
+                // KIWI (2026-10-05, precision): the plane only translates, so the exact
+                // shift lock (TexLockTranslateFace), not the Save / Reproject re-solve.
+                const float d[3] = { dir[0] * m_scalar, dir[1] * m_scalar, dir[2] * m_scalar };
+                TexLockTranslateFace( f, d );
 
                 for ( int p = 0; p < 3; ++p )
                     Mad3( &u.basePts[p * 3], dir, m_scalar, f->planepts[p] );
-
-                if ( f->w )
-                    Ed_FaceTexLockReproject( f, saveBuf, lockFlags );
             }
 
             RebuildAndValidate();
@@ -2721,7 +2977,10 @@ namespace
                 Sub3( want, u.curPos, delta );
                 if ( Len3( delta ) <= KX_EPS )
                     continue;
-                if ( Brush_MoveVertex( delta, u.def, u.curPos, end ) )
+                g_kiwiExactVertexEnd = true;      // `want` is exact (typed / KIWI-snapped)
+                const int moved = Brush_MoveVertex( delta, u.def, u.curPos, end );
+                g_kiwiExactVertexEnd = false;
+                if ( moved )
                 {
                     Copy3( end, u.curPos );
                     touchedBrush = true;
@@ -3022,6 +3281,7 @@ namespace
         bool Begin() override
         {
             m_deg = m_applied = 0.0f;
+            TurnReset();
             m_chain.clear();
             m_axis = 2;                       // Z default
             m_con  = CON_AXIS;                // R is ALWAYS about an axis
@@ -3032,7 +3292,6 @@ namespace
             m_ringDeg    = 0.0f;
             m_ringBase   = 0.0f;
             m_ringFresh  = false;
-            m_angleBase.clear();
 
             m_construct = m_refImage = false;
             if ( !SelectionHasObjects() )
@@ -3052,10 +3311,11 @@ namespace
             }
             else
             {
-                KiwiXform_CaptureEntityAngles( m_angleBase );
-                // Latch the pivot once; repeated Select_GetMid calls would let it crawl
-                // while rotating. This matches the ported rotate-mode nudge.
-                Select_GetMid( m_pivot );
+                // Latch the pivot once; recomputing it would let it crawl while rotating.
+                // KIWI (2026-10-05): the selection median (SelectionMedian) - Select_GetMid
+                // floored to the 16 grid (R 90 moved the object), and the bounds centre moves
+                // under a turn (R +a then R -a did not come back).
+                SelectionMedian( m_pivot );
             }
             // A session pivot replaces row 0 of the ported rot_around matrix.
             m_pivotOverridden = PivotActive( m_pivot );
@@ -3201,10 +3461,7 @@ namespace
         {
             if ( m_construct )      KiwiConSel_MoveCommit();      // the snapshot IS the undo record
             else if ( m_refImage )  KiwiRefImage_MoveCommit();
-            // Clean the ported float round-trip before the undo bracket closes.
-            else if ( m_undoOpen )
-                KiwiXform_SnapEntityAngles( m_angleBase, m_deg );
-            m_angleBase.clear();
+            TurnReset();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3218,7 +3475,7 @@ namespace
             else                    UnwindAll();                  // exact inverse of every segment; the bracket also restores
             m_applied = 0.0f;
             m_chain.clear();
-            m_angleBase.clear();
+            TurnReset();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3307,7 +3564,7 @@ namespace
         // so a mid-sweep press/release changes the angle immediately.
         static bool FreeformHeld()
         {
-            return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+            return KiwiCmd_CtrlHeld();      // physical, or the test modes' injected state
         }
 
         void Recompute() override
@@ -3347,34 +3604,190 @@ namespace
             m_applied += delta;
         }
 
-        // Ported rotation pattern: pivot in row 0, Select_RotateAxis fills rows 1..3,
-        // then Select_ApplyMatrix_SelectedBrushes applies the residual.  Brushes are
-        // turned incrementally, so a chain composes by itself.
+        // Ported rotation pattern: pivot in row 0, Select_RotateAxis fills rows 1..3.
+        // Everything takes the whole gesture as one matrix from its baseline (KIWI
+        // 2026-10-05): brushes / patches through m_turn (GeomBaseCapture), fixed-size
+        // entities through m_fixTurn (FixBaseCapture), each every residual composed in
+        // double, so a drag of hundreds of frames, a typed "90" (9 then 90) and a chain
+        // all land as a single exact rotation.
         void RotateBrushes( int axis, float delta )
         {
             float rot_around[4][3];
             Copy3( m_pivot, rot_around[0] );
+            // The same matrix Select_RotateAxis writes, about a unit axis u (the frame's, or
+            // the world's): its three cases are Rodrigues(u, -deg) TRANSPOSED for u = X / Y / Z,
+            //   m[a][b] = c * I + (1 - c) * u_a u_b - s * [u]x[a][b],  (s, c) of -deg.
+            double u[3] = { 0.0, 0.0, 0.0 };
             if ( FrameApplies() )
-            {
-                // The same matrix Select_RotateAxis writes, about an ARBITRARY unit axis u:
-                // its three cases are Rodrigues(u, -deg) TRANSPOSED for u = X / Y / Z, so
-                //   m[a][b] = c * I + (1 - c) * u_a u_b - s * [u]x[a][b],  (s, c) of -deg.
-                // Select_RotateFixedSize composes any 3x3 onto a model's `angles`, brushes and
-                // patches take it through Select_ApplyMatrix as they do for the world axes.
-                const float *u = m_frame[axis];
-                const float rad = -delta * 3.14159265358979323846f / 180.0f;
-                const float c = cosf( rad ), s = sinf( rad );
-                const float ux[3][3] = { {  0.0f, -u[2],  u[1] },
-                                         {  u[2],  0.0f, -u[0] },
-                                         { -u[1],  u[0],  0.0f } };
+                for ( int k = 0; k < 3; ++k )
+                    u[k] = m_frame[axis][k];
+            else
+                u[axis] = 1.0;
+            double s, c;
+            KiwiAng_SinCos( -(double)delta, &s, &c );      // exact at 90-degree multiples
+            const double ux[3][3] = { {  0.0, -u[2],  u[1] },
+                                      {  u[2],  0.0, -u[0] },
+                                      { -u[1],  u[0],  0.0 } };
+            double step[3][3];
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    step[a][b] = ( a == b ? c : 0.0 ) + ( 1.0 - c ) * u[a] * u[b] - s * ux[a][b];
+            if ( FrameApplies() )
                 for ( int a = 0; a < 3; ++a )
                     for ( int b = 0; b < 3; ++b )
-                        rot_around[1 + a][b] = ( a == b ? c : 0.0f ) + ( 1.0f - c ) * u[a] * u[b] - s * ux[a][b];
-            }
+                        rot_around[1 + a][b] = (float)step[a][b];
             else
                 Select_RotateAxis( axis, delta, (float (*)[4][3])rot_around );
-            Select_ApplyMatrix_SelectedBrushes( 0, rot_around[0], delta, 0 );
-            g_nUpdateBits = -1;
+
+            // Rows-as-axes matrices compose left to right: first A then B is A * B.
+            // Fixed-size entities take Select_RotateAxis's matrix only where it turns a lone
+            // one in its OWN frame (its g_nScaleHow 6 / 5 / 3 case); else the double step.
+            bool local = false;
+            if ( !FrameApplies() && selected_brushes.next != &selected_brushes
+              && selected_brushes.next->next == &selected_brushes && NodeIsFixedSize( selected_brushes.next ) )
+            {
+                const int how = g_nScaleHow & 7;
+                local = how == 6 || how == 5 || how == 3;
+            }
+            FixBaseCapture();
+            double next[3][3];
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                {
+                    next[a][b] = 0.0;
+                    for ( int k = 0; k < 3; ++k )
+                        next[a][b] += m_fixTurn[a][k] * ( local ? (double)rot_around[1 + k][b] : step[k][b] );
+                }
+            memcpy( m_fixTurn, next, sizeof( m_fixTurn ) );
+            FixBaseApply( false );
+
+            GeomBaseCapture();
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    next[a][b] = m_turn[a][0] * step[0][b] + m_turn[a][1] * step[1][b] + m_turn[a][2] * step[2][b];
+            memcpy( m_turn, next, sizeof( m_turn ) );
+            const double o[3] = { m_pivot[0], m_pivot[1], m_pivot[2] };
+            GeomBaseApply( [&]( const float *base, float *out )
+            {
+                const double rel[3] = { base[0] - o[0], base[1] - o[1], base[2] - o[2] };
+                for ( int j = 0; j < 3; ++j )
+                    out[j] = (float)( o[j] + rel[0] * m_turn[0][j] + rel[1] * m_turn[1][j] + rel[2] * m_turn[2][j] );
+            }, m_turn, o );                                  // texture lock, as the binary's rotate
+        }
+
+        double m_turn[3][3] = { { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 0.0, 1.0 } };
+
+        // KIWI (2026-10-05, precision): fixed-size entities turn from their baseline too -
+        // origin and axis through m_fixTurn in double, angles written exact.  (Per-frame float
+        // re-composition, then a 0.001 deg commit snap, turned "12.3456" into "12.346".)
+        struct fixBase_t
+        {
+            selbrush_t     *node;
+            brush_t        *def;
+            entity_s       *ent;
+            kiwiBaseBrush_t geo;           // the proxy's planepts
+            float           origin[3];
+            double          angles[3];     // the "angles" text, parsed in double
+            bool            hadAngles;
+            char            text[160];     // that text verbatim
+        };
+        std::vector<fixBase_t> m_fixBase;
+        bool                   m_fixBaseHave = false;
+        double m_fixTurn[3][3] = { { 1.0, 0.0, 0.0 }, { 0.0, 1.0, 0.0 }, { 0.0, 0.0, 1.0 } };
+
+        void FixBaseCapture()
+        {
+            if ( m_fixBaseHave )
+                return;
+            m_fixBaseHave = true;
+            m_fixBase.clear();
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            {
+                if ( !b->def || !b->def->owner || !NodeIsFixedSize( b ) )
+                    continue;
+                bool dup = false;
+                for ( size_t i = 0; i < m_fixBase.size() && !dup; ++i )
+                    dup = m_fixBase[i].def == b->def;
+                fixBase_t f;
+                if ( dup || !KiwiValid_Snapshot( b->def, &f.geo ) )
+                    continue;
+                f.node = b;
+                f.def  = b->def;
+                f.ent  = b->def->owner;
+                Copy3( f.ent->origin, f.origin );
+                const char *text = XformEntityKey( f.ent, "angles" );
+                f.hadAngles = text != nullptr;
+                _snprintf( f.text, sizeof( f.text ), "%s", text ? text : "" );
+                f.text[sizeof( f.text ) - 1] = '\0';
+                f.angles[0] = f.angles[1] = f.angles[2] = 0.0;
+                if ( text && sscanf( text, "%lf %lf %lf", &f.angles[0], &f.angles[1], &f.angles[2] ) != 3 )
+                    f.angles[0] = f.angles[1] = f.angles[2] = 0.0;
+                m_fixBase.push_back( f );
+            }
+        }
+
+        // The baseline turned by m_fixTurn about the pivot; `home` puts it back verbatim.
+        void FixBaseApply( bool home )
+        {
+            for ( size_t i = 0; i < m_fixBase.size(); ++i )
+            {
+                fixBase_t &f = m_fixBase[i];
+                if ( !Sel_BrushLive( f.node ) || f.node->def != f.def || f.def->owner != f.ent )
+                    continue;
+                double want[3];
+                for ( int j = 0; j < 3; ++j )
+                {
+                    want[j] = m_pivot[j];
+                    for ( int k = 0; k < 3; ++k )
+                        want[j] += ( (double)f.origin[k] - m_pivot[k] ) * m_fixTurn[k][j];
+                    if ( home )
+                        want[j] = f.origin[j];
+                }
+                const bool restored = KiwiValid_RestoreOnly( f.geo );
+                float move[3];
+                for ( int j = 0; j < 3; ++j )
+                    move[j] = (float)( want[j] - ( restored ? f.origin[j] : f.ent->origin[j] ) );
+                if ( restored )
+                    Copy3( f.origin, f.ent->origin );
+                Brush_Move( move, f.def, 0 );                 // the proxy + rebuild + versions
+                for ( int j = 0; j < 3; ++j )
+                    f.ent->origin[j] = (float)want[j];        // one rounding, not origin + move
+
+                double closest[3];
+                KiwiAng_Turn( f.angles, m_fixTurn, closest );
+                float out[3] = { (float)closest[0] + 0.0f, (float)closest[1] + 0.0f, (float)closest[2] + 0.0f };
+                const bool same = home || ( out[0] == (float)f.angles[0] && out[1] == (float)f.angles[1]
+                                         && out[2] == (float)f.angles[2] );
+                if ( same && f.hadAngles )
+                {
+                    const char *now = XformEntityKey( f.ent, "angles" );
+                    if ( !now || strcmp( now, f.text ) )
+                        SetKeyValue( f.ent, "angles", f.text );   // the baseline text, verbatim
+                }
+                else if ( same )
+                {
+                    if ( XformEntityKey( f.ent, "angles" ) )
+                    {
+                        SetKeyValue( f.ent, "angles", "0 0 0" );  // the model back upright,
+                        DeleteKey( &f.ent->epairs, "angles" );   // then no key, as before
+                    }
+                }
+                else
+                {
+                    char v[160];
+                    SetKeyValue( f.ent, "angles", KiwiFmt_Vec3Exact( v, sizeof( v ), out, 0 ) );   // bare, as %g
+                }
+            }
+        }
+
+        void TurnReset()
+        {
+            for ( int a = 0; a < 3; ++a )
+                for ( int b = 0; b < 3; ++b )
+                    m_turn[a][b] = m_fixTurn[a][b] = ( a == b ) ? 1.0 : 0.0;
+            GeomBaseReset();
+            m_fixBase.clear();
+            m_fixBaseHave = false;
         }
 
         // One world-axis turn as the 3x3 the stores apply, in the stores' own sense
@@ -3433,6 +3846,12 @@ namespace
             for ( size_t s = m_chain.size(); s-- > 0; )
                 if ( SelectionHasObjects() )
                     RotateBrushes( m_chain[s].axis, -m_chain[s].deg );
+            // Brushes: their baseline exactly (the unwound m_turn is identity to ~1e-15).
+            if ( m_geomBaseHave )
+                GeomBaseApply( []( const float *base, float *out ) { Copy3( base, out ); } );
+            if ( m_fixBaseHave )
+                FixBaseApply( true );     // origin, proxy and "angles" text verbatim
+            TurnReset();
             m_chain.clear();
             m_applied = 0.0f;
             m_deg     = 0.0f;
@@ -3473,7 +3892,6 @@ namespace
         { return m_construct ? "construction" : m_refImage ? "image" : "objects"; }
 
         float m_pivot[3] = { 0.0f, 0.0f, 0.0f };
-        std::vector<xformEntityAngles_t> m_angleBase;
         bool  m_construct = false;       // the construction store owns this gesture
         bool  m_refImage  = false;       // the reference-image store owns it
         float m_deg      = 0.0f;
@@ -3591,6 +4009,7 @@ namespace
         {
             m_factor = 1.0f;
             m_applied[0] = m_applied[1] = m_applied[2] = 1.0f;
+            GeomBaseReset();
             m_con      = CON_FREE;            // uniform by default
             m_axis     = 0;
             m_hasNum   = false;
@@ -3628,9 +4047,8 @@ namespace
             }
             else
             {
-                // Select_Scale (select.cpp 0x48FDC0) scales about the selection centre it
-                // recomputes per call; a session pivot re-centres the result (ApplyWanted).
-                Select_GetMid( m_pivot );
+                // The selection median, as R (SelectionMedian): S k then S 1/k is exact.
+                SelectionMedian( m_pivot );
             }
             m_pivotOverridden = PivotActive( m_pivot );
             CaptureModels();
@@ -3676,8 +4094,10 @@ namespace
                 m.scale = Entity_GetFloatValueForKey( def, "modelscale" );
                 if ( !( m.scale > 0.0f ) )
                     m.scale = 1.0f;
-                if ( !Entity_GetVec3ForKey( def, m.origin, "origin" ) )
-                    m.origin[0] = m.origin[1] = m.origin[2] = 0.0f;
+                // KIWI (2026-10-05): the live origin.  The "origin" epair is only rewritten
+                // at save / copy (map.cpp, entity.cpp), so after a move it lags - and a
+                // model dropped since the last save has none, so S scaled it about 0,0,0.
+                Copy3( def->origin, m.origin );
                 m_models.push_back( m );
             }
         }
@@ -3688,16 +4108,15 @@ namespace
                 return;
             const bool uniform = fabsf( want[0] - want[1] ) <= 1.0e-5f
                               && fabsf( want[0] - want[2] ) <= 1.0e-5f;
-            if ( !uniform )
+            // KIWI (2026-10-05, reversibility): a per-axis scale still carries the models'
+            // ORIGINS with the selection; only their size stays (the median pivot counts them).
+            if ( !uniform && !m_modelWarned )
             {
-                if ( !m_modelWarned )
-                    Sys_Printf( "Scale: xmodels take one UNIFORM modelscale (the engine has no "
-                                "per-axis model scale) - the axis/plane scale leaves the %i "
-                                "model(s) unchanged.\n", (int)m_models.size() );
+                Sys_Printf( "Scale: xmodels take one UNIFORM modelscale (the engine has no "
+                            "per-axis model scale) - the axis/plane scale moves the %i "
+                            "model(s) with the selection but keeps their size.\n", (int)m_models.size() );
                 m_modelWarned = true;
-                return;
             }
-            const float f = want[0];
             for ( size_t i = 0; i < m_models.size(); ++i )
             {
                 modelBase_t &m = m_models[i];
@@ -3705,19 +4124,25 @@ namespace
                     continue;
                 // Origin about the pivot, absolute from the baseline.
                 float cur[3], desired[3], delta[3];
-                if ( !Entity_GetVec3ForKey( m.def, cur, "origin" ) )
-                    Copy3( m.origin, cur );
+                Copy3( m.def->origin, cur );      // Brush_Move advances this, not the epair
                 for ( int k = 0; k < 3; ++k )
                 {
-                    desired[k] = m_pivot[k] + ( m.origin[k] - m_pivot[k] ) * f;
+                    desired[k] = m_pivot[k] + ( m.origin[k] - m_pivot[k] ) * want[k];
                     delta[k]   = desired[k] - cur[k];
                 }
-                if ( Len3( delta ) > 1.0e-4f )
-                    Brush_Move( delta, m.node->def, 0 );   // carries the origin epair along
-                char value[32];
-                _snprintf( value, sizeof( value ), "%.6g", (double)( m.scale * f ) );
-                value[sizeof( value ) - 1] = '\0';
-                SetKeyValue( m.def, "modelscale", value ); // Checkkey_Model rebuilds the proxy
+                if ( delta[0] != 0.0f || delta[1] != 0.0f || delta[2] != 0.0f )
+                {
+                    Brush_Move( delta, m.node->def, 0 );   // moves the proxy + live origin
+                    Copy3( desired, m.def->origin );       // KIWI: the target itself, not cur + delta
+                }
+                float now = Entity_GetFloatValueForKey( m.def, "modelscale" );
+                if ( !( now > 0.0f ) )
+                    now = 1.0f;
+                const float scale = uniform ? m.scale * want[0] : m.scale;
+                if ( now == scale )
+                    continue;
+                char value[48];                            // exact: %.6g re-rounded every S
+                SetKeyValue( m.def, "modelscale", KiwiFmt_Exact( value, sizeof( value ), scale ) );   // Checkkey_Model rebuilds the proxy
             }
         }
 
@@ -3763,6 +4188,7 @@ namespace
             if ( m_construct )      KiwiConSel_MoveCommit();      // the snapshot IS the undo record
             else if ( m_refImage )  KiwiRefImage_MoveCommit();
             m_models.clear();
+            GeomBaseReset();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3773,8 +4199,9 @@ namespace
         {
             if ( m_construct )      KiwiConSel_MoveCancel();      // pops the snapshot
             else if ( m_refImage )  KiwiRefImage_MoveCancel();
-            else                    ApplyWanted( 1.0f, 1.0f, 1.0f );   // models: modelscale back to baseline
+            else                    ApplyWanted( 1.0f, 1.0f, 1.0f );   // brushes + models back to baseline
             m_models.clear();
+            GeomBaseReset();
             m_undoOpen = false;
             m_pivotPlacing = false;
             m_construct = m_refImage = false;
@@ -3846,7 +4273,8 @@ namespace
         }
 
     private:
-        // Select_Scale multiplies, so residuals are ratios, not differences.
+        // Brushes / patches: absolute from the baseline.  Models: absolute modelscale.
+        // m_applied gates repeats (a ratio of 1 changes nothing).
         void ApplyWanted( float sx, float sy, float sz )
         {
             const float want[3] = { sx, sy, sz };
@@ -3875,18 +4303,17 @@ namespace
             if ( !any || !SelectionHasObjects() )
                 return;
             OpenUndo( "scale selection" );
-            float mid[3];
-            Select_GetMid( mid );                 // the centre Select_Scale scales about
-            Select_Scale( ratio[0], ratio[1], ratio[2] );
-            if ( m_pivotOverridden )
+            // KIWI (2026-10-05): absolute from the baseline about m_pivot (the session pivot or
+            // the true centre), in place of Select_Scale's grid-floored centre and its ratio
+            // residuals (see GeomBaseCapture).
+            GeomBaseCapture();
+            const double piv[3] = { m_pivot[0], m_pivot[1], m_pivot[2] };
+            const double fac[3] = { want[0], want[1], want[2] };
+            GeomBaseApply( [&]( const float *base, float *out )
             {
-                // Scaling about P equals scaling about the centre plus a shift of
-                // (centre - P) * (ratio - 1) on each axis — re-centre on the session pivot.
-                float shift[3];
                 for ( int k = 0; k < 3; ++k )
-                    shift[k] = ( mid[k] - m_pivot[k] ) * ( ratio[k] - 1.0f );
-                Select_Move( shift, 0 );
-            }
+                    out[k] = (float)( piv[k] + ( (double)base[k] - piv[k] ) * fac[k] );
+            } );
             // Selected xmodels: the proxy box above is moot (Checkkey_Model rebuilds it);
             // the real scale is the modelscale epair, absolute from the baseline.
             ApplyModels( want );
@@ -4304,21 +4731,13 @@ int KiwiXform_PushFaceOnce( selbrush_t *node, int faceIndex, float dist,
     KiwiCmd_UndoBegin( undoOp );
     KiwiCmd_UndoCoverBrush( node );          // face is absent from selected_brushes
 
-    byte lockFlags[3];
-    lockFlags[0] = (byte)( g_PrefsDlg->m_bTextureLock  != 0 );
-    lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );
-    lockFlags[2] = 1;
-    float saveBuf[19];
-
-    // One ported texture-lock pass over baseline; refresh the plane normal before
-    // TexLockSave.
+    // KIWI (2026-10-05, precision): the plane translates along its normal - the exact
+    // shift lock (TexLockTranslateFace), not the Save / Reproject re-solve.
     Face_MakePlane( f );
-    if ( f->w )
-        Ed_FaceTexLockSave( saveBuf, f );
+    const float d[3] = { normal[0] * dist, normal[1] * dist, normal[2] * dist };
+    TexLockTranslateFace( f, d );
     for ( int p = 0; p < 3; ++p )
         Mad3( &basePts[p * 3], normal, dist, f->planepts[p] );
-    if ( f->w )
-        Ed_FaceTexLockReproject( f, saveBuf, lockFlags );
 
     KiwiValid_Rebuild( def );
 

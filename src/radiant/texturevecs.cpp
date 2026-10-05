@@ -183,7 +183,10 @@ static double sub_4AAD00( float value, float granularity, float epsilon )
     }
 
     // snap to the granularity grid with the fistp-rounding epsilon (KEEP the +2^-30).
-    double snapped = (double)(int)( (double)( granularity * cleaned ) + 9.313225746154785e-10 )
+    // KIWI (2026-10-05): lrint = the binary's fistp (0x4AAE18, round to nearest); the C cast
+    // truncated, so a value just under a grid line (44.999 deg, g 4) never snapped up to it
+    // and negatives snapped toward zero.
+    double snapped = (double)(int)lrint( (double)( granularity * cleaned ) + 9.313225746154785e-10 )
                      / granularity;
     double drift   = (double)snapped - (double)cleaned;
     if ( drift < 0.0 ) drift = -drift;     // fabs (IDA: fabs)
@@ -325,5 +328,57 @@ void texturevecs_02( float *outSize, float *texMatPtr, float /*st1_phantom*/,
         shift[0] = (float)sub_4AAD00( shift[0], 8.0f, 0.001f );
         shift[1] = (float)sub_4AAD00( shift[1], 8.0f, 0.001f );
     }
+}
+
+// KIWI (2026-10-05, precision): texturevecs_02 for the exact texture lock (kiwi_texlock.h) - the
+// same phases in double, snapping onto the binary's grids (1/8 size / shift, 0.25 deg, 0.001
+// crossterm) only within float noise (8 ulps).  sub_4AAD00's fixed 0.001 / 0.005 reach moved
+// REAL values: a locked size of 52.1259 became 52.125, sliding the texture 0.009 repeats 450
+// repeats from its origin (a trim 30000 out, R 37).
+static double KiwiTexSnap( double v, double granularity )
+{
+    const double r = floor( v * granularity + 0.5 ) / granularity;
+    const double m = fabs( r ) > fabs( v ) ? fabs( r ) : fabs( v );
+    return fabs( v - r ) <= m * 9.6e-7 + 1.0e-12 ? r : v;
+}
+
+void texturevecs_02_exact( float *outSize, const double *texMat, const float *planeNormal, double planeDist,
+                           float *outShift, float *outRotate, float *outCrossterm )
+{
+    float pvecs[2][3];
+    float *xv = pvecs[0], *yv = pvecs[1];
+    int   s, t;
+    Ed_texturevecs( yv, xv, planeNormal, &s, &t );
+    const int r = 3 - s - t;
+    double m[8];
+    for ( int i = 0; i < 8; ++i )
+        m[i] = texMat[i];
+    for ( int row = 0; row < 2; ++row )                // Phase B: into the projection plane
+    {
+        double *w = m + row * 4;
+        if ( w[r] == 0.0 || planeNormal[r] == 0.0f )
+            continue;
+        const double ratio = w[r] / planeNormal[r];
+        for ( int k = 0; k < 3; ++k )
+            w[k] -= ratio * planeNormal[k];
+        w[3] += ratio * planeDist;
+    }
+    double cross = ( m[4] * m[0] + m[5] * m[1] + m[6] * m[2] ) / ( m[4] * m[4] + m[5] * m[5] + m[6] * m[6] );
+    cross = KiwiTexSnap( cross, 1000.0 );
+    for ( int k = 0; k < 3; ++k )                      // Phase D: de-skew row 0
+        m[k] -= cross * m[4 + k];
+    double size0 = 1.0 / sqrt( m[0] * m[0] + m[1] * m[1] + m[2] * m[2] );
+    double size1 = 1.0 / sqrt( m[4] * m[4] + m[5] * m[5] + m[6] * m[6] );
+    if ( m[4 + t] * m[s] * xv[s] * yv[t] - m[4 + s] * m[t] * xv[s] * yv[t] < 0.0 )
+        size1 = -size1;                                // Phase G
+    size0 = KiwiTexSnap( size0, 8.0 );
+    size1 = KiwiTexSnap( size1, 8.0 );
+    const double rotate = KiwiTexSnap( atan2( m[t] * xv[s], m[s] * xv[s] ) * ( 180.0 / 3.14159265358979323846 ), 4.0 );
+    outSize[0]    = (float)size0;
+    outSize[1]    = (float)size1;
+    *outCrossterm = (float)cross;
+    *outRotate    = (float)rotate;
+    outShift[0]   = (float)KiwiTexSnap( -m[3] * size0, 8.0 );
+    outShift[1]   = (float)KiwiTexSnap( -m[7] * size1, 8.0 );
 }
 

@@ -74,6 +74,22 @@ bool KiwiValid_Restore( const kiwiBaseBrush_t &base );
 // Also marks the map modified and increments def->version.
 void KiwiValid_Rebuild( brush_t *def );
 
+// KIWI: Brush_BuildWindings (CM_AddSimpleBrushPoint) and cod4map (ON_EPSILON) keep a
+// triple-plane point up to this far outside another plane, so a fold shallower than
+// this is not a fold to either: both sides' corners survive and the faces overlap.
+#define KVALID_FOLD_DIST       0.1f       // world units
+
+// KIWI: removes each face lying on another face's plane (same-facing, every winding
+// point of each within KVALID_PLANE_DIST of the other's plane), and rebuilds.  A pair
+// where a face passes through one of `moved` (the vertices an edit just placed) merges
+// up to KVALID_FOLD_DIST and keeps that face, so the placed vertex stays put; else the
+// larger face is kept.  Brush_MoveVertex bends a face into triangles and re-merges only
+// within one call, so a vertex dragged out and back left coplanar twins (V5), and a
+// small drag on a narrow face left a sub-0.1 fold the rebuild filled with phantoms.
+// Returns the number of faces removed; face indices after the first removed one shift.
+// A merge whose result fails KiwiValid_CheckBrush is undone (same faces, same order): 0.
+int KiwiValid_MergeCoplanarFaces( brush_t *def, const float ( *moved )[3] = 0, int movedCount = 0 );
+
 // Full V1..V7 gate after KiwiValid_Rebuild. `outWhy` is untouched on success.
 bool KiwiValid_CheckBrush( brush_t *def, const char **outWhy = 0 );
 
