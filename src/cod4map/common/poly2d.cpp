@@ -246,9 +246,16 @@ int Subdivide2DPolygonGrid(
       {
         int swap;
         splitX += gridSizeX;
+        /* KIWI: port transcription error, now as retail - the two counts were crossed.
+           The front piece (x > splitX) goes to scratch and becomes the next input, so
+           its count belongs in cellVertCount; the back piece is this column's cell,
+           which the callback below reads with frontCount (so here frontCount holds the
+           BACK piece).  Crossed, both read past the vertices written, into stale stack
+           data: primary-light assignment changed from run to run and drifted from
+           retail (mp_backlot_geo sun share 33.5% vs retail's 29.1%; now equal). */
         SplitPoly2D(polyBuffers + POLY2D_BUFFER_FLOATS * columnInputBuffer, cellVertCount, 0, splitX,
-            polyBuffers + POLY2D_BUFFER_FLOATS * scratchBuffer, &frontCount,
-            polyBuffers + POLY2D_BUFFER_FLOATS * columnOutputBuffer, &cellVertCount);
+            polyBuffers + POLY2D_BUFFER_FLOATS * scratchBuffer, &cellVertCount,
+            polyBuffers + POLY2D_BUFFER_FLOATS * columnOutputBuffer, &frontCount);
         swap = columnInputBuffer;
         columnInputBuffer = scratchBuffer;
         scratchBuffer = swap;

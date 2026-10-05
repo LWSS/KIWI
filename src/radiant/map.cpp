@@ -997,6 +997,13 @@ static int Kiwi_RescueSave_Write( const char *path )
     return 1;
 }
 
+// KIWI: the same write core for the live fragile check's snapshot (kiwi_fragile.cpp) - no
+// prompts, no sidecar, `modified` untouched, the real path never written.
+bool Map_WriteSnapshot( const char *path )
+{
+    return Kiwi_RescueSave_Write( path ) != 0;
+}
+
 bool Kiwi_RescueSave( char *outPath, int outPathSize )
 {
     static bool s_tried = false;               // ONE attempt, ever

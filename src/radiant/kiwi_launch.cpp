@@ -6,6 +6,7 @@
 #include <imgui/imgui.h>
 
 #include "kiwi_command.h"
+#include "kiwi_fragile.h"
 #include "kiwi_launch.h"
 #include "kiwi_matconvert.h"
 // KIWI GLASS
@@ -47,6 +48,11 @@ bool s_saveFirst   = true;
 bool s_verbose     = true;
 bool s_onlyEnts    = false;
 bool s_leakTest    = false;
+// KIWI (2026-10-04): -fragileStop - cod4map quits after its BSP when it finds fragile corners
+// (kiwi_fragile.h), so they get fixed before the long stages run.  "Build anyway" starts one
+// build without it (StartSelectedBuild sets s_buildSkipFragileStop for every build).
+bool s_fragileStop = true;
+bool s_buildSkipFragileStop = false;
 // KIWI (2026-09-30, model importer): stamp collmaps\<model>.map player-collision hulls
 // on every placed misc_model (cod4map map.cpp ProcessMiscModels). xmodel collision is
 // bullets only, so without this imported props never block players.
@@ -187,7 +193,10 @@ std::string TrimmedLine( const char *begin, const char *end )
 
 void RememberCaptureLine()
 {
+    // KIWI: "ERROR: fragile corner" is cod4map's level-0 warning (kiwi_fragile.h), not a failure
     if ( s_firstCaptureError.empty() &&
+         !ContainsNoCase( s_captureLine.c_str(),
+                          s_captureLine.c_str() + s_captureLine.size(), "fragile corner" ) &&
          ( ContainsNoCase( s_captureLine.c_str(),
                            s_captureLine.c_str() + s_captureLine.size(), "error:" ) ||
            ContainsNoCase( s_captureLine.c_str(),
@@ -710,6 +719,7 @@ void AfterBspDiagnostics( DWORD exitCode )
         LogLine( "--- exit code legend ---" );
         LogLine( "  0            success" );
         LogLine( "  4294967295   (-1) usage / bad arguments -- see the USAGE block above" );
+        LogLine( "  %-12d stopped at fragile corners (-fragileStop)", KIWI_FRAGILE_STOP_EXIT_CODE );
         LogLine( "  other        Com_Error; \"Not writing map due to errors\" means the .map" );
         LogLine( "               parsed but errors were logged (writebsp.cpp:807)" );
     }
@@ -753,6 +763,11 @@ void AfterBspDiagnostics( DWORD exitCode )
         Pointfile_Errorfile_Public();
         LogLine( "" );
         LogLine( "error log loaded (%d entries) from %s", s_errLogCount, errlog );
+        int fragileElsewhere = 0;
+        if ( const int fragile = KiwiFragile_Load( errlog, s_bspLoadSource, &fragileElsewhere ) )
+            LogLine( "%d fragile corner(s) flashing in the views (Build panel: Show / Fix / Fix all)", fragile );
+        if ( fragileElsewhere )
+            LogLine( "%d fragile corner(s) in prefabs or other files: error list only", fragileElsewhere );
         g_nUpdateBits = W_ALL;
     }
 }
@@ -785,6 +800,8 @@ bool StartBsp( const launchPaths_t &p )
                p.useLoadFrom ? p.mapPath : p.targetAbs );
     s_bspLoadSource[sizeof( s_bspLoadSource ) - 1] = '\0';
     ClearStaleDiagFiles( p );
+    KiwiFragile_Clear();        // the last compile's flashing spots are stale now
+    KiwiFragile_LiveCancel();   // this compile answers the same question
 
     std::string cmd;
     cmd += "\"";  cmd += exe;  cmd += "\"";
@@ -792,6 +809,7 @@ bool StartBsp( const launchPaths_t &p )
     if ( s_verbose )  cmd += " -v";
     if ( s_onlyEnts ) cmd += " -onlyEnts";
     if ( s_leakTest ) cmd += " -leakTest";
+    if ( s_fragileStop && !s_buildSkipFragileStop ) cmd += " -fragileStop";
     if ( s_modelCollMaps ) cmd += " -staticModelCollMaps";
     if ( p.useLoadFrom )
     {
@@ -977,6 +995,16 @@ void OnStageFinished( DWORD exitCode )
 
     if ( s_chain == LCHAIN_OFF )
     {
+        return;
+    }
+
+    if ( finished == LSTAGE_BSP && exitCode == KIWI_FRAGILE_STOP_EXIT_CODE )
+    {
+        LogLine( "build STOPPED at %d fragile corner(s) - fix them in the Build panel, or Build anyway.",
+                 KiwiFragile_Count() );
+        s_firstCaptureError.clear();    // the exit code is the reason; no stray ERROR: line
+        FinishBuildFailure( finished, exitCode, true,
+                            "Stopped at fragile corners: fix them below, or Build anyway." );
         return;
     }
 
@@ -1176,6 +1204,12 @@ void DrawStageRows( bool busy )
     ImGui::SameLine();
     ImGui::Checkbox( "Leak test (-leakTest)", &s_leakTest );
     ImGui::SameLine();
+    ImGui::Checkbox( "Stop at fragile corners", &s_fragileStop );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "-fragileStop: cod4map quits right after its BSP when it finds corners\n"
+                           "too flat for retail cod4map (void strips in game), so you can fix them\n"
+                           "before the long stages run. KIWI-cod4map compiles them correctly either way." );
+    ImGui::SameLine();
     ImGui::Checkbox( "Model collision (collmaps)", &s_modelCollMaps );
     if ( ImGui::IsItemHovered() )
         ImGui::SetTooltip( "-staticModelCollMaps: every placed model with a collmaps\\<model>.map\n"
@@ -1228,8 +1262,9 @@ void DrawStageRows( bool busy )
     ImGui::EndDisabled();
 }
 
-void StartSelectedBuild( const launchPaths_t &p )
+void StartSelectedBuild( const launchPaths_t &p, bool skipFragileStop = false )
 {
+    s_buildSkipFragileStop = skipFragileStop;
     BeginBuildStatus( p );
     s_buildStageCount = 0;
     s_nextBuildStage = 0;
@@ -1433,9 +1468,15 @@ void DrawWindow()
     // KIWI GLASS
     KiwiGlass_DrawBuildCheck();   // panes that won't break, non-blocking
     // KIWI END
-
     const bool canBuild = p.haveRoot && p.haveMap;
     const bool busy     = Busy();
+
+    // Last compile's fragile corners: per-issue Fix, Fix all, and - when they stopped the
+    // build - "Build anyway", which reruns the selection once without -fragileStop.
+    const bool stoppedAtFragile = s_buildStatus == BSTATUS_FAILED && s_failureStage == LSTAGE_BSP
+                               && s_failureHasExit && s_failureExit == KIWI_FRAGILE_STOP_EXIT_CODE;
+    if ( KiwiFragile_DrawBuildRow( stoppedAtFragile && !busy && canBuild ) )
+        StartSelectedBuild( p, true );
 
     ImGui::Separator();
     DrawStageRows( busy );
@@ -1490,6 +1531,34 @@ void DrawWindow()
 }
 
 }  // namespace
+
+bool KiwiLaunch_SamePath( const char *a, const char *b )
+{
+    return SamePath( a, b );
+}
+
+bool KiwiLaunch_Cod4mapTool( kiwiLaunchTool_t *out )
+{
+    launchPaths_t p;
+    ResolvePaths( p );
+    if ( !p.haveRoot )
+        return false;
+    ToolPath( p, "KIWI-cod4map.exe", out->exe, sizeof( out->exe ) );
+    if ( !FileExists( out->exe ) )
+        return false;
+    _snprintf( out->root, sizeof( out->root ), "%s", p.root );
+    _snprintf( out->binDir, sizeof( out->binDir ), "%s", p.binDir );
+    _snprintf( out->name, sizeof( out->name ), "%s", p.haveMap ? p.name : "untitled" );
+    out->root[sizeof( out->root ) - 1]     = '\0';
+    out->binDir[sizeof( out->binDir ) - 1] = '\0';
+    out->name[sizeof( out->name ) - 1]     = '\0';
+    return true;
+}
+
+bool KiwiLaunch_Busy()
+{
+    return Busy();
+}
 
 // Commands and per-frame entry point.
 void KiwiLaunch_RegisterCommands()

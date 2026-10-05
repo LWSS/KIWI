@@ -450,12 +450,13 @@ int FindSharedEdge(IntWinding_t *windingA, IntWinding_t *windingB, int *outStart
 ================
 WindingArrayShift
 
-Shifts winding array elements via memcpy.
+Shifts winding array elements in place.
 ================
 */
 void *WindingArrayShift(int elemSize, intptr_t arrayBase, int destIdx, int shiftAmount, int arrayLen)
 {
-  return memcpy((void *)(arrayBase + destIdx * elemSize), (const void *)(arrayBase + elemSize * (destIdx + shiftAmount)), elemSize * (arrayLen - destIdx));
+  /* KIWI FIX: memmove - an in-place shift overlaps, which memcpy leaves undefined */
+  return memmove((void *)(arrayBase + destIdx * elemSize), (const void *)(arrayBase + elemSize * (destIdx + shiftAmount)), elemSize * (arrayLen - destIdx));
 }
 
 /*
@@ -1780,9 +1781,10 @@ Winding_t *CollapseCollinearVerts(Winding_t **verts, int auxElemSize, int axisU,
       w->numpoints--;
       if ( test )
       {
-        memcpy(w->points[next], w->points[test], sizeof(vec3_t) * (w->numpoints - next));
+        /* KIWI FIX: memmove - in-place shift (overlapping memcpy is undefined) */
+        memmove(w->points[next], w->points[test], sizeof(vec3_t) * (w->numpoints - next));
         if ( auxElemSize )
-          memcpy(&auxData[auxElemSize * next], &auxData[auxElemSize * (next + 1)], auxElemSize * (w->numpoints - next));
+          memmove(&auxData[auxElemSize * next], &auxData[auxElemSize * (next + 1)], auxElemSize * (w->numpoints - next));
       }
     }
     else
@@ -1880,7 +1882,7 @@ IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int 
       remEnd -= n;
       start = 0;
     }
-    memcpy(&w0->indices[start], &w0->indices[remEnd], sizeof(int) * (n - remEnd));
+    memmove(&w0->indices[start], &w0->indices[remEnd], sizeof(int) * (n - remEnd)); /* KIWI FIX: was overlapping memcpy */
     if ( auxElemSize )
       WindingArrayShift(auxElemSize, (intptr_t)w0->auxData, start, remEnd - start, start + w0->numpoints - remEnd);
   }
@@ -1906,9 +1908,10 @@ IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int 
         }
         else
         {
-          memcpy(&w0->indices[start], &w0->indices[start + 2], sizeof(int) * (n - start));
+          /* KIWI FIX: memmove - in-place shift (overlapping memcpy is undefined) */
+          memmove(&w0->indices[start], &w0->indices[start + 2], sizeof(int) * (n - start));
           if ( auxElemSize )
-            memcpy((void *)((intptr_t)w0->auxData + start * auxElemSize),
+            memmove((void *)((intptr_t)w0->auxData + start * auxElemSize),
                    (const void *)((intptr_t)w0->auxData + auxElemSize * (start + 2)),
                    auxElemSize * n - start * auxElemSize);
           start = (start < prev) ? prev - 2 : prev;
@@ -2247,20 +2250,21 @@ static char PlugNotchesInWinding(TriSurf_t *ts)
       if (end <= (unsigned int)winding->numpoints)
       {
         int copyCount = winding->numpoints - end;
-        memcpy(&winding->points[pointIndex + 1], &winding->points[end],
+        /* KIWI FIX: memmove - in-place shifts (overlapping memcpy is undefined) */
+        memmove(&winding->points[pointIndex + 1], &winding->points[end],
                sizeof(vec3_t) * copyCount);
         if (ts->auxElemSize)
-          memcpy((char *)ts->auxData + ts->auxElemSize * (pointIndex + 1),
+          memmove((char *)ts->auxData + ts->auxElemSize * (pointIndex + 1),
                  (char *)ts->auxData + ts->auxElemSize * end,
                  ts->auxElemSize * copyCount);
       }
       else
       {
         int copyCount = winding->numpoints - span;
-        memcpy(winding->points, &winding->points[end - winding->numpoints],
+        memmove(winding->points, &winding->points[end - winding->numpoints],
                sizeof(vec3_t) * copyCount);
         if (ts->auxElemSize)
-          memcpy(ts->auxData,
+          memmove(ts->auxData,
                  (char *)ts->auxData + ts->auxElemSize * (end - winding->numpoints),
                  ts->auxElemSize * copyCount);
       }

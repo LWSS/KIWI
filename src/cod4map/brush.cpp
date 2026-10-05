@@ -425,8 +425,8 @@ void AddPointToWinding(float *newPoint, Winding_t *winding, int sortAxisX, int s
 
   if ( minSignedArea < -PLANESIDE_EPSILON )
   {
-    /* point is outside -- insert at best edge */
-    memcpy(winding->points[bestIdx + 1], winding->points[bestIdx], sizeof(vec3_t) * (winding->numpoints - bestIdx));
+    /* point is outside -- insert at best edge (KIWI FIX: memmove, the shift overlaps) */
+    memmove(winding->points[bestIdx + 1], winding->points[bestIdx], sizeof(vec3_t) * (winding->numpoints - bestIdx));
     VectorCopy(newPoint, winding->points[bestIdx]);
     ++winding->numpoints;
   }
@@ -658,20 +658,515 @@ int BrushMostlyOnSide(Brush_t *brush, volatile float *plane)
   return side;
 }
 
+/* KIWI FIX: BrushSideStillBounds runs while keep is set - around both world trees'
+   FilterStructuralBrushesIntoBspTree (bsp.cpp).  The first tree's phantom solids would
+   cull the hulls of faces looking into them before the final tree is built.  Detail
+   filtering is left alone: detail fragments never mark a leaf opaque.  Only the final
+   tree reports, so each fragile corner is listed once rather than per tree split. */
+static int s_keepBoundingSides;
+static int s_reportKeptSides;
+
+void SetKeepBoundingBrushSides(int keep, int report)
+{
+  s_keepBoundingSides = keep;
+  s_reportKeptSides = report;
+}
+
+/* KIWI FIX: BrushToPoints callback for BrushSideStillBounds.  Same inside test as
+   AddBrushPoint, but nothing is stored; it only tracks the corner furthest in front of the
+   tested side (how far the brush would grow without it). */
+static const Plane_t *s_boundTestPlane;
+static float s_boundTestExposure;
+static vec3_t s_boundTestCorner;
+
+static int AddBrushPointBoundTest(Brush_t *brush, BrushSide_t *sides, int numSides, float capsuleRad,
+                                  float capsuleHalf, int *planeIndices, int checkBevel, float *point, int pointCount)
+{
+  int i;
+
+  (void)brush;
+  (void)capsuleRad;
+  (void)capsuleHalf;
+  for ( i = 0; i < numSides; ++i )
+  {
+    const BrushSide_t *side = &sides[i];
+    const Plane_t *plane;
+
+    if ( checkBevel && side->bevel )
+      continue;
+    if ( side->planenum == planeIndices[0] || side->planenum == planeIndices[1] || side->planenum == planeIndices[2] )
+      continue;
+    plane = MAP_PLANE(side->planenum);
+    if ( DotProduct210(point, plane->normal) - plane->dist > ON_EPSILON )
+      return pointCount;
+  }
+  {
+    float exposure = (float)(DotProduct210(point, s_boundTestPlane->normal) - s_boundTestPlane->dist);
+    if ( exposure > s_boundTestExposure )
+    {
+      s_boundTestExposure = exposure;
+      VectorCopy(point, s_boundTestCorner);
+    }
+  }
+  return pointCount + 1;
+}
+
+/* KIWI FIX: true when brush->sides[index] still bounds the brush although its winding came
+   out NULL.  BrushToPoints skips plane triples with |det| < PLANESIDE_EPSILON, so the corner
+   of three nearly parallel planes is never made and a real side loses its winding.
+   Native drops such a side; the fragment then grows past that plane, FilterBrushIntoBspTree
+   marks the air it grew into opaque, and every face looking into that leaf is discarded
+   (kisak_trash church gable void, 2026-10-04 - retail cod4map does the same).  Rebuild the
+   corners from the sides native keeps and keep this side if any corner lands in front of
+   it.  Every candidate is tested against that same set, so the result does not depend on
+   side order, and a kept side is always a real plane of the brush.  This rebuild skips the
+   same flat triples, so a corner it cannot make either just falls back to native. */
+static int BrushSideStillBounds(Brush_t *brush, BrushSide_t *nativeKept, int nativeKeptCount, const BrushSide_t *side)
+{
+  s_boundTestPlane = MAP_PLANE(side->planenum);
+  s_boundTestExposure = 0.0f;
+  BrushToPoints(brush, nativeKept, nativeKeptCount, 0.0f, 0.0f, qtrue, AddBrushPointBoundTest);
+  return s_boundTestExposure > ON_EPSILON;
+}
+
+/* KIWI FIX: snapshot for BrushSideStillBounds before RemoveTinyBrushSides compacts the side
+   array: all brush->numSides sides as they are, followed by the *keptCount sides native keeps.
+   NULL when no side lost its winding (nothing to test). */
+static BrushSide_t *SnapshotBrushSides(const Brush_t *brush, int *keptCount)
+{
+  BrushSide_t *snapshot;
+  int i;
+
+  for ( i = 0; i < brush->numSides; ++i )
+  {
+    if ( !brush->sides[i].winding && !brush->sides[i].bevel )
+      break;
+  }
+  if ( i == brush->numSides )
+    return NULL;
+
+  snapshot = (BrushSide_t *)malloc(sizeof(*snapshot) * 2 * brush->numSides);
+  if ( !snapshot )
+    Com_Error("Out of memory");
+  memcpy(snapshot, brush->sides, sizeof(*snapshot) * brush->numSides);
+  *keptCount = 0;
+  for ( i = 0; i < brush->numSides; ++i )
+  {
+    const BrushSide_t *side = &brush->sides[i];
+    if ( (side->winding && !IsTinyWinding(side->winding)) || side->bevel )
+      snapshot[brush->numSides + (*keptCount)++] = *side;
+  }
+  return snapshot;
+}
+
+/* KIWI FIX: index of the source-brush face on `side`'s plane, or -1 for a BSP cut plane
+   (cut sides carry no material) or a bevel. */
+static int SourceFaceIndex(const Brush_t *source, const BrushSide_t *side)
+{
+  int i;
+
+  if ( !side->shaderInfo || side->bevel )
+    return -1;
+  for ( i = 0; i < source->numSides; ++i )
+  {
+    if ( source->sides[i].planenum == side->planenum && !source->sides[i].bevel )
+      return i;
+  }
+  return -1;
+}
+
+/* KIWI FIX: the corner that cost `kept` its winding.  It was too flat: either skipped
+   (|det| < PLANESIDE_EPSILON) or computed so inaccurately that AddBrushPoint's ON_EPSILON test
+   threw it away.  So take the flattest real corner on the side - solved in double precision,
+   inside the fragment's bounds and on or behind every plane of the fragment.  `sides` is the
+   fragment's full side list before compaction.  Returns 0 when there is none. */
+static int FindFlattestCorner(const Brush_t *brush, const BrushSide_t *kept,
+                              const BrushSide_t *sides, int sideCount, vec3_t corner,
+                              const BrushSide_t **outA, const BrushSide_t **outB)
+{
+  const BrushSide_t *triple[3] = { kept, NULL, NULL };
+  const Plane_t *p0 = MAP_PLANE(kept->planenum);
+  double bestDet = DBL_MAX;
+  int a, b, i;
+
+  for ( a = 0; a < sideCount; ++a )
+  {
+    for ( b = a + 1; b < sideCount; ++b )
+    {
+      const Plane_t *pa = MAP_PLANE(sides[a].planenum);
+      const Plane_t *pb = MAP_PLANE(sides[b].planenum);
+      double ab[3], b0[3], a0[3], det, p[3];
+
+      if ( sides[a].bevel || sides[b].bevel
+        || sides[a].planenum == kept->planenum || sides[b].planenum == kept->planenum )
+        continue;
+      ab[0] = (double)pa->normal[1] * pb->normal[2] - (double)pa->normal[2] * pb->normal[1];
+      ab[1] = (double)pa->normal[2] * pb->normal[0] - (double)pa->normal[0] * pb->normal[2];
+      ab[2] = (double)pa->normal[0] * pb->normal[1] - (double)pa->normal[1] * pb->normal[0];
+      det = p0->normal[0] * ab[0] + p0->normal[1] * ab[1] + p0->normal[2] * ab[2];
+      if ( fabs(det) >= bestDet || det == 0.0 )
+        continue;
+
+      b0[0] = (double)pb->normal[1] * p0->normal[2] - (double)pb->normal[2] * p0->normal[1];
+      b0[1] = (double)pb->normal[2] * p0->normal[0] - (double)pb->normal[0] * p0->normal[2];
+      b0[2] = (double)pb->normal[0] * p0->normal[1] - (double)pb->normal[1] * p0->normal[0];
+      a0[0] = (double)p0->normal[1] * pa->normal[2] - (double)p0->normal[2] * pa->normal[1];
+      a0[1] = (double)p0->normal[2] * pa->normal[0] - (double)p0->normal[0] * pa->normal[2];
+      a0[2] = (double)p0->normal[0] * pa->normal[1] - (double)p0->normal[1] * pa->normal[0];
+      for ( i = 0; i < 3; ++i )
+        p[i] = (p0->dist * ab[i] + pa->dist * b0[i] + pb->dist * a0[i]) / det;
+
+      /* a real corner of the fragment lies on or behind every one of its planes.  The planes
+         are stored as floats and a flat corner amplifies their rounding by 1/det, so the
+         tolerance grows with that error bound rather than staying at ON_EPSILON. */
+      {
+        double maxDist = fabs(p0->dist);
+        double tolerance;
+
+        if ( fabs(pa->dist) > maxDist ) maxDist = fabs(pa->dist);
+        if ( fabs(pb->dist) > maxDist ) maxDist = fabs(pb->dist);
+        tolerance = ON_EPSILON + 4.0 * FLT_EPSILON * (maxDist + 1.0) / fabs(det);
+        if ( tolerance > 1.0 )
+          tolerance = 1.0;
+        for ( i = 0; i < 3; ++i )
+        {
+          if ( p[i] < brush->eMins[i] - 1.0 || p[i] > brush->eMaxs[i] + 1.0 )
+            break;
+        }
+        if ( i < 3 )
+          continue;
+        for ( i = 0; i < sideCount; ++i )
+        {
+          const Plane_t *pi = MAP_PLANE(sides[i].planenum);
+          if ( p[0] * pi->normal[0] + p[1] * pi->normal[1] + p[2] * pi->normal[2] - pi->dist > tolerance )
+            break;
+        }
+        if ( i < sideCount )
+          continue;
+      }
+
+      bestDet = fabs(det);
+      triple[1] = &sides[a];
+      triple[2] = &sides[b];
+      VectorCopy(p, corner);
+    }
+  }
+  *outA = triple[1];
+  *outB = triple[2];
+  return triple[1] != NULL;
+}
+
+static float PlaneAngleDegrees(int planeA, int planeB)
+{
+  const float *na = MAP_PLANE(planeA)->normal;
+  const float *nb = MAP_PLANE(planeB)->normal;
+  double dot = (double)na[0] * nb[0] + (double)na[1] * nb[1] + (double)na[2] * nb[2];
+
+  return (float)(acos(dot > 1.0 ? 1.0 : dot < -1.0 ? -1.0 : dot) * (180.0 / 3.14159265358979323846));
+}
+
+/* KIWI FIX: which of two source-brush faces is narrower (a face with no winding counts as
+   degenerate, i.e. narrowest). */
+static int NarrowerFace(const Brush_t *source, int faceA, int faceB)
+{
+  Winding_t *wa = source->sides[faceA].winding;
+  Winding_t *wb = source->sides[faceB].winding;
+  double areaA = wa ? WindingArea(wa) : 0.0;
+  double areaB = wb ? WindingArea(wb) : 0.0;
+
+  return areaB < areaA ? faceB : faceA;
+}
+
+/* KIWI FIX: the brush of `entityNum` (other than `excludeBrushNum`) owning a face on `planenum`
+   in either orientation - the origin of a BSP cut plane - nearest to `point`, or -1. */
+static int FindPlaneOwnerBrush(int entityNum, int excludeBrushNum, int planenum, const float *point)
+{
+  const Brush_t *b;
+  int best = -1;
+  double bestDist = 1.0;   /* the owner's face passes through the corner */
+  int i, k;
+
+  for ( b = g_entities[entityNum].brushes; b; b = b->next )
+  {
+    double dist = 0.0;
+
+    if ( b->brushNum == excludeBrushNum )
+      continue;
+    for ( k = 0; k < 3; ++k )
+    {
+      if ( point[k] < b->eMins[k] ) dist += b->eMins[k] - point[k];
+      else if ( point[k] > b->eMaxs[k] ) dist += point[k] - b->eMaxs[k];
+    }
+    if ( dist > bestDist )
+      continue;
+    for ( i = 0; i < b->numSides; ++i )
+    {
+      if ( !b->sides[i].bevel && b->sides[i].shaderInfo && (b->sides[i].planenum >> 1) == (planenum >> 1) )
+      {
+        best = b->brushNum;
+        bestDist = dist;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+/* KIWI FIX: what to tell the mapper for one fragile corner.  Two of the corner's three planes
+   are usually nearly parallel (cod4map's flat-corner cutoff is met in practice by pairs a few
+   degrees apart - kisak_trash's are 1.6-2.0); below FRAGILE_CREASE_DEGREES that pair decides:
+     - both faces of this brush: a shallow crease - delete the narrower face (map line 790's
+       eave strip, not the ceiling beside it).  Deleting it moves the brush by at most the
+       crease height, so this is safe advice.
+     - this brush's face against a cut plane from another brush: two brushes whose faces almost
+       line up (e.g. an axis-aligned trim on a wall rotated 1.6 degrees) - align them; deleting
+       the face would wreck the brush.
+   Otherwise the three planes merely share nearly one edge direction and no face is to blame.
+   Nearly ANTI-parallel pairs (~180 degrees) also make flat corners but are not creases; they
+   get the nudge advice. */
+#define FRAGILE_CREASE_DEGREES 10.0f
+
+typedef enum
+{
+  FRAGILE_DELETE_FACE,
+  FRAGILE_ALIGN_FACE,
+  FRAGILE_NUDGE_BRUSH
+} FragileAction_t;
+
+typedef struct
+{
+  FragileAction_t action;
+  int    face;            /* face of brush->original to flash, or -1 */
+  int    partnerFace;     /* DELETE: the face it creases against */
+  int    neighbourBrush;  /* ALIGN: brushNum owning the near-parallel face, or -1 */
+  float  degrees;         /* angle between the nearly parallel planes */
+  vec3_t corner;
+} FragileAdvice_t;
+
+static void FragileCornerAdvice(const Brush_t *brush, const BrushSide_t *kept,
+                                const BrushSide_t *sides, int sideCount, FragileAdvice_t *advice)
+{
+  const Brush_t *source = brush->original;
+  const BrushSide_t *a, *b;
+  int i, j;
+
+  advice->action = FRAGILE_NUDGE_BRUSH;
+  advice->face = source ? SourceFaceIndex(source, kept) : -1;
+  advice->partnerFace = -1;
+  advice->neighbourBrush = -1;
+  advice->degrees = 0.0f;
+  VectorCopy(s_boundTestCorner, advice->corner);
+  if ( !source )
+    return;
+
+  if ( FindFlattestCorner(brush, kept, sides, sideCount, advice->corner, &a, &b) )
+  {
+    const BrushSide_t *plane[3] = { kept, a, b };
+    int x = 0, y = 1;
+    float best = 180.0f;
+
+    for ( i = 0; i < 3; ++i )
+    {
+      for ( j = i + 1; j < 3; ++j )
+      {
+        float degrees = PlaneAngleDegrees(plane[i]->planenum, plane[j]->planenum);
+        if ( degrees < best )
+        {
+          best = degrees;
+          x = i;
+          y = j;
+        }
+      }
+    }
+    if ( best < FRAGILE_CREASE_DEGREES )
+    {
+      int faceX = SourceFaceIndex(source, plane[x]);
+      int faceY = SourceFaceIndex(source, plane[y]);
+
+      advice->degrees = best;
+      if ( faceX >= 0 && faceY >= 0 )
+      {
+        advice->action = FRAGILE_DELETE_FACE;
+        advice->face = NarrowerFace(source, faceX, faceY);
+        advice->partnerFace = advice->face == faceX ? faceY : faceX;
+        return;
+      }
+      if ( faceX >= 0 || faceY >= 0 )
+      {
+        advice->action = FRAGILE_ALIGN_FACE;
+        advice->face = faceX >= 0 ? faceX : faceY;
+        advice->neighbourBrush = FindPlaneOwnerBrush(brush->entityNum, brush->brushNum,
+                                                     plane[faceX >= 0 ? y : x]->planenum, advice->corner);
+        return;
+      }
+    }
+  }
+  /* no corner pinned down: nudge.  Radiant's Fix acts on DELETE/ALIGN, so a crease elsewhere on
+     the brush must not be blamed for this one (another fragment usually pins the corner). */
+}
+
+/* KIWI FIX: one .errlog warning per face to act on, at the flat corner (clamped into the
+   fragment), with the face's own plane normal so Radiant can find it.  The Build panel
+   flashes that face and can apply the fix; its parser keys on the "delete face" / "line up
+   face ... with brush N" / other wording below, so keep those phrases stable.  They are held
+   until the final tree is filtered (WriteKeptBoundingSideReports). */
+typedef struct
+{
+  int             entityNum;
+  int             brushNum;
+  int             planenum;       /* the face to act on: one report per face */
+  int             mapInfoIndex;
+  int             currentEntity;  /* g_currentEntityIndex: Error() adds that entity's origin */
+  FragileAction_t action;
+  vec3_t          at;
+  vec3_t          normal;
+  char            message[1024];
+} FragileReport_t;
+
+static FragileReport_t *s_fragileReports;
+static int s_fragileReportCount;
+static int s_fragileReportCapacity;
+
+static void ReportKeptBoundingSide(const Brush_t *brush, const BrushSide_t *side,
+                                   const BrushSide_t *sides, int sideCount)
+{
+  FragileAdvice_t advice;
+  FragileReport_t *report;
+  const BrushSide_t *target;
+  int i;
+
+  FragileCornerAdvice(brush, side, sides, sideCount, &advice);
+  target = advice.face >= 0 ? &brush->original->sides[advice.face] : side;
+
+  /* one report per face: every fragment of a split brush meets the same corner */
+  for ( i = 0; i < s_fragileReportCount; ++i )
+  {
+    if ( s_fragileReports[i].entityNum == brush->entityNum && s_fragileReports[i].brushNum == brush->brushNum
+      && s_fragileReports[i].planenum == target->planenum )
+      return;
+  }
+  if ( s_fragileReportCount == s_fragileReportCapacity )
+  {
+    s_fragileReportCapacity = s_fragileReportCapacity ? 2 * s_fragileReportCapacity : 64;
+    s_fragileReports = (FragileReport_t *)realloc(s_fragileReports, sizeof(*s_fragileReports) * s_fragileReportCapacity);
+    if ( !s_fragileReports )
+      Com_Error("Out of memory");
+  }
+  report = &s_fragileReports[s_fragileReportCount++];
+  report->entityNum = brush->entityNum;
+  report->brushNum = brush->brushNum;
+  report->planenum = target->planenum;
+  report->mapInfoIndex = brush->mapInfoIndex;
+  report->currentEntity = g_currentEntityIndex;
+  report->action = advice.action;
+  VectorCopy(MAP_PLANE(target->planenum)->normal, report->normal);
+  for ( i = 0; i < 3; ++i )
+    report->at[i] = advice.corner[i] < brush->eMins[i] ? brush->eMins[i]
+                  : advice.corner[i] > brush->eMaxs[i] ? brush->eMaxs[i] : advice.corner[i];
+
+  if ( advice.action == FRAGILE_DELETE_FACE )
+    _snprintf(report->message, sizeof(report->message),
+      "fragile corner: delete face '%s' - it is only %.1f degrees from face '%s' of the same brush, "
+      "a crease too shallow for cod4map. Retail cod4map leaves a void here; KIWI-cod4map compiled "
+      "it correctly, so fixing it is optional.",
+      target->shaderInfo->name, advice.degrees, brush->original->sides[advice.partnerFace].shaderInfo->name);
+  else if ( advice.action == FRAGILE_ALIGN_FACE && advice.neighbourBrush >= 0 )
+    _snprintf(report->message, sizeof(report->message),
+      "fragile corner: line up face '%s' with brush %d - their faces are only %.1f degrees apart, "
+      "too close for cod4map. Retail cod4map leaves a void here; KIWI-cod4map compiled it "
+      "correctly, so fixing it is optional.",
+      target->shaderInfo->name, advice.neighbourBrush, advice.degrees);
+  else if ( advice.action == FRAGILE_ALIGN_FACE )
+    _snprintf(report->message, sizeof(report->message),
+      "fragile corner: face '%s' is only %.1f degrees off a neighbouring brush's face, too close "
+      "for cod4map - rotate one of the two brushes to line them up. Retail cod4map leaves a void "
+      "here; KIWI-cod4map compiled it correctly, so fixing it is optional.",
+      target->shaderInfo->name, advice.degrees);
+  else if ( target->shaderInfo )
+    _snprintf(report->message, sizeof(report->message),
+      "fragile corner: face '%s' meets other planes along almost the same edge, a corner too flat "
+      "for cod4map (the brush would swell %.1f units) - nudge or square up this brush. Retail "
+      "cod4map leaves a void here; KIWI-cod4map compiled it correctly, so fixing it is optional.",
+      target->shaderInfo->name, s_boundTestExposure);
+  else
+    _snprintf(report->message, sizeof(report->message),
+      "fragile corner: this brush meets a BSP cut in a corner too flat for cod4map (it would swell "
+      "%.1f units) - nudge or square up this brush. Retail cod4map leaves a void here; "
+      "KIWI-cod4map compiled it correctly, so fixing it is optional.",
+      s_boundTestExposure);
+  report->message[sizeof(report->message) - 1] = '\0';
+}
+
+/* KIWI FIX: write the held fragile-corner warnings and return how many.  A brush that also has
+   a face to delete or line up gets no "nudge" lines: fixing that face usually clears them, and
+   the next build lists any that remain - one instruction per brush at a time. */
+int WriteKeptBoundingSideReports(void)
+{
+  int savedEntity = g_currentEntityIndex;
+  int written = 0;
+  int i, j;
+
+  for ( i = 0; i < s_fragileReportCount; ++i )
+  {
+    const FragileReport_t *report = &s_fragileReports[i];
+
+    if ( report->action == FRAGILE_NUDGE_BRUSH )
+    {
+      for ( j = 0; j < s_fragileReportCount; ++j )
+      {
+        if ( s_fragileReports[j].action != FRAGILE_NUDGE_BRUSH
+          && s_fragileReports[j].entityNum == report->entityNum && s_fragileReports[j].brushNum == report->brushNum )
+          break;
+      }
+      if ( j < s_fragileReportCount )
+        continue;
+    }
+    g_currentEntityIndex = report->currentEntity;
+    Error(0, report->at, report->normal, report->mapInfoIndex, report->entityNum, report->brushNum,
+      "%s", report->message);
+    ++written;
+  }
+  g_currentEntityIndex = savedEntity;
+  free(s_fragileReports);
+  s_fragileReports = NULL;
+  s_fragileReportCount = 0;
+  s_fragileReportCapacity = 0;
+  return written;
+}
+
 /* CoD4 0x403A50: discard tiny non-bevel faces and compact the side array. */
 static int RemoveTinyBrushSides(Brush_t *brush)
 {
   int oldSideCount = brush->numSides;
   int removedCount = 0;
   int writeIndex = 0;
+  BrushSide_t *snapshot = NULL;   /* KIWI FIX: all sides before compaction, then native's kept */
+  BrushSide_t *nativeKept = NULL;
+  int nativeKeptCount = 0;
   int i;
+
+  if ( s_keepBoundingSides && (snapshot = SnapshotBrushSides(brush, &nativeKeptCount)) != NULL )
+    nativeKept = snapshot + oldSideCount;
 
   for ( i = 0; i < oldSideCount; ++i )
   {
     BrushSide_t *side = &brush->sides[i];
     Winding_t *winding = side->winding;
+    int keep = (winding && !IsTinyWinding(winding)) || (++removedCount, side->bevel);
 
-    if ( (winding && !IsTinyWinding(winding)) || (++removedCount, side->bevel) )
+    /* KIWI FIX: never drop a NULL-winding side the brush still needs (see
+       BrushSideStillBounds).  Tiny windings keep native's crunch.  Deliberately left counted
+       in removedCount, so the "< 4 real sides" sliver discard below decides exactly as
+       native: keeping such a sliver alive lets FilterBrushIntoBspTree's bounding-box volume
+       test mark the open air around it opaque (a native weakness this fix does not touch). */
+    if ( !keep && !winding && nativeKept && BrushSideStillBounds(brush, nativeKept, nativeKeptCount, side) )
+    {
+      if ( s_reportKeptSides )
+        ReportKeptBoundingSide(brush, side, snapshot, oldSideCount);
+      keep = 1;
+    }
+
+    if ( keep )
     {
       if ( writeIndex != i )
         memcpy(&brush->sides[writeIndex], side, sizeof(*side));
@@ -683,6 +1178,7 @@ static int RemoveTinyBrushSides(Brush_t *brush)
     }
   }
 
+  free(snapshot);
   brush->numSides = writeIndex;
   return oldSideCount - removedCount >= 4;
 }

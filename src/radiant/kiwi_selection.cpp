@@ -12,6 +12,8 @@
 #include "kiwi_selection.h"
 
 #include <string.h>
+#include <algorithm>
+#include <functional>
 
 // ── legacy entry points (verified against their definitions) ────────────────
 extern float world_orient_matrix[4][3];                          // entity.cpp(0x6DE290)
@@ -124,6 +126,26 @@ bool Sel_BrushLive( const selbrush_t *b )
         if ( i == b )
             return true;
     return false;
+}
+
+uint64_t Sel_BrushesLive( selbrush_t *const *brushes, int count, bool *live )
+{
+    const std::less<const selbrush_t *> before{};   // total order on unrelated pointers
+    std::vector<const selbrush_t *> want( brushes, brushes + count );
+    std::sort( want.begin(), want.end(), before );
+    std::vector<const selbrush_t *> found;
+    uint64_t hash = 14695981039346656037ull;        // FNV-1a over the node addresses
+    for ( selbrush_t *head : { &active_brushes, &selected_brushes } )
+        for ( selbrush_t *i = head->next; i && i != head; i = i->next )
+        {
+            hash = ( hash ^ (uint64_t)(uintptr_t)i ) * 1099511628211ull;
+            if ( std::binary_search( want.begin(), want.end(), i, before ) )
+                found.push_back( i );
+        }
+    std::sort( found.begin(), found.end(), before );
+    for ( int k = 0; k < count; ++k )
+        live[k] = brushes[k] && std::binary_search( found.begin(), found.end(), brushes[k], before );
+    return hash;
 }
 
 sel_item_t Sel_MakeObject( selbrush_t *b )

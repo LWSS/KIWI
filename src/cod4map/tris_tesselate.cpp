@@ -1053,12 +1053,13 @@ static int TrisLmap_TessRemoveDegenerateEdges(TrisLmapTessWork_t *work)
             Assert(work->count + 2 - current > 0, s_assertDisable_TesselateRemoveDegenerateEdges);
             Assert(before < current, s_assertDisable_TesselateRemoveDegenerateEdges);
             /* Native 0x45CC50 uses the CRT memcpy entry for this forward
-               compaction. */
-            memcpy(&work->indices[before], &work->indices[current], sizeof(work->indices[0]) * (work->count - before));
+               compaction.  KIWI FIX: memmove - the MSVC memcpy shares memmove's
+               overlap-safe body, so this is the same result without the UB. */
+            memmove(&work->indices[before], &work->indices[current], sizeof(work->indices[0]) * (work->count - before));
           }
           else
           {
-            memcpy(work->indices, &work->indices[2], sizeof(work->indices[0]) * work->count);
+            memmove(work->indices, &work->indices[2], sizeof(work->indices[0]) * work->count);
           }
         }
         break;
@@ -1205,9 +1206,10 @@ static int TrisLmap_TessClipEar(TrisLmapTessWork_t *work, TriSurfProps_t *props,
   --work->count;
   if (bestEar != work->count)
     /* 0x45CDF0 calls the CRT memcpy entry here.  Its source begins one
-       element after the destination; retain the native operation rather
-       than substituting a different overlap policy. */
-    memcpy(&work->indices[bestEar], &work->indices[bestEar + 1], sizeof(work->indices[0]) * (work->count - bestEar));
+       element after the destination.  KIWI FIX: memmove - the MSVC memcpy
+       shares memmove's overlap-safe body, so this is the native result
+       without relying on undefined behaviour. */
+    memmove(&work->indices[bestEar], &work->indices[bestEar + 1], sizeof(work->indices[0]) * (work->count - bestEar));
 
   /* 0x45CAF0 only runs 0x45CC50 when clipping has exposed a coincident
      pair across the removed ear.  Removing every pre-existing degenerate

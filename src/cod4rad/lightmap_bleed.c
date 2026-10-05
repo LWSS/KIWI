@@ -275,8 +275,9 @@ both primary (512) and secondary (1024, coords scaled by 2x) data.
 void Lmap_FindBleeding_Callback(float unused, float *samplePos,
                                 int unused1, int unused2, void *userData)
 {
-    int *lmapIdxPtr = (int *)userData;
-    int lmapIdx = *lmapIdxPtr;
+    /* KIWI: userData is &Triangle_t::lightmapIdx, an unsigned short (an int read
+     * pulled in the next field's bytes and only worked through index wrap) */
+    int lmapIdx = *(const unsigned short *)userData;
 
     /* primary: 512x512, original coords */
     Lmap_FindBleedingForSample(g_primaryBleedData, lmapIdx, 512, 512,
@@ -625,7 +626,9 @@ void Lmap_FindBleedingForSample(void *data, int lmapIdx, int width, int height,
     tableIdx = sHalf + tHalf * 2;
 
     sampleIdx = ((lmapIdx * height + t) * width) + s;
-    ((unsigned char *)data)[sampleIdx] |= g_bleedDirTable[tableIdx];
+    /* KIWI FIX: triangles sharing a texel run on different threads; a plain |=
+     * lost bits, so multi-threaded lightmaps differed run to run */
+    InterlockedOr8((volatile char *)data + sampleIdx, (char)g_bleedDirTable[tableIdx]);
 }
 
 /*

@@ -135,13 +135,6 @@ void __thiscall GlassesClient::ParseSnapshot(int localClientNum, msg_t *msg, boo
     unsigned int num; // [esp+4Ch] [ebp-8h]
     unsigned int check; // [esp+50h] [ebp-4h]
 
-    // LWSS HACK
-    //check = MSG_ReadShort(msg);
-    //if (check != 13337)
-    //{
-    //    iassert(0);
-    //}
-
     if ( MSG_ReadBit(msg) == 1 )
     {
         if ( MSG_ReadBit(msg) == 1 )

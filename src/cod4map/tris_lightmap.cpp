@@ -417,25 +417,60 @@ int TrisLmap_ReclaimRasterRegion(int lightmapIndex, int originX, int originY, in
     return reclaimed;
 }
 
-static int TrisLmap_CompareSurfPropsAndGroup(const void *left, const void *right)
+/* 0x453E80 orders surfaces by the ADDRESS of their property carrier, then by the
+   address of their LMAP group carrier (which decides the group that keeps the
+   original property object).  Native's address order is arbitrary (freed blocks
+   get reused) but was the same every run on its 32-bit heap.  KIWI FIX: on x64
+   the heap is randomized, so address order changed run to run - surface order,
+   vertex numbering and therefore the smoothed-normal summation order (1-7 ulp
+   normal/tangent noise) all varied, and the int-narrowed address difference could
+   overflow.  Sort by creation order instead - a deterministic stand-in, not a
+   reproduction of native's order: the property sidecar's allocSerial and the
+   group's id (both counters), then the collection index so equal keys keep their
+   list order. */
+typedef struct TrisLmapSeparateKey_s
 {
-    const TriSurf_t *leftSurf = *(const TriSurf_t * const *)left;
-    const TriSurf_t *rightSurf = *(const TriSurf_t * const *)right;
+    unsigned int propsSerial;
+    int          groupId;
+    int          order;
+    TriSurf_t   *surf;
+} TrisLmapSeparateKey_t;
 
-    /* 0x453E80 compares the fixed-size carriers with the native division
-       form.  On the 32-bit heap distinct 0xAC/0x24 allocations have the
-       same sign ordering as this, while retaining the original comparator
-       (and its zero result for a shared carrier). */
-    if (leftSurf->props != rightSurf->props)
-        return (int)(((intptr_t)leftSurf->props - (intptr_t)rightSurf->props)
-                     / (int)sizeof(*leftSurf->props));
-    /* 0x453E80 sorts equal property records by the native group carrier's
-       address, rather than its diagnostic id.  This chooses which group
-       retains the original property object. */
-    Assert(leftSurf->lmap, s_assertDisable_TrisLmapCreateSurface);
-    Assert(rightSurf->lmap, s_assertDisable_TrisLmapCreateSurface);
-    return (int)(((intptr_t)leftSurf->lmap->group - (intptr_t)rightSurf->lmap->group)
-                 / (int)sizeof(*leftSurf->lmap->group));
+static int TrisLmap_CompareSeparateKeys(const void *left, const void *right)
+{
+    const TrisLmapSeparateKey_t *a = (const TrisLmapSeparateKey_t *)left;
+    const TrisLmapSeparateKey_t *b = (const TrisLmapSeparateKey_t *)right;
+
+    if (a->propsSerial != b->propsSerial)
+        return a->propsSerial < b->propsSerial ? -1 : 1;
+    if (a->groupId != b->groupId)
+        return a->groupId < b->groupId ? -1 : 1;
+    return a->order - b->order;
+}
+
+static void TrisLmap_SortSurfPropsAndGroup(TriSurf_t **surfs, int count)
+{
+    TrisLmapSeparateKey_t *keys;
+    int index;
+
+    keys =(TrisLmapSeparateKey_t *)malloc(sizeof(*keys) * count);
+    if (!keys)
+        Com_Error("TrisLmap_SortSurfPropsAndGroup: out of memory");
+    for (index = 0; index < count; ++index)
+    {
+        TriSurfPropsSidecar_t *sidecar = TrisPropsSidecar_Get(surfs[index]->props);
+
+        Assert(sidecar, s_assertDisable_TrisLmapCreateSurface);
+        Assert(surfs[index]->lmap, s_assertDisable_TrisLmapCreateSurface);
+        keys[index].propsSerial = sidecar ? sidecar->allocSerial : 0xFFFFFFFFu;
+        keys[index].groupId = surfs[index]->lmap->group->id;
+        keys[index].order = index;
+        keys[index].surf = surfs[index];
+    }
+    qsort(keys, count, sizeof(*keys), TrisLmap_CompareSeparateKeys);
+    for (index = 0; index < count; ++index)
+        surfs[index] = keys[index].surf;
+    free(keys);
 }
 
 /* 0x453E40: retain every surface with an LMAP carrier and count the rest.
@@ -477,7 +512,7 @@ int TrisLmap_SeparatePropsByGroup(void)
         free(surfs);
         return 0;
     }
-    qsort(surfs, s_trisLmapSeparateLmapCount, sizeof(*surfs), TrisLmap_CompareSurfPropsAndGroup);
+    TrisLmap_SortSurfPropsAndGroup(surfs, s_trisLmapSeparateLmapCount);   /* KIWI FIX: was qsort by address */
 
     for (index = 0; index < s_trisLmapSeparateLmapCount; )
     {
@@ -1153,7 +1188,9 @@ static int TrisLmap_SurfSortBefore(const TriSurf_t *left, const TriSurf_t *right
         return left->props->si->contentFlags < right->props->si->contentFlags;
     if (left->props->si->surfaceFlags != right->props->si->surfaceFlags)
         return left->props->si->surfaceFlags < right->props->si->surfaceFlags;
-    return left < right;
+    /* Native's last key is the TriSurf address.  KIWI FIX: on the randomized x64
+       heap that varied run to run; creation order is a deterministic stand-in. */
+    return left->allocSerial < right->allocSerial;
 }
 
 static TriSurf_t *TrisLmap_SortCellMaterialList(TriSurf_t *head, int count)

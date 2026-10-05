@@ -4493,6 +4493,9 @@ void CamWnd_Draw( HWND hwnd )
         extern void KiwiEntBrowser_DrawGhost();   // kiwi_entbrowser.cpp
         KiwiEntBrowser_DrawGhost();
         extern void KiwiModelBrowser_DrawGhost(); KiwiModelBrowser_DrawGhost(); // KIWI-UX
+        // KIWI (2026-10-04): last compile's "fragile corner" spots, blinking like the engine's
+        // out-of-bounds clear.  LAST because it draws without a depth test (kiwi_fragile.cpp).
+        extern void KiwiFragile_DrawCamera(); KiwiFragile_DrawCamera();
     }
 
 

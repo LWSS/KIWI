@@ -22,3 +22,17 @@ bool KiwiLaunch_DispatchInstant( unsigned int cmdId );
 
 // Polls the child once per ImGui frame before deciding whether to draw.
 void KiwiLaunch_Draw();
+
+// The panel's path comparison (GetFullPathName + case-insensitive), for errlog map tokens.
+bool KiwiLaunch_SamePath( const char *a, const char *b );
+
+// The live fragile check (kiwi_fragile.cpp) runs the panel's cod4map from the panel's root.
+struct kiwiLaunchTool_t
+{
+    char exe[260];              // KIWI-cod4map.exe beside the editor
+    char root[260];             // fs_basepath: the build root and the compiler's working directory
+    char binDir[260];           // the editor's directory (data next to the exe)
+    char name[128];             // the open map's base name, "untitled" when unsaved
+};
+bool KiwiLaunch_Cod4mapTool( kiwiLaunchTool_t *out );   // false without a root or the exe
+bool KiwiLaunch_Busy();                                 // a build is running

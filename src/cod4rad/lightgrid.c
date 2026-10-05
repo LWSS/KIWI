@@ -1090,6 +1090,18 @@ static void LightGrid_BuildCod4Compact(void)
     g_cod4LightGridAssignments = NULL;
 }
 
+/* KIWI FIX: LightGrid_FindOrInsertColor merges colours within a tolerance, so its
+ * table depends on insert order.  Workers park each point's SH buffer here and
+ * CalculateLightGrid encodes them in grid order after the threaded pass - the
+ * order a single thread inserts in. */
+typedef struct GridPendingColor_s
+{
+    GridSampleResult *sample;
+    float             light[24];
+} GridPendingColor_t;
+
+static GridPendingColor_t *s_gridPendingColors;
+
 /*
  * CalculateLightGrid_Worker — calculate light grid for a single point.
  * Address: 0x411910 | Size: 141 bytes
@@ -1134,7 +1146,10 @@ void CalculateLightGrid_Worker(int gridIndex, int flags)
 
     LightGrid_StoreProducerVector(gridIndex, cod4Vector);
 
-    sample->colorIndex = LightGrid_EncodeSH(1.0f, lightBuffer);
+    /* KIWI FIX: encoded in grid order by CalculateLightGrid (was
+     * sample->colorIndex = LightGrid_EncodeSH(1.0f, lightBuffer)) */
+    s_gridPendingColors[gridIndex].sample = sample;
+    memcpy(s_gridPendingColors[gridIndex].light, lightBuffer, sizeof(lightBuffer));
 }
 
 /*
@@ -1701,6 +1716,7 @@ void CalculateLightGrid(int flags)
     int numDirs;
     int sourcePointCount;
     float dirScale;
+    int i;
 
     /* clear counters */
     g_gridColorCount = 0;
@@ -1785,8 +1801,22 @@ void CalculateLightGrid(int flags)
 
     g_gridPointPrimaries = (unsigned char *)calloc((size_t)g_gridPointCount + 1, 1);
 
+    s_gridPendingColors = (GridPendingColor_t *)calloc((size_t)g_gridPointCount, sizeof(*s_gridPendingColors));
+    if (!s_gridPendingColors)
+        ErrorMsg("Couldn't allocate light grid colour staging for %i points\n", g_gridPointCount);
+
     /* calculate lighting for each grid point */
     ForEachLightmapPixel(g_gridPointCount, (void *)CalculateLightGrid_Worker, flags);
+
+    /* KIWI FIX: colour table filled in grid order (see GridPendingColor_t) */
+    for (i = 0; i < g_gridPointCount; i++)
+    {
+        if (s_gridPendingColors[i].sample)
+            s_gridPendingColors[i].sample->colorIndex = LightGrid_EncodeSH(1.0f, s_gridPendingColors[i].light);
+    }
+    free(s_gridPendingColors);
+    s_gridPendingColors = NULL;
+
     LightGrid_AppendDefaultProducerVector();
 
     /* sort results */

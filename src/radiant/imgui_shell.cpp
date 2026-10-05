@@ -1417,6 +1417,12 @@ void ImGuiShell_RenderViewportsToRT()
         KiwiPerfScope perf( KPERF_CAMERA );
         CamWnd_RenderToRT( s_cellW[RTT_CAMERA],  s_cellH[RTT_CAMERA] );
     }
+    // KIWI (2026-10-04): a blinking "fragile corner" spot needs the 2D views redrawn each
+    // time the blink flips (every 512 ms); the camera above renders every tick anyway.
+    {
+        extern void KiwiFragile_Tick();   // kiwi_fragile.cpp
+        KiwiFragile_Tick();
+    }
     // The 2D views render only when dirty: when the gate says "clean" the RTT keeps its last
     // texture and the ImGui::Image below samples it as always.  Every uncertain answer is
     // "render" (kiwi_viewdirty.h), and a CLOSED view is marked dirty so reopening it can never

@@ -16,6 +16,7 @@
 // Patch controls use faceIndex = -1 and vertIndex = col * height + row, matching
 // Patch_EditPatch's d_points order.
 
+#include <stdint.h>
 #include <vector>
 
 struct selbrush_t;
@@ -66,6 +67,10 @@ bool        Sel_ItemEqual( const sel_item_t &a, const sel_item_t &b );
 // two display lists before dereference; a reused address can still pass until a
 // selection-generation change invalidates the gesture.
 bool Sel_BrushLive( const selbrush_t *b );
+// Sel_BrushLive for `count` brushes with one walk of the lists (same reuse caveat).
+// Returns a hash of the listed nodes in order, which changes when nodes are added,
+// removed, replaced (undo/redo, map load) or moved between the lists.
+uint64_t Sel_BrushesLive( selbrush_t *const *brushes, int count, bool *live );
 
 // patchMesh_t::ctrl is 16x16; reject dimensions that would index past it.
 #define KIWI_PATCH_MAX_DIM 16

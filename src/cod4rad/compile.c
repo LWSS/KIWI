@@ -1473,7 +1473,7 @@ void Compile(int threadCount)
     /* The local chain representation is updated by multiple triangles.  Its
      * native flat-transfer scratch/ordered merge has not yet been recovered,
      * so preserve retail's thread-invariant result by constructing it in work
-     * order.  Tracing after construction remains parallel. */
+     * order on one thread (the tracing runs inside the same pass). */
     BuildLightTransfers(1);
     EndProgress();
 

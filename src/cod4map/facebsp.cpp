@@ -678,6 +678,32 @@ int BuildBspTree_Recursive(Node_t *node, Face_t *list, int faceCount)
     {
       Winding_t *fw, *bw;
       ClipWindingEpsilon(cur->w, plane, plane[3], SPLIT_CLIP_EPSILON, &fw, &bw, 0);
+      /* KIWI FIX: WindingPlaneSide called this face CROSS at ON_EPSILON, but the clip above
+         uses twice that, so a face reaching 0.1-0.2 past the plane comes back whole on the
+         other side.  Its plane then never splits this side: a leaf here holds both the air in
+         front of the face and the brush behind it, is marked solid, and the face's draw
+         surface bordering it is culled - a missing wedge where a face meets a nearly
+         parallel neighbour (e.g. a mitered trim's front against the post it runs into).
+         The empty side gets the face's real fragment; every other split is unchanged. */
+      if ( !fw || !bw )
+      {
+        Winding_t *tf, *tb;
+        ClipWindingEpsilon(cur->w, plane, plane[3], ON_EPSILON, &tf, &tb, 0);
+        if ( !fw )
+        {
+          fw = tf;
+          tf = NULL;
+        }
+        if ( !bw )
+        {
+          bw = tb;
+          tb = NULL;
+        }
+        if ( tf )
+          FreeWinding(tf);
+        if ( tb )
+          FreeWinding(tb);
+      }
       if ( fw )
       {
         Face_t *f = AllocFace();

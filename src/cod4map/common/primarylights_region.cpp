@@ -1159,7 +1159,7 @@ void EmitReducedPrimaryLightKdop(PrimaryLightRegionNode_t *list, PrimaryLightReg
   kdop[0] = 9;
   maxAxisCount = axisCount < 17 ? axisCount : 17;
   axisCount -= 9;
-  memcpy(axes, &axes[axisCount], 9 * sizeof(axes[0]));
+  memmove(axes, &axes[axisCount], 9 * sizeof(axes[0])); /* KIWI FIX: overlaps below 18 axes */
 
   while (kdop[0] != maxAxisCount)
   {

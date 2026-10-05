@@ -31,7 +31,9 @@ OptionEntry_t optionsTable[] = {
     { "-noCurves",           "Ignores all patch and terrain geometry",                    (OptionHandler)Opt_NoCurves           }, 
     { "-noDetail",           "Ignores all detail brushes",                                (OptionHandler)Opt_NoDetail           }, 
     { "-fullDetail",         "Turns all detail brushes into structural brushes",          (OptionHandler)Opt_FullDetail         }, 
-    { "-leakTest",           "Quits immediately if the map leaked",                       (OptionHandler)Opt_LeakTest           }, 
+    { "-leakTest",           "Quits immediately if the map leaked",                       (OptionHandler)Opt_LeakTest           },
+    { "-fragileStop",        "Quits after the BSP if it found fragile corners (KIWI)",    (OptionHandler)Opt_FragileStop        },
+    { "-fragileCheck",       "Only checks for fragile corners, then quits (KIWI)",        (OptionHandler)Opt_FragileCheck       },
     { "-brushMethod",        "Brush optimization method (players/bullets/all/none)",      (OptionHandler)Opt_brushMethod        },  
     { "-expandPlayer",       "Writes a map for Radiant to see player-to-brush collision", (OptionHandler)Opt_ExpandPlayer       }, 
     { "-expandBullet",       "Writes a map for Radiant to see bullet-to-brush collision", (OptionHandler)Opt_ExpandBullet       }, 
@@ -115,6 +117,8 @@ int          g_parseEntityCount;
 int          g_removedBrushSides;
 int          g_treeNodeCount;
 int          leaktest;
+int          fragileStop;    /* KIWI: -fragileStop */
+int          fragileCheck;   /* KIWI: -fragileCheck */
 unsigned int Msg = 4294967295u;
 int          noCurveBrushes;
 int          nodetail;
@@ -229,7 +233,11 @@ int EmitWorldBSP(void)
   faces = CollectBrushWindings(g_entities[0].brushes);
   tree = BuildBspTree(faces);
   ProcessBspTree(tree);
+  /* KIWI FIX: keep brush sides that still bound their fragment (brush.cpp
+     BrushSideStillBounds) in both trees; only the final tree reports them. */
+  SetKeepBoundingBrushSides(1, 0);
   FilterStructuralBrushesIntoBspTree(g_entities, tree);
+  SetKeepBoundingBrushSides(0, 0);
 
   if ( FloodEntities(tree) )
   {
@@ -240,7 +248,30 @@ int EmitWorldBSP(void)
     FreeTreeBlock(tree);
     tree = BuildBspTree(detailFaces);
     ProcessBspTree(tree);
+    SetKeepBoundingBrushSides(1, 1);
     FilterStructuralBrushesIntoBspTree(g_entities, tree);
+    SetKeepBoundingBrushSides(0, 0);
+    int fragileCorners = WriteKeptBoundingSideReports();
+    if ( fragileCorners )
+    {
+      Com_Printf("WARNING: %i fragile corner(s) - faces nearly parallel to a neighbour, which retail "
+                 "cod4map turns into voids; KIWI-cod4map compiles them correctly. Listed in the "
+                 "error log (\"fragile corner\").\n",
+                 fragileCorners);
+      /* KIWI: -fragileStop - quit here, before the long tris/lightmap stages, so the mapper
+         can fix them first (the .errlog entries are already written). */
+      if ( fragileStop )
+      {
+        Com_Printf("--- FRAGILE CORNERS, STOPPING (-fragileStop) ---\n");
+        exit(FRAGILE_STOP_EXIT_CODE);
+      }
+    }
+    /* KIWI: -fragileCheck - the answer is written; nothing else is wanted */
+    if ( fragileCheck )
+    {
+      Com_Printf("--- FRAGILE CHECK DONE (-fragileCheck) ---\n");
+      exit(fragileCorners ? FRAGILE_STOP_EXIT_CODE : 0);
+    }
     leaked = 0;
   }
   else
@@ -254,6 +285,12 @@ int EmitWorldBSP(void)
     {
       Com_Printf("--- MAP LEAKED, ABORTING LEAKTEST ---\n");
       exit(-1);
+    }
+    /* KIWI: -fragileCheck - only a sealed map gets the final tree that reports */
+    if ( fragileCheck )
+    {
+      Com_Printf("--- MAP LEAKED, NO FRAGILE CHECK (-fragileCheck) ---\n");
+      exit(FRAGILE_CHECK_LEAKED_EXIT_CODE);
     }
     leaked = 1;
   }
@@ -908,6 +945,22 @@ int Opt_LeakTest()
 {
   Com_Printf("leaktest = true\n");
   leaktest = 1;
+  return 1;
+}
+
+/* KIWI: see EmitWorldBSP; KIWI Radiant's Build passes it unless "Build anyway". */
+int Opt_FragileStop()
+{
+  Com_Printf("fragileStop = true\n");
+  fragileStop = 1;
+  return 1;
+}
+
+/* KIWI: see EmitWorldBSP; KIWI Radiant's live check runs it on a snapshot after edits. */
+int Opt_FragileCheck()
+{
+  Com_Printf("fragileCheck = true\n");
+  fragileCheck = 1;
   return 1;
 }
 

@@ -390,7 +390,7 @@ void __cdecl GlassSv_ClipMoveTrace(const moveclip_t *clip, trace_t *results)
     }
 }
 
-void __cdecl GlassSv_PointTrace(const pointtrace_t *clip, trace_t *results)
+void __cdecl GlassSv_PointTrace(const pointtrace_t *clip, trace_t *trace)
 {
     float oldFraction; // [esp+14h] [ebp-10h]
     const GlassServer *glass; // [esp+18h] [ebp-Ch]
@@ -405,11 +405,11 @@ void __cdecl GlassSv_PointTrace(const pointtrace_t *clip, trace_t *results)
             glass = &svGlasses.glasses[i];
             if ( (glass->state.val.i & 0xF) != 2 )
             {
-                if ( intersect_extents_aabb(&clip->extents, glass->glass->absmin, glass->glass->absmax, results->fraction) )
+                if ( intersect_extents_aabb(&clip->extents, glass->glass->absmin, glass->glass->absmax, trace->fraction) )
                 {
-                    oldFraction = results->fraction;
+                    oldFraction = trace->fraction;
                     CM_TransformedBoxTrace(
-                        results,
+                        trace,
                         clip->extents.start, // KIWI (GLASS): was .vec.v
                         clip->extents.end,
                         vec3_origin,
@@ -418,13 +418,13 @@ void __cdecl GlassSv_PointTrace(const pointtrace_t *clip, trace_t *results)
                         clip->contentmask,
                         glass->glass->origin,
                         glass->glass->angles);
-                    if ( results->fraction < oldFraction )
+                    if ( trace->fraction < oldFraction )
                     {
-                        results->modelIndex = 0;
-                        results->partName = 0;
+                        trace->modelIndex = 0;
+                        trace->partName = 0;
                         //results->boneIndex = 0; // KIWI (GLASS): KIWI trace_t has no boneIndex
-                        results->partGroup = 0;
-                        if ( !results
+                        trace->partGroup = 0;
+                        if ( !trace
                             && !Assert_MyHandler(
                                         "c:\\projects_pc\\cod\\codsrc\\src\\physics\\../qcommon/cm_public.h",
                                         175,
@@ -434,8 +434,8 @@ void __cdecl GlassSv_PointTrace(const pointtrace_t *clip, trace_t *results)
                         {
                             __debugbreak();
                         }
-                        results->hitType = TRACE_HITTYPE_GLASS;
-                        results->hitId = i;
+                        trace->hitType = TRACE_HITTYPE_GLASS;
+                        trace->hitId = i;
                         //results->cflags = 16; // KIWI (GLASS): KIWI trace_t has no cflags
                     }
                 }
@@ -728,9 +728,6 @@ void __thiscall GlassesServer::WriteSnapshotToClient(msg_t *msg, int sinceTime)
     bool sendFull; // [esp+42h] [ebp-Ah]
     unsigned int numChanges; // [esp+44h] [ebp-8h]
     unsigned int _numGlasses; // [esp+48h] [ebp-4h]
-
-    // LWSS HACK AAHH
-    //MSG_WriteShort(msg, 13337);
 
     _numGlasses = this->numGlasses;
     if ( _numGlasses )

@@ -56,7 +56,14 @@ TriSurfProps_t  *g_windingHashBuckets[WINDING_HASH_BUCKETS];
 static unsigned char g_emitReflectionProbeIndex;
 static unsigned char g_emitPrimaryLightIndex;
 static unsigned char g_emitCastsSunShadow;
-static TriSurfPropsSidecar_t *g_triSurfPropsSidecars;
+/* KIWI: sidecars hashed on the props address.  Primary-light assignment looks one up
+   per lightmap texel, and the old single list made that stage O(texels x surfaces)
+   (25 minutes on mp_backlot_geo).  Lookup only - nothing iterates the table, so no
+   output order depends on the addresses. */
+#define TRISURF_PROPS_SIDECAR_BUCKETS 65536
+static TriSurfPropsSidecar_t *g_triSurfPropsSidecars[TRISURF_PROPS_SIDECAR_BUCKETS];
+static unsigned int g_triSurfPropsSerial;   /* KIWI: next TriSurfPropsSidecar_t::allocSerial */
+static unsigned int g_triSurfSerial;        /* KIWI: next TriSurf_t::allocSerial */
 TriSurf_t       *triSurfCellArray[TRISURFS_CELL_ARRAY_SIZE]; /* surface list head per cell slot */
 
 FILE   *g_debugPolyFile;
@@ -978,11 +985,16 @@ Clamps a float value to [min, max] range.
 /* Native TriSurfProps_t is an exact 0xAC carrier.  The smoothing and
    reflection state introduced by KIWI is intentionally external so it cannot
    displace its plane or list links (0x43FB60, 0x44E6F0). */
+static TriSurfPropsSidecar_t **TrisPropsSidecar_Bucket(const TriSurfProps_t *props)
+{
+  return &g_triSurfPropsSidecars[((unsigned long long)(uintptr_t)props * 0x9E3779B97F4A7C15ull) >> 48];
+}
+
 TriSurfPropsSidecar_t *TrisPropsSidecar_Get(TriSurfProps_t *props)
 {
   TriSurfPropsSidecar_t *entry;
 
-  for (entry = g_triSurfPropsSidecars; entry; entry = entry->next)
+  for (entry = *TrisPropsSidecar_Bucket(props); entry; entry = entry->next)
   {
     if (entry->props == props)
       return entry;
@@ -1004,8 +1016,9 @@ void TrisPropsSidecar_Create(TriSurfProps_t *props, float smoothAngleValue, int 
       Com_Error("TrisPropsSidecar_Create: out of memory");
     entry->props = props;
     entry->mapDrawSurf = NULL;
-    entry->next = g_triSurfPropsSidecars;
-    g_triSurfPropsSidecars = entry;
+    entry->allocSerial = g_triSurfPropsSerial++;
+    entry->next = *TrisPropsSidecar_Bucket(props);
+    *TrisPropsSidecar_Bucket(props) = entry;
   }
   entry->smoothAngle = smoothAngleValue;
   entry->smoothing = smoothingValue;
@@ -1036,7 +1049,7 @@ void TrisPropsSidecar_Clone(TriSurfProps_t *source, TriSurfProps_t *clone)
 
 void TrisPropsSidecar_Destroy(TriSurfProps_t *props)
 {
-  TriSurfPropsSidecar_t **link = &g_triSurfPropsSidecars;
+  TriSurfPropsSidecar_t **link = TrisPropsSidecar_Bucket(props);
 
   while (*link)
   {
@@ -6199,6 +6212,7 @@ TriSurf_t *AllocTriSurf(Winding_t *winding, void *auxData, int flags, TriSurfPro
   ts->winding = winding;
   ts->props = material;
   ts->auxData = auxData;
+  ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
   return ts;
 }
@@ -6255,6 +6269,7 @@ TriSurf_t *PrependTriSurf( Winding_t *winding, void *auxData, int flags, TriSurf
   ts->auxData = auxData;
   ts->props = material;
   ts->auxElemSize = flags;
+  ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
 
   /* prepend to doubly-linked list */
@@ -6285,6 +6300,7 @@ TriSurf_t *InsertTriSurfAfter( Winding_t *winding, void *auxData, int flags, Tri
   ts->auxData = auxData;
   ts->props = material;
   ts->auxElemSize = flags;
+  ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
 
   /* insert after tsAfter in doubly-linked list */

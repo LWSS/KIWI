@@ -376,6 +376,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_modelbrowser.cpp"
     "${SRC_DIR}/radiant/kiwi_particles.h"    # KIWI (2026-09-24): effects browser, kiwi_fx drop, mode 7, createfx export
     "${SRC_DIR}/radiant/kiwi_particles.cpp"
+    "${SRC_DIR}/radiant/kiwi_fragile.h"      # KIWI (2026-10-04): flashing cod4map "fragile corner" spots
+    "${SRC_DIR}/radiant/kiwi_fragile.cpp"
     # KIWI GLASS
     "${SRC_DIR}/radiant/kiwi_glass.h"        # breakable glass: panes, texture sets, Glass window
     "${SRC_DIR}/radiant/kiwi_glass.cpp"

@@ -600,6 +600,7 @@ extern bool       HasKeyValuePair(entity_s_def *e, const char *key);  // entity.
 extern float      Vec3Normalize_R(float *v);                          // engine_stubs.cpp (0x40A5E0) — returns length
 extern void       KiwiEntArrow_DrawXY( int viewType, float scale );   // KIWI-UX: Declare the bounded selected-entity 2D overlay.
 extern void       KiwiRefImage_DrawXY( int viewType, float scale );   // KIWI (REFIMG): editor-only material quads.
+extern void       KiwiFragile_DrawXY( int viewType, float scale );    // KIWI: kiwi_fragile.cpp
 extern int        R_Add3DLine(GfxPointVertex *verts, const orientation_t *orient,
                               const float *p1, const float *p2, const unsigned int *color,
                               char width, int vertCount, int maxVertCount);  // draw.cpp (0x40C110)
@@ -4131,6 +4132,7 @@ void XYWnd_Paint( HWND hwndIn )
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
     KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Draw selected-entity facing over the 2D overlay tail.
+    KiwiFragile_DrawXY( wnd->m_nViewType, wnd->m_fScale );  // KIWI: blinking "fragile corner" spots (kiwi_fragile.cpp).
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     R_EndFrame();
@@ -4283,6 +4285,7 @@ void XYWnd_RenderToRT( int w, int h )
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
     KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Mirror the facing overlay in the RTT XY path.
+    KiwiFragile_DrawXY( wnd->m_nViewType, wnd->m_fScale );  // KIWI: blinking "fragile corner" spots (kiwi_fragile.cpp).
     CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     {

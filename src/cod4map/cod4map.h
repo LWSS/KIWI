@@ -1570,7 +1570,8 @@ typedef struct TriSurfPropsSidecar_s {
     int                                lightStyle;
     unsigned char                      reflectionProbeIndex;
     unsigned char                      reflectionCellMode;
-    struct TriSurfPropsSidecar_s      *next;
+    unsigned int                       allocSerial; /* KIWI: creation order (stands in for native heap-address order) */
+    struct TriSurfPropsSidecar_s      *next;       /* KIWI: hash-bucket chain (tris.cpp) */
 } TriSurfPropsSidecar_t;
 
 /* TriSurf_t.  The first 0x40 bytes are the native CoD4 carrier used by
@@ -1592,6 +1593,7 @@ typedef struct TriSurf_s {
     int               auxElemSize; /* [64] KIWI aux-data element size */
     struct TriSurf_s *groupNext;   /* [68] KIWI group link */
     struct TrisLmapTransient_s *lmap; /* [72] KIWI lightmap transient */
+    unsigned int      allocSerial; /* KIWI: creation order (stands in for native address tie-breaks) */
 } TriSurf_t;
 
 static_assert(offsetof(TriSurf_t, winding) == 0x00, "TriSurf_t::winding offset");
@@ -2625,6 +2627,8 @@ int Opt_NoDetail();
 int Opt_FullDetail();
 int Opt_NoSubdivide();
 int Opt_LeakTest();
+int Opt_FragileStop();      /* KIWI */
+int Opt_FragileCheck();     /* KIWI */
 int Opt_ExpandPlayer();
 int Opt_ExpandBullet();
 int Opt_DebugPortals();
@@ -2702,6 +2706,8 @@ int CreateBrushWindings(Brush_t *brush);
 int FilterBrushIntoBspTree(Brush_t *brush, Node_t *node);
 int FilterDetailBrushesIntoBspTree(Entity_t *entity, Tree_t *tree);
 int FilterStructuralBrushesIntoBspTree(Entity_t *entity, Tree_t *tree);
+void SetKeepBoundingBrushSides(int keep, int report); /* KIWI FIX: see brush.cpp BrushSideStillBounds */
+int WriteKeptBoundingSideReports(void);   /* KIWI FIX: writes the fragile-corner warnings, returns the count */
 int BrushPointsAllInsidePlanes(Brush_t *brush, int numPoints, float capsRadius, float capsHeight, vec3_t *pointsBuffer);
 int FilterBrushPointsAndTestBrushes(int sideIndex, int numPoints, float capsRadius, float capsHeight, Brush_t **neighbors, int numNeighbors);
 int RemoveRedundantBrushPlanes(Brush_t *brush, Brush_t **neighbors, int numNeighbors, float capsRadius, float capsHeight, char passIndex, char *redundancyFlags);
@@ -4140,6 +4146,12 @@ extern int   reflectionDebug;
 extern int   fastvis;
 extern int   fulldetail;
 extern int   leaktest;
+extern int   fragileStop;   /* KIWI: -fragileStop */
+extern int   fragileCheck;  /* KIWI: -fragileCheck */
+/* KIWI: -fragileStop's / -fragileCheck's exit codes; KIWI Radiant (kiwi_fragile.h) keys on the
+   same values. */
+#define FRAGILE_STOP_EXIT_CODE         70
+#define FRAGILE_CHECK_LEAKED_EXIT_CODE 71
 extern int   mergevis;
 extern int   noCurveBrushes;
 extern int   noPassageVis;
