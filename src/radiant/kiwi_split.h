@@ -24,6 +24,16 @@
 // Esc returns preview to source picking, then cancels. Construction picking uses
 // the shared 10-pixel segment tolerance independent of selection mode.
 //
+// KIWI (2026-10-05): with NO splittable brush selected and construction lines selected, C
+// cuts the LINES instead (KiwiSplit_CommandForId routes to a second command): click the
+// cutter line (Shift+click adds / removes cutters), RMB / Enter splits every selected line
+// where a cutter crosses it (3D closest approach within KCON_ISECT_DIST; a cutter end on a
+// line's interior counts, a touch at the line's own end does not).  Lines / polylines /
+// rectangles become LINE / POLYLINE pieces, circles / arcs become ARCs; a closed loop needs
+// two crossings; splines are never cut.  The cutters stay whole.  One construction undo
+// snapshot; the pieces end up selected.  Rules and tolerances: kiwi_split.cpp, "C on
+// construction lines".
+//
 // Face Split's U is perpendicular to the longest face edge; V is parallel to it.
 // The cursor ray is intersected with the face plane. An on-plane geometry snap wins
 // except SNAP_FACE (the unsnapped surface hit); otherwise the world grid is used.
@@ -83,5 +93,5 @@ bool KiwiSplit_PlaneCrossesBrush( const brush_t *def,
 void KiwiSplit_RegisterCommands();
 KiwiEditorCommand *KiwiSplit_CommandForId( int commandId );
 
-bool KiwiSplit_CanCut();          // §3 palette predicate: >= 1 splittable brush
+bool KiwiSplit_CanCut();          // §3 palette predicate: >= 1 splittable brush, or lines
 bool KiwiSplit_CanSplitFace();    // §3 palette predicate: exactly one face selected

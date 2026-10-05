@@ -101,6 +101,10 @@ namespace
     // HOT receives MouseMove; PAUSED preserves the preview until bare LMB resumes.
     bool s_hot = true;
 
+    // KIWI (2026-10-05): typed entry waits for Tab after an unmoved gesture parks (the
+    // face-click auto-enter); Pause closes it, Tab opens it.  KiwiCmd_NumericGated.
+    bool s_numGated = false;
+
     // Commit drains a requested handoff only after undo close and numeric reset.
     int  s_deferId    = 0;
     bool s_deferPause = false;
@@ -246,6 +250,25 @@ namespace
         case KIWI_CMD_PRIM_SPHERE:
         case KIWI_CMD_PRIM_CONE:
         case KIWI_CMD_ADD_MENU:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    // Selection-mode keys (1..5, Object sub-modes) only change the pick filter, never the
+    // selection, so a gated gesture lets them run and stays parked (like a chip click).
+    bool SelModeVerb( int id )
+    {
+        switch ( id )
+        {
+        case KIWI_CMD_SELMODE_POINT:
+        case KIWI_CMD_SELMODE_EDGE:
+        case KIWI_CMD_SELMODE_FACE:
+        case KIWI_CMD_SELMODE_OBJECT:
+        case KIWI_CMD_SELMODE_ALL:
+        case KIWI_CMD_SELMODE_MODELS:
+        case KIWI_CMD_SELMODE_PARTICLES:
             return true;
         default:
             return false;
@@ -1085,6 +1108,7 @@ bool KiwiCmd_Start( int commandId )
         return false;
 
     KiwiNum_Reset();
+    s_numGated = false;                    // before Begin: Begin may Pause
     s_lastSnap = snap_result_t();
     s_hot      = true;
 
@@ -1126,6 +1150,7 @@ void KiwiCmd_Commit()
     KiwiCmd_UndoCommit();                  // no-op when the command opened no bracket
     DrainDeferredDeselect();
     KiwiNum_Reset();
+    s_numGated = false;                    // before the drain: a deferred start may gate
     s_lastSnap = snap_result_t();
     DrainDeferred();
     g_nUpdateBits |= 1;
@@ -1141,6 +1166,7 @@ void KiwiCmd_Cancel()
     cmd->Cancel();
     KiwiCmd_UndoCancel();                  // no-op when the command opened no bracket
     KiwiNum_Reset();
+    s_numGated = false;
     s_lastSnap = snap_result_t();
     s_deferId = 0;
     s_deferDeselect = false;
@@ -1167,8 +1193,18 @@ void KiwiCmd_Pause()
         return;
     if ( g_activeCommand->WantsClicks() )
         return;
+    // KIWI (2026-10-05, user: "When i click a face, and it goes into face offset mode, it should
+    // not accept numbers until I press TAB"): an unmoved gesture parking (the click auto-enter,
+    // PreemptIdle) closes typed entry until Tab; digits stay hotkeys meanwhile.
+    if ( g_activeCommand->PreemptIdle() && !KiwiNum_Has() )
+        s_numGated = true;
     s_hot = false;
     g_nUpdateBits |= 1;
+}
+
+bool KiwiCmd_NumericGated()
+{
+    return g_activeCommand != nullptr && s_numGated;
 }
 
 // Rebase before the next MouseMove so cursor travel while parked cannot jump geometry.
@@ -1215,7 +1251,7 @@ void KiwiCmd_Confirm()
 
 // Key ladder, in order:
 // 0) offer Tab to commands only when numeric cycling is a no-op;
-// 1) numeric entry, including field Tab, outranks command keys;
+// 1) numeric entry, including field Tab, outranks command keys (gated: only after a Tab);
 // 2) Esc clears the focused numeric field before anything else;
 // 3) command keys may consume Esc/Enter;
 // 4) Esc cancels;
@@ -1225,6 +1261,10 @@ bool KiwiCmd_KeyDown( int vk, unsigned int mods )
 {
     if ( !g_activeCommand )
         return false;
+
+    // KIWI (2026-10-05): any Tab opens a gated gesture's typed entry (see KiwiCmd_Pause).
+    if ( vk == 0x09 )                                    // VK_TAB
+        s_numGated = false;
 
     // KIWI (2026-09-28): with an options panel up, Tab walks its numeric rows and opens
     // each for typing (kiwi_cmdoptions.h); commands without a panel keep the field cycle.
@@ -1243,7 +1283,7 @@ bool KiwiCmd_KeyDown( int vk, unsigned int mods )
         }
     }
 
-    if ( KiwiNum_Key( vk, mods ) )
+    if ( !s_numGated && KiwiNum_Key( vk, mods ) )        // gated: digits are not typed
     {
         const int f = KiwiNum_Focus();
         g_activeCommand->NumericFieldChanged( f, KiwiNum_HasValueField( f ),
@@ -1487,6 +1527,7 @@ void KiwiCmd_DrawWorld()
 // - an unmoved auto-entered face gesture may yield to explicit context verbs;
 // - G/R/S swaps commit moved gestures and cancel untouched ones;
 // - Delete/End/view exceptions arbitrate parked face gestures;
+// - a gated gesture (typed entry closed until Tab) lets the 1..5 mode keys run;
 // - otherwise an active modal command swallows the key;
 // - idle Esc/delete/hide modes run before camera-fly swallowing.
 //
@@ -1634,6 +1675,15 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
         if ( ( id == KIWI_CMD_VIEW_FACE || id == KIWI_CMD_FOCUS_SELECTION )
           && KiwiCmd_CanExecute( id ) )
             return false;                   // …the camera verb runs, the gesture stays
+    }
+
+    // KIWI (2026-10-05, user: "It should continue the normal operation of doing 1/2/3/4/5
+    // selection modes"): until Tab opens typed entry, the mode keys run like a chip click.
+    if ( g_activeCommand && s_numGated )
+    {
+        const int id = LookupBinding( vk, CurrentMods() );
+        if ( SelModeVerb( id ) )
+            return false;                   // …the mode switch runs, the gesture stays
     }
 
     if ( g_activeCommand )

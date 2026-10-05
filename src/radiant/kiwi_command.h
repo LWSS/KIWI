@@ -359,6 +359,7 @@ public:
     { (void)imgX; (void)imgY; (void)shift; return false; }
 
     // Allows an unmoved auto-entered gesture to yield to an allow-listed context verb.
+    // Parking while true also gates typed entry until Tab (KiwiCmd_NumericGated).
     virtual bool PreemptIdle() const { return false; }
 
     // Allows an explicit transform tool swap; false keeps arbitrary hotkeys swallowed.
@@ -403,8 +404,13 @@ void KiwiCmd_StartDeferred( int commandId, bool paused );
 // Defers deselection until after Undo_EndBrushList has captured the selected tail.
 void KiwiCmd_DeselectAfterCommit();
 
-// Parks preview motion; click tools do not pause.
+// Parks preview motion; click tools do not pause.  Parking while PreemptIdle (an unmoved,
+// auto-entered face gesture) also gates typed entry until Tab (KIWI 2026-10-05).
 void KiwiCmd_Pause();
+
+// True while typed entry waits for Tab: digits are not typed and 1..5 switch the selection
+// mode with the gesture left parked.  Any Tab opens it; Start/Commit/Cancel reset it.
+bool KiwiCmd_NumericGated();
 
 // Returns to HOT and rebases at the latched cursor.
 void KiwiCmd_Resume();

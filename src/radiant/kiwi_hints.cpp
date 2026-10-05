@@ -209,8 +209,17 @@ namespace
         // HandleAxisKey's `allowPlane`; R and S pass false).
         if ( cmd && cmd->Name() && strcmp( cmd->Name(), "Move" ) == 0 )
             AddChip( chips, &n, "Shift+XYZ", "Plane" );
-        AddChip( chips, &n, "Tab",       "Field" );
-        AddChip( chips, &n, "0-9",       "Exact" );
+        // KIWI (2026-10-05): a gated gesture types only after Tab; 1-5 stay the modes.
+        if ( KiwiCmd_NumericGated() )
+        {
+            AddChip( chips, &n, "Tab",   "Type a value" );
+            AddChip( chips, &n, "1-5",   "Select mode" );
+        }
+        else
+        {
+            AddChip( chips, &n, "Tab",   "Field" );
+            AddChip( chips, &n, "0-9",   "Exact" );
+        }
         // State every SnapContext: Ctrl enables transform snapping, disables
         // construction snapping, and is irrelevant to always-snapped tools.
         if ( cmd )
@@ -310,6 +319,8 @@ namespace
         AddVerb( chips, &n, KiwiConSel_ContextE( KIWI_CMD_EXTRUDE_FACE ) == KIWI_CMD_CONSTRUCT_EXTEND
                             ? KIWI_CMD_EXTRUDE_FACE : KIWI_CMD_CONSTRUCT_EXTEND, "Extend" );
         AddVerb( chips, &n, KIWI_CMD_TRIM,             "Trim" );
+        // KIWI (2026-10-05): C on selected lines splits them where a picked line crosses.
+        AddVerb( chips, &n, KIWI_CMD_CUT,              "Cut" );
         AddVerb( chips, &n, KIWI_CMD_OFFSET_CURVE,     "Offset" );
         AddVerb( chips, &n, KIWI_CMD_FILLET_CURVE,     "Fillet" );
         AddVerb( chips, &n, KIWI_CMD_MOVE,             "Move" );

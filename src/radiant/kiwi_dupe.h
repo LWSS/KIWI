@@ -11,27 +11,34 @@
 // Clone_Selection (select.cpp 0x48F0D0) clones through the map text (Copy ->
 // Map_ImportBuffer, KIWI 2026-09-09): brushes, patches and entities all duplicate,
 // originals are deselected and the copies selected.  gridSize is unused in this port;
-// the import owns its own "import buffer" undo bracket (nested inside ours).
+// the import owns its own "import buffer" undo bracket unless g_kiwiImportInCallerUndo is
+// set (arrays set it, so the whole array is one Ctrl+Z).
 //
 // Arrays (KIWI 2026-09-27 redo, Plasticity's Rectangular/RadialArrayCommand flow): select
 // anything - it arrays AS ITSELF and the selection is never converted (objects clone;
 // construction, regions, brush edges and faces copy as construction, kiwi_conselect.h) -
 // start the tool, PICK a line (construction segment or brush edge; Radial: a snapped
-// centre point), then OPTIONS in the command panel - count, distance or fixed spacing,
-// flip (Radial: count, angle, axis Z / X / Y / construction-plane normal) - typed values
-// (count, Tab, length / angle), [ ] count, a lollipop on the last copy of a linear array,
-// P to pick again; Enter / RMB / Confirm writes.  Distance = the original to the last copy
-// (the picked line's length at first).  A full 360 spaces the radial copies around the
-// circle; a partial angle lands the last copy on it.
+// centre point), then OPTIONS in the command panel - count, spacing Fit to distance (the
+// distance first to last / count; the picked line's length at first), Fixed, or Natural
+// (KIWI 2026-10-05: end to end - the smallest step along the line after which no object of
+// a copy overlaps one of the copy before, so they touch - plus a Gap, 0 at first), reverse
+// direction (Radial: count, angle, axis Z / X / Y / construction-plane normal) - typed
+// values (count, Tab, the mode's distance / spacing / gap, or the angle), [ ] count, a
+// lollipop on the last copy of a linear array (Natural: it sets how many fit; else the
+// distance), P to pick again; Enter / RMB / Confirm writes.  The mode sticks between
+// arrays.  A full 360 spaces the radial copies around the circle; a partial angle lands the
+// last copy on it.
 //
-// Objects: one mutation-style undo record; each iteration clones the last copy and moves /
-// turns it one step, and every original and copy is selected again before commit so
-// Undo_EndBrushList records a consistent after-state; faces / edges / points picked beside
-// the objects are picked again.  Construction copies go through KiwiConSel_ArrayAdd (its own
-// construction undo snapshot, made first; the copies join the construction selection).
+// Objects: one mutation-style undo record (the clones' imports join it); each iteration
+// clones the last copy and moves / turns it one step, and every original and copy is
+// selected again before commit so Undo_EndBrushList records a consistent after-state; faces
+// / edges / points picked beside the objects are picked again.  Construction copies go
+// through KiwiConSel_ArrayAdd (its own construction undo snapshot, made first; the copies
+// join the construction selection) - a mixed selection is therefore two Ctrl+Z steps.
 //
-// Preview and snap marker share a bounded KiwiLines batch: per-object boxes and
-// construction segments per copy, one box per copy when that does not fit.
+// Preview and snap marker share a bounded KiwiLines batch: per-object outlines (brush face
+// edges, a model's oriented box, else the bounding box) and construction segments per copy,
+// one box per copy when that does not fit.
 //
 // Shift+D clones, refreshes the classic special-material hints, then enters paused
 // Move via KiwiCmd_AfterPaste. Its creation-style undo bracket omits Undo_AddBrushList
@@ -44,7 +51,7 @@ class KiwiEditorCommand;
 #define KARR_DEF_LINEAR     3     // default linear count
 #define KARR_DEF_RADIAL     6
 #define KARR_MIN_OFFSET     0.5f  // world units — below this a linear array is a no-op
-#define KARR_MAX_SOURCE     512   // preview cap (boxes, construction segments)
+#define KARR_MAX_SOURCE     512   // preview cap (construction segments)
 
 void KiwiDupe_RegisterCommands();
 KiwiEditorCommand *KiwiDupe_CommandForId( int commandId );

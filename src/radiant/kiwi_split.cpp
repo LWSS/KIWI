@@ -736,12 +736,45 @@ namespace
         return done;
     }
 
+    // The brush half of C: a selected brush the ported splitter accepts.
+    bool CanCutBrushes()
+    {
+        for ( selbrush_t *n = selected_brushes.next; n != &selected_brushes; n = n->next )
+            if ( Splittable( n ) )
+                return true;
+        return false;
+    }
+
+    // KIWI (2026-10-05, user: "allow cutting of lines with another line"): the construction
+    // objects C cuts when no brush is selected - every visible object a whole-object or
+    // segment item names (a point names no shape), ascending, once each.
+    void LineCutTargets( std::vector<int> *out )
+    {
+        out->clear();
+        for ( int i = 0; i < KiwiConSel_Count(); ++i )
+        {
+            const kconSelItem_t *it = KiwiConSel_At( i );
+            if ( !it || it->kind == KCONSEL_POINT || KiwiCon_Hidden( it->object ) )
+                continue;                       // Hidden reads true for a bad index
+            if ( std::find( out->begin(), out->end(), it->object ) == out->end() )
+                out->push_back( it->object );
+        }
+        std::sort( out->begin(), out->end() );
+    }
+
+    bool CanCutLines()
+    {
+        std::vector<int> t;
+        LineCutTargets( &t );
+        return !t.empty();
+    }
+
     // C — Cut. The source click locks the plane described in kiwi_split.h.
     class KiwiCutCommand : public KiwiEditorCommand
     {
     public:
         const char *Name() const override { return "Cut"; }
-        bool CanExecute() override { return KiwiSplit_CanCut(); }
+        bool CanExecute() override { return CanCutBrushes(); }
 
         // Both stages accept clicks so Shift+LMB can grow a fence; RMB/Enter commits.
         bool WantsClicks() const override { return true; }
@@ -2542,7 +2575,997 @@ namespace
         char  m_hud[160] = { 0 };
     };
 
+    // ── C on construction lines: cut them where other lines cross them ──────────────
+    // KIWI (2026-10-05, user: "allow cutting of lines with another line").  Select the lines
+    // to cut, press C, click the cutter (Shift+click adds / removes cutters), RMB / Enter
+    // cuts: the brush Cut's grammar with lines as the target.  Every selected line a cutter
+    // crosses is replaced by its pieces; the cutters stay whole (a selected line clicked as a
+    // cutter is not cut), as Plasticity's Cut keeps its cutting curve.
+    //   Crossing: 3D closest approach of two segments within KCON_ISECT_DIST, the test Trim,
+    //   intersection snapping and the region arrangement use.  Parallel pairs (angle sine
+    //   under 1e-3, intersection snapping's cutoff) have no stable crossing: only a cutter
+    //   END lying on the span cuts there (an overlapping collinear cutter cuts at its ends).
+    //   A cutter END on the target's interior (a T) cuts it, as the arrangement splits
+    //   T-junctions; a contact at the TARGET's own open end is a touch, not a cut.
+    //   Crossings within KREG_JOIN_DIST of an open end / of each other / of a corner
+    //   collapse onto it: the store's normalizer would weld a shorter piece away.
+    //   Lines, polylines and rectangles split into LINE / POLYLINE pieces (a rectangle
+    //   becomes polylines, as in Trim).  Circles and arcs split into ARCs on the same circle,
+    //   solved on the TRUE curve for a straight cutter.  A closed loop needs two crossings
+    //   (one leaves it whole); splines are layout curves and are never cut.
+    //   ONE construction undo snapshot; the pieces and the untouched selected lines end up
+    //   selected, as a brush cut leaves its halves selected.
+    const float KCUTL_MERGE = KREG_JOIN_DIST;
+    // Angle sine below which two segments are parallel (kiwi_snap.cpp ScanConIntersections).
+    const float KCUTL_PARALLEL_SIN = 1.0e-3f;
+
+    enum { KCUTL_UNTOUCHED = 0, KCUTL_CUT, KCUTL_REFUSED };
+
+    struct lcBox_t { float lo[3], hi[3]; };
+
+    void LcBoxSeed( lcBox_t *b, const float *p )
+    {
+        for ( int k = 0; k < 3; ++k ) { b->lo[k] = p[k]; b->hi[k] = p[k]; }
+    }
+    void LcBoxAdd( lcBox_t *b, const float *p )
+    {
+        for ( int k = 0; k < 3; ++k )
+        {
+            if ( p[k] < b->lo[k] ) b->lo[k] = p[k];
+            if ( p[k] > b->hi[k] ) b->hi[k] = p[k];
+        }
+    }
+    void LcBoxGrow( lcBox_t *b, float r )
+    {
+        for ( int k = 0; k < 3; ++k ) { b->lo[k] -= r; b->hi[k] += r; }
+    }
+    bool LcBoxOverlap( const lcBox_t &a, const lcBox_t &b )
+    {
+        for ( int k = 0; k < 3; ++k )
+            if ( a.hi[k] < b.lo[k] || b.hi[k] < a.lo[k] )
+                return false;
+        return true;
+    }
+
+    // A target walked as one chain with cumulative WORLD arc length (Trim's chain_t); a
+    // closed chain repeats its first point last.
+    struct lcChain_t
+    {
+        std::vector<float> p;           // 3 floats per point
+        std::vector<float> cum;         // arc length per point; cum[0] == 0
+        bool               closed = false;
+
+        int   Count() const { return (int)( p.size() / 3 ); }
+        float Total() const { return cum.empty() ? 0.0f : cum[cum.size() - 1]; }
+    };
+
+    bool LcBuildChain( const kconObject_t &o, lcChain_t *c )
+    {
+        c->p.clear();
+        c->cum.clear();
+        // The store's closed rule (KiwiCon_SegmentCount).
+        c->closed = ( o.type == KCON_CIRCLE ) || ( o.type == KCON_RECT ) || o.closed;
+        const int n = KiwiCon_VertCount( o );
+        if ( n < 2 )
+            return false;
+        for ( int i = 0; i < n; ++i )
+        {
+            float w[3];
+            if ( !KiwiCon_VertWorld( o, i, w ) )
+                return false;
+            c->p.push_back( w[0] );  c->p.push_back( w[1] );  c->p.push_back( w[2] );
+        }
+        if ( c->closed )
+        {
+            const float w0[3] = { c->p[0], c->p[1], c->p[2] };   // copy: push_back may move p
+            c->p.push_back( w0[0] );  c->p.push_back( w0[1] );  c->p.push_back( w0[2] );
+        }
+        const int m = c->Count();
+        c->cum.push_back( 0.0f );
+        for ( int i = 0; i + 1 < m; ++i )
+        {
+            float d[3];
+            Sub3( &c->p[( (size_t)i + 1 ) * 3], &c->p[(size_t)i * 3], d );
+            c->cum.push_back( c->cum[i] + Len3( d ) );
+        }
+        return c->Total() > 1.0e-4f;
+    }
+
+    void LcPointAt( const lcChain_t &c, float s, float out[3] )
+    {
+        const int m = c.Count();
+        if ( s <= 0.0f )      { Copy3( &c.p[0], out ); return; }
+        if ( s >= c.Total() ) { Copy3( &c.p[( (size_t)m - 1 ) * 3], out ); return; }
+        for ( int i = 0; i + 1 < m; ++i )
+        {
+            if ( s > c.cum[i + 1] )
+                continue;
+            const float span = c.cum[i + 1] - c.cum[i];
+            const float t    = ( span > 1.0e-6f ) ? ( ( s - c.cum[i] ) / span ) : 0.0f;
+            for ( int k = 0; k < 3; ++k )
+                out[k] = c.p[(size_t)i * 3 + k]
+                       + ( c.p[( (size_t)i + 1 ) * 3 + k] - c.p[(size_t)i * 3 + k] ) * t;
+            return;
+        }
+        Copy3( &c.p[( (size_t)m - 1 ) * 3], out );
+    }
+
+    // [a, b] of the chain: interpolated ends plus the original corners between them.
+    void LcExtract( const lcChain_t &c, float a, float b, std::vector<float> *out )
+    {
+        out->clear();
+        if ( !( b > a + 1.0e-4f ) )
+            return;
+        float w[3];
+        LcPointAt( c, a, w );
+        out->push_back( w[0] );  out->push_back( w[1] );  out->push_back( w[2] );
+        const int m = c.Count();
+        for ( int i = 0; i < m; ++i )
+        {
+            if ( c.cum[i] <= a + 1.0e-4f || c.cum[i] >= b - 1.0e-4f )
+                continue;
+            out->push_back( c.p[(size_t)i * 3 + 0] );
+            out->push_back( c.p[(size_t)i * 3 + 1] );
+            out->push_back( c.p[(size_t)i * 3 + 2] );
+        }
+        LcPointAt( c, b, w );
+        out->push_back( w[0] );  out->push_back( w[1] );  out->push_back( w[2] );
+    }
+
+    // The store's normalizer, dry (consecutive points within KREG_JOIN_DIST weld): a piece
+    // KiwiCon_Add would refuse is caught here, BEFORE the undo snapshot.
+    bool LcPieceOk( const std::vector<float> &pts )
+    {
+        const int    n    = (int)( pts.size() / 3 );
+        const float *last = 0;
+        int          kept = 0;
+        for ( int i = 0; i < n; ++i )
+        {
+            const float *p = &pts[(size_t)i * 3];
+            if ( last )
+            {
+                float d[3];
+                Sub3( p, last, d );
+                if ( Len3( d ) <= KREG_JOIN_DIST )
+                    continue;
+            }
+            last = p;
+            ++kept;
+        }
+        return kept >= 2 && kept <= KCON_MAX_POINTS;
+    }
+
+    // Sorted values: one within `tol` of the last kept value joins it.
+    void LcMergeSorted( std::vector<float> *v, float tol )
+    {
+        std::vector<float> out;
+        for ( size_t i = 0; i < v->size(); ++i )
+            if ( out.empty() || ( *v )[i] - out.back() > tol )
+                out.push_back( ( *v )[i] );
+        v->swap( out );
+    }
+
+    // A world point's angle about a circle / arc centre, degrees, in its plane.
+    float LcAngleOf( const kconObject_t &curve, const float w[3] )
+    {
+        float uv[2];
+        KiwiCon_WorldToPlane( curve.plane, w, uv );
+        return atan2f( uv[1] - curve.centre[1], uv[0] - curve.centre[0] ) * KCON_RAD2DEG;
+    }
+
+    void LcCurvePoint( const kconObject_t &curve, float deg, float out[3] )
+    {
+        const float rad   = deg * KCON_DEG2RAD;
+        const float uv[2] = { curve.centre[0] + cosf( rad ) * curve.radius,
+                              curve.centre[1] + sinf( rad ) * curve.radius };
+        KiwiCon_PlaneToWorld( curve.plane, uv, out );
+    }
+
+    // A straight segment's crossing with a circle / arc, solved on the TRUE curve: the
+    // tessellation only finds it (a chord runs up to r(1 - cos(pi/n)) inside the circle).
+    // The segment is projected into the curve's plane and the root nearest `approx` wins,
+    // within a tenth of the radius.  Out: the SEGMENT parameter and the curve angle.
+    // False keeps the tessellated estimate (a segment along the normal, no root near).
+    bool LcRefineOnCurve( const kconObject_t &curve, const float a[3], const float b[3],
+                          const float approx[3], float *outT, float *outDeg )
+    {
+        float ua[2], ub[2];
+        KiwiCon_WorldToPlane( curve.plane, a, ua );
+        KiwiCon_WorldToPlane( curve.plane, b, ub );
+        // Doubles: the discriminant subtracts two large squares.
+        const double dx = (double)ub[0] - ua[0], dy = (double)ub[1] - ua[1];
+        const double aa = dx * dx + dy * dy;
+        if ( aa < 1.0e-6 )
+            return false;
+        const double fx   = (double)ua[0] - curve.centre[0];
+        const double fy   = (double)ua[1] - curve.centre[1];
+        const double bb   = dx * fx + dy * fy;
+        const double cc   = fx * fx + fy * fy - (double)curve.radius * curve.radius;
+        const double disc = bb * bb - aa * cc;
+        double roots[2];
+        int    nr = 0;
+        if ( disc < 0.0 )
+            roots[nr++] = -bb / aa;             // grazing: the closest approach
+        else
+        {
+            const double sq = sqrt( disc );
+            roots[nr++] = ( -bb - sq ) / aa;
+            roots[nr++] = ( -bb + sq ) / aa;
+        }
+        float e[3];
+        Sub3( b, a, e );
+        float bestT = 0.0f, bestD = 0.0f;
+        bool  have  = false;
+        for ( int i = 0; i < nr; ++i )
+        {
+            float t = (float)roots[i];
+            if ( t < 0.0f ) t = 0.0f;
+            if ( t > 1.0f ) t = 1.0f;
+            float p[3], d[3];
+            Mad3( a, e, t, p );
+            Sub3( p, approx, d );
+            const float dist = Len3( d );
+            if ( !have || dist < bestD ) { have = true; bestD = dist; bestT = t; }
+        }
+        if ( !have || bestD > (std::max)( 1.0f, curve.radius * 0.1f ) )
+            return false;
+        const double u = ua[0] + dx * bestT - curve.centre[0];
+        const double v = ua[1] + dy * bestT - curve.centre[1];
+        *outT   = bestT;
+        *outDeg = (float)( atan2( v, u ) * KCON_RAD2DEG );
+        return true;
+    }
+
+    // One cutter: its tessellated WORLD segments and their bounds grown by the tolerance.
+    struct lcCutter_t
+    {
+        int                object = -1;
+        bool               open   = true;   // has real ends (first / last segment)
+        std::vector<float> seg;             // 6 floats per segment
+        lcBox_t            box;
+    };
+
+    bool LcBuildCutter( int object, lcCutter_t *out )
+    {
+        const kconObject_t *o = KiwiCon_At( object );
+        if ( !o || o->hidden )
+            return false;
+        out->object = object;
+        out->open   = !( ( o->type == KCON_CIRCLE ) || ( o->type == KCON_RECT ) || o->closed );
+        out->seg.clear();
+        const int segs = KiwiCon_SegmentCount( *o );
+        for ( int s = 0; s < segs; ++s )
+        {
+            float a[3], b[3];
+            if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
+                break;
+            for ( int k = 0; k < 3; ++k ) out->seg.push_back( a[k] );
+            for ( int k = 0; k < 3; ++k ) out->seg.push_back( b[k] );
+        }
+        if ( out->seg.empty() )
+            return false;
+        LcBoxSeed( &out->box, &out->seg[0] );
+        for ( size_t i = 3; i + 2 < out->seg.size(); i += 3 )
+            LcBoxAdd( &out->box, &out->seg[i] );
+        LcBoxGrow( &out->box, KCON_ISECT_DIST );
+        return true;
+    }
+
+    // One contact: arc length along the chain and, for a curve target, its angle.
+    void LcPushCut( const kconObject_t &t, float s, const float at[3], bool haveDeg, float deg,
+                    std::vector<float> *outS, std::vector<float> *outDeg )
+    {
+        outS->push_back( s );
+        if ( KiwiCon_IsParametric( t ) )
+            outDeg->push_back( haveDeg ? deg : LcAngleOf( t, at ) );
+    }
+
+    // Every contact of the target's chain with the cutters (rules: the block comment above).
+    void LcGatherCuts( const kconObject_t &t, const lcChain_t &c,
+                       const std::vector<lcCutter_t> &cutters,
+                       std::vector<float> *outS, std::vector<float> *outDeg )
+    {
+        outS->clear();
+        outDeg->clear();
+        const bool curve = KiwiCon_IsParametric( t );
+        const int  m     = c.Count();
+        lcBox_t chainBox;
+        LcBoxSeed( &chainBox, &c.p[0] );
+        for ( int k = 1; k < m; ++k )
+            LcBoxAdd( &chainBox, &c.p[(size_t)k * 3] );
+        LcBoxGrow( &chainBox, KCON_ISECT_DIST );
+
+        for ( size_t ci = 0; ci < cutters.size(); ++ci )
+        {
+            const lcCutter_t &cut = cutters[ci];
+            if ( !LcBoxOverlap( chainBox, cut.box ) )
+                continue;
+            const kconObject_t *co = KiwiCon_At( cut.object );
+            const bool cutCurve = co && KiwiCon_IsParametric( *co );
+            const int  ns = (int)( cut.seg.size() / 6 );
+            for ( int j = 0; j < ns; ++j )
+            {
+                const float *wa = &cut.seg[(size_t)j * 6];
+                const float *wb = wa + 3;
+                lcBox_t sb;
+                LcBoxSeed( &sb, wa );
+                LcBoxAdd ( &sb, wb );
+                LcBoxGrow( &sb, KCON_ISECT_DIST );
+                if ( !LcBoxOverlap( chainBox, sb ) )
+                    continue;
+                float e1[3];
+                Sub3( wb, wa, e1 );
+                const float l1 = Len3( e1 );
+                if ( l1 < 1.0e-4f )
+                    continue;
+
+                for ( int k = 0; k + 1 < m; ++k )
+                {
+                    const float *p0 = &c.p[(size_t)k * 3];
+                    const float *p1 = p0 + 3;
+                    lcBox_t kb;
+                    LcBoxSeed( &kb, p0 );
+                    LcBoxAdd ( &kb, p1 );
+                    if ( !LcBoxOverlap( sb, kb ) )
+                        continue;
+                    float e0[3];
+                    Sub3( p1, p0, e0 );
+                    const float l0 = Len3( e0 );
+                    if ( l0 < 1.0e-4f )
+                        continue;
+                    const float span = c.cum[k + 1] - c.cum[k];
+
+                    float ta = 0.0f, tb = 0.0f;
+                    const float d = KiwiCon_SegSegClosest( p0, p1, wa, wb, &ta, &tb, 0 );
+                    if ( d > KCON_ISECT_DIST )
+                        continue;
+
+                    float cr[3];
+                    Cross3( e0, e1, cr );
+                    if ( Len3( cr ) < KCUTL_PARALLEL_SIN * l0 * l1 )
+                    {
+                        // Parallel: only the cutter's own ENDS that sit on this span.  A vertex
+                        // where it turns away is caught by the next (non-parallel) segment.
+                        const float *ends[2]  = { wa, wb };
+                        const bool   isEnd[2] = { cut.open && j == 0, cut.open && j == ns - 1 };
+                        for ( int q = 0; q < 2; ++q )
+                        {
+                            if ( !isEnd[q] )
+                                continue;
+                            float rel[3], foot[3], off[3];
+                            Sub3( ends[q], p0, rel );
+                            const float tt = Dot3( rel, e0 ) / ( l0 * l0 );
+                            if ( tt < 0.0f || tt > 1.0f )
+                                continue;
+                            Mad3( p0, e0, tt, foot );
+                            Sub3( ends[q], foot, off );
+                            if ( Len3( off ) > KCON_ISECT_DIST )
+                                continue;
+                            LcPushCut( t, c.cum[k] + span * tt, foot, false, 0.0f, outS, outDeg );
+                        }
+                        continue;
+                    }
+
+                    float at[3];
+                    Mad3( p0, e0, ta, at );
+                    float s = c.cum[k] + span * ta;
+                    float deg = 0.0f, rt = 0.0f;
+                    bool  haveDeg = false;
+                    if ( curve && !cutCurve )
+                        haveDeg = LcRefineOnCurve( t, wa, wb, at, &rt, &deg );
+                    else if ( !curve && cutCurve )
+                    {
+                        float cutterDeg = 0.0f;
+                        if ( LcRefineOnCurve( *co, p0, p1, at, &rt, &cutterDeg ) )
+                        {
+                            s = c.cum[k] + span * rt;
+                            Mad3( p0, e0, rt, at );
+                        }
+                    }
+                    LcPushCut( t, s, at, haveDeg, deg, outS, outDeg );
+                }
+            }
+        }
+    }
+
+    // Stored-point targets (line / polyline / rectangle; a spline's tessellation is only
+    // walked to report it).  The pieces are LINE / POLYLINE objects.
+    int LcPlanChain( const kconObject_t &t, const lcChain_t &c, const std::vector<float> &raw,
+                     std::vector<kconObject_t> *pieces, std::vector<float> *points,
+                     const char **why )
+    {
+        const float total = c.Total();
+        const int   m     = c.Count();
+        std::vector<float> cuts;
+        for ( size_t i = 0; i < raw.size(); ++i )
+        {
+            float s = raw[i];
+            // A crossing this close to a corner IS the corner (the store welds the sliver).
+            for ( int k = 0; k < m; ++k )
+                if ( fabsf( s - c.cum[k] ) <= KCUTL_MERGE ) { s = c.cum[k]; break; }
+            if ( c.closed )
+            {
+                if ( s >= total - 1.0e-4f )
+                    s = 0.0f;                   // the seam is the first point
+            }
+            else if ( s <= KCUTL_MERGE || s >= total - KCUTL_MERGE )
+                continue;                       // its own end: a touch, not a cut
+            cuts.push_back( s );
+        }
+        std::sort( cuts.begin(), cuts.end() );
+        LcMergeSorted( &cuts, KCUTL_MERGE );
+        if ( c.closed && cuts.size() >= 2 && cuts[0] + total - cuts.back() <= KCUTL_MERGE )
+            cuts.pop_back();                    // one point either side of the seam
+        if ( cuts.empty() )
+            return KCUTL_UNTOUCHED;
+        if ( c.closed && cuts.size() < 2 )
+        {
+            *why = "a closed loop needs TWO crossings to come apart";
+            return KCUTL_REFUSED;
+        }
+
+        std::vector< std::vector<float> > runs;
+        if ( c.closed )
+        {
+            for ( size_t i = 0; i + 1 < cuts.size(); ++i )
+            {
+                runs.push_back( std::vector<float>() );
+                LcExtract( c, cuts[i], cuts[i + 1], &runs.back() );
+            }
+            // The last piece runs from the last cut over the seam to the first.
+            std::vector<float> tail, head;
+            LcExtract( c, cuts.back(), total, &tail );
+            LcExtract( c, 0.0f, cuts[0], &head );
+            const size_t first = tail.empty() ? 0u : 3u;     // the seam point once
+            for ( size_t k = first; k + 2 < head.size(); k += 3 )
+            {
+                tail.push_back( head[k] );
+                tail.push_back( head[k + 1] );
+                tail.push_back( head[k + 2] );
+            }
+            runs.push_back( tail );
+        }
+        else
+        {
+            float lo = 0.0f;
+            for ( size_t i = 0; i <= cuts.size(); ++i )
+            {
+                const float hi = ( i < cuts.size() ) ? cuts[i] : total;
+                runs.push_back( std::vector<float>() );
+                LcExtract( c, lo, hi, &runs.back() );
+                lo = hi;
+            }
+        }
+
+        for ( size_t r = 0; r < runs.size(); ++r )
+        {
+            if ( !LcPieceOk( runs[r] ) )
+            {
+                *why = "a piece would be under the weld distance or over the point limit";
+                pieces->clear();
+                return KCUTL_REFUSED;
+            }
+            kconObject_t o;
+            o.type   = ( (int)( runs[r].size() / 3 ) == 2 ) ? KCON_LINE : KCON_POLYLINE;
+            o.plane  = t.plane;                 // seed only; KiwiCon_Add refits
+            o.pts    = runs[r];
+            o.closed = false;
+            o.group  = t.group;
+            o.name   = t.name;
+            pieces->push_back( o );
+        }
+        for ( size_t i = 0; i < cuts.size(); ++i )
+        {
+            float w[3];
+            LcPointAt( c, cuts[i], w );
+            points->push_back( w[0] );  points->push_back( w[1] );  points->push_back( w[2] );
+        }
+        return KCUTL_CUT;
+    }
+
+    // Circle / arc targets stay curves: every piece is an ARC on the same circle.  `raw`
+    // holds the crossing angles (degrees, plane space).
+    int LcPlanCurve( const kconObject_t &t, const std::vector<float> &raw,
+                     std::vector<kconObject_t> *pieces, std::vector<float> *points,
+                     const char **why )
+    {
+        if ( !( t.radius > 1.0e-3f ) )
+            return KCUTL_UNTOUCHED;
+        const float tolDeg = ( KCUTL_MERGE / t.radius ) * KCON_RAD2DEG;   // the weld as an angle
+        // Piece bounds as absolute angles, in the curve's own direction.
+        std::vector<float> bounds;
+        if ( t.type == KCON_CIRCLE )
+        {
+            std::vector<float> a;
+            for ( size_t i = 0; i < raw.size(); ++i )
+                a.push_back( KiwiCon_WrapDeg( raw[i] ) );
+            std::sort( a.begin(), a.end() );
+            LcMergeSorted( &a, tolDeg );
+            if ( a.size() >= 2 && a[0] + 360.0f - a.back() <= tolDeg )
+                a.pop_back();                   // one point either side of 0 degrees
+            if ( a.empty() )
+                return KCUTL_UNTOUCHED;
+            if ( a.size() < 2 )
+            {
+                *why = "a closed loop needs TWO crossings to come apart";
+                return KCUTL_REFUSED;
+            }
+            bounds = a;
+            bounds.push_back( a[0] + 360.0f );  // the last piece runs over 0 degrees
+        }
+        else
+        {
+            const float d     = t.ang1 - t.ang0;
+            const float sweep = fabsf( d );
+            if ( !( sweep > 1.0e-3f ) )
+                return KCUTL_UNTOUCHED;
+            const float sgn = ( d < 0.0f ) ? -1.0f : 1.0f;
+            std::vector<float> f;               // degrees from ang0, along the sweep
+            for ( size_t i = 0; i < raw.size(); ++i )
+            {
+                float rel = KiwiCon_WrapDeg( ( raw[i] - t.ang0 ) * sgn );
+                if ( rel >= 360.0f - tolDeg )
+                    rel -= 360.0f;              // just before the start IS the start
+                if ( rel <= tolDeg || rel >= sweep - tolDeg )
+                    continue;                   // its own end: a touch, not a cut
+                f.push_back( rel );
+            }
+            std::sort( f.begin(), f.end() );
+            LcMergeSorted( &f, tolDeg );
+            if ( f.empty() )
+                return KCUTL_UNTOUCHED;
+            bounds.push_back( t.ang0 );
+            for ( size_t i = 0; i < f.size(); ++i )
+                bounds.push_back( t.ang0 + sgn * f[i] );
+            bounds.push_back( t.ang1 );
+        }
+
+        for ( size_t i = 0; i + 1 < bounds.size(); ++i )
+        {
+            kconObject_t o;
+            o.type       = KCON_ARC;
+            o.plane      = t.plane;
+            o.planeValid = true;
+            o.centre[0]  = t.centre[0];
+            o.centre[1]  = t.centre[1];
+            o.radius     = t.radius;
+            o.ang0       = bounds[i];
+            o.ang1       = bounds[i + 1];
+            // A circle's pieces take the Arc tool's radius-driven density; an arc keeps its own.
+            o.segs       = ( t.type == KCON_CIRCLE ) ? 0 : t.segs;
+            o.closed     = false;
+            o.group      = t.group;
+            o.name       = t.name;
+            pieces->push_back( o );
+        }
+        // Cut points: every bound but the arc's own ends (a circle's last repeats its first).
+        for ( size_t i = ( t.type == KCON_CIRCLE ) ? 0u : 1u; i + 1 < bounds.size(); ++i )
+        {
+            float w[3];
+            LcCurvePoint( t, bounds[i], w );
+            points->push_back( w[0] );  points->push_back( w[1] );  points->push_back( w[2] );
+        }
+        return KCUTL_CUT;
+    }
+
+    // One target against the cutters; KCUTL_CUT fills its pieces and cut points.
+    int LcPlanTarget( int object, const std::vector<lcCutter_t> &cutters,
+                      std::vector<kconObject_t> *pieces, std::vector<float> *points,
+                      const char **why )
+    {
+        pieces->clear();
+        points->clear();
+        const kconObject_t *t = KiwiCon_At( object );
+        if ( !t || t->hidden )
+            return KCUTL_UNTOUCHED;
+        lcChain_t c;
+        if ( !LcBuildChain( *t, &c ) )
+            return KCUTL_UNTOUCHED;
+        std::vector<float> s, deg;
+        LcGatherCuts( *t, c, cutters, &s, &deg );
+        if ( s.empty() )
+            return KCUTL_UNTOUCHED;
+        const int r = KiwiCon_IsParametric( *t ) ? LcPlanCurve( *t, deg, pieces, points, why )
+                                                 : LcPlanChain( *t, c, s, pieces, points, why );
+        if ( r != KCUTL_UNTOUCHED && KiwiCon_HasSmooth( *t ) )
+        {
+            // Walked only to say so: a piece could not keep the spline's curve.
+            pieces->clear();
+            points->clear();
+            *why = "it is a spline (a layout curve, never cut; it can still BE the cutter)";
+            return KCUTL_REFUSED;
+        }
+        return r;
+    }
+
+    struct lcPlan_t
+    {
+        int                       object = -1;
+        std::vector<kconObject_t> pieces;   // replace `object`, ready for KiwiCon_Add
+        std::vector<float>        points;   // the cut points, 3 floats each (preview)
+    };
+
+    class KiwiCutLinesCommand : public KiwiEditorCommand
+    {
+    public:
+        const char *Name() const override { return "Cut"; }
+        bool CanExecute() override { return CanCutLines(); }
+
+        // Clicks pick cutters in both stages; RMB / Enter commits.
+        bool WantsClicks() const override { return true; }
+        // Pick-only: nothing is placed, so no snap marker.
+        bool ShowsSnap() const override { return false; }
+
+        const char *HudStatus() const override { return m_hud[0] ? m_hud : 0; }
+        bool        HudInvalid() const override
+        { return m_stage == KCUTL_PREVIEW && m_crossings <= 0; }
+
+        int LineBudget() const override
+        {
+            int n = 64 + m_crossings * 24;      // ring + dot per cut point
+            for ( size_t i = 0; i < m_cutters.size(); ++i )
+                if ( const kconObject_t *o = KiwiCon_At( m_cutters[i] ) )
+                    n += KiwiCon_SegmentCount( *o );
+            if ( m_hover >= 0 )
+                if ( const kconObject_t *o = KiwiCon_At( m_hover ) )
+                    n += KiwiCon_SegmentCount( *o );
+            return n;
+        }
+
+        int HudPrompts( const kiwiPrompt_t **out ) const override
+        {
+            static const kiwiPrompt_t s_pick[] = {
+                { "LMB",       "Pick the line to cut with" },
+                { "Shift+LMB", "Add a cutter" },
+            };
+            static const kiwiPrompt_t s_preview[] = {
+                { "LMB",       "Cut with this line instead" },
+                { "Shift+LMB", "Add / remove a cutter" },
+                { "Esc",       "Pick again" },
+            };
+            if ( m_stage == KCUTL_PICK )
+            {
+                *out = s_pick;
+                return (int)( sizeof( s_pick ) / sizeof( s_pick[0] ) );
+            }
+            *out = s_preview;
+            return (int)( sizeof( s_preview ) / sizeof( s_preview[0] ) );
+        }
+
+        bool Begin() override
+        {
+            Reset();
+            LineCutTargets( &m_targets );
+            if ( m_targets.empty() )
+            {
+                Sys_Printf( "Cut: select a brush, or the construction lines to cut.\n" );
+                return false;
+            }
+            m_gen = KiwiCon_Generation();
+            UpdateHud();
+            Sys_Printf( "Cut: click the line to cut the %i selected line(s) with — "
+                        "Shift+click adds cutters, RMB / Enter cuts.  The cutter stays "
+                        "whole.\n", (int)m_targets.size() );
+            return true;
+        }
+
+        void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
+        {
+            (void)pick;  (void)snap;
+            const int was = m_hover;
+            int x = 0, y = 0, obj = -1;
+            m_hover = -1;
+            if ( KiwiCmd_LastCursor( &x, &y )
+              && KiwiCon_PickSegmentAt( x, y, 0, 0, &obj, 0, 0 ) && obj >= 0 )
+                m_hover = obj;
+            if ( m_hover != was )
+            {
+                UpdateHud();
+                g_nUpdateBits |= 1;
+            }
+        }
+
+        // A bare click makes the hovered shape the only cutter; Shift toggles it.
+        bool Click() override
+        {
+            if ( m_hover < 0 )
+            {
+                Sys_Printf( "Cut: nothing to cut with there — click a construction line, "
+                            "or press Esc.\n" );
+                return true;
+            }
+            if ( !KiwiCmd_LastShift() )
+                m_cutters.clear();
+            bool removed = false;
+            for ( size_t i = 0; i < m_cutters.size(); )
+            {
+                if ( m_cutters[i] == m_hover )
+                {
+                    m_cutters.erase( m_cutters.begin() + i );
+                    removed = true;
+                    continue;
+                }
+                ++i;
+            }
+            if ( !removed )
+                m_cutters.push_back( m_hover );
+
+            if ( m_cutters.empty() )
+            {
+                m_stage = KCUTL_PICK;
+                ClearPlan();
+                UpdateHud();
+                Sys_Printf( "Cut: no cutter left — click the line to cut with.\n" );
+                g_nUpdateBits |= 1;
+                return true;
+            }
+
+            m_stage = KCUTL_PREVIEW;
+            Rebuild( true );
+            if ( !removed && IsTarget( m_hover ) )
+                Sys_Printf( "Cut: that line was selected too — as a cutter it stays whole.\n" );
+            if ( m_crossings > 0 )
+                Sys_Printf( "Cut: %i crossing(s) on %i line(s) — RMB / Enter cuts, "
+                            "Shift+click adds a cutter, Esc picks again.\n",
+                            m_crossings, (int)m_plans.size() );
+            else if ( m_refused == 0 )
+                Sys_Printf( "Cut: %s none of the selected lines — click another, or Esc.\n",
+                            ( m_cutters.size() == 1 ) ? "that line crosses"
+                                                      : "the cutters cross" );
+            g_nUpdateBits |= 1;
+            return true;
+        }
+
+        // Esc steps the preview back to picking; Enter is consumed until a cutter exists.
+        bool KeyDown( int vk, unsigned mods ) override
+        {
+            (void)mods;
+            if ( vk == 0x1B && m_stage == KCUTL_PREVIEW )    // VK_ESCAPE
+            {
+                m_stage = KCUTL_PICK;
+                m_cutters.clear();
+                ClearPlan();
+                UpdateHud();
+                Sys_Printf( "Cut: cutters dropped — click another line (Esc again "
+                            "cancels).\n" );
+                g_nUpdateBits |= 1;
+                return true;
+            }
+            if ( vk == 0x0D && m_stage == KCUTL_PICK )       // VK_RETURN
+            {
+                Sys_Printf( "Cut: click the line to cut with first.\n" );
+                return true;
+            }
+            return false;
+        }
+
+        void DrawWorld() override
+        {
+            KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
+            for ( size_t i = 0; i < m_cutters.size(); ++i )
+                if ( !DrawShape( m_cutters[i] ) )
+                    return;
+            if ( m_hover >= 0 && !IsCutter( m_hover ) )
+            {
+                KiwiLines_Color( KSPLIT_HOT_COL[0], KSPLIT_HOT_COL[1], KSPLIT_HOT_COL[2] );
+                if ( !DrawShape( m_hover ) )
+                    return;
+            }
+            // Every split point: a ring with a dot, in the cut-outline red.
+            KiwiLines_Color( KSPLIT_LINE_COL[0], KSPLIT_LINE_COL[1], KSPLIT_LINE_COL[2] );
+            for ( size_t p = 0; p < m_plans.size(); ++p )
+                for ( size_t i = 0; i + 2 < m_plans[p].points.size(); i += 3 )
+                {
+                    KiwiSnap_EmitSpot( &m_plans[p].points[i], KiwiSnap_RingPixels(), false );
+                    KiwiSnap_EmitSpot( &m_plans[p].points[i], KiwiSnap_AccentPixels() * 2.0f, true );
+                }
+        }
+
+        void Commit() override
+        {
+            if ( m_stage != KCUTL_PREVIEW || m_cutters.empty() )
+            {
+                Sys_Printf( "Cut: no cutter was picked — nothing was cut.\n" );
+                Reset();
+                return;
+            }
+            if ( KiwiCon_Generation() != m_gen )
+            {
+                Sys_Printf( "Cut: the construction changed while Cut was open — nothing "
+                            "was cut.  Press C again.\n" );
+                Reset();
+                return;
+            }
+            Rebuild( false );                   // the previewed plan, from the live store
+            if ( m_plans.empty() )
+            {
+                Sys_Printf( "Cut: nothing is crossed — nothing was cut.\n" );
+                Reset();
+                return;
+            }
+
+            std::vector<int> gone;
+            for ( size_t i = 0; i < m_plans.size(); ++i )
+                gone.push_back( m_plans[i].object );
+            std::sort( gone.begin(), gone.end() );
+
+            // Selected lines the cut left alone stay selected beside the pieces; each index
+            // drops by the removals below it.
+            std::vector<int> sel;
+            for ( size_t i = 0; i < m_targets.size(); ++i )
+            {
+                const int t = m_targets[i];
+                if ( std::binary_search( gone.begin(), gone.end(), t ) )
+                    continue;
+                const int below = (int)( std::lower_bound( gone.begin(), gone.end(), t )
+                                       - gone.begin() );
+                sel.push_back( t - below );
+            }
+
+            // Every fallible step is behind us: ONE snapshot, then the plan completes.
+            KiwiCon_UndoPush();
+            for ( int i = (int)gone.size() - 1; i >= 0; --i )
+                KiwiCon_RemoveAt( gone[(size_t)i] );       // high first: lower indices hold
+            int made = 0;
+            for ( size_t p = 0; p < m_plans.size(); ++p )
+                for ( size_t k = 0; k < m_plans[p].pieces.size(); ++k )
+                {
+                    const int idx = KiwiCon_Add( m_plans[p].pieces[k] );
+                    if ( idx >= 0 )
+                    {
+                        sel.push_back( idx );
+                        ++made;
+                    }
+                }
+            KiwiConSel_SelectObjects( sel.empty() ? 0 : &sel[0], (int)sel.size() );
+
+            Sys_Printf( "Cut: %i line(s) -> %i piece(s) at %i crossing(s); the cutter%s "
+                        "stayed whole.\n", (int)gone.size(), made, m_crossings,
+                        ( m_cutters.size() == 1 ) ? "" : "s" );
+            Reset();
+            g_nUpdateBits = -1;
+        }
+
+        void Cancel() override
+        {
+            Reset();
+            g_nUpdateBits |= 1;
+        }
+
+    private:
+        void ClearPlan()
+        {
+            m_plans.clear();
+            m_crossings = 0;
+            m_refused   = 0;
+        }
+
+        void Reset()
+        {
+            m_stage = KCUTL_PICK;
+            m_targets.clear();
+            m_cutters.clear();
+            ClearPlan();
+            m_hover  = -1;
+            m_gen    = 0;
+            m_hud[0] = '\0';
+        }
+
+        bool IsCutter( int obj ) const
+        {
+            return std::find( m_cutters.begin(), m_cutters.end(), obj ) != m_cutters.end();
+        }
+
+        bool IsTarget( int obj ) const
+        {
+            return std::binary_search( m_targets.begin(), m_targets.end(), obj );
+        }
+
+        static bool DrawShape( int object )
+        {
+            const kconObject_t *o = KiwiCon_At( object );
+            if ( !o )
+                return true;
+            const int segs = KiwiCon_SegmentCount( *o );
+            for ( int s = 0; s < segs; ++s )
+            {
+                float a[3], b[3];
+                if ( !KiwiCon_SegmentWorld( *o, s, a, b ) )
+                    break;
+                if ( !KiwiLines_Add( a, b ) )
+                    return false;
+            }
+            return true;
+        }
+
+        // Re-plan every target against the cutters from the LIVE store.  `report` prints
+        // each refusal once (a click), never per frame.
+        void Rebuild( bool report )
+        {
+            ClearPlan();
+            if ( KiwiCon_Generation() != m_gen )
+            {
+                // The latched indices may name other objects now; read none of them.
+                if ( report )
+                    Sys_Printf( "Cut: the construction changed while Cut was open — Esc, "
+                                "then press C again.\n" );
+                UpdateHud();
+                return;
+            }
+            std::vector<lcCutter_t> cutters;
+            for ( size_t i = 0; i < m_cutters.size(); ++i )
+            {
+                lcCutter_t cu;
+                if ( LcBuildCutter( m_cutters[i], &cu ) )
+                    cutters.push_back( cu );
+            }
+            for ( size_t i = 0; i < m_targets.size() && !cutters.empty(); ++i )
+            {
+                if ( IsCutter( m_targets[i] ) )
+                    continue;                   // a cutter is never cut
+                lcPlan_t    plan;
+                const char *why = "unknown";
+                plan.object = m_targets[i];
+                const int r = LcPlanTarget( m_targets[i], cutters, &plan.pieces,
+                                            &plan.points, &why );
+                if ( r == KCUTL_CUT )
+                {
+                    m_crossings += (int)( plan.points.size() / 3 );
+                    m_plans.push_back( plan );
+                }
+                else if ( r == KCUTL_REFUSED )
+                {
+                    ++m_refused;
+                    if ( report )
+                        Sys_Printf( "Cut: one line left whole — %s.\n", why );
+                }
+            }
+            UpdateHud();
+        }
+
+        void UpdateHud()
+        {
+            if ( m_stage == KCUTL_PICK )
+            {
+                const char *what = "click the line to cut them with";
+                if ( m_hover >= 0 )
+                    what = IsTarget( m_hover ) ? "click this SHAPE — it cuts the rest, not itself"
+                                               : "click this SHAPE — it cuts, it is not cut";
+                _snprintf( m_hud, sizeof( m_hud ), "cut  %i line(s)  %s",
+                           (int)m_targets.size(), what );
+            }
+            else
+            {
+                int live = 0;                   // targets that are not cutters
+                for ( size_t i = 0; i < m_targets.size(); ++i )
+                    if ( !IsCutter( m_targets[i] ) )
+                        ++live;
+                char refused[40] = { 0 };
+                if ( m_refused > 0 )
+                    _snprintf( refused, sizeof( refused ), "  %i left whole", m_refused );
+                refused[sizeof( refused ) - 1] = '\0';
+                _snprintf( m_hud, sizeof( m_hud ),
+                           "cut  %i crossing(s) on %i of %i line(s)%s  (%i cutter(s) stay whole)",
+                           m_crossings, (int)m_plans.size(), live, refused,
+                           (int)m_cutters.size() );
+            }
+            m_hud[sizeof( m_hud ) - 1] = '\0';
+        }
+
+        enum stage_t { KCUTL_PICK = 0, KCUTL_PREVIEW };
+        stage_t               m_stage = KCUTL_PICK;
+        std::vector<int>      m_targets;        // selected objects, ascending (Begin)
+        std::vector<int>      m_cutters;        // picked cutters, in pick order
+        std::vector<lcPlan_t> m_plans;          // crossed targets and their pieces
+        int                   m_hover     = -1; // construction object under the cursor
+        int                   m_crossings = 0;
+        int                   m_refused   = 0;  // crossed but left whole (and why: console)
+        unsigned              m_gen       = 0;  // store generation the indices belong to
+        char                  m_hud[160]  = { 0 };
+    };
+
     KiwiCutCommand         s_cut;
+    KiwiCutLinesCommand    s_cutLines;
     KiwiSplitFaceCommand   s_splitFace;
     KiwiSplitRegionCommand s_splitRegion;
 
@@ -2626,13 +3649,11 @@ namespace
     }
 }
 
-// Cut needs only a selected splittable brush; the cutter is picked in the gesture.
+// Cut needs only a selected splittable brush - or, with none, selected construction lines
+// (KIWI 2026-10-05: C then cuts the lines); the cutter is picked in the gesture.
 bool KiwiSplit_CanCut()
 {
-    for ( selbrush_t *n = selected_brushes.next; n != &selected_brushes; n = n->next )
-        if ( Splittable( n ) )
-            return true;
-    return false;
+    return CanCutBrushes() || CanCutLines();
 }
 
 bool KiwiSplit_CanSplitFace()
@@ -2658,7 +3679,13 @@ void KiwiSplit_RegisterCommands()
 KiwiEditorCommand *KiwiSplit_CommandForId( int commandId )
 {
     if ( commandId == KIWI_CMD_CUT )
+    {
+        // KIWI (2026-10-05): no brush to cut but construction lines selected - cut the lines.
+        // A brush in the selection keeps the brush Cut (selected lines then seed its fence).
+        if ( !CanCutBrushes() && CanCutLines() )
+            return &s_cutLines;
         return &s_cut;
+    }
     if ( commandId == KIWI_CMD_SPLIT_FACE )
     {
         // KIWI: a selected construction face (region) takes the bisecting-line split -

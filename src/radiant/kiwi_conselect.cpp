@@ -612,10 +612,11 @@ bool KiwiConSel_Join()
 // lollipop handle").  A modal command: the lollipop sits on the selected end nearest the
 // cursor, pointing along its line; dragging it (or typing a length) moves every selected end
 // that far along its OWN end segment, so an object keeps its direction, its other points,
-// group, name and plane.  Nothing is written until Enter.
+// group, name and plane.  Nothing is written until Enter.  It starts paused: the cursor
+// moves nothing until the handle is dragged (2026-10-05).
 namespace
 {
-    const float KCON_EXTEND_MAX    = 4096.0f;   // WORLD UNITS an end may travel
+    const float KCON_EXTEND_MAX   = 4096.0f;   // WORLD UNITS an end may travel
     const float KCON_EXTEND_MAG_PX = 10.0f;     // the handle clicks onto a line crossing this close
     const float KCON_EXTEND_MIN    = 0.01f;     // below this an end has not moved
 
@@ -938,6 +939,17 @@ namespace
             return true;
         }
 
+        // KIWI (2026-10-05, user: "when i use E to extend a line it should not automatically
+        // start moving w/ my cursor. I need to drag the lollipop to get it to start"): Offset's
+        // rule - E starts PAUSED, only a held handle reads the cursor, and other presses are
+        // swallowed so a stray click cannot resume a mouse-follow.  Typing still works.
+        void HandleGrab( bool held ) override { m_grab = held; }
+        bool PressIntercept( int imgX, int imgY ) override
+        {
+            (void)imgX;  (void)imgY;
+            return !m_ends.empty();
+        }
+
         // A grab drops travel the stop swallowed, so the handle answers from where it shows.
         void Rebase() override
         {
@@ -953,6 +965,7 @@ namespace
             m_primary   = 0;
             m_dist      = 0.0f;
             m_haveStart = false;
+            m_grab      = false;
             m_hasNum    = false;
             m_onLine    = false;
             m_hud[0]    = '\0';
@@ -1059,6 +1072,9 @@ namespace
             PathCrossings( m_ends[m_primary], tol, &m_cross );
             LatchStart();
             Recompute();
+            KiwiCmd_Pause();                            // nothing follows the mouse until a grab
+            Sys_Printf( "Extend: drag the handle to lengthen the selected ends, or type a "
+                        "length.  RMB/Enter commits, Esc cancels.\n" );
             return true;
         }
 
@@ -1158,23 +1174,27 @@ namespace
                 return;
             const extendEnd_t &pe = m_ends[m_primary];
             float d = m_dist;
-            const bool canAxis = KiwiCam_AxisPortrayable( pe.dir );
-            if ( !canAxis )
-                m_haveStart = false;                   // looking down the line: hold
-            else if ( !m_haveStart )
-                LatchStart();
-            ray_t ray;
-            float q[3], rel[3];
-            if ( canAxis && m_haveStart && CursorRay( &ray ) && KiwiCam_RayAxis( ray, pe.p, pe.dir, q ) )
+            if ( m_grab )                              // only a held handle reads the cursor
             {
-                Sub3( q, pe.p, rel );
-                d = Dot3( rel, pe.dir ) - m_start;
+                const bool canAxis = KiwiCam_AxisPortrayable( pe.dir );
+                if ( !canAxis )
+                    m_haveStart = false;               // looking down the line: hold
+                else if ( !m_haveStart )
+                    LatchStart();
+                ray_t ray;
+                float q[3], rel[3];
+                if ( canAxis && m_haveStart && CursorRay( &ray ) && KiwiCam_RayAxis( ray, pe.p, pe.dir, q ) )
+                {
+                    Sub3( q, pe.p, rel );
+                    d = Dot3( rel, pe.dir ) - m_start;
+                }
             }
 
-            m_onLine = false;
+            if ( m_hasNum || m_grab )                  // a parked handle keeps its "on a line"
+                m_onLine = false;
             if ( m_hasNum )
                 d = m_numWorld;
-            else if ( KiwiCmd_SnapEngaged() )
+            else if ( m_grab && KiwiCmd_SnapEngaged() )
             {
                 float bestGap = 3.0e38f;
                 for ( size_t c = 0; c < m_cross.size(); ++c )
@@ -1231,6 +1251,7 @@ namespace
         float         m_dist      = 0.0f;               // the handle's travel before the stops
         float         m_start     = 0.0f;
         bool          m_haveStart = false;
+        bool          m_grab      = false;              // the lollipop handle is held
         bool          m_hasNum    = false;
         float         m_numWorld  = 0.0f;
         bool          m_onLine    = false;
