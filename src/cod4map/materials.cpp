@@ -672,7 +672,6 @@ static ShaderInfo_t *LoadMaterialForTarget(const char *materialName, int targetI
 {
   ShaderInfo_t *result, *matEntry;
   NativeLoadedMaterial_t *nativeEntry;
-  int assertResult;
   void *fileData;
   char filePath[MAX_OS_PATH];
 
@@ -693,47 +692,9 @@ static ShaderInfo_t *LoadMaterialForTarget(const char *materialName, int targetI
   if ( !result )
   {
     /* validate target platform state */
-    if ( !g_targetPlatform && !g_matExpandRegion.assertFlag_platform )
-    {
-      assertResult = AssertHandler("targetPlatform", ".\\materials.cpp", 165, 0, 1);
-      if ( assertResult )
-      {
-        if ( assertResult == 2 )
-          g_matExpandRegion.assertFlag_platform = 1;
-      }
-      else
-      {
-        DebugBreak();
-      }
-    }
-
-    if ( !g_targetPlatform->materialDirectory && !g_matExpandRegion.assertFlag_matDir0 )
-    {
-      assertResult = AssertHandler("targetPlatform->materialDirectory", ".\\materials.cpp", 166, 0, 1);
-      if ( assertResult )
-      {
-        if ( assertResult == 2 )
-          g_matExpandRegion.assertFlag_matDir0 = 1;
-      }
-      else
-      {
-        DebugBreak();
-      }
-    }
-
-    if ( !*g_targetPlatform->materialDirectory && !g_matExpandRegion.assertFlag_matDir )
-    {
-      assertResult = AssertHandler("targetPlatform->materialDirectory[0]", ".\\materials.cpp", 167, 0, 1);
-      if ( assertResult )
-      {
-        if ( assertResult == 2 )
-          g_matExpandRegion.assertFlag_matDir = 1;
-      }
-      else
-      {
-        DebugBreak();
-      }
-    }
+    iassert( g_targetPlatform );
+    iassert( g_targetPlatform->materialDirectory );
+    iassert( g_targetPlatform->materialDirectory[0] );
 
     /* build file path and load from IWD */
     sprintf(filePath, "%s/%s", g_targetPlatform->materialDirectory, materialName);

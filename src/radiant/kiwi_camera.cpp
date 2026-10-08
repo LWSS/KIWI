@@ -11,6 +11,7 @@
 #include "prefs.h"                   // g_PrefsDlg (m_bCamXYUpdate, m_nMoveSpeed, camera_fov)
 #include <universal/com_math.h>      // AngleVectors
 #include "kiwi_camera.h"
+#include "kiwi_command.h"            // KiwiCmd_KeyHeld
 #include "kiwi_pick.h"
 #include "kiwi_droptrace.h"          // KiwiDrop_Trace — the orbit pivot's any-surface fallback
 #include "kiwi_section.h"            // KiwiSection_Active: the sweep guard yields to a section cut
@@ -18,17 +19,13 @@
 #include "kiwi_skybox.h"             // KiwiSky_IsSkyBrush: the sky shell never pivots an orbit
 #include "radiant_registry.h"        // Radiant_Profile* (the fly-speed multiplier)
 #include "kiwi_vec.h"     // shared Dot3/Sub3/... helpers
+#include "kiwi_ported.h"
 
 #include <math.h>
 #include <stdio.h>                   // sprintf_s: the orbit-probe console line
 #include "kiwi_lines.h"              // KiwiLines_*: the orbit-probe debug draw
 #include "kiwi_ux.h"                 // KiwiUX_DebugOrbitPivot
 #include <float.h>                  // FLT_MAX: the orbit probe's model-mesh ray length
-
-// Ported entry points.
-extern camera_s *Ed_Camera();          // camwnd.cpp
-extern void      CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
-extern int       g_nUpdateBits;        // 0x25D5A74 (mainfrm.cpp)
 
 namespace
 {
@@ -203,7 +200,7 @@ namespace
 
     bool KeyDown( int vk )
     {
-        return ( ::GetAsyncKeyState( vk ) & 0x8000 ) != 0;
+        return KiwiCmd_KeyHeld( vk );       // a test instance never flies off the user's keys
     }
 
     // Measure fly dt because the 60-fps pump cadence is a cap, not a guarantee.
@@ -1213,45 +1210,6 @@ float KiwiCam_OrthoHalfHeight()
     if ( h > KCAM_ORTHO_HALF_MAX )
         h = KCAM_ORTHO_HALF_MAX;
     return h;
-}
-
-// Zoom meter uses the same min and projection-specific max as the wheel, so its
-// endpoints coincide with the clamps.
-bool KiwiCam_ZoomMeter( float *outFrac, float *outWpp )
-{
-    if ( outFrac ) *outFrac = 0.0f;
-    if ( outWpp )  *outWpp  = 0.0f;
-
-    const camera_s *c = Ed_Camera();
-    if ( c->height < 1 )
-        return false;
-
-    const float lo = KCAM_MIN_DIST;
-    const float hi = KCam_MaxDist();
-    if ( !( hi > lo ) )
-        return false;                        // a pathological fov collapsed the range
-
-    float d = s_dist;
-    if ( !( d > lo ) ) d = lo;               // also catches NaN
-    if ( d > hi )      d = hi;
-
-    // log(d/lo) / log(hi/lo).  Both logs are of numbers >= 1 and the denominator is
-    // > 0 by the guard above, so this cannot divide by zero or take a log of <= 0.
-    const double f = log( (double)d / (double)lo ) / log( (double)hi / (double)lo );
-    float frac = (float)f;
-    if ( !( frac > 0.0f ) ) frac = 0.0f;
-    if ( frac > 1.0f )      frac = 1.0f;
-
-    if ( outFrac )
-        *outFrac = frac;
-    if ( outWpp )
-    {
-        if ( !s_have )
-            PivotOnAxis( Ed_Camera() );
-        CamWnd_BuildMatrix();                // WorldPerPixel reads camera.vpn
-        *outWpp = KiwiCam_WorldPerPixel( s_lookAt );
-    }
-    return true;
 }
 
 // One-axis view gate; non-unit input is normalized and a zero axis is refused.

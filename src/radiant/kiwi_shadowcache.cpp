@@ -11,8 +11,7 @@
 #include "kiwi_shadowcache.h"
 #include "kiwi_walkcache.h"
 #include "kiwi_lightcache.h"
-
-extern int Sys_Printf( const char *fmt, ... );
+#include "kiwi_ported.h"
 
 // Per-XModel caps; callers must not treat a cache miss as empty geometry.
 #define KIWI_SV_MAX_MODEL_MB       96
@@ -90,14 +89,12 @@ void KiwiShadowCache_SetBrushCasts( const void *brushDef, unsigned defVersion, b
     // 32 probes deep and every slot live for another brush: give up rather than evict.
 }
 
-// Extracted model-local geometry keyed by asset pointer.
+// Extracted model-local geometry keyed by asset pointer (s_modelKey).
 struct SvModelGeo
 {
-    XModel         *model;
     float          *verts;       // 3 floats per vertex, model-local (stride 12)
     unsigned short *indices;
     int             indexCount;
-    int             bytes;
 };
 
 static SvModelGeo *s_models     = nullptr;
@@ -164,11 +161,9 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
     }
 
     SvModelGeo *e = &s_models[s_modelCount];
-    e->model      = model;
     e->verts      = nullptr;
     e->indices    = nullptr;
     e->indexCount = 0;
-    e->bytes      = 0;
 
     if ( ic > 0 )
     {
@@ -191,7 +186,6 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
                 e->verts      = vcopy;
                 e->indices    = icopy;
                 e->indexCount = ic;
-                e->bytes      = need;
                 s_modelBytes += need;
             }
             else
@@ -248,14 +242,4 @@ void KiwiShadowCache_Shutdown()
     memset( s_castTable, 0, sizeof( s_castTable ) );
     KiwiWalkCache_Invalidate();   // age every shared-epoch memo
 }
-
-int KiwiShadowCache_ResidentKB()
-{
-    int bytes = s_modelBytes;
-    bytes += (int)sizeof( s_castTable );
-    bytes += (int)sizeof( s_modelKey ) + (int)sizeof( s_modelIdx );
-    return bytes / 1024;
-}
-
-int KiwiShadowCache_CachedModels()      { return s_modelCount; }
 

@@ -3,9 +3,9 @@
 // Panel semantics vs CSurfaceDlg: same core calls in the same order (Gather → edit →
 // Apply/Spin, and the Fit/Natural/CAP/Lmap/Set buttons); the panel-stays-open flow and
 // the explicit Refresh button are the sanctioned Phase-3 divergences noted in
-// RADIANT_UI_REWORK_PLAN.md. No HWND path here: the dialog's Surf_RefreshFields and the
-// SetTexMods/Wnd02 scratch transaction are all gated on surfDlgGlob.hwnd, so the panel
-// re-Gathers its own fields instead.
+// RADIANT_UI_REWORK_PLAN.md. No HWND path here: the dialog's Surf_RefreshFields is gated on
+// surfDlgGlob.hwnd, so the panel re-Gathers its own fields instead (and applies edits live;
+// the MFC SetTexMods/Wnd02 scratch transaction is gone).
 #include "stdafx.h"
 #include "qe3.h"
 #include "kiwi_fmt.h"
@@ -31,6 +31,8 @@ struct surfaceDlgState_t
 
 // ── surfacedlg.cpp — the struct-coupled inspector core (not in radiant_ui_actions.h) ──
 extern bool SurfaceDlg_Gather( surfaceDlgState_t &out );                     // Select_SetTexture_2 read pass
+extern bool SurfaceDlg_PickSettled();
+extern bool g_surfInspStale;                                                 // set by Surf_UpdateInspector
 extern void SurfaceDlg_Apply( surfaceDlgState_t &st );                       // GetTexMods commit
 extern void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up );   // UpdateSpinners
 extern void SurfaceFit_Apply();                                              // "Fit" button
@@ -126,6 +128,14 @@ void ImGuiPanel_Surface_Draw()
         s_setMode = g_qeglobals.surfInsp_nIDButton;
         s_state.texdefDirty = 0;
         s_state.sampleDirty = 0;
+        SI_Refresh();
+    }
+
+    // KIWI: follow selection / edit / load changes (UpdateSurfaceDialog); a typed,
+    // unapplied edit keeps its fields
+    if ( g_surfInspStale && !s_state.texdefDirty && !s_state.sampleDirty && SurfaceDlg_PickSettled() )
+    {
+        g_surfInspStale = false;
         SI_Refresh();
     }
 

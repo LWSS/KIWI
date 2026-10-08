@@ -11,6 +11,7 @@
 #include "kiwi_construct.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_trim.h"
 #include "kiwi_units.h"
 #include "kiwi_vec.h"     // Shared Dot3/Sub3 helpers.
@@ -19,15 +20,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <vector>
-
-// Ported entry points, verified against their definitions.
-//   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
-//   engine_stubs.cpp:693   int  g_nUpdateBits = 0;   // 0x25d5a74
-//   mainfrm.cpp:1246       bool Radiant_RegisterCommand( const char *name, byte vk,
-//                                                        byte mods, int commandId )
-extern int  Sys_Printf( const char *fmt, ... );
-extern int  g_nUpdateBits;
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {

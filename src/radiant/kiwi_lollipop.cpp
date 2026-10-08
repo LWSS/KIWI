@@ -13,15 +13,11 @@
 #include "kiwi_command.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_ux.h"
 #include "kiwi_vec.h"     // vector helpers
 
 #include <math.h>
-
-// Ported entry points: CamWnd_BuildMatrix 0x403470; g_nUpdateBits 0x25d5a74.
-extern camera_s *Ed_Camera();
-extern void      CamWnd_BuildMatrix();
-extern int       g_nUpdateBits;
 
 namespace
 {
@@ -117,7 +113,7 @@ namespace
         float prev[3], pt[3];
         for ( int i = 0; i <= segs; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % segs ) ) / (float)segs;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % segs ) ) / (float)segs;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
             for ( int k = 0; k < 3; ++k )
@@ -130,8 +126,8 @@ namespace
             return;
         for ( int i = 0; i < segs / 2; ++i )
         {
-            const float th0 = ( 6.283185307179586f * (float)i ) / (float)segs;
-            const float th1 = th0 + 3.14159265358979f;
+            const float th0 = ( (float)( 2.0 * KIWI_PI ) * (float)i ) / (float)segs;
+            const float th1 = th0 + (float)KIWI_PI;
             float a[3], b[3];
             for ( int k = 0; k < 3; ++k )
             {
@@ -263,7 +259,7 @@ void KiwiLollipop_DrawWorld()
         float prev[3];
         for ( int i = 0; i <= KLOL_RING_SEGS; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % KLOL_RING_SEGS ) )
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % KLOL_RING_SEGS ) )
                            / (float)KLOL_RING_SEGS;
             float p[3];
             for ( int k = 0; k < 3; ++k )

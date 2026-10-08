@@ -6,17 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_FindSharedVertex;
-char s_assertDisable_ParsePatchVertex;
-char s_assertDisable_MergePatchVertexPositions;
-char s_assertDisable_SubdivideTerrain;
-char s_assertDisable_SubdivideTerrain;
-char s_assertDisable_SubdivideTerrain;
-char s_assertDisable_SubdivideTerrain;
-char s_assertDisable_SubdivideTerrain;
-char s_assertDisable_SubdivideTerrain;
-
-
 /*
 ================
 PatchMapDrawSurfs
@@ -219,34 +208,6 @@ int ComparePatchSurfaces(const void *elemA, const void *elemB)
   }
   
   return a->material < b->material ? -1 : 1;
-}
-
-/*
-================
-StableSortPatchSurfaces
-
-The native CoD4 CRT qsort keeps equal terrain patches in parser-list order.
-The current toolchain's qsort does not, which changes DrawSurf allocation and
-therefore collision vertex/triangle order.  Preserve the native observable
-order explicitly while retaining ComparePatchSurfaces as the ordering rule.
-================
-*/
-static void StableSortPatchSurfaces(Patch_t **patches, int patchCount)
-{
-  int i;
-
-  for ( i = 1; i < patchCount; ++i )
-  {
-    Patch_t *patch = patches[i];
-    int j = i;
-
-    while ( j > 0 && ComparePatchSurfaces(&patches[j - 1], &patch) > 0 )
-    {
-      patches[j] = patches[j - 1];
-      --j;
-    }
-    patches[j] = patch;
-  }
 }
 
 /*
@@ -1209,7 +1170,7 @@ void ProcessEntityPatches(Entity_t *entity)
   Patch_t *pm, *prev, *cur;
   Patch_t **arr;
   int terrainCount, patchCount, groupStart, groupSize;
-  int assertResult, i;
+  int i;
   Patch_t *stackArr[MAX_TERRAIN_PATCHES];
 
   /* count terrain patches */

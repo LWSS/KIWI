@@ -12,18 +12,12 @@
 #include "kiwi_hover.h"              // shared hover pick and accent
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"               // pick_result_t
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <vector>
-
-// Ed_Camera always returns &g_camwndState.camera (camwnd.cpp:159).
-extern camera_s  *Ed_Camera();                       // camwnd.cpp:161
-extern void       CamWnd_BuildMatrix();              // camwnd.cpp 0x403470
-extern int        g_nUpdateBits;                     // mainfrm.cpp
-extern selbrush_t selected_brushes;                  // brush.cpp
-extern int        Sys_Printf( const char *fmt, ... );  // win_qe3.cpp
 
 namespace
 {
@@ -232,11 +226,6 @@ bool KiwiPatchVerts_OwnsPatch( const selbrush_t *b )
 bool KiwiPatchVerts_Active()
 {
     return s_active;
-}
-
-const char *KiwiPatchVerts_Status()
-{
-    return ( s_active && s_status[0] ) ? s_status : 0;
 }
 
 void KiwiPatchVerts_Exit()

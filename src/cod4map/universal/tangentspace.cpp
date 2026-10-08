@@ -6,14 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_tsI0;
-char s_assertDisable_tsI1;
-char s_assertDisable_tsI2;
-char s_assertDisable_tsIndices;
-char s_assertDisable_tsSources;
-char s_assertDisable_tsVertCount;
-
-
 /*
 ================
 TangentSpaceCalcTBForTriangle

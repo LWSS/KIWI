@@ -12,12 +12,6 @@ int        c_peak_windings;
 int        c_removed;
 int        c_winding_allocs;
 int        c_winding_points;
-char       g_assertExpr_nGt0[8] = { 'n', ' ', '>', ' ', '0', '\0', '\0', '\0' };
-
-char s_assertDisable_CheckWindingInPlane;
-char s_assertDisable_RemoveDuplicatePoints;
-char s_assertDisable_RemoveDuplicatePoints;
-char s_assertDisable_RemoveDuplicatePoints;
 
 /*
 ================
@@ -137,20 +131,6 @@ float *Vector2Clear(float *out)
 {
   out[0] = 0.0f;
   out[1] = 0.0f;
-  return out;
-}
-
-float *Vector2Add(const float *a, const float *b, float *out)
-{
-  out[0] = a[0] + b[0];
-  out[1] = a[1] + b[1];
-  return (float *)a;
-}
-
-float *Vector2Scale(const float *in, float scale, float *out)
-{
-  out[0] = scale * in[0];
-  out[1] = scale * in[1];
   return out;
 }
 
@@ -424,8 +404,8 @@ int WindingPlaneSide(Winding_t *w, float *normal, float dist)
   return 2;    /* SIDE_ON */
 }
 
-/* CoD4 0x42D710. */
-static float WindingPlaneMaxDist(const Winding_t *w, const float *normal, float dist)
+/* CoD4 0x42D710: the largest |distance| of w's points from the plane. */
+float WindingPlaneMaxDist(const Winding_t *w, const float *normal, float dist)
 {
   float maxDist = 0.0f;
   int i;
@@ -439,198 +419,6 @@ static float WindingPlaneMaxDist(const Winding_t *w, const float *normal, float 
       maxDist = pointDist;
   }
   return maxDist;
-}
-
-/* CoD4 0x42E110.  For every directed edge, find its greatest inward plane
- * distance and return the smallest of those values.  This is the convexity
- * clearance used by the original shadow and concave-winding callers. */
-static float WindingSmallestEdgeDistance(const Winding_t *w, const float *planeNormal)
-{
-  float smallest = FLT_MAX;
-  int previous, current;
-
-  Assert(w, g_assertFlags7);
-  Assert(w->numpoints >= 3, g_assertFlags8);
-
-  previous = w->numpoints - 1;
-  for ( current = 0; current < w->numpoints; ++current )
-  {
-    vec3_t edge, edgePlane;
-    float edgeLength, edgeDist, largest = -FLT_MAX;
-    int test = (current + 1) % w->numpoints;
-
-    VectorSubtract(w->points[current], w->points[previous], edge);
-    CrossProduct(edge, planeNormal, edgePlane);
-    edgeLength = (float)VecNormalize(edgePlane);
-    edgeDist = DotProduct(edgePlane, w->points[previous]);
-
-    do
-    {
-      float pointDist = DotProduct(w->points[test], edgePlane) - edgeDist;
-      Assert(pointDist >= -ON_EPSILON || edgeLength < 1.0f, g_assertFlags9);
-      if ( pointDist < largest )
-        break;
-      largest = pointDist;
-      test = (test + 1) % w->numpoints;
-    } while ( test != previous );
-
-    if ( largest < smallest )
-      smallest = largest;
-    previous = current;
-  }
-  return smallest;
-}
-
-/*
-================
-WindingIsOnPlane
-
-Checks if ALL vertices of a winding are within epsilon of a plane.
-Returns 1 if all vertices within epsilon, 0 if any vertex exceeds epsilon.
-================
-*/
-int WindingIsOnPlane(Winding_t *w, float *normal, float dist, float epsilon)
-{
-  float epsSq;
-  double d;
-  int i;
-
-  epsSq = epsilon * epsilon;
-  for ( i = 0; i < w->numpoints; i++ )
-  {
-    d = DotProduct021(w->points[i], normal) - dist;
-    if ( d * d > epsSq )
-      return 0;
-  }
-  return 1;
-}
-
-/*
-================
-ChopWinding
-
-Snaps all winding vertices onto a plane and rounds to integer powers of 2.
-================
-*/
-Winding_t *ChopWinding(Winding_t *w, float *normal, float dist)
-{
-  int i;
-  double projDist;
-
-  Assert(w, g_assertFlagsE);
-  Assert(normal, g_assertFlagsF);
-
-  for ( i = 0; i < w->numpoints; i++ )
-  {
-    /* project vertex onto plane */
-    projDist = -(DotProduct120(w->points[i], normal) - dist);
-    VectorMA(w->points[i], projDist, normal, w->points[i]);
-
-    /* snap to grid */
-    w->points[i][0] = SnapToIntegralPowerOf2(w->points[i][0], SNAP_INT_MIN_BITS, SNAP_INT_MAX_BITS);
-    w->points[i][1] = SnapToIntegralPowerOf2(w->points[i][1], SNAP_INT_MIN_BITS, SNAP_INT_MAX_BITS);
-    w->points[i][2] = SnapToIntegralPowerOf2(w->points[i][2], SNAP_INT_MIN_BITS, SNAP_INT_MAX_BITS);
-  }
-
-  return w;
-}
-
-/*
-================
-CheckWinding
-
-Adds winding points to a convex hull. Both the winding and hull
-lie on the same plane.
-================
-*/
-Winding_t *CheckWinding(Winding_t *w, Winding_t **hull, float *normal)
-{
-  int i, j, k;
-  float *p, *copy;
-  vec3_t dir;
-  float d;
-  int numHullPts, numNew;
-  vec3_t hullPoints[MAX_HULL_POINTS];
-  vec3_t newHullPoints[MAX_HULL_POINTS];
-  vec3_t hullDirs[MAX_HULL_POINTS];
-  int hullSide[MAX_HULL_POINTS];
-  int outside;
-  Winding_t *result;
-
-  if ( !*hull )
-  {
-    result = AllocWinding(w->numpoints);
-    memcpy(result, w, sizeof(int) + w->numpoints * sizeof(vec3_t));
-    *hull = result;
-    return result;
-  }
-
-  numHullPts = (*hull)->numpoints;
-  memcpy(hullPoints, (*hull)->points, numHullPts * sizeof(vec3_t));
-
-  for ( i = 0; i < w->numpoints; i++ )
-  {
-    p = w->points[i];
-
-    /* build edge normals for current hull */
-    for ( j = 0; j < numHullPts; j++ )
-    {
-      k = (j + 1) % numHullPts;
-      VectorSubtract(hullPoints[k], hullPoints[j], dir);
-      VecNormalize(dir);
-      CrossProduct(normal, dir, hullDirs[j]);
-    }
-
-    /* classify input point against each hull edge */
-    outside = 0;
-    for ( j = 0; j < numHullPts; j++ )
-    {
-      VectorSubtract(p, hullPoints[j], dir);
-      d = DotProduct210(dir, hullDirs[j]);
-      if ( d >= ON_EPSILON )
-        outside = 1;
-      hullSide[j] = d >= -ON_EPSILON;
-    }
-
-    /* if point is inside the hull, skip it */
-    if ( !outside )
-      continue;
-
-    /* find the back-to-front transition */
-    for ( j = 0; j < numHullPts; j++ )
-    {
-      if ( !hullSide[j % numHullPts] && hullSide[(j + 1) % numHullPts] )
-        break;
-    }
-    if ( j == numHullPts )
-      continue;
-
-    /* start new hull with the input point */
-    VectorCopy(p, newHullPoints[0]);
-    numNew = 1;
-
-    /* copy hull points that aren't double-fronts (inside on both sides) */
-    j = (j + 1) % numHullPts;
-    for ( k = 0; k < numHullPts; k++ )
-    {
-      if ( hullSide[(j + k) % numHullPts] && hullSide[(j + k + 1) % numHullPts] )
-        continue;
-      copy = hullPoints[(j + k + 1) % numHullPts];
-      VectorCopy(copy, newHullPoints[numNew]);
-      numNew++;
-    }
-
-    numHullPts = numNew;
-    memcpy(hullPoints, newHullPoints, numHullPts * sizeof(vec3_t));
-  }
-
-  /* replace the old hull with the merged result */
-  FreeWinding(*hull);
-  result = AllocWinding(numHullPts);
-  *hull = result;
-  result->numpoints = numHullPts;
-  memcpy(result->points, hullPoints, numHullPts * sizeof(vec3_t));
-  return result;
 }
 
 /*
@@ -717,25 +505,6 @@ int CheckPointsAgainstPlane(vec3_t *points, int numPoints, float *normal, float 
 
 /*
 ================
-CheckPointsAgainstPlaneReversed
-
-Returns 1 if all points are on the negative side of a plane (dist <= epsilon).
-================
-*/
-int CheckPointsAgainstPlaneReversed(vec3_t *points, int numPoints, float *normal, float dist, float epsilon)
-{
-  int i;
-
-  for ( i = 0; i < numPoints; i++ )
-  {
-    if ( DotProduct021(points[i], normal) - dist > epsilon )
-      return 0;
-  }
-  return 1;
-}
-
-/*
-================
 CheckWindingSeparation
 
 Tests if any edge plane of w can separate testW (SAT test).
@@ -786,36 +555,44 @@ int CheckWindingSeparationBoth(Winding_t *w1, Winding_t *w2, float *normal, floa
 
 /*
 ================
-CheckWindingContainment
+CheckWindingSeparationBands
 
-Tests if inner winding is fully contained within outer winding.
-Returns 1 if all inner points pass all edge plane tests (contained), 0 otherwise.
+CoD4 0x42E3A0, the test AddWindingWithoutOverlap_r runs (0x42E4F0 = both directions): an edge
+plane of w separates testW when testW's nearest point is within 1% of epsilon of it, or within
+epsilon when testW reaches more than three times that depth past the plane and the overlap is
+under a quarter of w's own depth from that edge - the two bands ClipTriWinding uses.
+KIWI: wired; the port ran CheckWindingSeparation's flat epsilon band there, which let a piece up
+to epsilon deep into another count as separated and skip the clip.
 ================
 */
-int CheckWindingContainment(Winding_t *outer, Winding_t *inner, float *normal, float epsilon)
+static int CheckWindingSeparationBands(Winding_t *w, Winding_t *testW, float *normal, float epsilon)
 {
-  int numPts;
-  int i, nextIdx;
-  vec3_t edgePlane;
-  float planeDist;
-  vec3_t edgeDir;
+  int numPts, i;
+  vec3_t edgeDir, edgePlane;
+  float planeDist, minDist, maxDist;
+  const float smallEpsilon = epsilon * 0.01f;
 
-  numPts = outer->numpoints;
-  if ( numPts <= 0 )
-    return 1;
-
+  numPts = w->numpoints;
   for ( i = 0; i < numPts; i++ )
   {
-    nextIdx = (i + 1) % numPts;
-    VectorSubtract(outer->points[nextIdx], outer->points[i], edgeDir);
+    VectorSubtract(w->points[(i + 1) % numPts], w->points[i], edgeDir);
     CrossProduct(normal, edgeDir, edgePlane);
     VecNormalize(edgePlane);
-    planeDist = DotProduct210(edgePlane, outer->points[i]);
-
-    if ( !CheckPointsAgainstPlaneReversed(inner->points, inner->numpoints, edgePlane, planeDist, epsilon) )
-      return 0;
+    planeDist = DotProduct210(edgePlane, w->points[i]);
+    WindingPlaneDistExtent(testW, edgePlane, planeDist, &minDist, &maxDist);
+    if ( minDist >= -smallEpsilon )
+      return 1;
+    if ( minDist > -epsilon && maxDist > -3.0f * minDist
+         && minDist > -0.25f * WindingPlaneMaxDist(w, edgePlane, planeDist) )
+      return 1;
   }
-  return 1;
+  return 0;
+}
+
+int CheckWindingSeparationBandsBoth(Winding_t *w1, Winding_t *w2, float *normal, float epsilon)
+{
+  return CheckWindingSeparationBands(w1, w2, normal, epsilon)
+      || CheckWindingSeparationBands(w2, w1, normal, epsilon);
 }
 
 /*
@@ -996,55 +773,6 @@ Winding_t *WindingFromPlaneAndBounds(const float *plane, const float *mins, cons
 
 /*
 ================
-RemoveDuplicatePoints
-
-Removes consecutive near-duplicate vertices from winding (within epsilon distance).
-================
-*/
-void RemoveDuplicatePoints(Winding_t *w, float epsilon)
-{
-  int keptCount, totalKept;
-  float epsilonSq;
-  int i, newCount;
-
-  Assert(w, s_assertDisable_RemoveDuplicatePoints);
-  Assert(w->numpoints >= 3, s_assertDisable_RemoveDuplicatePoints);
-
-  epsilonSq = epsilon * epsilon;
-
-  /* remove trailing points that duplicate the first */
-  while ( w->numpoints > 0 )
-  {
-    if ( DistanceSquared(w->points[0], w->points[w->numpoints - 1]) > epsilonSq )
-      break;
-    w->numpoints--;
-  }
-
-  if ( w->numpoints < 3 )
-  {
-    w->numpoints = 0;
-    return;
-  }
-
-  /* compact: remove consecutive near-duplicates */
-  keptCount = 1;
-  for ( i = 1; i < w->numpoints; i++ )
-  {
-    if ( DistanceSquared(w->points[i], w->points[keptCount - 1]) > epsilonSq )
-    {
-      VectorCopy(w->points[i], w->points[keptCount]);
-      keptCount++;
-    }
-  }
-
-  totalKept = keptCount - 1;
-  newCount = keptCount;
-  Assert(w->numpoints >= newCount, s_assertDisable_RemoveDuplicatePoints);
-  w->numpoints = newCount;
-}
-
-/*
-================
 RemoveColinearPoints
 
 Removes colinear points from winding where adjacent edges have dot > 0.999.
@@ -1083,12 +811,6 @@ int RemoveColinearPoints(Winding_t *w)
     memcpy(w->points, tmpPoints, keptCount * sizeof(vec3_t));
   }
   return keptCount;
-}
-
-/* CoD4 0x42B920. */
-int WindingPlaneFromFirstThree(Winding_t *w, float *plane)
-{
-  return PlaneFromPoints(plane, w->points[0], w->points[1], w->points[2]);
 }
 
 /* CoD4 0x42B950.  Builds the winding plane and returns its unsigned area. */
@@ -1560,61 +1282,3 @@ void ClipWindingEpsilon(
   }
 }
 
-/*
-================
-ValidateWinding
-
-Debug validation function for windings (dead code in original — never called).
-Checks: point count >= 3, area > 1.0, vertex range < 131072, vertices on plane,
-no duplicate points, convexity. Calls Com_Error on any failure.
-================
-*/
-void ValidateWinding(Winding_t *w)
-{
-  int numPts;
-  int i, j, nextIdx;
-  vec3_t edge, edgeNormal, normal;
-  float edgeLen, area, dist, planeDist, edgePlaneDist;
-
-  numPts = w->numpoints;
-  if ( numPts < 3 )
-    Com_Error("CheckWinding: %i points", numPts);
-
-  area = WindingArea(w);
-  if ( area < 1.0f )
-    Com_Error("CheckWinding: %f area", area);
-
-  PlaneFromTriangle(w, normal, &planeDist);
-
-  for ( i = 0; i < numPts; i++ )
-  {
-    /* check vertex range */
-    for ( j = 0; j < 3; j++ )
-    {
-      if ( w->points[i][j] > MAX_WORLD_COORD || w->points[i][j] < MIN_WORLD_COORD )
-        Com_Error("CheckFace: BUGUS_RANGE: %f", (double)w->points[i][j]);
-    }
-
-    /* check vertex on plane */
-    nextIdx = (i + 1 == numPts) ? 0 : i + 1;
-    dist = DotProduct120(w->points[i], normal) - planeDist;
-    if ( dist < -ON_EPSILON || dist > ON_EPSILON )
-      Com_Error("CheckWinding: point off plane");
-
-    /* check no duplicate points */
-    VectorSubtract(w->points[nextIdx], w->points[i], edge);
-    edgeLen = (float)sqrt(DotProduct210(edge, edge));
-    if ( edgeLen < ON_EPSILON )
-      Com_Error("CheckWinding: degenerate edge");
-
-    /* check convexity */
-    CrossProduct(normal, edge, edgeNormal);
-    VecNormalize(edgeNormal);
-    edgePlaneDist = DotProduct120(w->points[i], edgeNormal) + ON_EPSILON;
-    for ( j = 0; j < numPts; j++ )
-    {
-      if ( j != i && DotProduct102(w->points[j], edgeNormal) > edgePlaneDist )
-        Com_Error("CheckWinding: non-convex");
-    }
-  }
-}

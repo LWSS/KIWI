@@ -6,11 +6,11 @@
 
 #include "stdafx.h"
 #include "linearmapping.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <string.h>   // memcpy
 
 // The binary uses the verbose Radiant Assert(file,line,0,"%s",cond) form for these
 // (NaN output-validation + the null-dir guard); kept byte-faithful.
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  0x4A45D0  Vec3_MajorAxis (com_math.cpp:690) — index of the component of `dir`
@@ -23,11 +23,7 @@ extern void Assert( const char *file, int line, int type, const char *fmt, ... )
 // ─────────────────────────────────────────────────────────────────────────────
 int Vec3_MajorAxis( const float *dir )
 {
-    // KEEP_VERBOSE: CoD3 com_math.cpp:690 fn kisak's engine doesn't carry; this is
-    // the canonical port copy (engine_stubs' duplicate was removed).
-    if ( !dir )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\universal\\com_math.cpp",
-                690, 0, "%s", "dir" );
+    iassert( dir );   // CoD3 com_math.cpp:690; kisak's engine has no copy
 
     float v[2];
     v[0] = dir[0] * dir[0];
@@ -248,9 +244,10 @@ bool LinearMapping_Setup( LinearMapping *lm, const float *normal,
 //  hex-rays variable name `v14`(=a7 at entry) is the misleading register-reuse alias.
 //
 //  We pass the LinearMapping* directly (it holds indx / m_lu / m_orig / axes).
+//  KIWI: coords in and the row out in double (the binary's were float).
 // ─────────────────────────────────────────────────────────────────────────────
-void LinearMapping_Apply( LinearMapping *lm, float *out,
-                          float c0, float c1, float c2 )
+void LinearMapping_Apply( LinearMapping *lm, double *out,
+                          double c0, double c1, double c2 )
 {
     double b[3]     = { c0, c1, c2 };
     double bsave[3] = { c0, c1, c2 };
@@ -258,14 +255,10 @@ void LinearMapping_Apply( LinearMapping *lm, float *out,
     LinearMapping_BackSub( lm->indx, lm->m_lu, b );
     LinearMapping_Refine( lm->m_orig, lm->m_lu, b, lm->indx, bsave );
 
-    out[lm->axisI] = (float)b[0];
-    out[lm->axisJ] = (float)b[1];
-    out[lm->axisK] = 0.0f;
-    out[3]         = (float)b[2];   // IDA: out[3] = solved sol[2] (the affine constant)
+    out[lm->axisI] = b[0];
+    out[lm->axisJ] = b[1];
+    out[lm->axisK] = 0.0;
+    out[3]         = b[2];   // IDA: out[3] = solved sol[2] (the affine constant)
 
-    {
-        // the binary's nan check was a vec-named macro body; vec = the solved row
-        const float *vec = out;
-        iassert( !IS_NAN((vec)[0]) && !IS_NAN((vec)[1]) && !IS_NAN((vec)[2]) && !IS_NAN((vec)[3]) );   // linearmapping.cpp:159
-    }
+    iassert( out[0] == out[0] && out[1] == out[1] && out[2] == out[2] && out[3] == out[3] );   // linearmapping.cpp:159 (no NaN)
 }

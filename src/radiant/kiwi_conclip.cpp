@@ -9,12 +9,9 @@
 #include "kiwi_conclip.h"
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
+#include "kiwi_ported.h"
 
 #include <vector>
-
-// Legacy symbols.
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118  int Sys_Printf(const char*,...)
-extern int g_nUpdateBits;                        // engine_stubs.cpp:773  int g_nUpdateBits = 0  (0x25D5A74)
 
 namespace
 {

@@ -9,27 +9,20 @@
 #include <universal/surfaceflags.h>
 #include "qe3.h"
 #include "kiwi_matconvert.h"     // KIWI-UX: non-lit surfaces remain visible in Shift+L
+#include "kiwi_ported.h"         // KIWI: shared engine/editor externs
 #include <universal/q_parse.h>   // Com_Parse / Com_ParseOnLine — the filter file grammar
-#include <map>                    // faceTexMap (IDB std::map<std::string,int>)
+#include <map>                    // faceTexMap
 #include <string>
 
 // ── forward declarations of helpers from materialdef.cpp / engine_stubs.cpp ──
 struct qtexture_s;
-extern void MaterialDef_02(MaterialDef *def, int (*cb)(qtexture_s *));  // 0x431520
 extern int  MaterialDef_05(qtexture_s *mtl);                  // 0x431840 — tex_num_or_localefilter (case 6 decal)
 extern int  MaterialDef_07(qtexture_s *mtl);                  // 0x431910 — callback for MaterialDef_02
 extern int  MaterialDef_09(qtexture_s *mtl);                  // 0x431a00 — color_or_surfacetype_filter (case 7)
 struct LayerMaterialDef;
-extern LayerMaterialDef *Materialdef_GetName(MaterialDef *m); // 0x431640 — radMtl->name / (char*)lyrMtl (case 3)
 extern bool Materialdef_Realize(MaterialDef *m);
-extern int  dword_181F51C;                                    // materialdef realize-state flag
 extern int  TexWnd_GetDecalLocaleBit();                       // texwnd.cpp — texWndGlob.unk_8 (case 6 decal seed)
-extern entity_s *world_entity;                                // map.cpp — the worldspawn entity (case 6 `world`)
-extern void Assert(const char *file, int line, int type, const char *fmt, ...); // 0x49cea0
-extern bool Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp 0x483930
 extern char *AllocMaterialString( const char *s );           // 0x48B030 (string heap-copy)
-extern int  Sys_Printf( const char *fmt, ... );              // win_qe3.cpp 0x499E90 (console print)
-extern int  g_nUpdateBits;                                   // engine_stubs.cpp / qe3 (view-invalidation bits)
 extern "C" int _stricmp( const char *, const char * );
 extern "C" char *_strlwr( char * );
 extern "C" void free( void * );
@@ -40,44 +33,40 @@ extern "C" void free( void * );
 #include "radiant_registry.h"   // Radiant_ProfileGet/SetInt — the non-MFC CWinApp profile replacement
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  CONDITION-TREE PARSER (DynamicFilter_ParseCondition + leaf parsers + qe3_cpp_01)
+//  CONDITION-TREE PARSER (DynamicFilter_ParseCondition + leaf parsers + Filter_ParseMaterialList)
 //
 //  The filter file (raw\..\RadiantFilters.txt) defines, per filter entry, a boolean
 //  condition over leaf predicates:
-//      Texture [All] [*]<name>     contents node {name@0, flags@4: bit0=`*`, bit1=All}  case 3
-//      Contents [All] <name>       {contentBits@0, flags@4: bit1=All}                   case 4
-//      Misc <world|terrain|curve|decal>  {name@0 (lowercased)}                          case 6
-//      KeyValue <key> <value>[*]   {key@0, value@4, flags@8: bit0=`*` wildcard}         case 5
-//      Surface [All] <name>        {surfaceBits@0, flags@4: bit1=All}                    case 7
-//      EClassFlag <name>           {eclassBits@0}                                        case 8
-//  combined with `&&` (surfaceFlags=1, AND), `||` (=2, OR), `!` (negate flag@+4) and
-//  parentheses.  The evaluator is FilterCondition_Eval (sub_412170) below; the case
+//      Texture [All] [*]<name>     contents node {name, flags: bit0=`*`, bit1=All}      case 3
+//      Contents [All] <name>       {contentBits, flags: bit1=All}                       case 4
+//      Misc <world|terrain|curve|decal>  {name (lowercased)}                            case 6
+//      KeyValue <key> <value>[*]   {key, value, flags: bit0=`*` wildcard}               case 5
+//      Surface [All] <name>        {surfaceBits, flags: bit1=All}                        case 7
+//      EClassFlag <name>           {eclassBits}                                          case 8
+//  combined with `&&` (surfaceFlags=1, AND), `||` (=2, OR), `!` (negate flag) and
+//  parentheses.  The evaluator is FilterCondition_Eval below; the case
 //  numbers here are EXACTLY the surfaceFlags values it switches on.
 //
 // Nodes carry an explicit native sibling link. Payloads keep string pointers
 // separate from scalar flag values; the original x86 sizes are not allocation sizes.
 //
-//  PARSE IDIOM: the binary inlined Com_Parse/Com_ParseOnLine, so the IDA shows the
-//  ungetToken-restore prologue + Com_ParseExt(.,1)/(.,0) open-coded.  Per the
-//  established radiant idiom (entity.cpp): prologue + Com_ParseExt(.,1) == Com_Parse;
-//  prologue + Com_ParseExt(.,0) (== _GetToken @0x4B83E0) == Com_ParseOnLine.  We call
-//  the engine functions directly — there is no `g_parse` global in the kisak engine
-//  (it uses Com_GetParseThreadInfo); these calls are the faithful equivalent.
+//  Tokens are read with Com_Parse / Com_ParseOnLine directly — there is no `g_parse`
+//  global in the engine (it uses Com_GetParseThreadInfo).
 // ═════════════════════════════════════════════════════════════════════════════
 
-// The condition-type case values (filter_info_s.surfaceFlags) — match sub_412170.
+// The condition-type case values (filter_info_s.surfaceFlags) FilterCondition_Eval switches on.
 enum {
     FILT_AND       = 1,   // children all-match
     FILT_OR        = 2,   // children any-match
-    FILT_TEXTURE   = 3,   // material-name match           (sub_411500 / FilterCond_Material)
-    FILT_CONTENTS  = 4,   // brush/face contents bits      (sub_411580 / sub_412470)
-    FILT_KEYVALUE  = 5,   // entity epair key/value        (sub_411450 / FilterCond_Surface)
-    FILT_MISC      = 6,   // world/terrain/curve/decal     (sub_4113D0 / sub_412320)
-    FILT_SURFACE   = 7,   // surface flag bits             (sub_4116B0 / sub_412500)
-    FILT_ECLASS    = 8,   // eclass classtype flag bits    (sub_411630 / sub_4124D0)
+    FILT_TEXTURE   = 3,   // material-name match           (Filter_ParseTexture / FilterCond_Material)
+    FILT_CONTENTS  = 4,   // brush/face contents bits      (Filter_ParseContents / FilterCond_Contents)
+    FILT_KEYVALUE  = 5,   // entity epair key/value        (Filter_ParseKeyValue / FilterCond_KeyValue)
+    FILT_MISC      = 6,   // world/terrain/curve/decal     (Filter_ParseMisc / FilterCond_Misc)
+    FILT_SURFACE   = 7,   // surface flag bits             (Filter_ParseSurface / FilterCond_SurfaceFlag)
+    FILT_ECLASS    = 8,   // eclass classtype flag bits    (Filter_ParseEClassFlag / FilterCond_EClassFlag)
 };
 
-// _GetToken (0x4B83E0) — read the next ON-LINE token (== Com_ParseOnLine; see idiom).
+// 0x4B83E0 _GetToken — read the next ON-LINE token (Com_ParseOnLine).
 static inline parseInfo_t *Filter_GetToken( const char **text ) { return Com_ParseOnLine( text ); }
 
 struct FilterNameCondition { char *name; int flags; };
@@ -87,15 +76,15 @@ struct FilterBitsCondition { int bits; int flags; };
 static filter_info_s *Filter_NewInfo( int type )
 {
     filter_info_s *n = (filter_info_s *)operator new( sizeof(filter_info_s) );
-    n->surfaceFlags    = type;        // [n]      condition type
-    n->z_pad_0x0004[0] = 0;           // [n+4]    negate flag (set by caller)
-    n->contents_ptr    = nullptr;     // [n+8]    contents/children
-    n->next           = nullptr;     // [n+0xC]  next-sibling link (leaf → 0)
+    n->surfaceFlags    = type;        // condition type
+    n->z_pad_0x0004[0] = 0;           // negate flag (set by caller)
+    n->contents_ptr    = nullptr;     // contents/children
+    n->next           = nullptr;     // next-sibling link (leaf → 0)
     return n;
 }
 
-// ── Texture [All] [*]<name>  (sub_411500, 0x411500) → case 3 ──────────────────
-// contents node: 8 bytes {char* name@0, int flags@4 (bit0 = `*` leading wildcard,
+// ── Texture [All] [*]<name>  (0x411500) → case 3 ──────────────────
+// contents node {char* name, int flags (bit0 = `*` leading wildcard,
 // bit1 = "All" — match any face)}.
 static filter_info_s *Filter_ParseTexture( const char **text )
 {
@@ -118,9 +107,8 @@ static filter_info_s *Filter_ParseTexture( const char **text )
     return n;
 }
 
-// ── name→bit tables (dumped verbatim from the IDB: off_73C388/73C498/73C520) ──
-// Each is an interleaved {const char* name; int bits} pair table; the binary indexes
-// it at stride 2 dwords (name@8*i, bits@8*i+4).  We store proper pairs and iterate.
+// ── name→bit tables ──
+// Each is a {const char* name; int bits} pair table.
 struct FilterFlagName { const char *name; int bits; };
 static const FilterFlagName s_contentsTbl[] = {   // 0x73C388 — 34 pairs
     {"solid", CONTENTS_SOLID}, {"foliage", CONTENTS_FOLIAGE}, {"ai_avoid", CONTENTS_AI_AVOID},
@@ -151,15 +139,15 @@ static const FilterFlagName s_eclassTbl[] = {     // 0x73C520 — 9 pairs
 };
 static int Filter_LookupBits( const FilterFlagName *tbl, int n, const char *name )
 {
-    int bits = 0;   // 0 if no name matches (IDA: the field stays its initial 0)
+    int bits = 0;   // 0 if no name matches
     for ( int i = 0; i < n; ++i )
         if ( !_stricmp( name, tbl[i].name ) )
             bits = tbl[i].bits;
     return bits;
 }
 
-// ── Contents [All] <name>  (sub_411580, 0x411580) → case 4 ────────────────────
-// contents node: 8 bytes {int contentBits@0, int flags@4 (bit1=All)}; <name> mapped
+// ── Contents [All] <name>  (0x411580) → case 4 ────────────────────
+// contents node {int contentBits, int flags (bit1=All)}; <name> mapped
 // to a bit via the 34-entry table.
 static filter_info_s *Filter_ParseContents( const char **text )
 {
@@ -180,8 +168,8 @@ static filter_info_s *Filter_ParseContents( const char **text )
     return n;
 }
 
-// ── EClassFlag <name>  (sub_411630, 0x411630) → case 8 ────────────────────────
-// contents node: 8 bytes {int eclassBits@0}; <name> mapped via the 9-entry table.
+// ── EClassFlag <name>  (0x411630) → case 8 ────────────────────────
+// contents node {int eclassBits}; <name> mapped via the 9-entry table.
 static filter_info_s *Filter_ParseEClassFlag( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_ECLASS );
@@ -196,8 +184,8 @@ static filter_info_s *Filter_ParseEClassFlag( const char **text )
     return n;
 }
 
-// ── Surface [All] <name>  (sub_4116B0, 0x4116B0) → case 7 ─────────────────────
-// contents node: 8 bytes {int surfaceBits@0, int flags@4 (bit1=All)}.
+// ── Surface [All] <name>  (0x4116B0) → case 7 ─────────────────────
+// contents node {int surfaceBits, int flags (bit1=All)}.
 static filter_info_s *Filter_ParseSurface( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_SURFACE );
@@ -217,8 +205,8 @@ static filter_info_s *Filter_ParseSurface( const char **text )
     return n;
 }
 
-// ── KeyValue <key> <value>[*]  (sub_411450, 0x411450) → case 5 ────────────────
-// contents node: 12 bytes {char* key@0, char* value@4, int flags@8 (bit0 = `*`
+// ── KeyValue <key> <value>[*]  (0x411450) → case 5 ────────────────
+// contents node {char* key, char* value, int flags (bit0 = `*`
 // trailing-wildcard prefix match)}.  Read key + value on the line; if the next token
 // is a bare `*`, set the wildcard bit, else unget it.
 static filter_info_s *Filter_ParseKeyValue( const char **text )
@@ -242,8 +230,8 @@ static filter_info_s *Filter_ParseKeyValue( const char **text )
     return n;
 }
 
-// ── Misc <world|terrain|curve|decal>  (sub_4113D0, 0x4113D0) → case 6 ─────────
-// contents node: 8 bytes {char* name@0 (lowercased)}.
+// ── Misc <world|terrain|curve|decal>  (0x4113D0) → case 6 ─────────
+// contents node {char* name (lowercased)}.
 static filter_info_s *Filter_ParseMisc( const char **text )
 {
     filter_info_s *n = Filter_NewInfo( FILT_MISC );
@@ -262,24 +250,24 @@ static filter_info_s *Filter_ParseMisc( const char **text )
 }
 
 // ── DynamicFilter_ParseCondition (0x411760) — recursive-descent over the grammar.
-// A leading `!` sets the negate flag (written into result[+4]).  A `(` opens a list:
+// A leading `!` sets the negate flag.  A `(` opens a list:
 // parse children, joining with `&&` (type 1) / `||` (type 2); the list node's type is
-// set to whichever operator separates the children (the binary stores it on the LAST
-// `&&`/`||` seen, exactly as transcribed).  Otherwise dispatch on the leaf keyword.
+// set to whichever operator separates the children (the LAST
+// `&&`/`||` seen wins).  Otherwise dispatch on the leaf keyword.
 filter_info_s *DynamicFilter_ParseCondition( const char **text )
 {
-    parseInfo_t *t = Com_Parse( text );      // prologue + Com_ParseExt(.,1)
+    parseInfo_t *t = Com_Parse( text );
     bool negate = false;
     if ( t->token[0] == '!' ) { negate = true; t = Com_Parse( text ); }
 
     if ( t->token[0] == '(' )
     {
-        filter_info_s *list = Filter_NewInfo( 0 );  // type set by the first operator
-        list->z_pad_0x0004[0] = (char)negate;       // result[4] = negate
+        filter_info_s *list = Filter_NewInfo( 0 );  // type set by the last operator
+        list->z_pad_0x0004[0] = (char)negate;
         while ( true )
         {
             filter_info_s *child = DynamicFilter_ParseCondition( text );
-            // Prepend the child to list->contents_ptr; the sibling link is child[+12].
+            // Prepend the child to list->contents_ptr.
             child->next = (filter_info_s *)list->contents_ptr;
             list->contents_ptr    = (filter_contents_s *)child;
             t = Com_Parse( text );
@@ -300,20 +288,20 @@ filter_info_s *DynamicFilter_ParseCondition( const char **text )
 
     if ( !leaf )
         Com_Error( ERR_FATAL, "DynamicFilter_ParseCondition: failed" );
-    leaf->z_pad_0x0004[0] = (char)negate;    // result[4] = negate
+    leaf->z_pad_0x0004[0] = (char)negate;
     return leaf;
 }
 
-// ── qe3_cpp_01 (0x411280) — parse a whitespace-separated material-name LIST for a
-// `face`-type filter entry (the body between { } when filter_type_enum & 4).  Each
-// node is 8 bytes {char* name@0, void* next@4}, prepended.  Reads the first token
+// ── Filter_ParseMaterialList (0x411280) — parse a whitespace-separated material-name
+// LIST for a `face`-type filter entry (the body between { } when filter_type_enum & 4).
+// Each node is {char* name, void* next}, prepended.  Reads the first token
 // on-line (after the `{`, space-delimited off), then subsequent tokens until empty.
 // Returns the list head (or null if the list is empty).
 struct FaceTexNode { void *name; FaceTexNode *next; };
-FaceTexNode *qe3_cpp_01( const char **text )
+FaceTexNode *Filter_ParseMaterialList( const char **text )
 {
     FaceTexNode *head = nullptr;
-    parseInfo_t *t = Com_Parse( text );      // prologue + Com_ParseExt(.,1)
+    parseInfo_t *t = Com_Parse( text );
     if ( !strlen( t->token ) )
         return nullptr;
     while ( true )
@@ -322,96 +310,96 @@ FaceTexNode *qe3_cpp_01( const char **text )
         node->name = AllocMaterialString( t->token );
         node->next = head;
         head = node;
-        t = Filter_GetToken( text );          // _GetToken == Com_ParseOnLine
+        t = Filter_GetToken( text );
         if ( !strlen( t->token ) )
             return head;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterCondition_Eval (sub_412170, 0x412170)
+// FilterCondition_Eval (0x412170)
 // Recursively evaluates a filter condition tree against a brush definition.
 // AND (1) and OR (2) recurse; cases 3..8 evaluate the six leaf forms.
 // ─────────────────────────────────────────────────────────────────────────────
-static bool FilterCondition_Eval(brush_t *a1, filter_info_s *a2);
+static bool FilterCondition_Eval(brush_t *def, filter_info_s *info);
 
 // Cases 3..8 are Texture, Contents, KeyValue, Misc, Surface, and EClassFlag.
-static bool FilterCond_Material  (brush_t *a1, filter_info_s *a2); // sub_412630
-static bool FilterCond_Contents  (brush_t *a1, filter_info_s *a2); // sub_412470
-static bool FilterCond_Surface   (brush_t *a1, filter_info_s *a2); // sub_412290 KeyValue
-static bool FilterCond_Misc      (brush_t *a1, filter_info_s *a2); // sub_412320
-static bool FilterCond_SurfaceFlag(brush_t *a1, filter_info_s *a2);// sub_412500
-static bool FilterCond_EClassFlag(brush_t *a1, filter_info_s *a2); // sub_4124D0
+static bool FilterCond_Material  (brush_t *def, filter_info_s *info);
+static bool FilterCond_Contents  (brush_t *def, filter_info_s *info);
+static bool FilterCond_KeyValue  (brush_t *def, filter_info_s *info);
+static bool FilterCond_Misc      (brush_t *def, filter_info_s *info);
+static bool FilterCond_SurfaceFlag(brush_t *def, filter_info_s *info);
+static bool FilterCond_EClassFlag(brush_t *def, filter_info_s *info);
 
-static bool FilterCondition_Eval(brush_t *a1, filter_info_s *a2)
+static bool FilterCondition_Eval(brush_t *def, filter_info_s *info)
 {
-    // IDA 0x412170 — switch on a2->surfaceFlags (the condition type)
-    switch ( a2->surfaceFlags )
+    // switch on info->surfaceFlags (the condition type)
+    switch ( info->surfaceFlags )
     {
     case 1: // AND — all children must match
     {
-        filter_contents_s *child = a2->contents_ptr;
+        filter_contents_s *child = info->contents_ptr;
         if ( !child )
-            return a2->z_pad_0x0004[0] == 0;
+            return info->z_pad_0x0004[0] == 0;
         do {
-            if ( !FilterCondition_Eval(a1, (filter_info_s *)child) )
-                return (bool)a2->z_pad_0x0004[0];
+            if ( !FilterCondition_Eval(def, (filter_info_s *)child) )
+                return (bool)info->z_pad_0x0004[0];
             child = (filter_contents_s *)((filter_info_s *)child)->next;
         } while ( child );
-        return a2->z_pad_0x0004[0] == 0;
+        return info->z_pad_0x0004[0] == 0;
     }
     case 2: // OR — any child must match
     {
-        filter_contents_s *child = a2->contents_ptr;
+        filter_contents_s *child = info->contents_ptr;
         if ( !child )
-            return (bool)a2->z_pad_0x0004[0];
+            return (bool)info->z_pad_0x0004[0];
         do {
-            if ( FilterCondition_Eval(a1, (filter_info_s *)child) )
-                return a2->z_pad_0x0004[0] == 0;
+            if ( FilterCondition_Eval(def, (filter_info_s *)child) )
+                return info->z_pad_0x0004[0] == 0;
             child = (filter_contents_s *)((filter_info_s *)child)->next;
         } while ( child );
-        return (bool)a2->z_pad_0x0004[0];
+        return (bool)info->z_pad_0x0004[0];
     }
-    case 3: // Texture / material-name match (sub_412630)
-        return FilterCond_Material(a1, a2);
-    case 4: // Contents flag bits (sub_412470)
-        return FilterCond_Contents(a1, a2);
-    case 5: // KeyValue epair match (sub_412290)
-        return FilterCond_Surface(a1, a2);
-    case 6: // Misc world/terrain/curve/decal (sub_412320)
-        return FilterCond_Misc(a1, a2);
-    case 7: // Surface flag bits (sub_412500)
-        return FilterCond_SurfaceFlag(a1, a2);
-    case 8: // EClassFlag bits (sub_4124D0)
-        return FilterCond_EClassFlag(a1, a2);
+    case 3: // Texture / material-name match
+        return FilterCond_Material(def, info);
+    case 4: // Contents flag bits
+        return FilterCond_Contents(def, info);
+    case 5: // KeyValue epair match
+        return FilterCond_KeyValue(def, info);
+    case 6: // Misc world/terrain/curve/decal
+        return FilterCond_Misc(def, info);
+    case 7: // Surface flag bits
+        return FilterCond_SurfaceFlag(def, info);
+    case 8: // EClassFlag bits
+        return FilterCond_EClassFlag(def, info);
     default:
         return false;
     }
 }
 
-// case 3 — Texture/material-name match (sub_412630).
+// case 3 — Texture/material-name match (0x412630).
 // Materialdef_GetName returns the radiant material name for ordinary world
-// materials and the layered-material name for layered ones. IDA 0x412630:
+// materials and the layered-material name for layered ones:
 //   • NOT "All" (node.flags&2==0) and NOT a patch → per-face: compare every base-layer face's
 //     material name against node.name (node.flags&1 → substring/strstr, else exact/strcmp); the
 //     brush matches if ANY face matches.
 //   • "All" set, or a patch brush → use the brush's representative material (patch->texture for
 //     a patch; else brush.xx1, the first-face mtldef cached when all faces share contents — 0 if
-//     heterogeneous) and compare once (sub_4125E0: same wildcard/exact rule).
-// Match → !negate; no match → negate (faithful to *(a2+4)==0 / *(a2+4)).
-static bool FilterCond_Material(brush_t *a1, filter_info_s *a2)
+//     heterogeneous) and compare once (same wildcard/exact rule).
+// Match → !negate; no match → negate.
+static bool FilterCond_Material(brush_t *def, filter_info_s *info)
 {
-    const int   flags  = ((FilterNameCondition *)a2->contents_ptr)->flags;               // node.flags (bit0=`*`, bit1=All)
-    const char *target = ((FilterNameCondition *)a2->contents_ptr)->name; // node.name
-    bool        negate = (a2->z_pad_0x0004[0] != 0);
+    const int   flags  = ((FilterNameCondition *)info->contents_ptr)->flags;               // node.flags (bit0=`*`, bit1=All)
+    const char *target = ((FilterNameCondition *)info->contents_ptr)->name; // node.name
+    bool        negate = (info->z_pad_0x0004[0] != 0);
 
-    if ( ( flags & 2 ) == 0 && !a1->patch )
+    if ( ( flags & 2 ) == 0 && !def->patch )
     {
-        if ( !a1->faceCount )
+        if ( !def->faceCount )
             return negate;
-        for ( int i = 0; i < a1->faceCount; ++i )
+        for ( int i = 0; i < def->faceCount; ++i )
         {
-            MaterialDef *md = &a1->faces[i].mtldef[0];
+            MaterialDef *md = &def->faces[i].mtldef[0];
             // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
             const char *name = (const char *)Materialdef_GetName( md );
             bool hit = ( flags & 1 ) ? ( strstr( name, target ) != nullptr )
@@ -423,8 +411,8 @@ static bool FilterCond_Material(brush_t *a1, filter_info_s *a2)
     }
 
     // "All" or patch: one representative material for the whole brush.
-    MaterialDef *md = a1->patch ? (MaterialDef *)&a1->patch->texture
-                                : a1->xx1;
+    MaterialDef *md = def->patch ? (MaterialDef *)&def->patch->texture
+                                 : def->xx1;
     if ( !md )
         return negate;
     const char *name = (const char *)Materialdef_GetName( md );
@@ -433,22 +421,20 @@ static bool FilterCond_Material(brush_t *a1, filter_info_s *a2)
     return hit ? !negate : negate;
 }
 
-// ── case 4 — Contents flag bits (sub_412470, 0x412470) ────────────────────────
-// Matches when the brush has a face
-// whose combined contents (brush.contents | face.contents) does NOT intersect the
-// filter's content bits — i.e. there exists a face that is NOT excluded by these bits.
-// IDA: a1[15]=brush.contents(@0x3C), a1[16]=faceCount(@0x40), a1[17]=faces(@0x44);
-// faces at +180(face.contents) stride 232; loop while ((brushC|faceC)&bits)!=0.
-static bool FilterCond_Contents(brush_t *a1, filter_info_s *a2)
+// ── case 4 — Contents flag bits (0x412470) ────────────────────────
+// Matches when EVERY face's combined contents (brush.contents | face.contents)
+// intersects the filter's content bits; one face without them → no match.
+// Loop while ((brushC|faceC)&bits)!=0.
+static bool FilterCond_Contents(brush_t *def, filter_info_s *info)
 {
-    int *cond      = (int *)a2->contents_ptr;     // {contentBits@0, flags@4}
+    int *cond      = (int *)info->contents_ptr;   // {contentBits@0, flags@4}
     int  bits      = cond[0];
-    bool negate    = (a2->z_pad_0x0004[0] != 0);
-    unsigned int faceCount = (unsigned int)a1->faceCount;
+    bool negate    = (info->z_pad_0x0004[0] != 0);
+    unsigned int faceCount = (unsigned int)def->faceCount;
     if ( !faceCount )
-        return !negate;                            // no faces → "matches" (IDA returns !negate)
-    int   brushContents = a1->contents;
-    face_t *face = a1->faces;
+        return !negate;                            // no faces → "matches"
+    int   brushContents = def->contents;
+    face_t *face = def->faces;
     for ( unsigned int i = 0; ; ++i, ++face )
     {
         int faceContents = face->contents;
@@ -458,26 +444,25 @@ static bool FilterCond_Contents(brush_t *a1, filter_info_s *a2)
             return !negate;                        // every face is excluded
     }
 }
-// ── case 5: key/value condition (sub_412290, 0x412290) ───────────────────────
-// This is what the LAYER filter (layers.cpp Layers_BuildFilter, sub_411950) uses:
+// ── case 5: key/value condition (0x412290) ───────────────────────
+// This is what the LAYER filter (Layers_BuildFilter below) uses:
 // a filter_contents_s with key="script_layer" and value=<layer name>, flags=0.
 // flags bit0 set → walk the entity's epairs by hand and strncmp the value (literal
 // prefix compare path); flags clear (our layer case) → Entity_HasEpairMatch exact.
-// `a1` is the brush DEFINITION; `a1->owner` is the brush's owning entity (whose
+// `def` is the brush DEFINITION; `def->owner` is the brush's owning entity (whose
 // epairs carry the script_layer key).  z_pad_0x0004[0] is the negation flag: when
 // it matches, the result is `negate==0` (true unless negated), else `negate`.
-static bool FilterCond_Surface(brush_t *a1, filter_info_s *a2)
+static bool FilterCond_KeyValue(brush_t *def, filter_info_s *info)
 {
-    // IDA 0x412290 — sub_412290(a1@<ecx>=brush def, a2@<ebx>=filter_info_s)
-    filter_contents_s *cond = a2->contents_ptr;
-    const char       *key   = cond->key;            // v3 = *(char**)v2
-    bool              negate = (a2->z_pad_0x0004[0] != 0);
+    filter_contents_s *cond = info->contents_ptr;
+    const char       *key   = cond->key;
+    bool              negate = (info->z_pad_0x0004[0] != 0);
 
     if ( (cond->flags & 1) != 0 )
     {
         // Literal path: walk the owning entity's epairs, find `key`, prefix-compare.
-        const char *val = "";                       // IDA: v5 = zero
-        epair_t *ep = a1->owner ? a1->owner->epairs : nullptr;  // *(a1+8)+116
+        const char *val = "";
+        epair_t *ep = def->owner ? def->owner->epairs : nullptr;
         for ( ; ep; ep = ep->next )
             if ( _stricmp( ep->key, key ) == 0 ) { val = ep->value; break; }
         if ( !strncmp( val, cond->value, strlen( cond->value ) ) )
@@ -486,41 +471,35 @@ static bool FilterCond_Surface(brush_t *a1, filter_info_s *a2)
     }
 
     // Epair-exact path (the layer-filter case): entity must have key==value.
-    if ( Entity_HasEpairMatch( a1->owner, key, cond->value ) )
+    if ( Entity_HasEpairMatch( def->owner, key, cond->value ) )
         return !negate;
     return negate;
 }
-// case 6 — Misc world/terrain/curve/decal (sub_412320).
-// IDA 0x412320, faithful transcription:
+// case 6 — Misc world/terrain/curve/decal (0x412320):
 //   world   — brush owned by the worldspawn (owner == world_entity->def).
 //   decal   — any base-layer face whose locale bits intersect the "decal" locale bit.
 //   terrain — patch brush whose patch->type == 64 (the terrain discriminant).
 //   curve   — patch brush whose patch->type != 64.
-// world/terrain/curve are pure struct reads and FULLY faithful.  decal walks faces through
-// the now-real MaterialDef_02/MaterialDef_05 realize path; the SEED is texWndGlob.unk_8
-// (1<<localeIndex("decal"), set by the unported P6 FillTextureMenu — 0 in kisak) and the
-// per-material locale field (qtexture.tex_num_or_localefilter) is also not retained by kisak
-// (Editor_AddRadiantMaterial leaves it 0 — CoD4 locale metadata is dropped).  So `Misc decal`
-// degenerates to "matches nothing" — the CODE is faithful; the DATA (locale bits) is a known,
-// documented kisak limitation, identical to the texwnd locale-filter simplification.  This is
-// SAFE (a decal filter just hides nothing), not a logic error.  See PROGRESS material-P3.
-static bool FilterCond_Misc(brush_t *a1, filter_info_s *a2)
+// world/terrain/curve are pure struct reads.  decal walks faces through the
+// MaterialDef_02/MaterialDef_05 realize path (qtexture.tex_num_or_localefilter); the SEED is
+// texWndGlob.unk_8 (1<<localeIndex("decal"), set by FillTextureMenu).
+static bool FilterCond_Misc(brush_t *def, filter_info_s *info)
 {
-    const FilterNameCondition *cond = (const FilterNameCondition *)a2->contents_ptr;
+    const FilterNameCondition *cond = (const FilterNameCondition *)info->contents_ptr;
     const char *node = cond->name;
     const int   flags = cond->flags;
-    bool        negate = (a2->z_pad_0x0004[0] != 0);
+    bool        negate = (info->z_pad_0x0004[0] != 0);
 
     if ( !strcmp( node, "world" )
-         && (void *)a1->owner == (world_entity ? world_entity->def : nullptr) )
+         && (void *)def->owner == (world_entity ? world_entity->def : nullptr) )
         return !negate;
 
     if ( !strcmp( node, "decal" ) )
     {
         int matchCount = 0;
-        for ( int i = 0; i < a1->faceCount; ++i )
+        for ( int i = 0; i < def->faceCount; ++i )
         {
-            MaterialDef *md = &a1->faces[i].mtldef[0];
+            MaterialDef *md = &def->faces[i].mtldef[0];
             if ( !Materialdef_Realize( md ) )
                 continue;
             dword_181F51C = TexWnd_GetDecalLocaleBit();         // texWndGlob.unk_8 seed
@@ -528,52 +507,51 @@ static bool FilterCond_Misc(brush_t *a1, filter_info_s *a2)
             if ( dword_181F51C )
                 ++matchCount;
         }
-        if ( matchCount && ( matchCount == a1->faceCount || ( flags & 2 ) == 0 ) )
+        if ( matchCount && ( matchCount == def->faceCount || ( flags & 2 ) == 0 ) )
             return !negate;
-        // fall through to terrain/curve tests (IDA LABEL_15) — a brush is not both.
+        // fall through to terrain/curve tests — a brush is not both.
     }
 
-    if ( !strcmp( node, "terrain" ) && a1->patch && (int)a1->patch->type == 64 )
+    if ( !strcmp( node, "terrain" ) && def->patch && (int)def->patch->type == 64 )
         return !negate;
-    if ( !strcmp( node, "curve" )   && a1->patch && (int)a1->patch->type != 64 )
+    if ( !strcmp( node, "curve" )   && def->patch && (int)def->patch->type != 64 )
         return !negate;
     return negate;
 }
 
-// case 7 — Surface flag bits (sub_412500). MaterialDef_02 /
-// MaterialDef_09 are fully ported (materialdef.cpp), and Editor_AddRadiantMaterial now
-// populates qtexture_s.color_or_surfacetype_filter (@0x1C) from the registered material's
+// case 7 — Surface flag bits (0x412500). Editor_AddRadiantMaterial
+// populates qtexture_s.color_or_surfacetype_filter from the registered material's
 // MaterialInfo.surfaceTypeBits — so the realize callback (MaterialDef_09 ANDs that field
-// into dword_181F51C) reads surface-type bits. IDA 0x412500:
+// into dword_181F51C) reads surface-type bits:
 //   patch brush      → seed dword_181F51C=surfaceBits, realize patch->texture[0]; matched
 //                      iff bits survive the AND.
 //   plain brush      → realize each base-layer face; count how many keep their bits.  The
 //                      brush matches when EVERY face matched, OR (when "All" is NOT set,
 //                      node.flags&2==0) when ANY face matched.
 //   no faces         → no match (return negate).
-// Match result: when matched, return !negate; else negate (faithful to *(a2+4)==0 / *(a2+4)).
-static bool FilterCond_SurfaceFlag(brush_t *a1, filter_info_s *a2)
+// Match result: when matched, return !negate; else negate.
+static bool FilterCond_SurfaceFlag(brush_t *def, filter_info_s *info)
 {
-    int  *node       = (int *)a2->contents_ptr;     // {surfaceBits@0, flags@4 (bit1=All)}
+    int  *node       = (int *)info->contents_ptr;   // {surfaceBits@0, flags@4 (bit1=All)}
     int   surfaceBits = node[0];
-    bool  negate     = (a2->z_pad_0x0004[0] != 0);
+    bool  negate     = (info->z_pad_0x0004[0] != 0);
 
-    if ( a1->patch )                                // a1[20] = patch
+    if ( def->patch )
     {
-        MaterialDef *md = (MaterialDef *)&a1->patch->texture;
+        MaterialDef *md = (MaterialDef *)&def->patch->texture;
         if ( !Materialdef_Realize( md ) )
             return negate;
         dword_181F51C = surfaceBits;                // seed; MaterialDef_09 ANDs surfaceTypeBits
-        MaterialDef_02( md, MaterialDef_09 );        // patch+24 (IDA)
+        MaterialDef_02( md, MaterialDef_09 );
         return dword_181F51C ? !negate : negate;
     }
-    if ( !a1->faceCount )
+    if ( !def->faceCount )
         return negate;
 
     int matchCount = 0;
-    for ( int i = 0; i < a1->faceCount; ++i )
+    for ( int i = 0; i < def->faceCount; ++i )
     {
-        MaterialDef *md = &a1->faces[i].mtldef[0];
+        MaterialDef *md = &def->faces[i].mtldef[0];
         if ( !Materialdef_Realize( md ) )
             continue;
         dword_181F51C = surfaceBits;
@@ -582,37 +560,32 @@ static bool FilterCond_SurfaceFlag(brush_t *a1, filter_info_s *a2)
             ++matchCount;
     }
     // matched if all faces matched, or (when "All" not set) any face matched.
-    if ( matchCount && ( matchCount == a1->faceCount || ( node[1] & 2 ) == 0 ) )
+    if ( matchCount && ( matchCount == def->faceCount || ( node[1] & 2 ) == 0 ) )
         return !negate;
     return negate;
 }
 
-// ── case 8 — EClassFlag bits (sub_4124D0, 0x4124D0) ───────────────────────────
-// Reads the owning entity's eclass classtype flags. IDA arg order is
-// swapped (sub_4124D0(a2=info@eax, a1=brush@ecx)); transcribed to (brush, info) here.
+// ── case 8 — EClassFlag bits (0x4124D0) ───────────────────────────
+// Reads the owning entity's eclass classtype flags.
 // Match when (brush->owner->eclass->classtype & filterEclassBits) != 0.
-static bool FilterCond_EClassFlag(brush_t *a1, filter_info_s *a2)
+static bool FilterCond_EClassFlag(brush_t *def, filter_info_s *info)
 {
-    int *cond   = (int *)a2->contents_ptr;          // {eclassBits@0}
-    bool negate = (a2->z_pad_0x0004[0] != 0);
-    // IDA: *(*(*(brush+8)+96)+384) & **(info+8)
-    //      brush+8=owner, +96=eclass, eclass+384=classtype; info+8=contents, [0]=bits.
-    int classtype = a1->owner->eclass->classtype;
+    int *cond   = (int *)info->contents_ptr;        // {eclassBits@0}
+    bool negate = (info->z_pad_0x0004[0] != 0);
+    int classtype = def->owner->eclass->classtype;
     if ( ( classtype & cond[0] ) != 0 )
         return !negate;
     return negate;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterBrush_CheckFilterListHide (sub_412050, 0x412050)
+// FilterBrush_CheckFilterListHide (0x412050)
 // Walks a filter_entry_s list and returns true if any non-face, non-fdshow entry
 // matches the brush def (i.e., the brush would be HIDDEN by that filter).
 // ─────────────────────────────────────────────────────────────────────────────
 static bool FilterBrush_CheckFilterListHide(filter_entry_s *list, brush_t *def)
 {
-    // IDA 0x412050 — sub_412050
-    // While condition in IDA: keep looping if (isShown) || (face type) || !condition_match
-    // i.e., stop and return 1 (hidden) only when: !isShown && !face_type && condition matches
+    // Stop and return 1 (hidden) only when: !isShown && !face_type && condition matches
     filter_entry_s *f = (filter_entry_s *)list;
     if ( !f )
         return false;
@@ -628,13 +601,12 @@ static bool FilterBrush_CheckFilterListHide(filter_entry_s *list, brush_t *def)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterBrush_IsFilteredByAnyList (sub_412120, 0x412120)
+// FilterBrush_IsFilteredByAnyList (0x412120)
 // Returns true if ANY filter list (geometry/entity/trigger/other/layer) hides
 // this brush def.
 // ─────────────────────────────────────────────────────────────────────────────
 static bool FilterBrush_IsFilteredByAnyList(brush_t *def)
 {
-    // IDA 0x412120
     return FilterBrush_CheckFilterListHide(g_qeglobals.d_filterGlobals_geometryFilters, def)
         || FilterBrush_CheckFilterListHide(g_qeglobals.d_filterGlobals_entityFilters,   def)
         || FilterBrush_CheckFilterListHide(g_qeglobals.d_filterGlobals_triggerFilters,  def)
@@ -643,13 +615,12 @@ static bool FilterBrush_IsFilteredByAnyList(brush_t *def)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterBrush_ApplyFilterList (sub_412090, 0x412090)
+// FilterBrush_ApplyFilterList (0x412090)
 // Accumulates fdhide (bit 3) / fdshow (bit 4) flags from a filter list into
 // the returned int bitmask.  Called once per category list from FilterBrush.
 // ─────────────────────────────────────────────────────────────────────────────
 static int FilterBrush_ApplyFilterList(filter_entry_s *list, brush_t *def)
 {
-    // IDA 0x412090
     int flags = 0;
     for ( filter_entry_s *v = list; v; v = v->next_filter )
     {
@@ -668,7 +639,7 @@ static int FilterBrush_ApplyFilterList(filter_entry_s *list, brush_t *def)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterBrush_CheckLayerFaces (sub_46A190, 0x46A190)
+// FilterBrush_CheckLayerFaces (0x46A190)
 // When current_edit_layer == 1, iterates all faces on a brush definition and
 // calls MaterialDef_02 to check if any face passes the material realize.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -693,169 +664,150 @@ static bool FilterBrush_CheckLayerFaces(brush_t *def)
 // Main brush visibility/filter check.  Returns non-zero if the brush should be
 // hidden / excluded from selection operations.
 //
-// The result is CACHED in a1->brushFlags (bit 0 = hidden by geometry/entity/etc)
-// and invalidated by incrementing g_qeglobals.g_filtersUpdated (which RadiantFilters07
-// and Load_RadiantFilters do on filter state change).  a1->xx6 stores the last
+// The result is CACHED in b->brushFlags (bit 0 = hidden by geometry/entity/etc)
+// and invalidated by incrementing g_qeglobals.g_filtersUpdated (which RadiantFilters_ToggleEntry
+// and Load_RadiantFilters do on filter state change).  b->xx6 stores the last
 // seen filtersUpdated value; a mismatch forces recomputation.
 //
-// Signature: char FilterBrush(selbrush_t *a1, int a2)
-//   a1  = the brush instance node
-//   a2  = 0: simple filtered check; non-zero: full hidden+fdshow+fdhide check
+// full = 0: simple filtered check; non-zero: full hidden+fdshow+fdhide check.
 // Returns non-zero if the brush is hidden/filtered.
 // ─────────────────────────────────────────────────────────────────────────────
-char FilterBrush(selbrush_t *a1, int a2)
+char FilterBrush(selbrush_t *b, int full)
 {
-    // IDA 0x46A1F0
+    brush_t *def = b->def;
     if ( g_qeglobals.current_edit_layer == 1 )
     {
-        brush_t *def = a1->def;
         // Fixed-size entities are NOT layer-filtered
         if ( !def->owner->eclass->fixedsize && !FilterBrush_CheckLayerFaces(def) )
             return 1;
     }
 
-    if ( a1->xx6 != g_qeglobals.g_filtersUpdated )
+    if ( b->xx6 != g_qeglobals.g_filtersUpdated )
     {
         // Recompute the cached brushFlags filter bits
-        bool filtered = FilterBrush_IsFilteredByAnyList(a1->def);
+        bool filtered = FilterBrush_IsFilteredByAnyList(def);
 
         if ( (g_qeglobals.d_savedinfo.d_xyShowFlags & 0x40) != 0 )
             filtered = !filtered;  // reverse-filter mode
 
         if ( filtered )
-            a1->brushFlags |=  1u;
+            b->brushFlags |=  1u;
         else
-            a1->brushFlags &= ~1u;
+            b->brushFlags &= ~1u;
 
         // Accumulate fdhide/fdshow flags from geometry/entity/trigger/other lists.
-        // IDA only uses 4 lists here (not layerFilters) and OR-assigns into brushFlags.
-        brush_t *def2 = a1->def;
-        int v6 = FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_geometryFilters, def2);
-        int v7 = FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_entityFilters,   def2) | v6;
-        int v8 = FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_triggerFilters,  def2) | v7;
-        a1->brushFlags |= FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_otherFilters, def2) | v8;
+        // Only 4 lists here (not layerFilters).
+        int fd  = FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_geometryFilters, def);
+        fd     |= FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_entityFilters,   def);
+        fd     |= FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_triggerFilters,  def);
+        fd     |= FilterBrush_ApplyFilterList(g_qeglobals.d_filterGlobals_otherFilters,    def);
+        // KIWI: replace, not OR - the binary never cleared 0x08 / 0x10, so a brush that stopped
+        // matching an fdhide / fdshow filter (classname or material changed) kept the stale bit
+        b->brushFlags = ( b->brushFlags & ~0x18u ) | fd;
 
-        a1->xx6 = g_qeglobals.g_filtersUpdated;
+        b->xx6 = g_qeglobals.g_filtersUpdated;
     }
 
-    if ( !a2 )
-        return (a1->brushFlags & 5) != 0;
+    if ( !full )
+        return (b->brushFlags & 5) != 0;
 
-    int brushFlags = a1->brushFlags;
+    int brushFlags = b->brushFlags;
     if ( (brushFlags & 8) != 0 )
         return 1;   // fdhide
     if ( (brushFlags & 0x10) != 0 )
         return (brushFlags & 6) != 0;  // fdshow: also check bit 1/2
 
-    return (a1->brushFlags & 5) != 0;
+    return (b->brushFlags & 5) != 0;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  faceTexMap — the "filter faces by material name" container (IDB global
-//  @0x26656A0 head / 0x26656A4 end).  In the binary this is a genuine MSVC 7.1
-//  std::map<std::string,int>: a per-material-name REFCOUNT.  A face-type filter
+//  faceTexMap — the "filter faces by material name" container: a
+//  std::map<std::string,int> per-material-name REFCOUNT.  A face-type filter
 //  entry owns a LIST of material-name substrings (filter_entry_s.material_ptr,
-//  built by qe3_cpp_01: {char* name@0; node* next@4}); when that entry is HIDDEN
+//  built by Filter_ParseMaterialList: {char* name; node* next}); when that entry is HIDDEN
 //  (isShown→0) every name in its list is added (++refcount); when it is SHOWN
 //  (isShown→1) every name is removed (--refcount, erase at 0).  The consumer
-//  MtlDef_IsFaceFiltered (mayaexport.cpp 0x46FBE0) tests a face's material name
+//  MtlDef_IsFaceFiltered (mayaexport.cpp) tests a face's material name
 //  against every key by SUBSTRING (strstr) — if any filtered substring occurs in
 //  the face material's name, the face is filtered out of the view.
 //
-// A standard std::map<std::string,int> preserves the required container semantics.
-//  (the binary's RB-tree helpers sub_4136E0/413420/4107C0/412880/4129C0/413AC0
-//  are just MSVC's <map> codegen).  We mirror the exact add/remove/lookup
-//  semantics on a real std::map; no byte-for-byte RB-tree reimplementation is
-//  needed or wanted.  The map lives in this TU (the binary's faceTexMap is a
-//  private filterGlobals member; nothing else in the port references it directly —
-//  the reader reaches it through FaceTexMap_HasSubstringOf below).
+//  The map lives in this TU; nothing else references it directly — readers go
+//  through FaceTexMap_HasSubstringOf / Filter_IsFaceMaterialHidden below.
 // ═════════════════════════════════════════════════════════════════════════════
-static std::map<std::string, int> s_faceTexMap;   // 0x26656A0  std::map<std::string,int>
+static std::map<std::string, int> s_faceTexMap;   // 0x26656A0
 
-// material-name list node built by qe3_cpp_01 (filter_entry_s.material_ptr chain):
-// {char* name@0; FaceTexNode* next@4}.  The IDB types this chain "MaterialInfo*"
-// (a misnomer — name@0 / next@4 exactly match the FaceTexNode the parser allocates).
+// material-name list node built by Filter_ParseMaterialList (filter_entry_s.material_ptr
+// chain): {char* name; FaceTexNode* next}.  The chain is typed "MaterialInfo*"
+// (a misnomer — it is the FaceTexNode list the parser allocates).
 struct FaceTexEntry { const char *name; FaceTexEntry *next; };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RadiantFilters05_large (0x411be0) — INCREMENT each material-name refcount in
-//   faceTexMap.  Called on HIDE (RadiantFilters04_isShown: isShown→0) and at load
-//   for a face entry that starts unchecked (RadiantFilters 0x411083).  IDA walks
-//   a1->material_ptr (the qe3_cpp_01 name list) and for each name does
-//   `++faceTexMap[name]` (lower_bound; insert value 1 if absent, else ++the value).
-//   Returns the last list node walked (faithful to the binary's `result`).
+// Filter_AddFaceMaterialRefs (0x411be0) — INCREMENT each
+//   material-name refcount in faceTexMap.  Called on HIDE (Filter_Hide) and at load
+//   for a face entry that starts unchecked (RadiantFilters).  Walks
+//   filter->material_ptr and for each name does `++faceTexMap[name]` (insert 1 if
+//   absent).  Returns the last list node walked.
 // ─────────────────────────────────────────────────────────────────────────────
-MaterialInfo *RadiantFilters05_large(filter_entry_s *a1)
+MaterialInfo *Filter_AddFaceMaterialRefs(filter_entry_s *filter)
 {
-    FaceTexEntry *node = (FaceTexEntry *)a1->material_ptr;   // [a1+8]
+    FaceTexEntry *node = (FaceTexEntry *)filter->material_ptr;
     FaceTexEntry *last = node;
     for ( ; node; last = node, node = node->next )
-        ++s_faceTexMap[node->name];                          // faithful: ++faceTexMap[name]
+        ++s_faceTexMap[node->name];
     return (MaterialInfo *)last;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RadiantFilters06_large (0x411e30) — DECREMENT each material-name refcount in
-//   faceTexMap, erasing the entry when it hits 0.  Called on SHOW
-//   (RadiantFilters03_isShown: isShown→1) and from RadiantFilters07.  IDA walks
-//   a1->material_ptr and for each name: lower_bound (asserts the key is present —
+// Filter_ReleaseFaceMaterialRefs (0x411e30) — DECREMENT each
+//   material-name refcount in faceTexMap, erasing the entry when it hits 0.  Called on
+//   SHOW (Filter_Show).  For each name: find (asserts the key is present —
 //   "mapIter != ...faceTexMap.end()"), `--*value`, and erase() when it reaches 0.
 //   Returns the last list node walked.
 // ─────────────────────────────────────────────────────────────────────────────
-MaterialInfo *RadiantFilters06_large(filter_entry_s *a1)
+MaterialInfo *Filter_ReleaseFaceMaterialRefs(filter_entry_s *filter)
 {
-    FaceTexEntry *node = (FaceTexEntry *)a1->material_ptr;   // [a1+8]
+    FaceTexEntry *node = (FaceTexEntry *)filter->material_ptr;
     FaceTexEntry *last = node;
     for ( ; node; last = node, node = node->next )
     {
         std::map<std::string, int>::iterator it = s_faceTexMap.find( node->name );
-        if ( it == s_faceTexMap.end() )                      // IDA: Assert mapIter != end()
-        {
-            // KEEP_VERBOSE: the string names g_qeglobals.d_filterGlobals.faceTexMap —
-            // the port's map is the file-static s_faceTexMap (qeglobals layout is locked).
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\filters.cpp",
-                    622, 0, "%s", "mapIter != g_qeglobals.d_filterGlobals.faceTexMap.end()" );
+        iassert( it != s_faceTexMap.end() );
+        if ( it == s_faceTexMap.end() )
             continue;
-        }
-        if ( --it->second == 0 )                             // faithful: if(--value==0) erase
+        if ( --it->second == 0 )
             s_faceTexMap.erase( it );
     }
     return (MaterialInfo *)last;
 }
 
 // Reader hook for MtlDef_IsFaceFiltered (0x46FBE0, mayaexport.cpp): true iff ANY
-// faceTexMap key is a SUBSTRING of `materialName` (the binary's strstr(name, key)
-// loop over the whole map).  Empty map ⇒ false (the default/headless case).
+// faceTexMap key is a SUBSTRING of `materialName`.  Empty map ⇒ false (the default/headless case).
 bool FaceTexMap_HasSubstringOf( const char *materialName )
 {
     if ( !materialName )
         return false;
     for ( std::map<std::string, int>::const_iterator it = s_faceTexMap.begin();
           it != s_faceTexMap.end(); ++it )
-        if ( strstr( materialName, it->first.c_str() ) )     // IDA: strstr(faceName, key)
+        if ( strstr( materialName, it->first.c_str() ) )
             return true;
     return false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// sub_46FCF0 (0x46FCF0) — the picker's face-texture-filter test.  Walk every key in
+// Filter_IsFaceMaterialHidden (0x46FCF0) — the picker's face-texture-filter test.  Walk every key in
 // faceTexMap and register its render material via Texture_GetHandle; return 1 iff any
 // key's registered Material* (qtexture_s.next, +0) equals the picked face's render
-// material.  The picker (Test_Ray cycle-pick, sub_48D460) calls this on the hit
-// face's material so a face hidden by a Texture filter is not pickable.  Faithful to
-// the binary, which iterates the std::map and compares Texture_GetHandle(key)->next
-// against a1 (the face material).  Empty map ⇒ 0 (the default/headless case — no face
-// filter active, so every face is pickable, exactly as the binary returns).
+// material.  The picker (Test_Ray cycle-pick, BrushList_Trace) calls this on the hit
+// face's material so a face hidden by a Texture filter is not pickable.  Empty map ⇒ 0
+// (the default/headless case — no face filter active, so every face is pickable).
 // ─────────────────────────────────────────────────────────────────────────────
-extern qtexture_s *Texture_GetHandle( const char *name );    // texwnd.cpp 0x45a8e0
 
-char sub_46FCF0( Material *faceMtl )
+char Filter_IsFaceMaterialHidden( Material *faceMtl )
 {
     for ( std::map<std::string, int>::const_iterator it = s_faceTexMap.begin();
           it != s_faceTexMap.end(); ++it )
     {
-        // Texture_GetHandle copies the key into a 64-byte buffer (strcpy) before lwr;
-        // pass a mutable copy so a >=64 key trips the same Com_PrintMessage path.
+        // a >=64-char key makes Texture_GetHandle print its "too long" message.
         if ( Texture_GetHandle( it->first.c_str() )->next == faceMtl )   // ->next == registered Material*
             return 1;
     }
@@ -863,58 +815,49 @@ char sub_46FCF0( Material *faceMtl )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RadiantFilters03_isShown (0x411b60, 53 bytes)
-// Set a filter entry's isShown = 1 (SHOW/enable it).
+// Filter_Show (0x411b60) — set a filter entry's isShown = 1.
 // For a face-type filter (bit 2), the material names it owns are no longer hidden,
-// so DECREMENT their faceTexMap refcounts (RadiantFilters06_large).
+// so DECREMENT their faceTexMap refcounts.
 // ─────────────────────────────────────────────────────────────────────────────
-void RadiantFilters03_isShown(filter_entry_s *filter)
+void Filter_Show(filter_entry_s *filter)
 {
-    // IDA 0x411b60 — enable (show) a filter entry; assert it was not already shown.
     iassert( !filter->isShown );
-    bool notFaceType = (filter->filter_type_enum & 4) == 0;
     filter->isShown = 1;
-    if ( !notFaceType )          // is a face-type filter
-        RadiantFilters06_large(filter);  // remove from faceTexMap (no longer filtered)
+    if ( filter->filter_type_enum & 4 )
+        Filter_ReleaseFaceMaterialRefs(filter);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RadiantFilters04_isShown (0x411ba0, 53 bytes)
-// Set a filter entry's isShown = 0 (HIDE/disable it).
+// Filter_Hide (0x411ba0) — set a filter entry's isShown = 0.
 // For a face-type filter (bit 2), the material names it owns are now hidden, so
-// INCREMENT their faceTexMap refcounts (RadiantFilters05_large).
+// INCREMENT their faceTexMap refcounts.
 // ─────────────────────────────────────────────────────────────────────────────
-void RadiantFilters04_isShown(filter_entry_s *filter)
+void Filter_Hide(filter_entry_s *filter)
 {
-    // IDA 0x411ba0 — disable (hide) a filter entry; assert it was shown.
     iassert( filter->isShown );
-    bool notFaceType = (filter->filter_type_enum & 4) == 0;
     filter->isShown = 0;
-    if ( !notFaceType )          // is a face-type filter
-        RadiantFilters05_large(filter);  // add to faceTexMap (now filtered)
+    if ( filter->filter_type_enum & 4 )
+        Filter_AddFaceMaterialRefs(filter);
 }
 
 // Forward-decl: the recursive condition-tree free (defined with the layer code below).
 static void Filters_FreeCondTree( filter_info_s *info );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RadiantFilters (0x410c50, 1330 bytes) — parse a RadiantFilters.txt file and build
+// RadiantFilters (0x410c50) — parse a RadiantFilters.txt file and build
 // the filter_entry_s linked lists.
 //
 // Grammar (per block):  <Category> <Name> [fdhide|fdshow|face] { <condition body> }
 //   Category ∈ {geometry, trigger, entity, other} → the matching d_filterGlobals_* list.
-//   Modifiers: fdhide → type|=1, fdshow → type|=2, face → type|=4 (verbatim 0x410efa).
-//   Body: face → qe3_cpp_01 material-name list; else → DynamicFilter_ParseCondition.
-//   The binary then reads the registry default (GetProfileIntA "Filters" <name> 1) and
-//   sets isShown=0 if the user had unchecked it; this port honours the saved checkbox
-//   state via the same key (CWinApp::GetProfileIntA exists in static MFC).
+//   Modifiers: fdhide → type|=1, fdshow → type|=2, face → type|=4.
+//   Body: face → Filter_ParseMaterialList; else → DynamicFilter_ParseCondition.
+//   Then the registry default ("Filters" <name>, default 1) is read and isShown=0 set
+//   if the user had unchecked it (CFilterWnd_GetSavedCheck).
 //
-// PARSE IDIOM (q_parse, no g_parse symbol): Com_BeginParseSession + Com_Parse (space-
-// delimited token reads) / Com_ParseOnLine (the on-line modifier reads) / Com_UngetToken,
-// exactly the established radiant idiom (entity.cpp Map_LoadEntities).  spaceDelimited
-// is toggled around the { } body so the condition tokens parse identically.
+// Parsing: Com_BeginParseSession + Com_Parse (space-delimited token reads) /
+// Com_ParseOnLine (the on-line modifier reads) / Com_UngetToken.  spaceDelimited
+// is toggled around the { } body.
 // ─────────────────────────────────────────────────────────────────────────────
-int LoadFile( const char *filename, void **bufferptr );             // cmdlib.cpp 0x40ABD0 (C++ linkage, matches eclass.cpp)
 extern int CFilterWnd_GetSavedCheck( const char *name );            // registry "Filters\<name>"
 static int LoadFile_Resolved( const char *name, void **buf );       // cwd → <fs_basepath>\bin\<name>
 
@@ -952,14 +895,14 @@ void RadiantFilters( const char *filterFile )
             continue;
         }
 
-        // Filter NAME (read on-line, like the binary's Com_ParseExt(.,0) after the category).
+        // Filter NAME (read on-line after the category).
         parseInfo_t *nm = Filter_GetToken( &text );
         char nameBuf[256];
         strncpy( nameBuf, nm->token, sizeof( nameBuf ) - 1 );
         nameBuf[sizeof( nameBuf ) - 1] = '\0';
 
         // Optional modifier tokens (fdhide/fdshow/face), still on the same line, until
-        // the line runs out (an empty on-line token), then the binary expects `{`.
+        // the line runs out (an empty on-line token), then `{` is expected.
         int typeFlags = 0;
         while ( true )
         {
@@ -969,7 +912,7 @@ void RadiantFilters( const char *filterFile )
             if      ( !_stricmp( mod->token, "fdhide" ) ) typeFlags |= 1;
             else if ( !_stricmp( mod->token, "fdshow" ) ) typeFlags |= 2;
             else if ( !_stricmp( mod->token, "face"   ) ) typeFlags |= 4;
-            // (any other on-line token is ignored, matching the binary's if/else-if chain)
+            // (any other on-line token is ignored)
         }
 
         // Expect `{` (space-delimited), then parse the body with spaceDelimited=0.
@@ -982,7 +925,7 @@ void RadiantFilters( const char *filterFile )
         filter_info_s *condTree  = nullptr;
         bool           isFace    = (typeFlags & 4) != 0;
         if ( isFace )
-            faceMtl = (MaterialInfo *)qe3_cpp_01( &text );    // material-name list (face filter)
+            faceMtl = (MaterialInfo *)Filter_ParseMaterialList( &text );
         else
             condTree = DynamicFilter_ParseCondition( &text ); // condition tree
 
@@ -992,26 +935,24 @@ void RadiantFilters( const char *filterFile )
         if ( strcmp( close->token, "}" ) )
             Com_ScriptErrorDrop( "MatchToken: got '%s', expected '%s'\n", close->token, "}" );
 
-        // Build the entry and prepend to the category list (binary order: *listHead head).
-        // IDA 0x410e12: filter_type_enum/name/isShown=1/info=0/next set, then face entries
-        // get material_ptr=qe3_cpp_01(...) (0x411022), non-face get info=condTree (0x411033).
+        // Build the entry and prepend it to the category list (*listHead is the head).
         filter_entry_s *e = (filter_entry_s *)operator new( sizeof( filter_entry_s ) );
         e->filter_type_enum = typeFlags;
         e->isShown          = true;              // shown by default
-        e->material_ptr     = faceMtl;           // face: qe3_cpp_01 name list; else null
+        e->material_ptr     = faceMtl;           // face: material-name list; else null
         e->name             = AllocMaterialString( nameBuf );
         e->info             = condTree;
         e->next_filter      = *listHead;
         *listHead           = e;
 
         // Honour the saved checkbox state (registry "Filters\<name>", default 1=shown).
-        // IDA 0x41104e: GetProfileIntA("Filters", name, 1)==0 → isShown=0, and for a FACE
-        // entry that starts hidden, RadiantFilters05_large(e) seeds the faceTexMap refcounts.
+        // For a FACE entry that starts hidden, Filter_AddFaceMaterialRefs(e) seeds the
+        // faceTexMap refcounts.
         if ( !CFilterWnd_GetSavedCheck( e->name ) )
         {
             e->isShown = false;
-            if ( isFace )                        // IDA 0x411080-83: !(type&4)==0 → add
-                RadiantFilters05_large( e );
+            if ( isFace )
+                Filter_AddFaceMaterialRefs( e );
         }
     }
 
@@ -1021,19 +962,19 @@ void RadiantFilters( const char *filterFile )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Load_RadiantFilters (0x411190, 240 bytes) — load RadiantFilters.txt + the user
-// filter file into the (empty-at-startup) filter lists.  Called from CMainFrame::
-// OnCreate (0x420940).  The binary just calls RadiantFilters("RadiantFilters.txt"),
+// Load_RadiantFilters (0x411190) — load RadiantFilters.txt + the user
+// filter file into the (empty-at-startup) filter lists.  Called at startup
+// (radiant_main.cpp).  The binary just calls RadiantFilters("RadiantFilters.txt"),
 // relying on the editor's cwd being the install bin/ dir (where the .exe + the .txt
 // sit).  This port can be launched from anywhere (Start-Process sets cwd to the caller),
-// so we RESOLVE the path: bare name (cwd, the faithful case) → <fs_basepath>\bin\<name>
+// so we RESOLVE the path: bare name (cwd, the original case) → <fs_basepath>\bin\<name>
 // (the known install location — fs_basepath itself is the install root, com_files.cpp).
 // ─────────────────────────────────────────────────────────────────────────────
 const char *Dvar_GetString( const char *dvarName );              // qcommon (C++ linkage; fs_basepath)
 
 static int LoadFile_Resolved( const char *name, void **buf )
 {
-    // 1) bare name (cwd) — faithful when the editor runs from the install bin/.
+    // 1) bare name (cwd) — works when the editor runs from the install bin/.
     int n = (int)LoadFile( name, buf );
     if ( n >= 0 && *buf )
         return n;
@@ -1066,22 +1007,20 @@ void Load_RadiantFilters()        // g_PrefsDlg / prefData_t from prefs.h (inclu
 // checklist click).  The binary reads the new check state from the CCheckListBox and
 // asserts it differs from the entry's current isShown.  This port exposes the CORE
 // (no MFC control coupling) so the hand-built listbox UI can drive it directly:
-//   show=true  → enable (RadiantFilters03_isShown tail; face entries touch faceTexMap)
-//   show=false → disable (RadiantFilters04_isShown tail)
+//   show=true  → Filter_Show; show=false → Filter_Hide (face entries touch faceTexMap)
 // then ++g_filtersUpdated (invalidate the per-brush FilterBrush cache) + repaint.
-// Non-face entries do not update the face-material refcount map.
 // ─────────────────────────────────────────────────────────────────────────────
 void RadiantFilters_ToggleEntry( filter_entry_s *cb, bool show )
 {
-    if ( !cb )
+    // KIWI: a same-state call is a no-op (it would double-count the face refcounts).
+    if ( !cb || cb->isShown == show )
         return;
-    bool isFace = (cb->filter_type_enum & 4) != 0;   // (& 4) == 0 → not face (clean)
-    cb->isShown = show;
-    if ( isFace )
-    {
-        if ( show ) RadiantFilters06_large( cb );
-        else        RadiantFilters05_large( cb );
-    }
+    if ( show ) Filter_Show( cb );
+    else        Filter_Hide( cb );
+    // KIWI: remember it - the startup load reads [Filters] <name>, but nothing ever wrote it
+    // (the binary's Filters_Free 0x411AD0 did, at exit), so every toggle reset on relaunch.
+    if ( cb->name )
+        CFilterWnd_SaveCheck( cb->name, show );
     ++g_qeglobals.g_filtersUpdated;                  // invalidate the FilterBrush cache
     g_nUpdateBits = -1;                              // repaint all views
 }
@@ -1093,7 +1032,7 @@ void RadiantFilters_ToggleEntry( filter_entry_s *cb, bool show )
 //        the loaded filter_entry_s nodes the user checks/unchecks → RadiantFilters_-
 //        ToggleEntry (= RadiantFilters07).  Enumerated via CFilterWnd_GetCategoryHead.
 //    (2) the six SIMPLE checkboxes (Angles/Connections/Names/Blocks/Coordinates/Reverse
-//        Filter), each a d_xyShowFlags bit — exactly CFilterWnd::GetSettings (0x4140f0)
+//        Filter), each a d_xyShowFlags bit — exactly CFilterWnd::GetSettings
 //        pushes into them, and the same bits the View→Show menu commands flip.  The
 //        get/set here mirror that 1:1 (a checked box = the feature SHOWN = bit CLEAR,
 //        except ReverseFilter where checked = bit SET — the inverted polarity GetSettings
@@ -1102,22 +1041,22 @@ void RadiantFilters_ToggleEntry( filter_entry_s *cb, bool show )
 
 // Registry "Filters\<name>" saved isShown default (1 = shown).  Radiant_ProfileGetInt
 // reads HKCU\...\<app>\Filters; defaults to 1 if absent — matching the binary's
-// GetProfileIntA(., "Filters", name, 1) at 0x41104e.  Headless-safe: the free-function
+// GetProfileIntA(., "Filters", name, 1).  Headless-safe: the free-function
 // profile helper needs no CWinApp and just returns the default when the key is absent.
 int CFilterWnd_GetSavedCheck( const char *name )
 {
     return Radiant_ProfileGetInt( "Filters", name, 1 );
 }
 
-// Persist a filter's checkbox state (the binary writes it on dialog close via
-// CWinApp::WriteProfileInt; we write on each toggle so it survives a restart).
+// Persist a filter's checkbox state (the binary wrote it at app close, Filters_Free; KIWI
+// writes on each toggle - RadiantFilters_ToggleEntry - so it survives a restart or a crash).
 void CFilterWnd_SaveCheck( const char *name, bool shown )
 {
     Radiant_ProfileSetInt( "Filters", name, shown ? 1 : 0 );
 }
 
 // Enumerate: return the head of one category's filter list (0..3 = geo/trig/ent/other),
-// matching the binary's CFilterWnd::InitFilterCheckboxes order (sub_414380 over
+// matching the binary's CFilterWnd::InitFilterCheckboxes order (over
 // geometryFilters/entityFilters/triggerFilters/otherFilters).  Walk ->next_filter.
 filter_entry_s *CFilterWnd_GetCategoryHead( int category )
 {
@@ -1175,24 +1114,22 @@ void CFilterWnd_SetShowFlag( int i, bool checked )
 //  A layer is "hidden" at runtime by an entry in d_filterGlobals_layerFilters
 //  whose condition is `script_layer == <layer name>` (filter case 5) and whose
 //  isShown flag is 0.  FilterBrush → FilterBrush_IsFilteredByAnyList →
-//  FilterBrush_CheckFilterListHide(layerFilters) → FilterCond_Surface(case 5) →
-//  Entity_HasEpairMatch(brush->owner, "script_layer", name).  This is exactly the
-//  binary's mechanism; the LayersDlg's CCheckListBox at the bottom maps 1:1 onto
-//  these entries.
+//  FilterBrush_CheckFilterListHide(layerFilters) → FilterCond_KeyValue(case 5) →
+//  Entity_HasEpairMatch(brush->owner, "script_layer", name).  The LayersDlg's
+//  CCheckListBox at the bottom maps 1:1 onto these entries.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Layers_BuildFilter (sub_411950, 0x411950) — prepend a script_layer filter entry.
-// Allocates filter_entry_s(0x18) + filter_info_s(0x10) + filter_contents_s(0xC),
+// Layers_BuildFilter (0x411950) — prepend a script_layer filter entry.
+// Allocates a filter_entry_s + filter_info_s + filter_contents_s,
 // wires key="script_layer", value=<name>, surfaceFlags=5 (the case-5 evaluator),
-// isShown=1 (visible by default).  Returns the value string (matches IDA's result).
+// isShown=1 (visible by default).  Returns the value string.
 // ─────────────────────────────────────────────────────────────────────────────
 const char *Layers_BuildFilter( const char *layerName )
 {
-    // IDA 0x411950 — operator new(0x18) entry, new(0x10) info, new(0xC) contents.
     filter_entry_s *entry = (filter_entry_s *)operator new( sizeof( filter_entry_s ) );
     entry->name            = AllocMaterialString( layerName );
-    entry->isShown         = true;            // v1->isShown = 1
+    entry->isShown         = true;
     entry->filter_type_enum= 0;               // not face/fdhide/fdshow — a condition filter
     entry->next_filter     = g_qeglobals.d_filterGlobals_layerFilters;  // prepend
     entry->material_ptr    = nullptr;
@@ -1212,22 +1149,22 @@ const char *Layers_BuildFilter( const char *layerName )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Filters_FreeCondTree (sub_4119D0, 0x4119D0) — recursively free a condition tree.
+// Filters_FreeCondTree (0x4119D0) — recursively free a condition tree.
 // Case 5 (script_layer): free key, value, the contents node, then the info node.
-// (The full Filters_Free 0x411ad0 ALSO writes each entry's isShown to the registry
+// (The full Filters_Free ALSO writes each entry's isShown to the registry
 //  via CWinApp::WriteProfileInt — undesirable for the transient, rebuilt-every-
 //  refresh layer filters — so the layer path frees without persisting.)
 // ─────────────────────────────────────────────────────────────────────────────
 extern "C" void free( void * );
 static void Filters_FreeCondTree( filter_info_s *info )
 {
-    // IDA 0x4119D0 — v1 = info; chase the sibling link (info+0xC) per node.
+    // chase the sibling link per node.
     while ( info )
     {
         filter_info_s *self = info;
         int type = info->surfaceFlags;
-        info = info->next;   // v1 = v1[3] (next sibling)
-        filter_contents_s *c = self->contents_ptr;       // v2[2]
+        info = info->next;   // next sibling
+        filter_contents_s *c = self->contents_ptr;
         switch ( (unsigned)type )
         {
         case 1u: case 2u:                                // AND/OR — recurse children
@@ -1251,7 +1188,7 @@ static void Filters_FreeCondTree( filter_info_s *info )
 // ─────────────────────────────────────────────────────────────────────────────
 // Layers_FreeVisibilityFilters — free the whole layerFilters list (entry + name +
 // condition tree) WITHOUT the registry write, then null the head.  Matches the
-// effect of sub_41C200's `Filters_Free(layerFilters); layerFilters = 0;` prologue
+// effect of 0x41C200's `Filters_Free(layerFilters); layerFilters = 0;` prologue
 // for these synthetic, every-refresh-rebuilt entries.
 // ─────────────────────────────────────────────────────────────────────────────
 void Layers_FreeVisibilityFilters()
@@ -1295,7 +1232,7 @@ bool Layers_SetLayerVisible( const char *layerName, bool visible )  // g_nUpdate
     if ( !f )
         return false;
     f->isShown = visible;
-    ++g_qeglobals.g_filtersUpdated;   // invalidate FilterBrush cache (a1->xx6 != g_filtersUpdated)
+    ++g_qeglobals.g_filtersUpdated;   // invalidate FilterBrush cache (b->xx6 != g_filtersUpdated)
     g_nUpdateBits = -1;               // force all views to repaint
     return true;
 }

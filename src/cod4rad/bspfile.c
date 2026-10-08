@@ -148,8 +148,6 @@ static char s_assertDisable_SwapLeafBrushes;
 static char s_assertDisable_SwapLeafBrushes_len;
 static char s_assertDisable_SwapDrawVerts;
 static char s_assertDisable_SwapDrawVerts_len;
-static char s_assertDisable_SwapBrushes;
-static char s_assertDisable_SwapBrushes_len;
 static char s_assertDisable_SwapLightGridEntries;
 static char s_assertDisable_SwapLightGridEntries_len;
 static char s_assertDisable_SwapCollisionAabbTree;
@@ -407,6 +405,8 @@ epair_t *ParseEpair(const char *key, char **parsePos)
 {
     epair_t *ep;
     char *val;
+    char *keyCopy;
+    char *valCopy;
     char *p;
 
     ep = malloc(sizeof(epair_t));
@@ -416,29 +416,29 @@ epair_t *ParseEpair(const char *key, char **parsePos)
 
     if (strlen(key) >= MAX_KEY - 1)
         Error("ParseEpair: token too long");
-    if (key[strlen(key) - 2] == '\\')
+    if (strlen(key) >= 2 && key[strlen(key) - 2] == '\\') /* KIWI: length guard; a 1-char key read key[-1] */
         Error("ParseEpair: key '%s' ends with a '\\'\n", key);
     if (strchr(key, '\n') || strchr(key, '\r'))
         Error("ParseEpair: key '%s' contains a newline character\n", key);
     if (strchr(key, '"'))
         Error("ParseEpair: key '%s' contains a \" character, will cause parsing errors\n", key);
 
-    ep->key = CopyStringInternal(key);
+    keyCopy = CopyStringInternal(key);
 
     val = Com_ParseOnLine(parsePos);
     if (strlen(val) >= MAX_TOKEN_CHARS - 1)
         Error("ParseEpair: token too long");
-    if (val[strlen(val) - 2] == '\\')
+    if (strlen(val) >= 2 && val[strlen(val) - 2] == '\\') /* KIWI: length guard */
         Error("ParseEpair: value '%s' ends with a '\\'\n", val);
     if (strchr(val, '\n') || strchr(val, '\r'))
         Error("ParseEpair: value '%s' contains a newline character (use of '\\' at end of value?)\n", val);
     if (strchr(val, '"'))
         Error("ParseEpair: value '%s' contains a \" character, will cause parsing errors\n", val);
 
-    ep->value = CopyStringInternal(val);
+    valCopy = CopyStringInternal(val);
 
     /* strip trailing whitespace from key */
-    for (p = ep->key + strlen(ep->key) - 1; p >= ep->key; p--)
+    for (p = keyCopy + strlen(keyCopy) - 1; p >= keyCopy; p--)
     {
         if (*p > ' ')
             break;
@@ -446,13 +446,15 @@ epair_t *ParseEpair(const char *key, char **parsePos)
     }
 
     /* strip trailing whitespace from value */
-    for (p = ep->value + strlen(ep->value) - 1; p >= ep->value; p--)
+    for (p = valCopy + strlen(valCopy) - 1; p >= valCopy; p--)
     {
         if (*p > ' ')
             break;
         *p = 0;
     }
 
+    ep->key = keyCopy;
+    ep->value = valCopy;
     return ep;
 }
 
@@ -522,7 +524,7 @@ void SetKeyValue(Entity_t *entity, const char *key, const char *value)
     {
         if (!strcmp(ep->key, key))
         {
-            free(ep->value);
+            free((void *)ep->value);
             ep->value = CopyStringInternal(value);
             return;
         }
@@ -1011,111 +1013,6 @@ WriteBspFile
 Writes the BSP file to disk from global arrays.
 ================
 */
-#if 0 /* CoD2 fixed-directory writer retained only as provenance. */
-int WriteBspFile_Cod2(const char *filename, int swapFlag)
-{
-    FILE *fp;
-    bspFileHeader_t header;
-
-    if (numBSPNodes > 0x7FFF)
-        Error("numnodes is %d, exceeds limit of %d.\n", numBSPNodes, 0x7FFF);
-
-    /* Pre-write byte-swap:
-     * - PC (swapFlag=0): in-memory data is LE, file must be LE → no swap needed
-     * - Xbox (swapFlag=1): in-memory data is LE, file must be BE → swap LE→BE
-     * Orig's condition here is `if (!swapFlag)` which triggers the swap on PC;
-     * that corrupts every passthrough lump because our SwapBSPFile
-     * unconditionally byte-swaps longs. Matching orig's observed output
-     * (which preserves pristine lumps bit-exact on PC) requires skipping
-     * the swap for PC. */
-    if (swapFlag)
-        SwapBSPFile(swapFlag);
-
-    memset(&header, 0, sizeof(header));
-
-    fp = fopen(filename, "wb");
-    if (!fp)
-    {
-        /* check if file is read-only */
-        unsigned int attrs = GetFileAttributesA(filename);
-        Error("could not open '%s' for writing\n", filename);
-
-        if (attrs != 0xFFFFFFFF && (attrs & 1)) /* FILE_ATTRIBUTE_READONLY */
-        {
-            char msgText[1024];
-            sprintf(msgText, "could not open '%s' for writing; replace?", filename);
-            int mbResult = MessageBoxA(NULL, msgText, "OUTPUT FILE IS READ ONLY", 0x21); /* MB_OKCANCEL | MB_ICONEXCLAMATION */
-            if (mbResult != 1) /* IDOK */
-                return 0;
-            SetFileAttributesA(filename, attrs & ~1); /* clear readonly */
-            fp = fopen(filename, "wb");
-            if (!fp)
-                Error("could not open '%s' for writing\n", filename);
-        }
-    }
-
-    header.magic = BigLong(BSP_IDENT);
-    header.version = BigLong(BSP_VERSION);
-    SafeWrite(fp, &header, sizeof(header));
-
-    AddLump(fp, &header, LUMP_MATERIALS,           bspMaterials,          sizeof(bspMaterials[0]) * numBSPMaterials);
-    AddLump(fp, &header, LUMP_LIGHTBYTES,          bspLightmapData,       numBSPLightBytes);
-    AddLump(fp, &header, LUMP_LIGHTGRIDENTRIES,    bspLightGridHash,      sizeof(bspLightGridHash[0]) * numBSPLightGridHash);
-    AddLump(fp, &header, LUMP_LIGHTGRIDCOLORS,     bspLightGridColors,    sizeof(bspLightGridColors[0]) * numBSPLightGridColors);
-    AddLump(fp, &header, LUMP_PLANES,              bspPlanes,             sizeof(bspPlanes[0]) * numBSPPlanes);
-    AddLump(fp, &header, LUMP_BRUSHSIDES,          bspBrushSidesData,     sizeof(bspBrushSidesData[0]) * numBSPBrushSides);
-    AddLump(fp, &header, LUMP_BRUSHES,             bspBrushes,            sizeof(bspBrushes[0]) * numBSPBrushes);
-    AddLump(fp, &header, LUMP_TRIANGLES,           bspTriangles,          sizeof(bspTriangles[0]) * numBSPTriSoups);
-    AddLump(fp, &header, LUMP_DRAWVERTS,           bspDrawVerts,          sizeof(bspDrawVerts[0]) * numBSPDrawVerts);
-    AddLump(fp, &header, LUMP_DRAWINDICES,         bspDrawIndexes,        sizeof(bspDrawIndexes[0]) * numBSPDrawIndexes);
-    AddLump(fp, &header, LUMP_CULLGROUPS,          bspCullGroups,         sizeof(bspCullGroups[0]) * numBSPCullGroups);
-    AddLump(fp, &header, LUMP_CULLGROUPINDICES,    bspCullGroupIndexes,   sizeof(bspCullGroupIndexes[0]) * numBSPCullGroupIndexes);
-    AddLump(fp, &header, LUMP_OBSOLETE_1,          bspShadowVerts,        sizeof(bspShadowVerts[0]) * numBSPShadowVerts);
-    AddLump(fp, &header, LUMP_OBSOLETE_2,          bspShadowIndexes,      sizeof(bspShadowIndexes[0]) * numBSPShadowIndices);
-    AddLump(fp, &header, LUMP_OBSOLETE_3,          bspShadowClusters,     sizeof(bspShadowClusters[0]) * numBSPShadowClusters);
-    AddLump(fp, &header, LUMP_OBSOLETE_4,          bspShadowData,         sizeof(bspShadowData[0]) * numBSPShadowAabbTrees);
-    AddLump(fp, &header, LUMP_OBSOLETE_5,          bspShadowSources,      sizeof(bspShadowSources[0]) * numBSPShadowSources);
-    AddLump(fp, &header, LUMP_PORTALVERTS,         bspPortalVerts,        sizeof(bspPortalVerts[0]) * numBSPPortalVerts);
-    AddLump(fp, &header, LUMP_OCCLUDER,            bspOccluders,          sizeof(bspOccluders[0]) * numBSPOccluders);
-    AddLump(fp, &header, LUMP_OCCLUDERPLANES,      bspOccluderPlanes,     sizeof(bspOccluderPlanes[0]) * numBSPOccluderPlanes);
-    AddLump(fp, &header, LUMP_OCCLUDEREDGES,       bspOccluderEdges,      sizeof(bspOccluderEdges[0]) * numBSPOccluderEdges);
-    AddLump(fp, &header, LUMP_OCCLUDERINDICES,     bspOccluderIndexes,    sizeof(bspOccluderIndexes[0]) * numBSPOccluderIndexes);
-    AddLump(fp, &header, LUMP_AABBTREES,           bspAabbTrees,          sizeof(bspAabbTrees[0]) * numBSPAabbTrees);
-    AddLump(fp, &header, LUMP_CELLS,               bspCells,              sizeof(bspCells[0]) * numBSPCells);
-    AddLump(fp, &header, LUMP_PORTALS,             bspPortals,            sizeof(bspPortals[0]) * numBSPPortals);
-    AddLump(fp, &header, LUMP_NODES,               bspNodes,              sizeof(bspNodes[0]) * numBSPNodes);
-    AddLump(fp, &header, LUMP_LEAFS,               bspLeafs,              sizeof(bspLeafs[0]) * numBSPLeafs);
-    AddLump(fp, &header, LUMP_LEAFBRUSHES,         bspLeafBrushes,        sizeof(bspLeafBrushes[0]) * numBSPLeafBrushes);
-    AddLump(fp, &header, LUMP_LEAFSURFACES,        bspLeafSurfaces,       sizeof(bspLeafSurfaces[0]) * numBSPLeafSurfaces);
-    AddLump(fp, &header, LUMP_COLLISIONVERTS,      bspCollisionVerts,     sizeof(bspCollisionVerts[0]) * numBSPCollisionVerts);
-    AddLump(fp, &header, LUMP_COLLISIONEDGES,      bspCollisionEdgeData,  sizeof(bspCollisionEdgeData[0]) * numBSPCollisionEdges);
-    AddLump(fp, &header, LUMP_COLLISIONTRIS,       bspCollisionTriData,   sizeof(bspCollisionTriData[0]) * numBSPCollisionTris);
-    AddLump(fp, &header, LUMP_COLLISIONBORDERS,    bspCollisionBorders,   sizeof(bspCollisionBorders[0]) * numBSPCollisionBorders);
-    AddLump(fp, &header, LUMP_COLLISIONPARTITIONS, bspCollisionParts,     sizeof(bspCollisionParts[0]) * numBSPCollisionParts);
-    AddLump(fp, &header, LUMP_COLLISIONAABBS,      bspCollisionAABBs,     sizeof(bspCollisionAABBs[0]) * numBSPCollisionAABBs);
-    AddLump(fp, &header, LUMP_MODELS,              bspModels,             sizeof(bspModels[0]) * numBSPModels);
-    AddLump(fp, &header, LUMP_VISIBILITY,          bspVisBytes,           numBSPVisBytes);
-    AddLump(fp, &header, LUMP_ENTITIES,            bspEntData,            bspEntDataSize);
-    if (numBSPPaths > 0)
-        AddLump(fp, &header, LUMP_PATHCONNECTIONS, bspPaths,              sizeof(bspPaths[0]) * numBSPPaths);
-
-    /* if swapFlag was 0 (no pre-swap), byte-swap the header entries now */
-    if (swapFlag)
-    {
-        int *headerInts = (int *)&header;
-        int j;
-        Swap_Init_BigEndian();
-        for (j = 0; j < (int)(sizeof(header) / sizeof(int)); j++)
-            headerInts[j] = LongSwap(headerInts[j]);
-        Swap_Init();
-    }
-
-    fseek(fp, 0, SEEK_SET);
-    SafeWrite(fp, &header, sizeof(header));
-    return fclose(fp);
-}
-#endif
-
 int WriteBspFile(const char *filename, int swapFlag)
 {
     FILE *fp;
@@ -1183,7 +1080,7 @@ int WriteBspFile(const char *filename, int swapFlag)
     (void)swapFlag;
     inputHeader = (const bspFileHeader_t *)s_loadedBspImage;
     memset(&header, 0, sizeof(header));
-    memset(s_bspChunkData, 0, sizeof(s_bspChunkData));
+    memset((void *)s_bspChunkData, 0, sizeof(s_bspChunkData));
     memset(consumed, 0, sizeof(consumed));
     header.magic = BSP_IDENT;
     header.version = BSP_VERSION;
@@ -1358,7 +1255,6 @@ void SwapNodes(void *data, int len)
 typedef struct BspLeaf { int a; short b; short c; int d; int e; short f; short pad; } BspLeaf;
 typedef struct BspLeafBrush { short a; short pad; int b; int c; } BspLeafBrush;
 typedef struct BspDrawVert { int a; int b; int c; int d; int e; int f; short g; short h; int j; } BspDrawVert;
-typedef struct BspBrush { int a; unsigned char skip[2]; short b; } BspBrush;
 
 /*
 ================
@@ -1438,30 +1334,6 @@ void SwapDrawVerts(void *data, int len)
         dv->g = BigShort(dv->g);
         dv->h = BigShort(dv->h);
         dv->j = BigLong(dv->j);
-    }
-}
-
-/*
-================
-SwapBrushes
-
-Byte-swaps brush entries (8 bytes each).
-Layout: L+0, [2 unswapped bytes +4], S+6.
-================
-*/
-void SwapBrushes(void *data, int len)
-{
-    int count, i;
-
-    Assert(data, s_assertDisable_SwapBrushes);
-    Assert(len >= 0, s_assertDisable_SwapBrushes_len);
-    count = len / 8;
-
-    for (i = 0; i < count; i++)
-    {
-        BspBrush *br = (BspBrush *)data + i;
-        br->a = BigLong(br->a);
-        br->b = BigShort(br->b);
     }
 }
 

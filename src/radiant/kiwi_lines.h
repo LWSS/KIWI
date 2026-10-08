@@ -66,9 +66,5 @@ inline void KiwiTris_FillNormal( float *out )
     out[2] = 1.0f;
 }
 
-// MATERIAL_COLOR.w = 1 selects flat RGB while packed vertex colour supplies draw
-// alpha. Callers own the surrounding material-colour state and must restore it.
-void KiwiTris_FillFlatColor( const float rgba[4] );
-
 // Restore the neutral {0,0,0,0} material colour.
 void KiwiTris_FillNeutral();

@@ -12,6 +12,7 @@
 #include "kiwi_droptrace.h"
 #include "kiwi_camera.h"        // KiwiCam_Ortho
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_section.h"
 #include "kiwi_shadowcache.h"
 
@@ -23,14 +24,10 @@
 #include <algorithm>
 #include <unordered_map>
 
-extern entity_s *world_entity;                                         // map.cpp
 extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
 extern void Test_Ray( float *start, float *dir, int contents,
                       edTrace_t *trace, int traceCount );              // select.cpp
-extern int Entity_GetVec3ForKey( entity_s_def *entity, float *out,
-                                 const char *key );                    // entity.cpp
-extern float *AnglesToAxis( float *angles, float ( *axisOut )[3] );    // engine_stubs.cpp
-extern char PMESH_RaySegPick( const float *vB, const float *vA, const float *dir,
+extern char Ray_TriangleHit( const float *vB, const float *vA, const float *dir,
                               const float *base, const float *origin,
                               float *outDist, float *outU, float *outV ); // pmesh.cpp
 extern bool Editor_ModelsEnabled();                                    // camwnd.cpp
@@ -209,7 +206,7 @@ namespace
                 const int i = order[j]*3;
                 const float *a=verts+3*indices[i], *b=verts+3*indices[i+1], *c=verts+3*indices[i+2];
                 float dist;
-                if ( !PMESH_RaySegPick( c, b, dir, a, start, &dist, nullptr, nullptr )
+                if ( !Ray_TriangleHit( c, b, dir, a, start, &dist, nullptr, nullptr )
                   || !_finite(dist) || dist <= KDROP_RAY_EPS || dist >= best ) continue;
                 best = dist;
                 const float u[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]}, v[3]={c[0]-a[0],c[1]-a[1],c[2]-a[2]};
@@ -474,7 +471,7 @@ bool KiwiDrop_ValidateModelTree( selbrush_t *node )
         for ( int i=0;i+2<count;i+=3 )
         {
             float dist;
-            if ( PMESH_RaySegPick(v+3*ix[i+2],v+3*ix[i+1],dir,v+3*ix[i],start,&dist,nullptr,nullptr)
+            if ( Ray_TriangleHit(v+3*ix[i+2],v+3*ix[i+1],dir,v+3*ix[i],start,&dist,nullptr,nullptr)
               && _finite(dist) && dist>KDROP_RAY_EPS && dist<slow ) slow=dist;
         }
         if ( (fast==FLT_MAX)!=(slow==FLT_MAX) || (fast!=FLT_MAX && fabsf(fast-slow)>.001f) ) return false;
@@ -628,7 +625,7 @@ bool KiwiDrop_Trace( const ray_t &ray, bool excludeSelectedModels,
     float bestNormal[3] = { 0.0f, 0.0f, 1.0f };
 
     // Exclude fixed-size/model proxies and flag-0x20 brushes; patches still reach
-    // PMESH_51's tessellated triangles, not control hull or symbiont bounds.
+    // Patch_RayTest's tessellated triangles, not control hull or symbiont bounds.
     const int contents = ( Pick_CameraContents() | 0x200 ) & ~( 0x400 | 0x1000 );
     edTrace_t worldTrace;
     {
@@ -758,7 +755,6 @@ bool KiwiDrop_PickModelMesh( const float start[3], const float dir[3], float max
 }
 
 // ─── xmodel vertex snapping (2026-10-03) ─────────────────────────────────────
-extern camera_s *Ed_Camera();                                          // camwnd.cpp
 
 namespace
 {

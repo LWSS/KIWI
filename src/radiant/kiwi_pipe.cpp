@@ -18,6 +18,7 @@
 #include "kiwi_material.h"          // KiwiMtl_RealizePatch / EnsurePatchChannels
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_primitive.h"         // KiwiPrim_BuildPatchCylinder / PatchControlPoint
 #include "kiwi_units.h"
 #include "kiwi_validity.h"
@@ -29,22 +30,12 @@
 #include <vector>
 
 // Ported entry points; signatures match their definitions (kiwi_primitive.cpp uses the same).
-extern int          Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp
-extern int          g_nUpdateBits;                                              // 0x25D5A74 (mainfrm.cpp)
-extern brush_t     *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );     // brush.cpp:465 (0x4751e0)
-extern void         Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510
-extern void         Brush_Free_R( brush_t *def );                               // brush.cpp:706 (0x475af0)
-extern void         Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1444 (0x48E800)
-extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
-extern void         Ed_EnsureCurrentMaterial_Kiwi();                            // xywnd.cpp:1563 forwarder
-extern patchMesh_t *MakeNewPatch();                                             // pmesh.cpp:136  0x437AC0
-extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );    // pmesh.cpp:840  0x4386A0
 extern void         Patch_KiwiFinishNew( patchMesh_t *p );                      // pmesh.cpp:1558
 
 namespace
 {
     const float KPIPE_COL_OK[3]  = { 0.55f, 0.85f, 1.00f };   // the primitives' preview blue
-    const float KPIPE_PI         = 3.14159265358979323846f;
+    const float KPIPE_PI         = (float)KIWI_PI;
 
     const kiwiNumField_t KPIPE_FIELDS[2] = { { "radius", KNUM_LENGTH, false },
                                              { "sides",  KNUM_COUNT,  false } };

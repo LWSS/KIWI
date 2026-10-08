@@ -14,6 +14,7 @@
 #include "kiwi_hints.h"
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -23,30 +24,19 @@
 #include <stdio.h>
 
 // Ported entry points.
-extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern int   g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-
-extern void  Brush_ShiftTexture ( float a1, float a2 );                 // select.cpp:3084  0x491F20
-extern void  Brush_ScaleTexture ( int   a1, int   a2 );                 // select.cpp:3257  0x492650
-extern void  Brush_RotateTexture( int   a1 );                           // select.cpp:3339  0x4929F0
+extern void  Brush_ShiftTexture ( float s, float t );                   // select.cpp 0x491F20
+extern void  Brush_ScaleTexture ( int   ds, int   dt );                 // select.cpp 0x492650
+extern void  Brush_RotateTexture( int   deg );                          // select.cpp 0x4929F0
 
 extern char  Texture_SetTexture( const int *a1, MaterialDef *a2 );      // texwnd.cpp:2169  0x45BE50
 extern char  Radiant_PatchGetTexdef( patchMesh_t *patch,
                                      texdef_sub_t *texdef );            // brush.cpp:2231   0x44B620
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );    // materialdef.cpp:159  0x431640
 namespace LayerMat       { int  GetCurrentLayer( MaterialDef *mtlDef ); }  // materialdef.cpp:252  0x431B30
 namespace SurfaceInspector { void UpdateSurfaceDialog(); }                 // surfacedlg.cpp:545   0x458590
 extern void  UpdatePatchInspector();                                    // patchdialog.cpp:500  0x436DB0
 // File scope avoids MSVC namespace-mangling mismatch; pick uses the browser's
 // patch normalization after applying a material.
 extern void  Patch_KiwiReNaturalizeSelected();                          // pmesh.cpp:1641
-extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );            // pmesh.cpp:2172
-
-extern float grid_sizes[];                                              // engine_stubs.cpp:771  0x6DDE5C
-
-extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:297
-extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-extern void  Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
 
 namespace
 {

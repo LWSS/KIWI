@@ -68,5 +68,3 @@ void KiwiWalk_PrefabLeave();
 // prefab orientations across the current recorded subtree. Equal keeps cached surfaces valid;
 // 0 means UNKNOWN and must be treated as changed. No allocation or string work.
 unsigned long long KiwiWalk_SubtreeSignature( const selbrush_t *brush );
-
-int  KiwiWalkCache_ResidentKB();

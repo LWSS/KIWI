@@ -30,8 +30,3 @@ void KiwiInstCache_BeginFrame();
 
 // Release every page and index block.  The device must still be alive.  Idempotent.
 void KiwiInstCache_Shutdown();
-
-// Per-frame Tracy counters.
-int KiwiInstCache_ResidentSurfs();
-int KiwiInstCache_ResidentKB();
-int KiwiInstCache_BuiltThisFrame();

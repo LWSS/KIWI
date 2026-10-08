@@ -10,6 +10,7 @@
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_refimage.h"       // Unhide All also reveals hidden reference images
 #include "kiwi_region.h"
 #include "kiwi_selection.h"
@@ -21,11 +22,7 @@
 #include <math.h>
 #include <vector>
 
-extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
-extern int  g_nUpdateBits;                       // 0x25D5A74
 // 0x23F1864: selected_brushes is the display-list sentinel; read only here.
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
-                                                 // mainfrm.cpp:1246
 
 namespace
 {
@@ -1645,24 +1642,6 @@ namespace
         }
         return true;
     }
-}
-
-void KiwiConSel_RotateApply( const float pivot[3], int axis, float degrees )
-{
-    if ( axis < 0 || axis > 2 )
-        return;
-    // Negative: the ported Select_RotateAxis turns the other way for the same degrees,
-    // and the ring feeds both, so construction must spin like brushes do.
-    const float rad = -degrees * KCON_DEG2RAD;
-    const float c = cosf( rad ), sn = sinf( rad );
-    const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
-    float m[3][3];
-    for ( int a = 0; a < 3; ++a )
-        for ( int k = 0; k < 3; ++k )
-            m[a][k] = ( a == k ) ? 1.0f : 0.0f;
-    m[i][i] = c;  m[i][j] = -sn;
-    m[j][i] = sn; m[j][j] = c;
-    KiwiConSel_RotateApplyMatrix( pivot, m );
 }
 
 namespace

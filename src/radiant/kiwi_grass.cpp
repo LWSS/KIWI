@@ -18,6 +18,8 @@
 #include "kiwi_lines.h"
 #include "kiwi_modelbrowser.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
+#include "kiwi_vec.h"
 #include "radiant_registry.h"
 
 #include <float.h>
@@ -28,21 +30,6 @@
 #include <string>
 #include <vector>
 
-extern int           Sys_Printf( const char *fmt, ... );
-extern int           g_nUpdateBits;
-extern entity_s     *world_entity;
-extern selbrush_t    selected_brushes;
-extern eclass_t     *Eclass_ForName( int has_brushes, const char *name );
-extern brush_t      *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );
-extern void          Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
-extern void          Brush_BuildWindings( brush_t *def, int bFull );
-extern void          Select_Deselect( int deselectFaces );
-extern void          CreateEntityFromName( const char *name );
-extern void          SetKeyValue( entity_s_def *entity, const char *key, const char *value );
-extern void          Ed_EnsureCurrentMaterial_Kiwi();
-extern void          Undo_ClearRedo();
-extern void          Undo_GeneralStart( const char *operation );
-extern void          Undo_End();
 // Layer assignment (must live at file scope: an extern declared inside an
 // anonymous-namespace function gets internal linkage under MSVC).
 extern bool          Layers_Exists( const char *name );                      // qe3.h:1065
@@ -59,7 +46,7 @@ namespace
     };
 
     const char  *KGRASS_PROFILE = "KiwiGrass";
-    const float  KGRASS_PI      = 3.14159265358979323846f;
+    const float  KGRASS_PI      = (float)KIWI_PI;
 
     struct grassSlot_t
     {
@@ -148,7 +135,7 @@ namespace
     void WriteFloat( const char *entry, float value )
     {
         char text[64];
-        KiwiFmt_Num( text, sizeof( text ), value, 6 );
+        KiwiFmt_Exact( text, sizeof( text ), value + 0.0f, 0 );
         Radiant_ProfileSetString( KGRASS_PROFILE, entry, text );
     }
 

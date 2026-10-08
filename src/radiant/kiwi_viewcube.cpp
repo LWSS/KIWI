@@ -35,20 +35,12 @@
 #include <xanim/xmodel.h>            // XModelGetSurfaces — the triangle-count readout
 #include "radiant_registry.h"
 #include "kiwi_vec.h"     // Dot3
+#include "kiwi_ported.h"
 
 #include <math.h>
 #include <stdio.h>                   // _snprintf — the grid readout
 #include <stdlib.h>
 #include <string.h>                  // strlen — the triangle-count formatter
-
-extern camera_s *Ed_Camera();          // camwnd.cpp
-extern void      CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
-// File scope on purpose: an extern inside an anonymous-namespace function gets
-// internal linkage under MSVC (the cursor-distance readout's mousespace source).
-extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
-extern selbrush_t selected_brushes;    // map.cpp — the triangle-count walk
-extern selbrush_t active_brushes;      // map.cpp
 
 namespace
 {
@@ -714,18 +706,6 @@ bool KiwiViewCube_ViewAxis( int *outAxis, float *outSign )
         return true;
     }
     return false;
-}
-
-const char *KiwiViewCube_ViewAxisName()
-{
-    camera_s *c = Ed_Camera();
-    if ( !c )
-        return 0;
-    CamWnd_BuildMatrix();
-    for ( int i = 0; i < 6; ++i )
-        if ( Dot3( KVC_VIEWS[i].vpn, c->vpn ) >= KVC_VIEW_ALIGNED )
-            return KVC_VIEWS[i].name;
-    return 0;
 }
 
 void KiwiViewCube_StepAxisView()

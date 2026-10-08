@@ -11,28 +11,18 @@
 #include "kiwi_selconv.h"
 #include "kiwi_command.h"
 #include "kiwi_pick.h"              // Pick_IsModelProxy
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
+#include "kiwi_vec.h"               // PointNear
 
 #include <math.h>
 #include <vector>
-
-extern int  Sys_Printf( const char *fmt, ... );   // win_qe3.cpp
-extern int  g_nUpdateBits;                        // 0x25D5A74 (mainfrm.cpp)
-
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
     // Match the ported FindPoint/SetupVertexSelection tolerance so winding
     // references to one world-space corner deduplicate to one selection item.
     const float KSC_TOL = 0.1f;
-
-    inline bool PointNear( const float *a, const float *b )
-    {
-        return fabsf( a[0] - b[0] ) <= KSC_TOL
-            && fabsf( a[1] - b[1] ) <= KSC_TOL
-            && fabsf( a[2] - b[2] ) <= KSC_TOL;
-    }
 
     winding_t *WindingOf( const selbrush_t *b, int faceIndex )
     {
@@ -98,8 +88,8 @@ namespace
                 float ea[3], eb[3];
                 if ( !Sel_EdgeEnds( items[i], ea, eb, false ) )
                     continue;
-                if ( ( PointNear( ea, a ) && PointNear( eb, c ) )
-                  || ( PointNear( ea, c ) && PointNear( eb, a ) ) )
+                if ( ( PointNear( ea, a, KSC_TOL ) && PointNear( eb, c, KSC_TOL ) )
+                  || ( PointNear( ea, c, KSC_TOL ) && PointNear( eb, a, KSC_TOL ) ) )
                     return;
             }
             items.push_back( Sel_MakeEdge( b, faceIndex, edgeIndex ) );
@@ -117,7 +107,7 @@ namespace
                 float q[3];
                 if ( !Sel_ItemWorldPos( items[i], q, false ) )
                     continue;
-                if ( PointNear( p, q ) )
+                if ( PointNear( p, q, KSC_TOL ) )
                     return;
             }
             items.push_back( Sel_MakeVertex( b, faceIndex, vertIndex ) );
@@ -224,8 +214,8 @@ namespace
             bool has0 = false, has1 = false;
             for ( int i = 0; i < w->numpoints; ++i )
             {
-                if ( PointNear( w->p[i], a ) ) has0 = true;
-                if ( PointNear( w->p[i], b ) ) has1 = true;
+                if ( PointNear( w->p[i], a, KSC_TOL ) ) has0 = true;
+                if ( PointNear( w->p[i], b, KSC_TOL ) ) has1 = true;
             }
             if ( has0 && has1 )
                 out.AddFace( it.brush, f );
@@ -246,7 +236,7 @@ namespace
             if ( !w )
                 continue;
             for ( int i = 0; i < w->numpoints; ++i )
-                if ( PointNear( w->p[i], p ) )
+                if ( PointNear( w->p[i], p, KSC_TOL ) )
                 {
                     out.AddFace( it.brush, f );
                     break;
@@ -271,7 +261,7 @@ namespace
             for ( int e = 0; e < w->numpoints; ++e )
             {
                 const int j = ( e + 1 ) % w->numpoints;
-                if ( PointNear( w->p[e], p ) || PointNear( w->p[j], p ) )
+                if ( PointNear( w->p[e], p, KSC_TOL ) || PointNear( w->p[j], p, KSC_TOL ) )
                     out.AddEdge( it.brush, f, e, w->p[e], w->p[j] );
             }
         }

@@ -23,6 +23,7 @@
 #include "kiwi_conselect.h"         // KiwiConSel_Clear before a trim renumbers the store
 #include "kiwi_lines.h"             // shared fill-rendering constraints
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_validity.h"          // KVALID_PLANE_DOT
 #include "kiwi_units.h"             // grid-scaled tolerances
 #include "kiwi_vec.h"     // Dot3
@@ -34,17 +35,7 @@
 #include <string.h>
 
 // Ported entry points.
-extern int   Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp
-extern int   g_nUpdateBits;                                              // 0x25D5A74 (mainfrm.cpp)
-// Returns the persistent g_camwndState.camera and never null.
-extern camera_s *Ed_Camera();                                            // camwnd.cpp:161
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
 // R_AddCmdSetMaterialColor comes from r_rendercmds.h (declared __cdecl there).
-extern void  __cdecl R_AddRenderCmdDrawTris(
-                 Material *material, MaterialTechniqueType techType, short indexCount,
-                 const uint16_t *indices, short vertexCount,
-                 const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-                 const float ( *st )[2] );                               // 0x4fd1c0
 // Names command-buffer drops before the void renderer call can hide them.
 extern int   __cdecl R_Ed_CmdBufferHeadroom();                           // r_rendercmds.cpp
 // Confirmed-visible translucent world-space polygon emitter; push is along n.
@@ -241,12 +232,6 @@ namespace
         float w[3];
         int   degree;
     };
-
-    inline float Dist3( const float *a, const float *b )
-    {
-        const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
-        return sqrtf( dx * dx + dy * dy + dz * dz );
-    }
 
     int NodeFor( std::vector<chainNode_t> &nodes, const float w[3], float tol )
     {
@@ -1150,18 +1135,6 @@ void KiwiRegion_Invalidate()
     s_dirty = true;
 }
 
-// Shared coplanarity and chain helpers.
-bool KiwiRegion_ObjectOnPlane( const kconObject_t &o, const kconPlane_t &plane )
-{
-    return ObjectOnPlane( o, plane );
-}
-
-// Shared sanitizer preserves the joined/unjoined region invariant.
-void KiwiRegion_SanitizeRing( std::vector<float> &pts )
-{
-    SanitizeRing( pts );
-}
-
 bool KiwiRegion_ChainWalk( const int *objects, int count,
                            std::vector<kchainStep_t> *outSteps, bool *outClosed )
 {
@@ -1538,7 +1511,7 @@ void KiwiRegion_DrawFills( int highlightIndex )
 
     // Regions are bounded by KREG_MAX_LOOP; donor pieces have a tighter checked cap.
     const int KREG_DONOR_MAX_PTS = 64;           // == CAM_MAXFACEVERTS, camwnd.cpp:532
-    static float s_world[KREG_MAX_LOOP][3];      // the loop, in world space
+    static float s_loopWorld[KREG_MAX_LOOP][3];  // the loop, in world space
     static float s_piece[KREG_MAX_LOOP][3];      // one convex piece of it
 
     // stateBitsEntry[TECHNIQUE_UNLIT] == 0xFF predicts Material_GetTechnique's
@@ -1647,9 +1620,9 @@ void KiwiRegion_DrawFills( int highlightIndex )
             // The donor applies nudge, normals, and planar ST from these world points.
             float w[3];
             KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, i ), w );
-            s_world[i][0] = w[0];
-            s_world[i][1] = w[1];
-            s_world[i][2] = w[2];
+            s_loopWorld[i][0] = w[0];
+            s_loopWorld[i][1] = w[1];
+            s_loopWorld[i][2] = w[2];
         }
         // Region-plane normals match Face_AddWindingToTriBatch.
         // 0x47b86a
@@ -1678,9 +1651,9 @@ void KiwiRegion_DrawFills( int highlightIndex )
                     badIndex = true;
                     break;
                 }
-                s_piece[i][0] = s_world[src][0];
-                s_piece[i][1] = s_world[src][1];
-                s_piece[i][2] = s_world[src][2];
+                s_piece[i][0] = s_loopWorld[src][0];
+                s_piece[i][1] = s_loopWorld[src][1];
+                s_piece[i][2] = s_loopWorld[src][2];
             }
             if ( badIndex )
             {
@@ -1713,9 +1686,9 @@ void KiwiRegion_DrawFills( int highlightIndex )
             emitSample       = (int)r;
             emitSamplePieces = (int)pieces.size();
             emitSampleVerts  = n;
-            emitSampleV[0]   = s_world[0][0];
-            emitSampleV[1]   = s_world[0][1];
-            emitSampleV[2]   = s_world[0][2];
+            emitSampleV[0]   = s_loopWorld[0][0];
+            emitSampleV[1]   = s_loopWorld[0][1];
+            emitSampleV[2]   = s_loopWorld[0][2];
             for ( int k = 0; k < 4; ++k )
                 emitSampleRgba[k] = rgba[k];
         }

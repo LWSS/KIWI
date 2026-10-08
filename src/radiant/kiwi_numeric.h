@@ -82,7 +82,6 @@ bool KiwiNum_EvalDisplay( const char *text, float *outDisplay );
 // Focused-field values
 bool        KiwiNum_Has();            // is anything typed?  ("-"/"." count)
 bool        KiwiNum_HasValue();       // does it parse to a number yet?
-float       KiwiNum_ValueWorld();     // RAW WORLD UNITS (Units_FromDisplay applied)
 const char *KiwiNum_Text();           // raw typed text, never NULL — HUD only
 
 // Values by field

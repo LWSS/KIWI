@@ -24,6 +24,7 @@
 #include "kiwi_lollipop.h"              // KiwiLollipop_FaceSide (the handle's display side)
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_primitive.h"             // shared curved-cylinder construction
 #include "kiwi_region.h"
 #include "kiwi_selection.h"             // selected-face arm
@@ -44,9 +45,6 @@
 #include <vector>
 
 // Ported entry points; addresses identify mirrored ordering and ABI contracts.
-extern int         Sys_Printf( const char *fmt, ... );                     // win_qe3.cpp
-extern camera_s   *Ed_Camera();                                            // camwnd.cpp
-extern int         g_nUpdateBits;                                          // 0x25D5A74 (mainfrm.cpp)
 extern int Radiant_ProfileGetInt( const char *, const char *, int );
 extern bool Radiant_ProfileSetInt( const char *, const char *, int );
 
@@ -93,26 +91,8 @@ float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
     return ld;
 }
 
-extern brush_t    *Brush_Alloc( const void *materialDefSrc, eclass_t *ecls ); // brush.cpp 0x4751e0
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp 0x475980
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp 0x4765a0
-extern void        Brush_Free_R( brush_t *def );                              // brush.cpp 0x475af0
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );       // entity.cpp 0x484fc0
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp 0x48E800 (int, NOT char — mangling)
-extern entity_s   *world_entity;                                              // entity.cpp 0x25D5B30
-
-// brush.cpp/xywnd.cpp forwarders used by the ported creation sequence.
+// brush.cpp forwarder used by the ported creation sequence.
 extern void Ed_BrushSetFaceCount( brush_t *def, int faceCount );
-extern void Ed_EnsureCurrentMaterial_Kiwi();
-
-// These declarations must match the other translucent-overlay users exactly;
-// signature drift is a link failure.
-extern char        Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
-extern void        __cdecl R_AddRenderCmdDrawTris(
-                       Material *material, MaterialTechniqueType techType, short indexCount,
-                       const uint16_t *indices, short vertexCount,
-                       const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-                       const float ( *st )[2] );                               // 0x4fd1c0
 
 namespace
 {
@@ -919,7 +899,7 @@ namespace
                 }
                 else
                 {
-                    const float angle = 6.283185307179586f * i / n;
+                    const float angle = (float)( 2.0 * KIWI_PI ) * i / n;
                     uv[0] = circle->radius * cosf( angle );
                     uv[1] = circle->radius * sinf( angle );
                 }
@@ -2362,7 +2342,6 @@ bool KiwiExtrude_CanExecute()
 
 void KiwiExtrude_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiExtrudeRegion", 0, 0, KIWI_CMD_EXTRUDE_REGION );
     Radiant_RegisterCommand( "KiwiExtrudeFace",   0, 0, KIWI_CMD_EXTRUDE_FACE );
 }

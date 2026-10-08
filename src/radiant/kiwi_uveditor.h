@@ -36,17 +36,16 @@
 //   face: texMat = Face_MoveTexture(start texdef, normal)
 //         row0' = A00*row0 + A01*row1; m3' = A00*m3 + A01*m7 + A02
 //         row1' = A10*row0 + A11*row1; m7' = A10*m3 + A11*m7 + A12
-//         texturevecs_02(texMat', normal, dist) -> size/shift/rotate/crossterm
+//         texturevecs_02_exact(texMat', normal, dist) -> size/shift/rotate/crossterm
 //   patch: st' = A*st in ctrl[i][j].texCoord.st[2*layer + {0,1}], the slots written by
 //          Patch_ShiftTexture (pmesh.cpp:3232-3238).
 // Face_MoveTexture's rows remain in the base-axis plane under these combinations, so the
-// texturevecs_02 decomposition is well posed (texturevecs.cpp:132/136).
+// decomposition is well posed.
 //
-// texturevecs_02 returns positive size[0]; transforming a negative-size[0] face can change
-// its numeric parameterization (180-degree rotate plus re-signed size[1]) without moving
-// pixels. Its internal sub_4AAD00 snapping is also not idempotent across repeated
-// decompose/recompose cycles. Every live frame therefore rebuilds from the gesture-start
-// texdef snapshot, never from the previous frame's output.
+// The decomposition returns positive size[0]; transforming a negative-size[0] face can
+// change its numeric parameterization (180-degree rotate plus re-signed size[1]) without
+// moving pixels.  Every live frame therefore rebuilds from the gesture-start texdef
+// snapshot, never from the previous frame's output.
 //
 // Pure translation bypasses decomposition. Face_MoveTexture uses m3=-shift[0]/sx and
 // m7=-shift[1]/sy, so `shift = shift0 - deltaST*size0`, including its zero-size -> 128
@@ -166,6 +165,10 @@ void KiwiUvEd_Draw();
 // Registers the palette row; KiwiWindows_DispatchInstant owns the window toggle.
 void KiwiUvEd_RegisterCommands();
 
+// Test hook: the Rot / Flip toolbar path ([a b; c d] about the target centre) on the
+// current selection, window open or not.  False when nothing is selected.
+bool KiwiUvEd_TestAffine( float a, float b, float c, float d );
+
 // Scope is latched once per frame while the window is visible and focused/hovered, or while
 // a gesture is live (so leaving the window during a drag does not flicker overlays). Cam_Draw
 // cannot query this window's ImGui state directly and may observe at most one frame of lag.
@@ -174,5 +177,4 @@ void KiwiUvEd_RegisterCommands();
 // material color rather than disappearing. faceIndex < 0 asks about the whole brush/patch;
 // faceIndex >= 0 asks about one face.
 struct brush_t;                          // qe3.h:30 — this header takes no includes
-bool KiwiUvEd_InScope();
 bool KiwiUvEd_OverlaySuppressed( const brush_t *def, int faceIndex );

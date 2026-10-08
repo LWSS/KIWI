@@ -23,7 +23,3 @@ bool KiwiModelCache_Get( const XSurface *xsurf, KiwiModelGeo *out );
 
 // Release every pooled buffer.  The device must still be alive.  Idempotent.
 void KiwiModelCache_Shutdown();
-
-// Resident-cache metrics for diagnostics.
-int KiwiModelCache_ResidentSurfs();
-int KiwiModelCache_ResidentKB();

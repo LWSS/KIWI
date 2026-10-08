@@ -25,9 +25,6 @@ void KiwiViewCube_StepAxisView();
 // (0=X, 1=Y, 2=Z); outSign is the look direction. Either output may be null.
 bool KiwiViewCube_ViewAxis( int *outAxis, float *outSign );
 
-// Returns the aligned view's name, or null when the camera is off-axis.
-const char *KiwiViewCube_ViewAxisName();
-
 // Alt+MMB swipe quantizes the nearest face view by 90 degrees. Horizontal swipes
 // walk the side ring; vertical swipes wrap a great circle through both poles.
 // Phase is stored because this pitch/yaw camera has no roll, then validated against

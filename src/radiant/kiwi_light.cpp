@@ -14,6 +14,8 @@
 #include "kiwi_command.h"
 #include "kiwi_boxselect.h"
 #include "kiwi_extrude.h"
+#include "kiwi_vec.h"
+#include "kiwi_ported.h"
 
 #include <gfx_d3d/r_init.h>
 #include <gfx_d3d/r_material.h>
@@ -29,39 +31,13 @@
 #include <stdio.h>
 #include <string.h>
 
-extern selbrush_t selected_brushes;
-extern entity_s   entities;
-extern float      world_orient_matrix[4][3];
-extern int        g_nUpdateBits;
 extern entity_s_def *edit_entity;
 
-extern char  *ValueForKey2( const entity_s *e, const char *key );
-extern float  Entity_GetFloatValueForKey( const entity_s *e, const char *key );
 extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );
-extern int    Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );
-extern bool   HasKeyValuePair( entity_s_def *e, const char *key );
-extern void   SetKeyValue( entity_s_def *e, const char *key, const char *value );
 extern void   SpawnFlags_Apply( int flags );
-extern void   MarkMapModified();
-extern void   Undo_ClearRedo();
-extern void   Undo_GeneralStart( const char *operation );
-extern void   Undo_AddEntity_W( entity_s *e );
-extern void   Undo_End();
-extern void   Select_Deselect( int deselectFaces );
-extern void   Select_Brush( selbrush_t *brush, char overwrite, char status, char center );
-extern void   CreateEntityFromName( const char *classname );
-extern eclass_t *Eclass_ForName( int hasBrushes, const char *name );
-extern brush_t  *Brush_Alloc( const void *material, eclass_t *eclass );
-extern void      Brush_Create( float *mins, float *maxs, brush_t *brush, eclass_t *eclass );
-extern void      Brush_BuildWindings( brush_t *brush, int full );
-extern void      Ed_EnsureCurrentMaterial_Kiwi();
-extern int       Sys_Printf( const char *fmt, ... );
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
-extern void      Radiant_ExecCommand( unsigned int commandId );
 extern void      CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2,
                                          const orientation_t *orient );
 extern void      ImGuiShell_FocusTab( const char *title );
-extern ImGuiID   ImGuiShell_DockRoot();
 extern bool KiwiSunPreview_Enabled();
 extern void KiwiSunPreview_SetEnabled(bool);
 extern const char *KiwiSunPreview_Status();
@@ -70,7 +46,7 @@ namespace
 {
     const int   KLIGHT_MAX_OVERLAYS = 8;
     const int   KLIGHT_RING_SEGS    = 24;
-    const float KLIGHT_PI           = 3.14159265358979323846f;
+    const float KLIGHT_PI           = (float)KIWI_PI;
     const float KLIGHT_XY_DEPTH     = 131072.0f;
 
     const char *const KTIP_COLOR =
@@ -254,23 +230,6 @@ namespace
         }
     }
 
-    float Normalize3( float v[3] )
-    {
-        const float len = sqrtf( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
-        if ( len > 1.0e-6f )
-        {
-            const float inv = 1.0f / len;
-            v[0] *= inv; v[1] *= inv; v[2] *= inv;
-        }
-        return len;
-    }
-
-    void Cross3( const float a[3], const float b[3], float out[3] )
-    {
-        out[0] = a[1] * b[2] - a[2] * b[1];
-        out[1] = a[2] * b[0] - a[0] * b[2];
-        out[2] = a[0] * b[1] - a[1] * b[0];
-    }
 
     const char *Key( entity_s_def *def, const char *name )
     {
@@ -346,7 +305,7 @@ namespace
             out->travelDir[0] = out->targetPos[0] - out->origin[0];
             out->travelDir[1] = out->targetPos[1] - out->origin[1];
             out->travelDir[2] = out->targetPos[2] - out->origin[2];
-            out->targetDistance = Normalize3( out->travelDir );
+            out->targetDistance = Len3Norm( out->travelDir );
         }
 
         if ( out->fovOuter == 0.0f )
@@ -645,9 +604,9 @@ namespace
         const float ref[3] = { 0.0f, 0.0f, fabsf( dir[2] ) > 0.9f ? 0.0f : 1.0f };
         float alt[3] = { 0.0f, 1.0f, 0.0f };
         Cross3( fabsf( dir[2] ) > 0.9f ? alt : ref, dir, right );
-        Normalize3( right );
+        Len3Norm( right );
         Cross3( dir, right, up );
-        Normalize3( up );
+        Len3Norm( up );
     }
 
     void EmitRing( const float center[3], const float right[3], const float up[3],
@@ -1080,7 +1039,7 @@ void KiwiLight_Draw()
             std::vector<std::string> defs;
             GatherLightDefs( defs );
             // KIWI FIX: Key() hands back a pointer INTO the entity's epair value storage.
-            // WriteKeyAll -> SetKeyValue -> sub_483500 free()s that exact block and
+            // WriteKeyAll -> SetKeyValue -> Epair_SetRaw free()s that exact block and
             // reallocates it, and WriteKeyAll is called from inside the combo below — so a
             // raw pointer dangles for the remaining Selectable compares, the empty-check and
             // the strncpy into s_defEdit.  Snapshot the value before anything can mutate it.

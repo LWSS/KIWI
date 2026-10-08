@@ -12,6 +12,7 @@
 #include "prefs.h"       // g_PrefsDlg (the Test_Ray contents gates + Fov)
 #include "kiwi_camera.h" // orthographic ray/projection helpers
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_section.h"   // section-plane pick clamps
 #include "kiwi_vec.h"     // Dot3/Sub3/...
 #include "kiwi_droptrace.h" // KiwiDrop_PickModelMesh: models pick by mesh, not by proxy box
@@ -22,22 +23,16 @@
 #include <vector>
 
 // ── ported entry points (verified against their definitions) ────────────────
-extern camera_s  *Ed_Camera();                                     // camwnd.cpp
-extern void       CamWnd_BuildMatrix();                            // camwnd.cpp 0x403470
 extern void       Ed_CameraCalcRayDir( int x, int y, float *dir ); // camwnd.cpp forwarder
 // Orthographic rays need per-pixel image-plane origins; perspective returns camera.origin.
 extern void       Ed_CameraCalcRayOrigin( int x, int y, float *org ); // camwnd.cpp forwarder
 extern void       Test_Ray( float *start, float *dir, int contents,
                             edTrace_t *t, int num_traces );        // select.cpp 0x48D7C0
-extern char       FilterBrush( selbrush_t *b, int updateFilters ); // filters.cpp 0x46A1F0
-extern selbrush_t active_brushes;                                  // map.cpp    (0x23F189C)
-extern entity_s  *world_entity;                                    // map.cpp    (0x25D5B30)
-extern bool       ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h ); // imgui_shell.cpp
 
 namespace
 {
-    // brushFlags bit 5 mirrors sub_48D460's ordinary-pick exclusion; only the
-    // 0x1000 pass admits it, then SelectFaceSth rejects it. qedefs.h has no symbol.
+    // brushFlags bit 5 mirrors BrushList_Trace's ordinary-pick exclusion; only the
+    // 0x1000 pass admits it, then Select_ClickTrace rejects it. qedefs.h has no symbol.
     const int BRUSHFLAG_PICK_EXCLUDED = 0x20;
 
 
@@ -120,7 +115,7 @@ namespace
         return Pick_SegDist2D( px, py, ax, ay, bx, by, outT );
     }
 
-    // Mirrors sub_48D460's world-pass admission. Prefab/model interiors are excluded:
+    // Mirrors BrushList_Trace's world-pass admission. Prefab/model interiors are excluded:
     // their windings are prefab-local and would project as world coordinates;
     // Test_Ray resolves them at object granularity.
     bool BrushPickable( selbrush_t *b )
@@ -565,7 +560,7 @@ pick_result_t Pick( const ray_t &ray, sel_mask_t kindMask, unsigned pickFlags )
     if ( pExcl && pExcl->Has( hb ) )
         return r;
 
-    // SelectFaceSth's 0x1000 (camera/Z view) rejection, reproduced: a flag-0x20
+    // Select_ClickTrace's 0x1000 (camera/Z view) rejection, reproduced: a flag-0x20
     // brush, or an inner prefab brush the 0x1000 pass admitted (t._pad[0]).
     if ( ( contents & 0x1000 ) != 0
       && ( ( hb->brushFlags & BRUSHFLAG_PICK_EXCLUDED ) != 0 || t._pad[0] ) )

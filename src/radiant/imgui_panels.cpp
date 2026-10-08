@@ -172,6 +172,7 @@ void ImGuiPanels_Draw()
         extern void ImGuiPanel_ScriptGroup_Draw();   // imgui_panel_scriptgroup.cpp
         extern void ImGuiPanel_Project_Draw();       // imgui_panel_project.cpp
         extern void ImGuiPanel_Sides_Draw();         // imgui_panel_sides.cpp
+        extern void ImGuiPanel_Cap_Draw();           // imgui_panel_cap.cpp
         ImGuiPanel_Surface_Draw();
         ImGuiPanel_FindTex_Draw();
         ImGuiPanel_Layers_Draw();
@@ -192,6 +193,7 @@ void ImGuiPanels_Draw()
         ImGuiPanel_ScriptGroup_Draw();
         ImGuiPanel_Project_Draw();
         ImGuiPanel_Sides_Draw();
+        ImGuiPanel_Cap_Draw();
     }
 
     if ( s_showGoTo )

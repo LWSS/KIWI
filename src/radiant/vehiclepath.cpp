@@ -4,10 +4,7 @@
 // cod3src\src\universal\g_vehicle_path.cpp — the vehicle-path node graph and the editor's
 // path-preview overlay.  Asserts in this TU cite
 // "C:\trees\cod3-pc\cod3-modtools\cod3src\src\universal\g_vehicle_path.cpp" (lines 153,
-// 1143-1145), which is how the file was identified.  Only two of its functions carry
-// assert strings; the rest were recovered by sweeping 0x4B5150-0x4B6C10 (a single link-
-// order .obj run bounded by fx code below and linearmapping.cpp above) plus the xrefs of
-// the node table / node count.
+// 1143-1145).
 //
 // The subsystem is a real ENGINE system (a vehicle drives a linked list of
 // info_vehicle_node entities, interpolating speed / lookahead / rotation between them);
@@ -16,8 +13,8 @@
 //
 //   0x4B5150  VehiclePath_AddPathSegment       collinear-merging 3D line emitter
 //   0x4B52C0  VehiclePath_DrawArrow            5-point heading arrow (g_vehicle_path.cpp:153)
-//   0x4B5550  VehiclePathNode_Init             node ctor (IDA mis-named _WinMain@16_199_0)
-//   0x4B55B0  VehiclePathNode_Copy             node assignment (IDA _WinMain@16_197_0)
+//   0x4B5550  VehiclePathNode_Init             node constructor
+//   0x4B55B0  VehiclePathNode_Copy             node assignment
 //   0x4B5630  VehiclePath_FindNode             (origin, targetname) -> index or -1
 //   0x4B56E0  VehiclePath_IsNodeReachable      forward-walk connectivity test
 //   0x4B5740  VehiclePath_ResolveNodeSpeed     inherit/interpolate a missing "speed"
@@ -44,39 +41,21 @@
 #include <universal/com_math.h>     // AnglesToAxis, MatrixTransformVector43
 #include <universal/q_shared.h>     // I_stricmp
 #include <universal/assertive.h>    // iassert
+#include "kiwi_ported.h"            // KIWI: shared engine/editor externs
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 // ── engine / editor bridges ──────────────────────────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
 extern void  R_Warn( int warnType, const char *fmt, ... );        // cmdlib.cpp (0x40B630)
-extern float Vec3Normalize_R( float *v );                         // engine_stubs.cpp (0x40A5E0)
 extern void  Radiant_VecToAngles( float *angles, const float *vec );               // engine_stubs.cpp (0x4A5020)
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );   // engine_stubs.cpp (0x402AC0)
-extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                          const float *p1, const float *p2, const unsigned int *color,
-                          char width, int vertCount, int maxVertCount );   // draw.cpp (0x40C110)
-extern float world_orient_matrix[4][3];                           // entity.cpp (0x6DE290)
 
-extern entity_s   entityInsts;        // entity.cpp  (0x23F1748) — entity-instance ring
-extern selbrush_t selected_brushes;   // map.cpp     (0x23F1864) — selection ring sentinel
-
-extern char   FilterBrush( selbrush_t *b, int updateFilters );        // filters.cpp (0x46A1F0)
-extern char  *ValueForKey2( const entity_s *e, const char *key );                 // entity.cpp  (0x4825C0)
 extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );     // entity.cpp  (0x483820)
-extern int    Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp (0x483860)
-extern bool   HasKeyValuePair( entity_s_def *e, const char *key );    // entity.cpp  (0x4838B0)
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VehiclePathNode — the 72-byte node record (IDB: g_vehiclePathNodes indexed as
-//  dword_2473D60[18 * i]).  Layout recovered from VehiclePathNode_Init (0x4B5550,
-//  which writes every field), VehiclePathNode_Copy (0x4B55B0, a field-by-field
-//  assignment covering the whole record) and the interior aliases IDA had named
-//  (+8 spawnflags1, +16 isRotateNode, +20 speed, +24 lookahead, +28 origin,
-//  +64 dist, +68 nextIndex, +70 prevIndex).  +12 is written as a WORD only (both by
-//  the ctor and by the assignment operator), so +14 is padding.
+//  VehiclePathNode — the 72-byte node record (stride 72 in g_vehiclePathNodes).
+//  +12 is written as a WORD only (both by VehiclePathNode_Init and by
+//  VehiclePathNode_Copy), so +14 is padding.
 // ─────────────────────────────────────────────────────────────────────────────
 struct VehiclePathNode
 {
@@ -107,10 +86,9 @@ static_assert( offsetof( VehiclePathNode, nextIndex ) == (sizeof(void *) == 8 ? 
 static_assert( offsetof( VehiclePathNode, prevIndex ) == (sizeof(void *) == 8 ? 78 : 0x46), "VehiclePathNode.prevIndex" );
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  VehiclePathTracer — the 200-byte simulation state (the IDB shows it only as the
-//  `__int16 v12[100]` stack local in VehiclePath_AddNode).  Field roles recovered
-//  from VehiclePath_InitTracer (0x4B6AC0, which writes +0..+52 then default-
-//  constructs the two embedded nodes) and VehiclePath_AdvanceToLookahead (0x4B6100).
+//  VehiclePathTracer — the 200-byte simulation state, a stack local in
+//  VehiclePath_AddNode.  VehiclePath_InitTracer writes +0..+52 then default-
+//  constructs the two embedded nodes.
 // ─────────────────────────────────────────────────────────────────────────────
 struct VehiclePathTracer
 {
@@ -135,22 +113,20 @@ static_assert( offsetof( VehiclePathTracer, nodeSaved ) == (sizeof(void *) == 8 
 
 #define MAX_VEHICLE_NODES 4000     // the Sys_Printf("...Max vehicle Nodes hit [%d]", 4000) cap
 
-// The node table.  IDB 0x2473D58 is a DWORD slot but EVERY access to the count is
-// 16-bit (`mov word ptr`, `add word ptr [..],1`, `cmp ax,0FA0h`, `(__int16)` compares)
-// and the upper half is never touched — a `short` reproduces all of them exactly
-// (§11 int16-truncation).
+// The node table.  The count is a DWORD slot in the binary, but every access to it is
+// 16-bit and the upper half is never touched, so a `short` reproduces all of them.
 static __int16         g_vehiclePathNodeCount;                       // 0x2473D58
 static VehiclePathNode g_vehiclePathNodes[MAX_VEHICLE_NODES];        // 0x2473D60
 
-// 0x739360 — the "angles were never authored" sentinel a fresh node is stamped with.
-// The three initialised floats there are literally (PI,PI,PI): an angle triple no map
-// ever produces, so the resolve pass can tell "unset" from a genuine 0,0,0 heading.
+// The "angles were never authored" sentinel a fresh node is stamped with: (PI,PI,PI),
+// an angle triple no map ever produces, so the resolve pass can tell "unset" from a
+// genuine 0,0,0 heading.
 static const float g_vehiclePathAnglesUnset[3] =
     { 3.1415927410125732f, 3.1415927410125732f, 3.1415927410125732f };
 
-// 0x73935C / 0x26661B8 / 0x26661C4 / 0x26661D0 — VehiclePath_AddPathSegment's pending
-// segment.  Initialised to 1 in .data (the first AddPathSegment call after a
-// VehiclePath_DrawPath reset only records, it does not emit).
+// VehiclePath_AddPathSegment's pending segment.  g_vehiclePathFirstSegment starts at 1
+// (the first AddPathSegment call after a VehiclePath_DrawPath reset only records, it
+// does not emit).
 static int   g_vehiclePathFirstSegment = 1;                          // 0x73935C
 static float g_vehiclePathSegStart[3];                               // 0x26661B8
 static float g_vehiclePathSegEnd[3];                                 // 0x26661C4
@@ -161,22 +137,20 @@ static float g_vehiclePathSegDir[3];                                 // 0x26661D
 //      a = a * (1/360);  a = (a - floorf(a + 0.5)) * 360
 //  NOT kisak's com_math AngleNormalize180 (which is the fmodf form) — same range,
 //  different float rounding, and this file's output feeds the drawn overlay.
-//  The two intermediate float stores (fstp dword after the multiply and after the
-//  +0.5) and the double slot the pre-add value is kept in are the binary's, verbatim:
-//  dbl_6F42C0 = (double)(1.0f/360.0f), dbl_6F4160 = 0.5, dbl_6F42B8 = 360.0.
+//  The intermediate float stores (after the multiply and after the +0.5) and the
+//  double the pre-add value is kept in matter for the rounding; the constants are
+//  (double)(1.0f/360.0f), 0.5 and 360.0.
 // ─────────────────────────────────────────────────────────────────────────────
 static float VehiclePath_AngleNormalize180( float angle )
 {
-    float  scaled = (float)( (double)angle * 0.0027777778450399637 );   // fmul dbl_6F42C0; fstp dword
-    double kept   = scaled;                                             // fst  qword (the pre-add copy)
-    float  rounded = (float)( kept + 0.5 );                             // fadd dbl_6F4160; fstp dword
+    float  scaled = (float)( (double)angle * 0.0027777778450399637 );
+    double kept   = scaled;                                             // the pre-add copy
+    float  rounded = (float)( kept + 0.5 );
     return (float)( ( kept - (double)floorf( rounded ) ) * 360.0 );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  0x4B5550  VehiclePathNode_Init — the node constructor.  IDA named this
-//  `_WinMain@16_199_0` (a COMDAT-folding artifact: VC7.1 gave the outlined
-//  __usercall(this@<eax>, index@<dx>) body a WinMain alias).  Zeroes the record,
+//  0x4B5550  VehiclePathNode_Init — the node constructor.  Zeroes the record,
 //  parks speed/lookahead at -1 ("inherit from a neighbour"), stamps the angles with
 //  the (PI,PI,PI) unset sentinel and both link indices with -1.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,9 +179,8 @@ static VehiclePathNode *VehiclePathNode_Init( VehiclePathNode *node, __int16 ind
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  0x4B55B0  VehiclePathNode_Copy — field-by-field node assignment (IDA
-//  `_WinMain@16_197_0`; dst in EAX, src in ECX).  Note it copies +0x0C as a WORD and
-//  never touches +0x0E — the padding proof for VehiclePathNode.index.
+//  0x4B55B0  VehiclePathNode_Copy — field-by-field node assignment.  It copies +0x0C
+//  as a WORD and never touches +0x0E — the padding proof for VehiclePathNode.index.
 // ─────────────────────────────────────────────────────────────────────────────
 static VehiclePathNode *VehiclePathNode_Copy( VehiclePathNode *dst, const VehiclePathNode *src )
 {
@@ -300,7 +273,7 @@ static int VehiclePath_IsNodeReachable( __int16 from, __int16 to )
 //  speed accumulating distance, walk FORWARD (nextIndex) for the other, then blend by
 //  the distance ratio.  One side only -> that side; neither -> 0.
 //  NOTE the asymmetry vs the lookahead twin below: this one tests `>= 0.0`, the
-//  lookahead one tests `> 0.0`.  Faithful — the binary really does differ.
+//  lookahead one tests `> 0.0` (the binary differs the same way).
 // ─────────────────────────────────────────────────────────────────────────────
 static float VehiclePath_ResolveNodeSpeed( __int16 index )
 {
@@ -603,8 +576,7 @@ fwdDone:
 // ─────────────────────────────────────────────────────────────────────────────
 //  0x4B5E50  VehiclePath_RotateNodeBlend — the tracer's rotate-node blend weight.
 //  1 while fully inside a rotate segment, ramping out of / into one across the
-//  current segment, 0 otherwise.  (The IDB shows a dead ECX parameter — the function
-//  is __fastcall but only ever reads EDX; normalised away here.)
+//  current segment, 0 otherwise.
 // ─────────────────────────────────────────────────────────────────────────────
 static float VehiclePath_RotateNodeBlend( const VehiclePathTracer *tracer )
 {
@@ -794,19 +766,17 @@ static int VehiclePath_AdvanceToLookahead( VehiclePathTracer *tracer, const floa
             }
             cur = next;
             if ( hops >= g_vehiclePathNodeCount )
-                goto seat;      // FAITHFUL: `frac` keeps its incoming value here, and
-                                // `node` is deliberately NOT re-pointed at the new `cur`
-                                // (the binary leaves ECX on the PREVIOUS node — see below).
+                goto seat;      // `frac` keeps its incoming value here, and `node` is
+                                // deliberately NOT re-pointed at the new `cur` (see below).
         }
         frac = t;
     }
 seat:
     tracer->nodeIndex = cur;
-    // FAITHFUL QUIRK: on the hop-limit exit above, `cur` has already advanced but
-    // `node` still points at the node we came from, so atEnd is computed from the
-    // PREVIOUS node's link (0x4B624B reads the stale ECX).  Harmless in practice —
-    // that path is only reached after following a link that was >= 0 — but transcribed
-    // as-is rather than "fixed".
+    // Quirk: on the hop-limit exit above, `cur` has already advanced but `node` still
+    // points at the node we came from, so atEnd is computed from the PREVIOUS node's
+    // link.  Harmless in practice (that path is only reached after following a link
+    // that was >= 0); kept as the binary has it rather than "fixed".
     tracer->atEnd = (__int16)( node->nextIndex < 0 );
     tracer->frac  = frac;
 
@@ -834,9 +804,9 @@ seat:
 //  file globals; a new segment whose direction matches the pending one to within
 //  dot >= 0.9999 just extends the pending end (unless `forceFlush`, the last step).
 //  Colour is the editor's d_savedinfo.colors[10].
-//  NOTE (faithful): the LAST pending segment of a path is never flushed — the pass
-//  always emits the PREVIOUS segment and then records the new one.  The final tail is
-//  picked up by the forceFlush call the caller makes on the terminating step.
+//  NOTE: the LAST pending segment of a path is never flushed — the pass always emits
+//  the PREVIOUS segment and then records the new one.  The final tail is picked up by
+//  the forceFlush call the caller makes on the terminating step.
 // ─────────────────────────────────────────────────────────────────────────────
 static void VehiclePath_AddPathSegment( const float *from, const float *to, int forceFlush )
 {
@@ -902,7 +872,7 @@ static void VehiclePath_DrawArrow( const float *angles, const float *origin )
 
     float size = (float)arrowSize;
 
-    // 5 local-space points (the binary keeps them as one contiguous float[15]).
+    // 5 local-space points.
     float pts[5][3];
     pts[0][0] =  0.5f;  pts[0][1] =  0.0f;         pts[0][2] = 0.0f;          // tip
     pts[1][0] = -0.5f;  pts[1][1] = -0.40000001f;  pts[1][2] = 0.0f;          // right wing
@@ -912,7 +882,7 @@ static void VehiclePath_DrawArrow( const float *angles, const float *origin )
 
     // orientation as a mat4x3: rows 0-2 = the angle axis, row 3 = the world origin.
     float mtx[4][3];
-    AnglesToAxis( angles, mtx );
+    AnglesToAxis( (float *)angles, mtx );   // KIWI: the editor's double version (0x4ABEB0), as the original; it only reads angles
     mtx[3][0] = origin[0];
     mtx[3][1] = origin[1];
     mtx[3][2] = origin[2];
@@ -941,11 +911,7 @@ static void VehiclePath_DrawArrow( const float *angles, const float *origin )
     vertCount = R_Add3DLine( verts, ident, world[4], origin,   cp, 1, vertCount, 12 );
     vertCount = R_Add3DLine( verts, ident, origin,   world[3], cp, 1, vertCount, 12 );
 
-    // KEEP_VERBOSE: level-1 assert (iassert/vassert hardcode level 0 — converting
-    // would downgrade it).
-    if ( vertCount != 12 )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\universal\\g_vehicle_path.cpp",
-                153, 1, "%s", "vertCount == ARRAY_COUNT( verts )" );
+    iassert( vertCount == ARRAY_COUNT( verts ) );   // g_vehicle_path.cpp:153
 
     if ( vertCount )
         R_AddCmd_Line3D( (short)( vertCount / 2 ), 1, verts );
@@ -977,8 +943,7 @@ static void VehiclePath_InitTracer( __int16 index, VehiclePathTracer *tracer )
     tracer->lookaheadPos[1] = g_vehiclePathNodes[index].origin[1];
     tracer->lookaheadPos[2] = g_vehiclePathNodes[index].origin[2];
     VehiclePathNode_Init( &tracer->nodeOverride, -1 );
-    VehiclePathNode_Init( &tracer->nodeSaved,    -1 );   // the binary reuses the DX it
-                                                         // already loaded (still -1)
+    VehiclePathNode_Init( &tracer->nodeSaved,    -1 );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -989,7 +954,7 @@ static void VehiclePath_InitTracer( __int16 index, VehiclePathTracer *tracer )
 //  The two VehiclePathNode_Copy calls are the ENGINE's per-vehicle node override: it
 //  installs `nodeOverride` into the shared table for the duration of the step (keyed
 //  by that node's targetname) and writes `nodeSaved` back afterwards.  BOTH lookups
-//  use nodeOverride.targetname — faithful; that is what the binary does.  In the
+//  use nodeOverride.targetname (the binary does the same).  In the
 //  editor both embedded nodes come out of VehiclePath_InitTracer default-constructed
 //  with a NULL targetname, so VehiclePath_FindNode returns -1 immediately and neither
 //  copy ever runs; the table is never mutated by the preview.
@@ -1023,7 +988,7 @@ static int VehiclePath_StepTracer( VehiclePathTracer *tracer, __int16 stopNode )
         tracer->angles[1] = VehiclePath_AngleNormalize180( tracer->angles[1] );
         tracer->angles[2] = VehiclePath_AngleNormalize180( tracer->angles[2] );
 
-        float step = tracer->speed * 0.05f;      // dbl_6F44D0 = (double)0.05f — 50 ms
+        float step = tracer->speed * 0.05f;      // 50 ms
         tracer->origin[0] = step * vec[0] + tracer->origin[0];
         tracer->origin[1] = step * vec[1] + tracer->origin[1];
         tracer->origin[2] = step * vec[2] + tracer->origin[2];
@@ -1096,8 +1061,8 @@ static void VehiclePath_DrawPath( const VehiclePathTracer *start )
         steps = steps + 1;
     }
 
-    // The binary's R_Warn ignores its warning-type argument entirely and forwards
-    // (fmt, va) to the console handler; 16 is the literal it passes.
+    // R_Warn ignores its warning-type argument and forwards (fmt, va) to the console
+    // handler; 16 is the literal the binary passes.
     R_Warn( 16, "WARNING: Invalid vehicle path.  Possible infinite loop\n" );
 }
 
@@ -1220,11 +1185,8 @@ void VehiclePath_AddNode()
     if ( selected_brushes.next == &selected_brushes )
         return;                                   // nothing selected
 
-    // The binary takes the sentinel's PREV link as its representative brush
-    // (`mov edi, selected_brushes` loads the dword AT the sentinel = selbrush_t.prev,
-    // NOT `selected_brushes_next` which is the +4 field it just compared).  It stashes
-    // it in a stack slot and restores it after the rebuild loop clobbers EDI; the port
-    // never clobbers `brush`, so no restore is needed.
+    // The representative brush is the sentinel's PREV link (the dword AT the sentinel),
+    // not its next link, which is what the emptiness test just compared.
     selbrush_t *brush = selected_brushes.prev;
 
     iassert( brush );                                   // g_vehicle_path.cpp:1143
@@ -1241,8 +1203,6 @@ void VehiclePath_AddNode()
     }
 
     // ── rebuild the node table from the live entity instances ────────────────
-    // (the IDB keeps the walk cursor in BOTH a register and a stack slot, so hex-rays
-    // shows a phantom second `next` variable — they are always the same entity.)
     g_vehiclePathNodeCount = 0;
 
     for ( entity_s *ent = entityInsts.next; ent != &entityInsts; ent = ent->next )
@@ -1260,7 +1220,7 @@ void VehiclePath_AddNode()
         if ( g_vehiclePathNodeCount >= MAX_VEHICLE_NODES )
         {
             Sys_Printf( "Warning: Max vehicle Nodes hit [%d]\n", MAX_VEHICLE_NODES );
-            break;                                  // the binary abandons the rebuild here
+            break;                                  // the rebuild is abandoned here
         }
 
         VehiclePathNode *node = &g_vehiclePathNodes[g_vehiclePathNodeCount];
@@ -1298,7 +1258,7 @@ void VehiclePath_AddNode()
     VehiclePath_LinkNodes();
 
     // The selected entity's own targetname, via a raw epair walk (case-insensitive,
-    // "" — the binary's `zero` global — when absent).  NOT ValueForKey2.
+    // "" when absent).  NOT ValueForKey2.
     const char *value = "";
     for ( epair_t *ep = brush->owner->def->epairs; ep; ep = ep->next )
     {

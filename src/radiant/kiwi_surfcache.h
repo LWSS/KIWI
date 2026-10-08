@@ -72,7 +72,6 @@ bool KiwiEdScene_Replay();
 int  KiwiEdScene_ReplayFiltered( const unsigned char *segClean, int segCount );
 void KiwiEdScene_DropCapture();
 bool KiwiEdScene_HaveCapture();
-int  KiwiEdScene_CaptureKB();
 
 // Resident mesh-index runs apply only to a stamped main flush; other flushes tessellate.
 void KiwiEdScene_StampMainFlush( int runsKey, bool presorted );

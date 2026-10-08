@@ -57,10 +57,6 @@
 extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5575
 extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5581
 extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:152
-// Terrain-paint gate shared by Drag_Begin (drag.cpp:653) and Cam_Draw's cursor ring
-// (camwnd.cpp:3189): patchdialog.cpp:229, IDB 0x401D50. Keep it outside the anonymous
-// namespace to preserve the ported definition's linkage.
-extern int  sub_401D50();                                                         // patchdialog.cpp:229
 
 namespace
 {
@@ -695,18 +691,6 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
     }
     if ( btn == 0 )                      // LMB — select only: marquee / click (§12, D-6)
     {
-        // Armed bare Alt+LMB returns false so the shell hands the stroke to the ported chain:
-        // CamWnd_OnLButtonDown (camwnd.cpp:4757) -> Drag_Begin (drag.cpp:650-653) ->
-        // Patch_Paint_Start (pmesh.cpp:5994). Mirror mode/modifier gates; sub_401D50 gates the ring (:3189).
-        const select_t selMode = g_qeglobals.d_select_mode;
-        if ( ImGui::GetIO().KeyAlt && !shift && !ctrl
-             && ( selMode == sel_brush || selMode == sel_addpoint )
-             && sub_401D50() )
-        {
-            KiwiHover_Clear();
-            return false;                // hand the press to the ported chain
-        }
-
         // ImGui's double-click edge is valid here in the pump; the first click already
         // selected the seed. KG_CONSUMED keeps release from KiwiBox_End, which would
         // replace the expanded selection with a single click pick.

@@ -164,7 +164,7 @@ Called from Image_DecodeCompressed via Wavelet_DecodeCoefficients.
 
 /* helper: decode one coefficient from a 12-bit Huffman table with 9-bit escape */
 static int Wavelet_DecodeValue9(WaveletDecodeState_t *state,
-                                unsigned short table[][2])
+                                const unsigned short table[][2])
 {
     int tableIdx = state->bits & 0xFFF;
     int bitCount = table[tableIdx][1];
@@ -184,7 +184,7 @@ static int Wavelet_DecodeValue9(WaveletDecodeState_t *state,
 
 /* helper: decode one coefficient from a 12-bit Huffman table with 10-bit escape */
 static int Wavelet_DecodeValue10(WaveletDecodeState_t *state,
-                                 unsigned short table[][2])
+                                 const unsigned short table[][2])
 {
     int tableIdx = state->bits & 0xFFF;
     int bitCount = table[tableIdx][1];

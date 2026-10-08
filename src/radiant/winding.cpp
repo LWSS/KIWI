@@ -7,7 +7,7 @@
 //   Winding_PlanesConcave 0x4627a0, Winding_Clip 0x462860 (CoD's name for
 //   Winding_SplitEpsilon), Winding_FindSharedEdge 0x462c50, Winding_TryMerge 0x462d40,
 //   Winding_Alloc 0x4d6d10, Winding_BaseForPlane 0x4d7bc0 (+ its common/polylib.cpp
-//   helper chain sub_4A4650 / sub_4D99D0 / sub_4D7670 / sub_4D7AB0), Winding_Clone
+//   helper chain 0x4A4650 / 0x4D99D0 / 0x4D7670 / 0x4D7AB0), Winding_Clone
 //   0x4d7d60.
 // The rest (Winding_Free/Reverse/RemovePoint/InsertPoint/IsTiny/IsHuge/Plane/Area/
 // Bounds/PointInside/VectorIntersect) are not named symbols in the binary — they are
@@ -22,19 +22,19 @@
 
 #include <universal/assertive.h>
 
-// Live-winding malloc/free counter.  IDB dword_24CE4FC (0x24CE4FC); the binary
-// increments it in every winding allocator, including the ones it inlines.
+// Live-winding malloc/free counter (0x24CE4FC); the binary increments it in every
+// winding allocator, including the ones it inlines.
 int g_windingAlloc = 0;
 
 // Epsilon constants.  NORMAL/DIST are stored in the binary as the FLOAT values widened
-// (dbl_6F4490 == (double)0.0001f, dbl_6F4488 == (double)0.02f), so an `f` literal is
-// exact for them.  CONTINUOUS (dbl_6F45C8) and WCONVEX (dbl_6F42F8) are TRUE doubles —
-// 0.005f and 0.2f are NOT equal to them, so those two comparisons must stay in double
-// (the binary compares the float dot against the double constant on the x87 stack).
+// ((double)0.0001f, (double)0.02f), so an `f` literal is exact for them.  CONTINUOUS and
+// WCONVEX are TRUE doubles — 0.005f and 0.2f are NOT equal to them, so those two
+// comparisons must stay in double (the binary compares the float dot against the double
+// constant).
 #define NORMAL_EPSILON     0.0001f
 #define DIST_EPSILON       0.02f
-#define CONTINUOUS_EPSILON 0.005          // dbl_6F45C8 — exact double, NOT 0.005f
-#define WCONVEX_EPSILON    0.2            // dbl_6F42F8 — exact double, NOT 0.2f
+#define CONTINUOUS_EPSILON 0.005          // exact double, NOT 0.005f
+#define WCONVEX_EPSILON    0.2            // exact double, NOT 0.2f
 #define EDGE_LENGTH        0.2f
 #define MAX_POINTS_ON_WINDING 1024
 
@@ -46,9 +46,9 @@ int g_windingAlloc = 0;
 #define W_DotProduct(a, b)      ( (a)[0]*(b)[0] + (a)[1]*(b)[1] + (a)[2]*(b)[2] )
 
 // =============================================================================
-// 0x462470 Plane_Equal(a@<eax>, b@<ecx>, flip).  flip negates the FIRST arg, not the
-// second (the opposite of GtkRadiant).  plane.dist lives in a DOUBLE slot at +0x10 but
-// only ever holds float-precision values, so reading it as float is exact.
+// 0x462470 Plane_Equal.  flip negates the FIRST arg, not the second (the opposite of
+// GtkRadiant).  plane.dist lives in a DOUBLE slot at +0x10 but only ever holds
+// float-precision values, so reading it as float is exact.
 // =============================================================================
 bool Plane_Equal( plane_t *a, plane_t *b, int flip )
 {
@@ -81,9 +81,9 @@ bool Plane_Equal( plane_t *a, plane_t *b, int flip )
 }
 
 // =============================================================================
-// 0x462550 Plane_FromPoints(p1@<eax>, p2@<ecx>, plane@<edi>, p3@<esi>).  normal =
-// cross(p2-p3, p1-p3); returns false when |normal| < 0.1 (colinear).  plane->dist is
-// computed as a float and merely widened into the double slot at +0x10.
+// 0x462550 Plane_FromPoints.  normal = cross(p2-p3, p1-p3); returns false when
+// |normal| < 0.1 (colinear).  plane->dist is computed as a float and merely widened into
+// the double slot at +0x10.
 // =============================================================================
 int Plane_FromPoints( vec3_t p1, vec3_t p2, vec3_t p3, plane_t *plane )
 {
@@ -110,8 +110,8 @@ int Plane_FromPoints( vec3_t p1, vec3_t p2, vec3_t p3, plane_t *plane )
 }
 
 // =============================================================================
-// 0x4625e0 Point_Equal(p1@<eax>, p2@<edx>, epsilon).  Rejects on |p1[i]-p2[i]| >
-// epsilon (strictly greater — an exactly-equal difference still passes).
+// 0x4625e0 Point_Equal.  Rejects on |p1[i]-p2[i]| > epsilon (strictly greater — an
+// exactly-equal difference still passes).
 // =============================================================================
 int Point_Equal( vec3_t p1, vec3_t p2, float epsilon )
 {
@@ -128,9 +128,9 @@ int Point_Equal( vec3_t p1, vec3_t p2, float epsilon )
 }
 
 // =============================================================================
-// 0x4d6d10 Winding_Alloc(points@<eax>).  4 + 12*N bytes; winding_t::p[4] is a declared
-// minimum, the allocation is sized for N.  The binary writes numpoints AFTER the
-// out-of-memory message, i.e. it derefs NULL on a failed malloc — reproduced.
+// 0x4d6d10 Winding_Alloc.  4 + 12*N bytes; winding_t::p[4] is a declared minimum, the
+// allocation is sized for N.  The binary writes numpoints AFTER the out-of-memory
+// message, i.e. it derefs NULL on a failed malloc — reproduced.
 // =============================================================================
 winding_t *Winding_Alloc( int points )
 {
@@ -157,7 +157,7 @@ void Winding_Free( winding_t *w )
 }
 
 // =============================================================================
-// 0x4d7d60 Winding_Clone(w@<edi>).  Duplicates numpoints + all point data.
+// 0x4d7d60 Winding_Clone.  Duplicates numpoints + all point data.
 // =============================================================================
 winding_t *Winding_Clone( winding_t *w )
 {
@@ -194,60 +194,9 @@ winding_t *Winding_Reverse( winding_t *w )
 }
 
 // =============================================================================
-// Winding_RemovePoint — GtkRadiant reference; removes point 'point' in place.
-// =============================================================================
-void Winding_RemovePoint( winding_t *w, int point )
-{
-    if ( point < 0 || point >= w->numpoints )
-    {
-        Com_Error( ERR_FATAL, "Winding_RemovePoint: point out of range" );
-    }
-    if ( point < w->numpoints - 1 )
-    {
-        memmove( &w->p[point][0], &w->p[point + 1][0],
-                 (size_t)( w->numpoints - point - 1 ) * 3 * sizeof( float ) );
-    }
-    w->numpoints--;
-}
-
-// =============================================================================
-// Winding_InsertPoint — GtkRadiant reference; inserts at 'spot', returns a new winding.
-// =============================================================================
-winding_t *Winding_InsertPoint( winding_t *w, vec3_t point, int spot )
-{
-    int        i, j;
-    winding_t *neww;
-
-    if ( spot > w->numpoints )
-    {
-        Com_Error( ERR_FATAL, "Winding_InsertPoint: spot > w->numpoints" );
-    }
-    if ( spot < 0 )
-    {
-        Com_Error( ERR_FATAL, "Winding_InsertPoint: spot < 0" );
-    }
-    neww            = Winding_Alloc( w->numpoints + 1 );
-    neww->numpoints = w->numpoints + 1;
-    for ( i = 0, j = 0; i < neww->numpoints; i++ )
-    {
-        if ( i == spot )
-        {
-            W_VectorCopy( point, neww->p[i] );
-        }
-        else
-        {
-            W_VectorCopy( w->p[j], neww->p[i] );
-            j++;
-        }
-    }
-    return neww;
-}
-
-// =============================================================================
-// 0x4627a0 Winding_PlanesConcave(w1@<eax>, w2@<ebx>, normal1@<edi>, normal2, dist1,
-// dist2).  True if any point of one winding is more than WCONVEX_EPSILON in front of
-// the OTHER plane.  Loop 1 pairs normal1 with dist2, loop 2 normal2 with dist1 — the
-// call sites (Brush_Convex, CSG_Merge) rely on that pairing.
+// 0x4627a0 Winding_PlanesConcave.  True if any point of one winding is more than
+// WCONVEX_EPSILON in front of the OTHER plane.  Loop 1 pairs normal1 with dist2, loop 2
+// normal2 with dist1 — the call sites (Brush_Convex, CSG_Merge) rely on that pairing.
 // =============================================================================
 int Winding_PlanesConcave( winding_t *w1, winding_t *w2,
                             vec3_t normal1, vec3_t normal2,
@@ -283,11 +232,10 @@ int Winding_PlanesConcave( winding_t *w1, winding_t *w2,
 // =============================================================================
 // 0x462860 Winding_Clip(in, normal, dist, epsilon, front, back).  Despite the name this
 // is SplitEpsilon semantics: `in` is NOT freed and BOTH pieces are allocated and
-// returned.  Side codes (IDA's, the inverse of GtkRadiant's SIDE_* order):
+// returned.  Side codes (the inverse of GtkRadiant's SIDE_* order):
 //   0 = all front, 1 = all back, 2 = all on-plane (coplanar), 3 = split.
 // CSG_FaceVisible gates its coplanar test on == 2; other callers ignore the return.
-// The all-front/all-back arms clone `in` (the binary inlines the clone in the first
-// arm and calls Winding_Clone in the second).
+// The all-front/all-back arms clone `in`.
 // =============================================================================
 int Winding_Clip( winding_t *in, vec3_t normal, double dist, float epsilon,
                   winding_t **front, winding_t **back )
@@ -333,13 +281,12 @@ int Winding_Clip( winding_t *in, vec3_t normal, double dist, float epsilon,
 
     if ( !counts[0] )
     {
-        // 0x4629ac: return 2 - (backCount != 0).
         *back = Winding_Clone( in );
         return counts[1] ? 1 : 2;
     }
     if ( !counts[1] )
     {
-        // No BACK points — all front/on (0x4629c2).
+        // No BACK points — all front/on.
         *front = Winding_Clone( in );
         return 0;
     }
@@ -387,7 +334,7 @@ int Winding_Clip( winding_t *in, vec3_t normal, double dist, float epsilon,
             continue;
         }
 
-        // Split point.  An axial normal component takes +/-dist verbatim (0x462b26).
+        // Split point.  An axial normal component takes +/-dist verbatim.
         p2  = in->p[( i + 1 ) % n];
         dot = dists[i] / ( dists[i] - dists[i + 1] );
         for ( j = 0; j < 3; j++ )
@@ -420,7 +367,7 @@ int Winding_Clip( winding_t *in, vec3_t normal, double dist, float epsilon,
     {
         Com_Error( ERR_FATAL, "Winding_Clip: MAX_POINTS_ON_WINDING" );
     }
-    return 3;   // IDA 0x4629a9: split (both front and back produced)
+    return 3;   // split (both front and back produced)
 }
 
 // =============================================================================
@@ -464,15 +411,14 @@ static int Winding_FindSharedEdge( winding_t *w1, winding_t *w2,
 }
 
 // =============================================================================
-// 0x462d40 Winding_TryMerge(f1@<eax>, f2, planenormal).  Merges two windings across
-// their shared edge if both junction corners stay convex, else NULL.  Neither input is
-// freed.  `keep` exists only for GtkRadiant API compatibility — the binary always
+// 0x462d40 Winding_TryMerge.  Merges two windings across their shared edge if both
+// junction corners stay convex, else NULL.  Neither input is freed.  `keep` exists only for GtkRadiant API compatibility — the binary always
 // builds the full merged polygon (no keep1/keep2 first-point removal).
 // =============================================================================
 winding_t *Winding_TryMerge( winding_t *f1, winding_t *f2,
                                vec3_t planenormal, int keep )
 {
-    (void)keep;   // CoD binary doesn't use keep; IDA has no keep1/keep2 logic
+    (void)keep;   // the binary has no keep1/keep2 logic
 
     unsigned int  idx1;
     int           idx2;
@@ -490,7 +436,7 @@ winding_t *Winding_TryMerge( winding_t *f1, winding_t *f2,
     n1 = (unsigned int)f1->numpoints;
     n2 = (unsigned int)f2->numpoints;
 
-    // Convexity at f1[idx1] vs f2[(idx2+2)%n2] (0x462d6d).
+    // Convexity at f1[idx1] vs f2[(idx2+2)%n2].
     {
         float *back = f1->p[( idx1 + n1 - 1 ) % n1];
         float *p1   = f1->p[idx1];
@@ -509,7 +455,7 @@ winding_t *Winding_TryMerge( winding_t *f1, winding_t *f2,
         }
     }
 
-    // Convexity at f1[(idx1+1)%n1] vs f2[(idx2+n2-1)%n2] (0x462e39).
+    // Convexity at f1[(idx1+1)%n1] vs f2[(idx2+n2-1)%n2].
     {
         float *p2   = f1->p[( idx1 + 1 ) % n1];
         float *next = f1->p[( idx1 + 2 ) % n1];
@@ -549,56 +495,6 @@ winding_t *Winding_TryMerge( winding_t *f1, winding_t *f2,
 }
 
 // =============================================================================
-// Winding_IsTiny — GtkRadiant reference; true if <3 edges exceed EDGE_LENGTH.
-// =============================================================================
-int Winding_IsTiny( winding_t *w )
-{
-    int   i, j;
-    float len;
-    float delta[3];
-    int   edges;
-
-    edges = 0;
-    for ( i = 0; i < w->numpoints; i++ )
-    {
-        j = ( i == w->numpoints - 1 ) ? 0 : i + 1;
-        delta[0] = w->p[j][0] - w->p[i][0];
-        delta[1] = w->p[j][1] - w->p[i][1];
-        delta[2] = w->p[j][2] - w->p[i][2];
-        len = Vec3Length( delta );
-        if ( len > EDGE_LENGTH )
-        {
-            if ( ++edges == 3 )
-            {
-                return 0;
-            }
-        }
-    }
-    return 1;
-}
-
-// =============================================================================
-// Winding_IsHuge — GtkRadiant reference; true if any coord leaves the world bounds.
-// =============================================================================
-int Winding_IsHuge( winding_t *w )
-{
-    int i, j;
-
-    for ( i = 0; i < w->numpoints; i++ )
-    {
-        for ( j = 0; j < 3; j++ )
-        {
-            if ( w->p[i][j] < -BOGUS_RANGE_WINDING + 1.0f ||
-                 w->p[i][j] >  BOGUS_RANGE_WINDING - 1.0f )
-            {
-                return 1;
-            }
-        }
-    }
-    return 0;
-}
-
-// =============================================================================
 // Winding_BaseForPlane and its common/polylib.cpp helper chain.  These are CoD's own
 // polylib functions, NOT GtkRadiant's BaseWindingForPlane (0x4d7380 has no xrefs in
 // this binary).  Where GtkRadiant makes a huge quad on the plane, CoD builds the base
@@ -607,11 +503,11 @@ int Winding_IsHuge( winding_t *w )
 //
 // Leaf math is reused from the kisak engine: IntersectPlanes / PointInBounds
 // (universal/com_math.cpp), Com_ConvexHullIndices (universal/com_convexhull.cpp, whose
-// KISAK_RADIANT delta is IDA sub_49E150), Vec3Cross / Vec3Sub.
+// KISAK_RADIANT delta is 0x49E150), Vec3Cross / Vec3Sub.
 // The binary's CM_ReverseWinding (0x4d7dc0) ALLOCATES a reversed copy while kisak's is
 // in-place/void (a CoD3-vs-CoD4 divergence), so the orientation flip uses this file's
 // own Winding_Reverse, which allocates.
-// The plane-orientation cross product is inlined verbatim from PlaneFromPoints_Real
+// The plane-orientation cross product is inlined from PlaneFromPoints_Real
 // (0x4a9950: normal = (C-B) x (A-B), pivot B) rather than calling kisak's
 // PlaneFromPoints, to stay independent of any CoD3/CoD4 cross-order divergence.
 // =============================================================================
@@ -650,21 +546,21 @@ static float Polylib_LargestTriangle( const vec3_t *pts, int count, const float 
     *i_a4 = 0;
     *i_a6 = 2;
 
-    for ( int a = 2; a < count; a++ )           // v6
+    for ( int a = 2; a < count; a++ )
     {
-        for ( int b = 1; b < a; b++ )           // v9
+        for ( int b = 1; b < a; b++ )
         {
-            for ( int c = 0; c < b; c++ )       // v11
+            for ( int c = 0; c < b; c++ )
             {
                 float d1[3], d2[3], cr[3];
-                // d1 = pts[a] - pts[b] (v20), d2 = pts[c] - pts[b] (v21)
+                // d1 = pts[a] - pts[b], d2 = pts[c] - pts[b]
                 d1[0] = pts[a][0] - pts[b][0];
                 d1[1] = pts[a][1] - pts[b][1];
                 d1[2] = pts[a][2] - pts[b][2];
                 d2[0] = pts[c][0] - pts[b][0];
                 d2[1] = pts[c][1] - pts[b][1];
                 d2[2] = pts[c][2] - pts[b][2];
-                Vec3Cross( d2, d1, cr );        // IDA: Vec3Cross(v21, v20, v22)
+                Vec3Cross( d2, d1, cr );
                 float area = fabsf( normal[0] * cr[0] + normal[1] * cr[1] + normal[2] * cr[2] );
                 if ( maxArea < area )
                 {
@@ -684,7 +580,7 @@ static float Polylib_LargestTriangle( const vec3_t *pts, int count, const float 
 // used by primarylights_region.
 winding_t *Polylib_HullForPoints( const vec3_t *xyz, const float *normal, int xyzCount )
 {
-    // 'proj' keeps the IDB name so the array-bound assert stringizes 1:1 (polylib.cpp:336).
+    // 'proj' keeps the binary's name so the array-bound assert stringizes 1:1 (polylib.cpp:336).
     float proj[64][2];
 
     vassert( (xyzCount <= (sizeof( proj ) / (sizeof( proj[0] ) * (sizeof( proj ) != 4 || sizeof( proj[0] ) <= 4)))), "(xyzCount) = %i", xyzCount );
@@ -721,7 +617,7 @@ winding_t *Polylib_HullForPoints( const vec3_t *xyz, const float *normal, int xy
     int iA4, iA5, iA6;
     if ( Polylib_LargestTriangle( w->p, (int)hullCount, normal, &iA4, &iA5, &iA6 ) >= 0.001f )
     {
-        // IDA PlaneFromPoints_Real(out, A=p[iA5], B=p[iA4], C=p[iA6]):
+        // PlaneFromPoints_Real(out, A=p[iA5], B=p[iA4], C=p[iA6]):
         //   testNormal = (C - B) × (A - B), pivot B = p[iA4].
         float e1[3], e2[3], n2[3];
         e1[0] = w->p[iA6][0] - w->p[iA4][0];   // C - B
@@ -784,8 +680,8 @@ static int Polylib_PlaneBoxEdges( const float *plane, const float *boundsPlanes,
 }
 
 // =============================================================================
-// 0x4d7bc0 Winding_BaseForPlane(maxs@<eax>, mins@<ebx>, plane).  Convex hull of the
-// plane's intersections with the [mins,maxs] AABB; NULL below 3 points.
+// 0x4d7bc0 Winding_BaseForPlane.  Convex hull of the plane's intersections with the
+// [mins,maxs] AABB; NULL below 3 points.
 // =============================================================================
 winding_t *Winding_BaseForPlane( vec3_t maxs, vec3_t mins, plane_t *plane )
 {
@@ -807,7 +703,7 @@ winding_t *Winding_BaseForPlane( vec3_t maxs, vec3_t mins, plane_t *plane )
     facePlane[2] = plane->normal[2];
     facePlane[3] = (float)plane->dist;
 
-    // Up to 12 candidate points (4 per axis pair × 3 pairs). IDA out buffer v8[144].
+    // Up to 12 candidate points (4 per axis pair × 3 pairs).
     float pts[12][3];
     int n = 0;
     n += Polylib_PlaneBoxEdges( facePlane, bounds, mins, maxs, 0, 1, pts[n] );
@@ -819,33 +715,6 @@ winding_t *Winding_BaseForPlane( vec3_t maxs, vec3_t mins, plane_t *plane )
         return Polylib_HullForPoints( pts, plane->normal, n );
     }
     return NULL;
-}
-
-// =============================================================================
-// Winding_Plane — GtkRadiant reference; best-fit plane normal + distance.
-// =============================================================================
-void Winding_Plane( winding_t *w, vec3_t normal, double *dist )
-{
-    float v1[3], v2[3];
-    int   i;
-
-    for ( i = 0; i < w->numpoints; i++ )
-    {
-        v1[0] = w->p[( i + 1 ) % w->numpoints][0] - w->p[i][0];
-        v1[1] = w->p[( i + 1 ) % w->numpoints][1] - w->p[i][1];
-        v1[2] = w->p[( i + 1 ) % w->numpoints][2] - w->p[i][2];
-        v2[0] = w->p[( i + 2 ) % w->numpoints][0] - w->p[i][0];
-        v2[1] = w->p[( i + 2 ) % w->numpoints][1] - w->p[i][1];
-        v2[2] = w->p[( i + 2 ) % w->numpoints][2] - w->p[i][2];
-        if ( Vec3Length( v1 ) > 0.5f && Vec3Length( v2 ) > 0.5f )
-        {
-            break;
-        }
-    }
-    // cross(v2, v1, normal) — GtkRadiant uses CrossProduct(v2, v1, normal)
-    Vec3Cross( v2, v1, normal );
-    Vec3Normalize( normal );
-    *dist = (double)W_DotProduct( w->p[0], normal );
 }
 
 // =============================================================================
@@ -870,89 +739,6 @@ float Winding_Area( winding_t *w )
         total += 0.5f * Vec3Length( cross );
     }
     return total;
-}
-
-// =============================================================================
-// Winding_Bounds — GtkRadiant reference; AABB of the winding.
-// =============================================================================
-void Winding_Bounds( winding_t *w, vec3_t mins, vec3_t maxs )
-{
-    float v;
-    int   i, j;
-
-    mins[0] = mins[1] = mins[2] =  99999.0f;
-    maxs[0] = maxs[1] = maxs[2] = -99999.0f;
-
-    for ( i = 0; i < w->numpoints; i++ )
-    {
-        for ( j = 0; j < 3; j++ )
-        {
-            v = w->p[i][j];
-            if ( v < mins[j] ) { mins[j] = v; }
-            if ( v > maxs[j] ) { maxs[j] = v; }
-        }
-    }
-}
-
-// =============================================================================
-// Winding_PointInside — GtkRadiant reference; 'point' inside the winding, on-plane.
-// =============================================================================
-int Winding_PointInside( winding_t *w, plane_t *plane, vec3_t point, float epsilon )
-{
-    int   i;
-    float dir[3], pointvec[3], normal[3];
-
-    for ( i = 0; i < w->numpoints; i++ )
-    {
-        dir[0]      = w->p[( i + 1 ) % w->numpoints][0] - w->p[i][0];
-        dir[1]      = w->p[( i + 1 ) % w->numpoints][1] - w->p[i][1];
-        dir[2]      = w->p[( i + 1 ) % w->numpoints][2] - w->p[i][2];
-        pointvec[0] = point[0] - w->p[i][0];
-        pointvec[1] = point[1] - w->p[i][1];
-        pointvec[2] = point[2] - w->p[i][2];
-        Vec3Cross( dir, plane->normal, normal );
-        if ( W_DotProduct( pointvec, normal ) < -epsilon )
-        {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-// =============================================================================
-// Winding_VectorIntersect — GtkRadiant reference; segment p1-p2 hits the winding.
-// =============================================================================
-int Winding_VectorIntersect( winding_t *w, plane_t *plane,
-                              vec3_t p1, vec3_t p2, float epsilon )
-{
-    float front, back, frac;
-    float mid[3];
-
-    front = W_DotProduct( p1, plane->normal ) - plane->dist;
-    back  = W_DotProduct( p2, plane->normal ) - plane->dist;
-
-    if ( front < -epsilon && back < -epsilon )
-    {
-        return 0;
-    }
-    if ( front > epsilon && back > epsilon )
-    {
-        return 0;
-    }
-
-    if ( fabsf( front - back ) < 0.001f )
-    {
-        W_VectorCopy( p2, mid );
-    }
-    else
-    {
-        frac   = front / ( front - back );
-        mid[0] = p1[0] + ( p2[0] - p1[0] ) * frac;
-        mid[1] = p1[1] + ( p2[1] - p1[1] ) * frac;
-        mid[2] = p1[2] + ( p2[2] - p1[2] ) * frac;
-    }
-
-    return Winding_PointInside( w, plane, mid, epsilon );
 }
 
 // =============================================================================

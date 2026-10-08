@@ -11,21 +11,14 @@
 #include "kiwi_autobool.h"
 #include "kiwi_csg.h"                 // shared CSG merge eligibility
 #include "kiwi_command.h"      // KIWI_CMD_AUTO_BOOL + KiwiCmd_UndoBegin / KiwiCmd_UndoCommit
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"    // KiwiSel / Sel_Clear / Sel_BrushLive
 #include "kiwi_selext.h"       // KSELX_TOUCH_EPS
 
 // Ported entry points.
-extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
 // Takes a NULL-terminated selbrush_t.next list; returns a new unlinked instance or
 // nullptr and never frees the inputs.
 extern selbrush_t *Brush_MergeList( selbrush_t *brushList );                  // csg.cpp:409   (0x47D600)
-extern void        Brush_RemoveFromList( selbrush_t *b );                     // brush.cpp:972 (0x476680)
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:927 (0x4765A0)
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:1002 (0x475BA0)
-// Keep at file scope; MSVC gave the former block-scope declaration the wrong linkage.
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                            int commandId );                  // mainfrm.cpp:1340
 // selected_brushes is a circular sentinel (qe3.h:374, 1054).
 
 namespace

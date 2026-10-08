@@ -16,40 +16,26 @@
 #include <universal/profile.h>
 #include "kiwi_viewdirty.h"        // KiwiViewDirty_Mark — re-arm on a bailed render
 #include "kiwi_camera.h"           // KiwiCam_MarkerViewpoint — the camera marker's anchor
+#include "kiwi_ported.h"           // KIWI: shared engine/editor externs
 #include <math.h>
 
 // ─── Editor globals shared with xywnd.cpp / engine_stubs / map.cpp ───────────────
-extern float grid_sizes[];                                    // engine_stubs.cpp (0x6dde5c)
 extern float region_mins[3];                                  // map.cpp          (0x739c14)
 extern float region_maxs[3];                                  // map.cpp          (0x739d24)
-extern float world_orient_matrix[4][3];                       // entity.cpp (identity orientation)
-extern char  Byte4PackPixelColor(float *from, GfxColor *out); // engine_stubs.cpp (0x402ac0)
-extern selbrush_t active_brushes;                             // map.cpp          (0x23F189C)
-extern selbrush_t selected_brushes;                           // engine_stubs     (0x23F1864)
-extern void  Radiant_FL_Log( const char *fmt, ... );          // mainfrm.cpp
-// U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp).  Never NULL — it replaces the
-// `g_pParentWnd->m_pCamWnd->camera` reach-throughs the Z view used to make.
-extern camera_s *Ed_Camera();                                 // camwnd.cpp
-
-// R_Add3DLine (draw.cpp, IDB 0x40c110): append one line segment (p1→p2, through `orient`)
-// into a caller batch; flushes via R_AddCmd_Line3D on overflow; returns the new vert count.
-extern int R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                        const float *p1, const float *p2, const unsigned int *color,
-                        char width, int vertCount, int maxVertCount );
 
 // ── Z_Draw active/selected filled-column deps (all already ported) ────────────────
-//  Ed_BrushFloorRay (select.cpp) is the headless-safe wrapper over the binary's Brush_Ray
-//  (0x475fe0): does the ray [start, start+262144*dir] enter the convex brush def?  Fills
-//  *outDist = the entry distance along dir (== the binary's *a5 = dot(dir, entryPt-start)),
-//  returns true on entry.  Clips against def->faceCount (authoritative), so it is correct
-//  without a prior camera draw (the §11 instance-vs-def trap Brush_Ray itself hits headless).
+//  Ed_BrushFloorRay (select.cpp) is the headless-safe wrapper over Brush_Ray (0x475fe0):
+//  does the ray [start, start+262144*dir] enter the convex brush def?  Fills *outDist = the
+//  entry distance along dir (dot(dir, entryPt-start)), returns true on entry.  Clips against
+//  def->faceCount (authoritative), so it is correct without a prior camera draw (the
+//  instance-vs-def trap Brush_Ray itself hits headless).
 extern bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir, float *outDist ); // select.cpp
 // Brush_GetEntityLineColor (brush.cpp 0x47aa20): RGBA of a brush's entity line (worldspawn→0,
 //   _color epair / actor / node_path overrides).  Canonical body, now non-static.
 extern char Brush_GetEntityLineColor( float *outRgba, brush_t *brushDef, const float *inRgba );    // brush.cpp
 // colorWhite[4] = {1,1,1,1} is static const float in q_shared.h (via stdafx.h → qe3.h).
 
-// ─── Z-view globals (IDB z.cpp: z_width 0x241a598 / z_height 0x241a59c / z_scale 0x241a5b0
+// ─── Z-view globals (z_width 0x241a598 / z_height 0x241a59c / z_scale 0x241a5b0
 //     / m_Camera.origin 0x241a5a4..ac). The Z view's "camera" is the editor camera position
 //     — there is no camera WINDOW until P5.4, so z.cpp owns these here; P5.4 reconciles
 //     m_Camera with CCamWnd. The defaults centre an empty view on the origin. ──────────────
@@ -64,10 +50,10 @@ float m_Camera_origin[3] = { 0, 0, 0 };   // editor camera world position (origi
 // the bottom of this file read/write these SAME fields.
 //   width/height  = CZWnd::m_nWidth / m_nHeight.  mainfrm.h still declares those members
 //                   (this unit may not edit it) but nothing outside z.cpp ever read them,
-//                   so the handlers no longer write them — the state lives here.  The IDB
-//                   globals z_width/z_height above stay the values the draw path reads
-//                   (faithful names), fed from these exactly as before.
-//   cursorx/cursory = screen cursor latched at button press (IDB 0x241a594/0x241a590),
+//                   so the handlers no longer write them — the state lives here.  The
+//                   globals z_width/z_height above stay the values the draw path reads,
+//                   fed from these.
+//   cursorx/cursory = screen cursor latched at button press (0x241a594/0x241a590),
 //                   the anchor of the RMB scroll-drag.
 struct zwndState_t
 {
@@ -77,7 +63,7 @@ struct zwndState_t
     int cursory = 0;
 } g_zwndState;
 
-// ─── Z_SetupScene — CXYWnd::SetupScene (IDB 0x5064c0) with the Z view's explicit org/axis ─
+// ─── Z_SetupScene — CXYWnd::SetupScene (0x5064c0) with the Z view's explicit org/axis ─
 // org = {0, cameraZ, 0}; axis = the XY-top basis (forward=+Z, right=-X, up=+Y). The ortho
 // projection is sized by the live target-window dimensions / z_scale (matches XY_SetupScene).
 static void Z_SetupScene()
@@ -105,14 +91,14 @@ static void Z_SetupScene()
 }
 
 // Line batch — sized generously; R_Add3DLine flushes via R_AddCmd_Line3D when full, so any
-// size is correct, this just controls how often it flushes (IDB uses 1362 for the grid).
+// size is correct, this just controls how often it flushes.
 static const int  Z_LINE_MAX = 2048;
 static GfxPointVertex s_zLines[Z_LINE_MAX];
-// The active/selected column passes use TWO 681-vertex batches like the IDB (v51 thick spine,
-// v52 thin box) — Z_AddSeg caps both at 681 (R_Add3DLine flushes on overflow).
+// The active/selected column passes use TWO 681-vertex batches (thick spine, thin box) —
+// Z_AddSeg caps both at 681 (R_Add3DLine flushes on overflow).
 static GfxPointVertex s_zSpine[681];
 
-// ─── Z_DrawGrid (IDB 0x49acf0), grid lines only (text labels = P5.5) ─────────────
+// ─── Z_DrawGrid (0x49acf0), grid lines only (text labels = P5.5) ─────────────
 static void Z_DrawGrid()
 {
     const int   halfW   = (int)( (double)z_width  * 0.5 / z_scale );   // half view width  (world units)
@@ -185,20 +171,20 @@ static void Z_DrawGrid()
         float a4[3] = { inv, 0.0f, 0.0f };     // xPixelStep (horizontal)
         float yp[3] = { 0.0f, -inv, 0.0f };    // yPixelStep (screen-down)
         float *colText = g_qeglobals.d_savedinfo.colors[8];
-        const float leftX = (float)( 1 - halfW );   // IDB 0x49b023: a3 = (float)(1 - z_width/2/z_scale)
+        const float leftX = (float)( 1 - halfW );
         char text[32];
         for ( float z = zmin; z < zmax; z += 64.0f )
         {
-            sprintf( text, "%i", (int)z );           // IDB 0x49b08d: "%i", (int)z (truncates; exact for 64-multiples)
+            sprintf( text, "%i", (int)z );           // truncates; exact for 64-multiples
             float org[3] = { leftX, z, 0.0f };
             R_AddCmdDrawTextAtPosition( text, font, org, a4, yp, colText );
         }
     }
 }
 
-// ─── Z_Draw column helpers (faithful to IDB 0x49b520, 2026-06-25) ────────────────
-// sub_40C1E0 (IDB 0x40c1e0): a thin 2D-point wrapper around R_Add3DLine — build two vec3
-//   from the (x1,y1)/(x2,y2) screen-column pairs (z=0) and append.  Inlined as Z_AddSeg.
+// ─── Z_Draw column helpers ────────────────────────────────────────────────────────
+// 0x40c1e0: a thin 2D-point wrapper around R_Add3DLine — build two vec3 from the
+//   (x1,y1)/(x2,y2) screen-column pairs (z=0) and append.  Inlined as Z_AddSeg.
 static inline int Z_AddSeg( GfxPointVertex *verts, float x1, float y1, float x2, float y2,
                             const unsigned int *color, char width, int vertCount )
 {
@@ -213,7 +199,7 @@ static inline int Z_AddSeg( GfxPointVertex *verts, float x1, float y1, float x2,
 // binary uses Brush_Ray (0x475fe0) whose *outDist = dot(dir, entryPt-start); for dir={0,0,-1}
 // start.z=+131072 that gives 131072-topZ (→ topZ after the 131072- fixup), and for dir={0,0,+1}
 // start.z=-131072 it gives bottomZ+131072 (→ bottomZ after the -131072 fixup).  Ed_BrushFloorRay
-// (select.cpp) reproduces exactly that distance.  Returns true only if BOTH rays enter.
+// (select.cpp) gives the same distance.  Returns true only if BOTH rays enter.
 static bool Z_RayBrushZExtent( brush_t *def, float *outBottom, float *outTop )
 {
     const float camX = m_Camera_origin[0];
@@ -226,15 +212,15 @@ static bool Z_RayBrushZExtent( brush_t *def, float *outBottom, float *outTop )
     float dTop, dBot;
     if ( !Ed_BrushFloorRay( def, startHigh, dirDown, &dTop ) )
         return false;
-    *outTop = 131072.0f - dTop;                       // IDB: v50 = 131072 - v50 → top Z
+    *outTop = 131072.0f - dTop;                       // top Z
     if ( !Ed_BrushFloorRay( def, startLow, dirUp, &dBot ) )
         return false;
-    *outBottom = dBot - 131072.0f;                    // IDB: v49 = v49 - 131072 → bottom Z
+    *outBottom = dBot - 131072.0f;                    // bottom Z
     return true;
 }
 
 // The brush passes the XY-footprint test if the camera's (X,Y) is inside the brush def's
-// XY AABB (IDB: m_Camera_origin0 in [def->mins[0],def->maxs[0]] etc; def[8..12]).
+// XY AABB (strict inequalities on both axes).
 static inline bool Z_CamInBrushXY( const brush_t *def )
 {
     return m_Camera_origin[0] > def->mins[0] && def->maxs[0] > m_Camera_origin[0] &&
@@ -242,15 +228,14 @@ static inline bool Z_CamInBrushXY( const brush_t *def )
 }
 
 // Seed the entity line colour from the brush's owner entity's DEF eclass (color[0..2] +
-// eclass->unk as alpha — IDB reads eclass[9..12]), then let Brush_GetEntityLineColor override
-// (_color / actor / node_path).
-// §11 INSTANCE-vs-DEF (mp_test read-AV fix): the IDB reads `instance->owner->def->eclass` — from
-// the selbrush_t INSTANCE's owner.  The prior version took the brush DEF (b->def) and read
-// `def->owner->def->eclass`, which by the b->def->owner == b->owner->def invariant equals
-// (b->owner->def)->def->eclass — ONE ->def too deep.  When owner->def isn't self-referential that
-// extra hop lands on a bogus eclass pointer → read AV (crash opening mp_test, ec=0x8592D47).  Take
-// the INSTANCE and read b->owner->def->eclass exactly like the binary; b->def still feeds
-// Brush_GetEntityLineColor (the IDB passes v2->def there).
+// eclass->unk as alpha), then let Brush_GetEntityLineColor override (_color / actor /
+// node_path).
+// INSTANCE-vs-DEF: this reads `instance->owner->def->eclass` from the selbrush_t INSTANCE's
+// owner.  Starting from the brush DEF (b->def) reads `def->owner->def->eclass`, which by the
+// b->def->owner == b->owner->def invariant equals (b->owner->def)->def->eclass — ONE ->def
+// too deep.  When owner->def isn't self-referential that extra hop lands on a bogus eclass
+// pointer → read AV (crash opening mp_test).  So take the INSTANCE; b->def still feeds
+// Brush_GetEntityLineColor.
 static void Z_EntLineColor( selbrush_t *b, GfxColor *out )
 {
     float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -262,13 +247,13 @@ static void Z_EntLineColor( selbrush_t *b, GfxColor *out )
         rgba[0] = ec->color[0];
         rgba[1] = ec->color[1];
         rgba[2] = ec->color[2];
-        rgba[3] = ec->unk;           // IDB eclass[12] = eclass+0x30 = the 4th seed value
+        rgba[3] = ec->unk;           // the 4th seed value (alpha)
     }
     Brush_GetEntityLineColor( rgba, b ? b->def : nullptr, rgba );
     Byte4PackPixelColor( rgba, out );
 }
 
-// ─── Z_Draw active-brush filled column (the v51 spine + v52 box of IDB's first loop) ──
+// ─── Z_Draw active-brush filled column ────────────────────────────────────────────
 // For each ACTIVE brush whose XY footprint contains the camera, ray its top/bottom Z at the
 // column and draw a THICK vertical spine (entity-line colour, pixel-width = 2*(z_width/3)*z_scale)
 // at x=0 plus a thin WHITE box outline of the ±(z_width/3) column × [bottom,top].
@@ -279,18 +264,16 @@ static void Z_DrawActiveColumns( int v0 )
 
     GfxColor white;
     Byte4PackPixelColor( const_cast<float *>( colorWhite ), &white );
-    // IDB v42[0]: the spine pixel-width truncates into a CHAR (R_AddCmd_Line3D's width is char) —
-    // faithful, even though wide views wrap it negative (the binary does exactly this).
+    // The spine pixel-width truncates into a CHAR (R_AddCmd_Line3D's width is char); wide
+    // views wrap it negative (the binary does the same).
     const char spineWidth = (char)(int)( (double)( 2 * v0 ) * z_scale );
     const float colX  =  (float)v0;
     const float colXn = -(float)v0;
 
-    int nSpine = 0;   // v51 (thick spine, per-brush entity colour)
-    int nBox   = 0;   // v52 (thin white box outline)
+    int nSpine = 0;   // thick spine, per-brush entity colour
+    int nBox   = 0;   // thin white box outline
 
-    // The binary walks active_brushes via v2->onext, but hex-rays mistypes the instance node
-    // as brush_t_with_custom_def* (88B) — at byte offset 0x04 that field is selbrush_t.next
-    // (the global display-list link), NOT ownerNext (0x0C).  Walk .next.
+    // Walk selbrush_t.next (the global display-list link, offset 0x04), NOT ownerNext (0x0C).
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
     {
         brush_t *def = b->def;
@@ -317,10 +300,10 @@ static void Z_DrawActiveColumns( int v0 )
         R_AddCmd_Line3D( (short)( nBox / 2 ), 1, s_zLines );
 }
 
-// ─── Z_Draw selected-brush column (the v51 spine + v52 box of IDB's second loop) ──────
+// ─── Z_Draw selected-brush column ─────────────────────────────────────────────────
 // Per SELECTED brush: if the column ray hits, draw the THICK entity-coloured spine; ALWAYS
 // draw the mins/maxs box outline (selection colour colors[10]) — the box uses def->mins/maxs[2]
-// directly (not the ray result), matching the IDB's unconditional R_Add3DLine box tail.
+// directly (not the ray result), matching the binary's unconditional box.
 static void Z_DrawSelectedColumns( int v0 )
 {
     if ( selected_brushes.next == &selected_brushes )
@@ -332,10 +315,10 @@ static void Z_DrawSelectedColumns( int v0 )
     const float colX  =  (float)v0;
     const float colXn = -(float)v0;
 
-    int nSpine = 0;   // v51 (thick entity-coloured spine, only on a ray hit)
-    int nBox   = 0;   // v52 (selection-coloured mins/maxs box, always)
+    int nSpine = 0;   // thick entity-coloured spine, only on a ray hit
+    int nBox   = 0;   // selection-coloured mins/maxs box, always
 
-    // Same as the active loop: the IDB v13->onext at offset 0x04 == selbrush_t.next.
+    // Same as the active loop: walk selbrush_t.next.
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
         brush_t *def = b->def;
@@ -366,11 +349,10 @@ static void Z_DrawSelectedColumns( int v0 )
         R_AddCmd_Line3D( (short)( nBox / 2 ), 1, s_zLines );
 }
 
-// ─── R_RenderSomething_Important_ (IDB 0x49b100) — the camera-height marker ───────────
-// A fixed 8-segment glyph (16 verts, blue flt_6DE160={0,0,1,1}) drawn at the live camera Z
-// (g_pParentWnd->m_pCamWnd->camera.origin[2]), spanning x = ±(z_width/4): a centre bar at
-// camZ with a small arrowhead (camZ±8) and a downward tick (camZ-48).  Marks where the 3D
-// camera sits on the Z ruler.
+// ─── 0x49b100  Z_DrawCameraMarker — the camera-height marker ──────────────────────────
+// A fixed 8-segment glyph (16 verts, blue {0,0,1,1}) drawn at the live camera Z, spanning
+// x = ±(z_width/4): a centre bar at camZ with a small arrowhead (camZ±8) and a downward
+// tick (camZ-48).  Marks where the 3D camera sits on the Z ruler.
 static void Z_DrawCameraMarker()
 {
     // KIWI-UX DEVIATION: the VIEWPOINT, not camera.origin.  Same reason as the XY
@@ -380,11 +362,11 @@ static void Z_DrawCameraMarker()
     float camEye[3];
     KiwiCam_MarkerViewpoint( camEye );
     const float camZ = camEye[2];                // U-GLOBALS (never NULL — guard dropped)
-    const float hw   = (float)( z_width / 4 );     // IDB v12 = z_width/4
-    const float x    =  hw;                        // v8 = +hw
-    const float xn   = -hw;                        // v9 = -hw
+    const float hw   = (float)( z_width / 4 );
+    const float x    =  hw;
+    const float xn   = -hw;
 
-    static const float kMarkerBlue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE160
+    static const float kMarkerBlue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
     GfxColor col;
     Byte4PackPixelColor( const_cast<float *>( kMarkerBlue ), &col );
 
@@ -398,22 +380,22 @@ static void Z_DrawCameraMarker()
     n = Z_AddSeg( verts, x,    camZ,        x,    camZ - 48.0f,&col.packed, 1, n );
     n = Z_AddSeg( verts, xn,   camZ - 48.0f,x,    camZ - 48.0f,&col.packed, 1, n );
     n = Z_AddSeg( verts, xn,   camZ - 48.0f,xn,   camZ,        &col.packed, 1, n );
-    iassert( n == 16 );                            // IDB z.cpp:280 vertCount == ARRAY_COUNT(verts)
+    iassert( n == 16 );                            // z.cpp:280
     if ( n )
         R_AddCmd_Line3D( (short)( n / 2 ), 1, verts );
 }
 
-// ─── Z_Draw (IDB 0x49b520) — grid + active/selected filled columns + camera marker ───
+// ─── Z_Draw (0x49b520) — grid + active/selected filled columns + camera marker ───────
 void Z_Draw()
 {
     if ( !active_brushes.next )    // brush lists not bootstrapped → no map loaded
         return;
-    const int v0 = z_width / 3;    // IDB v0 = z_width/3 (column half-width, world units)
+    const int v0 = z_width / 3;    // column half-width, world units
     Z_SetupScene();
     Z_DrawGrid();
-    Z_DrawActiveColumns( v0 );     // IDB first loop: active brushes under the cursor column
-    Z_DrawSelectedColumns( v0 );   // IDB second loop: selected brushes' spine + mins/maxs box
-    Z_DrawCameraMarker();          // IDB R_RenderSomething_Important_ (0x49b100)
+    Z_DrawActiveColumns( v0 );     // active brushes under the cursor column
+    Z_DrawSelectedColumns( v0 );   // selected brushes' spine + mins/maxs box
+    Z_DrawCameraMarker();
 }
 
 // Centre the Z view on the loaded map's Z range (the editor does this from the camera /
@@ -448,23 +430,21 @@ void Z_CenterOnMap()
 //  (no input handlers): it renders the Z grid + selected-brush Z extents.
 // ═════════════════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════════════════
-//  Z-VIEW MOUSE INTERACTION — opus 2026-06-19
-//  The Z (height) window had NO mouse handlers, so you couldn't drag a brush's height
-//  in it.  Ports Drag_MouseOrigin (0x49aa60 the Z pick ray), Z_MouseDown (0x49aae0),
-//  Z_MouseMoved (0x49abd0) + the CZWnd handlers (0x46eda0/0x46f220/0x46efc0/0x46ee60/
-//  0x46f2a0).  The drag itself reuses the already-ported Drag_Begin / Drag_MouseMoved /
-//  Drag_MouseUp with viewz=1 (the Z axis).  The binary's single m_Camera global is the
-//  port's per-window split, so the Z origin uses z.cpp's m_Camera_origin and the
-//  "set camera height" (Ctrl+click) writes the live CCamWnd camera.
+//  Z-VIEW MOUSE INTERACTION
+//  Dragging a brush's height in the Z (height) window: Drag_MouseOrigin (0x49aa60, the Z
+//  pick ray), Z_MouseDown (0x49aae0), Z_MouseMoved (0x49abd0) + the CZWnd handlers
+//  (0x46eda0/0x46f220/0x46efc0/0x46ee60/0x46f2a0).  The drag itself reuses Drag_Begin /
+//  Drag_MouseMoved / Drag_MouseUp with viewz=1 (the Z axis).  The binary's single m_Camera
+//  global is the port's per-window split, so the Z origin uses z.cpp's m_Camera_origin and
+//  the "set camera height" (Ctrl+click) writes the live CCamWnd camera.
 // ════════════════════════════════════════════════════════════════════════════
 #include "prefs.h"                                                  // g_PrefsDlg (m_nMouseButtons)
 extern void  Drag_Begin( void *pressFunc, unsigned int buttons, int viewz, int px, int py,
                          float *xvec, float *yvec, float *trace_start, float *trace_dir ); // 0x47E890
 extern void  Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 );          // 0x47FF30
 extern void  Drag_MouseUp( unsigned int buttons );                                          // 0x4802A0
-extern int   g_nUpdateBits;                                                                 // 0x25D5A74
 
-// The screen cursor latched at RMB press (IDB 0x241a594/0x241a590) lives in g_zwndState.
+// The screen cursor latched at RMB press (0x241a594/0x241a590) lives in g_zwndState.
 
 // ── Drag_MouseOrigin (0x49aa60) — build the Z-view pick ray (X = sel brush centre,
 //    Z = cursor world height, pointing +Y into the scene) ───────────────────────
@@ -485,10 +465,9 @@ static void Z_MouseDown( int flippedY, unsigned int nFlags, int x )
 {
     POINT pt; GetCursorPos( &pt );
     g_zwndState.cursorx = pt.x; g_zwndState.cursory = pt.y;
-    // xvec={0,0,0}, yvec={0,0,1/z_scale}: the Z view's screen→world drag basis (IDB 0x49aae0
-    // builds yvec from the contiguous v10/Point.x/Point.y stack floats = {0,0,1/z_scale}).
+    // xvec={0,0,0}, yvec={0,0,1/z_scale}: the Z view's screen→world drag basis.
     // Drag_Setup AxializeVectors yvec → {0,0,±1}, so mouse-Y maps to world-Z. A zero yvec
-    // (the prior port) axializes to {0,0,0} → zero drag delta → the brush never moves.
+    // axializes to {0,0,0} → zero drag delta → the brush never moves.
     float origin[3], dir[3], xvec[3] = { 0, 0, 0 };
     float yvec[3] = { 0.0f, 0.0f, 1.0f / z_scale };
     Drag_MouseOrigin( flippedY, origin, dir );
@@ -586,7 +565,7 @@ void ZWnd_OnSize( HWND hwnd, int cx, int cy )
         R_Hwnd_Resize( (HWND__ *)hwnd, cx, cy );
 }
 
-// The CZWnd::OnPaint pipeline (IDB 0x46eec0) — identical structure to CXYWnd::OnPaint,
+// The CZWnd::OnPaint pipeline (0x46eec0) — identical structure to CXYWnd::OnPaint,
 // targeting d_hwndZ. Grid + selected Z-extents subset.  The DC (CPaintDC / BeginPaint)
 // belongs to the shell, not to this pipeline.
 void ZWnd_Paint( HWND hwnd )

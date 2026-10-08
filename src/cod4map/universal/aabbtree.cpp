@@ -11,14 +11,6 @@ float *g_aabbSortEqual = NULL;
 float *g_aabbSortMaxs = NULL;
 float *g_aabbSortMins = NULL;
 
-char g_aabbAssert_firstChild = '\0';
-char g_aabbAssert_itemCount = '\0';
-char g_aabbAssert_sideAll = '\0';
-char g_aabbAssert_sideBack = '\0';
-char g_aabbAssert_sideFront = '\0';
-char g_aabbAssert_sideOn = '\0';
-char g_aabbAssert_sideSplit = '\0';
-
 
 /*
 ================
@@ -114,7 +106,7 @@ qboolean AabbFindBestSplitPlane(float *itemMins, float *itemMaxs, int *indices, 
   for ( j = 0; j < 3; ++j )
   {
     candidateRange = (overallMaxs[j] - overallMins[j] + 1.0) * 10.0 / (overallMaxs[longestAxis] - overallMins[longestAxis] + 1.0);
-    axisScale[j] = RoundPositiveFloatToInt(candidateRange);
+    axisScale[j] = CeilFloatToInt(candidateRange);
   }
 
   bestScore = INT_MIN;

@@ -14,6 +14,7 @@
 #include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_ux.h"
 #include "kiwi_vec.h"       // the one spelling of Dot3/Sub3/Mad3/Cross3/Norm3
 #include "kiwi_walkcache.h" // KiwiWalkCache_Epoch — the "some brush changed" counter
@@ -26,23 +27,6 @@
 
 #include <math.h>
 #include <stdio.h>
-
-// ── ported / sibling entry points (each verified against its DEFINITION) ─────
-extern camera_s *Ed_Camera();                                              // camwnd.cpp:161
-extern int       g_nUpdateBits;                                            // engine_stubs.cpp:773
-extern int       Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
-extern void      MarkMapModified();                                        // win_qe3.cpp:195
-extern entity_s *world_entity;                                             // map.cpp:62
-extern char     *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89
-extern int       Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:99
-extern float     Entity_GetFloatValueForKey( const entity_s *e, const char *key );     // entity.cpp:109
-// File-local elsewhere; needed to re-dock this window when it reopens.
-extern ImGuiID   ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796
-extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value );   // entity.cpp:212
-extern void      Undo_ClearRedo();                                         // undo.cpp:176
-extern void      Undo_GeneralStart( const char *operation );               // undo.cpp:367
-extern void      Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
-extern void      Undo_End();                                               // undo.cpp:686
 
 namespace
 {
@@ -88,7 +72,7 @@ namespace
     // same round trip used by dragging instead of duplicating an angle literal.
     const float KSUN_DEFAULT_DIR[3] = { 0.4418350f, 0.5680700f, 0.6943130f };
 
-    const float KSUN_RAD2DEG = 57.29577951308232f;
+    const float KSUN_RAD2DEG = (float)KIWI_RAD2DEG;
 
     // ── state ───────────────────────────────────────────────────────────────
     bool s_selected = false;
@@ -334,12 +318,8 @@ namespace
 
     void FormatSunVec3( char *out, size_t outSize, float x, float y, float z )
     {
-        char sx[48], sy[48], sz[48];
-        _snprintf( out, outSize, "%s %s %s",
-                   KiwiFmt_Num( sx, sizeof( sx ), x, 6 ),
-                   KiwiFmt_Num( sy, sizeof( sy ), y, 6 ),
-                   KiwiFmt_Num( sz, sizeof( sz ), z, 6 ) );
-        out[outSize - 1] = '\0';
+        const float v[3] = { x, y, z };
+        KiwiFmt_Vec3Exact( out, outSize, v, 0 );
     }
 
     void WriteAngles( float pitch, float yaw, const char *operation )
@@ -356,7 +336,7 @@ namespace
         float prev[3], pt[3];
         for ( int i = 0; i <= segs; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % segs ) ) / (float)segs;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % segs ) ) / (float)segs;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
             for ( int k = 0; k < 3; ++k )
@@ -379,7 +359,7 @@ namespace
         const float r1 = KSUN_SPOKE_PIX * wpp;
         for ( int i = 0; i < KSUN_SPOKES; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)i ) / (float)KSUN_SPOKES;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)i ) / (float)KSUN_SPOKES;
             const float cx = cosf( th );
             const float cy = sinf( th );
             float a[3], b[3];
@@ -617,7 +597,6 @@ void KiwiSun_Place()
 // Remove the worldspawn sun keys so a fresh sun can be placed.  The inverse of
 // KiwiSun_Place (which only writes ABSENT keys, so re-placing needs these gone
 // first).  Undo-bracketed as one record.
-extern void DeleteKey( epair_t **head, const char *key );      // entity.cpp 0x483720
 void KiwiSun_Delete()
 {
     entity_s_def *wd = WorldDef();
@@ -1027,8 +1006,8 @@ void KiwiSun_Draw()
             // (cod4map/primarylights.cpp:1406-1410).
             if ( !( s_uiLight >= 0.0f ) )
                 s_uiLight = 0.0f;
-            char buf[32];
-            KiwiFmt_Num( buf, sizeof( buf ), s_uiLight, 6 );
+            char buf[48];
+            KiwiFmt_Exact( buf, sizeof( buf ), s_uiLight, 0 );
             WriteKey( "sunlight", buf, "sun intensity" );
         }
         if ( ImGui::IsItemHovered() )

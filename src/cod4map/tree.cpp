@@ -72,38 +72,3 @@ void FreeTreeBlock(Tree_t *tree)
   free(tree);
 }
 
-/*
-================
-PrintTree_r
-
-Recursively prints BSP tree structure for debugging
-================
-*/
-int PrintTree_r(Node_t *node, int depth)
-{
-  int i;
-  Brush_t *brush;
-
-  for ( i = 0; i < depth; i++ )
-    Com_Printf("  ");
-
-  if ( node->planenum == PLANENUM_LEAF )
-  {
-    brush = node->leafBrushes;
-    if ( !brush )
-      return Com_Printf("NULL\n");
-    for ( ; brush; brush = brush->next )
-      Com_Printf("%i ", brush->original->brushNum);
-    return Com_Printf("\n");
-  }
-
-  Com_Printf(
-    "#%i (%5.2f %5.2f %5.2f):%5.2f\n",
-    node->planenum,
-    MAP_PLANE(node->planenum)->normal[0],
-    MAP_PLANE(node->planenum)->normal[1],
-    MAP_PLANE(node->planenum)->normal[2],
-    MAP_PLANE(node->planenum)->dist);
-  PrintTree_r(node->children[0], depth + 1);
-  return PrintTree_r(node->children[1], depth + 1);
-}

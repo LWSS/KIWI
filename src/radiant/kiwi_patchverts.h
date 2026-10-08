@@ -36,7 +36,3 @@ bool KiwiPatchVerts_OwnsPatch( const selbrush_t *b );
 
 // Cam_Draw tail hook for scoped control lattices and markers; inert when inactive.
 void KiwiPatchVerts_DrawWorld();
-
-// Bottom-of-screen status line for the mode, or NULL.  Same contract as a
-// command's HudStatus (static storage, read every frame).
-const char *KiwiPatchVerts_Status();

@@ -38,10 +38,8 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include <imgui/imgui.h>
+#include "kiwi_ported.h"
 #include "radiant_ui_actions.h"
-
-// ── verteditdlg.cpp bindings ──────────────────────────────────────────────────
-extern int g_nUpdateBits;                    // 0x25D5A74 (engine_stubs.cpp), as verteditdlg.cpp:20
 
 // ── panel state ───────────────────────────────────────────────────────────────
 static bool s_showVertEdit = false;

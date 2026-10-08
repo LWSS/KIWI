@@ -10,15 +10,13 @@
 #include <gfx_d3d/r_font.h>         // R_RegisterFont
 #include <gfx_d3d/r_material.h>     // Material_RegisterHandle
 #include <universal/com_memory.h>   // Com_InitHunkMemory
+#include "kiwi_ported.h"            // KIWI: shared engine/editor externs
 
 // ─── Editor globals owned by this TU ────────────────────────────────────────────
 int  R_Initiated;             // IDB 0x25d5a68 — "editor renderer is up" flag.
 // (the LayeredMaterialWnd HWNDs live in lyrMtlWndGlob — layeredmaterialwnd.cpp)
                               // LayeredMaterialWnd.cpp (Phase 6) takes ownership later;
                               // declared here so R_BeginRegistrationInternal links now.
-
-// The radiant verbose Assert stub (engine_stubs.cpp): type 0 = log-to-stderr + CONTINUE.
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // ─── R_BeginRegistrationInternal (IDB 0x416510) ─────────────────────────────────
 // The editor renderer bootstrap. Registers the few dvars the tools path touches,

@@ -1,13 +1,10 @@
 /*
  * mapio.c — Map file reading, entity processing, and BSP writing.
- *
- * All functions verified against cod2rad64 LST line by line.
- * Source: mapio.cpp (from LST source tags and assert strings: .\\mapio.cpp)
  */
 
 #include "cod2rad64.h"
 
-extern double strtof_wrap(const char *str); /* sub_43C920: returns double (cvtsd2ss at call sites) */
+extern double strtof_wrap(const char *str); /* returns double */
 
 /* BSP_Finalize, WriteBSPFile — in cod2rad64.h */
 
@@ -29,7 +26,6 @@ extern int num_entities; /* defined in bspfile.c */
  * ValueForKey — find a value string for a given key on an entity.
  * Address: 0x4153A0 | Size: 236 bytes
  *
- * rcx=entity, rdx=key
  * Returns value string pointer, or NULL if not found.
  */
 const char *ValueForKey(Entity_t *entity, const char *key)
@@ -58,8 +54,8 @@ const char *ValueForKey(Entity_t *entity, const char *key)
  * ParseVectorString — look up a key on an entity and parse its value as a float[3].
  * Address: 0x415490 | Size: 259 bytes
  *
- * rcx=entity, rdx=key, r8=outVector (float[3])
- * Returns 1 (al) if parsed successfully, 0 if not found or parse failed.
+ * outVector is a float[3].
+ * Returns 1 if parsed successfully, 0 if not found or parse failed.
  *
  * Tries 4 sscanf format strings: "%g %g %g", "%g, %g, %g",
  * "( %g %g %g )", "( %g, %g, %g )".
@@ -92,7 +88,6 @@ int ParseVectorString(Entity_t *entity, const char *key, float *outVector)
  * FindEntityWithKeyValue — find an entity with a specific key=value pair.
  * Address: 0x4155A0 | Size: 311 bytes
  *
- * rcx=key, rdx=value
  * Returns Entity_t* or NULL.
  *
  * Iterates all entities, for each walks its key-value list looking for
@@ -135,12 +130,12 @@ Entity_t *FindEntityWithKeyValue(const char *key, const char *value)
  * ProcessBrushModelTriangles — process triangles for a brush model entity.
  * Address: 0x416540 | Size: 283 bytes
  *
- * rcx=entity, rdx=modelValue (string starting with '*')
+ * modelValue is a string starting with '*'.
  * Parses model index, validates, gets transform, iterates triangles.
  */
 extern int atoi_wrap(const char *str);
 
-/* dword_1268FC80 = bspTriangles[] (bspfile.c), same static array */
+/* bspTriangles[] is defined in bspfile.c */
 
 void ProcessBrushModelTriangles(Entity_t *entity, const char *modelValue)
 {
@@ -168,7 +163,7 @@ void ProcessBrushModelTriangles(Entity_t *entity, const char *modelValue)
     /* get entity transform (origin + rotation) */
     GetEntityOriginAndAngles(entity, transform);
 
-    /* iterate triangles for this brush model (bspModels[] at dword_E020360) */
+    /* iterate triangles for this brush model */
     {
         BspModel_t *model = &bspModels[modelIndex];
 
@@ -179,37 +174,24 @@ void ProcessBrushModelTriangles(Entity_t *entity, const char *modelValue)
     }
 }
 
-/*
- * ProcessEntity — process the worldspawn entity.
- * Address: 0x415990 | Size: 2985 bytes
- *
- * rcx=entity
- *
- * Reads lighting configuration from entity keys (radiosityScale, ambient,
- * sun direction, sun light, etc.), then iterates all BSP surfaces and
- * processes their geometry triangles.
- *
- * This is the largest function in the binary at 2985 bytes.
- * The structure is: read config → iterate surfaces → process tris.
- */
-extern float g_ambientColor[3];     /* dword_4808E0..E8 */
+extern float g_ambientColor[3];
 /* g_sunDirX/Y/Z and g_backfaceLightR/G/B are in cod2rad64.h */
 extern int g_bspSurfCount;          /* runtime global */
 extern void *g_bspSurfs;            /* runtime global: BSP surface array */
-extern void ProcessSurfaceGeometry(Entity_t *entity, int surfIndex, void *material); /* various geometry calls */
-extern void SetupSunLight(float *sunDir, float *sunColor, float intensity); /* various setup calls */
+extern void ProcessSurfaceGeometry(Entity_t *entity, int surfIndex, void *material);
+extern void SetupSunLight(float *sunDir, float *sunColor, float intensity);
 
 extern char g_radiosityScaleOverridden;
 extern char g_contrastGainOverridden;
 extern int g_bspTriSoupCount;          /* runtime */
 extern void *g_bspTriSoups;            /* runtime: BSP triSoup array */
-extern void ProcessWorldSurface(int surfIdx, float *origin, float *axis, void *material); /* various geometry calls */
+extern void ProcessWorldSurface(int surfIdx, float *origin, float *axis, void *material);
 
 /*
  * ProcessEntity — process worldspawn entity lighting configuration and surfaces.
  * Address: 0x415990 | Size: 2985 bytes
  *
- * rcx=entity
+ * The largest function in the binary.
  *
  * Reads: radiosityScale, contrastGain, ambient, diffuseFraction, sunLight, sunDirection,
  * sunColor, and other lighting parameters from entity key-value pairs.
@@ -398,12 +380,10 @@ void ProcessEntity(Entity_t *entity)
     }
 
     /* compute per-channel ambient/diffuse/specular split with degamma correction.
-     * LST 0x416132-0x416325 (ProcessEntity worldspawn lighting):
-     *   rbp = &dword_480890 (base of contiguous light globals struct)
-     *   [rbp + 0x38] = g_sunColorR/G/B        (specular component)
-     *   [rbp + 0x44] = g_backfaceLightR/G/B   (diffuse component)
-     *   [rbp + 0x50] = g_ambientR/G/B         (ambient component)
-     * We write directly to the named globals — they are all overwritten from
+     *   g_sunColorR/G/B       = specular component
+     *   g_backfaceLightR/G/B  = diffuse component
+     *   g_ambientR/G/B        = ambient component
+     * Written directly to the named globals — they are all overwritten from
      * the worldspawn startup defaults (0.7/0.3/0) once this function runs. */
     {
         extern float DegammaColorChannel(float color);
@@ -553,13 +533,11 @@ void ProcessEntity(Entity_t *entity)
     }
 }
 
-#define DEG_TO_RAD 0.017453292f  /* dword_459734 = 0x3C8EFA35 = pi/180 as float */
+#define DEG_TO_RAD 0.017453292f  /* pi/180 as float */
 
 /*
  * ProcessLightEntity — process a light entity, creating point or spot light.
  * Address: 0x416990 | Size: 1768 bytes
- *
- * rcx=entity
  */
 void ProcessLightEntity(Entity_t *entity)
 {
@@ -744,7 +722,7 @@ void ProcessLightEntity(Entity_t *entity)
         if (outerAngle == 0.0f)
         {
             /* default: compute from dist */
-            outerCos = dist / sqrtf(dist * dist + 4096.0f); /* dword_459724 = 4096.0f */
+            outerCos = dist / sqrtf(dist * dist + 4096.0f);
         }
         else
         {
@@ -786,13 +764,11 @@ void ProcessLightEntity(Entity_t *entity)
                      exponent);
     }
 }
-/* strtof_wrap declared at top of file */
 
 /*
  * ProcessBrushModel — process a misc_model entity.
  * Address: 0x4166A0 | Size: 749 bytes
  *
- * rcx=entity
  * Loads the xmodel, gets transform, calls CM_TraceBox for collision,
  * adds ground lighting and light grid samples.
  */
@@ -804,7 +780,7 @@ void ProcessBrushModel(Entity_t *entity)
     float transform[12]; /* origin[3] + axis[9] */
     float scale[3];
     float center[3];
-    float boxHeight = 10.0f; /* dword_456494: default box extent, may be overwritten by CM_TraceBox */
+    float boxHeight = 10.0f; /* default box extent, may be overwritten by CM_TraceBox */
     int spawnFlags;
     KeyValuePair_t *kv;
     char xmodelPath[128];
@@ -827,8 +803,7 @@ void ProcessBrushModel(Entity_t *entity)
         kv = kv->next;
     }
 
-    /* Retail CoD4Rad sub_418030 skips both NO_SHADOW (2) and
-     * NO_STATIC_SHADOWS (4). */
+    /* Retail 0x418030 skips both NO_SHADOW (2) and NO_STATIC_SHADOWS (4). */
     if (spawnFlags & (2 | 4)) return;
 
     /* look up "model" key */
@@ -846,7 +821,7 @@ void ProcessBrushModel(Entity_t *entity)
 
     if (!modelValue) return;
 
-    /* CoD4Rad sub_418030 uses sub_44B180 only to recognize and strip an
+    /* Retail 0x418030 uses 0x44B180 only to recognize and strip an
      * optional "xmodel/" (or "xmodel\\") prefix.  Entity lumps normally
      * contain bare asset names; rejecting them empties both the static-model
      * shadow trace world and the model-origin light-grid source. */
@@ -880,7 +855,7 @@ void ProcessBrushModel(Entity_t *entity)
         } while (src[i++]);
     }
 
-    /* try loading shadow model first, then original.  KISAK: probe the shadow_
+    /* try loading shadow model first, then original.  Probe the shadow_
      * variant's existence QUIETLY first — only a handful of stock models ship one,
      * and letting XModelPrecache miss on every other model spammed
      * "^1ERROR: xmodel 'shadow_...' not found" per placed misc_model.
@@ -951,7 +926,7 @@ done:
  * GetEntityOriginAndAngles — extract origin and build rotation matrix from entity.
  * Address: 0x4156E0 | Size: 675 bytes
  *
- * rcx=entity, rdx=outTransform (float[12]: origin[3] + axis[9])
+ * outTransform is a float[12]: origin[3] + axis[9].
  *
  * Looks up "origin" key → parses to outTransform[0..2].
  * Looks up "angles" key → parses to local, calls AnglesToAxis → outTransform[3..11].
@@ -1042,7 +1017,6 @@ build_axis:
  * ProcessEntities — dispatch entity processing based on classname.
  * Address: 0x417080 | Size: 396 bytes
  *
- * rcx=entity
  * Looks up classname, dispatches to appropriate processor.
  */
 void ProcessEntities(Entity_t *entity)
@@ -1074,8 +1048,8 @@ void ProcessEntities(Entity_t *entity)
 
     if (I_stricmp(classname, "script_model") == 0)
     {
-        /* Retail dispatches sub_418030(entity, 1) and carries that flag into
-         * sub_41A990's collision instance.  The x64 collision record does not
+        /* Retail dispatches 0x418030(entity, 1) and carries that flag into
+         * 0x41A990's collision instance.  The x64 collision record does not
          * yet model the script-only triangle-test semantics, so do not fold it
          * silently into misc_model behavior. */
         WarningMsg(1,
@@ -1100,8 +1074,6 @@ void ProcessEntities(Entity_t *entity)
 /*
  * Map_Write — finalize lightmaps and write BSP file.
  * Address: 0x417310 | Size: 43 bytes
- *
- * rcx=filename
  */
 void Map_Write(const char *filename)
 {
@@ -1114,14 +1086,13 @@ void Map_Write(const char *filename)
  * Map_Read — load materials, process entities, allocate lightmap data.
  * Address: 0x417210 | Size: 252 bytes
  *
- * rcx=filename
- * Returns 1 (al).
+ * Returns 1.
  */
 extern void InitBSP(void);
 extern void LoadBSPShaders(void);
 extern void InitCollision(void);
-/* LoadMaterial — now in materials.c */
-/* Map_ReadPolyFile — now in polyfile.c */
+/* LoadMaterial — materials.c */
+/* Map_ReadPolyFile — polyfile.c */
 
 char Map_Read(const char *filename)
 {

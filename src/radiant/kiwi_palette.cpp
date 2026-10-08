@@ -12,12 +12,9 @@
 #include "kiwi_cmdui.h"             // shared palette/add-menu UI helpers
 #include "kiwi_command.h"
 
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
-
-extern void        Radiant_ExecCommand( unsigned int cmdId );
 
 namespace
 {

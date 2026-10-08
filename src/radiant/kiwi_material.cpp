@@ -10,6 +10,7 @@
 
 #include "kiwi_material.h"
 #include "kiwi_pick.h"                 // Pick / Pick_RayFromCursor / ray_t
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"            // sel_item_t, SEL_MASK_FACE, Sel_BrushLive
 #include "kiwi_str.h"                // KiwiStr_ContainsNoCase
 
@@ -17,10 +18,8 @@
 #include <string.h>
 
 // Ported entry points.
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );          // materialdef.cpp:159 (0x431640)
 extern bool              Materialdef_Realize( MaterialDef *md );              // materialdef.cpp:125
 extern float             Winding_Area( winding_t *w );                        // winding.cpp (winding.h:78)
-extern int               Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp
 
 // xywnd.cpp:2233 — the clipper's caulk/nodraw_decal synthesis and KIWI fallback.
 extern void              Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src );
@@ -286,11 +285,7 @@ void KiwiMtl_InfoCommand()
 
 extern int   Face_InitMaterialChannel( unsigned int textureChannel, face_t *faceDef,
                                        float src );                     // brush.cpp:417  (0x472C90)
-extern void  SetMaterial( const char *tex_name, patchMesh_material *mtlDef );  // materialdef.cpp:101 (0x4315C0)
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef );      // materialdef.cpp:168 (0x4314A0)
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                // materialdef.cpp:252 (0x431B30)
-extern void  MarkMapModified( void );                                          // win_qe3.cpp:195 (0x499BB0)
-extern entity_s entities;                                                      // entity.cpp:295 (0x23F17A0)
 // Same layer-1 texcoord pass used by patch creators.
 extern void  Patch_KiwiEnsureLmapCoords( patchMesh_t *p );                     // pmesh.cpp:10405
 

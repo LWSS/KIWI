@@ -156,3 +156,8 @@ bool KiwiIwi_ExistsOnDisk( const char *imageName );
 // Roll back one import; null, empty, and built-in ('$…') names are skipped.
 void KiwiMat_DeleteWritten( const char *materialName, const char *colorImage,
                             const char *normalImage, const char *specularImage );
+
+// Write raw/<qpath> so a failure can never cost the existing file: the bytes go to
+// "<qpath>.tmp" beside it and only a complete file replaces the destination (a rename on the
+// same volume).  On failure the tmp is removed, the destination is untouched, `err` says why.
+bool KiwiFS_WriteRawAtomic( const char *qpath, const void *data, unsigned size, char *err, size_t errSz );

@@ -18,10 +18,6 @@ PlatformEntry_t platformTable[2] = {
 
 PlatformEntry_t *g_sourcePlatform;
 
-char s_assertDisable_SetTargetPlatformByName;
-char s_assertDisable_tpBoundsCheck;
-char s_assertDisable_tpTableMatch;
-
 /* COD4 stores the selected platform as the index into this name table:
    0 = unset, 1 = pc, 2 = xenon, 3 = ps3.  Keep the public PlatformEntry_t
    adapter used by the rest of the compiler, but retain that visible order. */

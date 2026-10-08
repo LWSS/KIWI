@@ -9,6 +9,7 @@
 #include "prefs.h"          // g_PrefsDlg->m_bSelectCurves (prefs.h:86)
 
 #include "kiwi_command.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h" // KiwiSel_GetModeMask / SEL_MASK_FACE
 #include "kiwi_undo.h"      // KiwiUndo_NoteVisibilityRecord
 #include "kiwi_visibility.h"
@@ -18,13 +19,6 @@
 #include <vector>
 #include <algorithm>        // std::sort / std::lower_bound
 #include <utility>          // std::pair
-
-// 0x25d5a74 g_nUpdateBits; 0x23f1864 selected_brushes; 0x23f189c active_brushes.
-// 0x23F17A0 entities; keep its declaration at file scope for external linkage.
-extern int      Sys_Printf( const char *fmt, ... );
-extern int      g_nUpdateBits;
-extern bool     Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
-extern entity_s entities;
 
 namespace
 {
@@ -525,7 +519,7 @@ void KiwiVis_ReportPatchGates( bool force )
             Sys_Printf( "Patches: nothing is blocking patch selection — 'Don't select "
                         "curves' is OFF, no curve/terrain filter is hidden, and the "
                         "selection mode resolves whole objects.  A patch that still "
-                        "will not pick has no curveDef (pmesh.cpp PMESH_51 needs one).\n" );
+                        "will not pick has no curveDef (pmesh.cpp Patch_RayTest needs one).\n" );
         return;
     }
 

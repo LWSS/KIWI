@@ -29,6 +29,7 @@
 #include "kiwi_instcache.h"       // KiwiInstCache_* / KiwiInstGeo
 #include "kiwi_surfcache.h"       // KiwiEdSurfMark / the block store
 #include "kiwi_light.h"           // Missing additive-technique policy
+#include "kiwi_ported.h"          // KIWI: shared engine/editor externs
 #include <vector>
 #include <algorithm>              // std::sort / std::inplace_merge (the mixed-window flush)
 #include <vector>                 // KIWI (PERF): the main-flush sort-order cache
@@ -36,31 +37,29 @@
 #include <stdlib.h>
 #include <utility>                // std::pair (record + owning object, sorted together)
 
-extern void Assert(const char *file, int line, int type, const char *fmt, ...); // 0x49cea0
 void FatalError(int code, const char *fmt, ...);                                // 0x49a9e0
-extern int Sys_Printf(const char *fmt, ...);                                    // 0x499e90
 
 // r_ed_vertbuf.cpp — handle → (vb, firstIndex)
 void Editor_GetVertexBufferAndIndex(unsigned int handle, IDirect3DVertexBuffer9 **vb, uint16_t *firstIndex);
 
-// ── surface-cache types (IDB editorMesh_s/editorSurf_s) ──────────────────────
+// ── surface-cache types (editorMesh_s / editorSurf_s) ────────────────────────
 enum EDITOR_SURF_TYPE { ED_SURF_MESH = 0, ED_SURF_MODEL = 1 };
 
 struct editorMesh_s {              // 24 bytes
     const Material *material;      // +0
     int       techType;           // +4
-    int       sortKey;            // +8  (IDB "unk" — primary sort key)
+    int       sortKey;            // +8  (primary sort key)
     int       handle;             // +C  (LOWORD=firstIndex, HIWORD=vb buffer)
     uint16_t  vertCount;          // +10
     uint16_t  indexCount;         // +12
-    const uint16_t *indexTable;         // +14 (IDB "unk3" — edFaceIndices/edBackFaceIndices)
+    const uint16_t *indexTable;         // +14 (edFaceIndices / edBackFaceIndices)
 };
 
-// IDB editorSurf_sub — the ED_SURF_MODEL surf record (vs editorMesh_s, the brush-face one).
+// editorSurf_sub — the ED_SURF_MODEL surf record (vs editorMesh_s, the brush-face one).
 struct editorSurf_sub {            // 20 bytes
     Material               *material;   // +0
     int                     techType;   // +4
-    int                     sortKey;    // +8  (IDB "unk3")
+    int                     sortKey;    // +8
     union {                             // +C  the built skinned surface (verts+indices)
         GfxModelSkinnedSurface *skinnedSurf;
         GfxModelSkinnedSurface *surf;   //     (the binary's name — assert strings)
@@ -75,7 +74,7 @@ struct editorSurf_s {              // 8 bytes
 
 #define ED_SCENE_MAX_MESHES  0x40000
 #define ED_SCENE_MAX_SURFS   0x44000
-#define ED_SCENE_MAX_MODELSURFS 0x4000      // IDB radiant_surfs[0x4000]
+#define ED_SCENE_MAX_MODELSURFS 0x4000
 
 static struct {                        // the binary's edSceneGlobals block (assert strings)
     editorMesh_s sceneMeshes[ED_SCENE_MAX_MESHES];
@@ -84,26 +83,24 @@ static struct {                        // the binary's edSceneGlobals block (ass
     int          sceneSurfCount;
     int          sceneSurfCount_saved;
 } edSceneGlobals;
-static editorSurf_sub radiant_surfs[ED_SCENE_MAX_MODELSURFS];     // IDB 0x10F5658
+static editorSurf_sub radiant_surfs[ED_SCENE_MAX_MODELSURFS];
 static GfxModelSkinnedSurface radiant_modelSkinnedSurfs[ED_SCENE_MAX_MODELSURFS]; // built surfs
-static int radiant_surfCount;          // IDB 0x10F5654 — model-surf counter
+static int radiant_surfCount;          // model-surf counter
 static int radiant_modelSurfPos;       // stands in for the binary's frontEndDataOut->surfPos
-static int edScene_lastFrameCount;     // IDB dword_1365660 (per-frame reset guard)
+static int edScene_lastFrameCount;     // per-frame reset guard
 
-// IDB sub_4FED50 @ 0x4fed50.  Build the exact editor GfxLight payload, clear
+// 0x4FED50  R_SetLightShaderConstants — build the exact editor GfxLight payload, clear
 // alpha/stencil before its volume pass, then defer installation of the light
 // constants until the command stream reaches this point.
 void __cdecl R_SetLightShaderConstants(
     const float *origin, float radius, const float *color, const char *defName,
     const float *dir, float cosHalfFovInner, float cosHalfFovOuter, int exponent)
 {
-    if ( radius <= 0.0f )
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp",
-               782, 0, "%s\n\t(radius) = %g", "(radius > 0.0f)", radius);
+    vassert(radius > 0.0f, "(radius) = %g", radius);   // r_ed_scene.cpp:782
 
     GfxLight light;
     memset(&light, 0, sizeof(light));
-    light.type = dir ? 2 : 3; // GFX_LIGHT_TYPE_SPOT / GFX_LIGHT_TYPE_OMNI in the IDB
+    light.type = dir ? 2 : 3; // GFX_LIGHT_TYPE_SPOT / GFX_LIGHT_TYPE_OMNI
     light.color[0] = color[0];
     light.color[1] = color[1];
     light.color[2] = color[2];
@@ -136,7 +133,7 @@ void __cdecl R_SetLightShaderConstants(
     RC_SetLightColor(&light);
 }
 
-// Triangle-fan index tables (IDB unk_62D7C8 / unk_62D940): triangle t = { t+1, t+2, 0 }
+// Triangle-fan index tables: triangle t = { t+1, t+2, 0 }
 // front, { t+2, t+1, 0 } back.  Sized for the editor's max face (3*(N-2) <= 0xBA, N <= 64).
 #define ED_FACE_MAX_INDICES 186
 static uint16_t edFaceIndices[ED_FACE_MAX_INDICES];
@@ -175,7 +172,7 @@ static bool Editor_IsOpaqueFillPass(const Material *material, int techType, uint
 static bool s_edUnsafeOpaqueDepthReported;
 
 // Submission-time diagnostic requested for this failure class.  It inspects the same
-// stateBitsEntry + pass index that R_SetupPass reads at IDB 0x53C51E-0x53C523.
+// stateBitsEntry + pass index that R_SetupPass reads.
 static void Editor_CheckSubmittedOpaqueDepth(const Material *material, int techType)
 {
     if (s_edUnsafeOpaqueDepthReported || !material || techType < 0 || techType >= TECHNIQUE_COUNT)
@@ -219,11 +216,11 @@ static void Editor_CheckSubmittedOpaqueDepth(const Material *material, int techT
 void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
                                int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable)
 {
-    iassert(techType >= TECHNIQUE_DEPTH_PREPASS);         // 0x4fda66 (level 0)
+    iassert(techType >= TECHNIQUE_DEPTH_PREPASS);         // (level 0)
     const Material *material = Material_FromHandle(handle);
     iassert( material );   // r_ed_scene.cpp:224
 
-    // KISAK: the IDB indexes techniques[techType+1] (its set reserves slot 0); kisak's
+    // The binary's technique set reserves slot 0 (techniques[techType+1]); kisak's
     // MaterialTechniqueSet is indexed directly by techType (r_material.cpp:753).
     if (techType < TECHNIQUE_COUNT && !material->techniqueSet->techniques[techType])
         return;
@@ -243,7 +240,7 @@ void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
     mesh->vertCount = (uint16_t)vertCount;
     iassert(mesh->vertCount == vertCount);                // r_ed_scene.cpp:241, after the store
     mesh->indexCount  = (uint16_t)indexCount;
-    iassert(mesh->indexCount == indexCount);              // 0x4fdb40 (level 0), after the store
+    iassert(mesh->indexCount == indexCount);              // (level 0), after the store
     mesh->indexTable  = indexTable;
 
         iassert(edSceneGlobals.sceneSurfCount < ARRAY_COUNT( edSceneGlobals.sceneSurfs ));   // r_ed_scene.cpp:246
@@ -252,7 +249,7 @@ void __cdecl Editor_AddMeshCmd(Material *handle, int techType, int sortKey,
     surf->type = ED_SURF_MESH;
 }
 
-// 0x4FEEF0  sub_4FEEF0 — emit a front-facing fan (edFaceIndices) for one face.
+// 0x4FEEF0  Editor_AddGeoFace — emit a front-facing fan (edFaceIndices) for one face.
 //
 // KIWI-UX — THE ASSERT HAS TO RETURN.  In the binary's dev build the Assert above the
 // emit is a hard stop, so control never reaches Editor_AddMeshCmd with a fan that does
@@ -269,29 +266,27 @@ void __cdecl Editor_AddGeoFace(Material *handle, int techType, int sortKey, int 
 {
     if (!s_edFaceIndicesInit)
         Editor_InitFaceIndices();
-    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES) {
-        // KEEP_VERBOSE: the binary's condition string is PROSE, not a stringizable expression.
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 197, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edFaceIndices", vertCount);
+    const bool fits = vertCount >= 3 && (unsigned)(3 * vertCount - 6) <= ED_FACE_MAX_INDICES;
+    vassert(fits, "(vertCount) = %i", vertCount);   // r_ed_scene.cpp:197
+    if (!fits)
         return;
-    }
     Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, edFaceIndices);
 }
 
-// 0x4FEF50  sub_4FEF50 — emit a back-facing fan (edBackFaceIndices) for one face.
+// 0x4FEF50  Editor_AddGeoBackFace — emit a back-facing fan (edBackFaceIndices) for one face.
 // The same non-fatal-Assert fall-through, and the same correction — see Editor_AddGeoFace.
 void __cdecl Editor_AddGeoBackFace(Material *handle, int techType, int sortKey, int vertCount, int vbIndexAndOffs)
 {
     if (!s_edFaceIndicesInit)
         Editor_InitFaceIndices();
-    if (vertCount < 3 || (unsigned)(3 * vertCount - 6) > ED_FACE_MAX_INDICES) {
-        // KEEP_VERBOSE: the binary's condition string is PROSE, not a stringizable expression.
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 204, 0, "%s\n\t(vertCount) = %i", "vertCount fan fits edBackFaceIndices", vertCount);
+    const bool fits = vertCount >= 3 && (unsigned)(3 * vertCount - 6) <= ED_FACE_MAX_INDICES;
+    vassert(fits, "(vertCount) = %i", vertCount);   // r_ed_scene.cpp:204
+    if (!fits)
         return;
-    }
     Editor_AddMeshCmd(handle, techType, sortKey, vertCount, vbIndexAndOffs, 3 * vertCount - 6, edBackFaceIndices);
 }
 
-// 0x4FDBB0  sub_4FDBB0 — the sortKey DrawGeo (0x47acf0) passes to Editor_AddGeoFace: 100 x
+// 0x4FDBB0  Editor_MaterialSortKey — the sortKey DrawGeo (0x47acf0) passes to Editor_AddGeoFace: 100 x
 // the material's primary sort bucket.  Per-layer visuals of one face get consecutive keys
 // (base+layerIndex), so layer order survives.
 int __cdecl Editor_MaterialSortKey(Material *handle)
@@ -299,7 +294,7 @@ int __cdecl Editor_MaterialSortKey(Material *handle)
     return 100 * (int)Material_FromHandle(handle)->info.drawSurf.fields.primarySortKey;
 }
 
-// 0x4FD9C0  sub_4FD9C0 — surf sort comparator.  editorMesh_s and editorSurf_sub share their
+// 0x4FD9C0  Editor_SurfCompare — surf sort comparator.  editorMesh_s and editorSurf_sub share their
 // first three fields (material@0, techType@4, sortKey@8), so the primary keys work on both.
 // EVERY KEY IS LOAD-BEARING ORDERING, do not simplify:
 //   1/2 sortKey, techType — the material sort bucket (opaques 400, sky 500, decals 1200,
@@ -513,12 +508,6 @@ namespace
     }
 }
 
-void KiwiEdScene_SortCacheDrop()
-{
-    s_sortKeysPrev.clear();
-    s_sortPerm.clear();
-}
-
 // 0x4FDA10  R_AddEditorSurfsCmd — sort the surfs added since the last flush and emit
 // one RC_DRAW_EDITOR_SKINNEDCACHED for them.
 void *__cdecl R_AddEditorSurfsCmd()
@@ -585,7 +574,7 @@ int Editor_PendingSurfCount()
 // DrawBrush → DrawModels → SkinModelInst → AddModelSurfBuf + Editor_AddSurfCmd, then
 // RB_DrawEditorSkinnedCached_Sub.  Does NOT use the per-material VB pool.
 
-// IDB model_inst (44 bytes) — origin/quat/scale alias GfxScaledPlacement at +0, so an inst
+// model_inst (44 bytes) — origin/quat/scale alias GfxScaledPlacement at +0, so an inst
 // pointer casts straight to a placement.
 struct model_inst {                // 44 bytes
     float    angles[4];            // +0   quat (GfxPlacement.quat)
@@ -593,7 +582,7 @@ struct model_inst {                // 44 bytes
     float    modelscale;           // +28  (GfxScaledPlacement.scale)
     int      colorOverride;        // +32  pad_0x0020 — per-vert color (or -1)
     XModel  *model;                // +36
-    int      inuse;                // +40  IDB "random_one"
+    int      inuse;                // +40
 };
 static_assert(sizeof(model_inst) == (sizeof(void *) == 8 ? 56 : 44), "model_inst native storage");
 static_assert(offsetof(model_inst, angles) == 0, "model_inst placement quaternion");
@@ -601,7 +590,7 @@ static_assert(offsetof(model_inst, origin) == offsetof(GfxScaledPlacement, base)
 static_assert(offsetof(model_inst, modelscale) == offsetof(GfxScaledPlacement, scale), "model_inst placement scale");
 
 #define ED_MAP_MAX_MODELINST 65536
-struct EdMapGlobals {              // IDB edMapGlobals @ 0x835648
+struct EdMapGlobals {              // edMapGlobals
     int        modelInstMax;       // highest-used slot + 1 (NOT a fixed capacity)
     model_inst modelInst[ED_MAP_MAX_MODELINST + 16];
 };
@@ -610,7 +599,7 @@ static EdMapGlobals edMapGlobals;
 // 0x4FDBE0  AddModelToModelInstBuff — claim a free slot, return its 1-based handle.
 int __cdecl AddModelToModelInstBuff(XModel *model, float *axis, float scale)
 {
-    iassert(model);                                       // 0x4fdbe0 (level 0)
+    iassert(model);                                       // (level 0)
     if (XModelBad(model))
         return 0;
 
@@ -633,7 +622,7 @@ int __cdecl AddModelToModelInstBuff(XModel *model, float *axis, float scale)
     // cache holds against this address is about to stop existing.
     KiwiInstCache_InvalidateInstance((const GfxScaledPlacement *)v8);
     memset(v8, 0, sizeof(model_inst));
-    v8->inuse      = 1;            // LOBYTE(random_one) = 1 (faithful: only the low byte)
+    v8->inuse      = 1;            // the binary set only the low byte
     v8->model      = model;
     v8->origin[0]  = axis[0];
     v8->origin[1]  = axis[1];
@@ -675,9 +664,8 @@ void __cdecl RemoveModelInstFromBuf(int instanceHandle)
     edMapGlobals.modelInstMax = n;
 }
 
-// 0x4FDE10  Entity_GetModelInstBounds (sub_4FDE10) — local-space mins/maxs of an instance's
+// 0x4FDE10  Entity_GetModelInstBounds — local-space mins/maxs of an instance's
 // model (xmodel bounds rotated by the instance quat, scaled by modelscale).
-extern void OrientationPosToWorldPos(float *out, const float *pos, const orientation_t *orient);
 void __cdecl Entity_GetModelInstBounds(int instanceHandle, float *out_mins, float *out_maxs)
 {
     iassert(instanceHandle > 0 && instanceHandle <= edMapGlobals.modelInstMax);
@@ -685,10 +673,10 @@ void __cdecl Entity_GetModelInstBounds(int instanceHandle, float *out_mins, floa
     iassert(edMapGlobals.modelInst[instanceHandle - 1].inuse);   // r_ed_scene.cpp:351
 
     float mins[3], maxs[3];
-    XModelGetBounds(mi->model, mins, maxs);          // sub_4C6ED0
+    XModelGetBounds(mi->model, mins, maxs);
     mat3x3 axis;
-    QuatToAxis(mi->angles, axis);                    // sub_4A6FA0
-    // sub_4A8780: rotate the local AABB by axis into an axis-aligned [mins,maxs] pair.
+    QuatToAxis(mi->angles, axis);
+    // Rotate the local AABB by axis into an axis-aligned [mins,maxs] pair.
     float rmin[3], rmax[3];
     for (int i = 0; i < 3; ++i) { rmin[i] = 1e30f; rmax[i] = -1e30f; }
     for (int c = 0; c < 8; ++c) {
@@ -699,8 +687,8 @@ void __cdecl Entity_GetModelInstBounds(int instanceHandle, float *out_mins, floa
         for (int i = 0; i < 3; ++i) { if (r[i] < rmin[i]) rmin[i] = r[i]; if (r[i] > rmax[i]) rmax[i] = r[i]; }
     }
     for (int i = 0; i < 3; ++i) {
-        // sub_4A8780 seeds its min/max WITH origin, so the binary's `v7[i] - origin[i]`
-        // (0x4fdeb3) recovers the pure rotated bound.  rmin/rmax here are already origin-free.
+        // The binary's rotate helper seeds its min/max WITH origin and subtracts it back out;
+        // rmin/rmax here are already origin-free.
         out_mins[i] = mi->modelscale * rmin[i] + mi->origin[i];
         out_maxs[i] = mi->modelscale * rmax[i] + mi->origin[i];
     }
@@ -709,9 +697,9 @@ void __cdecl Entity_GetModelInstBounds(int instanceHandle, float *out_mins, floa
 // ── model-surf builder (the ED_SURF_MODEL queue) ──────────────────────────────
 
 // 0x4FE0D0  AddSurfTempSkinBuf — copy verts0 into frontEndDataOut->tempSkinBuf and point
-// skinnedVert at that WRITABLE COPY, so SkinModelInst's colour stamp (0x4fe455) never writes
+// skinnedVert at that WRITABLE COPY, so SkinModelInst's colour stamp never writes
 // the shared asset verts0.  skinnedCachedOffset = -1; on overflow the binary drops the model.
-void __cdecl Z_VirtualCommit(void *ptr, int size);    // com_memory.cpp (0x4AC210 == sub_4AC210)
+void __cdecl Z_VirtualCommit(void *ptr, int size);    // com_memory.cpp (0x4AC210)
 
 // KIWI: two divergences from the binary, whose per-frame decommit an editor frame cannot
 // afford.  The arithmetic, 32-byte stride, 0x5000000 cap and drop-on-overflow are unchanged.
@@ -798,25 +786,25 @@ static bool AddSurfTempSkinBuf(XSurface *xsurf, GfxModelSkinnedSurface *out, XMo
     }
 
     const int numVerts  = XSurfaceGetNumVerts(xsurf);
-    const unsigned vsize = 32u * (unsigned)numVerts;   // v3 = 32 * XSurfaceGetNumVerts (0x4fe129)
+    const unsigned vsize = 32u * (unsigned)numVerts;   // 32 bytes per vert
     GfxBackEndData *fe = frontEndDataOut;
     if (!fe || !fe->tempSkinBuf)
-        return false;                                        // 0x4fe12c assert -> no buffer, drop
+        return false;                                        // the binary asserted; no buffer -> drop
     if (vsize + (unsigned)fe->tempSkinPos > 0x5000000u) {
-        return false;                                        // 0x4fe169: drop this surf/model
+        return false;                                        // drop this surf/model
     }
-    uint8_t *copy = fe->tempSkinBuf + fe->tempSkinPos;       // 0x4fe18c: tempSkinBuf + tempSkinPos
-    fe->tempSkinPos += (long)vsize;                          // 0x4fe1a2
+    uint8_t *copy = fe->tempSkinBuf + fe->tempSkinPos;
+    fe->tempSkinPos += (long)vsize;
     // KIWI change (B): the binary's Z_VirtualCommit (0x4fe1ac), deduped against the
     // high-water mark.  Identical page state.
     Editor_TempSkinCommit(fe->tempSkinBuf, (unsigned)fe->tempSkinPos, copy, vsize);
     s_edSkinBytes += (int)vsize;
-    memcpy(copy, xsurf->verts0, vsize);                      // 0x4fe1ba: copy the base verts
-    out->skinnedVert = (GfxPackedVertex *)copy;              // 0x4fe1c2-ish: skinnedVert = the copy
+    memcpy(copy, xsurf->verts0, vsize);                      // copy the base verts
+    out->skinnedVert = (GfxPackedVertex *)copy;              // skinnedVert = the copy
     return true;
 }
 
-// IDB xmodel_utils helpers kisak lacks (CoD4Radiant-only) — trivial LOD-0 accessors.
+// xmodel_utils helpers kisak lacks (CoD4Radiant-only) — trivial LOD-0 accessors.
 //  GetXmodelNumSurfs (0x4CBD80)      = lodInfo[lod].numsurfs
 //  GetXmodelMaterialHandle (0x4CBDE0)= &materialHandles[lodInfo[lod].surfIndex]
 static inline int GetXmodelNumSurfs(const XModel *m, int lod) { return (uint16_t)m->lodInfo[lod].numsurfs; }
@@ -824,17 +812,17 @@ static inline Material **GetXmodelMaterialHandle(XModel *m, int lod) { return &m
 
 // 0x4FE1D0  AddModelSurfBuf — build one GfxModelSkinnedSurface per LOD-0 surface of the
 // xmodel; nullptr on overflow or a failed surf.
-// KISAK: kisak's GfxBackEndData has no surfsBuffer/surfPos, so the editor keeps its own array
+// kisak's GfxBackEndData has no surfsBuffer/surfPos, so the editor keeps its own array
 // + cursor.  The cursor advances by the FULL surface count of every model (NOT by the number
 // queued — Editor_AddSurfCmd can drop some), so a queued record is never overwritten.
 static GfxModelSkinnedSurface *AddModelSurfBuf(XModel *xmodel, bool needWritable)
 {
     if (XModelBad(xmodel))
         return 0;
-    XModelNumBones(xmodel);                   // (IDB call; bone count not needed for rigid)
+    XModelNumBones(xmodel);                   // (bone count not needed for rigid)
 
     XSurface *surfBase = nullptr;
-    int surfaceCount = XModelGetSurfaces(xmodel, &surfBase, 0);   // == LODForXmodel(model,&s,0)
+    int surfaceCount = XModelGetSurfaces(xmodel, &surfBase, 0);
     iassert(surfaceCount);
 
     const int firstSurfSlot = radiant_modelSurfPos;
@@ -843,13 +831,13 @@ static GfxModelSkinnedSurface *AddModelSurfBuf(XModel *xmodel, bool needWritable
     GfxModelSkinnedSurface *dst = &radiant_modelSkinnedSurfs[firstSurfSlot];
     for (int i = 0; i < surfaceCount; ++i) {
         if (!AddSurfTempSkinBuf(&surfBase[i], &dst[i], xmodel, needWritable))
-            return 0;                         // 0x4fe257: drop the model, cursor unmoved
+            return 0;                         // drop the model, cursor unmoved
     }
-    radiant_modelSurfPos = firstSurfSlot + surfaceCount;          // 0x4fe290
+    radiant_modelSurfPos = firstSurfSlot + surfaceCount;
     return dst;
 }
 
-// 0x4FDF40  sub_4FDF40 — multiply/skip-multiply draw-flag filter.  The binary keys "effect"
+// 0x4FDF40  Editor_SurfFilter — multiply/skip-multiply draw-flag filter.  The binary keys "effect"
 // on editorToolFlags & 0x70 == 0x70, then masks 8 for opaque / 4 for effect.
 static bool Editor_SurfFilter(int drawFlags, const Material *material)
 {
@@ -858,7 +846,7 @@ static bool Editor_SurfFilter(int drawFlags, const Material *material)
     iassert(!(drawFlags & DRAWFLAG_ONLY_MULTIPLY) || !(drawFlags & DRAWFLAG_SKIP_MULTIPLY));   // r_ed_scene.cpp:496
     const unsigned flags  = material ? material->editorToolFlags : 0;   // no material -> opaque
     const bool     opaque = (flags & 0x70) != 0x70;
-    return (drawFlags & (opaque ? 8 : 4)) != 0;          // binary: (drawFlags & (4*(!effect)+4)) != 0
+    return (drawFlags & (opaque ? 8 : 4)) != 0;
 }
 
 // 0x4FDFA0  Editor_AddSurfCmd — queue one ED_SURF_MODEL surf (a built skinned surface +
@@ -869,7 +857,7 @@ void __cdecl Editor_AddSurfCmd(int drawFlags, Material *material, model_inst *in
     iassert(surf);
     iassert(material);
 
-    // IDA gate (0x4fdff3): queue ONLY when the material carries the requested technique (or
+    // Gate: queue ONLY when the material carries the requested technique (or
     // techType >= TECHNIQUE_COUNT), else DROP it.  kisak indexes techniques[techType] with no +1.
     if (techType >= TECHNIQUE_COUNT || material->techniqueSet->techniques[techType]) {
         if (radiant_surfCount == ED_SCENE_MAX_MODELSURFS) {
@@ -879,7 +867,7 @@ void __cdecl Editor_AddSurfCmd(int drawFlags, Material *material, model_inst *in
             editorSurf_sub *v5 = &radiant_surfs[radiant_surfCount++];
             v5->material  = material;
             v5->techType  = techType;
-            // IDB: 0x64 * ((drawSurf >> 29) & 0xFFF); kisak's packed layout differs.
+            // The binary computed 0x64 * ((drawSurf >> 29) & 0xFFF); kisak's packed layout differs.
             v5->sortKey   = 0x64 * Material_FromHandle(material)->info.drawSurf.fields.primarySortKey;
             v5->skinnedSurf = surf;
             v5->placement = (GfxScaledPlacement *)inst;   // model_inst aliases GfxScaledPlacement
@@ -937,17 +925,6 @@ bool KiwiEdScene_HaveCapture()
     return s_capHave;
 }
 
-int KiwiEdScene_CaptureKB()
-{
-    if ( !s_capHave )
-        return 0;
-    const size_t bytes = s_capMeshes.size()  * sizeof( editorMesh_s )
-                       + s_capSubs.size()    * sizeof( editorSurf_sub )
-                       + s_capSubSkin.size() * sizeof( int )
-                       + s_capSkins.size()   * sizeof( GfxModelSkinnedSurface )
-                       + s_capEntries.size() * sizeof( EdCapEntry );
-    return (int)( ( bytes + 1023 ) / 1024 );
-}
 
 // `segSurfEnd[s]` is the ABSOLUTE edSceneGlobals.sceneSurfCount one past segment s's
 // output, so segment s owns [ (s ? segSurfEnd[s-1] : from->surf), segSurfEnd[s] ).  The
@@ -1352,7 +1329,7 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
     Material **modelMaterial = GetXmodelMaterialHandle(mi->model, 0);
     iassert(modelMaterial);
 
-    // The faithful wireframe stamp writes every surface.  The sun stamp is narrower: only
+    // The wireframe stamp writes every surface.  The sun stamp is narrower: only
     // XModel surfaces using the injected/direct fakelight fallback need a writable copy.
     // A native-only instance stays in the static model cache; a mixed instance is copied
     // once, but only its fallback surfaces are stamped below.
@@ -1387,14 +1364,14 @@ void __cdecl SkinModelInst(int instanceHandle, Material *checkhandle, int techTy
               || ( techType == TECHNIQUE_SUNLIGHT_PREVIEW
                 && KiwiModelNeedsSunFallbackColor(useMat) ) );
         if (stampColor) {
-            // IDB 0x4fe3f0-0x4fe45f: record the override AND write *colorPtr over each vert's
+            // Record the override AND write *colorPtr over each vert's
             // colour (@+0x10, stride 0x20).  Only ever the tempSkinBuf COPY, never verts0.
             mi->colorOverride = *colorPtr;
             iassert(skinnedSurf->skinnedCachedOffset != RIGID_SKINNED_CACHE_OFFSET);   // r_ed_scene.cpp:639
             iassert(skinnedSurf->skinnedCachedOffset != HIDDEN_SURFACE_OFFSET);        // r_ed_scene.cpp:640
-            const int nv  = XSurfaceGetNumVerts(skinned[i].xsurf);         // 0x4fe43d
+            const int nv  = XSurfaceGetNumVerts(skinned[i].xsurf);
             uint8_t  *base = (uint8_t *)skinned[i].skinnedVert;
-            for (int vi = 0; vi < nv; ++vi)                                // 0x4fe449-0x4fe45f
+            for (int vi = 0; vi < nv; ++vi)
                 *(uint *)(base + 32 * vi + 0x10) = (uint)*colorPtr;
         } else {
             mi->colorOverride = -1;
@@ -1421,10 +1398,8 @@ static void Editor_DrawIndexedPrimitive(GfxCmdBufPrimState *state, const GfxDraw
         D3DPT_TRIANGLELIST, 0, 0, args->vertexCount, args->baseIndex, args->triCount);
     if (hr < 0) {
         ++g_disableRendering;
-        FatalError(0,
-            "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp (%i) "
-            "device->DrawIndexedPrimitive( D3DPT_TRIANGLELIST, 0, 0, args->vertexCount, "
-            "args->baseIndex, args->triCount ) failed: %s\n", 545, R_ErrorDescription(hr));
+        FatalError(0, "r_ed_scene: DrawIndexedPrimitive( %i verts, %i tris ) failed: %s\n",
+            args->vertexCount, args->triCount, R_ErrorDescription(hr));
     }
 }
 
@@ -1456,8 +1431,7 @@ static void Editor_ForceOpaqueFillDepth()
 static void R_DrawTessTechnique_Brushes(const GfxDrawPrimArgs *args)
 {
     iassert(dx.d3d9 && dx.device);
-    if (!gfxCmdBufState.material)   // KEEP_VERBOSE: binary string "context.state->material" != port member gfxCmdBufState.material
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_scene.cpp", 555, 0, "%s", "context.state->material");
+    iassert(gfxCmdBufState.material);   // r_ed_scene.cpp:555
     const MaterialTechnique *technique = gfxCmdBufState.technique;
     iassert(technique);
 
@@ -1489,7 +1463,7 @@ static void RB_DrawEditorTessSurface(uint16_t minVert, uint16_t maxVert)
         R_UpdateViewport(&gfxCmdBufSourceState, &vp);
     }
     // MinVertexIndex is hardwired to 0, so vertexCount must span all referenced verts
-    // [0, maxVert].  (The IDB used minVert/range + an indexCount field kisak has not.)
+    // [0, maxVert].  (The binary used minVert/range + an indexCount field kisak lacks.)
     args.baseIndex   = R_SetIndexData(&gfxCmdBufState.prim, (uint8_t *)tess.indices, tess.indexCount / 3);
     args.vertexCount = maxVert + 1;          // NumVertices (verts span [0, maxVert])
     args.triCount    = tess.indexCount / 3;  // PrimitiveCount (triangles)
@@ -1517,7 +1491,7 @@ static void Editor_SetEyeRelativeWorldMatrix()
     gfxCmdBufSourceState.objectPlacement = 0;
 }
 
-// KISAK (not in the binary): re-apply every `def cN, x,y,z,w` immediate in a vertex shader's
+// Not in the binary: re-apply every `def cN, x,y,z,w` immediate in a vertex shader's
 // bytecode — the editor _dtex shaders decompress packed UBYTE4 texcoords from def constants
 // (c8..c12) that live there, not in any engine constant.  THE PARSE IS CACHED; THE ISSUE IS
 // NOT: R_SetupPass' args write the same constant file, so they must be re-issued per pass.
@@ -1688,16 +1662,12 @@ static bool Editor_BeginModelPass(uint pass)
 // 0x53AA30 has NO R_CheckVertexDataOverflow — that is the GAME variant only.
 static void Editor_DrawXModelSkinnedUncached(XSurface *xsurf, GfxPackedVertex *skinnedVert)
 {
-    if (!xsurf)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 383, 0, "%s", "xsurf");
-    if (!skinnedVert)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 384, 0, "%s", "skinnedVert");
-    if (tess.indexCount)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 385, 0, "%s", "tess.indexCount == 0");
-    if (tess.vertexCount)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 386, 0, "%s", "tess.vertexCount == 0");
+    iassert(xsurf);                    // rb_shade.cpp:383-386
+    iassert(skinnedVert);
+    iassert(tess.indexCount == 0);
+    iassert(tess.vertexCount == 0);
 
-    // IDA copies the IB via R_CheckTris(xsurf, tess.indices, 0), a plain memcpy of
+    // The binary copies the IB via R_CheckTris(xsurf, tess.indices, 0), a plain memcpy of
     // triIndices; kisak has none, and reading triIndices directly is byte-identical.
 
     // `skinnedVert == xsurf->verts0` is exactly the no-stamp case — verts read-only for the
@@ -1721,10 +1691,8 @@ static void Editor_DrawXModelSkinnedUncached(XSurface *xsurf, GfxPackedVertex *s
     args.vertexCount = XSurfaceGetNumVerts(xsurf);
     args.triCount    = XSurfaceGetNumTris(xsurf);
 
-    // KEEP_VERBOSE (405/409/412): rb_shade.cpp editor-variant strings (foreign gfx TU).
-    if (gfxCmdBufState.prim.vertDeclType != VERTDECL_PACKED)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 405, 1,
-               "%s\n\t(gfxCmdBufState.prim.vertDeclType) = %i", "(gfxCmdBufState.prim.vertDeclType == VERTDECL_PACKED)", gfxCmdBufState.prim.vertDeclType);
+    vassert(gfxCmdBufState.prim.vertDeclType == VERTDECL_PACKED, "(gfxCmdBufState.prim.vertDeclType) = %i",
+            gfxCmdBufState.prim.vertDeclType);   // rb_shade.cpp:405
 
     // Both arms leave prim.indexBuffer correct, so a later R_SetIndexData rebinds the
     // dynamic IB by its own rule (r_shade.cpp:69-70).
@@ -1736,8 +1704,7 @@ static void Editor_DrawXModelSkinnedUncached(XSurface *xsurf, GfxPackedVertex *s
         args.baseIndex = R_SetIndexData(&gfxCmdBufState.prim, (uint8_t *)xsurf->triIndices, args.triCount);
     }
 
-    if (!gfxCmdBufState.technique)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 409, 0, "%s", "gfxCmdBufState.technique");
+    iassert(gfxCmdBufState.technique);   // rb_shade.cpp:409
 
     // Cached: the pool chunk at this surface's byte offset (r_draw_staticmodel.cpp:215-218).
     // MinVertexIndex/BaseVertexIndex stay 0, so 0-based triIndices still address own verts.
@@ -1751,8 +1718,7 @@ static void Editor_DrawXModelSkinnedUncached(XSurface *xsurf, GfxPackedVertex *s
         vb           = gfxBuf.dynamicVertexBuffer->buffer;
         s_edModelUploadBytes += 32 * args.vertexCount;
     }
-    if (!vb)
-        Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\rb_shade.cpp", 412, 0, "%s", "vb");
+    iassert(vb);   // rb_shade.cpp:412
     if (gfxCmdBufState.prim.streams[0].vb != vb || gfxCmdBufState.prim.streams[0].offset != vertexOffset ||
         gfxCmdBufState.prim.streams[0].stride != 32) {
         R_ChangeStreamSource(&gfxCmdBufState.prim, 0, vb, vertexOffset, 32);
@@ -2395,8 +2361,8 @@ static void RB_DrawEditorSkinnedCached_Sub(int index, int amount, int runsKey)
             techType != gfxCmdBufState.techType || indexCount + tess.indexCount > 0x7FC0)
         {
             cutNext = false;
-            // Binary's `if (vb_x)` gate (0x4fe8a7): vb_x is the PREVIOUS edSurf's VB — 0
-            // after a MODEL (matrix[0] holds that model's placement), non-zero after a MESH.
+            // Gate on the PREVIOUS edSurf's VB — 0 after a MODEL (matrix[0] holds that
+            // model's placement), non-zero after a MESH.
             if (boundVb) {
                 RB_DrawEditorTessSurface(minVert, (uint16_t)maxVert);
                 minVert = 0xFFFF;
@@ -2466,8 +2432,8 @@ static void RB_DrawEditorSkinnedCached_Sub(int index, int amount, int runsKey)
 void __cdecl RB_DrawEditorSkinnedCachedCmd(GfxRenderCommandExecState *execState)
 {
     const GfxCmdEditorSkinnedCached *cmd = (const GfxCmdEditorSkinnedCached *)execState->cmd;
-    // KISAK: differs from 0x533880 — clear the persisted material first.  Sub's batch-start
-    // condition (0x4fe89f) compares material/techType, which Sub leaves set while resetting
+    // Differs from the binary: clear the persisted material first.  Sub's batch-start
+    // condition compares material/techType, which Sub leaves set while resetting
     // vertDeclType to GENERIC; back-to-back flushes sharing both would skip RB_BeginSurface
     // and draw with the stale decl.
     gfxCmdBufState.material = 0;
@@ -2501,7 +2467,7 @@ void __cdecl R_SortMaterials()
         s_edMeshSurfs = s_edMeshRunDraws = s_edMeshTessDraws = 0;
         // The per-frame transform budget (kiwi_instcache.h), reset AFTER the plots read it.
         KiwiInstCache_BeginFrame();
-        frontEndDataOut->viewInfo[frontEndDataOut->viewInfoCount].cmds = 0;  // sub_4FB170
+        frontEndDataOut->viewInfo[frontEndDataOut->viewInfoCount].cmds = 0;
         R_ClearScene(0);
         edScene_lastFrameCount        = rg.frontEndFrameCount;
         edSceneGlobals.sceneMeshCount = 0;

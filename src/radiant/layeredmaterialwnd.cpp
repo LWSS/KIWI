@@ -12,20 +12,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include <gfx_d3d/r_init.h>           // R_InitRendererForWindow
-
-extern int  Sys_Printf( const char *fmt, ... );
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
-// Brush-list display rebuild.
-extern void sub_47D060( selbrush_t *listHead );   // 0x47D060
-
-// Global brush lists (qe3.cpp).
-extern selbrush_t active_brushes;          // 0x23F189C
-extern selbrush_t selected_brushes;        // 0x23F1864
-extern selbrush_t filtered_brushes;        // 0x23F182C
-
-// Window-update bit-mask (qe3 / Sys_UpdateWindows).
-extern int g_nUpdateBits;                  // 0x25D5A74
+#include "kiwi_ported.h"              // KIWI: shared engine/editor externs
 
 // texwnd "layered-material window active" flag (texwnd_s.unk_bool @0x10039) — set so
 // the texture-window click-apply path can add a layer.  Accessor avoids exporting the
@@ -58,7 +45,7 @@ static inline void **EntryLayerHandle( LyrMtlEntry *e, int i ) { return (void **
 static inline LyrMtlEntry *ActiveEntry() { return (LyrMtlEntry *)(intptr_t)lyrMtlWndGlob.activeLyrMtl; }
 
 // Forward decls (mutual references within this TU).
-static BOOL sub_417710();
+static BOOL LayeredMaterialWnd_RebuildBrushLists();
 static int  LayeredMaterialWnd_ToggleLiveAdd();
 BOOL        LayeredMaterialWnd_Layer( unsigned int newLayerIndex );
 
@@ -76,14 +63,14 @@ static int LayeredMaterialWnd_ToggleLiveAdd()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  sub_417710  (0x417710) — rebuild the three brush-list displays after a layered-
-//  material change (it can affect drawn brushes).
+//  LayeredMaterialWnd_RebuildBrushLists  (0x417710) — rebuild the three brush-list
+//  displays after a layered-material change (it can affect drawn brushes).
 // ═══════════════════════════════════════════════════════════════════════════════
-static BOOL sub_417710()
+static BOOL LayeredMaterialWnd_RebuildBrushLists()
 {
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     g_nUpdateBits = -1;
     return TRUE;
 }
@@ -117,7 +104,7 @@ BOOL LayeredMaterialWnd_Layer( unsigned int newLayerIndex )
     *EntryLayerHandle( ActiveEntry(), lyrMtlWndGlob.selectedLayerIndex ) = tmpHandle;
 
     lyrMtlWndGlob.selectedLayerIndex = newLayerIndex;
-    return sub_417710();
+    return LayeredMaterialWnd_RebuildBrushLists();
 }
 
 // UI-independent action behind the layered-material tool's "Delete material" command.
@@ -131,7 +118,7 @@ BOOL LyrMtlDeleteMaterial_Apply()
     // Map_SaveFile of stock .maps — HARD RULE).  Faithful to the binary.
     LayeredMaterials_texcoords( (char *)(intptr_t)lyrMtlWndGlob.activeLyrMtl );
     lyrMtlWndGlob.activeLyrMtl = 0;
-    return sub_417710();
+    return LayeredMaterialWnd_RebuildBrushLists();
 }
 
 // UI-independent action behind the layered-material tool's "Remove layer" command.
@@ -146,7 +133,7 @@ BOOL LyrMtlRemoveLayer_Apply()
     memmove( &e->layers[sel], &e->layers[sel + 1], sizeof(LyrEntryLayer_t) * remaining );
     if ( lyrMtlWndGlob.selectedLayerIndex )
         --lyrMtlWndGlob.selectedLayerIndex;
-    return sub_417710();
+    return LayeredMaterialWnd_RebuildBrushLists();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -252,9 +239,9 @@ LRESULT LayeredMaterialWnd_RadMtl( qtexture_s *radMtl )
     *EntryLayerHandle( lyrMtl, count ) = radMtl;
     *EntryLayerId( lyrMtl, lyrMtl->layerCount++ ) = lyrMtl->nextId++;
 
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     g_nUpdateBits = -1;
     return 0;
 }

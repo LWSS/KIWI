@@ -13,7 +13,9 @@
 #include "kiwi_command.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
+#include "kiwi_texlock.h"   // Face_TexLockPoints*
 #include "kiwi_validity.h"
 #include "kiwi_vec.h"     // Dot3/Sub3/etc.
 
@@ -23,22 +25,8 @@
 #include <string.h>
 
 // Ported entry points.
-extern int   Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
-extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp:4495 (0x470470)
 // Drops the source when its matched plane duplicates another half-space.
-extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
-// Keep at file scope; a block-scope declaration caused an MSVC linkage mismatch.
-extern bool  Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                      int commandId );                 // mainfrm.cpp:1340
-
-// Patch post-edit bookkeeping; kiwi_transform.cpp uses the same pair.
-extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );           // pmesh.cpp:2137 (0x438D80)
-extern void  MarkMapModified();                                        // win_qe3.cpp:195  (0x499BB0)
-
-// Forwarders for brush.cpp's file-static texture-lock halves.
-extern void  Ed_FaceTexLockSave( float *saveBuf, face_t *face );
-extern void  Ed_FaceTexLockReproject( face_t *face, const float *saveBuf, const byte *lockFlags );
 
 namespace
 {
@@ -379,25 +367,24 @@ namespace
                 return false;                       // COMMIT
             }
 
-            // Ported texture-lock ABI requires 19 floats and lockFlags[2] == 1.
             byte lockFlags[3];
             lockFlags[0] = (byte)( g_PrefsDlg->m_bTextureLock  != 0 );
             lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );
             lockFlags[2] = 1;
-            float saveBuf[19];
+            double saveBuf[3][KTEXLOCK_LAYERS][6];
 
             face_t *f = &m_node->def->faces[m_face];
             memcpy( f->mtldef, m_baseMtl, sizeof( m_baseMtl ) );                   // restore typed baseline
             Face_MakePlane( f );                    // baseline plane must exist before the save
             if ( f->w && slid )
-                Ed_FaceTexLockSave( saveBuf, f );
+                Face_TexLockPointsSave( f, saveBuf );
 
             WritePlanePts( pts );
 
             // Unslid points carry no texcoord meaning: leave the texdef alone, which for
             // a planar projection is already the "nothing moved in the plane" answer.
             if ( f->w && slid )
-                Ed_FaceTexLockReproject( f, saveBuf, lockFlags );
+                Face_TexLockPointsReproject( f, saveBuf, lockFlags );
             if ( haveExact )
                 WritePlanePts( exact );             // the same plane, on the target's own points
 

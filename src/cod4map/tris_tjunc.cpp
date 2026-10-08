@@ -21,8 +21,6 @@ TjuncEdgeLine_t  tjuncEdgeLines[MAX_TJUNC_EDGE_LINES];
 int    numDegenerateTrisRemoved;
 int    numSelfTjunctions;
 int    numUnmergeableTexVerts;
-void  *tjuncAuxBuffer;
-int    tjuncAuxElemSize;
 float  tjuncBoundsMax[3];
 float  tjuncBoundsMin[3];
 char   tjuncCreateNonAxial;
@@ -40,8 +38,8 @@ int   *triVertexIndexMap;
 static void *tjuncMergeScratch;
 #define TJUNC_MERGE_SCRATCH_SIZE 0xD30300u
 
-/* Native 0x4052D0/0x4054A0 finish their x87 expression with an fstp to a
-   float local.  TJunction matching consumes those rounded values in branch
+/* Native 0x4052D0/0x4054A0 round their x87 expression to a float local.
+   TJunction matching consumes those rounded values in branch
    decisions, so generic reordered dot helpers are not interchangeable. */
 static float TJunc_DotNativeRound(const float *a, const float *b)
 {
@@ -60,23 +58,6 @@ static float TJunc_LenSq2NativeRound(float x, float y)
   volatile float result = x * x + y * y;
   return result;
 }
-
-char s_assertDisable_FixSurfaceJunctions;
-char s_assertDisable_RemoveDegenerateEdges;
-char s_assertDisable_RemoveDegenerateEdges;
-char s_assertDisable_RemoveDegenerateEdges;
-char s_assertDisable_RemoveDegenerateEdges;
-char s_assertDisable_TJunc_FindEdge;
-char s_assertDisable_TJunc_Init;
-char s_assertDisable_TJunc_ProcessSurface;
-char s_assertDisable_TJunc_ProcessWinding;
-char s_assertDisable_TJunc_ProcessWinding;
-char s_assertDisable_TJunc_ProcessWinding;
-char s_assertDisable_TjuncClampNode;
-char s_assertDisable_TjuncClampNode;
-char s_assertDisable_TjuncClampNode;
-char s_assertDisable_TjuncFixFaces;
-char s_assertDisable_TjuncFixFaces;
 
 /* CoD4 0x45DF10: clear the native directional and spatial edge-hash
    carriers without touching line or point counters. */
@@ -258,24 +239,12 @@ char TJunc_SetCreateNonAxial(char enabled)
 ================
 TJunc_Init
 
-Initializes T-junction system, allocates aux data buffer
+Checks the T-junction point list is empty before a pass
 ================
 */
-void *TJunc_Init( int auxElemSize )
+void TJunc_Init( void )
 {
   Assert(!tjuncPointCount, s_assertDisable_TJunc_Init);
-
-  if ( auxElemSize != tjuncAuxElemSize )
-  {
-    tjuncAuxElemSize = auxElemSize;
-    free(tjuncAuxBuffer);
-
-    if ( tjuncAuxElemSize )
-      tjuncAuxBuffer = malloc(tjuncAuxElemSize * MAX_TJUNC_AUX_POINTS);
-    else
-      tjuncAuxBuffer = NULL;
-  }
-  return tjuncAuxBuffer;
 }
 
 void *TJunc_MergeScratchInit(void)
@@ -363,8 +332,7 @@ void TJunc_InsertPoint(float *vertex, float intercept, int flags, TjuncEdgeLine_
   VectorCopy(vertex, newPt->pos);
   newPt->flags = flags;
 
-  /* Native 0x45D100 merges solely on line intercept tolerance; auxiliary
-     vertex payload belongs to winding reconstruction, not the point chain. */
+  /* Native 0x45D100 merges solely on line intercept tolerance. */
   scan = edgeLine->sentinel.next;
   while ( scan != &edgeLine->sentinel )
   {
@@ -598,10 +566,9 @@ TjuncEdgeLine_t *TJunc_FindEdgeLineByHash(float *direction, float *firstVertex,
   return bestLine;
 }
 
-/* CoD4 0x45DBF0: select the closest line across the complete arena.  IDA's
-   pseudocode used to lose the local best-line return carrier here; the x87
-   comparison at 0x45DC41..0x45DC62 updates both the running tolerance and
-   the selected line whenever distance < tolerance. */
+/* CoD4 0x45DBF0: select the closest line across the complete arena.  The
+   comparison updates both the running tolerance and the selected line
+   whenever distance < tolerance. */
 TjuncEdgeLine_t *TJunc_FindEdgeLineBrute(float *firstVertex, float *secondVertex,
                                          float tolerance)
 {
@@ -740,8 +707,7 @@ static void TJunc_ProcessEdgeNative(float *previous, float *current)
 ================
 TJunc_ProcessWinding
 
-CoD4 0x45CF20 walks previous-current pairs of the packed winding directly;
-auxiliary winding data is intentionally not part of this edge-line pass.
+CoD4 0x45CF20 walks previous-current pairs of the packed winding directly.
 ================
 */
 int TJunc_ProcessWinding(Winding_t *winding)
@@ -781,142 +747,7 @@ int TJunc_ProcessSurface(WindingAuxPair_t *surface)
   return holeIndex;
 }
 
-/*
-================
-FixSurfaceJunctions
-
-Inserts T-junction points into winding, expands vertex list
-================
-*/
-void FixSurfaceJunctions(WindingAuxPair_t *verts, int auxElemSize, float *surfPlane)
-{
-  Winding_t *winding, *newWinding;
-  TjuncEdgeLine_t *edge;
-  TjuncPoint_t *chainNode, *sentinel;
-  float *curVert, *nextVert, *outVert;
-  vec3_t outVertBuf[MAX_CONCAVE_WINDING_POINTS];
-  void *auxBlock;
-  int srcIdx, dstIdx, nextIdx, edgeAxis;
-  float epsilonOut, snapDist;
-  float curIntercept, nextIntercept;
-  double planeDist;
-  int forward;
-
-  auxBlock = auxElemSize ? malloc(auxElemSize * MAX_CONCAVE_WINDING_POINTS) : NULL;
-  winding = verts->winding;
-  dstIdx = 0;
-
-  for ( srcIdx = 0; srcIdx < winding->numpoints; srcIdx++ )
-  {
-    curVert = winding->points[srcIdx];
-
-    /* copy current vertex to output */
-    if ( dstIdx == MAX_CONCAVE_WINDING_POINTS )
-      Com_Error("MAX_POINTS_ON_CONCAVE_WINDING");
-    outVert = outVertBuf[dstIdx];
-    VectorCopy(curVert, outVert);
-    if ( auxElemSize )
-      AuxDataCopy(auxElemSize, (char *)verts->auxData, srcIdx, 1, (char *)auxBlock, dstIdx);
-    dstIdx++;
-
-    /* find edge line between this vertex and the next */
-    nextIdx = (srcIdx + 1) % winding->numpoints;
-    nextVert = winding->points[nextIdx];
-    edgeAxis = TJunc_ClassifyEdgeAxis(nextVert, curVert);
-    edge = TJunc_FindEdge(curVert, &epsilonOut, nextVert, edgeAxis);
-    if ( !edge )
-      continue;
-
-    /* tighten tolerance and compute snap distance */
-    if ( edge->tolerance > (double)epsilonOut )
-      edge->tolerance = epsilonOut;
-    snapDist = (float)sqrt(edge->tolerance);
-
-    /* project both endpoints onto the edge line */
-    curIntercept = DotProduct210(edge->edgeDir, curVert);
-    nextIntercept = DotProduct210(edge->edgeDir, nextVert);
-
-    /* walk the chain of junction points along this edge */
-    forward = curIntercept >= (double)nextIntercept;
-    chainNode = forward ? edge->sentinel.prev : edge->sentinel.next;
-    sentinel = &edge->sentinel;
-
-    while ( chainNode != sentinel )
-    {
-      float chainIntercept = chainNode->intercept;
-
-      /* check if we've passed the endpoint
-         On x86, x87 keeps float+float at 80-bit extended for comparison — matches original.
-         On x64, SSE2 does float+float at 32-bit, losing the extra precision.
-         Use double on x64 to match x86's 80-bit behavior. */
-#ifdef _WIN64
-      if ( !forward && (double)nextIntercept - (double)snapDist < chainIntercept )
-        break;
-      if ( forward && (double)nextIntercept + (double)snapDist > chainIntercept )
-        break;
-
-      /* check if junction point is between the two vertices */
-      if ( (!forward && (double)curIntercept + (double)snapDist < chainIntercept)
-        || (forward && (double)curIntercept - (double)snapDist > chainIntercept) )
-#else
-      if ( !forward && nextIntercept - snapDist < chainIntercept )
-        break;
-      if ( forward && nextIntercept + snapDist > chainIntercept )
-        break;
-
-      /* check if junction point is between the two vertices */
-      if ( (!forward && curIntercept + snapDist < chainIntercept)
-        || (forward && curIntercept - snapDist > chainIntercept) )
-#endif
-      {
-        /* check if junction point lies on the surface plane */
-        planeDist = DotProduct210(chainNode->pos, surfPlane) - surfPlane[3];
-        if ( planeDist > -snapDist && planeDist < snapDist )
-        {
-          if ( dstIdx == MAX_CONCAVE_WINDING_POINTS )
-            Com_Error("MAX_POINTS_ON_CONCAVE_WINDING");
-          outVert = outVertBuf[dstIdx];
-          VectorCopy(chainNode->pos, outVert);
-          if ( auxElemSize )
-          {
-            double frac = (chainNode->intercept - curIntercept) / (nextIntercept - curIntercept);
-            g_lerpAuxDataCallback(
-                (float *)((char *)verts->auxData + srcIdx * auxElemSize),
-                (float *)((char *)verts->auxData + nextIdx * auxElemSize),
-                frac,
-                (float *)((char *)auxBlock + dstIdx * auxElemSize)
-            );
-          }
-          dstIdx++;
-        }
-      }
-      chainNode = forward ? chainNode->prev : chainNode->next;
-    }
-  }
-
-  /* replace winding if new vertices were added */
-  Assert(dstIdx >= verts->winding->numpoints, s_assertDisable_FixSurfaceJunctions);
-  if ( dstIdx > verts->winding->numpoints )
-  {
-    FreeWinding(verts->winding);
-    newWinding = AllocWinding(dstIdx);
-    verts->winding = newWinding;
-    newWinding->numpoints = dstIdx;
-    memcpy(newWinding->points, outVertBuf, sizeof(vec3_t) * dstIdx);
-    if ( auxElemSize )
-    {
-      free(verts->auxData);
-      verts->auxData = malloc(auxElemSize * dstIdx);
-      memcpy(verts->auxData, auxBlock, auxElemSize * dstIdx);
-    }
-  }
-
-  free(auxBlock);
-}
-
-/* CoD4 0x45E080: direct native winding reconstruction.  This path carries
-   positions only; the older public helper above retains the donor aux-data
-   interpolation path for callers that require it. */
+/* CoD4 0x45E080: direct native winding reconstruction (positions only). */
 static void FixSurfaceJunctionsNative(Winding_t **windingPtr, float *surfPlane)
 {
   Winding_t *winding;
@@ -954,8 +785,8 @@ static void FixSurfaceJunctionsNative(Winding_t **windingPtr, float *surfPlane)
 
     if ( tolerance < edge->tolerance )
       edge->tolerance = tolerance;
-    /* Native 0x45E229 calls the local float wrapper at 0x407720; despite
-       IDA's `log` symbol, that wrapper returns sqrtf(X). */
+    /* Native calls the local float wrapper at 0x407720, which returns
+       sqrtf(X). */
     toleranceLog = sqrtf(edge->tolerance);
 
     pointIntercept = TJunc_DotNativeRound(point, edge->edgeDir);
@@ -1041,19 +872,6 @@ static void TJunc_FixSurfaceEdgesNative(WindingAuxPair_t *surface)
 
 /*
 ================
-TjuncFixSurfaceEdges
-
-Fixes junctions for surface main winding + holes.
-================
-*/
-int TjuncFixSurfaceEdges(TriSurf_t *ts)
-{
-  TJunc_FixSurfaceEdgesNative((WindingAuxPair_t *)&ts->winding);
-  return ts->holeCount;
-}
-
-/*
-================
 TjuncFixFaces
 
 Orchestrates T-junction fixing: collect edges, reset chains, re-insert, fix surfaces
@@ -1084,56 +902,6 @@ int TjuncFixFaces(intptr_t *surfArray, int surfCount, TriSurf_t *extraSurf)
 
   TjuncReset();
   return 0;
-}
-
-/*
-================
-RemoveDegenerateEdges
-
-Removes near-zero-length edges from winding
-================
-*/
-void RemoveDegenerateEdges(WindingAuxPair_t *verts, int auxElemSize)
-{
-  #define DEGENERATE_EPSILON 0.001f
-  Winding_t *w;
-  char *auxData;
-  int i, next;
-
-  Assert(verts, s_assertDisable_RemoveDegenerateEdges);
-  Assert(verts->winding, s_assertDisable_RemoveDegenerateEdges);
-  Assert(verts->auxData || !auxElemSize, s_assertDisable_RemoveDegenerateEdges);
-
-  w = verts->winding;
-  auxData = (char *)verts->auxData;
-  Assert(w->numpoints > 0 && w->numpoints < MAX_CONCAVE_WINDING_POINTS, s_assertDisable_RemoveDegenerateEdges);
-
-  i = 0;
-  while ( w->numpoints > 1 && i < w->numpoints )
-  {
-    next = (i + 1) % w->numpoints;
-    if ( !VectorCompareEpsilon(w->points[i], w->points[next], DEGENERATE_EPSILON, 3) )
-    {
-      i++;
-      continue;
-    }
-
-    /* degenerate edge found — remove next vertex by shifting tail */
-    if ( next )
-    {
-      int tail = w->numpoints - next;
-      memmove(w->points[i], w->points[next], sizeof(vec3_t) * tail);
-      if ( auxElemSize )
-        memmove(&auxData[auxElemSize * i], &auxData[auxElemSize * next], auxElemSize * tail);
-    }
-    else
-    {
-      /* next wrapped to 0 — back up one vertex instead */
-      i--;
-    }
-    w->numpoints--;
-  }
-  #undef DEGENERATE_EPSILON
 }
 
 /* CoD4 0x45E5B0: the native cleaner shifts only the packed 12-byte points. */
@@ -1179,35 +947,6 @@ static void TJunc_FixAndRemoveSurfaceNative(WindingAuxPair_t *surface)
 {
   TJunc_FixSurfaceEdgesNative(surface);
   TJunc_RemoveDegenerateSurfaceNative(surface);
-}
-
-/*
-================
-RemoveDegenerateEdgesForFace
-
-Removes degenerate edges from surface main winding + holes
-================
-*/
-int RemoveDegenerateEdgesForFace(TriSurf_t *ts)
-{
-  int i;
-  RemoveDegenerateEdges((WindingAuxPair_t *)&ts->winding, ts->auxElemSize);
-  for ( i = 0; i < ts->holeCount; i++ )
-    RemoveDegenerateEdges(&ts->holes[i], ts->auxElemSize);
-  return ts->holeCount;
-}
-
-/*
-================
-TjuncProcessFace
-
-Fixes T-junctions and removes degenerate edges for one face
-================
-*/
-int TjuncProcessFace(TriSurf_t *surf)
-{
-  TJunc_FixAndRemoveSurfaceNative((WindingAuxPair_t *)&surf->winding);
-  return surf->holeCount;
 }
 
 static void TJunc_ProcessGridSurface(TriSurf_t *surf)

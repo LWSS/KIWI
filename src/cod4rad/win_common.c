@@ -101,7 +101,6 @@ static void Sys_ListFiles_r(const char *basedir, const char *subdirs, char *filt
     intptr_t findhandle;
     char search[MAX_OS_PATH];
     char filename[MAX_OS_PATH];
-    char name[268];
     struct __finddata64_t finddata;
 
     if (*numfiles >= MAX_FOUND_FILES)

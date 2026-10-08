@@ -17,6 +17,7 @@
 #include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_str.h"
 #include "kiwi_transform.h"
 #include "kiwi_windows.h"
@@ -30,29 +31,7 @@
 #include <commdlg.h>
 #include <imgui_internal.h>
 
-extern int         Sys_Printf( const char *fmt, ... );
-extern int         g_nUpdateBits;
-extern entity_s   *world_entity;          // map.cpp
-extern selbrush_t  selected_brushes;      // map.cpp
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
-extern void        Brush_BuildWindings( brush_t *def, int bFull );
-extern void        Select_Deselect( int a1 );
-extern void        CreateEntityFromName( const char *str );
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value );
-extern void        Undo_ClearRedo();
-extern void        Undo_GeneralStart( const char *operation );
-extern void        Undo_AddEntity_W( entity_s *e );                       // undo.cpp 0x45E990
 extern void        Undo_KiwiMarkCreated( brush_t *def );                  // undo.cpp (KIWI tail)
-extern void        Undo_End();
-extern void        MarkMapModified();
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                             int commandId );
-extern void        Ed_EnsureCurrentMaterial_Kiwi();
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );
-extern ImGuiID     ImGuiShell_DockRoot();
-extern camera_s   *Ed_Camera();
 extern void        Radiant_SetProjectMapsPath( const char *mapPath );
 
 namespace
@@ -1097,7 +1076,6 @@ bool KiwiModelBrowser_InsertPrefab( const char *relativePath )
     if ( root.empty() ) return false;
     if ( root.back() != '/' ) root += '/';
     const std::string full = FullPrefabPath( root + relativePath );
-    extern char currentmap[];
     const std::string current = FullPrefabPath( currentmap );
     if ( full.size() <= root.size() || _strnicmp( full.c_str(), root.c_str(), root.size() )
       || full.size() < 4 || _stricmp( full.c_str() + full.size() - 4, ".map" )

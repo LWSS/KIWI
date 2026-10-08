@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include "kiwi_vec.h"               // KIWI_PI
+
 struct ray_t;                       // kiwi_pick.h
 struct pick_result_t;               // kiwi_pick.h
 struct selbrush_t;                  // qe3.h:31 (the brush INSTANCE / list node)
@@ -42,11 +44,11 @@ class  KiwiEditorCommand;           // kiwi_command.h
 #define KCON_DBLCLICK_MS     400u
 #define KCON_DBLCLICK_SLOP_PX 4     // per axis, in pixels
 
-// Shared spellings prevent precision drift between construction paths.
-#define KCON_PI              3.14159265358979f
-#define KCON_TWO_PI          6.283185307179586f
-#define KCON_DEG2RAD         0.01745329252f
-#define KCON_RAD2DEG         57.29577951308232f
+// Float forms of kiwi_vec.h's constants for the construction paths.
+#define KCON_PI              ( (float)KIWI_PI )
+#define KCON_TWO_PI          ( (float)( 2.0 * KIWI_PI ) )
+#define KCON_DEG2RAD         ( (float)KIWI_DEG2RAD )
+#define KCON_RAD2DEG         ( (float)KIWI_RAD2DEG )
 
 // Working-plane indicator dimensions are screen-space, not world-space.
 #define KCON_PLANE_HALF_PIXELS  110.0f
@@ -265,7 +267,6 @@ int         KiwiCon_NewGroup( const char *name );
 // Declared groups stay addressable even when empty.
 int         KiwiCon_GroupCount();
 int         KiwiCon_GroupIdAt( int i );
-bool        KiwiCon_GroupExists( int group );
 const char *KiwiCon_GroupName( int group );          // "" for an unknown id
 void        KiwiCon_SetGroupName( int group, const char *name );
 // Dissolve a group and return all members to ungrouped.
@@ -305,9 +306,6 @@ bool KiwiCon_SetPlaneFromSelectedFace();
 // Build from winding center/normal/longest edge. `requireReach` rejects a face
 // outside cursor reach. The caller separately decides whether to mark explicit.
 bool KiwiCon_SetPlaneFromFace( selbrush_t *node, int faceIndex, bool requireReach );
-// Quantize the view direction to a world-axis plane at the current offset.
-// This named operation is not an AutoPlaneForTool rung.
-bool KiwiCon_SetPlaneFromViewDominantAxis();
 // Tool-start invariant: an EXPLICIT plane stands; an armed single selected face
 // is consumed once and marked explicit; otherwise derive a zero-height default.
 // Never inherit an ambient face/object/view offset: an invisible persistent plane
@@ -325,7 +323,6 @@ void KiwiCon_DefaultPlaneForView();
 // and marking intent are separate operations so tool state cannot latch a plane.
 void        KiwiCon_MarkPlaneExplicit( const char *desc );
 bool        KiwiCon_PlaneIsExplicit();
-const char *KiwiCon_PlaneDesc();          // "" when the plane is the default
 // Live description is the explicit label or the named default plane.
 const char *KiwiCon_PlaneDescLive();
 // Drop the latch and re-derive the default; Space over empty space uses this.
@@ -343,9 +340,6 @@ void KiwiCon_SetToolSides( int sides );
 
 bool KiwiCon_ShowConstruction();
 void KiwiCon_SetShowConstruction( bool on );
-
-// True for any active drawing chain; plane-aware snapping uses PlanePlacement.
-bool KiwiCon_ToolActive();
 
 // PlanePlacement is true only for shapes that must remain planar: planar draw
 // tools and planar primitives. Free line/polyline/spline tools keep it false.

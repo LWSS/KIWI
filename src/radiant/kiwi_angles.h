@@ -6,6 +6,7 @@
 // [0, 360), roll in (-180, 180]); a turn composes as axis * rotM (Select_RotateFixedSize).
 
 #include <math.h>
+#include "kiwi_vec.h"   // KIWI_PI
 
 // sin / cos of degrees, exact at multiples of 90 (cos of 90 deg in radians is 6e-17, not 0).
 inline void KiwiAng_SinCos( double deg, double *s, double *c )
@@ -17,7 +18,7 @@ inline void KiwiAng_SinCos( double deg, double *s, double *c )
     if ( r == 90.0 )  { *s =  1.0; *c =  0.0; return; }
     if ( r == 180.0 ) { *s =  0.0; *c = -1.0; return; }
     if ( r == 270.0 ) { *s = -1.0; *c =  0.0; return; }
-    const double rad = r * ( 3.14159265358979323846 / 180.0 );
+    const double rad = r * KIWI_DEG2RAD;
     *s = sin( rad );
     *c = cos( rad );
 }
@@ -35,7 +36,7 @@ inline void KiwiAng_ToAxis( const double ang[3], double axis[3][3] )
 
 inline void KiwiAng_FromAxis( const double axis[3][3], double ang[3] )
 {
-    const double r2d = 180.0 / 3.14159265358979323846;
+    const double r2d = KIWI_RAD2DEG;
     const double *f  = axis[0];
     if ( fabs( f[0] ) < 1.0e-12 && fabs( f[1] ) < 1.0e-12 )
     {

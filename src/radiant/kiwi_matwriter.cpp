@@ -6,14 +6,13 @@
 #include <universal/com_files.h>
 
 #include "kiwi_matwriter.h"
+#include "kiwi_ported.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
 #include <vector>
-
-extern int  Sys_Printf( const char *fmt, ... );
 
 // All written offsets are sizeof-derived; these catch layout drift at its source.
 static_assert( sizeof( MaterialInfoRaw )        == 0x28, "MaterialInfoRaw must be 40 bytes" );
@@ -645,18 +644,40 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
 
     // raw/ rather than fs_gamedir ("main"): the map compilers' searchpaths are
     // raw/raw_shared/devraw only, so an import into main/ is invisible to them.
-    const int h = FS_FOpenFileWriteToDir( qpath, "raw" );
+    // KIWI: through a tmp beside it - a failed overwrite used to truncate, then delete, the original.
+    return KiwiFS_WriteRawAtomic( qpath, &out[0], (unsigned)out.size(), err, errSz );
+}
+
+bool KiwiFS_WriteRawAtomic( const char *qpath, const void *data, unsigned size, char *err, size_t errSz )
+{
+    char tmpQ[160];
+    _snprintf( tmpQ, sizeof( tmpQ ), "%s.tmp", qpath );
+    tmpQ[sizeof( tmpQ ) - 1] = '\0';
+
+    const int h = FS_FOpenFileWriteToDir( tmpQ, "raw" );
     if ( !h )
     {
-        SetErr( err, errSz, "could not open '%s' for writing", qpath );
+        SetErr( err, errSz, "could not open '%s' for writing", tmpQ );
         return false;
     }
-    const unsigned wrote = FS_Write( (const char *)&out[0], (unsigned)out.size(), h );
+    const unsigned wrote = FS_Write( (const char *)data, size, h );
     FS_FCloseFile( h );
-    if ( wrote != (unsigned)out.size() )
+    if ( wrote != size )
     {
-        FS_DeleteInDir( qpath, (char *)"raw" );
-        SetErr( err, errSz, "short write to '%s' (%u of %u bytes)", qpath, wrote, (unsigned)out.size() );
+        FS_DeleteInDir( tmpQ, (char *)"raw" );
+        SetErr( err, errSz, "short write to '%s' (%u of %u bytes); '%s' is unchanged", tmpQ, wrote, size, qpath );
+        return false;
+    }
+
+    // FS_FOpenFileWriteToDir's own root (fs_homepath), so tmp and destination share a volume.
+    char tmpOs[MAX_OSPATH], dstOs[MAX_OSPATH];
+    FS_BuildOSPath( fs_homepath->current.string, "raw", tmpQ, tmpOs );
+    FS_BuildOSPath( fs_homepath->current.string, "raw", qpath, dstOs );
+    if ( !::MoveFileExA( tmpOs, dstOs, MOVEFILE_REPLACE_EXISTING ) )
+    {
+        const unsigned long code = ::GetLastError();
+        FS_DeleteInDir( tmpQ, (char *)"raw" );
+        SetErr( err, errSz, "could not replace '%s' (error %lu); it is unchanged", qpath, code );
         return false;
     }
     return true;

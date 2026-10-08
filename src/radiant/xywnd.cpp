@@ -21,27 +21,21 @@ enum { YZ = ED_VIEW_YZ, XZ = ED_VIEW_XZ, XY = ED_VIEW_XY };   // the binary's ba
 #include "kiwi_viewdirty.h"        // KiwiViewDirty_Mark — re-arm on a bailed render
 #include "kiwi_camera.h"           // KiwiCam_MarkerViewpoint — the camera icon's anchor
 #include "kiwi_light.h"            // selected-light radius and cone overlays
+#include "kiwi_floatsnap.h"        // KiwiFloor_Fistp
+#include "kiwi_ported.h"           // KIWI: shared engine/editor externs
 #include <math.h>
 #include <vector>                   // XY_ContextMenu Layers submenu — distinct layer-name set
 #include <string>                   // (std::string / std::vector; <algorithm> already in stdafx)
 
 // Editor globals defined elsewhere in the radiant target.
-extern float grid_sizes[];                 // engine_stubs.cpp  (IDB 0x6dde5c)
-extern float region_mins[3];               // map.cpp           (IDB 0x739c14)
-extern float region_maxs[3];               // map.cpp           (IDB 0x739d24)
-extern char  Byte4PackPixelColor(float *from, GfxColor *out);  // engine_stubs.cpp (IDB 0x402ac0)
+extern float region_mins[3];               // map.cpp           (0x739c14)
+extern float region_maxs[3];               // map.cpp           (0x739d24)
 
-extern void Radiant_FL_Log( const char *fmt, ... );    // mainfrm.cpp (First-Light trace log)
+extern int   g_bCrossHairs;                // engine_stubs.cpp  (0x25d5b06) — Shift+X toggle
 
-// U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp).  Never NULL — it replaces every
-// `g_pParentWnd->m_pCamWnd->camera` reach-through this file used to make.
-extern camera_s *Ed_Camera();               // camwnd.cpp
-
-extern int   g_bCrossHairs;                // engine_stubs.cpp  (IDB 0x25d5b06) — Shift+X toggle
-
-// g_tdp (IDB 0x23f1634) — the snapped world point under the cursor. Maintained by
-// CXYWnd::OnMouseMove (0x464b10, every non-RMB move) and consumed by DrawCrosshair
-// (0x4655d0) and the binary's clip-point / point-file hover proximity tests.
+// g_tdp (0x23f1634) — the snapped world point under the cursor. Maintained by
+// CXYWnd::OnMouseMove (every non-RMB move) and consumed by DrawCrosshair and the
+// binary's clip-point / point-file hover proximity tests.
 float g_tdp[3] = { 0.0f, 0.0f, 0.0f };
 
 extern void Draw_PatchSelectPoints();           // brush.cpp 0x40c250 (unselected candidates, green)
@@ -75,11 +69,11 @@ void XY_SetupProjectionMtx(GfxMatrix *mtx, float width, float height, float dept
     mtx->m[3][3] = 1.0f;
 }
 
-// XY_SetupScene - CXYWnd::SetupScene 0x5064c0 + the org/axis prologue of XY_Draw 0x46ce20.
+// XY_SetupScene - CXYWnd::SetupScene 0x5064c0 + the org/axis prologue of XY_Draw.
 // The 3x3 view axis is a permutation/sign pattern of the world axes chosen by the view plane
 // (ED_VIEW_YZ=0 / XZ=1 / XY=2); the ortho projection is sized by the live target-window dims
 // divided by the view scale, depth -262144.
-// KISAK: R_Ed_ProjectionWouldBeValid is the defensive twin of Cam_SetupScene's guard - the
+// R_Ed_ProjectionWouldBeValid is the defensive twin of Cam_SetupScene's guard - the
 // axis-aligned ortho VP is structurally immune, so it never trips for the 2D views.
 bool XY_SetupScene(const XYViewState *v)
 {
@@ -143,7 +137,7 @@ static inline void edGridLine(GfxPointVertex *verts, int &n, int d1, int d2, int
     n += 2;
 }
 
-// Coordinate / view-name text (IDB XY_DrawGrid tail 0x4686a0).  The editor font is registered
+// Coordinate / view-name text (the tail of XY_DrawGrid).  The editor font is registered
 // by R_BeginRegistrationInternal (fonts/qerfont -> g_qeglobals.d_font_list).  Text origin is a
 // world position; xPixelStep/yPixelStep are the per-text-pixel world basis vectors, so glyphs
 // are screen-aligned at the view scale.  The top X ruler is drawn rotated (xPixelStep along
@@ -221,8 +215,8 @@ static void XY_DrawCoordText(const XYViewState *wnd,
 }
 
 // XY_DrawGrid - CXYWnd::XY_DrawGrid 0x4686a0: grid lines + coordinate/view-name text.
-// KISAK: the minor/major MATERIAL-COLOR batching diverges from the binary's single
-// per-vertex-colour buffer - the port's $line technique ignores vertex colour.
+// The minor/major MATERIAL-COLOR batching diverges from the binary's single per-vertex-colour
+// buffer - the port's $line technique ignores vertex colour.
 void XY_DrawGrid(const XYViewState *wnd)
 {
     const int nDim1 = (wnd->viewType == ED_VIEW_YZ);
@@ -321,38 +315,33 @@ void XY_DrawGrid(const XYViewState *wnd)
     R_AddCmdSetMaterialColor(s_edWhite);   // restore for the brush/overlay passes that follow
   } // d_showgrid
 
-    // Coordinate labels + view-name (IDB XY_DrawGrid text block); xyShowFlags 0x20 hides them,
+    // Coordinate labels + view-name; xyShowFlags 0x20 hides them,
     // independently of the grid lines.
     if ((g_qeglobals.d_savedinfo.d_xyShowFlags & 0x20) == 0)
         XY_DrawCoordText(wnd, xmin, xmax, ymin, ymax, stepSize, nDim1, nDim2, nDim3, w, h);
 }
 
-// DrawZIcon (IDB 0x469d50) - the XY "player indicator": a translucent-blue 16x16 fill quad
+// DrawZIcon (0x469d50) - the XY "player indicator": a translucent-blue 16x16 fill quad
 // plus a box outline with a "Z", at the m_Camera marker position.
-// KISAK: depth is ED_GRID_DEPTH(-131072) vs the binary's +131072 (cosmetic sign flip, kept so
+// Depth is ED_GRID_DEPTH(-131072) vs the binary's +131072 (cosmetic sign flip, kept so
 // the fill stays coplanar with the port's outline - see DrawCameraIcon).
-// The XY camera-icon origin (IDB m_Camera.origin0/1 @ 0x241a5a4/0x241a5a8) - written by the
+// The XY camera-icon origin (the binary's m_Camera.origin0/1, 0x241a5a4/0x241a5a8) - written by the
 // Shift+click camera-set dispatch below; NOT the live CCamWnd fly-cam origin (a separate value
 // moved by WASD/Ctrl+click).  Defined here because DrawZIcon reads it.
 static float m_Camera_origin0 = 0.0f;
 static float m_Camera_origin1 = 0.0f;
-extern void __cdecl R_AddRenderCmdDrawTris(                       // (also declared near DrawSelectionBox)
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float (*xyzw)[4], const float (*normal)[3], float *color,
-    const float (*st)[2] );
 static void DrawZIcon( const XYViewState *wnd )
 {
     if ( wnd->viewType != ED_VIEW_XY )       // the marker is an XY-plane (top-view) concept
         return;
-    const float cx = m_Camera_origin0;       // IDB m_Camera.origin0 (Shift+click marker), NOT the fly-cam
+    const float cx = m_Camera_origin0;       // the Shift+click marker, NOT the fly-cam
     const float cy = m_Camera_origin1;
 
     GfxColor col;
-    static float s_blue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE160 (camera-icon blue)
+    static float s_blue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   // camera-icon blue
     Byte4PackPixelColor( s_blue, &col );
 
-    // Translucent blue FILL quad (IDB 0x469d6e), drawn before the outline.
+    // Translucent blue FILL quad, drawn before the outline.
     {
         const float z = ED_GRID_DEPTH;
         float quad[4][4] = {
@@ -362,12 +351,12 @@ static void DrawZIcon( const XYViewState *wnd )
             { cx - 8, cy + 8, z, 1.0f },
         };
         float normal[4][3] = { {0,0,1}, {0,0,1}, {0,0,1}, {0,0,1} };
-        float st[4][2]     = { {0,0}, {1,0}, {1,1}, {0,1} };   // IDB xyzw[28..35]
-        static const uint16_t fillIdx[6] = { 1, 0, 2, 2, 0, 3 };   // IDB indices[0..5]
+        float st[4][2]     = { {0,0}, {1,0}, {1,1}, {0,1} };
+        static const uint16_t fillIdx[6] = { 1, 0, 2, 2, 0, 3 };
 
         GfxColor fillCol;
         Byte4PackPixelColor( s_blue, &fillCol );
-        fillCol.array[3] = 64;                                 // IDB: v13.array[3] = 64 (alpha)
+        fillCol.array[3] = 64;                                 // alpha
         float colorRepl = *(float *)&fillCol.packed;
         float color[4] = { colorRepl, colorRepl, colorRepl, colorRepl };
 
@@ -392,7 +381,7 @@ static void DrawZIcon( const XYViewState *wnd )
 // DrawCameraIcon - CXYWnd::DrawCameraIcon 0x469a40.  The 3D camera's position+facing marker in
 // a 2D view: a 4-corner diamond body + a diagonal + a 2-line FOV cone along the facing angle
 // (yaw for XY, pitch for XZ/YZ); drawn in all three views, in-plane axes chosen per view.
-// KISAK: out-of-plane depth uses ED_GRID_DEPTH(-131072) vs the binary's +131072 (cosmetic).
+// Out-of-plane depth uses ED_GRID_DEPTH(-131072) vs the binary's +131072 (cosmetic).
 // No null-guard, matching the binary - reached only post-init from OnPaint.
 //
 // ── KIWI-UX DEVIATION (shakeout B) — RED, FIXED SCREEN SIZE ────────────────────
@@ -500,12 +489,12 @@ void XY_DrawBlockGrid(const XYViewState *wnd)
     if ( blockPx < 12.0f )
         return;
 
-    const int nDim1 = (wnd->viewType == ED_VIEW_YZ);     // horizontal world axis (v54)
-    const int nDim2 = (wnd->viewType != ED_VIEW_XY) + 1; // vertical world axis   (v7)
-    const int nDim3 = 3 - nDim2 - nDim1;                 // depth (out-of-screen)  (v8)
+    const int nDim1 = (wnd->viewType == ED_VIEW_YZ);     // horizontal world axis
+    const int nDim2 = (wnd->viewType != ED_VIEW_XY) + 1; // vertical world axis
+    const int nDim3 = 3 - nDim2 - nDim1;                 // depth (out-of-screen)
 
-    const float halfW = (float)(int)((double)wnd->width  * (0.5 / wnd->scale));  // packed
-    const float halfH = (float)(int)((double)wnd->height * (0.5 / wnd->scale));  // v50
+    const float halfW = (float)(int)((double)wnd->width  * (0.5 / wnd->scale));
+    const float halfH = (float)(int)((double)wnd->height * (0.5 / wnd->scale));
 
     // Visible block extents on each 2D axis, clamped to the region, snapped to 1024.
     float hMin = wnd->origin[nDim1] - halfW;
@@ -540,12 +529,11 @@ void XY_DrawBlockGrid(const XYViewState *wnd)
     if (vertCount > 0)
         R_AddCmd_Line3D((short)(vertCount / 2), 2, verts);
 
-    // Block-index labels at each block centre (IDB text loop 0x4694da+): bx/by come from the
-    // block START coord, not the +512 centre the label is POSITIONED at.  The binary rounds
-    // with inline fistp (0x46950e/0x469521) - round-to-nearest, NOT the (int) truncation
-    // hex-rays prints.  PRECISION TRAP: the binary stores h/1024 to a FLOAT slot, then
-    // subtracts dbl_6F4178 = 0.4999999990686774 in DOUBLE before the fistp.  Written as a
-    // float literal that constant collapses to exactly 0.5f, which turns every exact block
+    // Block-index labels at each block centre: bx/by come from the block START coord, not
+    // the +512 centre the label is POSITIONED at.  The binary rounds with fistp
+    // (round-to-nearest, NOT (int) truncation).  PRECISION TRAP: h/1024 is a FLOAT, then
+    // 0.4999999990686774 is subtracted in DOUBLE before the fistp.  Written as a float
+    // literal that constant collapses to exactly 0.5f, which turns every exact block
     // multiple into a round-half-to-even TIE (odd block indices came out one too low) - so
     // the subtraction must stay in double.
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
@@ -571,10 +559,10 @@ void XY_DrawBlockGrid(const XYViewState *wnd)
 
     for (float h = hMin; h < hMax; h += 1024.0f)
     {
-        const int bx = (int)lrint((double)(h * 0.0009765625f) - 0.4999999990686774);
+        const int bx = (int)KiwiFloor_Fistp(h * 0.0009765625f);
         for (float v = vMin; v < vMax; v += 1024.0f)
         {
-            const int by = (int)lrint((double)(v * 0.0009765625f) - 0.4999999990686774);
+            const int by = (int)KiwiFloor_Fistp(v * 0.0009765625f);
             sprintf(text, "%i,%i", bx, by);
             org[nDim1] = (h + 512.0f) + halfX;
             org[nDim2] = (v + 512.0f) + halfY;
@@ -589,30 +577,15 @@ void XY_DrawBlockGrid(const XYViewState *wnd)
 // against the view rect, FilterBrush it, DrawBrush its wireframe (technique 29, width 1), then
 // the entity-name label and the per-classtype radius overlay; selected brushes draw on top.
 // ─────────────────────────────────────────────────────────────────────────────
-extern selbrush_t active_brushes;                                     // map.cpp (0x23F189C)
-extern selbrush_t selected_brushes;                                   // engine_stubs (0x23F1864)
-extern float      world_orient_matrix[4][3];                          // entity.cpp (identity)
-extern char       FilterBrush(selbrush_t *b, int fastDrag);           // filters.cpp (0x46A1F0)
-extern entity_s  *world_entity;                                       // engine_stubs.cpp (0x25D5B30)
-extern char      *ValueForKey2( const entity_s *e, const char *key);               // entity.cpp (0x4825C0)
-extern entity_s   entityInsts;                                        // entity.cpp (0x23F1748) — entity INSTANCE list head
-extern bool       HasKeyValuePair(entity_s_def *e, const char *key);  // entity.cpp (0x4838B0)
-extern float      Vec3Normalize_R(float *v);                          // engine_stubs.cpp (0x40A5E0) — returns length
 extern void       KiwiEntArrow_DrawXY( int viewType, float scale );   // KIWI-UX: Declare the bounded selected-entity 2D overlay.
 extern void       KiwiRefImage_DrawXY( int viewType, float scale );   // KIWI (REFIMG): editor-only material quads.
 extern void       KiwiFragile_DrawXY( int viewType, float scale );    // KIWI: kiwi_fragile.cpp
-extern int        R_Add3DLine(GfxPointVertex *verts, const orientation_t *orient,
-                              const float *p1, const float *p2, const unsigned int *color,
-                              char width, int vertCount, int maxVertCount);  // draw.cpp (0x40C110)
-void DrawBrush(selbrush_t *b, const orientation_t *orient, int viewType,
-               int technique, GfxColor *col, char width, int drawFlags,
-               const char *layerPrefix);                                 // brush.cpp (0x47afc0)
 
 
-// sub_40CD40 (0x40cd40) - the text-origin HALF-PIXEL SNAP the binary applies before emitting a
+// 0x40cd40 - the text-origin HALF-PIXEL SNAP the binary applies before emitting a
 // label: nudge the two IN-PLANE components (a8 = horizontal, a4 = vertical) of `src` by
 // +0.5/scale when the matching viewport dimension is EVEN; the DEPTH component (a2) is copied
-// unchanged.  Register binding from the call-site disasm: out@eax, a2@edx, src@ecx, a4@esi.
+// unchanged.
 static void Ed_TextHalfPixelSnap( float *out, int a2, const float *src, int a4,
                                   float scale, int width, int height, int a8 )
 {
@@ -625,10 +598,8 @@ static void Ed_TextHalfPixelSnap( float *out, int a2, const float *src, int a4,
 
 // The label-eligibility predicate (DrawBrushEntityName's gate minus the view cull and the
 // names-shown flag): non-world owner, the brush is the owner's REPRESENTATIVE def-brush
-// (def->brushes.prev == IDA brushes.oprev @+0x0C), not hidden (brushFlags & 2), non-empty
+// (def->brushes.prev), not hidden (brushFlags & 2), non-empty
 // "classname".  Shared by the draw and the headless oracle so they cannot drift.
-extern void Assert( const char *file, int line, int type, const char *fmt, ... ); // (also declared below)
-
 static const char *Ed_EntityNameForBrush( selbrush_t *brush )
 {
     entity_s *owner = brush ? brush->owner : nullptr;
@@ -637,7 +608,7 @@ static const char *Ed_EntityNameForBrush( selbrush_t *brush )
     entity_s_def *def = (entity_s_def *)owner->def;
     if ( !def )
         return nullptr;
-    brush_t *repBrush = (brush_t *)def->brushes.prev;   // IDA brushes.oprev (+0x0C)
+    brush_t *repBrush = (brush_t *)def->brushes.prev;
     if ( brush->def != repBrush || ( brush->brushFlags & 2 ) != 0 )
         return nullptr;
     const char *name = ValueForKey2( def, "classname" );
@@ -646,10 +617,10 @@ static const char *Ed_EntityNameForBrush( selbrush_t *brush )
 
 // Ed_DrawBrushEntityName - DrawBrushEntityName 0x46c880.  Draws one non-world entity's
 // "classname" at its def mins + 4 on the two in-plane axes (depth 131072), but only for the
-// entity's REPRESENTATIVE def-brush (def->brushes.prev, IDA brushes.oprev +0x0C) so a
-// multi-brush func_* entity is labelled exactly once.  Called per-brush from BOTH XY_Draw
-// loops (active 0x46d0fe and selected 0x46d2c9).  Gated on (d_xyShowFlags & 8) == 0.
-// KISAK: the binary passes its caller's `color[4]` local, which in the not-selected loop is
+// entity's REPRESENTATIVE def-brush (def->brushes.prev) so a multi-brush func_* entity is
+// labelled exactly once.  Called per-brush from BOTH XY_Draw loops (active and selected).
+// Gated on (d_xyShowFlags & 8) == 0.
+// The binary passes its caller's `color[4]` local, which in the not-selected loop is
 // UNINITIALISED stack (the source's "// flickering" comment); we pass savedinfo
 // COLOR_GRIDTEXT slot 8 for both loops.
 static void Ed_DrawBrushEntityName( int nView, selbrush_t *b, float scale,
@@ -663,24 +634,24 @@ static void Ed_DrawBrushEntityName( int nView, selbrush_t *b, float scale,
     if ( ( g_qeglobals.d_savedinfo.d_xyShowFlags & 8 ) != 0 )   // 0x8 = View→Show→Names hidden
         return;
 
-    // IDB 0x46c8c5: owner-consistency for ANY non-world b (before the representative gate).
+    // owner-consistency for ANY non-world b (before the representative gate).
     entity_s *nameOwner = b ? b->owner : nullptr;
     if ( nameOwner && nameOwner != world_entity )
+    {
         iassert( b->owner->def == b->def->owner );   // XYWnd.cpp:3602
+    }
 
     const char *name = Ed_EntityNameForBrush( b );          // representative-b gate
     if ( !name )
         return;
 
-    iassert( b->owner->def == b->def->owner );   // XYWnd.cpp:3609 (0x46c8fe)
+    iassert( b->owner->def == b->def->owner );   // XYWnd.cpp:3609
 
-    // Axis layout — the binary's axis_1(horiz/xstep) / axis_2(vert/ystep) / axis_3(depth),
-    // with the CoD4Radiant enum ED_VIEW_YZ=0 / XZ=1 / XY=2:
-    //   axis_1 = (nView==0=YZ)            ; axis_2 = (nView!=2=notXY)+1 ; axis_3 = 3-a2-a1.
+    // Axis layout - horizontal (xstep) / vertical (ystep) / depth, with ED_VIEW_YZ=0 / XZ=1 / XY=2:
     //   XY(2): h=0(X) v=1(Y) d=2(Z) ; XZ(1): h=0(X) v=2(Z) d=1(Y) ; YZ(0): h=1(Y) v=2(Z) d=0(X).
     // Identical to XY_DrawBrushes' nDim1/nDim2/nDim3.
-    const int axisH = ( nView == ED_VIEW_YZ );        // (nView==0)
-    const int axisV = ( nView != ED_VIEW_XY ) + 1;    // (nView!=2)+1
+    const int axisH = ( nView == ED_VIEW_YZ );
+    const int axisV = ( nView != ED_VIEW_XY ) + 1;
     const int axisD = 3 - axisV - axisH;
     brush_t *bd = b->def;
 
@@ -692,10 +663,9 @@ static void Ed_DrawBrushEntityName( int nView, selbrush_t *b, float scale,
     float xPixelStep[3] = { 0, 0, 0 };  xPixelStep[axisH] =  1.0f / scale;
     float yPixelStep[3] = { 0, 0, 0 };  yPixelStep[axisV] = -1.0f / scale;
 
-    // half-pixel snap into `org` (sub_40CD40): width→axisH, height→axisV, depth→axisD.
-    // The binary reads g_pParentWnd->m_pXYWnd->m_nWidth/m_nHeight (the active XY window);
-    // in this per-view draw the current view's own width/height are the faithful values
-    // (and for the XY view they ARE m_pXYWnd's).
+    // half-pixel snap into `org`: width→axisH, height→axisV, depth→axisD.
+    // The binary reads the active XY window's m_nWidth/m_nHeight; this per-view draw uses the
+    // current view's own width/height (for the XY view they ARE m_pXYWnd's).
     float org[3];
     Ed_TextHalfPixelSnap( org, axisD, src, axisV, scale, vWidth, vHeight, axisH );
 
@@ -704,12 +674,12 @@ static void Ed_DrawBrushEntityName( int nView, selbrush_t *b, float scale,
 }
 
 // XY_BrushColor - REDUCED Brush_GetColor2d 0x46CA10 (the brush's 2D wireframe colour).
-// KISAK PORT DEBT: the full Brush_GetColor2d picks frozen-layer (brushflags&0x20)->slot24;
+// PORT DEBT: the full Brush_GetColor2d picks frozen-layer (brushflags&0x20)->slot24;
 // !worldspawn -> func_group(17)/func_cullgroup(18)/misc_model(21)/else eclass->color +
 // Brush_GetEntityLineColor; worldspawn -> weapon-clip(bf&MASK_WEAPONCLIP)->19 / unknown(bf&0x8000004)
 // ->22 / bf&0x8000000->14 / BYTE1(def[1].def)->15 / else COLOR_BRUSHES(9), and copies FOUR
 // floats including alpha.  This keeps only !worldspawn->eclass colour, worldspawn->9, alpha 1.
-// Completing it needs sub_40A130 (colour unpack) + Brush_GetEntityLineColor 0x47aa20 + the
+// Completing it needs 0x40A130 (colour unpack) + Brush_GetEntityLineColor 0x47aa20 + the
 // stride-artifact-prone brushflags offsets.  Cosmetic - selection/geometry unaffected.
 // `outRgba` (optional) hands back the same four floats this function packs, so the model-tint
 // bracket can push them as MATERIAL_COLOR without unpacking the BGRA order again.
@@ -743,44 +713,42 @@ static void XY_BrushColor(selbrush_t *b, GfxColor *out, float *outRgba = nullptr
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  2D-VIEW RADIUS OVERLAY - Ed_DrawRadiusCircle 0x46c030 + the dispatchers 0x46c2b0 /
-//  0x46c360 / 0x46c4d0 / 0x46c710, all called from CXYWnd::XY_Draw.  Dispatch keys on the
+//  2D-VIEW RADIUS OVERLAY - Ed_DrawRadiusCircle + the dispatchers below, all called from
+//  CXYWnd::XY_Draw.  Dispatch keys on the
 //  entity DEF eclass classtype: &1 light -> Ed_DrawLightRadiusXY (circle); &0x20 node_* ->
 //  Ed_DrawNodeRadiusXY (radius + fixedNodeSafeRadius); &0xC0 trigger_radius/disk ->
 //  Ed_DrawNodeRadiusXY; else Ed_DrawColoredRadiusXY (_color + radius).  Lights/nodes/colored
 //  draw only for SELECTED brushes; triggers also draw unselected, plus the badplace/heading
 //  targetname specials.  View-only - never serialised.
 //  INSTANCE-vs-DEF: the radius/_color/height keys live on the entity DEF (owner->def, read
-//  via Entity_GetFloatValueForKey @0x74), NOT the instance.
+//  via Entity_GetFloatValueForKey), NOT the instance.
 // ════════════════════════════════════════════════════════════════════════════
 
-extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );   // entity.cpp (0x4837C0)
 static const char *Ed_EntFirstKey( entity_s *e, const char *key );   // defined below (epair scan)
-extern void Assert( const char *file, int line, int type, const char *fmt, ... ); // (also declared below)
 // script-group single-char team-colour visualization (scriptgroup.cpp): the selected-
-// trigger gate + the 2D-view marker draw (sub_46B110 cluster, wired below in XY_DrawBrushes).
+// trigger gate + the 2D-view marker draw (wired below in XY_DrawBrushes).
 extern bool  ScriptGroup_BrushIsTrigger( selbrush_t *b );            // scriptgroup.cpp 0x453FD0
 extern bool  PrefsDlg_ScriptTeamColorEnabled();                      // prefs.cpp/scriptgroup 0x4560F0
 // (defined at the bottom of this file — relocated from scriptgroup.cpp)
 extern void  ScriptGroup_DrawTeamColorViz( const char *teamColorStr, const float *viewMins,
-                                           const float *viewMaxs, int axis0, int axis1 ); // 0x46B110
+                                           const float *viewMaxs, int axis0, int axis1 );
 
-// Ed_DrawRadiusCircle (IDB 0x46c030) - sweep a 32-gon of `radius` around `center` in the view
+// Ed_DrawRadiusCircle (0x46c030) - sweep a 32-gon of `radius` around `center` in the view
 // plane (amplitude axes by viewType: YZ->Y,Z  XZ->X,Z  XY->X,Y), rotating a unit vector by
 // 2pi/32 each step (na=ca*c+sa*s / sa=c*sa-ca*s / ca=na; first point = center + amp2).
 // Batches via R_Add3DLine -> R_AddCmd_Line3D on `channel`.
 static void Ed_DrawRadiusCircle( const GfxColor *col, const float *center,
                                  int viewType, float radius, char channel )
 {
-    // amp1 / amp2 = the two in-plane amplitude vectors (the binary's v16..v18 / v20..v22).
+    // amp1 / amp2 = the two in-plane amplitude vectors.
     float amp1[3] = { 0.0f, 0.0f, 0.0f };
     float amp2[3] = { 0.0f, 0.0f, 0.0f };
-    if ( viewType == ED_VIEW_YZ )        // *(view+288)==0
+    if ( viewType == ED_VIEW_YZ )
     {
         amp1[1] = radius;                // amp1 = (0,r,0)
         amp2[2] = radius;                // amp2 = (0,0,r)
     }
-    else if ( viewType == ED_VIEW_XZ )   // ==1
+    else if ( viewType == ED_VIEW_XZ )
     {
         amp1[0] = radius;                // amp1 = (r,0,0)
         amp2[2] = radius;                // amp2 = (0,0,r)
@@ -794,14 +762,14 @@ static void Ed_DrawRadiusCircle( const GfxColor *col, const float *center,
     const float step = 0.19634955f;      // 2*pi/32
     const float c = cosf( step );
     const float s = sinf( step );
-    float ca = 0.0f, sa = 1.0f;          // v23 / v24 (rotating unit vector; starts at amp2)
+    float ca = 0.0f, sa = 1.0f;          // rotating unit vector; starts at amp2
 
     const orientation_t *ident = reinterpret_cast<const orientation_t *>( world_orient_matrix );
     GfxPointVertex verts[1024];
     int vertCount = 0;
 
     // The very first point is center + amp2 (ca=0, sa=1) — the binary pre-adds amp2 to
-    // the running point before the loop (v11 = *a2 + v20, ...).
+    // the running point before the loop.
     float prev[3] = { center[0] + amp2[0], center[1] + amp2[1], center[2] + amp2[2] };
 
     for ( int i = 0; i < 32; ++i )
@@ -825,7 +793,7 @@ static void Ed_DrawRadiusCircle( const GfxColor *col, const float *center,
     }
 }
 
-// Ed_DrawNodeRadiusShape (IDB 0x46c4d0) - XY view -> the round radius circle; XZ/YZ -> a
+// Ed_DrawNodeRadiusShape (0x46c4d0) - XY view -> the round radius circle; XZ/YZ -> a
 // 4-line axis-aligned box of `radius` half-width on the in-plane horizontal axis
 // (h = viewType != XZ) with the vertical extent given by the z-offsets zLo/zHi.
 static void Ed_DrawNodeRadiusShape( int m_nViewType, const float *center, char channel,
@@ -841,22 +809,22 @@ static void Ed_DrawNodeRadiusShape( int m_nViewType, const float *center, char c
     }
 
     // box branch (XZ=1 -> horizontal axis 0; YZ=0 -> horizontal axis 1)
-    const int h = ( m_nViewType != ED_VIEW_XZ );   // v9 = (*(view+288) != 1)
+    const int h = ( m_nViewType != ED_VIEW_XZ );
 
-    float p0[3] = { center[0], center[1], center[2] };   // v19
-    float p1[3] = { center[0], center[1], center[2] };   // v17
-    float p2[3] = { center[0], center[1], center[2] };   // v21
-    float p3[3] = { center[0], center[1], center[2] };   // v15
+    float p0[3] = { center[0], center[1], center[2] };
+    float p1[3] = { center[0], center[1], center[2] };
+    float p2[3] = { center[0], center[1], center[2] };
+    float p3[3] = { center[0], center[1], center[2] };
 
     p0[h] -= radius;
     p1[h] += radius;
     p2[h] += radius;
     p3[h] -= radius;
 
-    p0[2] += zHi;   // v20 += a6
-    p1[2] += zHi;   // v18 += a6
-    p2[2] += zLo;   // v22 += a5
-    p3[2] += zLo;   // v16 += a5
+    p0[2] += zHi;
+    p1[2] += zHi;
+    p2[2] += zLo;
+    p3[2] += zLo;
 
     const orientation_t *ident = reinterpret_cast<const orientation_t *>( world_orient_matrix );
     GfxPointVertex verts[8];
@@ -871,38 +839,40 @@ static void Ed_DrawNodeRadiusShape( int m_nViewType, const float *center, char c
     }
 }
 
-// ── Ed_DrawLightRadiusXY (IDB 0x46c2b0) — light "radius" circle (classtype&1) ────
+// ── Ed_DrawLightRadiusXY (0x46c2b0) — light "radius" circle (classtype&1) ────────
 static void Ed_DrawLightRadiusXY( selbrush_t *brush, const GfxColor *col, int viewType )
 {
-    brush_t  *def   = brush->def;                                   // *(b+0x14)
-    entity_s *eDef  = (entity_s *)brush->owner->def;  // *(*(b+8)+8) = owner->def
-    // center = midpoint of the DEF brush bbox (def+0x20 mins, +0x2C maxs)
+    brush_t  *def   = brush->def;
+    entity_s *eDef  = (entity_s *)brush->owner->def;
+    // center = midpoint of the DEF brush bbox
     float center[3] = { ( def->mins[0] + def->maxs[0] ) * 0.5f,
                         ( def->mins[1] + def->maxs[1] ) * 0.5f,
                         ( def->mins[2] + def->maxs[2] ) * 0.5f };
-    iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c2f9 (L0)
+    iassert( brush->owner->def == brush->def->owner );
     // the binary reads (and discards) the "light" key first, then "radius" — channel 1.
     Entity_GetFloatValueForKey( eDef, "light" );
     float radius = Entity_GetFloatValueForKey( eDef, "radius" );
     Ed_DrawRadiusCircle( col, center, viewType, radius, 1 );
 }
 
-// ── Ed_DrawColoredRadiusXY (IDB 0x46c360) — the "else" branch: _color + radius ───
+// ── Ed_DrawColoredRadiusXY (0x46c360) — the "else" branch: _color + radius ───────
 // Walks the entity DEF's epairs for "_color" (3 floats), packs a GfxColor, draws the
 // def-bbox-centred radius circle if "radius" != 0.
 static void Ed_DrawColoredRadiusXY( selbrush_t *brush, int viewType, char channel )
 {
-    entity_s *eDef = (entity_s *)brush->owner->def;   // *(*(b+8)+8)
+    entity_s *eDef = (entity_s *)brush->owner->def;
 
-    float rgb[3] = { 0.2f, 0.5f, 0.34999999f };                    // binary defaults (v9/v10/v11)
+    float rgb[3] = { 0.2f, 0.5f, 0.34999999f };                    // binary defaults
     const char *colorString = nullptr;
     bool foundColor = false;
     for ( epair_t *ep = eDef->epairs; ep; ep = ep->next )
         if ( !_stricmp( ep->key, "_color" ) ) { colorString = ep->value; foundColor = true; break; }
-    // IDB 0x46c3a8 asserts the found _color value is non-NULL (binary then sscanfs it); the
+    // The binary asserts the found _color value is non-NULL, then sscanfs it; the
     // if(colorString) guard below still avoids sscanf(NULL) in release.
     if ( foundColor )
+    {
         iassert( colorString );   // XYWnd.cpp:3459
+    }
     if ( colorString )
     {
         float r, g, bl;
@@ -914,25 +884,25 @@ static void Ed_DrawColoredRadiusXY( selbrush_t *brush, int viewType, char channe
     GfxColor col;
     Byte4PackPixelColor( rgb, &col );
 
-    brush_t *def = brush->def;                                         // *(b+0x14)
+    brush_t *def = brush->def;
     float center[3] = { ( def->mins[0] + def->maxs[0] ) * 0.5f,
                         ( def->mins[1] + def->maxs[1] ) * 0.5f,
                         ( def->mins[2] + def->maxs[2] ) * 0.5f };
-    iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c44a (L0)
+    iassert( brush->owner->def == brush->def->owner );
     float radius = Entity_GetFloatValueForKey( eDef, "radius" );
     if ( radius != 0.0f )
         Ed_DrawRadiusCircle( &col, center, viewType, radius, channel );
 }
 
-// ── Ed_DrawNodeRadiusXY (IDB 0x46c710) — node_* (classtype&0x20) and trigger_radius/
+// ── Ed_DrawNodeRadiusXY (0x46c710) — node_* (classtype&0x20) and trigger_radius/
 //    trigger_disk (classtype&0xC0): draws the "radius" AND "fixedNodeSafeRadius" shapes.
 //   Gate: (radius > 0 || safeRadius > 0) && !(brushFlags & 2).  height = trigger_disk
 //   (classtype & 0x80) -> 32, else "height" > 0, else 80.  center = the DEF origin with z
 //   offset by eclass.mins[2].  The safeRadius shape uses the fixed colour 0x40000000.
 static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, const GfxColor *col )
 {
-    entity_s_def *eDef = (entity_s_def *)brush->owner->def;  // *(b[2]+...) = owner->def
-    iassert( brush->owner->def == brush->def->owner );      // IDB 0x46c71a (L0)
+    entity_s_def *eDef = (entity_s_def *)brush->owner->def;
+    iassert( brush->owner->def == brush->def->owner );
     float radius     = Entity_GetFloatValueForKey( eDef, "radius" );
     float safeRadius = Entity_GetFloatValueForKey( eDef, "fixedNodeSafeRadius" );
 
@@ -953,7 +923,7 @@ static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, 
             height = 80.0f;
     }
 
-    // center = entity DEF origin (+0x68) with z offset by eclass.mins[2] (eclass+0x14).
+    // center = entity DEF origin with z offset by eclass.mins[2].
     float center[3] = { eDef->origin[0],
                         eDef->origin[1],
                         ec->mins[2] + eDef->origin[2] };
@@ -962,7 +932,7 @@ static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, 
         Ed_DrawNodeRadiusShape( viewType, center, channel, radius, 0.0f, height, col );
     if ( safeRadius > 0.0f )
     {
-        // the binary draws fixedNodeSafeRadius with a fixed colour (a4 = 0x40000000 packed).
+        // the binary draws fixedNodeSafeRadius with a fixed colour (0x40000000 packed).
         GfxColor safeCol;
         *(unsigned int *)&safeCol = 0x40000000u;
         Ed_DrawNodeRadiusShape( viewType, center, channel, safeRadius, 0.0f, height, &safeCol );
@@ -971,7 +941,7 @@ static void Ed_DrawNodeRadiusXY( char channel, selbrush_t *brush, int viewType, 
 
 // Dispatch the per-entity radius overlay for a SELECTED brush (the binary's selected
 // loop in XY_Draw): light / node / trigger / colored, keyed on the DEF eclass classtype.
-// `col` is the selection-highlight colour (the binary's gfx_col).
+// `col` is the selection-highlight colour.
 static void Ed_DrawSelectedRadius( selbrush_t *b, const GfxColor *col, int viewType, char channel )
 {
     entity_s *owner = b->owner;
@@ -994,10 +964,6 @@ static void Ed_DrawSelectedRadius( selbrush_t *b, const GfxColor *col, int viewT
 
 static inline selbrush_t *Ed_EntFirstBrushInst( entity_s *e );   // defined below
 
-// The prefab-walk counters, shared with the camera (brush.cpp).
-extern int g_edPrefabPrefabsWalked;                     // brush.cpp:7061
-extern int g_edPrefabBrushesWalked;                     // brush.cpp:7062
-extern int g_edPrefabBrushesDrawn;                      // brush.cpp:7064
 
 // The 2D view's per-entity model tint travels as a flat MATERIAL_COLOR, not a per-vertex
 // stamp: the stamp forces a writable tempSkinBuf copy (skinnedVert != verts0), which
@@ -1066,14 +1032,10 @@ void XY_DrawBrushes(const XYViewState *v)
     if ( !active_brushes.next )            // sentinel list not bootstrapped → no map loaded
         return;
 
-    // open this view's prefab-walk window (published at the tail).
-    g_edPrefabPrefabsWalked = g_edPrefabBrushesWalked = 0;
-    g_edPrefabBrushesDrawn = 0;
-
     const int nDim1 = (v->viewType == ED_VIEW_YZ);     // horizontal world axis
     const int nDim2 = (v->viewType != ED_VIEW_XY) + 1; // vertical world axis
 
-    // Visible view rectangle in world units (XY_Draw's v47/tdp/v48/v52).
+    // Visible view rectangle in world units.
     const float half = 0.5f / v->scale;
     const float hw   = (float)v->width  * half;
     const float hh   = (float)v->height * half;
@@ -1088,12 +1050,12 @@ void XY_DrawBrushes(const XYViewState *v)
     // see Ed_DrawBrushEntityName's text-colour divergence note.
     const float *labelColor = g_qeglobals.d_savedinfo.colors[8];
 
-    // 0x46cfe2 - XY_Draw opens the ACTIVE-brush pass with R_SortMaterials.  [FLUSH DEMARC]:
+    // XY_Draw opens the ACTIVE-brush pass with R_SortMaterials.  [FLUSH DEMARC]:
     // it performs the once-per-frontend-frame editor-scene reset (radiant_surfCount /
     // sceneSurfCount = 0) and pins sceneSurfCount_saved for this pass's flush window.  Without
     // it an interleaved camera+XY paint APPENDS the XY models onto the camera's still-queued
     // surfs, capping radiant_modelSkinnedSurfs and silently dropping model draws.
-    { extern void R_SortMaterials(); R_SortMaterials(); }
+    R_SortMaterials();
 
     // The UNSELECTED pass is open: tech-29 model arms reached from here transport their tint
     // through MATERIAL_COLOR.  Cleared before the selected pass, which keeps the stamp.
@@ -1125,11 +1087,11 @@ void XY_DrawBrushes(const XYViewState *v)
         DrawBrush( b, ident, v->viewType, /*technique=wireframe*/ TECHNIQUE_WIREFRAME_SHADED, &col, /*width*/ 1, /*drawFlags*/ 0,
                    /*layerPrefix (binary `zero`)*/ "" );
 
-        // entity-name label (binary's DrawBrushEntityName at 0x46d0fe, right after DrawBrush);
+        // entity-name label (right after DrawBrush, as in the binary);
         // self-gates to the owner's representative def-brush + not-hidden + names-shown.
         Ed_DrawBrushEntityName( v->viewType, b, v->scale, v->width, v->height, labelColor );
 
-        // Radius overlay for UNSELECTED entities (binary's active loop, 0x46d647): only
+        // Radius overlay for UNSELECTED entities (the binary's active loop): only
         // trigger_radius/trigger_disk (classtype&0xC0) draw their radius circle here, plus
         // the "badplace"/"heading" targetname specials.  Lights/nodes/general colored-radius
         // draw only when selected (the selected loop below).  Keys are read off the DEF.
@@ -1158,27 +1120,26 @@ void XY_DrawBrushes(const XYViewState *v)
     if ( walkReplay )
         KiwiWalk_EndReplay();   // the selected loop below stays immediate
 
-    // 0x46d120 - flush the ACTIVE pass's editor surfs (the ED_SURF_MODEL surfs DrawBrush ->
-    // DrawModels queued above) as their own RC_DRAW_EDITOR_SKINNEDCACHED window, exactly where
-    // the binary flushes after its not-selected loop.
-    // 0x46d230 — the binary opens the SELECTED pass with its own R_SortMaterials, so the
-    // selected surfs flush in their own [saved..count) window (not re-flushing the active
-    // pass's surfs).
-    // Both are XY_FlushModelSurfs now: same R_AddEditorSurfsCmd, same R_SortMaterials re-open,
-    // same order and count — only the tint command is new.
+    // Flush the ACTIVE pass's editor surfs (the ED_SURF_MODEL surfs DrawBrush -> DrawModels
+    // queued above) as their own RC_DRAW_EDITOR_SKINNEDCACHED window, where the binary flushes
+    // after its not-selected loop.  The binary then opens the SELECTED pass with its own
+    // R_SortMaterials, so the selected surfs flush in their own [saved..count) window (not
+    // re-flushing the active pass's surfs).  XY_FlushModelSurfs does both: same
+    // R_AddEditorSurfsCmd, same R_SortMaterials re-open, same order and count — only the tint
+    // command is new.
     XY_FlushModelSurfs();
     // The selected pass keeps the per-vertex stamp (its arm is tens of instances, and it is
     // the arm round BY3 kept on the dynamic path on purpose).
     g_edXyModelFlatTint = 0;
 
-    // Selected brushes drawn on top.  KISAK: the editor's $line material drives the line
-    // colour from CONST_SRC_CODE_MATERIAL_COLOR, not the per-vertex colour, so the selected
-    // pass switches the material colour to red; the faithful XY_Draw uses savedinfo
-    // COLOR_SELBRUSHES + 3px width (per-colour/width fidelity is a later item).
+    // Selected brushes drawn on top.  The editor's $line material drives the line colour from
+    // CONST_SRC_CODE_MATERIAL_COLOR, not the per-vertex colour, so the selected pass switches
+    // the material colour to red; the binary's XY_Draw uses savedinfo COLOR_SELBRUSHES + 3px
+    // width (per-colour/width fidelity is a later item).
     // teamColorStr = the team-colour token of the LAST selected script-trigger with a
-    // non-empty ScriptColorTeamKey (binary XY_Draw's `x`, captured at 0x46d62c).
+    // non-empty ScriptColorTeamKey.
     const char *teamColorStr = nullptr;
-    const bool  teamColorEnabled = PrefsDlg_ScriptTeamColorEnabled();   // sub_4560F0 (v57)
+    const bool  teamColorEnabled = PrefsDlg_ScriptTeamColorEnabled();
 
     if ( selected_brushes.next && selected_brushes.next != &selected_brushes )
     {
@@ -1201,10 +1162,8 @@ void XY_DrawBrushes(const XYViewState *v)
                 DrawBrush( b, ident, v->viewType, TECHNIQUE_WIREFRAME_SHADED, &selCol, 2, 0,
                            /*layerPrefix (binary `zero`)*/ "" );
 
-            // entity-name label (binary's DrawBrushEntityName at 0x46d2c9, in the SELECTED
-            // loop — NOT cull-gated there, so a selected entity gets its label even when its
-            // bbox is partly off-screen).  This is the path the old dedup-by-owner stand-in
-            // dropped: selected entities now keep their classname labels.
+            // entity-name label (in the SELECTED loop — NOT cull-gated in the binary, so a
+            // selected entity gets its label even when its bbox is partly off-screen).
             Ed_DrawBrushEntityName( v->viewType, b, v->scale, v->width, v->height, labelColor );
 
             // radius overlay (light / node / trigger / colored) — keyed on the DEF eclass
@@ -1212,10 +1171,10 @@ void XY_DrawBrushes(const XYViewState *v)
             Ed_DrawSelectedRadius( b, &selCol, v->viewType, chTrig );
             KiwiLight_DrawXY( b, v->viewType ); // KIWI-UX: Add bounded spot-cone and axis overlays.
 
-            // script-group team-colour capture (binary XY_Draw 0x46d5ca..0x46d62c): for a
+            // script-group team-colour capture: for a
             // selected script-trigger, when the team-colour viz is enabled, remember its
             // ScriptColorTeamKey value (the LAST such trigger wins — the binary overwrites
-            // `x` each iteration).  The else-branch (Ed_DrawScriptForceColor) is already
+            // it each iteration).  The else-branch (Ed_DrawScriptForceColor) is already
             // covered by DrawModels_Decorations for every drawn entity, so it is not
             // duplicated here.
             if ( teamColorEnabled && ScriptGroup_BrushIsTrigger( b ) )
@@ -1228,13 +1187,12 @@ void XY_DrawBrushes(const XYViewState *v)
         R_AddCmdSetMaterialColor( s_selWhite );   // restore for subsequent passes/frames
     }
 
-    // script-group single-char team-colour visualization (binary XY_Draw 0x46d848:
-    // `if (x) sub_46B110(x, &viewMins, &viewMaxs, axis0, axis1)`).  viewMins/viewMaxs are
-    // the view-rect extents on the two view axes; axis0/axis1 = nDim1/nDim2 (v58/v60).
+    // script-group single-char team-colour visualization.  viewMins/viewMaxs are the
+    // view-rect extents on the two view axes; axis0/axis1 = nDim1/nDim2.
     if ( teamColorStr && teamColorStr[0] )
     {
-        const float viewMins[2] = { xmin, ymin };   // &v47 = {v47, v48}
-        const float viewMaxs[2] = { xmax, ymax };   // &tdp = {tdp, v52}
+        const float viewMins[2] = { xmin, ymin };
+        const float viewMaxs[2] = { xmax, ymax };
         ScriptGroup_DrawTeamColorViz( teamColorStr, viewMins, viewMaxs, nDim1, nDim2 );
     }
 
@@ -1242,7 +1200,7 @@ void XY_DrawBrushes(const XYViewState *v)
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CXYWnd INPUT: screen->world picking, drag, select, zoom, scroll, undo.
-//  Screen->world (CXYWnd::SnapToPoint 0x467490 / XY_ToPoint 0x4676a0): the pick ray for the
+//  Screen->world (CXYWnd::SnapToPoint / XY_ToPoint): the pick ray for the
 //  XY top view starts high above the clicked world point and shoots straight down (0,0,-1);
 //  Test_Ray (select.cpp) clips it against the brushes.  The mouse handlers drive the
 //  Drag_Begin / Drag_MouseMoved / Drag_MouseUp core (drag.cpp).
@@ -1252,100 +1210,64 @@ extern void Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
 extern void Drag_MouseMoved( int x, int y, int buttons, float *origin, float *dir ); // drag.cpp
 extern void Drag_MouseUp( unsigned int buttons );                     // drag.cpp
 extern int  g_nPatchClickedView;                                      // engine_stubs (0x73b108)
-extern int  g_nUpdateBits;                                            // engine_stubs (0x25D5A74)
 extern void Undo_Undo();                                              // undo.cpp
 extern void Undo_Redo();                                              // undo.cpp
-extern void Map_SaveFile( const char *path, char a1, char a2 );       // map.cpp (Ctrl+S demo save)
-extern void Radiant_FL_Log( const char *fmt, ... );                   // mainfrm.cpp
 extern void Ed_InvalidateAllViews();                                  // mainfrm.cpp (repaint XY + Z)
 
 extern void *R_AddEditorSurfsCmd();   // r_ed_scene.cpp 0x4FDA10
 
-// Brush-creation chain (NewBrushDrag, IDB 0x467fa0).
-extern brush_t   *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );          // brush.cpp 0x4751e0
-extern void       Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *e );// brush.cpp 0x475300
+// Brush-creation chain (NewBrushDrag).
 extern void       Brush_Build( brush_t *b, float *mins, float *maxs );             // brush.cpp 0x4786d0
-extern void       Brush_BuildWindings( brush_t *b, int bFull );                    // brush.cpp 0x477ac0
-extern void       SetupVertexSelection();                                          // brush.cpp 0x494bc0
-extern void       MarkMapModified();                                               // brush.cpp 0x499bb0
-extern void       Entity_LinkBrush( brush_t *b, entity_s *world_ent );             // entity.cpp 0x484fc0 (def-side)
-extern selbrush_t*Brush_AddToList( brush_t *def, entity_s *owner );                // brush.cpp 0x475980 (instance)
 // ── CreateEntityFromName Path B (re-class) deps ──
-extern void       Undo_AddEntity_W( entity_s *a1 );                                // undo.cpp 0x45e990
-extern int        Init_MaterialLayer( MaterialDef *a1, float a2 );          // materialdef.cpp 0x472c00
-extern void       sub_476330( selbrush_t *b );                                     // brush.cpp Brush_Deselect_Helper 0x476330
-extern void       Brush_Free( selbrush_t *b );                                     // brush.cpp 0x475ba0
+extern void       Brush_Deselect_Helper( selbrush_t *b );                          // brush.cpp 0x476330
 extern eclass_t  *Entity_SetDefaultModelKey( brush_t *a1, eclass_t *a2 );          // entity.cpp 0x485510
-extern void       Brush_AddToList2( selbrush_t *b );                               // brush.cpp 0x4765a0 (selection)
-extern void       Com_Error( int code, const char *fmt, ... );
-extern void       SetMaterial( const char *tex_name, patchMesh_material *out );    // materialdef.cpp 0x4315c0
 extern char       Texture_SetTexture( const int *a1, MaterialDef *a2 );            // texwnd.cpp 0x45be50
 namespace LayerMat { int GetCurrentLayer( MaterialDef *md ); }                     // materialdef.cpp 0x431b30
 
-// Trigger_SetCurrentDefaultMaterial (IDB sub_45C1A0 0x45c1a0) — build a 64x64 default
+// Trigger_SetCurrentDefaultMaterial (0x45c1a0) — build a 64x64 default
 // material from `name` and make it the current editor texture (Texture_SetTexture).
 // Called for the just-created trigger/volume brush so it gets a sensible default skin.
 static char Trigger_SetCurrentDefaultMaterial( const char *name )
 {
     MaterialDef v3;
-    memset( &v3, 0, sizeof( v3 ) );                       // 0x45c1ac
-    SetMaterial( name, (patchMesh_material *)&v3 );       // 0x45c1c7
-    // &v3.mat_texDef + GetCurrentLayer scales by sizeof(texdef_sub_t)=28 (IDB lea eax*7*4).
-    texdef_sub_t *v1 = &v3.mat_texDef + LayerMat::GetCurrentLayer( &v3 );  // 0x45c1e0
-    v1->size[0] = 64.0f;                                  // 0x45c1e4 (flt_6F4738)
-    v1->size[1] = 64.0f;                                  // 0x45c1e8
-    return Texture_SetTexture( 0, &v3 );                  // 0x45c1ee  a1=0 (no patch projection)
+    memset( &v3, 0, sizeof( v3 ) );
+    SetMaterial( name, (patchMesh_material *)&v3 );
+    // &v3.mat_texDef + GetCurrentLayer scales by sizeof(texdef_sub_t)=28.
+    texdef_sub_t *v1 = &v3.mat_texDef + LayerMat::GetCurrentLayer( &v3 );
+    v1->size[0] = 64.0f;
+    v1->size[1] = 64.0f;
+    return Texture_SetTexture( 0, &v3 );                  // 0 = no patch projection
 }
 
-// ─── entity-creation chain (CreateEntityFromName, IDB 0x465cc0) ───────────────────
-extern eclass_t  *Eclass_ForName( int has_brushes, const char *name );             // eclass.cpp 0x482190
-extern entity_s  *Entity_Create( eclass_t *eclass );                               // entity.cpp 0x484980
+// ─── entity-creation chain (CreateEntityFromName) ─────────────────────────────────
 extern void       EntityAssignModel( entity_s_def *a1 );                           // entity.cpp 0x485410
 extern void       Undo_SetIdForEntity( entity_s_def *ent );                        // undo.cpp 0x45e9e0
-extern void       SetKeyValue( entity_s_def *e, const char *key, const char *value );// entity.cpp 0x483690
-extern char      *ValueForKey2( const entity_s *defPtr, const char *key );                     // entity.cpp 0x4825c0
 extern char      *Map_GetNextExportId( int slot );                                 // map.cpp 0x487a70
 extern int        I_stricmp( const char *s0, const char *s1 );                      // q_shared
-extern void       Assert( const char *file, int line, int type, const char *fmt, ... );
-void              CreateEntityFromName( const char *str );                          // defined below (0x465cc0)
-static void       CreateEntityFromClassname( xywndState_t *xywnd, const char *classname, int x, int y ); // below (0x466480)
-extern const char *Ed_SelectedEclassName();                                          // win_ent.cpp — the eclass picked in the entity window
+void              CreateEntityFromName( const char *str );                          // defined below
 extern void        Ed_PostAddModelCommand();                                         // win_ent.cpp — post IDC_E_ADD_MODEL to the entity window (model picker)
 
-// RMB context-menu hook state (consumed by CXYWnd::ContextMenu, the full 0x467100
-// eclass-tree menu, ported below): set true when an RMB drag actually scrolls the view,
+// RMB context-click state: set true when an RMB drag actually scrolls the view,
 // so OnRButtonUp can tell a context-click (no scroll) from a scroll-release.
 static bool       s_rmbScrolled = false;
 
 // ─── XY_MouseDown dispatch helpers (clone / nudge / camera-set branches) ──────────
 extern void       Select_GetMid( float *mid );                                     // select.cpp 0x48fc70
-extern void       Select_Move( const float *delta, char bSnap );                   // select.cpp 0x48e9c0
-extern void       Select_Brush( selbrush_t *b, char ow, char st, char ctr );       // select.cpp 0x48dcc0
-extern void       Select_Deselect( int bDeselectFaces );                           // select.cpp 0x48e800
 extern void       Clone_Selection( float a1 );                                     // select.cpp 0x48f0d0
 extern void       ConnectEntities_R();                                             // select.cpp 0x48c530
-extern void       Undo_ClearRedo();                                                // undo.cpp
-extern void       Undo_GeneralStart( const char *op );                             // undo.cpp
-extern void       Undo_AddBrushList( selbrush_t *list );                           // undo.cpp
-extern void       Undo_EndBrushList( selbrush_t *list );                           // undo.cpp
-extern void       Undo_End();                                                      // undo.cpp
-extern int        Sys_Printf( const char *fmt, ... );                              // 0x499e90
 extern void       MainFrm_SetStatusText( int pane, const char *text );             // mainfrm.cpp
-extern bool       g_bRotateMode;                                                   // drag.cpp 0x23f16d9
 extern bool       g_bScaleMode;                                                    // drag.cpp 0x23f16da
-extern int        g_bPatchBendMode;                                                // 0x25d5b04
 extern float      g_vRotateOrigin[3];                                              // drag.cpp 0x23f1658
-extern float      g_vBendOrigin[3];                                                // 0x231f548
 
-// byte_25D5A6A - promoted from a xywnd.cpp static to a shared global (defined in pmesh.cpp
-// next to its primary reader Patch_ClickControlPoint) so the curve-point click path sees the
-// "second click in the same view" flag the camera-set dispatch below sets.
-extern char  g_bXYViewIsLastPatchClick;        // byte_25D5A6A (def: pmesh.cpp)
+// A shared global (defined in pmesh.cpp next to its primary reader Patch_ClickControlPoint)
+// so the curve-point click path sees the "second click in the same view" flag the
+// camera-set dispatch below sets.
+extern char  g_bXYViewIsLastPatchClick;        // 0x25D5A6A (def: pmesh.cpp)
 
 // Ed_SnapToPoint - CXYWnd::SnapToPoint 0x467490: pixel -> world point in the view plane.
 // The m_nWidth*0.5f (float) vs m_nWidth/2 (int) distinction between this and SnapToGrid is
 // reproduced from the binary.
-// KISAK: the vertical-Y axis is FLIPPED ((h/2 - y), not the binary's (y - h/2)) consistently
+// The vertical-Y axis is FLIPPED ((h/2 - y), not the binary's (y - h/2)) consistently
 // across SnapToPoint + SnapToGrid + Ed_ViewBasis - the port's mouse handlers pass raw
 // top-left Y where the binary pre-flips to GL bottom-left.
 static void Ed_SnapToPoint( xywndState_t *wnd, float *tdp, int x, int y )
@@ -1397,23 +1319,18 @@ static void Ed_ViewBasis( xywndState_t *wnd, float *xvec, float *yvec )
 }
 
 // Press callback (Drag_Begin stores it in g_qeglobals.camera_fov_setup) - stands in for the
-// binary's sub_467700; XY_Draw's marquee-overlay gate compares camera_fov_setup against its
-// address, so the box only draws while a real drag is in progress.  The sub_467700 BODY (4
+// binary's 0x467700; XY_Draw's marquee-overlay gate compares camera_fov_setup against its
+// address, so the box only draws while a real drag is in progress.  The binary's BODY (4
 // box-select side-planes used ONLY by Terrain/Patch_SelectAreaPoints) stays inert: the BRUSH
 // marquee uses the world box Drag_MouseUp computes from the drag rectangle.
 static void Ed_PressCallback( int x1, int x2, int y1, int y2, int *out )
 { (void)x1; (void)x2; (void)y1; (void)y2; (void)out; }
 
-// DrawSelectionBox 0x40CC50 + the box-build from XY_Draw's tail 0x46d9a1 - the live marquee as
+// DrawSelectionBox + the box-build from XY_Draw's tail - the live marquee as
 // a translucent blue (alpha 0.25) quad on d_white/UNLIT: indices {3,0,2,2,0,1}, normals
 // (0,0,1)x4, st {(0,0),(0,1),(1,1),(1,0)}, depth 131072 on both corners.  Rect normalise:
 // ax=min(x_1,y_1)/bx=max, ay=min(x_2,y_2)/by=max.  The draw gate (camera_fov_setup ==
 // the press callback && d_select_mode in {5,12,13,14,15}) lives in the caller.
-extern void __cdecl R_AddRenderCmdDrawTris(
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float (*xyzw)[4], const float (*normal)[3], float *color,
-    const float (*st)[2] );
 
 // 0x40CC50 DrawSelectionBox — shared by XY_Draw (Ed_DrawSelectionBox) and the camera
 // 3D-marquee tail (camwnd.cpp Cam_Draw).  Non-static so camwnd.cpp can call it.
@@ -1464,7 +1381,7 @@ static void Ed_DrawSelectionBox( xywndState_t *wnd )
     const int d2 = (vt != ED_VIEW_XY) + 1;  // screen-vertical axis
     const int d3 = 3 - d1 - d2;              // depth axis
 
-    // 4 corners of the rectangle in the view plane (IDA v42 layout), w=1, depth=131072.
+    // 4 corners of the rectangle in the view plane, w=1, depth=131072.
     float quad[4][4];
     // corner 0: (a.h, a.v)
     quad[0][d1] = a[d1]; quad[0][d2] = a[d2]; quad[0][d3] = 131072.0f; quad[0][3] = 1.0f;
@@ -1478,7 +1395,7 @@ static void Ed_DrawSelectionBox( xywndState_t *wnd )
     Ed_DrawSelectionBoxQuad( quad );
 }
 
-// ─── CXYWnd::SnapToGrid (IDB 0x467510) ───────────────────────────────────────
+// ─── CXYWnd::SnapToGrid (0x467510) ───────────────────────────────────────────
 // Pixel → grid-snapped world point in the view plane. Writes only the two in-plane
 // axes (the depth axis is set by the caller — e.g. NewBrushDrag's d_new_brush bounds).
 static void Ed_SnapToGrid( xywndState_t *wnd, float *out, int x, int y )
@@ -1505,7 +1422,7 @@ static void Ed_SnapToGrid( xywndState_t *wnd, float *out, int x, int y )
     }
 }
 
-// ─── SnapToPoint_Chooser (IDB 0x467460) ──────────────────────────────────────
+// ─── SnapToPoint_Chooser (0x467460) ──────────────────────────────────────────
 // Grid-snap unless m_bNoClamp (prefs). g_PrefsDlg NULL → 0 → grid-snap (the default).
 static void Ed_SnapToPoint_Chooser( xywndState_t *wnd, float *out, int x, int y )
 {
@@ -1515,7 +1432,7 @@ static void Ed_SnapToPoint_Chooser( xywndState_t *wnd, float *out, int x, int y 
         Ed_SnapToGrid( wnd, out, x, y );
 }
 
-// ─── CXYWnd::VectorCopyXY (IDB 0x46df50) ─────────────────────────────────────
+// ─── CXYWnd::VectorCopyXY (0x46df50) ─────────────────────────────────────────
 // Copy the two in-plane components of `in` into `out` (leaving the depth axis).
 static void Ed_VectorCopyXY( xywndState_t *wnd, float *out, const float *in )
 {
@@ -1524,32 +1441,26 @@ static void Ed_VectorCopyXY( xywndState_t *wnd, float *out, const float *in )
     else { out[1] = in[1]; out[2] = in[2]; }
 }
 
-// sub_459A40 (0x459a40) = atan2(a1, a2).  DISASM: `fld a1; fld a2; call atan2` -> the MSVC x87
-// _CIatan2 helper computes atan2(st1, st0) = atan2(a1, a2).  Hex-rays renders the call
-// BACKWARDS as atan2(a2, a1) (a known _CIatan2 operand-reversal artifact) and mistracks st0 as
-// `return a1`; copying that form swaps the XY middle-click camera yaw.
+// 0x459a40 = atan2(a1, a2), in THAT operand order - reversing them swaps the XY
+// middle-click camera yaw.
 static double Ed_Atan2_459A40( float a1, float a2 ) { return atan2( (double)a1, (double)a2 ); }
 
-// sub_48CDF0 (0x48cdf0) - save the prior select mode, store sel_brush, then the patch
+// 0x48cdf0 - save the prior select mode, store sel_brush, then the patch
 // sub-mode cleanup tail: prior cycle mode -> CMainFrame::UpdatePatchToolbarButtons (a no-op
-// no-toolbar stub in this build); prior addpoint mode -> Patch_FinishCurveDrag (sub_43ECB0).
+// no-toolbar stub in this build).  (The binary's prior-addpoint arm went with the terrain paint.)
 // Same cleanup-tail shape as Drag_MouseUp and OnSelectionDragVertices/Edges.
-extern void CMainFrame_UpdatePatchToolbarButtons(); // select.cpp (0x42AA70, no-op no-toolbar)
-extern void sub_43ECB0();                            // pmesh.cpp Patch_FinishCurveDrag (0x43ECB0)
 static void Ed_ResetSelectMode_48CDF0()
 {
     const select_t prev = g_qeglobals.d_select_mode;
     g_qeglobals.d_select_mode = sel_brush;
     if ( prev == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prev == sel_addpoint )
-        sub_43ECB0();
 }
 
 // Ed_DragDelta - XYWnd::DragDelta 0x467e70.  Pixel delta since the press -> grid-snapped world
 // delta accumulated in m_vPressdelta; `out` receives the INCREMENT, the return is "did it
-// move".  The basis is the FIXED XY-plane unit basis (verbatim - NOT view-dependent and NOT
-// Y-flipped): it only gates movement, the real brush bounds come from NewBrushDrag's
+// move".  The basis is the FIXED XY-plane unit basis (as in the binary - NOT view-dependent
+// and NOT Y-flipped): it only gates movement, the real brush bounds come from NewBrushDrag's
 // view-aware SnapToGrid.  The grid snap is floorf(w/step)*step - truncation, no +0.5.
 static bool Ed_DragDelta( xywndState_t *wnd, int x, int y, float *out )
 {
@@ -1567,7 +1478,7 @@ static bool Ed_DragDelta( xywndState_t *wnd, int x, int y, float *out )
         if ( !noclamp )
         {
             const float step = grid_sizes[g_qeglobals.d_gridsize];
-            w = (float)floorf( w / step ) * step;   // IDA truncates with floorf (no +0.5)
+            w = (float)floorf( w / step ) * step;   // truncates with floorf (no +0.5)
         }
         work[i] = w;
     }
@@ -1580,9 +1491,9 @@ static bool Ed_DragDelta( xywndState_t *wnd, int x, int y, float *out )
     return ( out[0] != 0.0f || out[1] != 0.0f || out[2] != 0.0f );
 }
 
-// KISAK: random_texture_stuff is the editor's "current material" template - Brush_Alloc copies
-// its channel-0 MaterialDef into every face of a NEW brush.  Nothing in the port sets it yet,
-// so on a fresh session it is zeroed and a new brush's channel-0 lyrMtl is NULL (trips
+// random_texture_stuff is the editor's "current material" template - Brush_Alloc copies
+// its channel-0 MaterialDef into every face of a NEW brush.  Until Texture_SetTexture sets it,
+// a fresh session has it zeroed and a new brush's channel-0 lyrMtl is NULL (trips
 // MtlDef_IsValid).  Seed it lazily from the first loaded brush, else synthesise a default.
 static void Ed_EnsureCurrentMaterial()
 {
@@ -1620,8 +1531,7 @@ void Ed_EnsureCurrentMaterial_Kiwi()
 // the d_new_brush_bottom/top template, with a lo>=hi guard giving one grid unit of depth.
 // Nothing selected -> ALLOC/CREATE/BUILD/LINK(def+instance)/SELECT; otherwise RESIZE the
 // selected brush via Brush_Build.
-// NOTE Brush_Create(mins,maxs) is the DISASM-confirmed arg order - hex-rays prints the
-// __fastcall args swapped as (maxs,mins).
+// NOTE Brush_Create's arg order is (mins,maxs).
 // ─────────────────────────────────────────────────────────────────────────────
 static void Ed_NewBrushDrag( xywndState_t *wnd, int x, int y )
 {
@@ -1670,7 +1580,7 @@ static void Ed_NewBrushDrag( xywndState_t *wnd, int x, int y )
         // ── nothing selected → CREATE a new brush sized to the box ──
         Ed_EnsureCurrentMaterial();   // give the new brush a valid material (see above)
         brush_t *b = Brush_Alloc( g_qeglobals.random_texture_stuff, nullptr );
-        Brush_Create( mins, maxs, b, nullptr );   // (lower, upper) — disasm-confirmed arg order
+        Brush_Create( mins, maxs, b, nullptr );   // (lower, upper)
         if ( !b )
             return;
         Brush_BuildWindings( b, 1 );
@@ -1679,11 +1589,11 @@ static void Ed_NewBrushDrag( xywndState_t *wnd, int x, int y )
         MarkMapModified();
         ++b->version;
         // Link the DEF into worldspawn (def-side, refCount++), allocate the instance
-        // (refCount++ again — the faithful def/instance refCount==2 model), then
+        // (refCount++ again — the def/instance refCount==2 model), then
         // add it to the selection list (Brush_AddToList2 self-guards double-link).
         Entity_LinkBrush( b, (entity_s *)world_entity->def );
         selbrush_t *inst = Brush_AddToList( b, world_entity );
-        if ( inst->next || inst->prev )   // IDB 0x4680e2 (v13->onext/oprev = inst next/prev); restored
+        if ( inst->next || inst->prev )
             Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
         Brush_AddToList2( inst );
     }
@@ -1709,8 +1619,7 @@ static void Ed_NewBrushDrag( xywndState_t *wnd, int x, int y )
 //   (4) ctrl/mid/right combos -> set the camera origin / angle / the XY camera icon
 //  Drag_Begin's viewCode is XY->2 / XZ->512 / YZ->1024; the camera-angle tail uses
 //  atan2(dir[a1],dir[a2])*57.29578 with a1=(vt!=XY)+1, a2=(vt==YZ), angIdx=(vt==XY).
-//  KISAK: negated-yvec basis (Ed_ViewBasis, consistent with SnapToPoint); g_pParentWnd /
-//  m_pCamWnd null-guards where the binary derefs directly.
+//  Negated-yvec basis (Ed_ViewBasis, consistent with SnapToPoint).
 // ═════════════════════════════════════════════════════════════════════════════
 static void Ed_XY_MouseDown( xywndState_t *wnd, int x, int y, unsigned int buttons )
 {
@@ -1783,7 +1692,7 @@ static void Ed_XY_MouseDown( xywndState_t *wnd, int x, int y, unsigned int butto
         Select_Move( move, 0 );
         if ( single )
         {
-            // alt+shift+MIDDLE single-brush clone-and-connect (IDB 0x467AE8 tail).
+            // alt+shift+MIDDLE single-brush clone-and-connect.
             // single = the original brush; selected_brushes.next = the just-cloned+moved
             // copy.  Re-select exactly {original, clone} and link them via ConnectEntities_R.
             iassert( selected_brushes.next != &selected_brushes );   // XYWnd.cpp:1777
@@ -1829,7 +1738,7 @@ static void Ed_XY_MouseDown( xywndState_t *wnd, int x, int y, unsigned int butto
     {
         camera_s *cam = Ed_Camera();
         float dir[3] = { snap[0] - cam->origin[0], snap[1] - cam->origin[1],
-                         snap[2] - cam->origin[2] };   // IDA VectorSubtract(snap, cam.origin, dir)
+                         snap[2] - cam->origin[2] };
         const int a1     = ( wnd->m_nViewType != ED_VIEW_XY ) + 1;
         const int a2     = ( wnd->m_nViewType == ED_VIEW_YZ );
         const int angIdx = ( wnd->m_nViewType == ED_VIEW_XY );
@@ -1842,12 +1751,10 @@ static void Ed_XY_MouseDown( xywndState_t *wnd, int x, int y, unsigned int butto
     }
     if ( wnd->m_nButtonstate == (int)( v6 | MK_SHIFT ) )
     {
-        if ( g_bRotateMode || g_bPatchBendMode )
+        if ( g_bRotateMode )   // (the binary: or bend mode, which also set the bend origin)
         {
             Ed_SnapToPoint_Chooser( wnd, snap, x, y );
             Ed_VectorCopyXY( wnd, g_vRotateOrigin, snap );
-            if ( g_bPatchBendMode )
-            { g_vBendOrigin[0] = snap[0]; g_vBendOrigin[1] = snap[1]; g_vBendOrigin[2] = snap[2]; }
             g_nUpdateBits |= 2;
         }
         else
@@ -1869,33 +1776,33 @@ static void Ed_XY_MouseDown( xywndState_t *wnd, int x, int y, unsigned int butto
 // ═════════════════════════════════════════════════════════════════════════════
 //  Ed_XY_MouseMoved - CXYWnd::XY_MouseMoved 0x468230, the full mouse-move dispatcher.
 //   (A) idle (no button): iff g_bCrossHairs, hide+reshow the cursor and request an XY+camera
-//       repaint so DrawCrosshair tracks the cursor (0x46824b).
+//       repaint so DrawCrosshair tracks the cursor.
 //   (B) LMB-held OR alt+(RMB+shift): if a marquee toggle-state (toggle_unk03/04) is active and
 //       we are NOT in a transient RECTANGLE point-edit mode (d_select_mode 12..15), re-dispatch
 //       XY_MouseDown for buttons 5 / (9 & alt) / 13 (shift/ctrl box-extend), else clear the
 //       toggles; with no toggle active it falls through to Drag_MouseMoved.
-//   (C) sel_addpoint + RMB + alt: also the Drag_MouseMoved path (shared LABEL_41).
+//   (C) (the binary's sel_addpoint + RMB + alt paint arm is gone with the terrain paint.)
 //   (D) camera positioning DURING the move (mirror of the XY_MouseDown camera tail) / RMB
 //       view scroll.
-//  KISAK: the scroll body omits the binary's ShowCursor(0) + toggle_unk02=fast_2d_view (the
+//  The scroll body omits the binary's ShowCursor(0) + toggle_unk02=fast_2d_view (the
 //  matching ShowCursor(1)/fast-drag render path is not ported, so adding it partially would
-//  strand the cursor); null-guards on the camera writes; synchronous Invalidate in place of
-//  the binary's g_nUpdateBits-only deferred repaint.
+//  strand the cursor); synchronous Invalidate in place of the binary's g_nUpdateBits-only
+//  deferred repaint.
 // ═════════════════════════════════════════════════════════════════════════════
 static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int buttons )
 {
     // ── (A) no button held: idle move ──
-    // 0x46824b: with the crosshair on, the binary hides+reshows the cursor and requests a
-    // repaint of the XY + camera views so the full-extent crosshair tracks the cursor.
-    // The ShowCursor(FALSE)/ShowCursor(TRUE) pair is a net no-op on the display counter —
-    // transcribed FAITHFULLY (it is what the binary does; only the repaint request matters).
+    // With the crosshair on, the binary hides+reshows the cursor and requests a repaint of
+    // the XY + camera views so the full-extent crosshair tracks the cursor.  The
+    // ShowCursor(FALSE)/ShowCursor(TRUE) pair is a net no-op on the display counter (kept as
+    // the binary has it; only the repaint request matters).
     if ( !wnd->m_nButtonstate )
     {
         if ( g_bCrossHairs )
         {
-            ShowCursor( FALSE );        // 0x46825e
-            g_nUpdateBits |= 6;         // 0x468260
-            ShowCursor( TRUE );         // 0x468269
+            ShowCursor( FALSE );
+            g_nUpdateBits |= 6;
+            ShowCursor( TRUE );
         }
         return;
     }
@@ -1923,7 +1830,7 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
     {
         if ( !g_qeglobals.toggle_unk03_mousedrag_state1 && !g_qeglobals.toggle_unk04_mousedrag_state2 )
         {
-            doDrag = true;   // no marquee in progress → ordinary Drag_MouseMoved (LABEL_41)
+            doDrag = true;   // no marquee in progress → ordinary Drag_MouseMoved
         }
         else
         {
@@ -1947,13 +1854,8 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
             return;
         }
     }
-    // ── (C) add-point mode, RMB + alt: also the Drag_MouseMoved path ─────────────────
-    else if ( sel_mode == sel_addpoint && wnd->m_nButtonstate == MK_RBUTTON && alt )
-    {
-        doDrag = true;
-    }
 
-    if ( doDrag )   // LABEL_41: select / move the dragged geometry
+    if ( doDrag )   // select / move the dragged geometry
     {
         float trace_start[3], trace_dir[3];
         Ed_XY_ToPoint( wnd, x, y, trace_start, trace_dir );
@@ -1972,11 +1874,9 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
         if ( wnd->m_nButtonstate == (int)( v6 | MK_SHIFT ) )
         {
             float snap[3]; Ed_SnapToPoint_Chooser( wnd, snap, x, y );
-            if ( g_bRotateMode || g_bPatchBendMode )
+            if ( g_bRotateMode )   // (the binary: or bend mode, which also set the bend origin)
             {
                 Ed_VectorCopyXY( wnd, g_vRotateOrigin, snap );
-                if ( g_bPatchBendMode )
-                { g_vBendOrigin[0] = snap[0]; g_vBendOrigin[1] = snap[1]; g_vBendOrigin[2] = snap[2]; }
                 g_nUpdateBits |= 2;   // W_XY
             }
             else   // place the XY camera icon
@@ -1998,14 +1898,14 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
                     float snap[3]; Ed_SnapToPoint_Chooser( wnd, snap, x, y );
                     camera_s *cam = Ed_Camera();
                     float dir[3] = { snap[0] - cam->origin[0], snap[1] - cam->origin[1],
-                                     snap[2] - cam->origin[2] };   // IDA VectorSubtract(snap, cam.origin, dir)
+                                     snap[2] - cam->origin[2] };
                     const int a1     = ( wnd->m_nViewType != ED_VIEW_XY ) + 1;
                     const int a2     = ( wnd->m_nViewType == ED_VIEW_YZ );
                     const int angIdx = ( wnd->m_nViewType == ED_VIEW_XY );
                     if ( dir[a1] != 0.0f || dir[a2] != 0.0f )
                     {
                         const double ang = Ed_Atan2_459A40( dir[a1], dir[a2] );
-                        g_nUpdateBits |= 0x104;   // W_XY_OVERLAY | W_CAMERA_IFON (IDB 0x468516 = 0x104; W_CAMERA_IFON is 0x100)
+                        g_nUpdateBits |= 0x104;   // W_XY_OVERLAY | W_CAMERA_IFON (W_CAMERA_IFON is 0x100)
                         cam->angles[angIdx] = (float)( RAD2DEG( ang ) );
                     }
                 }
@@ -2043,33 +1943,23 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
 }
 
 // =============================================================================
-//  THE CLIPPER (split a brush along a clip plane) - the CXYWnd cluster.  IDB: SetClipMode
-//  0x465430, DropClipPoint 0x463d70, ProduceSplitLists 0x464040, Clip 0x46dc10, FlipClip
-//  0x46ddf0, DrawClipper 0x4656c0; the split primitive Brush_SplitBrushByFace (0x471960)
-//  lives in brush.cpp.  Workflow: enter clip mode -> left-click drops 1-3 grid-snapped clip
-//  points -> DrawClipper previews the front/back split -> Enter commits the kept side, X
-//  swaps it.  Two points + the view's depth axis define the plane in a 2D view; a third makes
+//  THE CLIPPER (split a brush along a clip plane) - the CXYWnd cluster: SetClipMode,
+//  DropClipPoint, ProduceSplitLists, Clip, FlipClip, DrawClipper; the split primitive
+//  Brush_SplitBrushByFace lives in brush.cpp.  Workflow: enter clip mode -> left-click
+//  drops 1-3 grid-snapped clip points -> DrawClipper previews the front/back split ->
+//  Enter commits the kept side, X swaps it.  Two points + the view's depth axis define the plane in a 2D view; a third makes
 //  it fully 3D.  CoD divergence from GtkRadiant: the split FACE material is SYNTHESISED
 //  (caulk, or nodraw_decal if the source has a decal face) via the same MaterialDef build CSG
 //  uses - NOT GtkRadiant's "inherit face 0" copy.
 // =============================================================================
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp 0x475980
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp 0x4765a0
-extern void        Brush_RemoveFromList( selbrush_t *b );                     // brush.cpp 0x476680
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp 0x475ba0
 extern void        Brush_SplitBrushByFace( brush_t *in, face_t *face,
                                            brush_t **front, brush_t **back ); // brush.cpp 0x471960
-extern void        Select_Delete();                                           // select.cpp 0x48e760
-extern void        SetMaterial( const char *name, patchMesh_material *out );  // materialdef.cpp 0x431520
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *m );          // materialdef.cpp 0x4314a0
 namespace LayerMat { int GetCurrentLayer( MaterialDef *m ); }                 // materialdef.cpp 0x431b30
-extern void        OrientationPosToWorldPos( float *out, const float *localPos,
-                                             const orientation_t *orient );   // entity.cpp 0x4ba430
 extern int         DrawShadedWireframe( int cullMode, face_t *face, const orientation_t *orient,
                                         GfxColor *lineColor, char width, int vertCount,
                                         int vertLimit, GfxPointVertex *verts );  // brush.cpp 0x47b5c0
 
-// The split-preview wireframe colour (IDB flt_6DE1B0 = magenta); Byte4PackPixelColor reads 4 floats.
+// The split-preview wireframe colour (magenta); Byte4PackPixelColor reads 4 floats.
 static const float s_clipPreview[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
 
 // CClipPoint::Reset
@@ -2093,10 +1983,9 @@ static void Ed_FreeSplitList( selbrush_t *head )
     head->prev = head;
 }
 
-// Brush_CopyList (IDB 0x464740) -- MOVE every brush from `from`'s display list into
-// `pTo`'s display list. Faithful to the disasm (the hex-rays `onext`/`oprev` are the
-// entity_brush_s 0x00/0x04 misnaming; the loads are really next@4 / prev@0 -- the
-// DISPLAY list). When pTo IS selected_brushes it routes through Brush_AddToList2.
+// Brush_CopyList (0x464740) -- MOVE every brush from `from`'s display list into
+// `pTo`'s display list (the DISPLAY list next/prev, not the entity list). When pTo IS
+// selected_brushes it routes through Brush_AddToList2.
 static void Brush_CopyList( selbrush_t *pTo, selbrush_t *from )
 {
     for ( selbrush_t *b = from->next; b && b != from; )
@@ -2120,9 +2009,14 @@ static void Brush_CopyList( selbrush_t *pTo, selbrush_t *from )
     }
 }
 
-// CXYWnd::SetClipMode (IDB 0x465430) -- enter/leave clip mode. Entering resets the 3
+// CXYWnd::SetClipMode (0x465430) -- enter/leave clip mode. Entering resets the 3
 // clip points and the split lists; leaving releases the moving-clip capture, frees the
 // split lists, and requests a redraw. Always clears g_bRogueClipMode.
+// KIWI: a clip point is being dragged - the binary's SetCapture on press over a hovered point
+// (Ed_DropClipPoint) up to the button release.  P5 RTT's shell owns OS capture, so the old
+// GetCapture() test never passed and clip points could not be dragged.
+static bool s_clipDragging = false;
+
 void Ed_SetClipMode( char bMode )
 {
     g_bClipMode = bMode;
@@ -2139,7 +2033,7 @@ void Ed_SetClipMode( char bMode )
     {
         if ( g_pMovingClip )
         {
-            ReleaseCapture();
+            s_clipDragging = false;   // KIWI: was ReleaseCapture (the shell owns capture)
             g_pMovingClip = nullptr;
         }
         Ed_FreeSplitList( &g_brFrontSplits );
@@ -2148,20 +2042,21 @@ void Ed_SetClipMode( char bMode )
     }
 }
 
-// CXYWnd::DropClipPoint (IDB 0x463d70) -- place the next clip point (1->2->3) at the
+// CXYWnd::DropClipPoint (0x463d70) -- place the next clip point (1->2->3) at the
 // grid-snapped cursor. The two in-plane axes come from the snap; the DEPTH axis (the
 // axis not in this 2D view) is seeded from the new-brush template bounds (d_new_brush_top
 // for points 1/2, _bottom for 3) so the clip plane spans the view depth. Dropping a 4th
 // point cycles. If a clip point is being dragged (g_pMovingClip), re-snap it instead.
 //
-// KISAK: raw client coords throughout (the firstlight render maps world-up to screen-up); the
-// IDB's Rect.bottom-y-1 flip is the other convention - double-flipping would mirror the clip.
+// Raw client coords throughout (the firstlight render maps world-up to screen-up); the
+// binary's Rect.bottom-y-1 flip is the other convention - double-flipping would mirror the clip.
 void Ed_DropClipPoint( xywndState_t *wnd, int x, int y )
 {
     if ( g_pMovingClip )
     {
         // P5 RTT: shell owns drag-capture; OS-capturing the hidden child steals the mouse from
-        // the ImGui host, so the clip-point drag SetCapture is dropped here.
+        // the ImGui host, so the binary's SetCapture here is s_clipDragging.
+        s_clipDragging = true;
         if ( g_PrefsDlg->m_bNoClamp ) Ed_SnapToPoint( wnd, g_pMovingClip, x, y );
         else                          Ed_SnapToGrid ( wnd, g_pMovingClip, x, y );
         g_nUpdateBits |= 0x5;
@@ -2169,7 +2064,7 @@ void Ed_DropClipPoint( xywndState_t *wnd, int x, int y )
     }
 
     // The depth axis for this 2D view (the axis the snap does NOT fill) = the axis NOT shown.
-    // IDA 0x463d70: v9 == m_nViewType for all 3 views (XY(2)->Z=2, XZ(1)->Y=1, YZ(0)->X=0).
+    // It equals m_nViewType for all 3 views (XY(2)->Z=2, XZ(1)->Y=1, YZ(0)->X=0).
     int depthAxis;
     if ( wnd->m_nViewType == ED_VIEW_XY )      depthAxis = 2;   // XY view -> Z is depth
     else                                       depthAxis = ( wnd->m_nViewType != ED_VIEW_YZ );  // XZ->Y(1), YZ->X(0)
@@ -2211,7 +2106,7 @@ void Ed_DropClipPoint( xywndState_t *wnd, int x, int y )
     g_nUpdateBits |= 0x5;
 }
 
-// Clip-point hover/move detection (IDB OnMouseMove clip branch, 0x4651d5). In clip mode,
+// Clip-point hover/move detection (the OnMouseMove clip branch). In clip mode,
 // while not dragging: if the cursor is within 3 world-units of a set clip point (both
 // in-plane axes) latch it as the moving clip point and show the cross cursor. Returns
 // true only if a clip point is actively being dragged (consumes the move).
@@ -2220,7 +2115,7 @@ static bool Ed_ClipMouseMoved( xywndState_t *wnd, int x, int y )
     if ( !g_bClipMode )
         return false;
 
-    if ( g_pMovingClip && GetCapture() == wnd->m_hWnd )
+    if ( g_pMovingClip && s_clipDragging )
     {
         if ( g_PrefsDlg->m_bNoClamp ) Ed_SnapToPoint( wnd, g_pMovingClip, x, y );
         else                          Ed_SnapToGrid ( wnd, g_pMovingClip, x, y );
@@ -2277,7 +2172,7 @@ void Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src )
         return;
 
     // Source material classification: nodraw_decal if ANY source face is a decal, else
-    // caulk. (The IDB realizes each face's MaterialDef and stops on the first decal.)
+    // caulk. (The binary realizes each face's MaterialDef and stops on the first decal.)
     bool anyDecal = false;
     const int layer = g_qeglobals.current_edit_layer;
     for ( int f = 0; f < src->faceCount; ++f )
@@ -2318,7 +2213,7 @@ void Ed_BuildClipFaceMaterial_Kiwi( face_t *out, const brush_t *src )
     }
 }
 
-// CXYWnd::ProduceSplitLists (IDB 0x464040) -- rebuild g_brFrontSplits / g_brBackSplits
+// CXYWnd::ProduceSplitLists (0x464040) -- rebuild g_brFrontSplits / g_brBackSplits
 // by splitting every selected brush along the clip plane (through g_Clip1/2/3). First
 // de-selects clip-incompatible brushes (patches / physics primitives / fixed-size
 // entities) back into active_brushes, frees any prior split brushes, then (in clip mode,
@@ -2337,13 +2232,13 @@ void Ed_ProduceSplitLists()
             if ( !warnedPatch ) { warnedPatch = true; Sys_Printf( "Deselecting patches for clip operation.\n" ); }
             incompatible = true;
         }
-        else if ( b->def->numberId )    // physics primitive (IDB total_size_0x58 @ 0x54)
+        else if ( b->def->numberId )    // physics primitive
         {
             if ( !warnedPhys ) { warnedPhys = true; Sys_Printf( "Deselecting physics primitives for clip operation.\n" ); }
             incompatible = true;
         }
-        // fixed-size entity (IDB owner->def->eclass, the entity_s_def
-        // path -- matches SelectFaceSth; NOT entity_s.eclass which is the def-owner path).
+        // fixed-size entity (owner->def->eclass, the entity_s_def
+        // path -- matches Select_ClickTrace; NOT entity_s.eclass which is the def-owner path).
         else if ( *(int *)&( (entity_s_def *)b->owner->def )->eclass->fixedsize )
         {
             if ( !warnedFixed ) { warnedFixed = true; Sys_Printf( "Deselecting fixed size entities for clip operation.\n" ); }
@@ -2351,8 +2246,8 @@ void Ed_ProduceSplitLists()
         }
         if ( incompatible )
         {
-            // DESELECT: head-insert into active_brushes (the binary's inline splice at
-            // 0x464040).  NOT Brush_AddToList2 - that re-links into selected_brushes.
+            // DESELECT: head-insert into active_brushes (the binary's inline splice).
+            // NOT Brush_AddToList2 - that re-links into selected_brushes.
             Brush_RemoveFromList( b );
             if ( b->next || b->prev )
                 Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
@@ -2403,12 +2298,9 @@ void Ed_ProduceSplitLists()
         else
         {
             // Only 2 points placed -> make the third by lifting clip1 +32 along the view's
-            // DEPTH axis (the axis NOT shown, so the plane is perpendicular to the 2D view).
-            // IDA 0x464040: vt==2(XY)->[2]+32, vt!=0(==1,XZ)->[1]+32, else(==0,YZ)->[0]+32.
-            // [BUGFIX: was XZ->[0]/YZ->[1] (swapped) — same depth-axis confusion as DropClipPoint.]
-            // (was g_pParentWnd->m_pActiveXY->m_nViewType — the same singleton view, now via
-            // the shell-agnostic accessor; every entry point into this function syncs the MFC
-            // class members onto the state first.)
+            // DEPTH axis (the axis NOT shown, so the plane is perpendicular to the 2D view):
+            // XY(2)->[2], XZ(1)->[1], YZ(0)->[0].  (XZ->[0]/YZ->[1] is the swapped form - the
+            // same depth-axis confusion as DropClipPoint.)
             int vt = Ed_ActiveXY()->m_nViewType;
             clipFace.planepts[2][0] = g_Clip1.m_ptClip[0];
             clipFace.planepts[2][1] = g_Clip1.m_ptClip[1];
@@ -2444,11 +2336,11 @@ void Ed_ProduceSplitLists()
     }
 }
 
-// CXYWnd::Clip (IDB 0x46dc10) -- COMMIT the clip. Produce the split lists, choose the
+// CXYWnd::Clip (0x46dc10) -- COMMIT the clip. Produce the split lists, choose the
 // KEEP side (front or back, per g_bSwitch + m_bSwitchClip + the view type), stash the
 // kept brushes in a temp list, free both split lists, delete the original selection,
 // move the kept brushes into the selection, then leave clip mode + request a full redraw.
-//   Keep-side (verbatim): useRawSwitch = m_bSwitchClip ? isXZ : !isXZ; v2 = useRawSwitch ?
+//   Keep-side: useRawSwitch = m_bSwitchClip ? isXZ : !isXZ; v2 = useRawSwitch ?
 //   g_bSwitch : !g_bSwitch; keep = (v2 == 0) ? back : front.  isXZ is a BOOLEAN, not a 3-way
 //   axis pick - there is no depth-axis bug here.
 void Ed_Clip( xywndState_t *wnd )
@@ -2458,9 +2350,7 @@ void Ed_Clip( xywndState_t *wnd )
 
     Ed_ProduceSplitLists();
 
-    // Pick which split list to keep (IDB 0x46dc10 verbatim):
-    //   v2 = useRawSwitch ? g_bSwitch : !g_bSwitch;  keep = (v2==0) ? back : front
-    //   useRawSwitch = m_bSwitchClip ? (view==XZ) : (view!=XZ)
+    // Pick which split list to keep (see the header).
     const bool isXZ = ( wnd->m_nViewType == ED_VIEW_XZ );    // XZ == 1
     const bool useRawSwitch = g_PrefsDlg->m_bSwitchClip ? isXZ : !isXZ;
     const int  v2 = useRawSwitch ? (int)(byte)g_bSwitch : ( g_bSwitch == 0 );
@@ -2469,7 +2359,7 @@ void Ed_Clip( xywndState_t *wnd )
     if ( keep->next == keep )      // nothing produced -> leave the selection untouched
         return;
 
-    // IDB exactly: stash the kept brushes in a temp list, free BOTH split lists (the
+    // Stash the kept brushes in a temp list, free BOTH split lists (the
     // not-kept brushes get freed; the kept ones are now in temp, out of `keep`), delete
     // the original selection, then move the kept brushes into selected_brushes.
     selbrush_t temp{};
@@ -2489,20 +2379,19 @@ void Ed_Clip( xywndState_t *wnd )
     g_nUpdateBits = -1;
 }
 
-// CXYWnd::SplitClip (IDB 0x46dd30) -- commit the clip keeping BOTH sides.  Same shape as
+// CXYWnd::SplitClip (0x46dd30) -- commit the clip keeping BOTH sides.  Same shape as
 // Ed_Clip above but instead of picking a keep-side it moves the front list AND the back list
 // into the selection, so the original brush is replaced by its two halves.  Bails (leaving
-// clip mode armed) if either split list came back empty.  Wired to CMainFrame::OnSplitSelected
+// clip mode armed) if either split list came back empty.  Wired to Cmd_OnSplitSelected
 // (menu 32794 Selection>Clipper>Split selected / Shift+Enter).
-// Faithful to the disasm: the two free-loops after the copies are no-ops because Brush_CopyList
-// already emptied both lists; the SetClipMode arg is `g_bRogueClipMode == 0` (0x46DDBE cmp/jz),
-// and g_bRogueClipMode is cleared afterwards.  The binary does NOT set g_nUpdateBits here
+// As in the binary, the two free-loops after the copies are no-ops because Brush_CopyList
+// already emptied both lists; the SetClipMode arg is `g_bRogueClipMode == 0`, and
+// g_bRogueClipMode is cleared afterwards.  The binary does NOT set g_nUpdateBits here
 // (Ed_SetClipMode's leave path already requests W_XY|W_CAMERA_IFON).
 void Ed_SplitClip()
 {
-    // U-GLOBALS: reached straight from CMainFrame::OnSplitSelected (mainfrm.cpp 5218), i.e. NOT
-    // through a CXYWnd handler.  The transitional XYWnd_MfcSyncIn( m_pActiveXY ) that used to run
-    // here is gone: m_nViewType (what Ed_ProduceSplitLists reads) now lives ONLY in g_xywndState.
+    // U-GLOBALS: reached straight from Cmd_OnSplitSelected (mainfrm.cpp), i.e. NOT through a
+    // CXYWnd handler.  m_nViewType (what Ed_ProduceSplitLists reads) lives ONLY in g_xywndState.
     Ed_ProduceSplitLists();
 
     if ( g_brFrontSplits.next == &g_brFrontSplits )
@@ -2521,18 +2410,18 @@ void Ed_SplitClip()
     g_bRogueClipMode = 0;
 }
 
-// CXYWnd::FlipClip (IDB 0x46ddf0) -- toggle which side the clip keeps.
+// CXYWnd::FlipClip (0x46ddf0) -- toggle which side the clip keeps.
 void Ed_FlipClip()
 {
     g_nUpdateBits |= 0x5;
     g_bSwitch = ( g_bSwitch == 0 );
 }
 
-// ─── CXYWnd::DrawCrosshair (IDB 0x4655d0) ────────────────────────────────────
+// ─── CXYWnd::DrawCrosshair (0x4655d0) ────────────────────────────────────────
 // The Shift+X full-extent crosshair: two ±131072-unit lines crossing at g_tdp (the
-// snapped world point under the cursor, maintained by CXYWnd::OnMouseMove 0x464b10),
+// snapped world point under the cursor, maintained by CXYWnd::OnMouseMove),
 // in the view's two in-plane axes.  The axis pair is the same one PaintSizeInfo uses:
-// dim1 = (m_nViewType == YZ) @0x46561b, dim2 = (m_nViewType != XY) + 1 @0x465625.
+// dim1 = (m_nViewType == YZ), dim2 = (m_nViewType != XY) + 1.
 // Colour {0.2, 0.9, 0.2, 0.8}; ONE 2-line batch at width 1.
 static void Ed_DrawCrosshair( xywndState_t *wnd )
 {
@@ -2540,40 +2429,39 @@ static void Ed_DrawCrosshair( xywndState_t *wnd )
     GfxColor       gfx_col;
     GfxPointVertex verts[4];
 
-    const int dim1 = ( wnd->m_nViewType == ED_VIEW_YZ );        // 0x46561b
-    const int dim2 = ( wnd->m_nViewType != ED_VIEW_XY ) + 1;    // 0x465625
+    const int dim1 = ( wnd->m_nViewType == ED_VIEW_YZ );
+    const int dim2 = ( wnd->m_nViewType != ED_VIEW_XY ) + 1;
 
-    from[0] = 0.2f;          // 0x4655ef
-    from[1] = 0.89999998f;   // 0x4655fc
-    from[2] = 0.2f;          // 0x465604
-    from[3] = 0.80000001f;   // 0x465613
-    Byte4PackPixelColor( from, &gfx_col );                      // 0x465627
+    from[0] = 0.2f;
+    from[1] = 0.89999998f;
+    from[2] = 0.2f;
+    from[3] = 0.80000001f;
+    Byte4PackPixelColor( from, &gfx_col );
 
-    for ( int i = 0; i < 4; ++i )                               // 0x465632..0x46566c
+    for ( int i = 0; i < 4; ++i )
     {
         verts[i].xyz[0] = g_tdp[0];
         verts[i].xyz[1] = g_tdp[1];
         verts[i].xyz[2] = g_tdp[2];
-        *(GfxColor *)verts[i].color = gfx_col;                  // 0x46568b..0x465694
+        *(GfxColor *)verts[i].color = gfx_col;
     }
-    verts[0].xyz[dim1] = -131072.0f;                            // 0x465675
-    verts[1].xyz[dim1] =  131072.0f;                            // 0x46567f
-    verts[3].xyz[dim2] =  131072.0f;                            // 0x465683
-    verts[2].xyz[dim2] = -131072.0f;                            // 0x465687
+    verts[0].xyz[dim1] = -131072.0f;
+    verts[1].xyz[dim1] =  131072.0f;
+    verts[3].xyz[dim2] =  131072.0f;
+    verts[2].xyz[dim2] = -131072.0f;
 
-    R_AddCmd_Line3D( 2, 1, verts );                             // 0x465697
+    R_AddCmd_Line3D( 2, 1, verts );
 }
 
-// CXYWnd::DrawClipper (IDB 0x4656c0) -- render the placed clip points (numbered square
+// CXYWnd::DrawClipper (0x4656c0) -- render the placed clip points (numbered square
 // markers + "1"/"2"/"3" labels) and, once two points are placed, a wireframe preview of
 // the kept split side. Drawn through the identity orientation (world_orient_matrix);
 // colours from d_savedinfo.colors[12] (the clip-point colour).
 // Split-preview keep-side v37 = (vt == XZ) ? !g_bSwitch : g_bSwitch - NO m_bSwitchClip here,
-// unlike Clip.  KISAK divergences: (1) the label half-pixel centering (CXYWnd+92/+96 flags,
-// unmodelled by the port's MFC-reconstructed CXYWnd) is dropped - sub-pixel; (2) the
-// split-preview wireframe uses a dedicated 5450-vertex buffer where the binary reuses the
-// 3-vertex clip-MARKER buffer with vertLimit=3 (0x465b05 `push 3`), a latent original bug
-// that truncates the preview to ~1 line.
+// unlike Clip.  Divergences: (1) the label half-pixel centering (two CXYWnd flags the port
+// does not model) is dropped - sub-pixel; (2) the split-preview wireframe uses a dedicated
+// 5450-vertex buffer where the binary reuses the 3-vertex clip-MARKER buffer with
+// vertLimit=3, a latent original bug that truncates the preview to ~1 line.
 void Ed_DrawClipper( xywndState_t *wnd )
 {
     GfxColor clipCol;
@@ -2614,7 +2502,7 @@ void Ed_DrawClipper( xywndState_t *wnd )
     for ( int k = 0; k < 3; ++k )
     {
         if ( !cp[k]->m_bSet ) continue;
-        // org = ptClip + 2 on all 3 axes (the binary's v44[nDim1/2/3] = v47[nDim1/2/3]).
+        // org = ptClip + 2 on all 3 axes.
         float org[3];
         org[nDim1] = cp[k]->m_ptClip[nDim1] + 2.0f;
         org[nDim2] = cp[k]->m_ptClip[nDim2] + 2.0f;
@@ -2627,7 +2515,7 @@ void Ed_DrawClipper( xywndState_t *wnd )
     if ( g_Clip1.m_bSet && g_Clip2.m_bSet )
     {
         Ed_ProduceSplitLists();
-        // IDB DrawClipper keep-side (distinct from Clip -- no m_bSwitchClip here):
+        // keep-side (distinct from Clip -- no m_bSwitchClip here):
         //   v37 = (view==XZ) ? (g_bSwitch==0) : g_bSwitch;  keep = v37 ? back : front.
         const int v37 = ( wnd->m_nViewType == ED_VIEW_XZ ) ? ( g_bSwitch == 0 )
                                                             : (int)(byte)g_bSwitch;
@@ -2636,7 +2524,7 @@ void Ed_DrawClipper( xywndState_t *wnd )
         GfxColor previewCol;
         Byte4PackPixelColor( const_cast<float *>( s_clipPreview ), &previewCol );
 
-        // KISAK: dedicated 5450-vertex buffer instead of the binary's 3-vertex marker-buffer
+        // Dedicated 5450-vertex buffer instead of the binary's 3-vertex marker-buffer
         // reuse + vertLimit=3, which truncates the preview - see the header.
         static GfxPointVertex s_lineVerts[5450];
         int vertCount = 0;
@@ -2659,16 +2547,16 @@ void Ed_DrawClipper( xywndState_t *wnd )
 // Ed_DrawVertexHandles - the sel_vertex/sel_edge handle PREFIX of DrawConnectionLinks
 // (0x40c9f0), which the binary calls from BOTH XY_Draw and Cam_Draw (so both call it here;
 // d_points are world-space, transformed through the identity orientation).  Green points
-// (flt_6DE140) for the vertices, blue edge-midpoints (flt_6DE160) for sel_edge; batched as
-// RC_DRAW_POINTS, flushed at 1362 like the binary.
-// KISAK REDUCTION: the full prefix also draws sub_40C4D0's red (1,0,0,0.25) overlay over
-// dword_180A8E0 items, and the sel_vertex handles for the transient RECTANGLE point-edit
+// for the vertices, blue edge-midpoints for sel_edge; batched as RC_DRAW_POINTS, flushed at
+// 1362 like the binary.
+// REDUCTION: the full prefix also draws 0x40C4D0's red (1,0,0,0.25) overlay over the items
+// at 0x180A8E0, and the sel_vertex handles for the transient RECTANGLE point-edit
 // modes 14/15 (not just sel_vertex).
 void Ed_DrawVertexHandles()
 {
     if ( g_qeglobals.d_select_mode == sel_vertex )
     {
-        static const float s_vertGreen[4] = { 0.0f, 1.0f, 0.0f, 1.0f };  // flt_6DE140
+        static const float s_vertGreen[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
         GfxColor col;
         Byte4PackPixelColor( const_cast<float *>( s_vertGreen ), &col );
 
@@ -2686,7 +2574,7 @@ void Ed_DrawVertexHandles()
     }
     else if ( g_qeglobals.d_select_mode == sel_edge )
     {
-        static const float s_edgeBlue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE160
+        static const float s_edgeBlue[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
         GfxColor col;
         Byte4PackPixelColor( const_cast<float *>( s_edgeBlue ), &col );
 
@@ -2714,19 +2602,17 @@ void Ed_DrawVertexHandles()
 //  SELF-GATES on it, drawing only when the bit is CLEAR).  Draws a line with chevron
 //  arrowheads from each entity with a `target` epair to every entity whose `targetname`
 //  matches, plus the CoD `script_linkTo`/`script_linkName` script-link variant.
-//  IDB: Lines_AddLinkTo 0x46a2c0, Lines_AddLinkToScript 0x46b590, and the line-colour helper
-//  Brush_GetEntityLineColor 0x47aa20 - all the tail of DrawConnectionLinks 0x40c9f0.
+//  Lines_AddLinkTo, Lines_AddLinkToScript and the line-colour helper
+//  Brush_GetEntityLineColor - all the tail of DrawConnectionLinks.
 // ════════════════════════════════════════════════════════════════════════════════
 
-// Brush_GetEntityLineColor (IDB 0x47aa20) lives in brush.cpp — its asserts are
-// brush.cpp:4560, i.e. that IS its source file.  This TU used to carry a second
-// static copy which shadowed the canonical one for the connections overlay; the two
-// had drifted, so the copy is gone and both paths now share brush.cpp's body.
+// Brush_GetEntityLineColor lives in brush.cpp (its asserts are brush.cpp:4560); the
+// connections overlay shares that body.
 extern char Brush_GetEntityLineColor( float *outRgba, brush_t *brushDef,
                                       const float *inRgba );   // brush.cpp 0x47aa20
 
 // Find an entity's first epair value for `key` (case-insensitive), or "" if absent.
-// (Lines_AddLinkTo's inlined epair scan; the binary uses `zero` for the not-found case.)
+// (Lines_AddLinkTo's inlined epair scan.)
 static const char *Ed_EntFirstKey( entity_s *e, const char *key )
 {
     for ( epair_t *ep = e->def
@@ -2747,9 +2633,9 @@ static inline selbrush_t *Ed_EntFirstBrushInst( entity_s *e )
 }
 
 // The eclass for an entity's line colour.  INSTANCE-vs-DEF trap: the binary reads the DEF
-// eclass (*(_DWORD*)(ent+8)+0x60 = def->eclass), NOT the INSTANCE's own `eclass` field - for a
-// prefab-instanced entity the instance eclass can be NULL.  entity_s_def.eclass is also at
-// +0x60.  Falls back to the instance eclass / black if both are absent.
+// eclass (def->eclass), NOT the INSTANCE's own `eclass` field - for a prefab-instanced
+// entity the instance eclass can be NULL.  Falls back to the instance eclass / black if
+// both are absent.
 static inline const float *Ed_EntDefColor( entity_s *e )
 {
     static const float kBlack[3] = { 0.0f, 0.0f, 0.0f };
@@ -2770,7 +2656,7 @@ static inline int Ed_AddLinkSeg( GfxPointVertex *verts, const orientation_t *ori
     return R_Add3DLine( verts, orient, p1, p2, (const unsigned int *)col, 1, vertCount, ED_LINK_BATCH );
 }
 
-// ── Lines_AddLinkTo (IDB 0x46a2c0) — target/targetname connection lines ─────────
+// ── Lines_AddLinkTo (0x46a2c0) — target/targetname connection lines ─────────────
 // For every entity with a "target" epair whose representative brush is visible: draw
 // a coloured line + chevron arrowheads to every entity whose "targetname" matches.
 // If NO targetname matches, draw a single random-coloured "dangling" line to a random
@@ -2781,7 +2667,7 @@ static void Lines_AddLinkTo()
         return;                                  // connections hidden
 
     // Pass 1: gather every entity that HAS a targetname + a visible brush.
-    static entity_s   *tnEnts[ED_LINK_MAX_ENTS];     // file-static: the IDB stack arrays
+    static entity_s   *tnEnts[ED_LINK_MAX_ENTS];     // file-static: the binary's stack arrays
     static const char *tnVals[ED_LINK_MAX_ENTS];     //  are 256 KB each — too big for the stack
     int nTn = 0;
     for ( entity_s *e = entityInsts.next; e != &entityInsts; e = e->next )
@@ -2840,19 +2726,18 @@ static void Lines_AddLinkTo()
 
             // arrowhead wing offsets (±8 units, perpendicular in the XY plane)
             float ax = dir[0] * 8.0f, ay = dir[1] * 8.0f;
-            float wing1[2] = { ax - ay, ay + ax };   // (v28,v29)
-            float wing2[2] = { ax + ay, ay - ax };   // (v30,v31)
+            float wing1[2] = { ax - ay, ay + ax };
+            float wing2[2] = { ax + ay, ay - ax };
 
-            // binary XYWnd.cpp:2881 — the matched brush instance must belong to the matched
-            // entity.  tb/te are the binary's locals.
+            // the matched brush instance must belong to the matched entity; tb/te are the
+            // binary's local names.
             selbrush_t *tb = mb;
             entity_s   *te = me;
             iassert( tb->owner && tb->owner == te );   // XYWnd.cpp:2881
 
-            // line colour = matched entity's DEF eclass colour (§11 instance-vs-def: read the
+            // line colour = matched entity's DEF eclass colour (instance-vs-def: read the
             // DEF's eclass, not the instance's — see Ed_EntDefColor), overridden by the matched
-            // brush's _color/actor/node_path via Brush_GetEntityLineColor (brushDef = mb->def,
-            // matching the IDB's `v19 = (entity_brush_s*)v10->def`).
+            // brush's _color/actor/node_path via Brush_GetEntityLineColor (brushDef = mb->def).
             const float *baseCol = Ed_EntDefColor( me );
             float rgba[4] = { baseCol[0], baseCol[1], baseCol[2], 1.0f };
             Brush_GetEntityLineColor( rgba, mb->def, rgba );
@@ -2899,7 +2784,7 @@ static void Lines_AddLinkTo()
         R_AddCmd_Line3D( (short)( vertCount / 2 ), 1, verts );
 }
 
-// ── Map_ParseLinkList (IDB 0x48be20, file-static in select.cpp) ─────────────────
+// ── Map_ParseLinkList (0x48be20, file-static in select.cpp) ─────────────────────
 // Parse a space-separated list of unique integers into `out` (out[count]=-1 sentinel),
 // max 30 entries.  Local copy here because the select.cpp original is file-static.
 static int Ed_ParseLinkList( int *out, const char *str )
@@ -2925,7 +2810,7 @@ static int Ed_ParseLinkList( int *out, const char *str )
     return count;
 }
 
-// ── Lines_AddLinkToScript (IDB 0x46b590) — script_linkTo/script_linkName lines ──
+// ── Lines_AddLinkToScript (0x46b590) — script_linkTo/script_linkName lines ──────
 // The CoD script-link variant: each entity's `script_linkTo` is a space-separated list
 // of integers; draw a line (no arrowheads) to every entity whose `script_linkName`
 // integer is in that list.
@@ -2987,13 +2872,13 @@ static void Lines_AddLinkToScript()
                                ( toDef->mins[1] + toDef->maxs[1] ) * 0.5f,
                                ( toDef->mins[2] + toDef->maxs[2] ) * 0.5f };
 
-            // binary XYWnd.cpp:3272 — matched brush instance must belong to the matched entity.
-            // tb/te are the binary's locals.
+            // matched brush instance must belong to the matched entity; tb/te are the
+            // binary's local names.
             selbrush_t *tb = mb;
             entity_s   *te = lnEnts[i];
             iassert( tb->owner && tb->owner == te );   // XYWnd.cpp:3272
 
-            const float *baseCol = Ed_EntDefColor( lnEnts[i] );   // §11: DEF eclass colour
+            const float *baseCol = Ed_EntDefColor( lnEnts[i] );   // DEF eclass colour
             float rgba[4] = { baseCol[0], baseCol[1], baseCol[2], 1.0f };
             Brush_GetEntityLineColor( rgba, mb->def, rgba );
             GfxColor col;
@@ -3016,18 +2901,17 @@ void Ed_DrawConnectionLines()
     Lines_AddLinkTo();
     Lines_AddLinkToScript();
     VehiclePath_AddNode();      // vehicle-path preview for the selected info_vehicle_node
-    Pointfile_Draw();           // IDB DrawConnectionLinks tail — draw the .lin leak path
+    Pointfile_Draw();           // DrawConnectionLinks tail — draw the .lin leak path
 }
 
 
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Shell-agnostic XY-viewport handlers (U-VP-XY).  Every afx_msg body lives here as a free
-//  function on plain args; the MFC CXYWnd handlers at the bottom of this file are thin
-//  translations, and the raw-Win32 WndProc twin after them feeds the SAME functions with the
-//  SAME conventions MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD size).
-//  The focus/capture calls and the state writes are part of the handler bodies, so both shells
-//  get them identically.  `Ed_ActiveXY()` is the one XY view (see xywndState_t).
+//  function on plain args; the raw-Win32 WndProc twin at the bottom of this file feeds them
+//  with the SAME conventions MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD
+//  size).  The state writes are part of the handler bodies (focus/capture belong to the ImGui
+//  host under P5 RTT).  `Ed_ActiveXY()` is the one XY view (see xywndState_t).
 //
 //  Callers declare these themselves (mainfrm.h is not this unit's to edit):
 //      extern void XYWnd_OnCreate( HWND hwnd );
@@ -3046,9 +2930,9 @@ void Ed_DrawConnectionLines()
 // ═════════════════════════════════════════════════════════════════════════════
 
 // CXYWnd::OnLButtonDown 0x463f70 -> OriginalButtonDown 0x464a20 -> XY_MouseDown.  The binary's
-// active-XY-pane swap is moot here (single-pane) and m_ptDown is not modelled; SetFocus /
-// SetCapture (inside OriginalButtonDown in the binary) + Ed_InvalidateAllViews are the port's
-// conventions.  (CWnd::SetFocus/SetCapture ARE ::SetFocus(m_hWnd)/::SetCapture(m_hWnd).)
+// active-XY-pane swap is moot here (single-pane) and m_ptDown is not modelled; the binary's
+// SetFocus / SetCapture (inside OriginalButtonDown) are left to the shell (P5 RTT), and
+// Ed_InvalidateAllViews is the port's convention.
 void XYWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
 {
     xywndState_t *wnd = Ed_ActiveXY();
@@ -3062,28 +2946,29 @@ void XYWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
     Ed_InvalidateAllViews();   // selection / clip points changed -> repaint XY + Z
 }
 
-extern void SelectFaceSth( float *a1, float *a2, int a3 );   // select.cpp 0x48e340 (via drag.cpp extern)
+extern void Select_ClickTrace( float *trace_dir, float *trace_start, int contents );   // select.cpp 0x48e340
 
 void XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y )
 {
     xywndState_t *wnd = Ed_ActiveXY();
-    // Clip mode: release any clip-point drag (IDB OnLButtonUp clip branch); a click that
+    // Clip mode: release any clip-point drag (the binary's OnLButtonUp clip branch); a click that
     // placed a point does not run Drag_MouseUp (no drag was begun).
     if ( g_bClipMode )
     {
         if ( g_pMovingClip )
         {
             // P5 RTT: shell owns drag-capture; OS ReleaseCapture on the hidden child would
-            // steal the mouse from the ImGui host, so the release is dropped here.
+            // steal the mouse from the ImGui host, so the release is s_clipDragging.
             g_pMovingClip = nullptr;
         }
+        s_clipDragging = false;
         wnd->m_nButtonstate = 0;
         g_nUpdateBits = -1;
         Ed_InvalidateAllViews();
         return;
     }
-    // RESTORED (IDB OnLButtonUp 0x464860): alt+shift LMB CLICK (no drag — the up point equals
-    // the press point) → single-face select via SelectFaceSth, with the filter bits from prefs
+    // OnLButtonUp 0x464860: alt+shift LMB CLICK (no drag — the up point equals
+    // the press point) → single-face select via Select_ClickTrace, with the filter bits from prefs
     // (entities_off=0x200 / selectableModels=0x400 / sky_brush_off=0x800). Cast the press point
     // ray from m_nPressx/m_nPressy (the port doesn't model the binary's m_ptDown; for an LMB the
     // down/press point coincides). Off the monkey/gate path (modifier state can't be PostMessage'd).
@@ -3096,7 +2981,7 @@ void XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y )
         if ( g_PrefsDlg->sky_brush_off )       flags |= 2048;
         float start[3], dir[3];
         Ed_XY_ToPoint( wnd, wnd->m_nPressx, wnd->m_nPressy, start, dir );
-        SelectFaceSth( dir, start, flags );
+        Select_ClickTrace( dir, start, flags );
     }
     Drag_MouseUp( nFlags );        // == XY_MouseUp's Drag_MouseUp (toggle_unk02/ShowCursor reset
     wnd->m_nButtonstate = 0;       //    omitted — consistent with the documented scroll reduction)
@@ -3106,17 +2991,17 @@ void XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y )
     Ed_InvalidateAllViews();   // repaint XY + Z
 }
 
-// CXYWnd::OnMouseMove - REDUCED vs IDA 0x464b10.  Kept: the g_tdp cursor-point update, the
-// clip-point hover/drag (Ed_ClipMouseMoved) and Ed_XY_MouseMoved.  KISAK omissions on a
+// CXYWnd::OnMouseMove 0x464b10 - REDUCED.  Kept: the g_tdp cursor-point update, the
+// clip-point hover/drag (Ed_ClipMouseMoved) and Ed_XY_MouseMoved.  Omitted on a
 // no-RButton move: the CHASE-MOUSE edge auto-scroll (m_bChaseMouse + SetTimer + m_ptDragAdj +
 // the OnTimer half, which needs the unmodelled m_ptDown), the STATUS-BAR coord readout, and
-// the point-edit HOVER latch (byte_23245A5 + dword_23F1648).
+// the point-edit HOVER latch (0x23245A5 + 0x23F1648).
 void XYWnd_OnMouseMove( unsigned int nFlags, int x, int y )
 {
     xywndState_t *wnd = Ed_ActiveXY();
-    // 0x464c1a: while the RMB is NOT down (the binary's m_bRButtonDown; the port carries the
+    // While the RMB is NOT down (the binary's m_bRButtonDown; the port carries the
     // same state in m_nButtonstate) the cursor's snapped world point is republished into
-    // g_tdp — the anchor DrawCrosshair (0x4655d0) draws through.  Zeroed first because
+    // g_tdp — the anchor DrawCrosshair draws through.  Zeroed first because
     // SnapToPoint/SnapToGrid only write the two in-plane axes.
     if ( !( wnd->m_nButtonstate & MK_RBUTTON ) )
     {
@@ -3135,8 +3020,8 @@ void XYWnd_OnMouseMove( unsigned int nFlags, int x, int y )
 }
 
 // CXYWnd::OnRButtonDown 0x4647b0 - single-pane reconstruction.  The binary swaps the active XY
-// pane then routes the non-clip RMB through OriginalButtonDown 0x464a20 -> XY_MouseDown(...,
-// MK_RBUTTON).  KISAK: (a) the active-pane swap is MOOT (single-pane); (b) OriginalButtonDown's
+// pane then routes the non-clip RMB through OriginalButtonDown -> XY_MouseDown(...,
+// MK_RBUTTON).  (a) the active-pane swap is MOOT (single-pane); (b) OriginalButtonDown's
 // SetWindowPos/BringWindowToTop Z-order raise is deliberately omitted - it destabilises the
 // live D3D render panes; (c) for the default 3-button mouse XY_MouseDown(MK_RBUTTON) only sets
 // m_nButtonstate + GetCursorPos, both reproduced directly; on a 2-button mouse the binary maps
@@ -3146,8 +3031,8 @@ void XYWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
     xywndState_t *wnd = Ed_ActiveXY();
     (void)hwnd;   // P5 RTT: shell owns focus + drag-capture; OS-capturing the hidden child steals the mouse.
     // Ctrl+RMB on a 3-button mouse = the temporary "rogue" clip: enter clip mode if not
-    // already in it, mark it rogue (so LMB keeps normal editing), and drop a clip point
-    // (IDB OnRButtonDown 0x4647b0). Otherwise arm the scroll/context-menu RMB path.
+    // already in it, mark it rogue (so LMB keeps normal editing), and drop a clip point.
+    // Otherwise arm the scroll/context-menu RMB path.
     if ( g_PrefsDlg->m_nMouseButtons == 3 && GetKeyState( VK_CONTROL ) < 0 )
     {
         if ( !g_bClipMode )
@@ -3159,60 +3044,59 @@ void XYWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
         Ed_InvalidateAllViews();
         return;
     }
-    // Faithful RMB routing (0x4647b0 → OriginalButtonDown → XY_MouseDown): the binary sends
+    // RMB routing (→ OriginalButtonDown → XY_MouseDown): the binary sends
     // EVERY RMB-down through XY_MouseDown — that is what arms Drag_Begin's Shift+RMB(+Alt)
-    // marquee modes (Drag_Setup 0x47e566: buttons==6 [MK_SHIFT|MK_RBUTTON] + Alt →
+    // marquee modes (Drag_Setup: buttons==6 [MK_SHIFT|MK_RBUTTON] + Alt →
     // sel_areabrush_sub(13) box-DESELECT).  The port's plain-RMB scroll/context reduction
     // stays for an UNMODIFIED RMB; a MODIFIED one routes through the real dispatch so those
-    // drags arm and OnRButtonUp's Drag_MouseUp can apply them.  [audit U3, 2026-07-25]
+    // drags arm and OnRButtonUp's Drag_MouseUp can apply them.
     if ( GetKeyState( VK_SHIFT ) < 0 || GetKeyState( VK_MENU ) < 0 )
     {
         wnd->m_nPressx = x;
         wnd->m_nPressy = y;
-        s_rmbScrolled = true;            // modified RMB never pops the context menu (0x4649e4 gate)
+        s_rmbScrolled = true;            // modified RMB never pops the context menu (the modifier gate)
         Ed_XY_MouseDown( wnd, x, y, nFlags );
         return;
     }
     wnd->m_nButtonstate = MK_RBUTTON;
     s_rmbScrolled  = false;          // arm the context-click detector
     GetCursorPos( &wnd->m_ptCursor );
-    // The binary records the client-space press point (m_ptDown) here; the RMB-create
-    // dispatch (OnEntityCreate_Context 0x466730) passes it to CreateEntityFromClassname
-    // so the placeholder brush drops under the cursor. m_nPressx/y ARE that client point.
+    // The binary records the client-space press point (m_ptDown) here for its RMB-create
+    // dispatch (OnEntityCreate_Context 0x466730). m_nPressx/y ARE that client point.
     wnd->m_nPressx = x;
     wnd->m_nPressy = y;
 }
 
-// CXYWnd::ContextMenu (IDB 0x467100) - the XY right-click popup: Select / Prefab / Layers
+// CXYWnd::ContextMenu (0x467100) - the XY right-click popup: Select / Prefab / Layers
 // submenus, the Make-Detail/Structural/Clip/Coplanar + Ungroup commands, and the recursive
-// eclass CREATE-entity tree.  The static items route to their existing WM_COMMAND handlers;
-// TrackPopupMenu(TPM_RETURNCMD) dispatches directly.
+// eclass CREATE-entity tree.  Not ported (see the gate in XYWnd_OnRButtonUp).
 
 void XYWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags )
 {
     xywndState_t *wnd = Ed_ActiveXY();
-    // The faithful 0x464990 tail = XY_MouseUp 0x467e30: Drag_MouseUp closes/applies any armed
-    // drag, toggle_unk02 resets, full repaint bits requested.  KISAK: the binary's
+    // OnRButtonUp 0x464990's tail = XY_MouseUp 0x467e30: Drag_MouseUp closes/applies any armed
+    // drag, toggle_unk02 resets, full repaint bits requested.  The binary's
     // ShowCursor(1)-until-visible loop is omitted - the port's reduced RMB path never
     // ShowCursor(0)s.
-    Drag_MouseUp( nFlags );                       // 0x467e35
-    g_qeglobals.toggle_unk02 = 0;                 // 0x467e48
-    g_nUpdateBits = -1;                           // 0x467e4d
-    wnd->m_nButtonstate = 0;                      // 0x467e57
+    Drag_MouseUp( nFlags );
+    g_qeglobals.toggle_unk02 = 0;
+    g_nUpdateBits = -1;
+    wnd->m_nButtonstate = 0;
+    s_clipDragging = false;   // KIWI: the Ctrl+RMB rogue clip's drag ends here too
     // P5 RTT: shell owns drag-capture; OS ReleaseCapture on the hidden child would steal the
-    // mouse from the ImGui host, so the ( nFlags & MK_* )==0 release (0x464a08) is dropped here.
+    // mouse from the ImGui host, so the ( nFlags & MK_* )==0 release is dropped here.
     Ed_InvalidateAllViews();                      // port's repaint mechanism for g_nUpdateBits
 
     // Context menu: only on a CLICK (no scroll — s_rmbScrolled stands in for the binary's
-    // point==m_ptDown test) with NO Shift/Ctrl/Alt (the 0x4649cc–0x4649e4 modifier gate,
-    // previously missing).  Popped AFTER the capture release — the binary pops first
-    // (0x4649e6) but literal order fails here (TrackPopupMenu×capture port quirk).
+    // point==m_ptDown test) with NO Shift/Ctrl/Alt (the binary's modifier gate).  Popped AFTER
+    // the capture release — the binary pops first, but that order fails here
+    // (TrackPopupMenu×capture port quirk).
     if ( !s_rmbScrolled )
     {
-        bool noAlt = GetKeyState( VK_MENU ) >= 0;                       // 0x4649cc
-        if ( GetKeyState( VK_CONTROL ) < 0 )                            // 0x4649d5
+        bool noAlt = GetKeyState( VK_MENU ) >= 0;
+        if ( GetKeyState( VK_CONTROL ) < 0 )
             noAlt = false;
-        if ( GetKeyState( VK_SHIFT ) >= 0 && noAlt )                    // 0x4649e4
+        if ( GetKeyState( VK_SHIFT ) >= 0 && noAlt )
         {
             (void)hwnd;               // raw shell: no context menu until the HMENU rewrite lands
         }
@@ -3221,7 +3105,7 @@ void XYWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags )
 
 void XYWnd_OnMButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
 {
-    // IDB CXYWnd::OnMButtonDown 0x463ff0 -> OriginalButtonDown 0x464a20 -> XY_MouseDown with
+    // CXYWnd::OnMButtonDown 0x463ff0 -> OriginalButtonDown -> XY_MouseDown with
     // nFlags carrying MK_MBUTTON (0x10), which reaches Ed_XY_MouseDown's camera-angle branch
     // (m_nMouseButtons==3 && m_nButtonstate==16) and turns the 3D camera toward the clicked
     // point.  (Ed_XY_MouseDown sets m_nButtonstate itself.)
@@ -3237,13 +3121,12 @@ void XYWnd_OnMButtonUp()
     // mouse from the ImGui host, so the release is dropped here.
 }
 
-// KISAK PORT UX BINDING: the binary's CXYWnd has NO OnMouseWheel override (zoom is
+// PORT UX BINDING: the binary's CXYWnd has NO OnMouseWheel override (zoom is
 // WM_COMMAND/key-driven via CMainFrame::OnKeyDown 0x422370), so wheel-to-zoom-around-cursor is
 // a port convenience, not a reproduced handler.  The zoom-to-cursor math is the standard
 // GtkRadiant form; the scale step (1.25/0.8) + clamp [0.01,32] should be cross-checked against
 // the binary's zoom WM_COMMAND handler (not located).
-// screenX/screenY = the WM_MOUSEWHEEL SCREEN point (MFC hands OnMouseWheel the same); returns
-// TRUE(1) = handled, as the MFC override did.
+// screenX/screenY = the WM_MOUSEWHEEL SCREEN point; returns TRUE(1) = handled.
 int XYWnd_OnMouseWheel( HWND hwnd, short zDelta, int screenX, int screenY )
 {
     xywndState_t *wnd = Ed_ActiveXY();
@@ -3311,125 +3194,9 @@ static bool Entity_NeedsExportKey( entity_s_def *e )
 // Workflow: drag out a placeholder brush where you want the entity, then "create X" -
 // Entity_Create consumes the placeholder and drops the entity there.
 
-// CreateEntityBrush (IDB 0x466290) - drop a 32x32 grid-snapped placeholder brush at the click
-// point, so a fresh point/model entity picked from the RMB menu with an empty selection has a
-// box to bind to.  __usercall(int height@<eax>, int x@<ecx>, xywndState_t *wnd).  The DEPTH axis
-// comes from d_new_brush_bottom_x/top_x (grid-quantised, min one grid cell).  NOTE the
-// degenerate in-plane axis fixup ADDS 16.0, not +step.
-static selbrush_t *CreateEntityBrush( int height, int x, xywndState_t *wnd )
-{
-    float mins[3], maxs[3];
-    const bool noclamp = ( g_PrefsDlg->m_bNoClamp != 0 );          // 0x4662aa
-
-    if ( noclamp ) Ed_SnapToPoint( wnd, mins, x, height );        // 0x4662b7
-    else           Ed_SnapToGrid ( wnd, mins, x, height );        // 0x4662c8
-
-    const int x2 = x + 32;                                        // 0x4662d0
-    const int h2 = height + 32;                                   // 0x4662d3
-    if ( noclamp ) Ed_SnapToPoint( wnd, maxs, x2, h2 );           // 0x4662e2
-    else           Ed_SnapToGrid ( wnd, maxs, x2, h2 );           // 0x4662f3
-
-    // Depth (out-of-screen) axis: XY→Z(2), XZ→Y(1)/YZ→X(0) (m_nViewType!=0).
-    const int depth = ( wnd->m_nViewType == 2 ) ? 2 : ( wnd->m_nViewType != 0 );  // 0x466304
-
-    const float step   = grid_sizes[g_qeglobals.d_gridsize];
-    const float *botSrc = &g_qeglobals.d_new_brush_bottom_x;      // [x,y,z]
-    const float *topSrc = &g_qeglobals.d_new_brush_top_x;         // [x,y,z]
-
-    const float lo = (float)(int)( botSrc[depth] / step ) * step; // 0x466339
-    mins[depth] = lo;
-    float hi = (float)(int)( topSrc[depth] / step ) * step;       // 0x466367
-    maxs[depth] = hi;
-    if ( hi <= lo )                                               // 0x466376
-        maxs[depth] = lo + step;                                  // 0x46637f
-
-    for ( int i = 0; i < 3; ++i )                                 // 0x46638b
-    {
-        if ( maxs[i] == mins[i] )                                 // 0x46639c
-            maxs[i] += 16.0f;                                     // 0x4663a4  (note: +16, not +step)
-        if ( maxs[i] < mins[i] )                                  // 0x4663b7
-        {
-            const float t = mins[i]; mins[i] = maxs[i]; maxs[i] = t;
-        }
-    }
-
-    Ed_EnsureCurrentMaterial();   // give the new brush a valid material (as Ed_NewBrushDrag)
-    brush_t *b = Brush_Alloc( g_qeglobals.random_texture_stuff, nullptr );  // 0x4663e5
-    Brush_Create( mins, maxs, b, nullptr );                       // 0x4663f0 (lower, upper)
-    if ( !b )                                                     // 0x4663fa
-        return nullptr;
-    Brush_BuildWindings( b, 1 );                                  // 0x466409
-    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )  // 0x46641e
-        SetupVertexSelection();
-    MarkMapModified();                                            // 0x466425
-    ++b->version;                                                 // 0x466430
-    Entity_LinkBrush( b, (entity_s *)world_entity->def );         // 0x46643a  (def-side)
-    selbrush_t *inst = Brush_AddToList( b, world_entity );        // 0x466448
-    if ( inst->next || inst->prev )                               // 0x466453
-        Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-    Brush_AddToList2( inst );                                     // 0x46645d
-    return inst;
-}
-
-// ─── CreateEntityFromClassname (IDB 0x466480) ─────────────────────────────────
-// The XY-menu dynamic-id dispatch target (called from OnEntityCreate_Context 0x466730).
-//   __usercall CreateEntityFromClassname(xywndState_t *xywnd@<edi>, char *classname@<esi>, int x, int y)
-// Runtime refusal checks (MessageBeep + Sys_Printf, NOT a grey-out) for fixedsize-with-
-// brushes and prefab/model conflicts; then Undo bracket; then if NOTHING is selected drop a
-// placeholder brush at (x, clientHeight-y-1); then CreateEntityFromName(classname).
-static void CreateEntityFromClassname( xywndState_t *xywnd, const char *classname, int x, int y )
-{
-    RECT xyrect;
-    GetClientRect( xywnd->m_hWnd, &xyrect );                      // 0x46648e
-
-    eclass_t *ec = Eclass_ForName( 0, classname );               // 0x4664a0
-    const bool haveSel = ( selected_brushes.next != &selected_brushes );
-
-    // The selected brush's owning entity eclass name (b->owner->def->eclass->name).
-    // def is entity_s*; the eclass lives on the entity_s_def view (as elsewhere in this file).
-    const char *selName = haveSel
-        ? ( (entity_s_def *)selected_brushes.next->owner->def )->eclass->name
-        : nullptr;
-
-    if ( ec && *(int *)&ec->fixedsize )                          // fixedsize entity
-    {
-        // 0x4664c8: refuse ONLY when WORLD brushes are selected — the binary tests
-        // `!I_stricmp(selName,"worldspawn")` (true when the selection IS worldspawn).  A
-        // NON-worldspawn entity selected falls through to the re-class path (CreateEntityFromName
-        // Path B).  [A prior port dropped the `!`, inverting this — it beeped on entity selection
-        // and allowed the refused world-brush case.]
-        if ( haveSel && !I_stricmp( selName, "worldspawn" ) )    // 0x4664c8
-        {
-            MessageBeep( MB_ICONHAND );                          // 0x4664d6 (0x40)
-            Sys_Printf( "Can not create a fixed size entity with brushes selected\n" );
-            return;                                              // 0x4664ec
-        }
-    }
-    if ( haveSel )                                                // 0x4664f7
-    {
-        if ( ( !I_stricmp( selName, "misc_model" ) || !I_stricmp( selName, "script_model" ) )
-             && !I_stricmp( classname, "misc_prefab" ) )         // 0x466545
-        {
-            MessageBeep( MB_ICONHAND );                          // 0x466553
-            Sys_Printf( "Can not create a prefab with a misc_model or script_model selected\n" );
-            return;                                              // 0x466569
-        }
-        if ( !I_stricmp( selName, "misc_prefab" )
-             && ( !I_stricmp( classname, "misc_model" ) || !I_stricmp( classname, "script_model" ) ) )  // 0x4665ac
-        {
-            MessageBeep( MB_ICONHAND );                          // 0x4665ba
-            Sys_Printf( "Can not create a misc_model or script_model with a prefab selected\n" );
-            return;                                              // 0x4665d0
-        }
-    }
-
-    Undo_ClearRedo();                                            // 0x4665d1
-    Undo_GeneralStart( "create entity" );                        // 0x4665db
-    if ( !haveSel )                                              // 0x4665ea  nothing selected → drop a box
-        CreateEntityBrush( xyrect.bottom - xyrect.top - y - 1, x, xywnd );  // 0x4665fc (GL Y-flip)
-    CreateEntityFromName( classname );                          // 0x466605
-    Undo_End();                                                 // 0x46660d
-}
+// KIWI: the RMB-menu create path (CreateEntityFromClassname 0x466480 + its placeholder
+// CreateEntityBrush 0x466290) is gone with the classic context menu; the ImGui browsers'
+// DropPlaceholder / PerformDrop do that job.
 
 void CreateEntityFromName( const char *str )
 {
@@ -3466,16 +3233,15 @@ void CreateEntityFromName( const char *str )
 
         if ( Entity_NeedsExportKey( (entity_s_def *)v4->def ) )
         {
-            // actor/misc_turret: assign a unique "export" id.  IDA 0x466034 allocates an MFC
+            // actor/misc_turret: assign a unique "export" id.  The binary allocates an MFC
             // CString temp buffer for Map_GetNextExportId to fill; the port's version RETURNS
             // the VA string (slot-index convention), so that scaffolding collapses to one
             // call.  Slot 2 is free (0/1 belong to MainFrm_BrushList).
             SetKeyValue( (entity_s_def *)v4->def, "export", Map_GetNextExportId( 2 ) );
         }
 
-        // Class-type default keys (faithful 0x465E.. tail). misc_*/script_* spawn the
-        // model-selection window (PARK — P6 UI); other classes seed radius/height or a
-        // trigger/volume layer key.
+        // Class-type default keys. misc_*/script_* spawn the model-selection window;
+        // other classes seed radius/height or a trigger/volume layer key.
         if ( I_stricmp( str, "misc_model" )    && I_stricmp( str, "misc_prefab" )  &&
              I_stricmp( str, "script_model" )  && I_stricmp( str, "script_vehicle" ) &&
              I_stricmp( str, "dyn_model" ) )
@@ -3488,13 +3254,12 @@ void CreateEntityFromName( const char *str )
             }
             else if ( ( classtype & 0x80u ) == 0 )
             {
-                // trigger/volume layer key (faithful 0x4661d0 dispatch): the 7 plain
+                // trigger/volume layer key: the 7 plain
                 // trigger_* classes → default material "trigger"; trigger_friendlychain →
                 // "aitrig"; info_volume → "volume".  Each calls Trigger_SetCurrentDefaultMaterial
-                // (sub_45C1A0) → SetMaterial(name,&mtl); mtl.layer[GetCurrentLayer].size[0..1]=64;
+                // → SetMaterial(name,&mtl); mtl.layer[GetCurrentLayer].size[0..1]=64;
                 // Texture_SetTexture(0,&mtl) — make a 64x64 default the CURRENT editor texture for
-                // the just-created trigger/volume brush.  All deps now ported (Texture_SetTexture
-                // 0x45be50 → texwnd.cpp).
+                // the just-created trigger/volume brush.
                 if ( I_stricmp( str, "trigger_multiple" ) && I_stricmp( str, "trigger_damage" ) &&
                      I_stricmp( str, "trigger_once" )     && I_stricmp( str, "trigger_hurt" )   &&
                      I_stricmp( str, "trigger_lookat" )   && I_stricmp( str, "trigger_use" )    &&
@@ -3525,11 +3290,9 @@ void CreateEntityFromName( const char *str )
             // The entity (with its bbox) is ALREADY created by Entity_Create above; the
             // picker only adds the "model" epair.  We post the same command so the
             // picker runs in the GUI; headless (no entity window) it is a clean no-op —
-            // the model-less misc_model bbox stands, and the model_gate exercises the
-            // picker's commit core (Ed_CommitPickedModel) directly.  (was: FATAL stub)
-            // The mode switch was parked on CEntityWnd_SetInspectorMode; that shipped with
-            // the inspector-mode unit, so the W_ENTITY switch is RESTORED (2026-07-31) —
-            // without it the picker can pop behind a Textures/Console/Filters inspector.
+            // the model-less misc_model bbox stands.
+            // Without the W_ENTITY switch the picker can pop behind a Textures/Console/Filters
+            // inspector.
             CEntityWnd_SetInspectorMode( INSPECTOR_ENTITY );   // 128
             Ed_PostAddModelCommand();
         }
@@ -3539,12 +3302,12 @@ void CreateEntityFromName( const char *str )
     else
     {
         // PATH B: Entity_Create refused (NULL) - re-class the single selected fixedsize point
-        // entity to the new fixedsize class `eclass` (IDA 0x465d54-0x465f8b).  Rebuilds the
+        // entity to the new fixedsize class `eclass`.  Rebuilds the
         // bbox brush in place from the new eclass's mins/maxs, repoints owner->eclass, sets
-        // "classname", relinks/reselects, then Entity_SetDefaultModelKey (0x485510).
+        // "classname", relinks/reselects, then Entity_SetDefaultModelKey.
         // The six bad-selection sub-cases (empty / >1 selected / consistency-assert / owner==
         // world / owner-class not fixedsize / new class not fixedsize) all fall through to the
-        // "Failed to create entity." MessageBox (IDA loc_465F90).
+        // "Failed to create entity." MessageBox.
         selbrush_t *v5 = selected_brushes.next;
         if ( v5 == &selected_brushes ||                          // empty selection
              v5->next != &selected_brushes )                      // more than one selected
@@ -3570,33 +3333,32 @@ void CreateEntityFromName( const char *str )
                 Undo_AddEntity_W( (entity_s *)eDef );
 
                 // Recompute the bbox from the new eclass's mins/maxs, preserving the
-                // old brush's origin.  IDA: delta = oldDef->mins - newEclass->mins;
+                // old brush's origin: delta = oldDef->mins - newEclass->mins;
                 //   newMins = newEclass->mins + delta;  newMaxs = newEclass->maxs + delta.
                 brush_t *oldDef = v5->def;
                 float delta[3], newMins[3], newMaxs[3];
                 for ( int i = 0; i < 3; ++i )
                 {
-                    delta[i]   = oldDef->mins[i] - eclass->mins[i];     // VectorSubtract
-                    newMins[i] = eclass->mins[i] + delta[i];            // VectorAdd
-                    newMaxs[i] = eclass->maxs[i] + delta[i];            // VectorAdd
+                    delta[i]   = oldDef->mins[i] - eclass->mins[i];
+                    newMins[i] = eclass->mins[i] + delta[i];
+                    newMaxs[i] = eclass->maxs[i] + delta[i];
                 }
 
                 // Repoint the entity to the new class + write the "classname" key.
                 eDef->eclass = eclass;
                 SetKeyValue( eDef, "classname", str );
 
-                // Build the new bbox brush def from the new eclass material.
-                // IDA: Init_MaterialLayer(&matdef, COERCE(0.25f)); sub_475AC0(&matdef,
-                //   eclass, newMins, newMaxs) == Brush_Alloc(&matdef, eclass) +
-                //   Brush_Create(newMins, newMaxs, brush, eclass).
+                // Build the new bbox brush def from the new eclass material:
+                // Init_MaterialLayer(&matdef, 0.25f), then 0x475AC0 == Brush_Alloc(&matdef,
+                // eclass) + Brush_Create(newMins, newMaxs, brush, eclass).
                 // matdef: the binary leaves mat_texDef uninitialized (Init_MaterialLayer
                 // seeds it per-layer; Brush_Alloc memcpys all 0x24 bytes into each face).
-                // memset for safety, matching the gate-proven Entity_Create bbox build.
+                // memset for safety, matching the Entity_Create bbox build.
                 MaterialDef matdef;
                 memset( &matdef, 0, sizeof( matdef ) );
                 matdef.lyrMtl = eclass->material.lyrMtl;
                 matdef.radMtl = eclass->material.radMtl;
-                float ss = 0.25f;                                            // flt_6F42F0 (COERCE_MATERIALDEF_)
+                float ss = 0.25f;
                 Init_MaterialLayer( &matdef, ss );
 
                 brush_t *nb = Brush_Alloc( &matdef, eclass );
@@ -3611,11 +3373,11 @@ void CreateEntityFromName( const char *str )
                      g_qeglobals.d_select_mode == sel_edge )
                     SetupVertexSelection();
                 MarkMapModified();
-                ++nb->version;                                              // IDA 0x465edb add word [esi+4Eh],1
+                ++nb->version;
 
                 // Drop the old instance, free the old def, instance the new def.
                 entity_s *ownerInst = v5->owner;
-                sub_476330( v5 );                                          // Brush_Deselect_Helper
+                Brush_Deselect_Helper( v5 );
                 Brush_Free( v5 );
                 selbrush_t *v11 = Brush_AddToList( nb, ownerInst );        // new instance for the new def
 
@@ -3625,7 +3387,7 @@ void CreateEntityFromName( const char *str )
                 }
 
                 // Select_Brush_2(&active_brushes, v11): list != &selected_brushes, so the
-                // else-branch head-splice into active_brushes (IDA 0x476630 else path).
+                // else-branch head-splice into active_brushes.
                 if ( v11->next || v11->prev )
                     Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
                 v11->next = active_brushes.next;
@@ -3634,7 +3396,7 @@ void CreateEntityFromName( const char *str )
                 v11->prev = &active_brushes;
 
                 Select_Brush( v11, 1, 1, 0 );
-                Entity_SetDefaultModelKey( nb, eclass );                   // 0x485510 (v9, v21)
+                Entity_SetDefaultModelKey( nb, eclass );
 
                 iassert( selected_brushes.next->def == nb && selected_brushes.prev->def == nb );   // XYWnd.cpp:1131
             }
@@ -3645,16 +3407,15 @@ void CreateEntityFromName( const char *str )
 }
 
 
-// CXYWnd::OnDestroy (0x463d00) — persist the window placement.  [audit U8/B9 — the
-// whole handler was absent; SaveRegistryInfo has been a real port since win_qe3.cpp:336.]
+// CXYWnd::OnDestroy (0x463d00) — persist the window placement.
 // (The CWnd::OnDestroy() base chain is the SHELL's job — DefWindowProc in the raw twin.)
 extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );   // win_qe3.cpp 0x499940
 void XYWnd_OnDestroy( HWND hwnd )
 {
     WINDOWPLACEMENT wndpl;
-    wndpl.length = sizeof( wndpl );                          // 0x463d1a (44)
-    if ( ::GetWindowPlacement( hwnd, &wndpl ) )              // 0x463d21
-        SaveRegistryInfo( "Radiant::XYWindowPlace", &wndpl, 0x2C );   // 0x463d37
+    wndpl.length = sizeof( wndpl );                          // 44
+    if ( ::GetWindowPlacement( hwnd, &wndpl ) )
+        SaveRegistryInfo( "Radiant::XYWindowPlace", &wndpl, 0x2C );
 }
 
 // Latch the window handle + client size (CXYWnd::OnCreate tail, after the base-class create).
@@ -3682,7 +3443,7 @@ void XYWnd_OnSize( HWND hwnd, int cx, int cy )
 
 // ════════════════════════════════════════════════════════════════════════════
 //  XY_Draw tail sub-draws, each wired into OnPaint at the binary's exact position
-//  (see CXYWnd::XY_Draw 0x46ce20).
+//  (see CXYWnd::XY_Draw).
 // ════════════════════════════════════════════════════════════════════════════
 
 // Ed_PaintSizeInfo - PaintSizeInfo 0x46ba10, the selection size/measure overlay: two 3-segment
@@ -3690,22 +3451,22 @@ void XYWnd_OnSize( HWND hwnd, int cx, int cy )
 // labels - the per-axis extents beside each bracket and the (h,v) world coordinate at the
 // corner.
 // NAMING TRAP: the binary names the corners backwards - vec3_clamp 0x4a8670 leaves the running
-// MIN in `vMaxBounds`@a5 and the running MAX in `vMinBounds`@a1, so a1 = maxCorner, a5 =
-// minCorner, size = a1 - a5.
-// The CXYWnd "no-snap" flags at +92/+96 (tested with &1 for the half-texel label nudge) are
-// not modelled by the port's class, so they default 0 = the binary's default-window case.
+// MIN in `vMaxBounds` and the running MAX in `vMinBounds`, so its vMinBounds = maxCorner, its
+// vMaxBounds = minCorner, size = maxCorner - minCorner.
+// The CXYWnd "no-snap" flags (tested with &1 for the half-texel label nudge) are not modelled
+// by the port's class, so they default 0 = the binary's default-window case.
 static void Ed_PaintSizeInfo( const float *maxCorner, xywndState_t *wnd,
                               int nDim2, int nDim1, const float *minCorner )
 {
-    const int   nDim3 = 3 - nDim1 - nDim2;       // v79 = 3 - a4 - a3
-    const float  scale = wnd->m_fScale;          // *(a2+100)
+    const int   nDim3 = 3 - nDim1 - nDim2;
+    const float  scale = wnd->m_fScale;
     const float  inv   = 1.0f / scale;
-    // CXYWnd "no x-snap"/"no y-snap" flags (a2+92 / a2+96): not modelled → 0 (apply nudge).
-    const bool   noSnapV = false;                // (*(_BYTE*)(a2+92) & 1)
-    const bool   noSnapH = false;                // (a2+96 & 1)
+    // CXYWnd "no x-snap"/"no y-snap" flags: not modelled → 0 (apply nudge).
+    const bool   noSnapV = false;
+    const bool   noSnapH = false;
     const float  half    = 0.5f * inv;
 
-    // Size vector = maxCorner - minCorner (v68).
+    // Size vector = maxCorner - minCorner.
     float size[3];
     size[0] = maxCorner[0] - minCorner[0];
     size[1] = maxCorner[1] - minCorner[1];
@@ -3716,9 +3477,8 @@ static void Ed_PaintSizeInfo( const float *maxCorner, xywndState_t *wnd,
     Byte4PackPixelColor( colSize, &packed );
     const float pc = *(float *)&packed.packed;             // packed colour, per-vertex
 
-    // The measure brackets: SIX lines = TWELVE vertices (disasm 0x46ba83..0x46bc64 fills
-    // v81 + v82[0/4] + v83[0/4/8/12] + v84[0/4] + v85[0/4/8] = 12 GfxPointVertex, then
-    // R_AddCmd_Line3D(6=LINE count, ...)).  A horizontal bracket 10/scale below the bottom
+    // The measure brackets: SIX lines = TWELVE vertices (R_AddCmd_Line3D takes the LINE
+    // count, 6).  A horizontal bracket 10/scale below the bottom
     // edge and a vertical bracket 10/scale right of the max edge, each with 6/scale end ticks.
     GfxPointVertex line[12];
     int lv = 0;
@@ -3733,24 +3493,24 @@ static void Ed_PaintSizeInfo( const float *maxCorner, xywndState_t *wnd,
     const float hMin = minCorner[nDim1], hMax = maxCorner[nDim1];
     const float vMin = minCorner[nDim2], vMax = maxCorner[nDim2];
     // horizontal bracket: left tick, bottom rail, right tick
-    vert( hMin, vMin -  6.0f * inv );  vert( hMin, vMin - 10.0f * inv );   // v81  / v82[0]
-    vert( hMin, vMin - 10.0f * inv );  vert( hMax, vMin - 10.0f * inv );   // v82[4] / v83[0]
-    vert( hMax, vMin - 10.0f * inv );  vert( hMax, vMin -  6.0f * inv );   // v83[4] / v83[8]
+    vert( hMin, vMin -  6.0f * inv );  vert( hMin, vMin - 10.0f * inv );
+    vert( hMin, vMin - 10.0f * inv );  vert( hMax, vMin - 10.0f * inv );
+    vert( hMax, vMin - 10.0f * inv );  vert( hMax, vMin -  6.0f * inv );
     // vertical bracket: bottom tick, right rail, top tick
-    vert( hMax +  6.0f * inv, vMin );  vert( hMax + 10.0f * inv, vMin );   // v83[12] / v84[0]
-    vert( hMax + 10.0f * inv, vMin );  vert( hMax + 10.0f * inv, vMax );   // v84[4] / v85[0]
-    vert( hMax + 10.0f * inv, vMax );  vert( hMax +  6.0f * inv, vMax );   // v85[4] / v85[8]
+    vert( hMax +  6.0f * inv, vMin );  vert( hMax + 10.0f * inv, vMin );
+    vert( hMax + 10.0f * inv, vMin );  vert( hMax + 10.0f * inv, vMax );
+    vert( hMax + 10.0f * inv, vMax );  vert( hMax +  6.0f * inv, vMax );
     R_AddCmd_Line3D( 6, 1, line );
 
     Font_s *font = (Font_s *)g_qeglobals.d_font_list;
     if ( !font )
         return;
 
-    // text step vectors (v70 = +1/scale along nDim1, v71 = -1/scale along nDim2; dbl_6F42A0=-1.0).
+    // text step vectors (+1/scale along nDim1, -1/scale along nDim2).
     float xstep[3] = { 0.0f, 0.0f, 0.0f };  xstep[nDim1] =  inv;
     float ystep[3] = { 0.0f, 0.0f, 0.0f };  ystep[nDim2] = -inv;
 
-    // off_739EC8[axis] = per-axis size label: {"x:%.f","y:%.f","z:%.f"}.
+    // per-axis size label.
     static const char *kAxisFmt[3] = { "x:%.f", "y:%.f", "z:%.f" };
     char  buf[64];
     float org[3];
@@ -3773,8 +3533,8 @@ static void Ed_PaintSizeInfo( const float *maxCorner, xywndState_t *wnd,
         org[nDim3] = 131072.0f;
         R_AddCmdDrawTextAtPosition( buf, font, org, xstep, ystep, colSize );
     }
-    // Label 3 — the corner coordinate, format off_739ED4 = "(x:%.f  y:%.f)" (single, all views).
-    // Args (disasm 0x46bf4d/0x46bf54): min[nDim1], max[nDim2].  Offset +4/+8 px.
+    // Label 3 — the corner coordinate, one format for all views; args min[nDim1], max[nDim2].
+    // Offset +4/+8 px.
     {
         sprintf( buf, "(x:%.f  y:%.f)", minCorner[nDim1], maxCorner[nDim2] );
         org[nDim1] = ( minCorner[nDim1] + 4.0f * inv ) + ( noSnapV ? 0.0f : half );
@@ -3788,16 +3548,15 @@ static void Ed_PaintSizeInfo( const float *maxCorner, xywndState_t *wnd,
 // rotate-mode pivot: a 4x4-world-unit square (two tris) in purple (0.8,0.1,0.9,0.25) at
 // g_vRotateOrigin in the view plane, then a single pink (1,0.2,1,1) point at the exact pivot.
 // Depth axis pushed to 131072 like the binary.  Only called when g_bRotateMode is set.
-extern bool  g_bRotateMode;        // drag.cpp 0x23F16D9
 extern float g_vRotateOrigin[3];   // drag.cpp 0x23F1658
 static void Ed_DrawRotateIconCenterSquare( xywndState_t *wnd )
 {
     const int vt = wnd->m_nViewType;
-    // center (v14,v15,v16); v12/v13 = the (X,Y) corner offsets; v6/v7 = the (Y,Z) offsets.
-    // Transcribed literally from 0x469690 per view.
-    float cx, cy, cz;     // v14,v15,v16
-    float o12, o13;       // v12 (X), v13 (Y)
-    float o6,  o7;        // v6  (Y), v7  (Z)
+    // center (cx,cy,cz); o12/o13 = the (X,Y) corner offsets; o6/o7 = the (Y,Z) offsets,
+    // set per view.
+    float cx, cy, cz;
+    float o12, o13;       // X, Y
+    float o6,  o7;        // Y, Z
     if ( vt == 2 )              // XY
     {
         cx = g_vRotateOrigin[0]; cy = g_vRotateOrigin[1]; cz = 131072.0f;
@@ -3823,11 +3582,11 @@ static void Ed_DrawRotateIconCenterSquare( xywndState_t *wnd )
     float xyzw[4][4];
     float normal[4][3] = { {0,0,1}, {0,0,1}, {0,0,1}, {0,0,1} };
     float st[4][2]     = { {0,0}, {0,0}, {0,0}, {0,0} };
-    // base (v9,v10,v11) = (cx-o12, cy-o13, cz-0).  Per-corner ± (v6,v7) on (Y,Z).
+    // base (v9,v10,v11) = (cx-o12, cy-o13, cz-0).  Per-corner ± (o6,o7) on (Y,Z).
     const float v9  = cx - o12;
     const float v10 = cy - o13;
     const float v11 = cz - 0.0f;
-    const float xc1 = cx + o12;     // v17/v2
+    const float xc1 = cx + o12;
     const float v8  = cy + o13;
     // corner 0 = ( v9 , v10-o6 , v11-o7 )
     xyzw[0][0] = v9 - 0.0f;          xyzw[0][1] = v10 - o6;       xyzw[0][2] = v11 - o7;       xyzw[0][3] = 1.0f;
@@ -3850,7 +3609,7 @@ static void Ed_DrawRotateIconCenterSquare( xywndState_t *wnd )
     R_AddPointCmd_W( 1, 1, &pt );
 }
 
-// Ed_DrawTurretExportBox - sub_46AB80 0x46ab80: a 32x32-world-unit diamond (two tris) centred
+// Ed_DrawTurretExportBox - 0x46ab80: a 32x32-world-unit diamond (two tris) centred
 // at the entity origin (XY plane, z + 0.01 - 16) in colour `col`.
 static void Ed_DrawTurretExportBox( const float *p, const float *col )
 {
@@ -3860,7 +3619,7 @@ static void Ed_DrawTurretExportBox( const float *p, const float *col )
 
     const float cx = p[0];
     const float cy = p[1];
-    // z = origin.z + 0.01 - 16 (disasm: var_24 = (z+0.01) - 16.0, shared by all 4 verts).
+    // z = origin.z + 0.01 - 16, shared by all 4 verts.
     const float cz = ( p[2] + 0.009999999776482582f ) - 16.0f;
 
     // 4 verts of the diamond (all at the same z), order is
@@ -3879,17 +3638,16 @@ static void Ed_DrawTurretExportBox( const float *p, const float *col )
                             xyzw, normal, color, st );
 }
 
-// Ed_HighlightTurretShareAmbush - sub_46AD20 0x46ad20: walk a brush sentinel list and, for
+// Ed_HighlightTurretShareAmbush - 0x46ad20: walk a brush sentinel list and, for
 // each brush whose entity def has an `export` key, look the id up in the two highlight bitmaps
-// and draw a coloured box - both set -> flt_6DE1B0 magenta, share only -> flt_6DE130 red,
-// ambush only -> flt_6DE160 blue.
+// and draw a coloured box - both set -> magenta, share only -> red, ambush only -> blue.
 static void Ed_HighlightTurretShareAmbush( selbrush_t *listHead, selbrush_t *listEnd,
                                            const byte *shareFlags,
                                            const byte *ambushFlags )
 {
-    static const float kShare[4] = { 1.0f, 0.0f, 0.0f, 1.0f };   // flt_6DE130 (red)
-    static const float kAmbush[4]= { 0.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE160 (blue)
-    static const float kBoth[4]  = { 1.0f, 0.0f, 1.0f, 1.0f };   // flt_6DE1B0 (magenta)
+    static const float kShare[4] = { 1.0f, 0.0f, 0.0f, 1.0f };   // red
+    static const float kAmbush[4]= { 0.0f, 0.0f, 1.0f, 1.0f };   // blue
+    static const float kBoth[4]  = { 1.0f, 0.0f, 1.0f, 1.0f };   // magenta
 
     for ( selbrush_t *b = listHead; b != listEnd; b = b->next )
     {
@@ -3907,22 +3665,21 @@ static void Ed_HighlightTurretShareAmbush( selbrush_t *listHead, selbrush_t *lis
         const bool ambush = ambushFlags[id] != 0;
         if ( !share && !ambush )
             continue;
-        // origin = def->origin (entity_s.origin @ +104) -- the binary passes def+104.
+        // origin = def->origin.
         const float *c = ( share && ambush ) ? kBoth : ( share ? kShare : kAmbush );
         Ed_DrawTurretExportBox( def->origin, c );
     }
 }
 
-// Drive the turret share/ambush export-highlight (the binary's selected-loop parse at
-// 0x46d426 + the twin sub_46AD20 passes at 0x46d890/0x46d8b0).  The SELECTED turrets'
+// Drive the turret share/ambush export-highlight (the binary's selected-loop parse + the
+// twin Ed_HighlightTurretShareAmbush passes).  The SELECTED turrets'
 // `script_turret_share` / `script_turret_ambush` keys (space-separated export ids) seed
 // the two highlight bitmaps; if any id was flagged the highlight pass then draws a box on
-// every brush in BOTH lists whose `export` id is flagged.  v67=share bitmap, v66=ambush.
-extern bool Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp 0x483930
+// every brush in BOTH lists whose `export` id is flagged.
 static void Ed_DrawTurretExportHighlights()
 {
-    static byte shareFlags[2048];   // v67 (the binary memsets 2048 at the top of XY_Draw)
-    static byte ambushFlags[2048];  // v66
+    static byte shareFlags[2048];   // the binary memsets 2048 at the top of XY_Draw
+    static byte ambushFlags[2048];
     memset( shareFlags, 0, sizeof( shareFlags ) );
     memset( ambushFlags, 0, sizeof( ambushFlags ) );
 
@@ -3937,7 +3694,7 @@ static void Ed_DrawTurretExportHighlights()
         if ( !def || !Entity_HasEpairMatch( def, "classname", "misc_turret" ) )
             continue;
 
-        // script_turret_share -> shareFlags (v67)
+        // script_turret_share -> shareFlags
         const char *shareVal = Ed_EntFirstKey( owner, "script_turret_share" );
         if ( shareVal && *shareVal )
         {
@@ -3951,7 +3708,7 @@ static void Ed_DrawTurretExportHighlights()
                 if ( id > 0 && id < 2048 ) { shareFlags[id] = 1; any = true; }
             }
         }
-        // script_turret_ambush -> ambushFlags (v66)
+        // script_turret_ambush -> ambushFlags
         const char *ambushVal = Ed_EntFirstKey( owner, "script_turret_ambush" );
         if ( ambushVal && *ambushVal )
         {
@@ -3967,14 +3724,14 @@ static void Ed_DrawTurretExportHighlights()
         }
     }
 
-    if ( !any )                                 // binary's `if (i)` gate
+    if ( !any )                                 // the binary's gate
         return;
     Ed_HighlightTurretShareAmbush( active_brushes.next,   &active_brushes,   shareFlags, ambushFlags );
     Ed_HighlightTurretShareAmbush( selected_brushes.next, &selected_brushes, shareFlags, ambushFlags );
 }
 
-// Drive the selection size/measure overlay (the binary's PaintSizeInfo call at 0x46d965,
-// gated at 0x46d93b on `!bFixedSize && !g_bRotateMode && !g_bScaleMode && selected!=empty
+// Drive the selection size/measure overlay (the binary's PaintSizeInfo call,
+// gated on `!bFixedSize && !g_bRotateMode && !g_bScaleMode && selected!=empty
 // && m_bSizePaint`).  The running bounds + bFixedSize the binary accumulates in the
 // selected loop are recomputed here over the selected list (the loop only feeds the size
 // overlay — recomputing is identical to the in-loop accumulation).  vMaxBounds/vMinBounds
@@ -3989,8 +3746,8 @@ static void Ed_DrawSizeInfo( xywndState_t *wnd, int nDim1, int nDim2 )
         return;
 
     bool  bFixedSize = false;
-    float vMaxBounds[3] = {  131072.0f,  131072.0f,  131072.0f };  // running MIN  (o1)
-    float vMinBounds[3] = { -131072.0f, -131072.0f, -131072.0f };  // running MAX  (o2)
+    float vMaxBounds[3] = {  131072.0f,  131072.0f,  131072.0f };  // running MIN
+    float vMinBounds[3] = { -131072.0f, -131072.0f, -131072.0f };  // running MAX
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -4012,15 +3769,13 @@ static void Ed_DrawSizeInfo( xywndState_t *wnd, int nDim1, int nDim2 )
     }
     if ( bFixedSize )                                // binary: !bFixedSize gate
         return;
-    // PaintSizeInfo(ecx=vMinBounds(=max), ebx=wnd, edi=nDim2, esi=nDim1, push vMaxBounds(=min)).
     Ed_PaintSizeInfo( vMinBounds, wnd, nDim2, nDim1, vMaxBounds );
 }
 
-// CopySelectedFaceValues (IDB 0x47d130) - XY_Draw's tail call: for each selected FACE re-run
+// CopySelectedFaceValues (0x47d130) - XY_Draw's tail call: for each selected FACE re-run
 // Brush_CheckBuildFaceVis on its owning brush so the windings used by the surface inspector /
 // face-drag are current.
-extern void       sub_477D70( selbrush_t *b, const float *orient );  // brush.cpp Brush_CheckBuildFaceVis
-// (world_orient_matrix is declared at the top of this file.)
+// (world_orient_matrix is declared in kiwi_ported.h.)
 void CopySelectedFaceValues()
 {
     const int count = g_SelectedFaces.GetSize();
@@ -4031,11 +3786,11 @@ void CopySelectedFaceValues()
             Com_Error( ERR_FATAL,
                        "RADIANT: selFace array bounds check failed (CopySelectedFaceValues)" );
         }
-        sub_477D70( g_SelectedFaces.GetAt( i ).brush, (const float *)world_orient_matrix );
+        Brush_CheckBuildFaceVis( g_SelectedFaces.GetAt( i ).brush, (const float *)world_orient_matrix );
     }
 }
 
-// CXYWnd::OnPaint - the XY_Draw pipeline (IDB 0x465b80):
+// CXYWnd::OnPaint - the XY_Draw pipeline (0x465b80):
 //   CheckDevice -> BeginFrame -> ClearScreen -> SetupScene -> XY_DrawGrid -> XY_DrawBrushes ->
 //   the overlay tail -> EndFrame -> IssueRenderCommands -> SortMaterials -> CheckTargetWindow.
 // (The DC — CPaintDC / BeginPaint — belongs to the shell, not to this pipeline.)
@@ -4084,20 +3839,20 @@ void XYWnd_Paint( HWND hwndIn )
     if ( ( g_qeglobals.d_savedinfo.d_xyShowFlags & 0x10 ) == 0 )  // View→Show→Blocks (0x10 SET = hidden)
         XY_DrawBlockGrid( &vs );   // coarse 1024-unit block grid + block-index labels
     XY_DrawBrushes( &vs );     // brushes/entity bboxes + entity-name labels
-    // turret share/ambush export-highlight (IDB XY_Draw 0x46d876: the twin sub_46AD20
+    // turret share/ambush export-highlight (the twin Ed_HighlightTurretShareAmbush
     // passes, gated on the selected turrets' script_turret_share/ambush key lists).
     Ed_DrawTurretExportHighlights();
-    DrawCameraIcon( &vs );     // the camera position+facing marker (IDB CXYWnd::DrawCameraIcon 0x469a40)
-    DrawZIcon( &vs );          // the blue camera-position marker ("player indicator", IDB 0x469d50)
-    if ( g_bRotateMode )       // rotate-mode pivot marker (IDB XY_Draw 0x46db4f, DrawRotateIcon_CenterSquare 0x469690)
+    DrawCameraIcon( &vs );     // the camera position+facing marker
+    DrawZIcon( &vs );          // the blue camera-position marker ("player indicator")
+    if ( g_bRotateMode )       // rotate-mode pivot marker
         Ed_DrawRotateIconCenterSquare( wnd );
 
-    // The XY brush loop draws every entity via DrawBrush, whose DrawModels dispatch (0x47b102
-    // -> Editor_InstanceAndSkinModel, tech 29 + per-vert colour) queues each model's
+    // The XY brush loop draws every entity via DrawBrush, whose DrawModels dispatch
+    // (-> Editor_InstanceAndSkinModel, tech 29 + per-vert colour) queues each model's
     // ED_SURF_MODEL surfs - including misc_models INSIDE prefab contents.  The ortho scene is
     // the active projection, so the flush draws the mesh top-down/front/side.
     // MATERIAL_COLOR is reset to the binary's NEUTRAL {0,0,0,0} before the flush
-    // (R_SetMaterialColor(NULL), XY_Draw 0x46d8fa): tech 29 wireframe_shaded LERPS the texture
+    // (R_SetMaterialColor(NULL)): tech 29 wireframe_shaded LERPS the texture
     // toward materialColor.rgb by materialColor.w, so w=1 would flat-override the mesh white.
     // Line batches keep their own per-brush colours (pushed just before their own DrawLines).
     {
@@ -4108,9 +3863,9 @@ void XYWnd_Paint( HWND hwndIn )
     R_AddEditorSurfsCmd();   // flush the ED_SURF_MODEL surfs into THIS ortho frame
     // KIWI (REFIMG): material draw is legal here; lead the overlay tail so its wires stay above it.
     KiwiRefImage_DrawXY( wnd->m_nViewType, wnd->m_fScale );
-    // Live marquee box (IDB XY_Draw 0x46d9a1): draw while a box-drag is active. The gate
-    // mirrors the binary's `camera_fov_setup == sub_467700 && mode ∈ {area, 12..15}`
-    // (Ed_PressCallback stands in for sub_467700 — see its note).
+    // Live marquee box: draw while a box-drag is active. The gate mirrors the binary's
+    // `camera_fov_setup == <press callback> && mode ∈ {area, 12..15}` (Ed_PressCallback
+    // stands in for that callback — see its note).
     {
         const select_t m = g_qeglobals.d_select_mode;
         if ( g_qeglobals.camera_fov_setup == (void *)&Ed_PressCallback
@@ -4118,22 +3873,22 @@ void XYWnd_Paint( HWND hwndIn )
                || m == sel_areabrush_sub || m == sel_areapoint_curve || m == sel_areapoint ) )
             Ed_DrawSelectionBox( wnd );
     }
-    // Shift+X crosshair (IDB OnPaint 0x465bf7): drawn between XY_Draw and DrawClipper.
+    // Shift+X crosshair: drawn between XY_Draw and DrawClipper.
     if ( g_bCrossHairs )
         Ed_DrawCrosshair( wnd );
     if ( g_bClipMode )
         Ed_DrawClipper( wnd ); // clip points + numbered labels + split-preview wireframe
-    Draw_PatchSelectPointsSelected();  // SELECTED curve points, light blue (binary DrawConnectionLinks prefix 0x40ca0f — before the handles)
+    Draw_PatchSelectPointsSelected();  // SELECTED curve points, light blue (the binary's DrawConnectionLinks prefix — before the handles)
     Ed_DrawVertexHandles();    // vertex/edge handles when in vertex-edit mode (shared with Cam_Draw)
-    Draw_PatchSelectPoints();  // UNSELECTED curve-point candidates, green (binary XY_Draw 0x46d11b; self-gated on sel_curvepoint/sel_area)
-    // size/measure overlay (IDB XY_Draw 0x46d965, PaintSizeInfo 0x46ba10): the selection
+    Draw_PatchSelectPoints();  // UNSELECTED curve-point candidates, green (self-gated on sel_curvepoint/sel_area)
+    // size/measure overlay (PaintSizeInfo): the selection
     // bounding-box dimensions + corner coordinate, gated on m_bSizePaint && !fixedsize &&
     // !rotate/scale && a non-empty selection.  nDim1=(viewType==YZ), nDim2=(viewType!=XY)+1.
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
     KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Draw selected-entity facing over the 2D overlay tail.
     KiwiFragile_DrawXY( wnd->m_nViewType, wnd->m_fScale );  // KIWI: blinking "fragile corner" spots (kiwi_fragile.cpp).
-    CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
+    CopySelectedFaceValues();  // XY_Draw tail: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     R_EndFrame();
     R_IssueRenderCommands( (uint)-1 );
@@ -4145,7 +3900,7 @@ void XYWnd_Paint( HWND hwndIn )
 // selection / filter / grid / layer / pan / zoom path already sets.  What it does NOT cover is
 // an overlay that follows the MOUSE while no bits are set — a live marquee, a clip-point drag,
 // the Shift+X crosshair — so while any of these is live the XY view is FORCE-DIRTY.
-extern int drag_ok;   // drag.cpp:132 (IDB 0x23f1724)
+extern int drag_ok;   // drag.cpp:132 (0x23f1724)
 
 bool XYWnd_OverlayIsLive()
 {
@@ -4167,7 +3922,7 @@ bool XYWnd_OverlayIsLive()
 
 // A SKIPPED tick still owes XYWnd_RenderToRT's two non-drawing side effects: the viewport's
 // own size state (the mouse mapping reads m_nHeight) and CopySelectedFaceValues
-// (XY_Draw tail 0x46db54), which keeps the surface inspector's windings current.
+// (the XY_Draw tail), which keeps the surface inspector's windings current.
 void XYWnd_TickSkipped( int w, int h )
 {
     xywndState_t *wnd = Ed_ActiveXY();
@@ -4237,20 +3992,20 @@ void XYWnd_RenderToRT( int w, int h )
     if ( ( g_qeglobals.d_savedinfo.d_xyShowFlags & 0x10 ) == 0 )  // View→Show→Blocks (0x10 SET = hidden)
         XY_DrawBlockGrid( &vs );   // coarse 1024-unit block grid + block-index labels
     XY_DrawBrushes( &vs );     // brushes/entity bboxes + entity-name labels
-    // turret share/ambush export-highlight (IDB XY_Draw 0x46d876: the twin sub_46AD20
+    // turret share/ambush export-highlight (the twin Ed_HighlightTurretShareAmbush
     // passes, gated on the selected turrets' script_turret_share/ambush key lists).
     Ed_DrawTurretExportHighlights();
-    DrawCameraIcon( &vs );     // the camera position+facing marker (IDB CXYWnd::DrawCameraIcon 0x469a40)
-    DrawZIcon( &vs );          // the blue camera-position marker ("player indicator", IDB 0x469d50)
-    if ( g_bRotateMode )       // rotate-mode pivot marker (IDB XY_Draw 0x46db4f, DrawRotateIcon_CenterSquare 0x469690)
+    DrawCameraIcon( &vs );     // the camera position+facing marker
+    DrawZIcon( &vs );          // the blue camera-position marker ("player indicator")
+    if ( g_bRotateMode )       // rotate-mode pivot marker
         Ed_DrawRotateIconCenterSquare( wnd );
 
-    // The XY brush loop draws every entity via DrawBrush, whose DrawModels dispatch (0x47b102
-    // -> Editor_InstanceAndSkinModel, tech 29 + per-vert colour) queues each model's
+    // The XY brush loop draws every entity via DrawBrush, whose DrawModels dispatch
+    // (-> Editor_InstanceAndSkinModel, tech 29 + per-vert colour) queues each model's
     // ED_SURF_MODEL surfs - including misc_models INSIDE prefab contents.  The ortho scene is
     // the active projection, so the flush draws the mesh top-down/front/side.
     // MATERIAL_COLOR is reset to the binary's NEUTRAL {0,0,0,0} before the flush
-    // (R_SetMaterialColor(NULL), XY_Draw 0x46d8fa): tech 29 wireframe_shaded LERPS the texture
+    // (R_SetMaterialColor(NULL)): tech 29 wireframe_shaded LERPS the texture
     // toward materialColor.rgb by materialColor.w, so w=1 would flat-override the mesh white.
     // Line batches keep their own per-brush colours (pushed just before their own DrawLines).
     {
@@ -4261,9 +4016,9 @@ void XYWnd_RenderToRT( int w, int h )
     R_AddEditorSurfsCmd();   // flush the ED_SURF_MODEL surfs into THIS ortho frame
     // KIWI (REFIMG): RTT twin, first in the material-capable overlay tail.
     KiwiRefImage_DrawXY( wnd->m_nViewType, wnd->m_fScale );
-    // Live marquee box (IDB XY_Draw 0x46d9a1): draw while a box-drag is active. The gate
-    // mirrors the binary's `camera_fov_setup == sub_467700 && mode ∈ {area, 12..15}`
-    // (Ed_PressCallback stands in for sub_467700 — see its note).
+    // Live marquee box: draw while a box-drag is active. The gate mirrors the binary's
+    // `camera_fov_setup == <press callback> && mode ∈ {area, 12..15}` (Ed_PressCallback
+    // stands in for that callback — see its note).
     {
         const select_t m = g_qeglobals.d_select_mode;
         if ( g_qeglobals.camera_fov_setup == (void *)&Ed_PressCallback
@@ -4271,22 +4026,22 @@ void XYWnd_RenderToRT( int w, int h )
                || m == sel_areabrush_sub || m == sel_areapoint_curve || m == sel_areapoint ) )
             Ed_DrawSelectionBox( wnd );
     }
-    // Shift+X crosshair (IDB OnPaint 0x465bf7): drawn between XY_Draw and DrawClipper.
+    // Shift+X crosshair: drawn between XY_Draw and DrawClipper.
     if ( g_bCrossHairs )
         Ed_DrawCrosshair( wnd );
     if ( g_bClipMode )
         Ed_DrawClipper( wnd ); // clip points + numbered labels + split-preview wireframe
-    Draw_PatchSelectPointsSelected();  // SELECTED curve points, light blue (binary DrawConnectionLinks prefix 0x40ca0f — before the handles)
+    Draw_PatchSelectPointsSelected();  // SELECTED curve points, light blue (the binary's DrawConnectionLinks prefix — before the handles)
     Ed_DrawVertexHandles();    // vertex/edge handles when in vertex-edit mode (shared with Cam_Draw)
-    Draw_PatchSelectPoints();  // UNSELECTED curve-point candidates, green (binary XY_Draw 0x46d11b; self-gated on sel_curvepoint/sel_area)
-    // size/measure overlay (IDB XY_Draw 0x46d965, PaintSizeInfo 0x46ba10): the selection
+    Draw_PatchSelectPoints();  // UNSELECTED curve-point candidates, green (self-gated on sel_curvepoint/sel_area)
+    // size/measure overlay (PaintSizeInfo): the selection
     // bounding-box dimensions + corner coordinate, gated on m_bSizePaint && !fixedsize &&
     // !rotate/scale && a non-empty selection.  nDim1=(viewType==YZ), nDim2=(viewType!=XY)+1.
     Ed_DrawSizeInfo( wnd, ( wnd->m_nViewType == ED_VIEW_YZ ), ( wnd->m_nViewType != ED_VIEW_XY ) + 1 );
     Ed_DrawConnectionLines();  // target/targetname + script_linkTo lines (self-gated on d_xyShowFlags&4)
     KiwiEntArrow_DrawXY( wnd->m_nViewType, wnd->m_fScale ); // KIWI-UX: Mirror the facing overlay in the RTT XY path.
     KiwiFragile_DrawXY( wnd->m_nViewType, wnd->m_fScale );  // KIWI: blinking "fragile corner" spots (kiwi_fragile.cpp).
-    CopySelectedFaceValues();  // IDB XY_Draw tail 0x46db54: rebuild the selected faces' faceVis
+    CopySelectedFaceValues();  // XY_Draw tail: rebuild the selected faces' faceVis
     }   // end if (sceneOk) — degenerate-projection frame draws only the cleared background
     {
         R_EndFrame();
@@ -4308,8 +4063,8 @@ void XYWnd_RenderToRT( int w, int h )
 // deps of the moved viz cluster (previously file-local to scriptgroup.cpp):
 extern int  ScriptGroup_Unreachable( const char *a1 );                 // scriptgroup.cpp 0x451170
 extern void Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );  // brush.cpp 0x46AE10
-static const char zero[] = "";       // scriptgroup's `zero` (default team-key value)
-// flt_73B098 (0x73B098) — the 7 script-colour token colours (r/b/y/c/g/p/o),
+static const char zero[] = "";       // the default team-key value
+// 0x73B098 — the 7 script-colour token colours (r/b/y/c/g/p/o),
 // indexed by ScriptGroup_Unreachable.  Same table as brush.cpp/camwnd.cpp.
 static const float kScriptColorVizTable[7][4] = {
     { 1.0f, 0.0f, 0.0f, 1.0f },   // r — red
@@ -4325,29 +4080,27 @@ static const float kScriptColorVizTable[7][4] = {
 
 
 
-// 0x46AA80  CamTokens_BrushMatchesToken (ecx=brush, arg0=token) — true if the brush
-// entity's ScriptColorTeamKey value strstr-contains `token`.  Disasm-faithful: walks
-// b->owner->def->epairs (selbrush+8 → entity+8 → epairs@0x74) for the team key
-// (g_PrefsDlg+0x32C), defaulting to `zero`="" when absent.
+// 0x46AA80  CamTokens_BrushMatchesToken — true if the brush entity's ScriptColorTeamKey
+// value strstr-contains `token`.  Walks b->owner->def->epairs for the team key, defaulting
+// to "" when absent.
 static bool CamTokens_BrushMatchesToken( selbrush_t *b, const char *token )
 {
     const char *teamKey = g_PrefsDlg->ScriptColorTeamKey.c_str();
-    entity_s_def *def = (entity_s_def *)b->owner->def;        // [ecx+8]→[+8]
-    const char *value = zero;                                 // IDB `zero` = ""
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )      // [+0x74]
+    entity_s_def *def = (entity_s_def *)b->owner->def;
+    const char *value = zero;
+    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
     {
         if ( !_stricmp( ep->key, teamKey ) ) { value = ep->value; break; }
     }
     return strstr( value, token ) != nullptr;
 }
 
-// 0x46AAE0  CamTokens_EntityGate (eax=brush) — true if the brush entity HAS the
-// ScriptColorTeamKey AND its classname contains actor / node / info_volume.
-// Disasm-faithful: v1 = b->owner->def; HasKeyValuePair(v1, teamKey) gate, then the
-// classname epair-walk (default `zero`).
+// 0x46AAE0  CamTokens_EntityGate — true if the brush entity HAS the
+// ScriptColorTeamKey AND its classname contains actor / node / info_volume
+// (the HasKeyValuePair gate, then the classname epair-walk, default "").
 static bool CamTokens_EntityGate( selbrush_t *b )
 {
-    entity_s_def *def = (entity_s_def *)b->owner->def;        // *(int**)(*(int*)(a1+8)+8)
+    entity_s_def *def = (entity_s_def *)b->owner->def;
     if ( !HasKeyValuePair( def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) )
         return false;
     const char *value = zero;
@@ -4359,18 +4112,18 @@ static bool CamTokens_EntityGate( selbrush_t *b )
         || strstr( value, "info_volume" ) != nullptr;
 }
 
-// 0x46B110  ScriptGroup_DrawTeamColorViz (sub_46B110) — the script-group single-char
+// 0x46B110  ScriptGroup_DrawTeamColorViz — the script-group single-char
 // team-colour visualization.  a1 = the team-colour token string (a selected trigger's
-// ScriptColorTeamKey value); a2/a3 = the view-rect mins/maxs on the two view axes
-// (XY_Draw's &v47 / &tdp); a4/a5 = the two world axis indices for the view plane (v58/v60).
+// ScriptColorTeamKey value); viewMins/viewMaxs = the view-rect mins/maxs on the two view
+// axes; axis0/axis1 = the two world axis indices for the view plane.
 //
 // Copy a1 into a 1024 buffer; tokenize by " "; for each token
-// store "<tok> " into a fixed 16-byte-stride array (v42) and its colour into a parallel
-// 4-float-stride array (v34, token n → v34[4n+4] = kScriptColorVizTable[Unreachable(tok)]).
+// store "<tok> " into a fixed 16-byte-stride array and its colour into a parallel
+// 4-float-stride array (token n → tokCol[4n+4] = kScriptColorVizTable[Unreachable(tok)]).
 // Then if there is more than one token, find the first (among the first tokens-1) whose
-// text contains ScriptColorKey and SWAP it (string + colour) with the LAST token — the 3
-// overlapping strcpy/qmemcpy loops in the binary are exactly a token[M] ⟷ token[tokens-1]
-// exchange via a 16-byte scratch (v43).  Finally, for every active then selected entity in
+// text contains ScriptColorKey and SWAP it (string + colour) with the LAST token — the
+// binary's 3 overlapping copy loops are exactly a token[M] ⟷ token[tokens-1]
+// exchange via a 16-byte scratch.  Finally, for every active then selected entity in
 // view that passes !FilterBrush + CamTokens_EntityGate, draw a colour billboard
 // (Ed_DrawScriptColorQuad) for each token the entity matches (CamTokens_BrushMatchesToken).
 //
@@ -4378,40 +4131,43 @@ static bool CamTokens_EntityGate( selbrush_t *b )
 void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
                                    const float *viewMaxs, int axis0, int axis1 )
 {
-    const int MAX_COLORENTREES = 32;   // camwnd idiom; scriptgroup's #define stayed behind
-    char buf[1024];                          // v41 — strtok working copy of a1
-    strcpy( buf, a1 );
+    const int MAX_COLORENTREES = 32;   // camwnd idiom
+    // KIWI: bounded like Cam_DrawTokens - the binary's strcpy into buf / tokStr with only an
+    // assert on the count overran the stack on a 33rd or a 16+ character token, every frame
+    // such a trigger stayed selected.
+    char buf[1024];                          // strtok working copy of a1
+    strncpy( buf, a1, sizeof( buf ) - 1 );
+    buf[sizeof( buf ) - 1] = 0;
     if ( !buf[0] )
         return;
 
     // token strings (16-byte stride, each "<tok> ") + parallel colours (token n at [4n+4]).
-    char  tokStr[MAX_COLORENTREES][16];      // v42 (516 bytes; entry n = &v42[16*n])
-    float tokCol[(MAX_COLORENTREES + 1) * 4];// v34 (132 floats; token n colour at [4n+4])
-    int   tokens = 0;                        // i
+    char  tokStr[MAX_COLORENTREES][16];
+    float tokCol[(MAX_COLORENTREES + 1) * 4];// 132 floats; token n colour at [4n+4]
+    int   tokens = 0;
 
-    for ( char *t = strtok( buf, " " ); t; t = strtok( nullptr, " " ) )
+    for ( char *t = strtok( buf, " " ); t && tokens < MAX_COLORENTREES; t = strtok( nullptr, " " ) )
     {
         iassert( t[0] );                     // XYWnd.cpp:3122 "token[0]"
-        strcpy( tokStr[tokens], t );
-        strcat( tokStr[tokens], " " );       // trailing space (binary appends asc_6D56FC)
+        _snprintf( tokStr[tokens], sizeof( tokStr[tokens] ), "%s ", t );   // trailing space
+        tokStr[tokens][sizeof( tokStr[tokens] ) - 1] = 0;
         int ci = ScriptGroup_Unreachable( t );
-        // binary indexes flt_73B098[4*ci] unconditionally; ci is -1 only on a no-match
-        // (which would assert + read flt_73B098[-4]) — guard the never-valid case, matching
-        // the established camwnd/brush.cpp convention.
+        // the binary indexes the colour table unconditionally; ci is -1 only on a no-match
+        // (which would assert + read the entry before the table) — guard the never-valid
+        // case, matching the camwnd/brush.cpp convention.
         const float *c = ( ci >= 0 && ci <= 6 ) ? kScriptColorVizTable[ci]
                                                 : kScriptColorVizTable[0];
-        const int colSlot = 4 * tokens + 4;  // v34[4n+4]
+        const int colSlot = 4 * tokens + 4;
         tokCol[colSlot + 0] = c[0];
         tokCol[colSlot + 1] = c[1];
         tokCol[colSlot + 2] = c[2];
         tokCol[colSlot + 3] = c[3];
         ++tokens;
-        iassert( tokens < MAX_COLORENTREES );   // XYWnd.cpp:3129
     }
 
     // SWAP the first ScriptColorKey-matching token (among the first tokens-1) with the
-    // LAST token (binary's 3 overlapping-copy loops, 0x46B268..0x46B382).
-    const char *colorKey = g_PrefsDlg->ScriptColorKey.c_str();  // *(char**)(+0x330)
+    // LAST token (the binary's 3 overlapping-copy loops).
+    const char *colorKey = g_PrefsDlg->ScriptColorKey.c_str();
     const int last = tokens - 1;
     for ( int m = 0; m < last; ++m )
     {
@@ -4424,19 +4180,19 @@ void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
             saveCol[2] = tokCol[4 * last + 4 + 2];
             saveCol[3] = tokCol[4 * last + 4 + 3];
             char saveStr[16];
-            strcpy( saveStr, tokStr[last] );
+            memcpy( saveStr, tokStr[last], sizeof( saveStr ) );
 
             tokCol[4 * last + 4 + 0] = tokCol[4 * m + 4 + 0];
             tokCol[4 * last + 4 + 1] = tokCol[4 * m + 4 + 1];
             tokCol[4 * last + 4 + 2] = tokCol[4 * m + 4 + 2];
             tokCol[4 * last + 4 + 3] = tokCol[4 * m + 4 + 3];
-            strcpy( tokStr[last], tokStr[m] );
+            memcpy( tokStr[last], tokStr[m], sizeof( tokStr[last] ) );
 
             tokCol[4 * m + 4 + 0] = saveCol[0];
             tokCol[4 * m + 4 + 1] = saveCol[1];
             tokCol[4 * m + 4 + 2] = saveCol[2];
             tokCol[4 * m + 4 + 3] = saveCol[3];
-            strcpy( tokStr[m], saveStr );
+            memcpy( tokStr[m], saveStr, sizeof( saveStr ) );
             break;
         }
     }
@@ -4469,17 +4225,6 @@ void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  MFC shell — CXYWnd.  Each handler is a translation layer only (extract point/flags, bridge
-//  the class members onto g_xywndState, call the free fn, chain the base class where it used
-//  to).  U-GUARD flips this whole block off globally; the #ifndef here is the same gate.
-//  XYWnd_MfcSyncIn/Out is the temporary U-GLOBALS bridge for the core TUs that still reach the
-//  view state through the CXYWnd members (see its comment near the top of this file).
-//  (The TU still needs U-GLOBALS before it compiles with the flag ON — Ed_XY_MouseDown /
-//  Ed_XY_MouseMoved / DrawCameraIcon reach the camera through g_pParentWnd->m_pCamWnd, and
-//  XY_ContextMenu / XYWnd_OnKeyDown reach CMainFrame.)
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ═════════════════════════════════════════════════════════════════════════════
 //  Raw-Win32 shell — the CXYWnd twin (U-VP-XY).  Same free fns, same conventions:
 //    WM_CREATE      → XYWnd_OnCreate                        (CXYWnd::OnCreate tail)
 //    WM_SIZE        → DefWindowProc, then XYWnd_OnSize       (MFC chains CWnd::OnSize FIRST)
@@ -4489,7 +4234,7 @@ void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
 //    WM_LBUTTONDOWN / WM_LBUTTONUP / WM_MOUSEMOVE / WM_RBUTTONDOWN / WM_RBUTTONUP /
 //    WM_MBUTTONDOWN / WM_MBUTTONUP → free fn, return 0.  NONE of the CXYWnd handlers chain the
 //                     base class (unlike CZWnd's move/up handlers), so MFC never reaches
-//                     DefWindowProc for them either — returning 0 is the faithful twin.
+//                     DefWindowProc for them either — returning 0 matches.
 //    WM_MOUSEWHEEL  → XYWnd_OnMouseWheel, return 0 when it returns TRUE (an MFC OnMouseWheel
 //                     returning TRUE means "handled", i.e. no further processing); the point in
 //                     lParam is in SCREEN coords for this message — passed through as such,
@@ -4499,10 +4244,10 @@ void ScriptGroup_DrawTeamColorViz( const char *a1, const float *viewMins,
 //    WM_DESTROY     → DefWindowProc, then XYWnd_OnDestroy    (MFC chains CWnd::OnDestroy FIRST)
 //    x/y = (short)LOWORD/HIWORD(lParam) — client coords, exactly CPoint(lParam);
 //    nFlags = wParam — the MK_* word MFC passes as UINT nFlags.
-//  CAPTURE/FOCUS semantics live in the handler bodies (SetFocus/SetCapture on button-down,
-//  ReleaseCapture on button-up), so both shells get them identically.
-//  NOT in this twin: the RMB context menu (XY_ContextMenu is MFC CMenu — the modifier gate still
-//  runs, the popup is skipped) and OnKeyDown's forward into CMainFrame; both marked U-GLOBALS.
+//  CAPTURE/FOCUS belong to the ImGui host (P5 RTT): the button handlers do not SetFocus /
+//  SetCapture / ReleaseCapture the hidden child.
+//  NOT in this twin: the RMB context menu (the modifier gate still runs, the popup is skipped)
+//  and OnKeyDown's forward into the command map.
 //
 //  d_hwndXY registration stays the CALLER's job in BOTH shells: mainfrm.cpp's
 //  Radiant_CreateRenderWindows sets g_qeglobals.d_hwndXY from the new HWND (and creates the XY

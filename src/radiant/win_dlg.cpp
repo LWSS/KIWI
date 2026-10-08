@@ -9,28 +9,12 @@
 #include "mainfrm.h"
 #include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "radiant_registry.h"   // Radiant_Profile* (was AfxGetApp()->*Profile* before U-SHIM removal)
+#include "kiwi_ported.h"        // KIWI: shared engine/editor externs
 #include <cstdio>
 #include <cstdlib>
 
 // ── globals / cores reused from other TUs ─────────────────────────────────────
-extern entity_s   entityInsts;                                  // 0x23F1748 (map.cpp) — instance list sentinel
-extern entity_s  *world_entity;                                 // 0x25D5B30 (map.cpp)
-extern int        Sys_Printf( const char *fmt, ... );           // 0x499E90
-extern void       Assert( const char *file, int line, int type, const char *fmt, ... ); // 0x49CEA0
-extern void       Select_Brush( selbrush_t *b, char overwrite, char status, char center ); // select.cpp (0x48DCC0)
-extern void       Select_Deselect( int bDeselectFaces );        // select.cpp (0x48E800)
 extern void       Select_GetTrueMid( float *center );           // select.cpp (0x48FC20)
-extern void       Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] ); // select.cpp (0x48FF40)
-extern void       Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char bSwap ); // select.cpp (0x48FD10)
-extern int        g_nUpdateBits;                                // 0x25D5A74 (engine_stubs.cpp)
-extern camera_s   *Ed_Camera();                                 // camwnd.cpp — THE editor camera (never NULL)
-
-extern void       Undo_ClearRedo();                             // undo.cpp (0x45DF20)
-extern void       Undo_GeneralStart( const char *opName );      // undo.cpp (0x45E3F0)
-extern void       Undo_AddBrushList( selbrush_t *list );        // undo.cpp (0x45E7C0)
-extern void       Undo_EndBrushList( selbrush_t *list );        // undo.cpp (0x45E870)
-extern void       Undo_End();                                   // undo.cpp (0x45EA20)
-extern int        UpdateSelection( int wParam, eclass_t *cls ); // win_ent.cpp (0x497180)
 
 // selected_brushes sentinel is declared in qe3.h.
 
@@ -120,45 +104,6 @@ void Select_ByEntityNumber( int brushIdx, int entIdx )
         cam->origin[2] = cz;
     }
     SendMessageA( g_qeglobals.d_hwndStatus, WM_USER | WM_CREATE, 0, (LPARAM)"Selected." );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  0x495700  GetSelectionIndex(&entOut, &brushOut) — report the entity# + brush# of the
-//  first selected brush (the inverse of Select_ByEntityNumber, used to preload the Find
-//  brush dialog).  Counts the selected instance's owner position in entityInsts (entOut)
-//  and its def's position in the owner's DEF brush list (brushOut).  No selection → 0/0.
-// ══════════════════════════════════════════════════════════════════════════════
-void GetSelectionIndex( int *entOut, int *brushOut )
-{
-    selbrush_t *sb = selected_brushes.next;
-    *entOut   = 0;
-    *brushOut = 0;
-    if ( sb == &selected_brushes )
-        return;
-
-    iassert(entityInsts.next == world_entity);
-
-    // entity index = position of sb->owner in the instance list.
-    for ( entity_s *iterEntityInst = entityInsts.next; ; iterEntityInst = iterEntityInst->next )
-    {
-        iassert(iterEntityInst != &entityInsts);
-        if ( iterEntityInst == sb->owner )
-            break;
-        ++*entOut;
-    }
-
-    // brush index = position of sb->def in the owner's DEF brush list.
-    entity_s_def *def = (entity_s_def *)sb->owner->def;
-    void         *defSentinel = (void *)&def->def;
-    for ( brush_t *j = (brush_t *)def->brushes.prev; ; j = j->onext )
-    {
-        if ( (void *)j == defSentinel )
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\win_dlg.cpp",
-                    175, 0, "%s", "iterBrushDef != &(selectedBrushInst->owner->def->brushes)" );
-        if ( j == sb->def )
-            break;
-        ++*brushOut;
-    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

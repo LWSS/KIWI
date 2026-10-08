@@ -5,13 +5,14 @@
 // steps, the idle pump / invalidation broadcast / hotkey map, and the id->action command
 // table behind every menu + accelerator id.  Renderer bring-up is
 // R_BeginRegistrationInternal (0x416510).
-// U-RIP: the MFC shell (CMainFrame, its AFX_MSGMAP, the C*Dlg DDX classes, the toolbar +
-// status bar + CTextureBar members and every CMainFrame::On* forwarder) is DELETED.  What
-// is left is the free-function layer radiant_main.cpp drives; `was CMainFrame::X (0xADDR)`
-// notes are PROVENANCE (the IDB body each function came from), not live code.
+// The MFC shell (CMainFrame, its message map, the C*Dlg DDX classes, the toolbar + status
+// bar + CTextureBar members and every CMainFrame::On* forwarder) is gone; this is the
+// free-function layer radiant_main.cpp drives.  `was CMainFrame::X (0xADDR)` notes name the
+// binary function each body came from.
 
 #include "stdafx.h"
-#include <ctime>                       // clock() â€” RoutineProcessing camera-fly dtime (0x421a90)
+#include <ctime>                       // clock() - RoutineProcessing camera-fly dtime
+#include <vector>
 #include "mainfrm.h"
 #include "radiant_frame.h"             // U-BOOT: the shell-agnostic frame API declared for both shells
 #include "qe3.h"                       // g_qeglobals, qeglobals_t, grid_sizes
@@ -35,13 +36,14 @@
 #include "kiwi_viewdirty.h"            // KIWI: the fitted 2D view must re-render
 #include "kiwi_camera.h"               // KIWI: KiwiCam_LookAlong / KiwiCam_FrameBounds (3D fit)
 #include "kiwi_fmt.h"                  // KIWI: exact key values
+#include "kiwi_ported.h"               // KIWI: shared engine/editor externs
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
 extern void track_init();                    // qcommon/mem_track.h
 extern void SL_Init();                        // script/scr_stringlist.cpp (also inits the script memory tree)
 
-// The real renderer bootstrap (gfxwrapper.cpp, IDB 0x416510). Asserts d_hwndCamera/XY/Z/
+// The real renderer bootstrap (gfxwrapper.cpp, 0x416510). Asserts d_hwndCamera/XY/Z/
 // Texture + lyrMtlWndGlob.layerList, attaches the device to each, registers fonts/qerfont
 // (g_qeglobals.d_font_list) + white_tools/$opaque/$additive.
 extern Material *R_BeginRegistrationInternal();
@@ -55,15 +57,11 @@ extern void       Texture_ResetPosition();                       // texwnd.cpp (
 extern void       Map_LoadFromFile( const char *path );          // map.cpp (0x486680)
 extern void       Map_NewMap();                                  // map.cpp (0x486110)
 extern void       Map_New();                                     // entity.cpp (0x4870C0) Fileâ†’New
-extern entity_s  *world_entity;                                  // map.cpp (0x25D5B30)
 extern void       Prefab_LevelBack();                            // map.cpp (0x489D50)
-extern void       Map_SaveFile( const char *path, char a1, char a2 ); // map.cpp
-extern eclass_t  *Eclass_ForName( int has_brushes, const char *name ); // eclass.cpp
-extern selbrush_t active_brushes;                                // map.cpp (0x23F189C)
+extern bool       Map_SaveFile( const char *path, char a1 ); // map.cpp
 extern void       QE_CountBrushesAndUpdateStatusBar();           // qe3.cpp
 extern void       Entity_UpdateSelection();                      // win_ent.cpp (UpdateSelection(-1,NULL))
 extern void       Z_CenterOnMap();                               // z.cpp
-// (Cam_CenterOnMap(CCamWnd*) extern retired with U-RIP â€” the forwarder died with the class)
 extern void       Undo_Undo();                                   // undo.cpp
 extern void       Undo_Redo();                                   // undo.cpp
 // KIWI-UX (shakeout I): the unified undo/redo journal's two entry points
@@ -71,13 +69,10 @@ extern void       Undo_Redo();                                   // undo.cpp
 // the ID_EDIT_UNDO / ID_EDIT_REDO arms fall through to the ported handlers.
 extern bool       KiwiUndo_Undo();                               // kiwi_undo.cpp
 extern bool       KiwiUndo_Redo();                               // kiwi_undo.cpp
-extern int        g_nUpdateBits;                                 // engine_stubs.cpp (0x25D5A74)
 
 // â”€â”€â”€ U-GLOBALS: the shell-agnostic viewport entry points (camwnd.cpp) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Ed_Camera() / Ed_ActiveXY() (xywnd.h) never return NULL, so the command handlers below
 // reach the camera + XY state without going through CMainFrame's child-window pointers.
-extern camera_s  *Ed_Camera();                                   // camwnd.cpp
-extern void       CamWnd_BuildMatrix();                          // was CCamWnd::Cam_BuildMatrix
 extern void       CamWnd_MouseControl( float dtime );            // was Cam_MouseControl( cam, dt )
 extern void       CamWnd_Scroll( float amount );                 // was CCamWnd_Scroll( frame, amt )
 extern void       CamWnd_ChangeFloor( int a2 );                  // was CCamWnd::Cam_ChangeFloor( cam, a2 )
@@ -87,7 +82,7 @@ extern int        CamWnd_RemoveLightPreview( selbrush_t *removed );
 extern void       CamWnd_ClearLightPreviews();                   // was m_pCamWnd->light_preview_count = 0
 
 // Console sink â€” the binary's CMainFrame::OnCreate installs console_print as the
-// global console_stuff callback (console_stuff = &console_print, 0x420A54), so every
+// global console_stuff callback (console_stuff = &console_print), so every
 // editor-log Com_PrintMessage / Com_PrintError / R_Warn line lands in the console
 // pane (d_hwndEdit).  cmdlib.cpp owns console_stuff + SetConsoleHandler (0x40A9E0);
 // console_print lives in win_qe3.cpp.
@@ -100,26 +95,19 @@ extern BOOL       LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSi
 //  the invalidation broadcast, the hotkey lookup, the id->action dispatch) is a FREE
 //  function.  Post-U-RIP the raw-Win32 shell (radiant_main.cpp) is their only caller.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// U-BOOT: every declaration this block used to carry now lives in radiant_frame.h (included
-// above), so the raw-Win32 shell and the MFC shell read the SAME prototypes â€” no per-TU
-// re-declaration to drift.  The bodies are unchanged and still live in this file:
+// U-BOOT: the prototypes live in radiant_frame.h (included above); the bodies live here:
 //   Radiant_UpdateWindows / RoutineProcessing / TryHotkey / ExecCommand /
 //   DispatchCommandDirect, the XYWnd_* five, and the frame helpers
 //   (Radiant_SetGridStatus / PicMip / CheckTextureScale / SetEntityCheck).
 
 // radiantFrameState_t â€” the three frame members those free functions still need.  The frame
-// is a singleton (one editor window), so this is the one file-scope instance.  U-RIP deleted
-// the class that used to own them; the provenance cites below stay.
+// is a singleton (one editor window), so this is the one file-scope instance.
 //   doLoop       = CMainFrame::m_bDoLoop       (RoutineProcessing gate, set at the OnCreate tail)
 //   camPreview   = CMainFrame::m_bCamPreview   (ToggleCamera 0x423A50 / OnUpdateViewCameraupdate 0x4264B0)
 //   currentStyle = CMainFrame::m_nCurrentStyle (the binary's QE4 window style; this port pins it
-//                  at 1 and never writes it â€” win_ent.cpp:1690 still reads the MEMBER, same
-//                  constant, so the member has to stay until that call site is swept)
-// EXTERNAL READERS checked before redirecting (repo-wide grep): m_bDoLoop â€” none;
-// m_bCamPreview â€” none; m_nCurrentStyle â€” win_ent.cpp:1690 only (reported: that call site
-// still names the deleted member and is U-RIP-2's to sweep).
+//                  at 1 and never writes it)
 // U-BOOT: the STRUCT lives in radiant_frame.h (the shell's boot writes .doLoop); the single
-// instance still lives here.
+// instance lives here.
 radiantFrameState_t g_radiantFrameState;
 
 // The frame's menu bar as a raw HMENU â€” the binary's GetMenu()/CMenu::CheckMenuItem pairs are
@@ -154,9 +142,11 @@ void Radiant_FL_Log( const char *fmt, ... )
     va_list ap; va_start( ap, fmt );
     _vsnprintf( buf, sizeof( buf ), fmt, ap );
     va_end( ap );
+    buf[sizeof( buf ) - 1] = 0;   // KIWI: _vsnprintf leaves a truncated line unterminated
     char path[MAX_PATH], tmp[MAX_PATH];
     GetTempPathA( sizeof( tmp ), tmp );
     _snprintf( path, sizeof( path ), "%sradiant_firstlight.log", tmp );
+    path[sizeof( path ) - 1] = 0;
     FILE *f = fopen( path, "a" );
     if ( f ) { fputs( buf, f ); fputc( '\n', f ); fclose( f ); }
 }
@@ -167,6 +157,7 @@ void Radiant_FL_LogReset()
     char path[MAX_PATH], tmp[MAX_PATH];
     GetTempPathA( sizeof( tmp ), tmp );
     _snprintf( path, sizeof( path ), "%sradiant_firstlight.log", tmp );
+    path[sizeof( path ) - 1] = 0;
     FILE *f = fopen( path, "w" );
     if ( f ) { fputs( "=== radiant trace ===\n", f ); fclose( f ); }
 }
@@ -245,10 +236,10 @@ LONG WINAPI Radiant_FL_Veh( EXCEPTION_POINTERS *ep )
 void Radiant_SetDefaultGridState()
 {
     g_qeglobals.d_showgrid = true;
-    // CreateQEChildren 0x4219d1: d_gridsize = 5 (grid_sizes[5] == 16.0) is the startup default.
+    // d_gridsize = 5 (grid_sizes[5] == 16.0) is the startup default (CreateQEChildren).
     g_qeglobals.d_gridsize = 5;
 
-    // Default palette, verbatim from MFCCreate (0x499600): WHITE XY background, grey grid,
+    // Default palette, as MFCCreate (0x499600) sets it: WHITE XY background, grey grid,
     // BLACK text/brushes.  XY_DrawGrid draws each grid colour as its own
     // R_AddCmdSetMaterialColor batch, so the dark lines survive on the white background
     SavedInfo_t &si = g_qeglobals.d_savedinfo;
@@ -285,11 +276,11 @@ void Radiant_SetDefaultGridState()
             si.colors[i][c] = kColors[i][c];
 }
 
-// KISAK: the binary's OnCreateClient (0x422480) builds nested CSplitterWnds - outer 2 rows
+// The binary's OnCreateClient (0x422480) builds nested CSplitterWnds - outer 2 rows
 // (views 85% / console CEdit 15%, whose HWND becomes d_hwndEdit), inner 3 columns.  The
 // renderer multi-window path is driven by HWND, not splitter panes, so the port reproduces
 // that arrangement by hand: a bottom console strip, then Z | XY | (Cam over Tex).
-// U-BOOT: EdLayout moved to radiant_frame.h (plain RECT â€” the raw shell has no CRect).
+// U-BOOT: EdLayout lives in radiant_frame.h (plain RECT - the raw shell has no CRect).
 // Width (px) of the splitter gutters left between adjacent panes (the draggable bars).
 static const int GAP = 4;
 
@@ -297,9 +288,9 @@ static const int GAP = 4;
 // no child pane); the WM_SETCURSOR / WM_LBUTTON* / WM_MOUSEMOVE handlers drag these fractions
 // (defaults = the binary's OnCreateClient splits).
 static float s_fracConsole = 0.15f;  // console height / inner (views+console) height
-static float s_fracZ       = 0.05f;  // Z-strip width / cx (IDA OnCreateClient col0 = 5%)
-static float s_fracRight   = 0.25f;  // right-column width / cx (IDA OnCreateClient col2 = 25%)
-static float s_fracCam     = 0.60f;  // camera height / views height (IDA split3 row0 = 60%)
+static float s_fracZ       = 0.05f;  // Z-strip width / cx (OnCreateClient col0 = 5%)
+static float s_fracRight   = 0.25f;  // right-column width / cx (OnCreateClient col2 = 25%)
+static float s_fracCam     = 0.60f;  // camera height / views height (split3 row0 = 60%)
 static float s_fracEnt     = 0.20f;  // entity-inspector height / views height
 // Gutter geometry (client coords) cached by Radiant_ComputeLayout for the hit-test.
 static int s_barV1x, s_barV2x;            // vertical gutters: Z|XY, XY|right
@@ -398,8 +389,8 @@ EdLayout Radiant_ComputeLayout( int cx, int cy, int topInset )
     // Bottom console strip (the binary's m_wndSplit row 1, 15% of the frame). Clamp so a
     // small window keeps usable views above it and never collapses the console to 0.
     int conH = (int)( cy * s_fracConsole );
-    if ( conH < 5 ) conH = 5;              // IDA SetRowInfo row1 min = 5
-    if ( conH > cy - 50 ) conH = cy - 50;  // IDA row0 min = 50
+    if ( conH < 5 ) conH = 5;              // SetRowInfo row1 min = 5
+    if ( conH > cy - 50 ) conH = cy - 50;  // row0 min = 50
     if ( conH < 1 ) conH = 1;
     int topH = cy - conH;                   // the views occupy [0, topH)
     if ( topH < 64 ) { topH = cy; conH = 0; }
@@ -408,12 +399,12 @@ EdLayout Radiant_ComputeLayout( int cx, int cy, int topInset )
     // left, XY grid 70% middle, right column 25% = Camera over texture browser.  (The binary
     // hides the Entity window in combined view; here it floats - see below.)
     int zW = (int)( cx * s_fracZ );         // Z strip (left)
-    if ( zW < 10 ) zW = 10;                 // IDA split2 col0 min = 10
+    if ( zW < 10 ) zW = 10;                 // split2 col0 min = 10
     int rW = (int)( cx * s_fracRight );     // right column (camera + inspector + textures)
-    if ( rW < 25 ) rW = 25;                 // IDA split2 col2 min = 25
+    if ( rW < 25 ) rW = 25;                 // split2 col2 min = 25
     // Cap only on the XY grid's MINIMUM width: the binary's CSplitterWnd has no maximum for
     // the right column, so let it grow to whatever the drag handler allows (0.85).
-    const int xyMinW = 100;                 // IDA split2 col1 min = 100
+    const int xyMinW = 100;                 // split2 col1 min = 100
     if ( rW > cx - zW - xyMinW ) rW = cx - zW - xyMinW;
     if ( rW < 25 ) rW = 25;                 // re-assert the min (tiny frames)
     int xyW = cx - zW - rW;                 // XY grid (the big middle pane)
@@ -425,12 +416,10 @@ EdLayout Radiant_ComputeLayout( int cx, int cy, int topInset )
     // Right column = Camera over Texture browser.  The Inspector is an ImGui dock tab, so
     // this legacy native-layout fraction remains unused.
     int rCamH = (int)( topH * s_fracCam );  // Camera on top, Texture browser below
-    if ( rCamH < 15 ) rCamH = 15;           // IDA split3 min = 15/15
+    if ( rCamH < 15 ) rCamH = 15;           // split3 min = 15/15
     if ( rCamH > topH - 15 ) rCamH = topH - 15;
     const int camBottom = rCamH;
 
-    // U-BOOT: CRect::SetRect / ::OffsetRect became the Win32 ::SetRect / ::OffsetRect those
-    // CRect members wrap (EdLayout is plain RECT now) â€” same arguments, same results.
     EdLayout L;
     ::SetRect( &L.z,   0,              0,               zRight,  topH      );
     ::SetRect( &L.xy,  zRight  + GAP,  0,               xyRight, topH      );
@@ -499,17 +488,22 @@ void MainFrm_SetStatusText( int pane, const char *text )
 }
 
 // â”€â”€ Map open (Fileâ†’Open + the cmdline startup share this) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-static char s_currentMapPath[MAX_PATH] = "";
+extern int  prefabStackLevel;             // map.cpp 0x25D5B34
 
-// KIWI-UX (ROUND BF): read-only view of the authoritative saved map path.
-// The Build & Run dialog (kiwi_launch.cpp) compiles THIS path -- it is what File>Open
-// (:628) and Save-As (:4447) write and what the Save funnel below consumes -- and it must
-// not use `currentmap` (map.cpp:44), which prefab editing stomps (map.cpp:1797-1813).
-// Returns "" for an untitled map, the same emptiness test Radiant_FileSave makes below.
-const char *Radiant_CurrentMapPath() { return s_currentMapPath; }
+// KIWI-UX (ROUND BF): the TOP LEVEL's map path, "" when untitled - what the Build & Run dialog
+// (kiwi_launch.cpp) compiles.  KIWI: read through native `currentmap` (Map_LoadFromFile and
+// Save As write it, Map_NewMap sets "unnamed.map"); inside a prefab currentmap is the prefab's
+// .map and the top level's path waits in the stack's first slot (Prefab_NextLevel saved it).
+// One fact, one spelling - the old shadow copy drifted whenever a path skipped it.
+const char *Radiant_CurrentMapPath()
+{
+    const char *path = prefabStackLevel > 0 ? g_prefabStack[0].mapName : currentmap;
+    return _stricmp( path, "unnamed.map" ) ? path : "";
+}
 
-// (Radiant_CenterXYOnMap deleted with U-RIP: dead since HEAD per U-GLOBALS, and the
-// last writer of the deleted CXYWnd class members.)
+// KIWI: what File > Save writes.  The binary saves `currentmap`, which Enter Prefab points at
+// the prefab's .map; outside a prefab that is the top level's path ("" when untitled).
+static const char *ActiveSavePath() { return prefabStackLevel > 0 ? currentmap : Radiant_CurrentMapPath(); }
 
 // U-BOOT: de-static'd â€” the raw shell gates its cmdline map on the same test.
 bool Radiant_PathLooksLikeMap( const char *p )
@@ -518,11 +512,6 @@ bool Radiant_PathLooksLikeMap( const char *p )
     size_t n = strlen( p );
     return n > 4 && _stricmp( p + n - 4, ".map" ) == 0;
 }
-
-// SetKeyValue (entity.cpp 0x483690).  Its side-effect chain is inert for "mapspath":
-// Checkkey_Model fires only for model/angles/modelscale, Checkkey_Color only for
-// _color/targetname.
-extern void SetKeyValue( entity_s_def *e, const char *key, const char *value );
 
 // LayerdMatWnd (layeredmaterials.cpp 0x416D40) - load the library named by the project
 // entity's "layeredmaterials" epair into lyrMtlGlob.Layers[] (the binary calls it from
@@ -552,7 +541,7 @@ void Radiant_SetProjectMapsPath( const char *mapPath )
     *slash = '\0';
 
     // Allocate the project entity DEF on first use (140-byte entity_s_def, brush-list
-    // sentinels self-linked â€” matching Entity_Create's LABEL_10 def init).
+    // sentinels self-linked - matching Entity_Create's def init).
     entity_s_def *proj = g_qeglobals.d_project_entity;
     if ( !proj )
     {
@@ -575,6 +564,8 @@ void Radiant_SetProjectMapsPath( const char *mapPath )
             break;
         }
     }
+    // SetKeyValue's side-effect chain is inert for "mapspath": Checkkey_Model fires only for
+    // model/angles/modelscale, Checkkey_Color only for _color/targetname.
     SetKeyValue( proj, "mapspath", dir );
 
     // The binary's QE_LoadProject parses cod4.prj's
@@ -600,7 +591,7 @@ bool Radiant_LoadProjectAtStartup()
     extern signed int QE_LoadProject_ParseFile( const char *path );   // qe3.cpp 0x48BAB0
     extern const char *Dvar_GetString( const char *dvarName );        // qcommon (fs_basepath)
 
-    // The stock cod4.prj beside the editor.  Try the CWD first (faithful: LoadFileNoCrash's
+    // The stock cod4.prj beside the editor.  Try the CWD first (LoadFileNoCrash's
     // plain fopen), then EXE-anchored locations — the exe's own directory, then
     // <fs_basepath>\cod4.prj and <fs_basepath>\bin\cod4.prj (fs_basepath is exe-derived,
     // com_files.cpp).  The exe-dir attempt matters because the CWD is NOT the exe dir under
@@ -656,7 +647,6 @@ bool Radiant_LoadProjectAtStartup()
 // reference image, so a map that is still only sketches and pictures frames too.  An
 // empty map keeps the view it has.
 extern void XYWnd_SetViewType( int vt );                          // below (0x4685F0 forwarder)
-extern int  Sys_Printf( const char *fmt, ... );                   // win_qe3.cpp (0x499E90)
 namespace
 {
     void FitExtend( float mins[3], float maxs[3], const float p[3], bool *any )
@@ -774,15 +764,14 @@ void Radiant_OpenMap( const char *path )
     // Seed the project mapspath from the map's own directory so misc_prefab "model"
     // refs (the *_geo.map geometry + prefabs/) resolve in Prefab_Load on this load.
     Radiant_SetProjectMapsPath( path );
-    Map_LoadFromFile( path );
-    _snprintf( s_currentMapPath, sizeof( s_currentMapPath ), "%s", path );
+    Map_LoadFromFile( path );               // writes currentmap = path
 
     if ( g_qeglobals.d_hwndMain )        // NO-MFC: same liveness gate, HWND-based
     {
         Z_CenterOnMap();
         Radiant_FitXYToMap();            // KIWI: top view + 3D camera framed on the whole map
         // Map_LoadFromFile (0x486680) placed camera.origin at the info_player_start (else
-        // deathmatch, else origin) +60 Z with that entity's angles, exactly as the binary
+        // deathmatch, else origin) +60 Z with that entity's angles, as the binary
         // does; Radiant_FitXYToMap then re-frames the camera on the map's contents (KIWI
         // divergence, by request: a load should show the whole map, not one eye view).
         // Title = "CoD4Radiant - <map>".
@@ -822,14 +811,9 @@ void Radiant_OpenMap( const char *path )
 
 }
 
-// U-BOOT: Radiant_CheckMenu is declared in radiant_frame.h now
-// (de-static'd â€” the raw shell's boot seeds the same menu check marks).
-
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  U-BOOT â€” three boot steps that used to be INLINE BLOCKS of CMainFrame::OnCreate.
-//  They are free functions now so the raw-Win32 boot (radiant_main.cpp) runs the SAME
-//  bodies in the same order instead of a second copy that could drift.  OnCreate calls
-//  them at exactly the points the blocks sat (step numbers kept).
+//  U-BOOT - three boot steps from CMainFrame::OnCreate (its step numbers kept); the
+//  raw-Win32 boot (radiant_main.cpp) runs them in that order.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // OnCreate step 6a-pre) The head of Load_Textures (0x45d140) that the port skips by calling
@@ -870,23 +854,21 @@ static void Radiant_Kiwi_SeedSnapshotLayer0( const curTexWndLayer_t *src )
 
 void Radiant_SeedCurrentTexdefs()
 {
-    extern void SetMaterial( const char *name, patchMesh_material *out );          // materialdef.cpp 0x4315c0
-    extern int  Init_MaterialLayer( MaterialDef *channel, float src );      // materialdef.cpp 0x472c00
     curTexWndLayer_t *rts = g_qeglobals.random_texture_stuff;
-    Get_MaterialNames();       // 0x45d143
-    rts[0].sampleSize = 0.25f;   // 0x45d14e
-    rts[1].sampleSize = 16.0f;   // 0x45d164
-    g_qeglobals.current_edit_layer = 0;   // 0x45d16a
-    rts[2].sampleSize = 0.25f;   // 0x45d174
-    SetMaterial( "$default",       (patchMesh_material *)&rts[0].mtl );   // 0x45d17a
-    SetMaterial( "lightmap_gray",  (patchMesh_material *)&rts[1].mtl );   // 0x45d189
-    SetMaterial( "smoothing_hard", (patchMesh_material *)&rts[2].mtl );   // 0x45d198
+    Get_MaterialNames();
+    rts[0].sampleSize = 0.25f;
+    rts[1].sampleSize = 16.0f;
+    g_qeglobals.current_edit_layer = 0;
+    rts[2].sampleSize = 0.25f;
+    SetMaterial( "$default",       (patchMesh_material *)&rts[0].mtl );
+    SetMaterial( "lightmap_gray",  (patchMesh_material *)&rts[1].mtl );
+    SetMaterial( "smoothing_hard", (patchMesh_material *)&rts[2].mtl );
     // Init_MaterialLayer's 2nd arg is the sample-size FLOAT BITS reinterpreted as a ptr
     // (cf. map.cpp / Face_InitMaterialChannel).
     float s0 = 0.25f, s1 = 16.0f, s2 = 0.25f;
-    Init_MaterialLayer( &rts[0].mtl, s0 );   // 0x45d1ac
-    Init_MaterialLayer( &rts[1].mtl, s1 );   // 0x45d1bf
-    Init_MaterialLayer( &rts[2].mtl, s2 );   // 0x45d1cf
+    Init_MaterialLayer( &rts[0].mtl, s0 );
+    Init_MaterialLayer( &rts[1].mtl, s1 );
+    Init_MaterialLayer( &rts[2].mtl, s2 );
 
     // KIWI-UX (ROUND AA, ITEM 1) — SNAPSHOT, so the restore below needs no calls.
     // See Radiant_ApplyStartupTextureScale for why the round-Y restore could not
@@ -908,7 +890,6 @@ void KiwiGlass_RegisterEclass();       // kiwi_glass.cpp
 void Radiant_LoadEclassDefs()
 {
     extern eclass_t *Eclass_InitForSourceDirectory( char *path );  // eclass.cpp (0x481B50)
-    extern char     *ValueForKey2( const entity_s *e, const char *key );       // entity.cpp 0x4825C0
     extern void      Load_Defs( const char *folder );              // eclass.cpp (0x48B6C0)
     extern void      ScanWeapAiFiles();                            // eclass.cpp (0x48BA40)
     extern const char *Dvar_GetString( const char *dvarName );     // qcommon (fs_basepath)
@@ -1013,19 +994,16 @@ void Radiant_ApplyStartupTextureScale()
     if ( s_kiwiSeedLayer0Have )
     {
         curTexWndLayer_t *rts = g_qeglobals.random_texture_stuff;
-        rts[0].mtl        = s_kiwiSeedLayer0Mtl;          // as 0x45d17a + 0x45d1ac, replayed
-        rts[0].sampleSize = s_kiwiSeedLayer0SampleSize;   // as 0x45d14e
+        rts[0].mtl        = s_kiwiSeedLayer0Mtl;          // the seed's SetMaterial + Init_MaterialLayer, replayed
+        rts[0].sampleSize = s_kiwiSeedLayer0SampleSize;   // the seed's rts[0].sampleSize
     }
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  U-BOOT â€” the RADIANT_STARTUP_MAP / RADIANT_STARTUP_CAM operator hooks, verbatim from
+//  U-BOOT - the RADIANT_STARTUP_MAP / RADIANT_STARTUP_CAM operator hooks from
 //  CRadiantApp::InitInstance (radiantapp.cpp:93-138).  They run at the very END of the boot
-//  (after ShowWindow/UpdateWindow), which is where InitInstance has them.
-//  The MFC shell still runs its own inline copy in radiantapp.cpp â€” that whole TU is on the
-//  U-RIP kill list (plan item 2), so the duplication is transient BY DESIGN; the raw shell
-//  calls THIS body.  It lives in mainfrm.cpp because camera_s is declared in mainfrm.h,
-//  which the raw shell cannot include (it is MFC-laden until U-RIP folds it away).
+//  (after ShowWindow/UpdateWindow), which is where InitInstance had them; the raw shell
+//  calls this body.  It lives in mainfrm.cpp because camera_s is declared in mainfrm.h.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 void Radiant_ApplyStartupMapEnv()
 {
@@ -1070,13 +1048,11 @@ void Radiant_ApplyStartupMapEnv()
 
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-//  The gutter (splitter-bar) drag â€” U-CMD-2 extraction.  All four handlers only ever
-//  touched the file-static gutter geometry + the fraction state above, so they are free
-//  functions now and BOTH shells drive the same drag (CMainFrame's handlers below forward;
-//  radiant_main.cpp's frame WndProc calls them from WM_SETCURSOR / WM_LBUTTON* / WM_MOUSEMOVE).
-//  SPLIT POINT: the move handler updates the fractions and REPORTS the change instead of
-//  relaying out itself â€” the relayout is the one shell-specific step (CMainFrame::Relayout-
-//  Panes vs the raw shell's Radiant_RelayoutPanes), and both call it right after.
+//  The gutter (splitter-bar) drag.  The four handlers only touch the file-static gutter
+//  geometry + the fraction state above; radiant_main.cpp's frame WndProc calls them from
+//  WM_SETCURSOR / WM_LBUTTON* / WM_MOUSEMOVE.
+//  The move handler updates the fractions and REPORTS the change instead of relaying out
+//  itself - the caller runs Radiant_RelayoutPanes right after.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Splitter-bar hit-test on the GAP gutters (client coords): 0 = none; 1/2 = vertical
@@ -1152,15 +1128,13 @@ bool Radiant_SplitterOnLButtonUp()
 }
 
 
-// The texture bar's field refresh.  U-RIP deleted the MFC body (the bar was a CWnd embedded
-// in CMainFrame); the docked strip is not up in this shell yet, so this is the no-op
-// invalidation point the broadcast below still calls â€” it becomes the ImGui texture-bar
-// refresh when that strip ships (U-BOOT v2).
+// The texture bar's field refresh.  The docked strip is not up in this shell yet, so this is
+// the no-op invalidation point the broadcast below calls.
 static void Radiant_RefreshTextureBar()
 {
 }
 
-// â”€â”€ The real invalidation broadcast (CMainFrame::UpdateWindows, IDB 0x427090) â”€â”€â”€â”€
+// â”€â”€ The real invalidation broadcast (CMainFrame::UpdateWindows, 0x427090) â”€â”€â”€â”€
 // The binary RedrawWindow'd each view whose W_* bit was set, RDW_UPDATENOW, so a drag
 // tracked the cursor.
 //
@@ -1190,8 +1164,8 @@ void Radiant_UpdateWindows( int /*nBits*/ )
 // the 2D-view dirty-flag hook consumed by the drain below.
 extern void KiwiViewDirty_MarkFromUpdateBits( int bits );   // kiwi_viewdirty.h:93
 
-// Idle pump (CMainFrame::RoutineProcessing 0x421a90), driven each idle from
-// CRadiantApp::OnIdle: compute dtime from clock() into g_qeglobals.g_time/g_oldtime (clamp
+// Idle pump (CMainFrame::RoutineProcessing 0x421a90; the binary drove it from
+// CRadiantApp::OnIdle): compute dtime from clock() into g_qeglobals.g_time/g_oldtime (clamp
 // dt>2 -> 0.1, then dtime>0.2 -> 0.2), pump Cam_MouseControl for the RMB cursor-joystick fly,
 // then flush g_nUpdateBits via UpdateWindows.  U-CMD-1: the raw-Win32 message pump (U-BOOT)
 // calls this straight from its idle branch.
@@ -1205,7 +1179,7 @@ void Radiant_RoutineProcessing()
     // tail of every frame spins through here).  The zone is what makes that visible.
     PROF_SCOPED( "RoutineProcessing" );
 
-    // dtime = wall-clock seconds since last pump, clamped (binary 0x421ada..0x421b24).
+    // dtime = wall-clock seconds since last pump, clamped.
     clock_t now = clock();
     double dtime = (double)now / 1000.0 - g_qeglobals.g_time;
     g_qeglobals.g_time = (double)now / 1000.0;
@@ -1233,7 +1207,7 @@ void Radiant_RoutineProcessing()
 // (Shift=1, Alt=2, Ctrl=4, Win=8), looks the key up, and SendMessage(WM_COMMAND, commandId).
 // std::map keeps the FIRST binding for a duplicate key, so a forward first-match search
 // matches the binary.  g_radiantCommands is a MUTABLE copy of g_radiantCommandsDefault (the
-// binary's table, verbatim): LoadCommandMap (0x421230) overrides individual entries BY NAME
+// binary's table; KIWI changes are marked): LoadCommandMap (0x421230) overrides individual entries BY NAME
 // from radiant.ini [Commands]; ShowMenuItemKeyBindings (0x420460) annotates the menu items.
 // KIWI-UX (CLEANUP, C-6): struct RadiantCommand moved to radiant_frame.h (included
 // at the top of this file) so the seven translation units that walk this raw array
@@ -1458,8 +1432,8 @@ static void Radiant_SeedCommandTable()
 }
 
 // Shell-agnostic read access to the LIVE command table (the mutable copy LoadCommandMap
-// patches from radiant.ini) â€” the ImGui command-list panel's row source.  Seeding inside
-// the accessor keeps callers independent of whether CMainFrame has run yet (Phase 4).
+// patches from radiant.ini) - the ImGui command-list panel's row source.  Seeding inside
+// the accessor keeps callers independent of boot order (Phase 4).
 int Radiant_GetCommandTable( const RadiantCommand **out )
 {
     Radiant_SeedCommandTable();
@@ -1476,11 +1450,6 @@ int Radiant_GetCommandTableMutable( RadiantCommand **out )
     *out = g_radiantCommands;
     return g_radiantCommandCount;
 }
-
-// KIWI-UX (CLEANUP, C-1): the overflow arms below report.  Declared here because the
-// file's own extern sits further down (mainfrm.cpp:2054, and again at :2618) -- an
-// identical redeclaration, which is what those two already are to each other.
-extern int Sys_Printf( const char *fmt, ... );        // win_qe3.cpp (0x499E90)
 
 // KIWI-UX: append one row to the extension block.  `name` must have static lifetime (the
 // table stores the pointer, exactly as the compiled-in rows do).  Returns false when the
@@ -1574,7 +1543,7 @@ void Radiant_ResetCommandBindings()
 
 // The named-key table (binary g_Keys @0x73BDF8, 47 entries, ends at g_KeysExceeded 0x73BF74).
 // Maps a key NAME to its VK code â€” used by LoadCommandMap (parse an INI binding string) and by
-// ShowMenuItemKeyBindings (VK â†’ name for the menu annotation).  Extracted verbatim from the exe.
+// ShowMenuItemKeyBindings (VK â†’ name for the menu annotation).
 struct RadiantKeyName { const char *name; unsigned int vk; };
 static const RadiantKeyName g_radiantKeys[] = {
     { "Space", 0x20 }, { "Backspace", 0x08 }, { "Escape", 0x1B }, { "End", 0x23 },
@@ -1595,9 +1564,8 @@ static const RadiantKeyName g_radiantKeys[] = {
 //   modifier flags (+alt/+ctrl/+shift/+lwin) and the key (single alnum char or a g_Keys name)
 //   and overwrite that command's binding.  A missing file / missing key leaves the default.
 //   INI path: g_PrefsDlg->m_strUserIniPath if set, else <exe folder>\radiant.ini (g_strAppPath).
-// U-BOOT: lifted out of CMainFrame verbatim â€” the body never touched the frame (only
-// g_PrefsDlg + GetModuleFileNameA + the command table), so it is the same call in both
-// shells.  CMainFrame::LoadCommandMap is a forwarder at the bottom of this file.
+// U-BOOT: lifted out of CMainFrame - the body never touched the frame (only g_PrefsDlg +
+// GetModuleFileNameA + the command table).
 void Radiant_LoadCommandMap()
 {
     Radiant_SeedCommandTable();
@@ -1615,6 +1583,7 @@ void Radiant_LoadCommandMap()
         if ( slash ) *slash = 0;
         _snprintf( iniPath, sizeof( iniPath ), "%s\\radiant.ini", exeDir );
     }
+    iniPath[sizeof( iniPath ) - 1] = 0;   // KIWI: _snprintf does not terminate on truncation
 
     // KIWI-UX: bounded by the live count, not ARRAYSIZE -- the tail of the array is the
     // extension block (see Radiant_SeedCommandTable).  Unregistered slots have name == NULL,
@@ -1630,7 +1599,7 @@ void Radiant_LoadCommandMap()
             continue;   // no override for this command â†’ keep the default binding
 
         // Parse + strip the modifier flags (each is optional, any order).  The binary uses
-        // CString::Find + Replace; a plain strstr/erase is faithful.
+        // CString::Find + Replace; a plain strstr/erase is equivalent.
         byte mods = 0;
         struct { const char *tok; byte bit; } flags[] =
             { { "+alt", 2 }, { "+ctrl", 4 }, { "+shift", 1 }, { "+lwin", 8 } };
@@ -1683,10 +1652,9 @@ void Radiant_LoadCommandMap()
 // â”€â”€ ShowMenuItemKeyBindings (0x420460) â€” annotate menu items with their key binding â”€â”€â”€â”€
 //   For each command, if a menu item with that command ID exists (and is a text item), append
 //   "\t[Shift-][Alt-][Ctrl-][LWin-]KeyName" to its caption.  KeyName comes from g_Keys, or the
-//   raw char (%c) for a plain-key binding.  Faithful to the binary (walks g_Commands/g_Keys).
-// U-BOOT: lifted out of CMainFrame verbatim â€” it takes the HMENU it annotates and touches
-// nothing else, so both shells call it right after ::SetMenu.  CMainFrame::
-// ShowMenuItemKeyBindings is a forwarder at the bottom of this file.
+//   raw char (%c) for a plain-key binding.
+// U-BOOT: lifted out of CMainFrame - it takes the HMENU it annotates and touches nothing
+// else; the shell calls it right after ::SetMenu.
 BOOL Radiant_ShowMenuItemKeyBindings( HMENU hMenu )
 {
     Radiant_SeedCommandTable();
@@ -1745,11 +1713,9 @@ BOOL Radiant_ShowMenuItemKeyBindings( HMENU hMenu )
 
 // Command-map lookup + dispatch (factored out of OnKeyDown so the floating inspector popup can
 // reach it too).  Returns true when a hotkey fired its command.
-// U-CMD-1: this IS the whole lookup half of 0x422370, now a free function â€” the raw-Win32
-// shell's per-view key handlers call it directly.  The dispatch TAIL is Radiant_ExecCommand,
-// which is the single #ifdef'd fork for the whole file: MFC = SendMessage(WM_COMMAND) to the
-// frame (byte-identical to the old ::SendMessageA(m_hWnd, ...) â€” d_hwndMain IS m_hWnd),
-// KISAK_NO_MFC = Radiant_DispatchCommandDirect.
+// U-CMD-1: the whole lookup half of 0x422370 - the raw-Win32 shell's per-view key handlers
+// call it directly.  The dispatch tail is Radiant_ExecCommand (the binary sent WM_COMMAND to
+// the frame).
 bool Radiant_TryHotkey( unsigned int vk )
 {
     if ( !vk )
@@ -1778,25 +1744,20 @@ bool Radiant_TryHotkey( unsigned int vk )
 
 
 // â”€â”€ File / Edit command wrappers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// U-CMD-2: the five File-menu map flows + the WM_CLOSE guard are FREE functions now.  Every
-// one of these bodies already reached the shell through exactly two things â€” s_currentMapPath
-// and the frame's own HWND â€” and the HWND is g_qeglobals.d_hwndMain in BOTH shells
-// (mainfrm.cpp:1460 GetSafeHwnd() / radiant_main.cpp:313), so one body serves the MFC message
-// map (via the forwarders below) and Radiant_DispatchCommandDirect.  The two prompts they
-// guard on (Radiant_OkToDiscard / Radiant_ConfirmModified) and Radiant_FileSaveAs's picker are
-// defined further down this file; radiant_frame.h declares all three for both shells.
+// U-CMD-2: the five File-menu map flows + the WM_CLOSE guard.  Each body reaches the shell
+// only through the map path and the frame's HWND (g_qeglobals.d_hwndMain).  The two prompts
+// they guard on (Radiant_OkToDiscard / Radiant_ConfirmModified) and Radiant_FileSaveAs's
+// picker are defined further down this file; radiant_frame.h declares all three.
 void Radiant_FileNew()
 {
-    // Faithful OnFileNew (0x423AA0): guard on OkToDiscard() (the unsaved-changes prompt,
-    // now shipped â€” was a parked stub), pop any prefab nesting, then run the real
-    // Fileâ†’New = Map_New().  Map_New builds a valid worldspawn so a drag-created brush
-    // can attach; the old Map_NewMap()-only path left world_entity NULL and the first
-    // NewBrushDrag NULL-deref'd.
+    // OnFileNew (0x423AA0): guard on OkToDiscard() (the unsaved-changes prompt), pop any
+    // prefab nesting, then run the real File->New = Map_New().  Map_New builds a valid
+    // worldspawn so a drag-created brush can attach (Map_NewMap() alone leaves world_entity
+    // NULL and the first NewBrushDrag NULL-derefs).
     if ( !Radiant_OkToDiscard() )
         return;                            // user chose Cancel â†’ keep the current map
     Prefab_LevelBack();
-    Map_New();
-    s_currentMapPath[0] = 0;
+    Map_New();                             // currentmap = "unnamed.map" (untitled)
     ::SetWindowTextA( g_qeglobals.d_hwndMain, "CoD4Radiant - untitled" );
     QE_CountBrushesAndUpdateStatusBar();
     g_nUpdateBits = W_ALL;
@@ -1804,7 +1765,7 @@ void Radiant_FileNew()
 
 void Radiant_FileOpen()
 {
-    // Faithful OnFileOpen (0x423ae0): guard on OkToDiscard() (then Prefab_LevelBack)
+    // OnFileOpen (0x423ae0): guard on OkToDiscard() (then Prefab_LevelBack)
     // BEFORE popping the open dialog â€” so a dirty map prompts to save first.
     if ( !Radiant_OkToDiscard() )
         return;
@@ -1823,23 +1784,22 @@ void Radiant_FileOpen()
         Radiant_OpenMap( file );
 }
 
-void Radiant_FileSave()
+bool Radiant_FileSave()
 {
-    if ( !s_currentMapPath[0] )
-    {
-        Radiant_FileSaveAs();
-        return;
-    }
-    Map_SaveFile( s_currentMapPath, 0, 0 );
-    Radiant_FL_Log( "saved: %s", s_currentMapPath );
+    const char *path = ActiveSavePath();
+    if ( !path[0] )
+        return Radiant_FileSaveAs();
+    if ( !Map_SaveFile( path, 0 ) )
+        return false;
+    Radiant_FL_Log( "saved: %s", path );
+    return true;
 }
 
 void Radiant_FileExit()
 {
-    // Fileâ†’Exit posts WM_CLOSE â†’ the close guard runs there (faithful: the binary's exit
-    // guard lives in OnClose 0x422220, not in the Exit command).  Both shells honour it:
-    // the MFC frame in CMainFrame::OnClose, the raw frame in its WM_CLOSE case, and both
-    // run the SAME Radiant_FrameCloseAllowed() body below.
+    // File->Exit posts WM_CLOSE -> the close guard runs there (the binary's exit guard
+    // lives in OnClose 0x422220, not in the Exit command): the raw frame's WM_CLOSE case
+    // runs Radiant_FrameCloseAllowed() below.
     ::PostMessageA( g_qeglobals.d_hwndMain, WM_CLOSE, 0, 0 );
 }
 
@@ -1859,15 +1819,13 @@ bool Radiant_FrameCloseAllowed()
 //  Cores (Project_Write / QE_LoadProject_ParseFile / the MRU_* family) live in qe3.cpp.
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 extern signed int Project_Write( const char *path );                        // qe3.cpp 0x48BD90
-extern const char *Project_GetCurrentPath();                                 // qe3.cpp (== dword_25D65AC)
+extern const char *Project_GetCurrentPath();                                 // qe3.cpp (the global at 0x25D65AC)
 extern LPMRUMENU  *CreateMruMenuDefault();                                    // qe3.cpp 0x48A150
 extern void        MRU_NewItem( LPMRUMENU *mru, const char *lpString1 );      // qe3.cpp 0x48A2C0
 extern void        MRU_InsertItem( LPMRUMENU *mru, HMENU hMenu );             // qe3.cpp 0x48A400
 extern void        SaveMruInReg( LPMRUMENU *mru );                            // qe3.cpp 0x48A750
 extern void        LoadMruInReg( LPMRUMENU *mru );                            // qe3.cpp 0x48A870
 extern BOOL        DoMru( short nID, HWND hWnd );                             // qe3.cpp 0x4994B0
-extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp 0x4825C0
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp
 
 // â”€â”€ 0x495330  ProjectDlgProc â€” the IDD_PROJECT_SETTINGS content, UI-independent â”€â”€
 // The dialog proc's WM_INITDIALOG (272) filled 5 edit controls from the project entity and
@@ -1928,27 +1886,24 @@ static void Cmd_OnEditRedo()
     g_nUpdateBits = W_ALL;
 }
 
-// â”€â”€ Grid menu (IDB OnGrid1 0x424ab0 + helpers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Grid menu (OnGrid1 0x424ab0 + helpers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // KIWI (2026-09-27, user: "I want the grid menu on the win32 top-bar and all
 // sub-functionality removed, it's no longer relevant for our 3d-dominant KIWI workflow"):
 // uIDCheckItemGrid (IDB 0x6ddf04) and CheckGridMenuSelection (IDB 0x428950) are gone with
 // the menu.  d_gridsize keeps its loaded value for the ported code that reads grid_sizes.
-extern float grid_sizes[];   // engine_stubs.cpp (0x6dde5c)
 
 extern "C" int ClampGridSize();   // drag.cpp (0x463a80 â€” rotate/grid snap table)
 
-// SetGridStatus (IDB 0x428a00), minus the C: cubic-scale field: G=grid size,
+// SetGridStatus (0x428a00), minus the C: cubic-scale field: G=grid size,
 // T=saved grid index, R=ClampGridSize, L=texLock('M')+rotLock('R').
 void Radiant_SetGridStatus()
 {
     const char texLockC = g_PrefsDlg->m_bTextureLock ? 'M' : ' ';
     const char rotLockC = g_PrefsDlg->m_bRotateLock  ? 'R' : ' ';
     char buf[64];
-    // NB: d_savedinfo.d_gridsize is a float in the port's qe3.h; the binary passes it
-    // to %i, so cast to int explicitly (a float in a %i vararg would misalign the rest).
     _snprintf( buf, sizeof( buf ), "G:%.1f T:%i R:%i L:%c%c",
                grid_sizes[g_qeglobals.d_gridsize],
-               (int)g_qeglobals.d_savedinfo.d_gridsize,
+               g_qeglobals.d_savedinfo.d_gridsize,
                ClampGridSize(),
                texLockC, rotLockC );
     MainFrm_SetStatusText( 4, buf );
@@ -1964,15 +1919,12 @@ void Radiant_CheckMenu( UINT id, bool checked )   // U-BOOT: de-static'd
         ::CheckMenuItem( m, id, checked ? MF_CHECKED : MF_UNCHECKED );
 }
 
-extern void PMESH_49();              // pmesh.cpp (0x4495C0) â€” rebuild all active curveDefs
-
-
-// OnSnaptogrid (IDB 0x428380) â€” toggle m_bNoClamp, persist, re-check the menu.
+// OnSnaptogrid (0x428380) â€” toggle m_bNoClamp, persist, re-check the menu.
 // KIWI (2026-09-27): REMOVED with the Grid menu.  m_bNoClamp keeps its persisted value for
 // the ported drag / XY code that reads it (drag.cpp / xywnd.cpp / Brush_SnapPlanepts);
 // KIWI's own snap is KiwiGrid_SnapEnabled (the viewport chip).
 
-// Texture-Lock toggles (IDB OnToggleLockMoves 0x426b80 / OnToggleLockRotations
+// Texture-Lock toggles (OnToggleLockMoves 0x426b80 / OnToggleLockRotations
 // 0x429230 / OnToggleLockLightmap 0x426bf0): flip the lock field, re-check the menu,
 // SavePrefs, refresh the grid-status line (which shows the lock chars). The lock
 // reprojection itself is still deferred in Brush_Move (see brush.cpp), so these
@@ -1999,15 +1951,14 @@ static void Cmd_OnToggleLockLightmap()
     Radiant_SetGridStatus();
 }
 
-// â”€â”€ Viewâ†’Show overlay toggles (d_xyShowFlags; IDB 0x42ba40 / 0x42bac0 / 0x42bb00 /
-// 0x42bbc0 / 0x42bb60 / 0x42bc20) â”€â”€
+// â”€â”€ Viewâ†’Show overlay toggles (d_xyShowFlags) â”€â”€
 // Each handler flips its bit in d_savedinfo.d_xyShowFlags, re-checks the menu item
 // (CHECKED == feature SHOWN == bit CLEAR â€” the binary's CheckMenuItem value is 8 when the
 // bit is being cleared; Reverse Filter is the one INVERTED case), pushes the state into the
 // filter window's checkboxes (CFilterWnd::GetSettings) and broadcasts a repaint.
 extern void Map_BuildBrushData();    // map.cpp (0x485f00) â€” rebuilds the display lists
 
-// CFilterWnd::GetSettings (IDB 0x4140f0) â€” push d_xyShowFlags into the filter pane's six
+// CFilterWnd::GetSettings (0x4140f0) â€” push d_xyShowFlags into the filter pane's six
 // BM_SETCHECK checkboxes.  The port's filter pane is the entity window's Filter mode, so
 // this is Radiant_RefreshFilterPane (win_ent.cpp); it no-ops when that window is down.
 static void Radiant_SyncFilterWnd()
@@ -2015,7 +1966,7 @@ static void Radiant_SyncFilterWnd()
     Radiant_RefreshFilterPane();
 }
 
-static void Cmd_OnSelectNames()              // IDB 0x42ba40
+static void Cmd_OnSelectNames()              // 0x42ba40
 {
     bool nowShown = ( ( g_qeglobals.d_savedinfo.d_xyShowFlags ^ 8 ) & 8 ) == 0;
     g_qeglobals.d_savedinfo.d_xyShowFlags ^= 8u;       // 0x8 = names HIDDEN when set
@@ -2025,7 +1976,7 @@ static void Cmd_OnSelectNames()              // IDB 0x42ba40
     g_nUpdateBits |= 2u;                               // W_XY
 }
 
-static void Cmd_OnSelectCoordinates()        // IDB 0x42bb60
+static void Cmd_OnSelectCoordinates()        // 0x42bb60
 {
     bool nowShown = ( ( g_qeglobals.d_savedinfo.d_xyShowFlags ^ 0x20 ) & 0x20 ) == 0;
     g_qeglobals.d_savedinfo.d_xyShowFlags ^= 0x20u;    // 0x20 = coordinate rulers HIDDEN when set
@@ -2034,11 +1985,11 @@ static void Cmd_OnSelectCoordinates()        // IDB 0x42bb60
     g_nUpdateBits |= 2u;                               // W_XY
 }
 
-static void Cmd_OnSelectReverseFilter()      // IDB 0x42bc20
+static void Cmd_OnSelectReverseFilter()      // 0x42bc20
 {
     // NB the menu-check polarity is INVERTED vs the other toggles in the binary
-    // (v5=0 when the bit is being cleared, v5=8 when set) â€” i.e. CHECKED == reverse ON
-    // == bit SET.  Transcribed verbatim.
+    // (unchecked when the bit is being cleared, checked when set) - i.e. CHECKED == reverse
+    // ON == bit SET.
     bool nowOn = ( ( g_qeglobals.d_savedinfo.d_xyShowFlags ^ 0x40 ) & 0x40 ) != 0;
     g_qeglobals.d_savedinfo.d_xyShowFlags ^= 0x40u;    // 0x40 = reverse-filter mode
     Radiant_CheckMenu( 36127 /*ID_ReverseFilter*/, nowOn );
@@ -2049,7 +2000,7 @@ static void Cmd_OnSelectReverseFilter()      // IDB 0x42bc20
     g_nUpdateBits = -1;                                // full repaint (filter visibility changed)
 }
 
-static void Cmd_OnSelectConnections()        // IDB 0x42bbc0
+static void Cmd_OnSelectConnections()        // 0x42bbc0
 {
     // d_xyShowFlags bit 0x4 = connection lines HIDDEN when SET (shown when clear).  Draw
     // consumers = Lines_AddLinkTo + Lines_AddLinkToScript (xywnd.cpp), both ported (the
@@ -2061,7 +2012,7 @@ static void Cmd_OnSelectConnections()        // IDB 0x42bbc0
     g_nUpdateBits |= 0xBu;                             // W_CAMERA|W_XY|W_Z (binary: |= 0xB)
 }
 
-static void Cmd_OnSelectAngles()             // IDB 0x42bac0
+static void Cmd_OnSelectAngles()             // 0x42bac0
 {
     // d_xyShowFlags bit 0x2 = entity angle arrows HIDDEN when SET (shown when clear).  Draw
     // consumer = DrawAngles (brush.cpp), invoked from DrawBrush for fixedsize "angles"-keyed
@@ -2073,7 +2024,7 @@ static void Cmd_OnSelectAngles()             // IDB 0x42bac0
     g_nUpdateBits |= 3u;                               // W_XY|W_CAMERA (binary: |= 3)
 }
 
-static void Cmd_OnSelectBlocks()             // IDB 0x42bb00
+static void Cmd_OnSelectBlocks()             // 0x42bb00
 {
     // d_xyShowFlags bit 0x10 = the 1024-unit block grid HIDDEN when SET (shown when clear).
     // Draw consumer = XY_DrawBlockGrid (xywnd.cpp), invoked from OnPaint when the bit is clear.
@@ -2084,7 +2035,7 @@ static void Cmd_OnSelectBlocks()             // IDB 0x42bb00
     g_nUpdateBits |= 2u;                               // W_XY (block grid is XY-only)
 }
 
-// OnTexturesInspector (IDB 0x424b60) â€” Texturesâ†’Surface Inspector â†’ DoSurface.  Opens (or
+// OnTexturesInspector (0x424b60) â€” Texturesâ†’Surface Inspector â†’ DoSurface.  Opens (or
 // re-focuses) the hand-built Surface Inspector popup; selecting a face then populates it,
 // and edits re-project the texture live in the camera (surfacedlg.cpp).
 static void Cmd_OnTexturesInspector()
@@ -2095,7 +2046,7 @@ static void Cmd_OnTexturesInspector()
     ImGuiPanel_Surface_Toggle();
 }
 
-// OnPatchInspector (IDB 0x42b460, cmd 33092, Shift+S) â€” Patchâ†’Inspector â†’ DoPatchInspector.
+// OnPatchInspector (0x42b460, cmd 33092, Shift+S) â€” Patchâ†’Inspector â†’ DoPatchInspector.
 // Opens (or re-focuses) the hand-built Patch Properties popup and populates it from the
 // selected patch (patchdialog.cpp).
 extern void DoPatchInspector();   // patchdialog.cpp (0x436d30)
@@ -2104,8 +2055,7 @@ static void Cmd_OnPatchInspector()
     DoPatchInspector();
 }
 
-// OnCurveSimplepatchmesh (IDB 0x429a20, cmd 32856 / 0x8058 â€” verified from the CMainFrame
-// command table {cmdId,cmdId,0x38,pfn}) â€” Curveâ†’Simple Patch Mesh.  Runs the "Patch
+// OnCurveSimplepatchmesh (0x429a20, cmd 32856 / 0x8058) â€” Curveâ†’Simple Patch Mesh.  Runs the "Patch
 // density" modal (CPatchDensityDlg) inside an Undo bracket; OK builds a flat NxM Bezier
 // patch over the selected brush (patchdialog.cpp â†’ Patch_GenericMesh).
 extern void DoSimplePatchMesh();   // patchdialog.cpp (0x429a20 body)
@@ -2121,12 +2071,12 @@ static void Cmd_OnCurveSimpleterrainpatch()
 }
 
 
-// OnSelectionAddToActiveLayer (IDB CXYWnd::OnSelectionAddToActiveLayer 0x466930,
-// AFX msgmap nID 0x88B9 = 35001) â€” the right-click "Add selection to active layer"
-// command.  The binary attaches it to the CXYWnd context-menu map; KIWI routes
-// menu commands through CMainFrame, so this thin handler forwards to the ported
-// core (brush.cpp), which sets every selected brush's parent_layer_string to
-// g_activeLayer_string.  g_nUpdateBits|=1 â†’ redraw (CMainFrame::On* convention).
+// OnSelectionAddToActiveLayer (CXYWnd::OnSelectionAddToActiveLayer 0x466930, message-map
+// id 0x88B9 = 35001) - the right-click "Add selection to active layer" command.  The binary
+// attaches it to the CXYWnd context-menu map; KIWI routes menu commands through the frame's
+// command table, so this thin handler forwards to the ported core (brush.cpp), which sets
+// every selected brush's parent_layer_string to g_activeLayer_string.  g_nUpdateBits|=1 ->
+// redraw (the CMainFrame::On* convention).
 extern void CXYWnd_OnSelectionAddToActiveLayer();   // brush.cpp (0x466930 core)
 static void Cmd_OnSelectionAddToActiveLayer()
 {
@@ -2135,9 +2085,8 @@ static void Cmd_OnSelectionAddToActiveLayer()
 }
 
 
-// OnEditEntityinfo (IDB 0x426D6F) â€” Editâ†’Entity Info... The MFC entity-list browser
-// died with U-RIP (EntList_Open deleted with entitylist.cpp's popup); its cores
-// (EntityList_Gather/EntityEpairs_Gather/EntListSelect_Apply) survive. Until the
+// OnEditEntityinfo (0x426D6F) â€” Editâ†’Entity Info... The MFC entity-list browser
+// died with U-RIP (KIWI: entitylist.cpp and its uncalled cores are deleted).  Until an
 // entity-list DOCK TAB lands (POST-RIP: plan "Panels NOT queued" list), route to the
 // ImGui entity INSPECTOR panel â€” its eclass/K-V views cover the browse use case.
 static void Cmd_OnEditEntityinfo()
@@ -2151,13 +2100,6 @@ static void Cmd_OnEditEntityinfo()
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // View + Selection menu wrappers - thin command handlers forwarding to ported cores.
 
-extern selbrush_t selected_brushes;                      // engine_stubs (0x23F1864)
-extern void    Undo_ClearRedo();                         // undo.cpp
-extern void    Undo_GeneralStart( const char *operation );
-extern void    Undo_AddBrushList( selbrush_t *sb );
-extern void    Undo_EndBrushList( selbrush_t *sb );
-extern void    Undo_End();
-extern void    Select_Deselect( int bDeselectFaces );    // select.cpp (0x48E800)
 extern void    CSG_MakeHollow();                          // csg.cpp    (0x47D3C0)
 extern int     CSG_Merge();                               // csg.cpp    (0x47DA40)
 // KIWI-UX (RADIANT_UX_DESIGN sec 24, Phase 5): the CSG console-feedback pair
@@ -2169,10 +2111,9 @@ extern int     CSG_Merge();                               // csg.cpp    (0x47DA4
 extern void    KiwiCsg_NoteBefore();
 extern void    KiwiCsg_NoteAfter( const char *label );
 extern void    Sys_UpdateWindows( int bits );             // win_qe3.cpp
-extern int     Sys_Printf( const char *fmt, ... );        // win_qe3.cpp (0x499E90)
 extern float   z_scale;                                   // z.cpp       (0x241A5B0)
 
-// IDB global 0x25D5A90 â€” last committed XY zoom level (pixels/world unit). The zoom
+// 0x25D5A90 - last committed XY zoom level (pixels/world unit). The zoom
 // handlers mirror m_fScale into it; the overlay/print paths read it.
 float g_zoomLevel = 1.0f;
 
@@ -2220,19 +2161,17 @@ static void Cmd_OnViewZoomout()
 //   2. Camera pane hover, and only with the CameraUseWheel pref  -> CCamWnd::Scroll
 //      (dolly; wheel-forward passes -1.0, wheel-back +1.0).
 //   3. Anything else       -> XY zoom in/out.
-// The hover test is two-stage, exactly as the binary: with QE4StyleWindows (m_nView) == 1
+// The hover test is two-stage, as in the binary: with QE4StyleWindows (m_nView) == 1
 // the pane must additionally be the window UNDER the cursor (and, for the texture pane,
 // the inspector must currently be in Textures mode); otherwise only the screen-rect test
 // runs.  Returns TRUE on every path (the wheel is always consumed).
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// U-CMD-2: extracted whole.  The three MFC binds all had exact HWND twins, so this is ONE
-// body both shells run (CMainFrame::OnScroll below is a forwarder):
-//   m_pTexWnd / m_pCamWnd            -> g_qeglobals.d_hwndTexture / d_hwndCamera (the SAME
-//        windows: mainfrm.cpp:974 / :963 register them from those very pointers)
-//   CWnd::FromHandle(..) == m_pXWnd  -> the HWND compare that test always reduced to
+// U-CMD-2: the binary's MFC binds and their HWND forms:
+//   m_pTexWnd / m_pCamWnd            -> g_qeglobals.d_hwndTexture / d_hwndCamera (the same windows)
+//   CWnd::FromHandle(..) == m_pXWnd  -> an HWND compare
 //   GetClientRect + ClientToScreen   -> ::GetClientRect + ::MapWindowPoints( h, 0, .., 2 )
-//        (CWnd::ClientToScreen(RECT*) maps both corners â€” that is this call)
-//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll (texwnd.cpp:2257 is its forwarder)
+//        (CWnd::ClientToScreen(RECT*) maps both corners)
+//   m_pTexWnd->Scroll( zDelta )      -> TexWnd_Scroll
 // `focusOrHover` is the window the WM_MOUSEWHEEL was delivered to.  The binary's hover test
 // consults ::WindowFromPoint ONLY (the wheel is dispatched by CURSOR position, not focus), so
 // it is deliberately not read here; it stays in the signature because the raw pump's call
@@ -2243,57 +2182,57 @@ bool Radiant_OnMouseWheel( HWND focusOrHover, short zDelta, POINT screenPt )
 {
     (void)focusOrHover;
 
-    if ( !zDelta )                                                   // 0x42b863
+    if ( !zDelta )
         return true;
 
     const HWND hTex = g_qeglobals.d_hwndTexture;
     const HWND hCam = g_qeglobals.d_hwndCamera;
 
-    bool overTex = false;                                            // 0x42b879 (v13)
-    bool overCam = false;                                            // 0x42b87e (v14)
+    bool overTex = false;
+    bool overCam = false;
 
-    if ( hTex )                                                      // 0x42b883
+    if ( hTex )
     {
-        // 0x42b8b2 â€” style gate + "the texture pane is the window under the cursor".
+        // style gate + "the texture pane is the window under the cursor"
         if ( g_PrefsDlg->m_nView != 1
           || ( inspector_mode == INSPECTOR_TEXTURE
             && ::WindowFromPoint( screenPt ) == hTex ) )
         {
             RECT r;
-            ::GetClientRect( hTex, &r );                             // 0x42b8bd
-            ::MapWindowPoints( hTex, nullptr, (POINT *)&r, 2 );      // 0x42b8ce
-            if ( ::PtInRect( &r, screenPt ) )                        // 0x42b8da
-                overTex = true;                                      // 0x42b8e4
+            ::GetClientRect( hTex, &r );
+            ::MapWindowPoints( hTex, nullptr, (POINT *)&r, 2 );
+            if ( ::PtInRect( &r, screenPt ) )
+                overTex = true;
         }
     }
-    if ( hCam && g_PrefsDlg->camera_use_wheel )                      // 0x42b8f1/0x42b8f8
+    if ( hCam && g_PrefsDlg->camera_use_wheel )
     {
         if ( g_PrefsDlg->m_nView != 1
-          || ::WindowFromPoint( screenPt ) == hCam )                 // 0x42b920
+          || ::WindowFromPoint( screenPt ) == hCam )
         {
             RECT r;
-            ::GetClientRect( hCam, &r );                             // 0x42b92b
-            ::MapWindowPoints( hCam, nullptr, (POINT *)&r, 2 );      // 0x42b93c
-            if ( ::PtInRect( &r, screenPt ) )                        // 0x42b948
-                overCam = true;                                      // 0x42b952
+            ::GetClientRect( hCam, &r );
+            ::MapWindowPoints( hCam, nullptr, (POINT *)&r, 2 );
+            if ( ::PtInRect( &r, screenPt ) )
+                overCam = true;
         }
     }
 
-    if ( overTex )                                                   // 0x42b95c
+    if ( overTex )
     {
-        TexWnd_Scroll( zDelta );                                     // 0x42b962
+        TexWnd_Scroll( zDelta );
         return true;
     }
-    if ( !overCam )                                                  // 0x42b97d
+    if ( !overCam )
     {
-        if ( zDelta > 0 )                                            // 0x42b9e9
-            Cmd_OnViewZoomin();                                      // 0x42b9eb
+        if ( zDelta > 0 )
+            Cmd_OnViewZoomin();
         else
-            Cmd_OnViewZoomout();                                     // 0x42b9fe
+            Cmd_OnViewZoomout();
         return true;
     }
-    iassert( g_qeglobals.d_hwndCamera );                             // MainFrm.cpp:6124 (was iassert(m_pCamWnd) â€” same window)
-    CamWnd_Scroll( ( zDelta > 0 ) ? -1.0f : 1.0f );                  // 0x42b9b7 / 0x42b9cf
+    iassert( g_qeglobals.d_hwndCamera );                             // MainFrm.cpp:6124 (the binary asserts m_pCamWnd, the same window)
+    CamWnd_Scroll( ( zDelta > 0 ) ? -1.0f : 1.0f );
     return true;
 }
 
@@ -2323,11 +2262,8 @@ static void Cmd_OnSelectionDeselect()
 // The tail cleans up whichever patch sub-mode was active BEFORE the switch.
 extern int  OnlyPatchesSelected();   // engine_stubs.cpp 0x447860
 extern int  AnyPatchesSelected();    // engine_stubs.cpp 0x447890
-extern void SetupVertexSelection();  // select.cpp 0x494bc0
-extern void Patch_EditPatch();       // engine_stubs.cpp (patch editor, FATAL until pmesh)
+extern void Patch_EditPatch();       // pmesh.cpp (0x441fd0, enter curve-point edit)
 extern void Terrain_Edit();          // pmesh.cpp (mixed patch+brush vert-snap entry, 0x442100)
-extern void sub_43ECB0();            // engine_stubs.cpp (addpoint-mode cleanup, FATAL)
-extern void CMainFrame_UpdatePatchToolbarButtons();   // select.cpp (0x42AA70)
 
 static void Cmd_OnSelectionDragVertices()
 {
@@ -2382,7 +2318,7 @@ static void Cmd_OnSelectionDragVertices()
             g_nUpdateBits = -1;
             return;
         }
-        // The binary RE-READS d_select_mode here (0x425898) â€” SetupVertexSelection runs first.
+        // The binary RE-READS d_select_mode here - SetupVertexSelection runs first.
         prevMode = g_qeglobals.d_select_mode;
         g_qeglobals.d_select_mode = sel_vertex;  // toggle ON
     }
@@ -2393,10 +2329,6 @@ static void Cmd_OnSelectionDragVertices()
         CMainFrame_UpdatePatchToolbarButtons();
         g_nUpdateBits = -1;
         return;
-    }
-    if ( prevMode == sel_addpoint )
-    {
-        sub_43ECB0();
     }
     g_nUpdateBits = -1;
 }
@@ -2425,8 +2357,6 @@ static void Cmd_OnSelectionDragEdges()
             g_nUpdateBits = -1;
             return;
         }
-        if ( prevMode == sel_addpoint )
-            sub_43ECB0();
     }
     g_nUpdateBits = -1;
 }
@@ -2439,14 +2369,10 @@ static void Cmd_OnSelectionDragEdges()
 // (DropModel). The drop is raised by DropHeight unless ForceZeroDropHeight; non-
 // fixed-size brushes snap to the grid unless NoClamp. The whole pass is one undo
 // bracket, and (like the binary) prefs are reloaded from the registry at entry.
-//   The grid-snap loop's apparent IDB off-by-one (reads pos@+0x54.., writes @+0x50..) is a
-//   stack-shift display artifact, not a shifted write; both arrays are the same pos[3].
-extern void          sub_47CBA0( selbrush_t *b, int axis, float deg );                       // select.cpp (0x47CBA0)
-extern char         *va( const char *fmt, ... );                                             // q_shared
+extern void          Brush_RotateAboutPivot( selbrush_t *b, int axis, float deg );                       // select.cpp (0x47CBA0)
 extern edTrace_t    *Trace_AllDirectionsIfFailed( float *cam_origin, edTrace_t *trace_result,
                                                   float *dir, int contents );                // select.cpp (0x48DAA0)
 extern void          AlignEntityToFace_OrientToFloor( entity_s_def *ent, float *dir );        // entity.cpp (0x485AD0)
-extern entity_s     *Brush_Move( const float *move, brush_t *def, char snap );               // brush.cpp (0x47BA40)
 
 static void Cmd_OnDropSelected()
 {
@@ -2464,10 +2390,6 @@ static void Cmd_OnDropSelected()
         {
             CMainFrame_UpdatePatchToolbarButtons();
         }
-        else if ( prevMode == sel_addpoint )
-        {
-            sub_43ECB0();                                // Patch_FinishCurveDrag (0x43ecb0)
-        }
 
         entity_s_def *def = (entity_s_def *)b->owner->def;
 
@@ -2475,9 +2397,9 @@ static void Cmd_OnDropSelected()
         if ( *(int *)&def->eclass->fixedsize && g_PrefsDlg->m_bDropModel )
         {
             SetKeyValue( def, "angles", "0 0 0" );
-            sub_47CBA0( b, 0, (float)( (double)rand() * 0.000030517578125 ) * 5.0f - 2.5f );   // pitch Â±2.5
-            sub_47CBA0( b, 1, (float)( (double)rand() * 0.000030517578125 ) * 5.0f - 2.5f );   // roll  Â±2.5
-            sub_47CBA0( b, 2, (float)( (double)rand() * 0.000030517578125 ) * 360.0f );        // yaw   0..360
+            Brush_RotateAboutPivot( b, 0, (float)( (double)rand() * 0.000030517578125 ) * 5.0f - 2.5f );   // pitch Â±2.5
+            Brush_RotateAboutPivot( b, 1, (float)( (double)rand() * 0.000030517578125 ) * 5.0f - 2.5f );   // roll  Â±2.5
+            Brush_RotateAboutPivot( b, 2, (float)( (double)rand() * 0.000030517578125 ) * 360.0f );        // yaw   0..360
             float base  = (float)g_PrefsDlg->scale_base  / 100.0f;
             float range = (float)g_PrefsDlg->scale_range / 100.0f;
             float scale = (float)( (double)rand() * 0.000030517578125 ) * ( range + range ) + base - range;
@@ -2571,19 +2493,43 @@ static void Cmd_OnSelectionCsgmerge()
 extern void Ed_SetClipMode( char bMode );    // xywnd.cpp (0x465430)
 struct xywndState_t;
 extern xywndState_t *Ed_ActiveXY();           // xywnd.cpp — the one 2D view (U-GLOBALS)
-extern void Ed_Clip( xywndState_t *wnd );     // xywnd.cpp (0x46dc10) — xywndState_t* overload (U-RIP done)
+extern void Ed_Clip( xywndState_t *wnd );     // xywnd.cpp (0x46dc10) — xywndState_t* overload
 extern void Ed_SplitClip();                   // xywnd.cpp (0x46dd30)
 extern void Ed_FlipClip();                    // xywnd.cpp (0x46ddf0)
 extern int  g_bClipMode;                      // engine_stubs.cpp 0x23f16d8
-extern bool g_bRotateMode;                    // drag.cpp (0x23F16D9)
-extern int  g_bPatchBendMode;                 // pmesh.cpp (0x25D5B04)
 void Ed_InvalidateAllViews();                 // defined below (repaint broadcast)
 
+// OnClipSelected (0x427170, Enter) / OnSplitSelected (0x4271d0, Shift+Enter): the clipper
+// commits, undo-bracketed.  KIWI: the port called Ed_Clip / Ed_SplitClip bare, so a clip could
+// not be undone; both brackets now run only in clip mode (outside it a split records nothing).
+// The binary's Enter also advanced patch-bend mode (Patch_BendHandleEnter) - gone with it.
+static void Cmd_OnClipSelected()
+{
+    if ( g_bClipMode && Ed_ActiveXY() )
+    {
+        Undo_ClearRedo();
+        Undo_GeneralStart( "clip selected" );
+        Undo_AddBrushList( &selected_brushes );
+        Ed_Clip( Ed_ActiveXY() );
+        Undo_EndBrushList( &selected_brushes );
+        Undo_End();
+    }
+}
 
-extern void Patch_BendHandleEnter();          // pmesh.cpp (0x447B70)
+static void Cmd_OnSplitSelected()
+{
+    if ( !g_bClipMode || !Ed_ActiveXY() )
+        return;
+    Undo_ClearRedo();
+    Undo_GeneralStart( "split selected" );
+    Undo_AddBrushList( &selected_brushes );
+    Ed_SplitClip();
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
+}
 
 
-// Region menu wrappers - 5-byte jmp thunks in the IDB (0x4252b0..0x4252f0) to the map.cpp
+// Region menu wrappers - 5-byte jmp thunks in the binary (0x4252b0..0x4252f0) to the map.cpp
 // cores; no undo wrapper (a selection change, not an edit).
 extern void Map_RegionOff();              // map.cpp (0x487530)
 extern void Map_RegionXY();               // map.cpp (0x4877d0)
@@ -2601,12 +2547,12 @@ static void Cmd_OnRegionSetselection() { Map_RegionSelectedBrushes(); } // 0x425
 // Reshape the selected brush into an N-sided cylinder / cone / sphere.  The binary pops the
 // IDD_ARBITRARY_SIDES modal (SidesDlgProc 0x495F00), which dispatches to
 // Brush_MakeSided{,Cone,Sphere} via the g_bDoCone / g_bDoSphere flags.  All three handlers
-// are undo-bracketed (0x424EE0 / 0x429170 / 0x42B630).
+// are undo-bracketed.
 extern void Brush_MakeSided_Prolog( unsigned int sides, char snap ); // brush.cpp (0x4735E0)
 extern void Brush_MakeSidedCone( int sides );                        // brush.cpp (0x47BC10)
 extern void Brush_MakeSidedSphere( int sides );                      // brush.cpp (0x47BE90)
 
-// IDB globals 0x25D5B38 / 0x25D5B39 â€” which primitive SidesDlgProc builds.
+// Globals 0x25D5B38 / 0x25D5B39 - which primitive SidesDlgProc builds.
 char g_bDoCone   = 0;
 char g_bDoSphere = 0;
 
@@ -2645,8 +2591,7 @@ static void Radiant_RunSidesDialog( const char *title, char doCone, char doSpher
 
 
 // â”€â”€ SELECTION menu wrappers (batch â€” thin forwards to already-ported cores) â”€â”€â”€
-// Each transcribed from the IDB; the Make Detail/Structural pair is undo-bracketed exactly
-// as the binary.
+// The Make Detail/Structural pair is undo-bracketed, as in the binary.
 extern void Select_Connected();                          // select.cpp (0x490EC0)
 extern void Select_ByClass( const char *key );           // select.cpp (0x490A70)
 extern LRESULT Select_Ungroup();                         // entity.cpp (0x490780)
@@ -2700,12 +2645,12 @@ static void Cmd_OnSelectionMakeStructural()  // 0x426200 â€” Selectionâ†
 }
 
 // â”€â”€ SCRIPT-GROUP / FIXED-SIZE LIGHT command handlers (0x428E10-0x428EE0) â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Thin CMainFrame methods the binary jumps through to the brush.cpp/pmesh.cpp cores,
-// transcribed verbatim incl. the exact float factors.
+// Thin CMainFrame methods the binary jumps through to the brush.cpp/pmesh.cpp cores, with
+// the binary's float factors.
 extern void DisassociateEntities();          // brush.cpp 0x47a1b0
 extern void SelectedAssociated();            // brush.cpp 0x47a330
 extern void OverbrightShift( float a1 );     // brush.cpp 0x47a600
-extern void Light_01( float a1 );            // brush.cpp 0x47a790
+extern void Light_ScaleSelected( float scale );   // brush.cpp 0x47a790
 extern void Light_Height( float a1 );        // brush.cpp 0x47a910
 extern void Patch_Subdivide( int decrease ); // pmesh.cpp 0x44cde0
 // Script-Group colour command cores (scriptgroup.cpp).
@@ -2714,8 +2659,6 @@ extern void ScriptGroup_AddColorToSelection();  // 0x4543B0
 extern void ScriptGroup_TriggerNumber();        // 0x453170
 extern bool ScriptGroup_SelectionHasTrigger();  // (helper used by OnScriptGroup_Disassociate)
 extern void AssociateEntities();                // 0x455A80 (Script-Group dialog toggle/open)
-extern int  UpdateSelection( int wParam, eclass_t *cls );   // win_ent.cpp 0x497180 (declared again @2812)
-extern int  Sys_Printf( const char *fmt, ... );             // win_qe3.cpp 0x499E90 (declared again @2021)
 
 // 0x428E00 (thunk)  CMainFrame::OnAssociateEntities â€” Associate-Entities accelerator (Shift+G):
 // open the Script-Group dialog.
@@ -2766,13 +2709,13 @@ static void Cmd_OnScriptGroup_Disassociate()
 
 static void Cmd_OnLightShiftUp()           // 0x428E30
 {
-    Light_01( 1.1f );
+    Light_ScaleSelected( 1.1f );
     g_nUpdateBits = -1;
 }
 
 static void Cmd_OnLightShiftDown()         // 0x428E50
 {
-    Light_01( 0.9f );
+    Light_ScaleSelected( 0.9f );
     g_nUpdateBits = -1;
 }
 
@@ -2788,10 +2731,9 @@ static void Cmd_OnCyclinderHeightDown()    // 0x428E90
     g_nUpdateBits = -1;
 }
 
-// â”€â”€ Camera raise/lower (D / C) â€” IDB OnCameraUp 0x426900 / OnCameraDown 0x426680 â”€â”€
+// â”€â”€ Camera raise/lower (D / C) â€” OnCameraUp / OnCameraDown â”€â”€
 //   Nudge the 3D camera up/down by 32 world units along Z, then redraw the camera (W_CAMERA)
-//   and, if "camera updates XY" is on, the 2D view (W_XY).  Faithful to the binary's
-//   `g_nUpdateBits |= 2*(m_bCamXYUpdate!=0)+1`.
+//   and, if "camera updates XY" is on, the 2D view (W_XY).
 static void Cmd_OnCameraUp()               // 0x426900 (cmd 33055, 'D')
 {
     Ed_Camera()->origin[2] += 32.0f;   // U-GLOBALS
@@ -2804,9 +2746,9 @@ static void Cmd_OnCameraDown()             // 0x426680 (cmd 33056, 'C')
     g_nUpdateBits |= 2 * ( g_PrefsDlg->m_bCamXYUpdate != 0 ) + 1;
 }
 
-// â”€â”€ Camera pitch up/down (A / Z) â€” IDB OnCameraAngleUp 0x4265d0 / OnCameraAngleDown 0x426590 â”€â”€
+// â”€â”€ Camera pitch up/down (A / Z) â€” OnCameraAngleUp / OnCameraAngleDown â”€â”€
 //   Tilt the 3D camera pitch (angles[0]) by Â±22.5Â°, clamped to [-85, 85], then redraw the
-//   camera (W_CAMERA).  Faithful to the binary.
+//   camera (W_CAMERA).
 static void Cmd_OnCameraAngleUp()          // 0x4265d0 (cmd 33061, 'A')
 {
     g_nUpdateBits |= W_CAMERA;
@@ -2838,10 +2780,10 @@ static void Cmd_OnOverBrightShiftDown()    // 0x428EE0
 }
 
 
-// REGION SELECTION handlers â€” the IDB thunks (0x426340/0x426360/0x426370/0x426350)
-// are 5-byte jmps straight to the cores (no undo wrapper: a selection change, not an
-// edit). Each core takes the single selected brush as a box, deletes it, then
-// (re)selects the brushes matching the box test (see select.cpp).
+// REGION SELECTION handlers - the binary's thunks are 5-byte jmps straight to the cores
+// (no undo wrapper: a selection change, not an edit). Each core takes the single selected
+// brush as a box, deletes it, then (re)selects the brushes matching the box test (see
+// select.cpp).
 extern void Select_CompleteTall();   // select.cpp (0x490170)
 extern void Select_PartialTall();    // select.cpp (0x4903D0)
 extern void Select_Touching_R();     // select.cpp (0x490520)
@@ -2868,13 +2810,9 @@ static void Cmd_OnSelectionInside()         // 0x426350 â€” Select Inside (
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// MENU-WRAPPER BATCH - thin On* handlers forwarding to already-ported cores, each
-// transcribed from the IDB (EAs below).
-extern void    Select_Delete();                               // select.cpp (0x48E760)
+// MENU-WRAPPER BATCH - thin On* handlers forwarding to already-ported cores.
 extern void    Brush_AutoCaulk();                             // csg.cpp    (0x47E0F0)
 extern void    Select_ChangeBrushToolflags( int set, int clear );// select.cpp (0x491890)
-extern void    Undo_AddEntity_W( entity_s *def );            // undo.cpp   (0x45E990)
-extern undo_s *g_lastundo;                                   // undo.cpp   (0x23F162C)
 
 // CMainFrame::OnSelectionDelete (0x425690) - Edit->Delete (33003 / Backspace).  Undo-brackets
 // the selection, then per selected brush adds its OWNER entity + that entity's whole brush-def
@@ -2957,8 +2895,8 @@ static void Cmd_OnSelectionMakeDontSplitCoplanar()
 
 // CMainFrame::OnViewCenter (0x423C50) â€” Viewâ†’Center (32953 / End). Levels the camera
 // (zero pitch/roll) and snaps its yaw to the nearest 22.5Â° increment, then repaints
-// the camera + Z views. Pure inline camera math (no core dependency); transcribed
-// verbatim â€” note floor((yaw+11)/22.5)*22.5 is the binary's snap (NOT a rounding helper).
+// the camera + Z views. Pure inline camera math (no core dependency); note
+// floor((yaw+11)/22.5)*22.5 is the binary's snap (NOT a rounding helper).
 static void Cmd_OnViewCenter()
 {
     {
@@ -2975,7 +2913,7 @@ extern LRESULT Texture_ShowInuse();   // texwnd.cpp (0x45B850) â€” mark/cou
 
 // CMainFrame::OnViewUpfloor (0x424700) / OnViewDownfloor (0x423ED0) â€” Viewâ†’Up/Down Floor
 // (32954/32955). Snap the camera onto the nearest brush surface above/below it
-// (CCamWnd::Cam_ChangeFloor, now ported in camwnd.cpp). Verbatim one-line handlers.
+// (CCamWnd::Cam_ChangeFloor, camwnd.cpp).
 static void Cmd_OnViewUpfloor()
 {
     CamWnd_ChangeFloor( 1 );   // U-GLOBALS: was CCamWnd::Cam_ChangeFloor( m_pCamWnd, 1 )
@@ -2986,8 +2924,8 @@ static void Cmd_OnViewDownfloor()
 }
 
 // CMainFrame::OnTexturesShowinuse (0x424B20) â€” Texturesâ†’Show In Use (32974). Mark only
-// the textures the map references, then redraw the texture browser. Faithful to the
-// binary: wait-cursor â†’ Texture_ShowInuse() â†’ RedrawWindow(m_pTexWnd) if present.
+// the textures the map references, then redraw the texture browser: wait-cursor ->
+// Texture_ShowInuse() -> RedrawWindow(m_pTexWnd) if present.
 static void Cmd_OnTexturesShowinuse()
 {
     HCURSOR prev = SetCursor( LoadCursorA( 0, (LPCSTR)IDC_WAIT ) );
@@ -3021,12 +2959,12 @@ static void Cmd_OnTexturesShowall()
 // backend (R_ReloadImages / R_UpdateMipMap) is in gfx_d3d/r_image.cpp under KISAK_RADIANT;
 // kisak's imageGlobals.imageHashTable[32768] IS the binary's flat imageGlobals[32768].
 
-void __cdecl R_ReloadImages();   // gfx_d3d/r_image.cpp (idb R_ReloadImages 0x513D70; decl in r_image.h)
-void __cdecl R_UpdateMipMap();    // gfx_d3d/r_image.cpp (idb R_UpdateMipMap  0x5139A0; decl in r_image.h)
+void __cdecl R_ReloadImages();   // gfx_d3d/r_image.cpp (0x513D70; decl in r_image.h)
+void __cdecl R_UpdateMipMap();    // gfx_d3d/r_image.cpp (0x5139A0; decl in r_image.h)
 
 // CMainFrame::OnTextureRefresh (0x428B50) â€” Texturesâ†’Refresh Textures (33204, F5).  Reload
 // every loose-file image from disk so edited TGA/DDS/IWI shows up without restarting, then
-// invalidate all views.  Verbatim: R_ReloadImages(); g_nUpdateBits = -1.
+// invalidate all views.
 static void Cmd_OnTextureRefresh()
 {
     R_ReloadImages();
@@ -3034,14 +2972,14 @@ static void Cmd_OnTextureRefresh()
 }
 
 // CMainFrame::PicMip (0x420860) â€” apply g_qeglobals.d_savedinfo.d_picmip to the r_picmip*
-// dvars and check the matching Texture-Resolution radio item.  Verbatim from the binary,
-// adapted to kisak's Dvar_SetIntByName(name, value) arg order (the binary lists them
-// swapped; see gfxwrapper.cpp).  d_picmip is 0..3 (Maximum..Low); the menu ids are
-// 36115+d_picmip.  (Bump/spec are pinned to 3, exactly as the binary.)
+// dvars and check the matching Texture-Resolution radio item, in kisak's
+// Dvar_SetIntByName(name, value) arg order (the binary lists them swapped; see
+// gfxwrapper.cpp).  d_picmip is 0..3 (Maximum..Low); the menu ids are 36115+d_picmip.
+// (Bump/spec are pinned to 3, as in the binary.)
 void Radiant_PicMip()
 {
     int picmip = g_qeglobals.d_savedinfo.d_picmip;
-    iassert( picmip >= 0 && picmip <= 3 );   // idb: menuID in [36115, 36118]
+    iassert( picmip >= 0 && picmip <= 3 );   // binary: menuID in [36115, 36118]
     Dvar_SetIntByName( "r_picmip",      picmip );
     Dvar_SetIntByName( "r_picmip_spec", 3 );
     Dvar_SetIntByName( "r_picmip_bump", 3 );
@@ -3061,7 +2999,7 @@ void Radiant_PicMip()
 // Maximum/High/Normal/Low).  If the picked level differs from the current d_picmip, store it,
 // push the r_picmip dvars (PicMip), propagate them into imageGlobals.picmip* (R_UpdateMipMap),
 // reload every loose-file image at the new mip level (R_ReloadImages), and invalidate all
-// views (g_nUpdateBits = -1).  Verbatim from the binary (id âˆ’ 36115 == the picmip level).
+// views (g_nUpdateBits = -1).  id - 36115 == the picmip level.
 static void Cmd_OnTextureResolution( UINT nID )
 {
     int level = (int)nID - 36115;
@@ -3075,17 +3013,17 @@ static void Cmd_OnTextureResolution( UINT nID )
     }
 }
 
-// â”€â”€ Texturesâ†’Texture Filter submenu (33226..33230) â€” 0x424200 / 0x424250 / 0x4242A0 /
+// â”€â”€ Texturesâ†’Texture Filter submenu (33226..33230)
 //    Each handler: find the malleable "r_textureMode" dvar and set its string from source
 //    (the binary's 2-arg Dvar_SetStringFromSource passes source 0 == DVAR_SOURCE_INTERNAL),
 //    or register it fresh with flags 0x4000 (DVAR_EXTERNAL) + description "External Dvar";
-//    then `or g_nUpdateBits, 1` (== W_CAMERA).
+//    then g_nUpdateBits |= 1 (W_CAMERA).
 //    KISAK: CoD4's renderer consults r_textureMode in a global sampler-filter override;
 //    kisak's CoD3 renderer bakes min/mag/mip into each technique's GfxStateBits.samplerState
-//    and has no such override, so the dvar is written faithfully but nothing consumes it.
+//    and has no such override, so the dvar is written but nothing consumes it.
 static void Radiant_SetTextureMode( const char *mode )
 {
-    const dvar_s *v = Dvar_FindVar( "r_textureMode" );          // idb Dvar_FindMalleableVar 0x4B0F00
+    const dvar_s *v = Dvar_FindVar( "r_textureMode" );          // binary: Dvar_FindMalleableVar 0x4B0F00
     if ( v )
         Dvar_SetStringFromSource( (dvar_s *)v, (char *)mode, DVAR_SOURCE_INTERNAL );
     else
@@ -3110,8 +3048,8 @@ static void Cmd_OnRendermethodCaseTextures( UINT nID ) { Texture_SetMode( (int)n
 
 // CMainFrame::CheckTextureScale (0x42AF50) â€” check the picked Texture-Window-Scale radio item
 // (32894..32898 = 200/100/50/25/10%), persist prefs, reset the browser scroll, and repaint the
-// texture window.  Verbatim; the binary's raw `g_nUpdateBits |= 0x10` is W_TEXTURE (qedefs
-// macros are aligned to the binary values, so the symbol equals the raw 0x10).
+// texture window.  The binary's raw `g_nUpdateBits |= 0x10` is W_TEXTURE (qedefs macros are
+// aligned to the binary values, so the symbol equals the raw 0x10).
 void Radiant_CheckTextureScale( UINT uIDCheckItem )
 {
     if ( HMENU menu = Radiant_FrameMenu() )   // U-CMD-1: raw HMENU == the binary's CMenu pair
@@ -3123,13 +3061,13 @@ void Radiant_CheckTextureScale( UINT uIDCheckItem )
         ::CheckMenuItem( menu, 32894, MF_BYCOMMAND | MF_UNCHECKED );   // 200%
         ::CheckMenuItem( menu, uIDCheckItem, MF_BYCOMMAND | MF_CHECKED );
     }
-    Prefs_SavePrefs( g_PrefsDlg );   // idb CPrefsDlg::SavePrefs(g_PrefsDlg) 0x44f280
+    Prefs_SavePrefs( g_PrefsDlg );   // CPrefsDlg::SavePrefs 0x44f280
     Texture_ResetPosition();
-    g_nUpdateBits |= W_TEXTURE;   // idb `or g_nUpdateBits, 10h` (W_TEXTURE == 0x10)
+    g_nUpdateBits |= W_TEXTURE;   // W_TEXTURE == 0x10
 }
 
 // The five Texture-Window-Scale menu items (32894..32898).  Each stores the percentage in
-// g_PrefsDlg->m_nTextureWindowScale then CheckTextureScale(id).  Verbatim (0x42B020..0x42AFE0).
+// g_PrefsDlg->m_nTextureWindowScale then CheckTextureScale(id).  (0x42B020..0x42AFE0)
 static void Cmd_OnTexturesTexturewindowscale10()  { g_PrefsDlg->m_nTextureWindowScale = 10;  Radiant_CheckTextureScale( 32898 ); }
 static void Cmd_OnTexturesTexturewindowscale25()  { g_PrefsDlg->m_nTextureWindowScale = 25;  Radiant_CheckTextureScale( 32897 ); }
 static void Cmd_OnTexturesTexturewindowscale50()  { g_PrefsDlg->m_nTextureWindowScale = 50;  Radiant_CheckTextureScale( 32896 ); }
@@ -3140,15 +3078,9 @@ static void Cmd_OnTexturesTexturewindowscale200() { g_PrefsDlg->m_nTextureWindow
 // INSPECTOR TAB SWITCHING - each command toggles the right-column inspector to its mode (or
 // hides the inspector if it is already in that mode + visible), then SetInspectorMode.
 
-// (Radiant_ToggleInspectorMode removed — the native entity-window inspector modes are all
-// ImGui panels/dock tabs now: Entity → ImGuiPanel_Entity_Toggle, Textures/Console →
-// ImGuiShell_FocusTab, Filters → ImGuiPanel_Filters_Toggle. Nothing drives the old HWND path.)
-
 // CMainFrame::OnViewEntity (0x423f00) â€” Viewâ†’Toggleâ†’Entity View (33017).
-// Dock-world routing (the inspector-mode toggles drove the MFC tab strip, which
-// early-returns without d_hwndEntity — N/O/texture-view were dispatching into silence):
-// Entity -> the Inspector tab; Textures/Console -> focus the dock tab; Filters (F) stays
-// on the inert old path until the filters panel exists (POST-RIP).
+// Dock-world routing: Entity -> the Inspector tab; Textures/Console -> focus the dock tab;
+// Filters (F) -> the Filters panel.
 extern void ImGuiPanel_Entity_Toggle();                  // imgui_panel_entity.cpp
 extern void ImGuiPanel_Filters_Toggle();                 // imgui_panel_filters.cpp
 extern void ImGuiShell_FocusTab( const char *title );    // imgui_shell.cpp
@@ -3158,45 +3090,40 @@ static void Cmd_OnViewTextureMode() { ImGuiShell_FocusTab( "Textures" ); }
 // CMainFrame::OnViewConsole (0x423e10) â€” Viewâ†’Toggleâ†’Console View (33016, hotkey O).
 static void Cmd_OnViewConsole()     { ImGuiShell_FocusTab( "Console" ); }
 // CMainFrame::OnFilterDlg (0x42b7a0) â€” Viewâ†’Filter Settings (33104, hotkey F).  Routes to the
-// ImGui Filters panel (imgui_panel_filters.cpp) — the CFilterWnd replacement — instead of the
-// dead native entity-window filter mode (Radiant_ToggleInspectorMode no-ops with no d_hwndEntity).
+// ImGui Filters panel (imgui_panel_filters.cpp) — the CFilterWnd replacement.
 static void Cmd_OnFilterDlg()       { ImGuiPanel_Filters_Toggle(); }
 
 // â”€â”€ Textures-menu Usage / Locale / Surface-type filter command handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The FillTextureMenu-built submenus (ids base+arrayIndex) dispatch here.  Each thin
 // wrapper subtracts the submenu's id base to recover the filter index and forwards to the
-// texwnd.cpp core.  IDB CMainFrame::OnFilterUsage 0x4243e0 / OnFilterLocale 0x424400 /
-// OnFilterSurfaceType 0x424420 (each: `add nID, -base; call TexWnd_*Filter`).
+// texwnd.cpp core.  CMainFrame::OnFilterUsage 0x4243e0 / OnFilterLocale 0x424400 /
+// OnFilterSurfaceType 0x424420.
 extern void TexWnd_UsageFilter( int index );             // texwnd.cpp (0x45B3B0)
 extern void TexWnd_localFilter( int index );             // texwnd.cpp (0x45B490)
 extern void TexWnd_SurfaceTypeFilter( unsigned int index ); // texwnd.cpp (0x45B570)
-static void Cmd_OnFilterUsage( UINT nID )       { TexWnd_UsageFilter( (int)nID - 60000 ); }        // 0x4243ed
-static void Cmd_OnFilterLocale( UINT nID )      { TexWnd_localFilter( (int)nID - 60256 ); }        // 0x42440d
-static void Cmd_OnFilterSurfaceType( UINT nID ) { TexWnd_SurfaceTypeFilter( (unsigned int)( nID - 60512 ) ); } // 0x42442d
+static void Cmd_OnFilterUsage( UINT nID )       { TexWnd_UsageFilter( (int)nID - 60000 ); }
+static void Cmd_OnFilterLocale( UINT nID )      { TexWnd_localFilter( (int)nID - 60256 ); }
+static void Cmd_OnFilterSurfaceType( UINT nID ) { TexWnd_SurfaceTypeFilter( (unsigned int)( nID - 60512 ) ); }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// SELECTION TRANSFORMS - Clone + Flip/Rotate X/Y/Z; each transcribed from the IDB.
+// SELECTION TRANSFORMS - Clone + Flip/Rotate X/Y/Z.
 extern void Clone_Selection( float gridSize );                              // select.cpp (0x48F0D0)
-extern void DoFlip( int axis, const char *opName );                         // (0x424F30) â€” body below
+extern void DoFlip( int axis, const char *opName );                         // select.cpp (0x424F30)
 extern void Select_GetMid( float *mid );                                    // select.cpp (0x48FC70)
-extern void Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] ); // select.cpp (0x48FF40)
 extern void Select_FlipAxis( int axis );                                    // select.cpp (0x48FD50)
 extern void Select_GetTrueMid( float *center );                             // select.cpp (0x48FC20)
-extern void Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char bSwap ); // select.cpp (0x48FD10)
-extern void sub_47B940( brush_t *def );                                     // brush.cpp (Brush_UpdateSpecialMaterialFlag, real)
-extern int  UpdateSelection( int wParam, eclass_t *cls );                   // win_ent.cpp (0x497180)
 
 // CMainFrame::OnSelectionClone (0x425480) â€” Selectionâ†’Clone (33001). Clones the
 // selection (in-memory clone, see select.cpp note), then refreshes render flags on
-// every selected + active brush DEF (sub_47B940 = Brush_UpdateSpecialMaterialFlag, now
-// a real port in brush.cpp â€” refreshes the 2D back-face-cull hint from the face materials).
+// every selected + active brush DEF (Brush_UpdateSpecialMaterialFlag, brush.cpp - refreshes
+// the 2D back-face-cull hint from the face materials).
 static void Cmd_OnSelectionClone()
 {
     Clone_Selection( grid_sizes[g_qeglobals.d_gridsize] );
     for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
-        sub_47B940( i->def );
+        Brush_UpdateSpecialMaterialFlag( i->def );
     for ( selbrush_t *j = active_brushes.next; j != &active_brushes; j = j->next )
-        sub_47B940( j->def );
+        Brush_UpdateSpecialMaterialFlag( j->def );
 }
 
 // CMainFrame::OnEditCopybrush (0x4286B0) â€” Editâ†’Copy (33039). Serialise the selection
@@ -3208,15 +3135,14 @@ static void Cmd_OnEditCopybrush()
 
 // CMainFrame::OnEditPastebrush (0x4286D0) â€” Editâ†’Paste (33040). Re-parse the clipboard
 // (placing + selecting), then refresh the special-material flag on every selected +
-// active brush DEF (sub_47B940 = Brush_UpdateSpecialMaterialFlag, real port; identical
-// tail to OnSelectionClone).
+// active brush DEF (Brush_UpdateSpecialMaterialFlag; the same tail as OnSelectionClone).
 static void Cmd_OnEditPastebrush()
 {
     XYWnd_PasteClip();   // U-CMD-1: was m_pActiveXY->Paste()
     for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
-        sub_47B940( i->def );
+        Brush_UpdateSpecialMaterialFlag( i->def );
     for ( selbrush_t *j = active_brushes.next; j != &active_brushes; j = j->next )
-        sub_47B940( j->def );
+        Brush_UpdateSpecialMaterialFlag( j->def );
 }
 
 // CMainFrame::OnBrushFlipx/y/z (0x4250A0/0x4250C0/0x4250E0) â€” Brushâ†’Flipâ†’X/Y/Z
@@ -3257,16 +3183,13 @@ static void Cmd_OnBrushRotatez() { Radiant_RotateSelection( 2, "rotate Z" ); }
 // TOOLBAR COMMAND HANDLERS (IDR_TOOLBAR152).  MFC auto-disables toolbar buttons whose command
 // id has no ON_COMMAND handler, so every button needs one.  Each toggles a pref/mode and
 // reflects it on its button via TB_CHECKBUTTON (the binary's SendMessage(TB_CHECKBUTTON,
-// cmdId, state)); bodies match the IDB 1:1.
+// cmdId, state)).
 extern void Brush_FlipTexture( int axis );          // select.cpp (0x492280)
 extern void Brush_RotateTexture( int deg );         // select.cpp (0x4929F0)
 extern void Material_SetMode( int iMode );          // texwnd.cpp (0x45B910)
-extern void CMainFrame_UpdatePatchToolbarButtons(); // select.cpp (0x42AA70)
 extern void Patch_InsDelToggle();                   // pmesh.cpp  (0x447E50)
-extern int  g_qeglobals_redispersePatchVerts;       // engine_stubs.cpp (0x25D5A6B)
 extern char g_nScaleHow;                            // drag.cpp   (0x23F16DC)
 extern bool g_bScaleMode;                           // drag.cpp   (0x23F16DA)
-extern bool g_bRotateMode;                          // drag.cpp   (0x23F16D9)
 
 
 // â”€â”€ Texturesâ†’Flip/Rotate (toolbar) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3281,9 +3204,7 @@ static void Cmd_OnEditLayerCycle()
 }
 
 
-// â”€â”€ Viewâ†’Change (0x426400, 32781) â€” cycle the active XY view type XYâ†’XZâ†’YZâ†’XY.
-//    (SetViewType is a stub in this port, so the rotation is cosmetic until it lands;
-//    the handler is faithful and PositionView/repaint run.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Viewâ†’Change (0x426400, 32781) â€” cycle the active XY view type XYâ†’XZâ†’YZâ†’XY. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static void Cmd_OnViewChange()
 {
     if ( g_radiantFrameState.currentStyle == 2 )   // U-CMD-1 (Ed_ActiveXY() is never NULL)
@@ -3327,11 +3248,8 @@ static void Cmd_OnCycleTerrainEdge()                 // 0x42B530 (33141)
     }
     else
     {
-        select_t prev = g_qeglobals.d_select_mode;
         g_qeglobals.d_select_mode = sel_cycle_edge_direction_quad;
         CMainFrame_UpdatePatchToolbarButtons();
-        if ( prev == sel_addpoint )
-            sub_43ECB0();                              // Patch_FinishCurveDrag
     }
     CMainFrame_UpdatePatchToolbarButtons();
 }
@@ -3341,17 +3259,17 @@ static void Cmd_OnCycleTerrainEdge()                 // 0x42B530 (33141)
 // Advance w_cyclePreviewMode 0â†’1â†’2â†’3â†’4â†’0 (0 = off).  For each selected brush: clear any
 // existing preview-model flag (brushFlags&0x100) and bump the entity-def version so its
 // model re-instances; then, if the new mode is on AND the eclass has a model name for that
-// mode slot (eclass->default_model_name[mode]), re-arm the preview flag.  Verbatim from the
-// IDB (the dead `if(!v1)` re-test is omitted â€” v1 = old+1 is never 0 for the 0..4 range).
+// mode slot (eclass->default_model_name[mode]), re-arm the preview flag.  (The binary's
+// dead re-test of the new mode against 0 can never fire for the 0..4 range.)  Not wired
+// here: the 35005 dispatch arm returns false.
 extern void Entity_RebuildBounds( entity_s *e );    // entity.cpp (0x485390)
 
 // â”€â”€ Drop Selected Relative-Z (0x425940, 35042) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // In curve/terrain point-edit mode, drop the SELECTED control points to the floor while
 // PRESERVING their relative Z offsets: find the lowest selected point, trace each point
 // straight down, and shift it so the lowest sits on the surface and the rest keep their
-// height above it.  Cancels mouse-rotate mode (m_pActiveXY, the IDB +0x814 member confirmed
-// vs OnSelectMouserotate) and re-tessellates each selected patch.  One undo bracket.
-extern void Patch_Rebuild( patchMesh_t *p, char doBounds );   // pmesh.cpp (0x438D80)
+// height above it.  Cancels mouse-rotate mode (m_pActiveXY) and re-tessellates each
+// selected patch.  One undo bracket.  Not wired here: the 35042 dispatch arm returns false.
 
 
 // 0x4241E0  CMainFrame::OnShowRegionsForSelected â€” build the per-pixel-light-preview
@@ -3365,15 +3283,14 @@ static void Cmd_OnShowRegionsForSelected()
 }
 
 // 0x42BFD0  CMainFrame::OnSetAsActiveLayer (cmd 33955) â€” the Layers "Set as active layer"
-// command.  The binary handler is a single `retn` (empty stub); ported verbatim as a no-op.
-// Wired so 33955 no longer WRONGLY fires OnShowRegionsForSelected (that is now on 36125).
+// command.  The binary handler is empty, so this is a no-op.  (OnShowRegionsForSelected is
+// on 36125, not 33955.)
 static void Cmd_OnSetAsActiveLayer()
 {
 }
 
 // SetEntityCheck (0x42B1F0) â€” re-check the main-menu item matching the active show-state.
-// The exact m_nEntityShowState values were read from the IDB handler immediates (default
-// 0x10010 = Skinned).  No-op for items absent from the port's menu bar.
+// The m_nEntityShowState values are the binary's (default 0x10010 = Skinned).  No-op for items absent from the port's menu bar.
 void Radiant_SetEntityCheck()
 {
     HMENU menu = Radiant_FrameMenu();   // U-CMD-1: raw HMENU == the binary's CMenu pair
@@ -3389,7 +3306,7 @@ void Radiant_SetEntityCheck()
 }
 
 // The 6 entity-display-mode setters (0x42B320..0x42B3E0): set the show-state bits, re-check
-// the menu, persist, repaint.  Bit layout (from the IDB immediates): WIREFRAME=0x1,
+// the menu, persist, repaint.  Bit layout: WIREFRAME=0x1,
 // SKIN_MODEL=0x10, SELECTED_ONLY=0x100, BOXED=0x1000, SKINNED=0x10000.
 static void Cmd_OnViewEntitiesasBoundingbox()
 { g_PrefsDlg->m_nEntityShowState = 0x1000;  Radiant_SetEntityCheck(); Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits = -1; }
@@ -3405,10 +3322,10 @@ static void Cmd_OnViewEntitiesasSkinnedandboxed()
 { g_PrefsDlg->m_nEntityShowState = 0x11010; Radiant_SetEntityCheck(); Prefs_SavePrefs( g_PrefsDlg ); g_nUpdateBits = -1; }
 
 
-// â”€â”€ Colors menu (DoColor is in win_dlg.cpp, IDB 0x499350) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Colors menu (DoColor is in win_dlg.cpp, 0x499350) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Each thunk is DoColor(paletteIndex) then g_nUpdateBits = -1 (Sys_UpdateWindows).  DoColor
-// already sets g_nUpdateBits = -1 on OK; the trailing assignment (kept verbatim from the
-// binary) also forces a full repaint on cancel.  Palette indices decoded from each EA body.
+// already sets g_nUpdateBits = -1 on OK; the trailing assignment (the binary's) also forces
+// a full repaint on cancel.
 static void Cmd_OnTextureBackground()         { DoColor(0);  g_nUpdateBits = -1; }  // 0x424E40
 static void Cmd_OnColorsXyBackground()        { DoColor(1);  g_nUpdateBits = -1; }  // 0x424EC0
 static void Cmd_OnColorsMinor()               { DoColor(2);  g_nUpdateBits = -1; }  // 0x424EA0
@@ -3433,14 +3350,14 @@ static void Cmd_OnColorsUnknown208()          { DoColor(22); g_nUpdateBits = -1;
 static void Cmd_OnColorsWireframe()           { DoColor(23); g_nUpdateBits = -1; }  // 0x4272A0
 static void Cmd_OnColorsFrozenLayers()        { DoColor(24); g_nUpdateBits = -1; }  // 0x427260
 
-// â”€â”€ Select Entity Color (33036 / K accel; IDB 0x424C10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Select Entity Color (33036 / K accel; 0x424C10) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Seed a scratch palette slot from the edited entity's "_color" key (slot 6 if a LIGHT is
 // selected, else slot 5), pop DoColor on that slot, and â€” while the entity inspector is
-// shown â€” write the picked "r g b" back to the entity via the key/value fields + AddProp().
+// shown â€” write the picked "r g b" back to the entity (KIWI: EntSetKey_Apply, AddProp's core;
+// the binary went through the MFC key/value fields + AddProp).
 extern entity_s_def *edit_entity;                                    // win_ent.cpp (0x240A108)
 extern int           inspector_mode;                                 // win_ent.cpp (0x240A110)
-extern void          AddProp();                                      // win_ent.cpp (0x497490)
-extern void          Win_SetEntityKeyValueFields( const char *key, const char *value ); // win_ent.cpp
+extern void          EntSetKey_Apply( const char *key, const char *value ); // win_ent.cpp
 static void Cmd_OnMiscSelectentitycolor()
 {
     if ( !edit_entity )
@@ -3485,15 +3402,13 @@ static void Cmd_OnMiscSelectentitycolor()
                  g_qeglobals.d_savedinfo.colors[slot][0],
                  g_qeglobals.d_savedinfo.colors[slot][1],
                  g_qeglobals.d_savedinfo.colors[slot][2] );
-        Win_SetEntityKeyValueFields( "_color", rgb );
-        AddProp();
+        EntSetKey_Apply( "_color", rgb );
     }
     g_nUpdateBits = -1;
 }
 
-// â”€â”€ Colorsâ†’Themes â€” whole-palette presets.  Every colors[i][c] transcribed verbatim from
-// the binary (float constant-by-constant; the decompiler's shuffled store order is
-// irrelevant â€” no slot is written twice within a theme).  Each ends g_nUpdateBits = -1. â”€â”€
+// â”€â”€ Colorsâ†’Themes â€” whole-palette presets.  Every colors[i][c] is the binary's constant
+// (no slot is written twice within a theme).  Each ends g_nUpdateBits = -1. â”€â”€
 
 // 0x427480 â€” "QE4 Original"
 static void Cmd_OnThemeQ4()
@@ -3656,24 +3571,17 @@ static void Cmd_OnThemeGrey()
 }
 
 // â”€â”€ CMainFrame::OnDynamicLighting (0x429960) â€” "Dynamic Lighting" (menu 32854/0x8056) â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Verbatim: allocate + Cam_Init a fresh CCamWnd (the port's ctor IS CCamWnd::Cam_Init
-// 0x402c40) and Create it as a FLOATING top-level popup - class "QCamera", empty title,
-// WS_OVERLAPPEDWINDOW, 200x200 at (100,100), parent = the desktop, child id 12345.
-// The binary's feature is DEAD: its CCamWnd::OnCreate hijacks g_qeglobals.d_hwndCamera, but
-// the popup's hwnd is never registered with the renderer and all 5 R_MAX_WINDOWS slots are
-// taken at startup, so the popup renders nothing.  KISAK: the port omits the d_hwndCamera
-// hijack (that would regress the real camera); CCamWnd::OnPaint no-ops for the unregistered
-// hwnd, matching the "renders nothing" outcome.  See RADIANT_MISSING_FUNCTIONS.md.
+// The binary allocates + Cam_Inits a fresh CCamWnd (CCamWnd::Cam_Init 0x402c40) and Creates
+// it as a FLOATING top-level popup - class "QCamera", empty title, WS_OVERLAPPEDWINDOW,
+// 200x200 at (100,100), parent = the desktop, child id 12345.  The feature is DEAD there: its
+// CCamWnd::OnCreate hijacks g_qeglobals.d_hwndCamera, but the popup's hwnd is never
+// registered with the renderer and all 5 R_MAX_WINDOWS slots are taken at startup, so the
+// popup renders nothing.
 //
-// U-CMD-1 â€” DELIBERATE DIVERGENCE, the only behaviour change this unit makes to the MFC build:
-// the second-CCamWnd construction is REMOVED and 32854 is an explicit no-op.
-// Reason (the U-GUARD HAZARD block at camwnd.cpp ~85): U-VP-CAM moved every CCamWnd member into
-// the file-scope camwndState_t singleton, so a SECOND CCamWnd is no longer a second camera â€”
-// its WM_CREATE / WM_SIZE / mouse input write THE REAL camera's state (size, button state,
-// cursor anchors).  The feature was already dead in the binary (the popup's hwnd is never
-// registered with the renderer and all 5 R_MAX_WINDOWS slots are taken at startup, so it drew
-// nothing), and the port had already dropped its d_hwndCamera hijack â€” so nothing observable is
-// lost, while the singleton corruption it would now cause is real.  See
+// U-CMD-1 - DELIBERATE DIVERGENCE: 32854 is an explicit no-op.  Every CCamWnd member lives in
+// the file-scope camwndState_t singleton (the U-GUARD HAZARD block at camwnd.cpp ~85), so a
+// SECOND CCamWnd would not be a second camera - its WM_CREATE / WM_SIZE / mouse input would
+// write THE REAL camera's state (size, button state, cursor anchors).  See
 // RADIANT_MISSING_FUNCTIONS.md; do not "restore" this without first giving the popup its own
 // state block.
 static void Cmd_OnDynamicLighting()
@@ -3687,7 +3595,7 @@ static void Cmd_OnDynamicLighting()
 // name "radiantImport.mel") into "<exeDir>\Maya\".  The emit pipeline is in mayaexport.cpp.
 extern "C" void ExportToMaya( const char *dir, const char *outName,
                               char emitUVs, char groupAsBrush, char polyList, float scale );
-static void Cmd_OnMiscMayaExport()                                          // 0x423xxx â†’ 0x491b20
+static void Cmd_OnMiscMayaExport()
 {
     // Output dir = the editor exe's folder (the binary uses g_strAppPath; same intent).
     char exePath[MAX_PATH];
@@ -3706,7 +3614,7 @@ static void Cmd_OnMiscMayaExport()                                          // 0
 extern void Pointfile_Errorfile_Public();      // errorfile.cpp (0x4100B0 wrapper)
 extern void Pointfile_Clear();                 // points.cpp (0x410600)
 extern void Pointfile_ResetPoints();           // points.cpp (s_num_points = 0)
-extern int  s_errLogCount; // points.cpp (== s_errLogCount @0x1814CE8)
+extern int  s_errLogCount; // points.cpp (0x1814CE8)
 extern void Material_SetMode( int iMode );     // texwnd.cpp (0x45B910)
 extern void Texture_SetMode( int iTexMenu );   // texwnd.cpp (0x45A520)
 
@@ -3785,7 +3693,7 @@ static void Cmd_OnSaveLayeredMaterials()
 }
 
 // â”€â”€ Brush_Print (0x47BB60) â€” debug-dump a brush's face planepts to the console â”€â”€â”€â”€â”€â”€
-//   Faithful transcription incl. the binary's quirk: the loop counter (the "Face %i" label)
+//   The binary's quirk is kept: the loop counter (the "Face %i" label)
 //   steps by 2 while the face index steps by 1 and the loop tests label < faceCount â€” so it
 //   prints the first ceil(faceCount/2) faces labelled 0,2,4,...  (a harmless debug quirk).
 //   The binary's face stride is 464B (CoD4 face_t); the port uses sizeof(face_t) (232B).
@@ -3810,8 +3718,7 @@ static void Cmd_OnSelectionPrint()
 
 // â”€â”€ WXY_Print (0x463AE0) â€” print the XY viewport to the printer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //   PrintDlg (PD_RETURNDC) â†’ StartDoc/StartPage â†’ StretchBlt the XY window's client into the
-//   printer's physical page â†’ EndPage/EndDoc, with a MessageBox on each failure step.  Verbatim
-//   from the disasm (Win32 GDI printing).
+//   printer's physical page â†’ EndPage/EndDoc, with a MessageBox on each failure step.
 static void WXY_Print()
 {
     PRINTDLGA pd;
@@ -3905,7 +3812,7 @@ static void Radiant_PatchAdjust( char ins, char col, char flag, const char *op )
 
 // Patchâ†’Primitivesâ†’Dense Cylinder (32883, 0x42AB90) / Very Dense Cylinder (32884,
 // 0x42AC40).  Both are the plain cylinder followed by NESTED, individually-bracketed
-// Patch_AdjustSelected row edits â€” reproduced verbatim, including the nesting (the outer
+// Patch_AdjustSelected row edits â€” reproduced including the nesting (the outer
 // "dense cylinder" record stays open across the inner "add/insert (2) rows" records) and
 // the repeated g_nUpdateBits = -1 writes.  Dense = 1 add + 1 insert; Very Dense = 2 of each.
 static void Radiant_PatchDenseRows( int pairs, const char *op )
@@ -3916,8 +3823,8 @@ static void Radiant_PatchDenseRows( int pairs, const char *op )
     Patch_BrushToMesh( 0, 0, 0, 0 );
     for ( int i = 0; i < pairs; ++i )
     {
-        Radiant_PatchAdjust( 1, 0, 1, "add (2) rows" );      // 0x42ABC6 / 0x42AC76
-        Radiant_PatchAdjust( 1, 0, 0, "insert (2) rows" );   // 0x42ABF6 / 0x42ACA6
+        Radiant_PatchAdjust( 1, 0, 1, "add (2) rows" );
+        Radiant_PatchAdjust( 1, 0, 0, "insert (2) rows" );
     }
     g_nUpdateBits = -1;
     Undo_EndBrushList( &selected_brushes );
@@ -3938,7 +3845,7 @@ static void Cmd_OnCurveCyclecap()
 
 // Patchâ†’Insertâ†’Add Terrain Row / Column (33153 / Shift+Ctrl+A, 0x42B080) â€” if a PATCH is
 // selected, insert at the selected vertex pair; otherwise fall through to the entity-chain
-// arm (clone the source entity onto the pair's midpoint and re-link).  Verbatim.
+// arm (clone the source entity onto the pair's midpoint and re-link).
 extern void Patch_InsertRemoveFromVertPair();     // pmesh.cpp (0x44BB90)
 extern void Select_InsertMidpointEntity();        // select.cpp (0x48EB30)
 static void Cmd_OnAddTerrainRowColumn()
@@ -3970,24 +3877,24 @@ static void Cmd_OnCurveDeleteFirstcolumn(){ Radiant_PatchAdjust( 0, 1, 1, "delet
 static void Cmd_OnCurveDeleteLastcolumn() { Radiant_PatchAdjust( 0, 1, 0, "delete last (2) columns" ); }
 static void Cmd_OnCurveDeleteFirstrow()   { Radiant_PatchAdjust( 0, 0, 1, "delete first (2) rows" ); }
 static void Cmd_OnCurveDeleteLastrow()    { Radiant_PatchAdjust( 0, 0, 0, "delete last (2) rows" ); }
-// Patchâ†’Negative (32881): faithful thunk to Patch_ToggleInverted (IDB OnCurveNegative
-// 0x42A7E0 is a pure thunk â€” NO Undo bracket, matching the binary).
+// Patchâ†’Negative (32881): thunk to Patch_ToggleInverted (OnCurveNegative 0x42A7E0 is a
+// pure thunk - NO Undo bracket).
 static void Cmd_OnCurveNegative()         { Patch_ToggleInverted(); }
-// Patchâ†’Matrixâ†’Transpose (32906): IDB OnCurveMatrixTranspose 0x42B1E0 = Patch_Transpose()
+// Patchâ†’Matrixâ†’Transpose (32906): OnCurveMatrixTranspose 0x42B1E0 = Patch_Transpose()
 // then g_nUpdateBits=-1 (no Undo bracket).
 static void Cmd_OnCurveMatrixTranspose()  { Patch_Transpose(); g_nUpdateBits = -1; }
-// Patchâ†’Naturalize (32890): IDB OnPatchNaturalize 0x42AE10 â€” fetch the default tex-repeat
+// Patchâ†’Naturalize (32890): OnPatchNaturalize 0x42AE10 â€” fetch the default tex-repeat
 // scale (Select_SetTexture), Patch_NaturalizeSelected(unk=0,cap=0,...) lays linear S/T,
 // then g_nUpdateBits=-1. (Patch_NaturalizeSelected does its own Undo bracket.)
 static void Cmd_OnPatchNaturalize()       { float x[2]; Select_SetTexture( x ); Patch_NaturalizeSelected( 0, 0, x[0], x[1] ); g_nUpdateBits = -1; }
-// Selectionâ†’Invert (33101 / Ctrl+I): IDB OnSelectionInvert 0x42B6F0 = Select_Invert()
+// Selectionâ†’Invert (33101 / Ctrl+I): OnSelectionInvert 0x42B6F0 = Select_Invert()
 // then g_nUpdateBits |= 0xB (swap active/selected lists + repaint XY/Z/camera).
 static void Cmd_OnSelectionInvert()       { Select_Invert(); g_nUpdateBits |= 0xB; }
-// Patchâ†’Redisperse Cols/Rows (32889/32888): IDB OnCurveRedisperse* 0x42AD80/0x42AD90 =
+// Patchâ†’Redisperse Cols/Rows (32889/32888): OnCurveRedisperse* 0x42AD80/0x42AD90 =
 // Patch_Disperse{Columns,Rows}() then g_nUpdateBits = -1 (evenly redistribute control points).
 static void Cmd_OnCurveRedisperseCols()   { Patch_DisperseColumns(); g_nUpdateBits = -1; }
 static void Cmd_OnCurveRedisperseRows()   { Patch_DisperseRows();    g_nUpdateBits = -1; }
-// Patchâ†’Negative Texture X/Y (32899/32903): IDB OnCurveNegativeTexture{X,Y} 0x42A7F0/0x42A800
+// Patchâ†’Negative Texture X/Y (32899/32903): OnCurveNegativeTexture{X,Y} 0x42A7F0/0x42A800
 // = Patch_InvertTexture(0/1) (the worker sets g_nUpdateBits itself; pure thunks, no Undo bracket).
 static void Cmd_OnCurveNegativeTextureX() { Patch_InvertTexture( 0 ); }
 static void Cmd_OnCurveNegativeTextureY() { Patch_InvertTexture( 1 ); }
@@ -4000,17 +3907,32 @@ extern void        Patch_Thicken( int amount, char bseam );              // pmes
 extern void        SplitPatch();                                         // pmesh.cpp 0x44CC60
 extern void        ExtrudeTerrainRow();                                  // pmesh.cpp 0x44BD40
 extern void        RemoveTerrainRowCol();                                // pmesh.cpp 0x44BE10
-extern brush_t    *PMESH_58( face_t *face, selbrush_t *ownerInst );      // pmesh.cpp 0x44D1F0
-extern selbrush_t *PMESH_07_Width( selbrush_t *a1 );                     // pmesh.cpp 0x43B950
+extern brush_t    *Face_ToTerrainPatch( face_t *face, selbrush_t *ownerInst );      // pmesh.cpp 0x44D1F0
+extern selbrush_t *Patch_CurveToTerrain( selbrush_t *inst );                   // pmesh.cpp 0x43B950
 extern void        Patch_NaturalizeSelected( bool unk, bool cap, float x, float y );
 extern void        Select_SetTexture( float *out );
-extern selbrush_t  selected_brushes;
-extern void        Brush_RemoveFromList( selbrush_t *b );                // brush.cpp
-extern void        Brush_AddToList2( selbrush_t *b );                    // brush.cpp
 
-// Curveâ†’Cap (32885, IDB OnCurveCap 0x42AD40): auto-cap the single selected patch.
+// Curveâ†’Cap (32885, OnCurveCap 0x42AD40): auto-cap the single selected patch.
+// KIWI: the binary opened its undo bracket first, so a refused selection or an open patch
+// (whose type dialog was MFC) left an empty "curve cap" record.  Now: not one patch -> the
+// message only; an open patch -> the cap-type prompt (its Cap_Commit brackets the build;
+// the -kiwitest harness skips the prompt); else the auto caps under the bracket.
+extern int  Patch_CapCountSeams();                                       // pmesh.cpp
+extern void ImGuiPanel_Cap_Open( int patchWidth );                        // imgui_panel_cap.cpp
+extern bool KiwiTest_Active();                                            // kiwi_test.cpp
 static void Cmd_OnCurveCap()
 {
+    const int seams = Patch_CapCountSeams();
+    if ( seams < 0 )
+        return;
+    if ( seams == 0 )
+    {
+        if ( KiwiTest_Active() )
+            Sys_Printf( "Cap: an open patch - pick the cap type (the test harness skips the prompt).\n" );
+        else
+            ImGuiPanel_Cap_Open( selected_brushes.next->patch->def->width );
+        return;
+    }
     Undo_ClearRedo();
     Undo_GeneralStart( "curve cap" );
     Undo_AddBrushList( &selected_brushes );
@@ -4020,7 +3942,7 @@ static void Cmd_OnCurveCap()
     Undo_End();
 }
 
-// Patchâ†’Cap naturalize (35040, IDB OnPatchCap 0x42AE50): lay cap texturing on the selection.
+// Patchâ†’Cap naturalize (35040, OnPatchCap 0x42AE50): lay cap texturing on the selection.
 static void Cmd_OnPatchCap()
 {
     float x[2];
@@ -4031,10 +3953,10 @@ static void Cmd_OnPatchCap()
 
 // â”€â”€ CDialogThick (IDD 0xA4) â€” Curveâ†’Thicken parameters (thickness + seam) â”€â”€â”€â”€â”€
 //   Hand-built like CPatchDensityDlg.  DDX (0x40C060): checkbox 1288 = "create seam"
-//   (member @0x74, default 1), edit 1290 = thickness (member @0x78, default 8).
+//   (default 1), edit 1290 = thickness (default 8).
 // UI-independent action behind Curveâ†’Thicken's OK â€” Patch_Thicken + full repaint.  (The
-// undo bracket stays with the caller: IDB 0x42B0D0 opens it around the DIALOG, not the
-// thicken â€” even a cancel opens/closes the bracket.)
+// undo bracket stays with the caller: the binary (0x42B0D0) opens it around the DIALOG, not
+// the thicken - even a cancel opens/closes the bracket.)
 void CurveThicken_Apply( int amount, bool seam )
 {
     Patch_Thicken( amount, seam );
@@ -4046,10 +3968,9 @@ extern void Select_Scale( float sx, float sy, float sz );   // select.cpp (0x48F
 extern int  OnlyPatchesSelected();                          // engine_stubs.cpp (0x447860)
 
 // UI-independent action behind Selectionâ†’Scale's OK â€” the two validations, then
-// Select_Scale inside an undo bracket (IDB OnSelectScale 0x4283D0 body after DoModal).
-// PRECEDENCE, verbatim from 0x42844D..0x428481: the negative test is X < 0 || (Y < 0 && Z < 0),
-// NOT a three-way OR (`fcom X` + `jnp` -> error, then `fcom Y` + `jp` SKIPS the Z test).  An
-// original quirk: a lone negative Y or Z slips through to Select_Scale.
+// Select_Scale inside an undo bracket (OnSelectScale 0x4283D0, the body after DoModal).
+// PRECEDENCE: the binary's negative test is X < 0 || (Y < 0 && Z < 0), NOT a three-way OR -
+// a quirk: a lone negative Y or Z slips through to Select_Scale.
 void SelectScale_Apply( float x, float y, float z )
 {
     if ( x < 0.0f || ( y < 0.0f && z < 0.0f ) )
@@ -4073,13 +3994,13 @@ void SelectScale_Apply( float x, float y, float z )
 }
 
 
-// Selectionâ†’Clipperâ†’Split selected (32794 / Shift+Enter, IDB OnSplitSelected 0x4271D0) â€”
+// Selectionâ†’Clipperâ†’Split selected (32794 / Shift+Enter, OnSplitSelected 0x4271D0) â€”
 // commit the clip keeping BOTH halves, inside an undo bracket.  Gated on an active XY view
-// exactly as the binary is.
+// as in the binary.
 extern void Ed_SplitClip();                                 // xywnd.cpp (CXYWnd::SplitClip 0x46DD30)
 
-// Physicsâ†’Cylinder (36113, IDB OnMakePhysCylinder 0x4291D0) / Physicsâ†’Box (36120,
-// IDB OnMakePhysBox 0x429200) â€” undo-bracketed wrappers over the brush.cpp cores.
+// Physicsâ†’Cylinder (36113, OnMakePhysCylinder 0x4291D0) / Physicsâ†’Box (36120,
+// OnMakePhysBox 0x429200) â€” undo-bracketed wrappers over the brush.cpp cores.
 extern void Brush_MakePhysCylinder();   // brush.cpp (0x47C310)
 extern void Brush_MakePhysBox();        // brush.cpp (0x47C180)
 static void Cmd_OnMakePhysCylinder()
@@ -4102,24 +4023,17 @@ static void Cmd_OnMakePhysBox()
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// The remaining one-off command bodies, each ported from its own IDB body; the ones the binary
-// leaves EMPTY are reproduced as empty (with the address), never as a silent TODO.
+// The remaining one-off command bodies; the ones the binary leaves EMPTY are empty here too
+// (with the address), never a silent TODO.
 extern void Delete_Exportables();                // entity.cpp 0x487C30
 extern void Select_HideUnselected2_unused();     // select.cpp 0x48EF40
-extern void Patch_BendToggle();                  // pmesh.cpp  0x4478E0
-extern void Patch_BendHandleTAB();               // pmesh.cpp  0x447980
 extern void Patch_InsDelHandleTAB();             // pmesh.cpp  0x447F40
 extern void Patch_SnapVertToGrid();              // pmesh.cpp  0x449280
 extern void Patch_RedistributeVerts();           // pmesh.cpp  0x449930
 extern void DoRedistPatchPts();                  // pmesh.cpp  0x449A90
 extern void DoTurnTerrainEdges();                // pmesh.cpp  0x44B260
 extern void SelectTargettedEntity();             // select.cpp 0x491440
-extern int  g_bPatchBendMode;                    // pmesh.cpp  0x25D5B04
-extern int  g_qeglobals_redispersePatchVerts;    // engine_stubs.cpp 0x25D5A6B
-extern char PMESH_10( char bAdd, int dCol, int dRow );            // pmesh.cpp  0x43CB80
-extern void Select_Brush( selbrush_t *b, char some_overwrite,
-                          char bStatus, char center_grid_on_selection ); // select.cpp 0x48DCC0
-extern void Select_Deselect( char bResetMode );                   // select.cpp 0x48E800
+extern char Patch_KeyMoveSelection( char bAdd, int dCol, int dRow );            // pmesh.cpp  0x43CB80
 
 // 206 â€” Miscâ†’Delete exportables (0x424E30), a pure thunk.
 static void Cmd_OnDeleteExportables() { Delete_Exportables(); }
@@ -4129,9 +4043,9 @@ static void Cmd_OnDeleteExportables() { Delete_Exportables(); }
 //   (0x40B890).  OnInitDialog sets ONE tab stop at 96 dialog units, opens "c:/commandlist.txt"
 //   (CFile modeCreate|modeWrite, no exception object - a silent no-op when C:\ is not writable)
 //   and appends "<name> \t<modifiers><key>" for every command to both the listbox and the file.
-// UI-independent halves of a command-list line (sub_40BBC0): key-name lookup and the
+// UI-independent halves of a command-list line (0x40BBC0): key-name lookup and the
 // modifier string, in the binary's order.
-// key name: the g_Keys entry, else the raw character (sub_40BBC0's %c).
+// key name: the g_Keys entry, else the raw character (the binary's %c).
 const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] )
 {
     for ( const RadiantKeyName &k : g_radiantKeys )
@@ -4153,13 +4067,10 @@ void CommandList_Mods( const RadiantCommand &c, char mods[64] )
 }
 
 // Single shell-agnostic command entry point.  Every editor command is identified by its
-// menu/accelerator id (the ids in g_radiantCommands and the ON_COMMAND maps).  This is THE
-// one place the two shells diverge:
-//   MFC          â†’ the frame's message map stays the authoritative id->handler table, so the
-//                  id goes out as a WM_COMMAND exactly as the binary's TryHotkey tail does.
-//   KISAK_NO_MFC â†’ Radiant_DispatchCommandDirect (the free-function command table at the
-//                  bottom of this file) IS the table; there is no message map to post to.
-// Callers (menus, accelerators, hotkeys, the ImGui shell) do not change either way.
+// menu/accelerator id (the ids in g_radiantCommands).  Radiant_DispatchCommandDirect (the
+// free-function command table at the bottom of this file) IS the id->handler table; the
+// binary's TryHotkey tail sent a WM_COMMAND to the frame's message map instead.  Menus,
+// accelerators, hotkeys and the ImGui shell all come through here.
 void Radiant_ExecCommand( unsigned int cmdId )
 {
     Radiant_DispatchCommandDirect( cmdId );
@@ -4170,7 +4081,7 @@ void Radiant_ExecCommand( unsigned int cmdId )
 static void Cmd_OnLinkKeepSelection()
 {
     g_PrefsDlg->linking_keeps_selection = ( g_PrefsDlg->linking_keeps_selection == 0 );
-    Prefs_SavePrefs( g_PrefsDlg );      // idb CPrefsDlg::SavePrefs 0x44F280
+    Prefs_SavePrefs( g_PrefsDlg );      // CPrefsDlg::SavePrefs 0x44F280
 }
 
 // 32776 â€” ToggleCamera (0x423A50): flip the camera-update preview flag.  (Distinct from
@@ -4178,12 +4089,11 @@ static void Cmd_OnLinkKeepSelection()
 static void Cmd_ToggleCamera() { g_radiantFrameState.camPreview = !g_radiantFrameState.camPreview; }
 
 
-// 32782 â€” Viewâ†’Camera update (0x426450).  Its ON_UPDATE_COMMAND_UI was already wired;
-// the command itself was not, so the check mark drew but clicking did nothing.
+// 32782 â€” Viewâ†’Camera update (0x426450).
 static void Cmd_OnViewCameraupdate() { g_nUpdateBits |= W_CAMERA; }
 
-// 32863 / 32864 â€” Patchâ†’Primitivesâ†’Inverted End Cap / Inverted Bevel.  GENUINELY EMPTY
-// in the binary (0x42A500 / 0x42A4F0 are single `retn`s) â€” reproduced as empty.
+// 32863 / 32864 â€” Patchâ†’Primitivesâ†’Inverted End Cap / Inverted Bevel.  EMPTY in the
+// binary (0x42A500 / 0x42A4F0).
 static void Cmd_OnCurvePatchinvertedendcap() {}
 static void Cmd_OnCurvePatchinvertedbevel()  {}
 
@@ -4191,7 +4101,7 @@ static void Cmd_OnCurvePatchinvertedbevel()  {}
 // Shift variants).  Note these are NOT the Patch menu's "(2) rows/columns" commands
 // (32873..32876) â€” different ids, different undo strings, and all four pass bFlag = 1.
 static void Cmd_OnCurveInsertrowSingle()    { Radiant_PatchAdjust( 1, 0, 1, "insert row" ); }     // 0x42A5B0
-static void Cmd_OnCurveInsertcolumnSingle() { Radiant_PatchAdjust( 1, 1, 1, "insert colum" ); }   // 0x42A560 (idb typo kept)
+static void Cmd_OnCurveInsertcolumnSingle() { Radiant_PatchAdjust( 1, 1, 1, "insert colum" ); }   // 0x42A560 (the binary's typo kept)
 static void Cmd_OnCurveDeleterowSingle()    { Radiant_PatchAdjust( 0, 0, 1, "delete row" ); }     // 0x42A650
 static void Cmd_OnCurveDeletecolumnSingle() { Radiant_PatchAdjust( 0, 1, 1, "delete column" ); }  // 0x42A600
 
@@ -4200,19 +4110,14 @@ static void Cmd_OnCurveDeletecolumnSingle() { Radiant_PatchAdjust( 0, 1, 1, "del
 static void Cmd_OnHideUnselected2() { Select_HideUnselected2_unused(); }
 
 // 32978 â€” Miscâ†’Benchmark (0x424B70).  EMPTY in the binary (the camera-spin benchmark is
-// compiled out); reproduced as empty so the menu item stops being silently unroutable.
+// compiled out).
 static void Cmd_OnMiscBenchmark() {}
 
-// 33089 â€” Patch TAB (0x42A9E0).  In bend mode / redisperse mode the TAB steps that mode's
-// state machine; otherwise it cycles to the NEXT brush of the selected brush's entity
-// (worldspawn excluded).
+// 33089 â€” Patch TAB (0x42A9E0).  In redisperse mode the TAB steps that mode's state machine
+// (the binary: bend mode's too); otherwise it cycles to the NEXT brush of the selected brush's
+// entity (worldspawn excluded).
 static void Cmd_OnPatchTab()
 {
-    if ( g_bPatchBendMode )
-    {
-        Patch_BendHandleTAB();
-        return;
-    }
     if ( g_qeglobals_redispersePatchVerts )
     {
         Patch_InsDelHandleTAB();
@@ -4253,10 +4158,8 @@ static void Cmd_OnPatchEnter() {}
 // 33091 â€” SelectSnapPointsToGrid (Ctrl+G, 0x42AE90).  With NOTHING selected this pops the
 // "go to position" dialog; with a selection it snaps the patch control points to the grid
 // inside an undo bracket.  (The odd pairing is the original's.)
-// U-CMD-2: the WITH-a-selection half is a free function â€” it is the only half that is
-// shell-agnostic, and keeping ONE body avoids the duplicate-function drift trap.  The
-// no-selection half stays per-shell (MFC pops CGoToDlg; the command table toggles the
-// Go-to-position panel), because the dialog IS the shell-specific part.
+// U-CMD-2: this is the WITH-a-selection half; the no-selection half (the binary's CGoToDlg)
+// is the command table's Go-to-position panel toggle.
 void Cmd_SnapPatchVertsToGrid()
 {
     Undo_ClearRedo();
@@ -4270,12 +4173,12 @@ void Cmd_SnapPatchVertsToGrid()
 
 
 // 33165..33168 â€” the four "vertex select" nudges (Ctrl+Up/Down + two unbound siblings).
-// Each is a bare PMESH_10(1, dCol, dRow) â€” bAdd = 1 (EXTEND the vertex selection), unlike
+// Each is a bare Patch_KeyMoveSelection(1, dCol, dRow) â€” bAdd = 1 (EXTEND the vertex selection), unlike
 // the already-wired OnSelectionDragVertices arrows which pass bAdd = 0.
-static void Cmd_OnVertexSelectUp()    { PMESH_10( 1, 0, -1 ); }   // 0x426880
-static void Cmd_OnVertexSelectDown()  { PMESH_10( 1, 0,  1 ); }   // 0x4268A0
-static void Cmd_OnVertexSelectRight() { PMESH_10( 1, 1,  0 ); }   // 0x4268C0
-static void Cmd_OnVertexSelectLeft()  { PMESH_10( 1, -1, 0 ); }   // 0x4268E0
+static void Cmd_OnVertexSelectUp()    { Patch_KeyMoveSelection( 1, 0, -1 ); }   // 0x426880
+static void Cmd_OnVertexSelectDown()  { Patch_KeyMoveSelection( 1, 0,  1 ); }   // 0x4268A0
+static void Cmd_OnVertexSelectRight() { Patch_KeyMoveSelection( 1, 1,  0 ); }   // 0x4268C0
+static void Cmd_OnVertexSelectLeft()  { Patch_KeyMoveSelection( 1, -1, 0 ); }   // 0x4268E0
 
 // 33170 â€” RedisperseVertices (Shift+F, 0x42A270), a thunk.
 static void Cmd_OnRedistPatchPoints() { DoRedistPatchPts(); }
@@ -4296,16 +4199,16 @@ static void Cmd_OnFileClose() {}
 static void Cmd_OnFilePrint() {}
 static void Cmd_OnFilePrintPreview() {}
 
-// Curveâ†’Split (33158, IDB OnSplitPatch 0x42B0C0): thunk.
+// Curveâ†’Split (33158, OnSplitPatch 0x42B0C0): thunk.
 static void Cmd_OnSplitPatch() { SplitPatch(); }
 
-// Terrainâ†’Extrude Row/Col (33192, IDB 0x42B0A0): thunk.
+// Terrainâ†’Extrude Row/Col (33192, 0x42B0A0): thunk.
 static void Cmd_ExtrudeTerrainRow2() { ExtrudeTerrainRow(); }
 
-// Terrainâ†’Remove Row/Col (33154, IDB 0x42B0B0): thunk.
+// Terrainâ†’Remove Row/Col (33154, 0x42B0B0): thunk.
 static void Cmd_OnRemoveTerrainRowColumn() { RemoveTerrainRowCol(); }
 
-// Curveâ†’Terrain (35041, IDB OnCurveToTerrain 0x429B30): convert selected patches to terrain.
+// Curveâ†’Terrain (35041, OnCurveToTerrain 0x429B30): convert selected patches to terrain.
 static void Cmd_OnCurveToTerrain()
 {
     int n = 0;
@@ -4320,7 +4223,7 @@ static void Cmd_OnCurveToTerrain()
                 Undo_AddBrushList( &selected_brushes );
             }
             ++n;
-            PMESH_07_Width( b );
+            Patch_CurveToTerrain( b );
         }
     }
     if ( !n )
@@ -4335,9 +4238,9 @@ static void Cmd_OnCurveToTerrain()
     Sys_Printf( va( "Curve to terrain: converted %i %s.\n", n, ( n <= 1 ) ? "curve" : "curves" ) );
 }
 
-// Selectionâ†’Connect (33021, IDB OnSelectionConnect 0x425510): in curve-point mode connect
-//   patch vertices (ConnectVertices â€” patch-verts, still deferred); otherwise WeldMesh (now
-//   ported), and if no weld happened, ConnectEntities_R.  Now wire-able because WeldMesh landed.
+// Selectionâ†’Connect (33021, OnSelectionConnect 0x425510): in curve-point mode connect
+//   patch vertices (ConnectVertices); otherwise WeldMesh, and if no weld happened,
+//   ConnectEntities_R.
 extern char WeldMesh();                                   // pmesh.cpp 0x44C8C0
 extern void ConnectEntities_R();                          // select.cpp 0x48C530
 extern void ConnectVertices();                            // pmesh.cpp 0x44A920
@@ -4345,7 +4248,7 @@ static void Cmd_OnSelectionConnect()
 {
     if ( g_qeglobals.d_select_mode == sel_curvepoint )
     {
-        // ConnectVertices (0x44A920) â€” patch control-vertex connect/weld (now ported).
+        // patch control-vertex connect/weld
         ConnectVertices();
         return;
     }
@@ -4356,7 +4259,7 @@ static void Cmd_OnSelectionConnect()
     }
 }
 
-// Faceâ†’Terrain (36102, IDB OnFaceToTerrain 0x429BE0): convert selected faces to terrain patches.
+// Faceâ†’Terrain (36102, OnFaceToTerrain 0x429BE0): convert selected faces to terrain patches.
 static void Cmd_OnFaceToTerrain()
 {
     Undo_ClearRedo();
@@ -4364,24 +4267,23 @@ static void Cmd_OnFaceToTerrain()
     Undo_AddBrushList( &selected_brushes );
 
     int faceCount = g_SelectedFaces.GetSize();
-    // collect the new terrain brushes (the binary uses a CArray<BrushInst*>; a plain
-    // bounded buffer is faithful â€” one new brush per selected face).
-    selbrush_t *newBrushes[256];
-    int newCount = 0;
-    for ( int i = 0; i < faceCount && newCount < 256; ++i )
+    // collect the new terrain brushes, one per selected face (the binary's growable CArray;
+    // KIWI: was a 256-slot buffer that silently skipped the faces past it)
+    std::vector<selbrush_t *> newBrushes;
+    for ( int i = 0; i < faceCount; ++i )
     {
         selbrush_t *brush = g_SelectedFaces.GetAt( i ).brush;
         face_t     *face  = &brush->def->faces[g_SelectedFaces.GetAt( i ).index];
-        brush_t    *nb    = PMESH_58( face, brush );
+        brush_t    *nb    = Face_ToTerrainPatch( face, brush );
         if ( nb )
-            newBrushes[newCount++] = (selbrush_t *)nb;
+            newBrushes.push_back( (selbrush_t *)nb );
     }
 
     g_nUpdateBits = -1;
     Select_Deselect( 1 );
 
     // relink the new brushes into the selection (Brush_RemoveFromList + Brush_AddToList2).
-    for ( int i = 0; i < newCount; ++i )
+    for ( size_t i = 0; i < newBrushes.size(); ++i )
     {
         Brush_RemoveFromList( newBrushes[i] );
         if ( newBrushes[i]->next || newBrushes[i]->prev )
@@ -4413,7 +4315,7 @@ void Ed_InvalidateAllViews()
         Radiant_RoutineProcessing();              // flush now (keeps drags responsive)
 }
 
-// â”€â”€ ConfirmModified (IDB 0x49a030) â€” the unsaved-changes "Save changes?" prompt â”€â”€
+// â”€â”€ ConfirmModified (0x49a030) â€” the unsaved-changes "Save changes?" prompt â”€â”€
 // The binary's body is a single MessageBoxA with two shapes selected by the "DefaultSaveNo"
 // pref (g_PrefsDlg->loose_changes):
 //   loose_changes set  -> "Lose changes?"       MB_OKCANCEL         (IDOK -> discard)
@@ -4439,10 +4341,9 @@ int ConfirmModified_Decide( int answer, bool looseChanges )
     return CM_ABORT;
 }
 
-// U-CMD-2: the prompt is a FREE function â€” its whole body is a plain ::MessageBoxA over
-// ::GetActiveWindow() plus the two save paths, so nothing in it was ever CMainFrame state.
-// CMainFrame::ConfirmModified below forwards, and the raw shell (radiant_main.cpp's WM_CLOSE,
-// the File flows, errorfile.cpp / qe3.cpp's NO-MFC arms) calls this same body.
+// U-CMD-2: the prompt is a free function (a plain ::MessageBoxA over ::GetActiveWindow() plus
+// the two save paths); radiant_main.cpp's WM_CLOSE, the File flows and errorfile.cpp /
+// qe3.cpp's NO-MFC arms call it.
 bool Radiant_ConfirmModified()
 {
     const bool looseChanges = ( g_PrefsDlg && g_PrefsDlg->loose_changes ) ? true : false;
@@ -4458,12 +4359,14 @@ bool Radiant_ConfirmModified()
     if ( verdict == CM_SAVE_THEN_PROCEED )
     {
         // Binary: strcmp(currentmap,"unnamed.map") â†’ SaveAsDialog; else Map_SaveFile(currentmap).
-        // Port adaptation: the active path lives in s_currentMapPath (empty == untitled),
-        // so this mirrors OnFileSave's branch exactly.
-        if ( !s_currentMapPath[0] )
+        // Port adaptation: the same target as OnFileSave (ActiveSavePath: inside a prefab the
+        // prefab's .map, else the top level's path, empty == untitled).
+        const char *path = ActiveSavePath();
+        if ( !path[0] )
             return Radiant_FileSaveAs();   // SaveAsDialog(0): false if the user cancels Save-As
-        Map_SaveFile( s_currentMapPath, 0, 0 );
-        Radiant_FL_Log( "ConfirmModified: saved %s", s_currentMapPath );
+        if ( !Map_SaveFile( path, 0 ) )
+            return false;                  // KIWI: a failed save must not let the caller discard
+        Radiant_FL_Log( "ConfirmModified: saved %s", path );
         return true;
     }
     return ( verdict == CM_PROCEED );
@@ -4473,33 +4376,32 @@ bool Radiant_ConfirmModified()
 // destroy-the-map command (OnFileNew/OnFileOpen/OnClose/DoMru):
 //   ( !HasUnsavedChangesOrInsidePrefab()
 //     && CheckLayeredMaterial_Modifications(...) == lyrMtlGlob_crcToken )  ||  ConfirmModified()
-// i.e. proceed silently when nothing is dirty, otherwise prompt.  The layered-material
-// CRC half matches ErrorLog_01's already-shipped guard (errorfile.cpp).
-extern int      modified;                 // map.cpp 0x23f179c
-extern int      prefabStackLevel;         // map.cpp 0x25d5b34
+// i.e. proceed silently when nothing is dirty, otherwise prompt.  ErrorLog_01's inlined copy
+// (errorfile.cpp) calls this too.
+// KIWI: the binary prompted once (saving only the active level) and its caller's
+// Prefab_LevelBack then dropped every parent level's edits.  The prefab levels are left first,
+// each the way Leave Prefab does it, so the remaining test is the top level's alone.
 extern unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 ); // layeredmaterials.cpp
+extern void     Prefab_PrevLevel();       // map.cpp 0x489890
 
-static bool HasUnsavedChangesOrInsidePrefab_mf()   // mirror of errorfile.cpp's static (0x489d90)
+// Leave every prefab level; each modified one gets Save / Discard / Cancel.  false = cancelled
+// (at that level).
+bool Radiant_LeavePrefabLevels()
 {
-    if ( modified )
-        return true;
-    if ( prefabStackLevel > 0 )
+    while ( prefabStackLevel > 0 )
     {
-        prefabLevel_t *p = g_prefabStack;
-        for ( int n = 0; ; ++p )
-        {
-            if ( p->modified )
-                return true;
-            if ( ++n >= prefabStackLevel )
-                return false;
-        }
+        if ( modified && !Radiant_ConfirmModified() )
+            return false;
+        Prefab_PrevLevel();
     }
-    return false;
+    return true;
 }
 
 bool Radiant_OkToDiscard()
 {
-    if ( !HasUnsavedChangesOrInsidePrefab_mf()
+    if ( !Radiant_LeavePrefabLevels() )
+        return false;
+    if ( !modified
          && CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
                                                 sizeof(LyrEntry_t) * lyrMtlGlob.entryCount, 0 ) == (unsigned)lyrMtlGlob.crcToken )
         return true;                       // nothing dirty â†’ proceed silently
@@ -4508,13 +4410,12 @@ bool Radiant_OkToDiscard()
 
 // OnFileSaveAs that reports whether the user actually saved (vs cancelling the Save-As
 // dialog) â€” ConfirmModified's IDYES-on-untitled path needs the cancel signal.
-// U-CMD-2: free function (was CMainFrame::OnFileSaveAs_Confirmed).  GetSaveFileNameA is plain
-// Win32, and the three frame touches become the HWND both shells register as d_hwndMain:
-// ofn.hwndOwner, GetMenu()->GetSafeHmenu() â†’ ::GetMenu(), SetWindowText â†’ ::SetWindowTextA.
+// U-CMD-2: was CMainFrame::OnFileSaveAs_Confirmed; its three frame touches (ofn.hwndOwner,
+// GetMenu(), SetWindowText) use d_hwndMain.
 bool Radiant_FileSaveAs()
 {
     char file[MAX_PATH];
-    _snprintf( file, sizeof( file ), "%s", s_currentMapPath );
+    _snprintf( file, sizeof( file ), "%s", ActiveSavePath() );
     OPENFILENAMEA ofn;
     memset( &ofn, 0, sizeof( ofn ) );
     ofn.lStructSize = sizeof( ofn );
@@ -4530,8 +4431,11 @@ bool Radiant_FileSaveAs()
 
     // SaveAsDialog (0x49A760) .map path: after the extension default, copy the chosen path
     // into currentmap, bump the MRU (MRU_NewItem promotes it to slot 0), and refresh the
-    // File-menu recent-files list â€” verbatim from 0x49a800-0x49a84a â€” BEFORE Map_SaveFile.
-    _snprintf( s_currentMapPath, sizeof( s_currentMapPath ), "%s", file );
+    // File-menu recent-files list - BEFORE Map_SaveFile.
+    // KIWI: inside a prefab that retargets the level's currentmap only (Prefab_PrevLevel
+    // restores the parent's on leave), so Radiant_CurrentMapPath keeps the top level's path.
+    _snprintf( currentmap, 1024, "%s", file );
+    currentmap[1023] = '\0';
     if ( g_qeglobals.d_lpMruMenu )
     {
         MRU_NewItem( g_qeglobals.d_lpMruMenu, file );
@@ -4539,7 +4443,8 @@ bool Radiant_FileSaveAs()
                         ::GetSubMenu( ::GetMenu( g_qeglobals.d_hwndMain ), 0 ) );
     }
 
-    Map_SaveFile( file, 0, 0 );
+    if ( !Map_SaveFile( file, 0 ) )
+        return false;
     char title[MAX_PATH + 32];
     _snprintf( title, sizeof( title ), "CoD4Radiant - %s", file );
     ::SetWindowTextA( g_qeglobals.d_hwndMain, title );
@@ -4569,13 +4474,9 @@ void XYWnd_CopyClip()
 // axes depend on the view type (ED_VIEW_YZ=0/XZ=1/XY=2): nDim1 = (view==YZ), nDim2 =
 // (view!=XY)+1 â†’ XY:{0,1} XZ:{0,2} YZ:{1,2}.  If a point-edit mode is active and there
 // are move points, center on their average; otherwise center on the camera origin, and
-// if exactly one brush is selected, on that brush's bbox centre.  Faithful to the disasm.
-// U-GLOBALS: the body reads/writes the shell-agnostic view state (Ed_ActiveXY()) instead of
-// this CXYWnd's own members â€” the XY view is a singleton, so they are the same view, and the
-// state block is now the ONE authority the bridge no longer overwrites.
-// U-CMD-1: extracted out of CXYWnd â€” the body never touched a CXYWnd member after U-GLOBALS,
-// so it is a plain free function over Ed_ActiveXY() + Ed_Camera(); CXYWnd::PositionView is now
-// a forwarder (the XY view is a singleton, so "this view" and "the active view" are the same).
+// if exactly one brush is selected, on that brush's bbox centre.
+// U-GLOBALS / U-CMD-1: a free function over Ed_ActiveXY() + Ed_Camera() (the XY view is a
+// singleton, so "this view" and "the active view" are the same).
 void XYWnd_PositionView()
 {
     xywndState_t *xy = Ed_ActiveXY();
@@ -4619,14 +4520,10 @@ void XYWnd_PositionView()
 // â”€â”€â”€ CXYWnd::SetViewType (0x46DF90) â€” set the 2D-view axis (YZ/XZ/XY) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The binary stores the EViewType (== m_nViewType value) directly, then â€” only in the
 // floating single-XY layout (m_nCurrentStyle==1) â€” retitles the window "YZ Side" /
-// "XZ Front" / "XY Top".  In the port's docked layout (m_nCurrentStyle!=1 by default)
-// the title update is skipped exactly as the binary skips it.
-// U-GLOBALS: writes the view type into the shell-agnostic state (Ed_ActiveXY()) â€” same
-// singleton view, and the ONE authority now that the bridge no longer syncs it back in.
-// U-CMD-1: extracted.  `vt` stays an int because ED_VIEW_YZ/XZ/XY (xywnd.h) ARE
-// CXYWnd::EViewType's values (0/1/2) â€” verified against both enums.  The retitle is
-// ::SetWindowTextA on the XY view's own HWND (d_hwndXY), which is what CWnd::SetWindowTextA
-// resolved to; the style gate reads the shell-agnostic frame state.
+// "XZ Front" / "XY Top".  This port pins currentStyle at 1, so the retitle always runs.
+// U-GLOBALS / U-CMD-1: the view type lives in Ed_ActiveXY(); `vt` is an int because
+// ED_VIEW_YZ/XZ/XY (xywnd.h) ARE CXYWnd::EViewType's values (0/1/2).  The retitle targets the
+// XY view's own HWND (d_hwndXY).
 void XYWnd_SetViewType( int vt )
 {
     Ed_ActiveXY()->m_nViewType = vt;
@@ -4647,10 +4544,9 @@ void XYWnd_SetViewType( int vt )
 extern void     Select_GetTrueMid( float *center );   // select.cpp (0x48FC20)
 extern float    g_vRotateOrigin[3];                   // drag.cpp   (0x23F1658)
 extern float    g_vRotation[3];                       // drag.cpp   (0x23F164C)
-extern bool     g_bRotateMode;                        // drag.cpp   (0x23F16D9)
 
-// U-CMD-1: extracted.  The trailing repaint was CWnd::RedrawWindow on the XY view itself,
-// i.e. ::RedrawWindow(d_hwndXY, ...) â€” same window, same flags.
+// U-CMD-1: the trailing repaint is the binary's CWnd::RedrawWindow on the XY view
+// (d_hwndXY), same flags.
 bool XYWnd_SetRotateMode( int bMode )
 {
     if ( bMode && selected_brushes.next != &selected_brushes )
@@ -4671,8 +4567,7 @@ bool XYWnd_SetRotateMode( int bMode )
 
 // ─── CMainFrame::OnViewClipper (0x426510) + OnSelectMouserotate (0x428570) ────────
 // The clip and mouse-rotate modes are mutually exclusive: entering EITHER cancels the OTHER
-// (verbatim from the IW3xRadiant IDA — the earlier port dropped the cancel because rotate mode
-// was unported; XYWnd_SetRotateMode above ships it now).  m_pActiveXY is always Ed_ActiveXY()
+// (as in the binary).  m_pActiveXY is always Ed_ActiveXY()
 // here, so its null-guard falls away; the m_wndToolBar TB_CHECKBUTTON tail is the only DROPPED
 // line (no toolbar in the shell yet — cosmetic button state).  Mutual recursion terminates:
 // each cancels the other BEFORE flipping its own mode, so the re-entrant call sees the other
@@ -4744,45 +4639,34 @@ static void Cmd_OnTolerantWeld()     // 33155 (Shift+J)
 // (0x42a040), which additionally re-flags every selected + active brush's special material.
 // All three drop only the m_wndToolBar TB_CHECKBUTTON reflect-state SendMessage (cosmetic).
 extern void       Patch_InsDelToggle();     // pmesh.cpp (0x447e50) — redisperse mode
-extern void       Patch_BendToggle();       // pmesh.cpp (0x4478e0) — bend mode
-extern void       sub_47B940( brush_t *b ); // brush.cpp (0x47b940) — Brush_UpdateSpecialMaterialFlag
-extern selbrush_t active_brushes;           // map.cpp   (0x23F189C)
 
 static void Cmd_OnPatchRedisperse() { Patch_InsDelToggle(); g_nUpdateBits = -1; }   // 32872 (0x42a990)
-static void Cmd_OnPatchBend()       { Patch_BendToggle();   g_nUpdateBits = -1; }   // 32882 (0x42a950)
+// (32882 OnPatchBend, 0x42a950 - KIWI: the classic bend mode is gone.)
 
 static void Cmd_OnToggleDrawSurfs()   // 33144 (0x42a040)
 {
     g_PrefsDlg->draw_toggle ^= 1;
     for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
-        sub_47B940( i->def );
+        Brush_UpdateSpecialMaterialFlag( i->def );
     for ( selbrush_t *j = active_brushes.next;   j != &active_brushes;   j = j->next )
-        sub_47B940( j->def );
+        Brush_UpdateSpecialMaterialFlag( j->def );
     Prefs_SavePrefs( g_PrefsDlg );
     g_nUpdateBits = -1;
 }
 
-// â”€â”€â”€ CXYWnd forwarders (U-CMD-1).  The five bodies above are the real implementations;
-// these keep mainfrm.h's CXYWnd declaration and every existing `m_pXYWnd->X()` /
-// `m_pActiveXY->X()` call site (this file + map.cpp / entity.cpp / win_dlg.cpp) working
-// unchanged.  U-GUARD deletes them with the class once those call sites are retargeted.
-
-// CTextureBar::GetSurfaceAttributes + the rest of the bar now live in texturebar.cpp.
+// KIWI: the MFC texture bar (CTextureBar, texturebar.cpp) is gone; it had no ImGui caller.
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-// UI COMMAND-WIRING batch - CMainFrame WM_COMMAND thunks over already-ported cores, each
-// transcribed verbatim from its binary handler (EA in the trailing comment).
+// UI COMMAND-WIRING batch - CMainFrame WM_COMMAND thunks over already-ported cores (the
+// binary handler's address in the trailing comment).
 extern int g_bCrossHairs;   // engine_stubs.cpp (0x25D5B06) â€” XY crosshair toggle
 
 // â”€â”€ Camera fly keys (arrows / , . ) â€” Left/Right pitch-yaw, Forward/Back/Strafe move.
-//    Each first tries PMESH_10 (patch-vertex move in vertex/curvepoint mode); if that
-//    handles it (returns nonzero) the camera is left alone.  IDB 0x426720/70/0x4266B0/
-//    0x426610/0x4267C0/0x426820.
-extern char PMESH_10( char bAdd, int a2, int a3 );   // pmesh.cpp 0x43CB80
-
+//    Each first tries Patch_KeyMoveSelection (patch-vertex move in vertex/curvepoint mode); if that
+//    handles it (returns nonzero) the camera is left alone.
 static void Cmd_OnCameraLeft()             // 0x426720 (cmd 33057, Left)
 {
-    if ( !PMESH_10( 0, 1, 0 ) )
+    if ( !Patch_KeyMoveSelection( 0, 1, 0 ) )
     {
         Ed_Camera()->angles[1] += 22.5f;   // U-GLOBALS
         g_nUpdateBits |= 2 * ( g_PrefsDlg->m_bCamXYUpdate != 0 ) + 1;
@@ -4791,7 +4675,7 @@ static void Cmd_OnCameraLeft()             // 0x426720 (cmd 33057, Left)
 
 static void Cmd_OnCameraRight()            // 0x426770 (cmd 33058, Right)
 {
-    if ( !PMESH_10( 0, -1, 0 ) )
+    if ( !Patch_KeyMoveSelection( 0, -1, 0 ) )
     {
         Ed_Camera()->angles[1] -= 22.5f;   // U-GLOBALS
         g_nUpdateBits |= 2 * ( g_PrefsDlg->m_bCamXYUpdate != 0 ) + 1;
@@ -4800,7 +4684,7 @@ static void Cmd_OnCameraRight()            // 0x426770 (cmd 33058, Right)
 
 static void Cmd_OnCameraForward()          // 0x4266B0 (cmd 33059, Up)
 {
-    if ( !PMESH_10( 0, 0, -1 ) )
+    if ( !Patch_KeyMoveSelection( 0, 0, -1 ) )
     {
         camera_s *cam = Ed_Camera();   // U-GLOBALS
         cam->origin[0] += cam->forward[0] * 32.0f;
@@ -4812,7 +4696,7 @@ static void Cmd_OnCameraForward()          // 0x4266B0 (cmd 33059, Up)
 
 static void Cmd_OnCameraBack()             // 0x426610 (cmd 33060, Down)
 {
-    if ( !PMESH_10( 0, 0, 1 ) )
+    if ( !Patch_KeyMoveSelection( 0, 0, 1 ) )
     {
         camera_s *cam = Ed_Camera();   // U-GLOBALS
         cam->origin[0] -= cam->forward[0] * 32.0f;
@@ -4840,38 +4724,38 @@ static void Cmd_OnCameraStraferight()      // 0x426820 (cmd 33064, '.')
     g_nUpdateBits |= 2 * ( g_PrefsDlg->m_bCamXYUpdate != 0 ) + 1;
 }
 
-// â”€â”€ Grid toggle (0) â€” flip d_showgrid, redraw XY+Z.  IDB 0x426930. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€ Grid toggle (0) â€” flip d_showgrid, redraw XY+Z.  0x426930. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static void Cmd_OnGridToggle()             // cmd 33065
 {
     g_qeglobals.d_showgrid = !g_qeglobals.d_showgrid;
     g_nUpdateBits |= W_XY | W_Z;
 }
 
-// â”€â”€ Grid size next/prev ( ] / [ ) â€” step d_gridsize within [0,10].  IDB 0x4289A0/D0. â”€
+// â”€â”€ Grid size next/prev ( ] / [ ) â€” step d_gridsize within [0,10].  0x4289A0/D0. â”€
 // KIWI (2026-09-27): Cmd_OnGridNext / Cmd_OnGridPrev (33083 / 33084) removed with the
 // Grid menu.
 
 // â”€â”€ Texture-shift step inc/dec (Shift+KP-/KP+) â€” walk d_savedinfo.d_gridsize as an INT
-//    counter (LODWORD bit-manip; the wrap-guard keeps it out of 0).  IDB 0x4287B0/830.
+//    counter (the wrap-guard keeps it out of 0).  0x4287B0/830.
 static void Cmd_OnSelectionTextureSnapDec()  // cmd 33072
 {
-    int *g = (int *)&g_qeglobals.d_savedinfo.d_gridsize;
+    int *g = &g_qeglobals.d_savedinfo.d_gridsize;
     if ( !--*g )
-        *g = -1;   // binary sets NAN bit-pattern (0xFFFFFFFF int) to avoid 0
+        *g = -1;   // never 0
     Radiant_SetGridStatus();
 }
 
 static void Cmd_OnSelectionTextureSnapInc()  // cmd 33073
 {
-    int *g = (int *)&g_qeglobals.d_savedinfo.d_gridsize;
+    int *g = &g_qeglobals.d_savedinfo.d_gridsize;
     if ( !++*g )
         *g = 1;
     Radiant_SetGridStatus();
 }
 
-// â”€â”€ Texture fit / fit-all (Ctrl+F / Ctrl+Shift+F) â€” Brush_FitTexture 1Ã—1.  IDB
+// â”€â”€ Texture fit / fit-all (Ctrl+F / Ctrl+Shift+F) â€” Brush_FitTexture 1Ã—1.
 //    0x4287D0 / 0x428800. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-extern void Brush_FitTexture( float x, float y, int a4 );      // select.cpp 0x4939E0
+extern void Brush_FitTexture( float x, float y, int acrossSelection );   // select.cpp 0x4939E0
 static void Cmd_OnSelectionTextureFitUnk()   // cmd 33074
 {
     Brush_FitTexture( 1.0f, 1.0f, 0 );
@@ -4883,7 +4767,7 @@ static void Cmd_OnTextureFitAll()            // cmd 33234
     g_nUpdateBits = -1;
 }
 
-// â”€â”€ Texture rotate CW / CCW (Ctrl+arrows) â€” Brush_RotateTexture(Â±ClampGridSize).  IDB
+// â”€â”€ Texture rotate CW / CCW (Ctrl+arrows) â€” Brush_RotateTexture(Â±ClampGridSize).
 //    0x428850 / 0x428860. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 static void Cmd_OnTexRotateClockwise()       // cmd 33075
 {
@@ -4894,7 +4778,7 @@ static void Cmd_OnTexRotateCounterCW()       // cmd 33076
     Brush_RotateTexture( -ClampGridSize() );
 }
 
-// â”€â”€ Texture shift L/R/U/D (Shift+arrows) â€” Brush_ShiftTexture by Â±2Â·grid.  IDB
+// â”€â”€ Texture shift L/R/U/D (Shift+arrows) â€” Brush_ShiftTexture by Â±2Â·grid.
 //    0x4288E0/910/870/8A0. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 extern void Brush_ShiftTexture( float ds, float dt );          // select.cpp 0x491F20
 static void Cmd_OnTexShiftLeft()             // cmd 33079
@@ -4969,17 +4853,16 @@ static void Cmd_OnToggleviewYz() {}        // cmd 32797
 static void Cmd_OnToggleviewXz() {}        // cmd 32798
 
 // â”€â”€ Viewâ†’Toggleâ†’{Console,Camera,XY,Z} show/hide (0x426A90 / 0x426A40 / 0x426AE0 /
-//    0x426B30) â€” the four SHOW/HIDE toggles (dead in the port until the U7 backfill).
+//    0x426B30) - the four SHOW/HIDE toggles.
 //    Each is the same shape: gate on the layout style, then flip the child window's
-//    visibility with IsWindowVisible + ShowWindow(SW_HIDE/SW_SHOW).  Ported verbatim.
+//    visibility with IsWindowVisible + ShowWindow(SW_HIDE/SW_SHOW).
 //    NOTE the STYLE GATES differ per handler and are the binary's, not a typo:
 //      console/camera : style > 0 && style < 3   (i.e. 1 or 2)
 //      XY             : style == 1  ONLY
 //      Z              : style == 1 || style == 2, ELSE tail-jumps to Undo_Redo (see below)
 static void Cmd_OnToggleconsole()          // cmd 33068 (0x426A90)
 {
-    // The binary's m_pEditWnd is the docked console CEdit (g_qeglobals.d_hwndEdit); in this
-    // port that is the embedded m_wndConsole child.
+    // The binary's m_pEditWnd is the docked console CEdit (g_qeglobals.d_hwndEdit).
     if ( g_radiantFrameState.currentStyle > 0 && g_radiantFrameState.currentStyle < 3 )
     {
         // The console the user reads is the ImGui dock window, not the native EDIT pane (which
@@ -5007,12 +4890,10 @@ static void Cmd_OnToggleview()             // cmd 33071 (0x426AE0), Shift+Ctrl+V
 
 static void Cmd_OnTogglez()                // cmd 33070 (0x426B30), Shift+Ctrl+Z
 {
-    // ORIGINAL QUIRK, reproduced verbatim: the style-mismatch path at 0x426B43 is
-    // `pop esi ; jmp Undo_Redo` â€” i.e. in any layout other than 1/2 this command performs
-    // a REDO instead of a Z-view toggle.  Not an ICF artifact (the else arm is reachable by
-    // fall-through from the two `jz`s and the function already has its own `pop esi ; retn`
-    // epilogue at 0x426B7D).  This port fixes m_nCurrentStyle at 1, so the arm is unreachable
-    // here; it is kept so the code matches the binary.
+    // BINARY QUIRK: in any layout other than 1/2 this command performs a REDO instead of a
+    // Z-view toggle (a real tail-jump to Undo_Redo, not an identical-code-folding artifact).
+    // This port fixes currentStyle at 1, so the arm is unreachable here; it is kept to match
+    // the binary.
     if ( g_radiantFrameState.currentStyle == 1 || g_radiantFrameState.currentStyle == 2 )
     {
         Radiant_ToggleChildVisible( g_qeglobals.d_hwndZ );   // U-CMD-1: was m_pZWnd
@@ -5067,14 +4948,8 @@ static void Cmd_OnSelectPrev()             // cmd 33161 (0x423CA0)
 }
 
 // â”€â”€ Move selection up / down (KP+ / KP-) â€” translate Â±grid along Z, wrapped in undo. â”€â”€
-extern void Undo_ClearRedo();               // undo.cpp
-extern void Undo_GeneralStart( const char *op );
-extern void Undo_AddBrushList( selbrush_t *list );
-extern void Undo_EndBrushList( selbrush_t *list );
-extern void Undo_End();
 static void Cmd_OnSelectionMovedown()      // cmd 32829 (0x429050)
 {
-    extern void Select_Move( const float *delta, char bSnap );
     Undo_ClearRedo();
     Undo_GeneralStart( "move up" );
     Undo_AddBrushList( &selected_brushes );
@@ -5086,17 +4961,15 @@ static void Cmd_OnSelectionMovedown()      // cmd 32829 (0x429050)
 }
 static void Cmd_OnSelectionMoveup()        // cmd 32831 (0x4290B0)
 {
-    extern void Select_Move( const float *delta, char bSnap );
     float delta[3] = { 0.0f, 0.0f, grid_sizes[g_qeglobals.d_gridsize] };
     Select_Move( delta, 1 );
     g_nUpdateBits |= 0xBu;
 }
 
-// â”€â”€ Selection nudge L/R/U/D (Alt+arrows) â€” NudgeSelection(dir, this, grid).  IDB
+// â”€â”€ Selection nudge L/R/U/D (Alt+arrows) â€” NudgeSelection(dir, this, grid).
 //    0x429510/530/550/4F0. â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// U-CMD-2: the MFC-signature entry point (and these four members) is the MFC shell's only
-// caller; the command table dispatches 32847..32850 straight at NudgeSelection_Apply
-// (select.cpp:4541), the shell-agnostic core select.cpp already split out.
+// U-CMD-2: the command table dispatches 32847..32850 straight at NudgeSelection_Apply
+// (select.cpp), the shell-agnostic core.
 
 // â”€â”€ Splay / Set View To Entity / Link Selected / Get Distance / Select All Of Type â”€â”€
 extern void DoSplay();                      // pmesh.cpp 0x44A430
@@ -5181,7 +5054,7 @@ static void Cmd_OnShowLastHidden()         // cmd 33246 (0x42B6E0)
     KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 
-// â”€â”€ Selection draw toggles: crosshair / no-outline / no-tint.  IDB 0x42B690/0x425630/50.
+// â”€â”€ Selection draw toggles: crosshair / no-outline / no-tint.  0x42B690/0x425630/50.
 static void Cmd_OnViewCrosshair()          // cmd 33100
 {
     g_bCrossHairs ^= 1u;
@@ -5199,21 +5072,20 @@ static void Cmd_OnSelectionNoTint()        // cmd 33172
 }
 
 // â”€â”€ Select same target / targetname (B / Ctrl+B) â€” copy the FIRST selected entity's
-//    key value onto all selected.  IDB 0x42ADA0 (targetname) / 0x42ADD0 (target). â”€â”€â”€â”€â”€â”€
-extern void Select_AllByKeyValue( const char *key );   // select.cpp (sub_485B70 0x485B70)
-static void Cmd_OnSelectSameTargetname()   // cmd 36121 (sub_42ADA0)
+//    key value onto all selected. â”€â”€â”€â”€â”€â”€
+extern void Select_AllByKeyValue( const char *key );   // select.cpp (0x485B70)
+static void Cmd_OnSelectSameTargetname()   // cmd 36121 (0x42ADA0)
 {
     Select_AllByKeyValue( "targetname" );
     g_nUpdateBits = -1;
 }
-static void Cmd_OnSelectSameTarget()       // cmd 36123 (sub_42ADD0)
+static void Cmd_OnSelectSameTarget()       // cmd 36123 (0x42ADD0)
 {
     Select_AllByKeyValue( "target" );
     g_nUpdateBits = -1;
 }
 
 // â”€â”€ ON_UPDATE_COMMAND_UI handlers â€” keep menu items' enable/grey state live. â”€â”€â”€â”€â”€â”€â”€â”€â”€
-extern undo_s *g_lastundo;              // undo.cpp (0x23F162C)
 extern bool    Undo_RedoAvailable();    // undo.cpp â€” g_lastredo != nullptr
 extern int     g_region_active;         // map.cpp (0x23F1744)
 
@@ -5221,7 +5093,6 @@ extern int     g_region_active;         // map.cpp (0x23F1744)
 // â”€â”€ Light-preview submenu (F8 workflow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // U-GLOBALS: CamWnd_AddLightPreview / CamWnd_RemoveLightPreview / CamWnd_ClearLightPreviews
 // are declared with the other accessors at the top of this file.
-extern float world_orient_matrix[4][3];                                       // entity.cpp 0x6DE290
 
 static void Cmd_OnEnableLightPreview()     // cmd 33950 (0x4240C0)
 {
@@ -5274,7 +5145,7 @@ static void Cmd_OnPreviewAtMaxIntensity()  // cmd 36122 (0x425670)
 // â”€â”€ Fileâ†’Load / Save-Selected / Save-Region â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 extern void Map_ImportFile( const char *path );                  // map.cpp 0x488C70
 extern void DefaultExtension( char *path, const char *ext );     // cmdlib.cpp
-extern void Map_SaveFile( const char *path, char bRegion, char a3 ); // map.cpp
+extern bool Map_SaveFile( const char *path, char bRegion ); // map.cpp
 typedef int WriteFunc_map_t( void *ctx, const char *fmt, ... );
 extern void Entity_WriteSelected_R( WriteFunc_map_t **writer );  // map.cpp 0x488DF0
 
@@ -5341,9 +5212,9 @@ static void Cmd_OnFileExportmap()          // cmd 32845 â€” Fileâ†’Sav
 
 static void Cmd_OnFileSaveregion()         // cmd 32827 â€” Fileâ†’Save Region  (0x429020)
 {
-    // The binary calls SaveAsDialog(1); its region path (a1!=0) is just the Save dialog +
-    // DefaultExtension(".reg") + Map_SaveFile(file, 1, 0) â€” the MRU management (MRU_* not
-    // ported) only runs on the non-region (SaveAs) path, so it is faithfully omitted here.
+    // The binary calls SaveAsDialog(1); its region path is just the Save dialog +
+    // DefaultExtension(".reg") + Map_SaveFile(file, 1) - the MRU management only runs on the
+    // non-region (SaveAs) path.
     char file[MAX_PATH] = "";
     OPENFILENAMEA ofn;
     memset( &ofn, 0, sizeof( ofn ) );
@@ -5357,7 +5228,7 @@ static void Cmd_OnFileSaveregion()         // cmd 32827 â€” Fileâ†’Sav
     if ( !GetSaveFileNameA( &ofn ) )
         return;
     DefaultExtension( file, ".reg" );
-    Map_SaveFile( file, 1, 0 );
+    Map_SaveFile( file, 1 );
 }
 
 // â”€â”€ CEdBlankPane (Tex placeholder + laymat content render shell) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -5370,10 +5241,8 @@ extern bool g_radiantFirstLightRendererReady;
 // called by Map_LoadFile / the prefab enter-leave pair / Undo_GeneralStart+Undo_End
 // with a label describing the moment.  Walks the DISPLAY list (prev/next) and checks
 // the link back-pointers, the def/owner cross-link and the def refcount.
-// (Its sibling MainFrm_EntList 0x42c1e0 is deliberately still a stub â€” see engine_stubs.cpp.)
+// KIWI: its sibling MainFrm_EntList (0x42c1e0) was never ported; the no-op stub and its calls are gone.
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );  // engine_stubs.cpp
-
 void MainFrm_BrushList( const char *message, selbrush_t *brushList )
 {
     const char *msg = message;
@@ -5396,9 +5265,8 @@ void MainFrm_BrushList( const char *message, selbrush_t *brushList )
 // ============================================================================
 //  U-CMD-1 - Radiant_DispatchCommandDirect: the shell-agnostic id->action table.
 //
-//  U-RIP: the frame's AFX_MSGMAP is deleted, so THIS is the only id->action table; every
-//  caller (menus, accelerators, hotkeys, the ImGui shell) reaches it through
-//  Radiant_ExecCommand.
+//  This is the only id->action table (the frame's message map is gone); every caller
+//  (menus, accelerators, hotkeys, the ImGui shell) reaches it through Radiant_ExecCommand.
 //
 //  Extraction rule: a handler is extracted when its body reaches the editor ONLY through
 //  free functions + globals (cores, g_qeglobals, g_PrefsDlg, g_nUpdateBits, Ed_Camera(),
@@ -5407,16 +5275,11 @@ void MainFrm_BrushList( const char *message, selbrush_t *brushList )
 //  popups) return false with a POST-RIP marker; false means "not routable yet", never
 //  "the command did nothing".
 //
-//  U-CMD-2 routed the deferred block: every dialog command now flips its ImGui panel, the
-//  File-menu map flows call the extracted free bodies, and the MRU picks reach DoMru.  ONE
-//  CAVEAT on the panel toggles: the panels only RENDER while the ImGui shell is up (it is
-//  behind -imgui, and the overlay draws inside the camera-window / dockhost paint), so with
-//  the overlay off the toggle still flips its bool silently and nothing appears.  That is
-//  accepted for v1 - the flag is correct, only the presenter is missing - and it self-heals
-//  the moment the shell is on.  What is left returns false with a POST-RIP marker: those are
-//  the toolbar-state commands (there is no toolbar in the raw shell until an ImGui one
-//  exists), the m_pActiveXY-gated clipper commands, the HMENU popup commands (U-MENU), and
-//  the two project-file dialogs.
+//  U-CMD-2: every dialog command flips its ImGui panel, the File-menu map flows call the
+//  extracted free bodies, and the MRU picks reach DoMru.  What is left returns false with a
+//  POST-RIP marker: the mouse-scale / scale-lock toolbar commands, the two m_pActiveXY /
+//  CMenu commands (35005 / 35042), the HMENU popup commands (U-MENU), and the two
+//  project-file dialogs.
 // ============================================================================
 // The panel toggles the deferred dialog commands route to (imgui_panel_*.cpp +
 // imgui_panels.cpp).  Each flips the file-static show flag its checkbox drives - the raw
@@ -5854,10 +5717,9 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
         Cmd_OnTextureResolution( cmdId ); return true;
 
     // ------------------------------------------------------------------------
-    // U-CMD-2: the File-menu map flows.  The bodies are the free functions above
-    // (mainfrm.cpp's "File / Edit command wrappers" block); the MFC members forward to the
-    // same ones, so both shells run one flow.  Exit posts WM_CLOSE and the CLOSE handler
-    // runs the discard prompt - faithful to 0x422220, where the guard lives.
+    // U-CMD-2: the File-menu map flows (the free functions in the "File / Edit command
+    // wrappers" block above).  Exit posts WM_CLOSE and the CLOSE handler runs the discard
+    // prompt - as in the binary, where the guard lives in OnClose (0x422220).
     // ------------------------------------------------------------------------
     case ID_FILE_NEW: Radiant_FileNew(); return true;   // File->New            0x423AA0
     case ID_FILE_OPEN: Radiant_FileOpen(); return true;   // File->Open           0x423AE0
@@ -5916,30 +5778,26 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
         return true;
 
     // The four Alt+arrow nudges (0x429510/530/550/4F0).  NudgeSelection's CMainFrame* arg was
-    // only ever the ->Nudge receiver, and that body now lives in NudgeSelection_Apply
-    // (select.cpp:4541), so the frame drops out entirely.
+    // only the ->Nudge receiver, so NudgeSelection_Apply (select.cpp) takes no frame.
     case 32847: NudgeSelection_Apply( 0, grid_sizes[g_qeglobals.d_gridsize] ); return true;   // left
     case 32848: NudgeSelection_Apply( 2, grid_sizes[g_qeglobals.d_gridsize] ); return true;   // right
     case 32849: NudgeSelection_Apply( 1, grid_sizes[g_qeglobals.d_gridsize] ); return true;   // up
     case 32850: NudgeSelection_Apply( 3, grid_sizes[g_qeglobals.d_gridsize] ); return true;   // down
 
     // ------------------------------------------------------------------------
-    // POST-RIP: still UI-bound, and the widget each one needs does not exist in the raw
-    // shell yet.  Reason per line; nothing here is a missing port - each body exists and
-    // works in the MFC build, it just cannot run without its widget.  The TOOLBAR block is
-    // the bulk of it and unblocks only when an ImGui toolbar ships (RADIANT_UI_REWORK_PLAN.md
-    // U-BOOT v2); the m_pActiveXY clipper gates go with the XY-view sweep, the HandlePopup
-    // trio with U-MENU.
+    // POST-RIP: still UI-bound - the widget each one needs does not exist in the raw shell
+    // yet (reason per line).  The toolbar-state ones wait for an ImGui toolbar
+    // (RADIANT_UI_REWORK_PLAN.md U-BOOT v2), the HandlePopup trio for U-MENU.
     // ------------------------------------------------------------------------
     case 32791: return false;   // POST-RIP: OnFileNewproject               CFileDialog (MFC)
     case 35018: return false;   // POST-RIP: OnSetStartupProject            AfxGetApp()/CString profile access
     // CLIPPER + MOUSE-ROTATE — cores ported to Ed_ActiveXY()/xywndState_t (no MFC view).
     // X toggles clip mode (cancelling rotate); Enter / Shift+Enter / Ctrl+Enter commit/split/
-    // flip; R toggles free mouse-rotation (cancelling clip). Ed_Clip self-gates on g_bClipMode;
+    // flip; R toggles free mouse-rotation (cancelling clip). The commits are undo-bracketed;
     // Ed_SplitClip bails on empty split lists. (Toolbar check-button state lands with the ImGui toolbar.)
     case 32783: Cmd_OnViewClipper();       return true;   // ToggleClipper   (X)
-    case 32795: Ed_Clip( Ed_ActiveXY() );  return true;   // ClipSelected    (Enter)
-    case 32794: Ed_SplitClip();            return true;   // SplitSelected   (Shift+Enter)
+    case 32795: Cmd_OnClipSelected();      return true;   // ClipSelected    (Enter)
+    case 32794: Cmd_OnSplitSelected();     return true;   // SplitSelected   (Shift+Enter)
     case 32796: Ed_FlipClip();             return true;   // FlipClip        (Ctrl+Enter)
     case 32810: Cmd_OnSelectMouserotate(); return true;   // MouseRotate     (R)
     // Brush -> Primitives: the sides prompt (was the IDD_ARBITRARY_SIDES modal, now
@@ -5948,8 +5806,7 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33034: Radiant_RunSidesDialog( "Arbitrary sided", 0, 0 ); return true;   // OnBrushArbitrarysided    0x424EE0
     case 32833: Radiant_RunSidesDialog( "Cone",            1, 0 ); return true;   // OnBrushMakecone          0x429170
     case 32892: Radiant_RunSidesDialog( "Sphere",          0, 1 ); return true;   // OnBrushPrimitivesSphere  0x42B630
-    // ── TOOLBAR-STATE PREF TOGGLES — ported verbatim from the IW3xRadiant IDA (handler EA in
-    //    each comment). Every one is a g_PrefsDlg field flip + Prefs_SavePrefs + the binary's own
+    // ── TOOLBAR-STATE PREF TOGGLES (handler address in each comment). Every one is a g_PrefsDlg field flip + Prefs_SavePrefs + the binary's own
     //    repaint; the ONLY dropped line is the m_wndToolBar TB_CHECKBUTTON reflect-state
     //    SendMessage (cosmetic — the button glyph lands with the ImGui toolbar). ──
     case 32936: if ( ++g_PrefsDlg->camera_mode > 2 ) g_PrefsDlg->camera_mode = 0;
@@ -5971,7 +5828,6 @@ bool Radiant_DispatchCommandDirect( unsigned int cmdId )
     case 33155: Cmd_OnTolerantWeld();    return true;   // TolerantWeld          (Shift+J)
     case 33144: Cmd_OnToggleDrawSurfs(); return true;   // ToggleDrawSurfs       (0x42a040)
     case 32872: Cmd_OnPatchRedisperse(); return true;   // PatchRedisperse       (0x42a990)
-    case 32882: Cmd_OnPatchBend();       return true;   // PatchBend             (0x42a950)
 
     // STILL DEFERRED — genuinely need a widget/state-machine that does not exist yet:
     case 32813: return false;   // POST-RIP: OnSelectMousescale             mouse-scale mode + m_wndToolBar

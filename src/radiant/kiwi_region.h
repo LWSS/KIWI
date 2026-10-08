@@ -166,15 +166,6 @@ struct kchainStep_t
 bool KiwiRegion_ChainWalk( const int *objects, int count,
                            std::vector<kchainStep_t> *outSteps, bool *outClosed );
 
-// True only when every tessellated point lies within KiwiRegion_PlaneBand;
-// exported because grouping and Join ask the same point-to-plane question.
-bool KiwiRegion_ObjectOnPlane( const kconObject_t &o, const kconPlane_t &plane );
-
-// Preserve the joined/unjoined invariant by bounded dedupe, collinear removal at
-// KVALID_PLANE_DOT, then dedupe again.  Input is an unrepeated plane-space ring;
-// callers reject results below three points.  Winding remains an acceptance gate.
-void KiwiRegion_SanitizeRing( std::vector<float> &pts );
-
 // 2D polygon toolkit.
 // Signed area of a plane-space loop; > 0 == CCW.
 float KiwiRegion_SignedArea( const std::vector<float> &pts );

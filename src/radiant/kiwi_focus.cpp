@@ -13,6 +13,7 @@
 #include "kiwi_construct.h"
 #include "kiwi_focus.h"
 #include "kiwi_hover.h"                     // Face hover fallback.
+#include "kiwi_ported.h"
 #include "kiwi_region.h"                    // Space on construction faces.
 #include "kiwi_selection.h"                 // Face-selection validity.
 #include "kiwi_skybox.h"                    // Sky-shell detection.
@@ -23,15 +24,8 @@
 #include <math.h>                           // Face aim angles.
 
 // Ported entry points, verified against their definitions.
-//   win_qe3.cpp:112        int  Sys_Printf( const char *fmt, ... )
 //   select.cpp:2073        void Select_GetBounds( float *mins, float *maxs )
-//   qe3.h:1054             selbrush_t selected_brushes;   // 0x23f1864
-//   qe3.h:1053             selbrush_t active_brushes;     // 0x23f189c
-//   mainfrm.cpp:1340       bool Radiant_RegisterCommand( const char *name, byte vk,
-//                                                        byte mods, int commandId )
-extern int  Sys_Printf( const char *fmt, ... );
 extern void Select_GetBounds( float *mins, float *maxs );
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
@@ -345,8 +339,8 @@ namespace
         float dz = d[2];
         if ( dz >  1.0f ) dz =  1.0f;
         if ( dz < -1.0f ) dz = -1.0f;
-        const float pitch = (float)( asin( (double)dz )      * 57.295779513082320876 );
-        const float yaw   = (float)( atan2( (double)d[1], (double)d[0] ) * 57.295779513082320876 );
+        const float pitch = (float)( asin( (double)dz )      * KIWI_RAD2DEG );
+        const float yaw   = (float)( atan2( (double)d[1], (double)d[0] ) * KIWI_RAD2DEG );
         KiwiCam_LookAlong( pitch, yaw );
     }
 

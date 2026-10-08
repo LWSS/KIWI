@@ -9,9 +9,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #pragma comment(lib, "winmm.lib")
 
-char s_assertDisable_FS_GetPreviousPathComponent;
-
-
 /*
 ================
 SafeMalloc
@@ -50,46 +47,6 @@ int FS_FileLength(FILE *f)
   end = ftell(f);
   fseek(f, pos, SEEK_SET);
   return end;
-}
-
-/*
-================
-SafeOpenRead
-
-Opens a file for reading, calls Com_Error on failure
-================
-*/
-FILE *SafeOpenRead(char *filename)
-{
-  FILE *f;
-  int *errnoPtr;
-  char *errorStr;
-
-  f = fopen(filename, "rb");
-  if ( !f )
-  {
-    errnoPtr = _errno();
-    errorStr = strerror(*errnoPtr);
-    Com_Error("Error opening %s: %s", filename, errorStr);
-  }
-  return f;
-}
-
-/* CoD4 0x40DF90. */
-FILE *SafeOpenWrite(char *filename)
-{
-  FILE *f;
-  int *errnoPtr;
-  char *errorStr;
-
-  f = fopen(filename, "wb");
-  if ( !f )
-  {
-    errnoPtr = _errno();
-    errorStr = strerror(*errnoPtr);
-    Com_Error("Error opening %s: %s", filename, errorStr);
-  }
-  return f;
 }
 
 /*

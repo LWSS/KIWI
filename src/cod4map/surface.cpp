@@ -20,9 +20,8 @@ DrawSurf_t *AllocDrawSurface(void)
 
   nativeDrawSurf = AllocMapDrawSurf();
   drawSurf = &g_drawSurfs[nativeDrawSurf - g_nativeMapDrawSurfs];
-  /* These are donor-only mirrors of native MapDrawSurf defaults.  Set them
-     at allocation so BSP orchestration does not need the unmatched CoD2
-     AllocateLightmaps pre-pass. */
+  /* These are donor-only mirrors of native MapDrawSurf defaults, set at
+     allocation (the CoD2 lightmap pre-pass that also set them is gone). */
   drawSurf->lightStyle = LIGHTSTYLE_NONE;
   drawSurf->ownerGroup = NULL;
   drawSurf->nextInGroup = NULL;
@@ -99,51 +98,6 @@ void WriteDebugSurfaceToFile(TerrainNode_t *tn)
     fprintf(g_debugPolyFile, "( %.9g %.9g %.9g %.9g %.9g )\n",
             v->pos[0], v->pos[1], v->pos[2], v->st[0], v->st[1]);
   }
-}
-
-/*
-================
-FilterWindingIntoTree_r
-
-Recursively filters a winding through the BSP tree, clipping against
-node planes. At leaf nodes, checks winding validity against the side.
-================
-*/
-void FilterWindingIntoTree_r(Winding_t *winding, BrushSide_t *side, Node_t *node)
-{
-  Winding_t *frontWinding, *backWinding;
-
-  if ( !winding )
-    return;
-
-  if ( node->planenum == PLANENUM_LEAF )
-  {
-    /* at a leaf: add winding to side's visible hull if not opaque */
-    if ( !node->opaque )
-      CheckWinding(winding, &side->visibleHull, MAP_PLANE(side->planenum)->normal);
-    FreeWinding(winding);
-    return;
-  }
-
-  /* side on same plane as node — goes entirely to front child */
-  if ( side->planenum == node->planenum )
-  {
-    FilterWindingIntoTree_r(winding, side, node->children[0]);
-    return;
-  }
-
-  /* side on flipped plane — goes entirely to back child */
-  if ( side->planenum == (node->planenum ^ 1) )
-  {
-    FilterWindingIntoTree_r(winding, side, node->children[1]);
-    return;
-  }
-
-  /* split winding by node plane, recurse both halves */
-  ClipWindingEpsilon(winding, MAP_PLANE(node->planenum)->normal, MAP_PLANE(node->planenum)->dist, SNAP_GRID_SIZE, &frontWinding, &backWinding, 1);
-  FreeWinding(winding);
-  FilterWindingIntoTree_r(frontWinding, side, node->children[0]);
-  FilterWindingIntoTree_r(backWinding, side, node->children[1]);
 }
 
 /*
@@ -248,37 +202,6 @@ DrawSurf_t *DrawSurfaceForSide(Brush_t *brush, BrushSide_t *side, Winding_t *win
   nativeDrawSurf->u.brush.side = side;
 
   return surf;
-}
-
-/*
-================
-WriteDebugWindingToFile
-
-Writes winding vertices with computed lightmap S/T coords to the debug polygon file.
-================
-*/
-void WriteDebugWindingToFile(BrushSide_t *side, Winding_t *winding)
-{
-  int i;
-  float *p;
-  float s, t;
-
-  if ( !g_debugPolyFile )
-    return;
-
-  fprintf(g_debugPolyFile, "%s\n", side->shaderInfo->name);
-  fprintf(g_debugPolyFile, "%i\n", winding->numpoints);
-
-  for ( i = 0; i < winding->numpoints; i++ )
-  {
-    p = winding->points[i];
-
-    /* compute texture coords — FPU order preserved */
-    s = side->texVecs[0][0] * p[0] + p[1] * side->texVecs[0][1] + side->texVecs[0][2] * p[2] + side->texVecs[0][3];
-    t = p[1] * side->texVecs[1][1] + side->texVecs[1][2] * p[2] + p[0] * side->texVecs[1][0] + side->texVecs[1][3];
-
-    fprintf(g_debugPolyFile, "( %.9g %.9g %.9g %.9g %.9g )\n", p[0], p[1], p[2], s, t);   /* KIWI: %.9g */
-  }
 }
 
 /*
@@ -476,62 +399,4 @@ void CullBrushSideVisibleHulls(Brush_t *brushes, Node_t *treeRoot)
       }
     }
   }
-}
-
-/*
-================
-ClipSidesIntoTree
-
-Walks all brushes for an entity, filters each side's winding into the
-BSP tree, then creates draw surfaces for visible sides.
-================
-*/
-int ClipSidesIntoTree(Entity_t *entity, Tree_t *tree)
-{
-  Brush_t *b;
-  BrushSide_t *side;
-  Winding_t *w, *hull;
-  ShaderInfo_t *si;
-  int i;
-
-  Com_DPrintf("----- ClipSidesIntoTree -----\n");
-
-  for ( b = entity->brushes; b; b = b->next )
-  {
-    for ( i = 0; i < b->numSides; i++ )
-    {
-      side = &b->sides[i];
-      if ( !side->winding )
-        continue;
-
-      /* filter a copy of the winding through the BSP tree */
-      w = CopyWinding(side->winding);
-      side->visibleHull = NULL;
-      FilterWindingIntoTree_r(w, side, tree->headnode);
-
-      hull = side->visibleHull;
-      if ( !hull )
-        continue;
-
-      si = side->shaderInfo;
-      if ( !si )
-        continue;
-
-      /* if material has noClip, use original winding instead of clipped hull */
-      if ( si->noClip )
-        hull = side->winding;
-
-      /* write debug output for nodraw visible surfaces */
-      if ( (si->surfaceFlags & SURF_NODRAW) && !(si->surfaceFlags & SURF_NOCASTSHADOW) )
-        WriteDebugWindingToFile(side, hull);
-
-      if ( side->bevel )
-        Com_Error("monkey tried to create draw surface for brush bevel");
-
-      CheckWindingInPlane(hull, MAP_PLANE(side->planenum)->normal, MAP_PLANE(side->planenum)->dist);
-      DrawSurfaceForSide(b, side, hull);
-    }
-  }
-
-  return 0;
 }

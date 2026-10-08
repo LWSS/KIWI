@@ -16,20 +16,6 @@ int g_textureBasisVecs[NUM_TEXTURE_AXES * TEXTURE_BASIS_STRIDE] = {
     /* -Y wall    */ 0x00000000, 0xBF800000, 0x00000000, 0x3F800000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0xBF800000
 };
 
-char s_assertDisable_btvPvec0R;
-char s_assertDisable_btvPvec0S;
-char s_assertDisable_btvPvec0T;
-char s_assertDisable_btvPvec1R;
-char s_assertDisable_btvPvec1S;
-char s_assertDisable_btvPvec1T;
-char s_assertDisable_btvSvEqTv;
-char s_assertDisable_tvNormal;
-char s_assertDisable_tvS;
-char s_assertDisable_tvT;
-char s_assertDisable_tvXv;
-char s_assertDisable_tvYv;
-
-
 /*
 ================
 TexturePlanesFromBasis
@@ -49,7 +35,9 @@ int TexturePlanesFromBasis(float *normal, int *xAxis, int *yAxis)
   for ( i = 0; i < NUM_TEXTURE_AXES; i++ )
   {
     float dot = DotProduct(normal, (float *)&g_textureBasisVecs[TEXTURE_BASIS_STRIDE * i]);
-    if ( dot > bestDot )
+    /* KIWI: a tie within 1e-4 keeps the earlier axis (Radiant's Ed_Normal_Calc KTEXAXIS_TIE
+       matches) - a face at 45 deg took its projection axis from the noise in its normal. */
+    if ( dot > bestDot + (bestDot > 0.0f ? 1.0e-4f : 0.0f) )
     {
       bestDot = dot;
       bestAxis = i;

@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "kiwi_thumbcache.h"
+#include "kiwi_ported.h"
 
 #include <d3d9.h>
 #include <gfx_d3d/r_init.h>
@@ -15,7 +16,6 @@
 #include <vector>
 #include <string.h>
 
-extern int  Sys_Printf( const char *fmt, ... );
 extern BOOL FS_UseSearchPath( const searchpath_s *search );
 
 namespace
@@ -363,10 +363,10 @@ namespace
             return false;
         const unsigned char *cursor = (const unsigned char *)data;
         const unsigned char *end = cursor + size;
-        unsigned short version = 0;
-        memcpy( &version, cursor, sizeof( version ) );
-        cursor += sizeof( version );
-        if ( version != 25 || !SkipBytes( cursor, end, 1 ) )
+        unsigned short fileVersion = 0;
+        memcpy( &fileVersion, cursor, sizeof( fileVersion ) );
+        cursor += sizeof( fileVersion );
+        if ( fileVersion != 25 || !SkipBytes( cursor, end, 1 ) )
             return false;
         for ( int i = 0; i < 3; ++i )
         {

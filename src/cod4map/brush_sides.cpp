@@ -34,7 +34,6 @@ static BrushSideGlobals_t brushSideGlob;
    removed - a hardcoded, never-reset global call count with no geometric meaning (a leftover
    conditional breakpoint / decompiler artifact).  It aborted one winding subtraction at an
    arbitrary point that depended on brush processing order. */
-static char s_assertDisable_BrushSides;
 
 /* CoD4 0x407E70 passes two uninitialized stack vectors.  Their incidental
    pointer payloads are build/allocator artifacts rather than portable map

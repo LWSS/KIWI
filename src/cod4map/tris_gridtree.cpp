@@ -17,18 +17,6 @@ static float gridTreeBoundsMaxs[3];
 char      g_fmtTwoInts[8] = { '%', 'i', ',', ' ', '%', 'i', '\0', '\0' };
 const int g_gridTreeSplitAxis[GRID_TREE_AXIS_COUNT] = { 0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1, 2, 0, 1, 0, 1, 0, 1, 2 };
 
-char s_assertDisable_GridTree_ClassifyNode;
-char s_assertDisable_GridTree_FindNode;
-char s_assertDisable_GridTree_FindNode;
-char s_assertDisable_GridTree_FindNode;
-char s_assertDisable_GridTree_FindNode;
-char s_assertDisable_GridTree_Init;
-char s_assertDisable_GridTree_Insert;
-char s_assertDisable_GridTree_Remove;
-char s_assertDisable_GridTree_Shutdown;
-char s_assertDisable_SetGridDivisionPoints;
-
-
 /*
 ================
 GridTree_ClassifyNode

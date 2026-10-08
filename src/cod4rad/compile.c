@@ -1,8 +1,5 @@
 /*
  * compile.c — Radiosity compilation: lighting transfer, bounce, gather.
- *
- * All functions verified against cod2rad64 LST line by line.
- * Source: compile.cpp (from LST assert strings: .\compile.cpp)
  */
 
 #include "cod2rad64.h"
@@ -14,18 +11,17 @@
  * Tetrahedral SH basis constants for 4-band directional lighting.
  * These encode the 4 basis directions of a regular tetrahedron.
  */
-static const float k_sqrt2_3  = 0.8164965510f;  /* sqrt(2/3) — dword_457610 */
-static const float k_inv_sqrt3 = 0.5773502588f;  /* 1/sqrt(3) — dword_457614 */
-static const float k_inv_sqrt2 = 0.7071067691f;  /* 1/sqrt(2) — dword_457624 */
-static const float k_inv_sqrt6 = 0.4082482755f;  /* 1/sqrt(6) — dword_457634 */
+static const float k_sqrt2_3  = 0.8164965510f;  /* sqrt(2/3) */
+static const float k_inv_sqrt3 = 0.5773502588f;  /* 1/sqrt(3) */
+static const float k_inv_sqrt2 = 0.7071067691f;  /* 1/sqrt(2) */
+static const float k_inv_sqrt6 = 0.4082482755f;  /* 1/sqrt(6) */
 
-/* Named constants for raw address reads */
-static const float k_skyRayLength = 262144.0f;    /* dword_4577D8 */
-static const float k_smallEpsilon = 0.001f;        /* dword_457AF0 */
-static const float k_randScale = 0.000061037019f;  /* dword_457BB4 — approx 2.0/32767.0 */
-static const float k_largeRadius = 0.999f;         /* dword_457854 = 0x3F7FBE77 = 0.999 as float */
-static const float k_initialMaxEnergy = 3.402823e+38f; /* dword_456490 — FLT_MAX */
-static const float k_divergeThreshold = 2.0f;      /* dword_457630 = 40000000h (was wrongly 1.1) */
+static const float k_skyRayLength = 262144.0f;
+static const float k_smallEpsilon = 0.001f;
+static const float k_randScale = 0.000061037019f;  /* approx 2.0/32767.0 */
+static const float k_largeRadius = 0.999f;
+static const float k_initialMaxEnergy = 3.402823e+38f; /* FLT_MAX */
+static const float k_divergeThreshold = 2.0f;
 
 /*
 ================
@@ -36,9 +32,9 @@ vector. For each basis where the dot product is positive, accumulates
 (dot * lightColor) into the corresponding output band (3 floats each).
 
 Parameters:
-  lightColor — float[3] RGB light color (rcx)
-  direction  — float[3] unit direction vector (rdx)
-  output     — float[12] accumulator, 4 bands × 3 channels (r8)
+  lightColor — float[3] RGB light color
+  direction  — float[3] unit direction vector
+  output     — float[12] accumulator, 4 bands × 3 channels
 
 Band dot products:
   band0 = dir[2]
@@ -88,11 +84,9 @@ void GatherSurfaceIncidentEnergyForLightFromDir(float *lightColor, float *direct
     }
 }
 
-/* memset is from CRT (sub_43C400) */
-
 /* global transfer block pool */
-static void *g_transferPool;     /* qword_480A68 */
-static int g_transferPoolIdx;    /* dword_480A70 */
+static void *g_transferPool;
+static int g_transferPoolIdx;
 
 typedef struct RelightSuppressedRange_s {
     uint64_t key;
@@ -111,7 +105,7 @@ static uint32_t g_relightSuppressedCapacity;
 static int g_relightCacheLoaded;
 static float *g_relightSkyStorage;
 
-/* per-thread max bounced energy — originally dword_480A48..480A58, now dynamically sized */
+/* per-thread max bounced energy, dynamically sized */
 static float *g_bounceEnergy;
 static int g_bounceEnergyCount;
 static float *g_bounceStage;
@@ -127,12 +121,12 @@ typedef struct {
 } TransferHTEntry_t;
 static __declspec(thread) TransferHTEntry_t g_transferHT[TRANSFER_HT_SIZE];
 
-static char s_assertDisable_Alloc_fromSample;  /* byte_480A7B */
-static char s_assertDisable_Alloc_vars;        /* byte_480A7A */
-static char s_assertDisable_Alloc_weight;      /* byte_480A79 */
-static char s_assertDisable_Alloc_block;       /* byte_480A78 */
+static char s_assertDisable_Alloc_fromSample;
+static char s_assertDisable_Alloc_vars;
+static char s_assertDisable_Alloc_weight;
+static char s_assertDisable_Alloc_block;
 
-static const float k_weightEpsilon = -1.0e-5f; /* dword_4576A0 */
+static const float k_weightEpsilon = -1.0e-5f;
 
 /*
 ================
@@ -782,8 +776,8 @@ static int RadTrans_SaveV3(void)
     return ok;
 }
 
-static char s_assertDisable_Normalize_sample;  /* byte_480A7D */
-static char s_assertDisable_Normalize_vars;    /* byte_480A7C */
+static char s_assertDisable_Normalize_sample;
+static char s_assertDisable_Normalize_vars;
 
 /*
 ================
@@ -868,10 +862,7 @@ void NormalizeLightTransfers(Sample_t *sample)
     }
 }
 
-/* TraceSetup_and_Dispatch declared in cod2rad64.h — sub_40CDB0 */
-/* sqrtf is CRT (sub_43B200) */
-/* g_vertexData — view into g_vertData[0].lmCoord (stride sizeof(DrawVert_t)=0x44).
- * Binary uses raw byte indexing with stride 0x44 from unk_1270FCC4. */
+/* g_vertexData — view into g_vertData[0].lmCoord (stride sizeof(DrawVert_t)=0x44). */
 unsigned char *g_vertexData = (unsigned char *)&g_vertData[0].lmCoord;
 
 /*
@@ -883,13 +874,7 @@ triangle hit, interpolates barycentric UV coordinates from vertex
 lighting data, and samples the lightmap. Returns 1 on success,
 0 if no hit or invalid triangle, -1 on backface.
 
-Parameters:
-  rcx = sampleIdx (32-bit int)
-  rdx = position[3]
-  r8  = normal[3]
-  xmm3 = offset
-  [stack+0x20] = outputLighting ptr
-  [stack+0x28] = outputNormal ptr (float[3], optional)
+outputNormal is an optional float[3].
 ================
 */
 static int FindLightingSamplesAndNormalMode(int sampleIdx, float *position,
@@ -901,12 +886,12 @@ static int FindLightingSamplesAndNormalMode(int sampleIdx, float *position,
 {
     float startPos[3], endPos[3];
     RayHitResult_t hitResult;
-    float smallOffset = 0.125f; /* dword_457704 */
+    float smallOffset = 0.125f;
     Triangle_t *tri;
     MaterialDef_t *material;
     float baryU, baryV, baryW;
     float u, v;
-    float uvScale = 512.0f; /* dword_457700 */
+    float uvScale = 512.0f;
     int vertIdx0, vertIdx1, vertIdx2;
 
     if (outTraceClass)
@@ -917,19 +902,10 @@ static int FindLightingSamplesAndNormalMode(int sampleIdx, float *position,
     startPos[1] = normal[1] * smallOffset + position[1];
     startPos[2] = normal[2] * smallOffset + position[2];
 
-    /* compute end = position + normal * (offset + smallOffset) */
+    /* compute end = start + normal * offset */
     endPos[0] = normal[0] * offset + startPos[0];
     endPos[1] = normal[1] * offset + startPos[1];
     endPos[2] = normal[2] * offset + startPos[2];
-
-    /* no, let me re-read: start = pos + normal*smallOffset, end = pos + normal*(offset)
-       Actually:
-       xmm4 = normal[1], xmm3 = normal[2], xmm6 = normal[0]
-       xmm4 *= offset (xmm7), xmm3 *= offset, xmm6 *= offset → normal*offset
-       xmm1 = normal[2]*smallOffset, xmm5 = normal[0]*smallOffset, xmm2 = normal[1]*smallOffset
-       xmm1 += pos[2], xmm5 += pos[0], xmm2 += pos[1] → start = pos + normal*smallOffset
-       xmm3 += xmm1, xmm6 += xmm5, xmm4 += xmm2 → end = start + normal*offset
-    */
 
     /* trace ray */
     TraceSetup_and_Dispatch(sampleIdx, startPos, endPos, &hitResult);
@@ -1159,12 +1135,12 @@ int Lighting_RejectTransportPoint(int sampleIdx, const float *point)
 }
 
 
-static char s_assertDisable_Sky_subSample;    /* byte_480A84 */
-static char s_assertDisable_Sky_sample;       /* byte_480A83 */
-static char s_assertDisable_Sky_vars;         /* byte_480A82 */
-static char s_assertDisable_Sky_area;         /* byte_480A81 */
-static char s_assertDisable_Sky_nanEnergy;    /* byte_480A80 */
-static char s_assertDisable_Sky_nanResult;    /* byte_480A7F */
+static char s_assertDisable_Sky_subSample;
+static char s_assertDisable_Sky_sample;
+static char s_assertDisable_Sky_vars;
+static char s_assertDisable_Sky_area;
+static char s_assertDisable_Sky_nanEnergy;
+static char s_assertDisable_Sky_nanResult;
 
 /*
 ================
@@ -1175,8 +1151,8 @@ from the surface point along the normal direction to detect sky
 visibility. If the sky is visible (backface material hit), accumulates
 weighted sky color into the sample's lighting data.
 
-Uses global settings g_sunDirX/C0/C4 for the sky direction
-basis coefficients and g_sunColorR/CC/D0 for the sky color.
+Uses the global sun direction for the sky direction basis coefficients
+and the global sun color for the sky color.
 ================
 */
 void GatherSkyLighting(int sampleIdx, float *position, float *basis,
@@ -1247,8 +1223,7 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     visibility = 1.0f;
 
     /* CoD4 keeps direct sunlight and the energy injected into radiosity as
-     * separate colors.  Both scale by visibility * skyWeight (0x407770
-     * v30 = vis * a8). */
+     * separate colors.  Both scale by visibility * skyWeight (0x407770). */
     directEnergy[0] = g_sunColorR * (visibility * skyWeight);
     directEnergy[1] = g_sunColorG * (visibility * skyWeight);
     directEnergy[2] = g_sunColorB * (visibility * skyWeight);
@@ -1330,13 +1305,13 @@ static void SeedSkyLightForSample(Sample_t *sample)
 extern int GetPointLightCount(void);
 extern void SetLightingSampleAreas(int threadCount);
 extern void BuildLightTransfers(int threadCount);
-extern void Lighting_InitSamples(void);                                /* lighting_412350 */
+extern void Lighting_InitSamples(void);
 extern void BeginProgress(const char *msg);
 extern void EndProgress(void);
 extern void CalculateGroundLightingForAllStaticModels(void);
 /* malloc/free from <stdlib.h> */
-extern void *g_lightDirArray;                                  /* qword_480A60 */
-extern int g_totalLightCount;                                  /* dword_480A48 */
+extern void *g_lightDirArray;
+extern int g_totalLightCount;
 
 /*
 ================
@@ -1404,7 +1379,6 @@ setup, light transport, radiosity bounce, lightmap building,
 light grid, ground lighting, and cleanup.
 ================
 */
-/* forward decls for debug globals used by Compile() below */
 
 void Compile(int threadCount)
 {
@@ -1538,15 +1512,6 @@ void Compile(int threadCount)
 
 /*
 ================
-RadiosityBounce
-
-Performs iterative radiosity bounce passes. Each pass gathers
-indirect illumination from neighboring samples weighted by
-transfer coefficients and bounce fraction.
-================
-*/
-/*
-================
 GatherPointLightForSample
 
 Gathers direct illumination from a single point light for a
@@ -1556,12 +1521,12 @@ light contribution into the sample's SH bands.
 */
 extern int PointLightEvaluatePoint(int surfacePrimaryLightIndex, int sampleIdx,
     int lightIdx, float *position, float *normal, float *outDir,
-    float *outColor, float *outArg); /* pointlights_419090 */
+    float *outColor, float *outArg);
 
-static char s_assertDisable_Point_sample;    /* byte_480A88 */
-static char s_assertDisable_Point_vars;      /* byte_480A87 */
-static char s_assertDisable_Point_nanEnergy; /* byte_480A86 */
-static char s_assertDisable_Point_nanResult; /* byte_480A85 */
+static char s_assertDisable_Point_sample;
+static char s_assertDisable_Point_vars;
+static char s_assertDisable_Point_nanEnergy;
+static char s_assertDisable_Point_nanResult;
 
 void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
     float *basis, float subAreaFactor, unsigned char primaryLightIndex,
@@ -1580,8 +1545,8 @@ void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position,
     sampleVars = sample->vars;
     Assert(sampleVars != 0, s_assertDisable_Point_vars);
 
-    /* call point light gathering — returns 0 (no light), 1 (directional), 2 (ambient) */
-    /* binary passes basis+6 (the surface normal, 3rd row of basis) as 4th arg */
+    /* returns 0 (no light), 1 (primary-light intensity), 2 (directional), 3 (coincident);
+     * basis+6 is the surface normal (3rd row of basis) */
     result = PointLightEvaluatePoint(primaryLightIndex, sampleIdx, lightIdx - 2,
         position, basis + 6,
         lightDirection, lightColor, &outArg);
@@ -1653,7 +1618,6 @@ area and neighbor distances. Used for the radiosity transfer
 radius computation.
 ================
 */
-/* sqrtf is from CRT (sub_43D3C0) */
 float g_invTraces;       /* native 0x407C48: 2.0 / g_traces */
 
 void SetupSampleRadii(void)
@@ -1699,7 +1663,7 @@ void SetupSampleRadii(void)
             dist = Vec2DistanceSq(
                 (float *)&((LightDirEntry_t *)g_lightDirArray)[j],
                 (float *)&((LightDirEntry_t *)g_lightDirArray)[i]);
-            dist *= 0.25f; /* dword_4573A4 = 0.25 */
+            dist *= 0.25f;
 
             if (dist < minDistSq)
                 minDistSq = dist;
@@ -1718,54 +1682,6 @@ void SetupSampleRadii(void)
 
 /*
 ================
-BuildLightingTransfersForSample
-
-Builds the lighting transfer data for a single sample by tracing
-rays to neighbor samples and computing transfer weights.
-================
-*/
-static char s_assertDisable_Build_sample;    /* byte_480A8D */
-static char s_assertDisable_Build_vars;      /* byte_480A8C */
-static char s_assertDisable_Build_nanWeight; /* byte_480A8B */
-static char s_assertDisable_Build_nanBounce; /* byte_480A8A */
-static char s_assertDisable_Build_nanResult; /* byte_480A89 */
-
-void BuildLightingTransfersForSample(float *bouncedLight, float weight, Sample_t *sample)
-{
-    SampleVars_t *sampleVars;
-    float weighted[3];
-
-    Assert(sample != 0, s_assertDisable_Build_sample);
-    sampleVars = sample->vars;
-    Assert(sampleVars != 0, s_assertDisable_Build_vars);
-    Assert(!IS_NAN_FLOAT(weight), s_assertDisable_Build_nanWeight);
-    Assert(!IS_NAN_FLOAT(bouncedLight[0]) && !IS_NAN_FLOAT(bouncedLight[1])
-        && !IS_NAN_FLOAT(bouncedLight[2]), s_assertDisable_Build_nanBounce);
-
-    weighted[0] = weight * bouncedLight[0];
-    weighted[1] = weight * bouncedLight[1];
-    weighted[2] = weight * bouncedLight[2];
-
-    AcquireThreadLock((unsigned int)(uintptr_t)sample);
-
-    sampleVars->scattered[0] += weighted[0];
-    sampleVars->scattered[1] += weighted[1];
-    sampleVars->scattered[2] += weighted[2];
-
-    sampleVars->unscattered[0] += weighted[0];
-    sampleVars->unscattered[1] += weighted[1];
-    sampleVars->unscattered[2] += weighted[2];
-
-    Assert(!IS_NAN_FLOAT(sampleVars->unscattered[0])
-        && !IS_NAN_FLOAT(sampleVars->unscattered[1])
-        && !IS_NAN_FLOAT(sampleVars->unscattered[2]),
-           s_assertDisable_Build_nanResult);
-
-    ReleaseThreadLock((unsigned int)(uintptr_t)sample);
-}
-
-/*
-================
 GatherBounceForSample
 
 Gathers indirect (bounced) illumination for a single sample.
@@ -1773,13 +1689,13 @@ Iterates the transfer chain and accumulates weighted contributions
 from neighboring samples' scattered light.
 ================
 */
-static char s_assertDisable_Bounce_source;      /* byte_480A91 */
-static char s_assertDisable_Bounce_sourceVars;  /* byte_480A90 */
-static char s_assertDisable_Bounce_sampleVars;  /* byte_480A7E */
-static char s_assertDisable_Bounce_nanSource;   /* byte_480A8F */
-static char s_assertDisable_Bounce_nanBounced;  /* byte_480A8E */
+static char s_assertDisable_Bounce_source;
+static char s_assertDisable_Bounce_sourceVars;
+static char s_assertDisable_Bounce_sampleVars;
+static char s_assertDisable_Bounce_nanSource;
+static char s_assertDisable_Bounce_nanBounced;
 
-extern float g_energyScale; /* dword_4576F8: 1/3 or similar */
+extern float g_energyScale;
 
 void GatherBounceForSample(Sample_t *sourceSample, int threadIdx)
 {
@@ -1796,7 +1712,7 @@ void GatherBounceForSample(Sample_t *sourceSample, int threadIdx)
 
     /* The producer stores transfers on the hit sample: each entry therefore
      * names an incoming source.  This is the same pull topology as retail
-     * 0x407C50 (the old port mistakenly pushed entries back to their source). */
+     * 0x407C50. */
     Assert(!IS_NAN_FLOAT(sourceVars->unscattered[0])
         && !IS_NAN_FLOAT(sourceVars->unscattered[1])
         && !IS_NAN_FLOAT(sourceVars->unscattered[2]),
@@ -1939,35 +1855,22 @@ void RadiosityBounce(float epsilon, int threadCount)
 ================
 FindLightingTransfersForDirection
 
-Traces rays in a specific direction to find lighting transfers
-between samples. Used during the transport building phase.
-================
-*/
-/*
-================
-FindLightingTransfersForDirection
-
 Traces rays in a specific direction from a sample to find lighting
 transfers to neighboring samples. Computes transfer weights based
 on visibility and distance.
 
 1367 bytes — the largest function in compile.cpp. Contains ray
 tracing, transfer allocation, weight computation, and NaN checks.
-
-Parameters:
-  ecx = sampleIdx, rdx = sample, r8 = position, r9 = normal,
-  [stack] = dirIdx, [stack] = subAreaFactor
 ================
 */
-/* rand is from CRT (sub_43D4C0) */
 extern void Vec2Normalize(float *v);
 
-static char s_assertDisable_Dir_areaFactor;  /* byte_480A97 */
-static char s_assertDisable_Dir_sampleArea;  /* byte_480A96 */
-static char s_assertDisable_Dir_vars;        /* byte_480A95 */
-static char s_assertDisable_Dir_incident;    /* byte_480A94 */
-static char s_assertDisable_Dir_nanEnergy;   /* byte_480A93 */
-static char s_assertDisable_Dir_nanResult;   /* byte_480A92 */
+static char s_assertDisable_Dir_areaFactor;
+static char s_assertDisable_Dir_sampleArea;
+static char s_assertDisable_Dir_vars;
+static char s_assertDisable_Dir_incident;
+static char s_assertDisable_Dir_nanEnergy;
+static char s_assertDisable_Dir_nanResult;
 
 int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     float *position, float *normal, float subAreaFactor, int dirIdx)
@@ -1979,12 +1882,10 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     float pertDir[3]; /* perturbed direction on disk */
     float worldDir[3];
     LightingHit_t hitResults[4];
-    float outputNormal[3];
     SampleVars_t *sampleVars;
     int result;
     int traceClass;
     float factor;
-    float energy[3];
     int i;
 
     dirEntry = (float *)&((LightDirEntry_t *)g_lightDirArray)[dirIdx];
@@ -2022,7 +1923,7 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     }
 
     Assert(subAreaFactor > 0, s_assertDisable_Dir_areaFactor);
-    /* KISAK: >= rather than >.  Transport rejects subtract min(cellArea,
+    /* >= rather than >.  Transport rejects subtract min(cellArea,
      * weight) from the sample total (geometry.c ProcessLightingSampleArea), so
      * a fully occluded texel legitimately drains to exactly 0 while a sibling
      * 2x2 channel still holds area; retail 32-bit processes that state
@@ -2064,15 +1965,14 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     else if (traceClass == 4)
     {
         if (g_lightingSeedSkyPass)
-            return;
+            return 4; /* KIWI: was a bare return; the caller reads the class */
         /* hit neighbor samples — allocate transfers */
         for (i = 0; i < result; i++)
         {
             void *toSample = hitResults[i].sample;
             float weight = factor * hitResults[i].weight;
             /* The current sample owns its incoming-source list.  Retail
-             * 0x406F90 appends the packed hit sample to currentSample->vars;
-             * the previous port accidentally reversed these arguments. */
+             * 0x406F90 appends the packed hit sample to currentSample->vars. */
             AllocLightingTransfer(sample, toSample, dirIdx, weight);
         }
         return 4;

@@ -36,7 +36,7 @@
 
 struct kiwiBarbwireOpts_t
 {
-    int   source      = 0;       // KiwiBarbwire_SourceName() index (the stock model)
+    int   source      = 0;       // stock-model table index (KiwiBarbwire_SourceLabel)
     // Wires kept from the top of the source (its strands cluster by height into the
     // physical wires); 1 = the top strand alone, centred ON the curve.  0 = every wire
     // at its post height with the curve as the ground line.
@@ -56,7 +56,6 @@ struct kiwiBarbwireOpts_t
 
 // The stock models the strands can be lifted from (index = opts.source).
 int         KiwiBarbwire_SourceCount();
-const char *KiwiBarbwire_SourceName ( int i );     // "mil_barbedwire7"
 const char *KiwiBarbwire_SourceLabel( int i );     // what the dialog shows
 
 // Persisted dialog defaults (kiwi_radiant.ini [Barbwire]).

@@ -16,6 +16,7 @@
 #include <gfx_d3d/r_bsp.h>        // GfxWorld
 #include <universal/com_memory.h>  // fileData_s
 #include "kiwi_floatsnap.h"        // KIWI: noise-only half-grid snap
+#include "kiwi_vec.h"              // KIWI: KIWI_PI
 #include <universal/com_math.h>    // mat4x4 + typed MatrixInverse44(const mat4x4&, mat4x4&)
 #include <qcommon/qcommon.h>       // Com_*, errorParm_t, CM_*, DObj_s, dvar_t (via q_shared.h)
 #include <qcommon/threads.h>       // ThreadContext_t, WinThreadLock
@@ -729,6 +730,7 @@ void __cdecl CM_ShowBrushCollision(int contentMask, cplane_s *frustumPlanes,
 // ═════════════════════════════════════════════════════════════════════════════
 #include "qe3.h"           // entity_s, brush_t, eclass_t, models_t
 #include "prefs.h"         // g_PrefsDlg (prefData_t* — the real settings object)
+#include "kiwi_ported.h"   // KIWI: checks the shared externs against these definitions
 
 // 0x49cea0 — the editor's Assert.  Routed to iassert so the port's assert handling is
 // uniform; the binary pops a message box and lets you continue.
@@ -756,19 +758,6 @@ void FatalError(int code, const char *fmt, ...)
     RADIANT_BREAK_BEFORE_FATAL_EXIT();
     ExitProcess(1);
 }
-
-// Renderer enable/disable refcount pair (no-ops here).
-void DisableRendering_pp() {}
-void DisableRendering_mm() {}
-
-// MFC CString COW internals, referenced only by the g_bBuildList=1 eclass path (dead at
-// runtime, g_bBuildList defaults 0).  Linker satisfaction only.
-void cstr(void **, void *)                  {}
-void str_set(void **, void *, int)          {}
-void str_append(void **, void *, int)       {}
-void __strcpy(void **, int)                 {}
-void OleException(long)                     {}
-void *lpBuffer = nullptr;                   // CString accumulation buffer (build-list path)
 
 // `zero` (0x6D58F0) is the binary's empty-CString rep used as "" throughout the editor.
 // MUST point at a real empty string, not nullptr: ported code casts it to const char* and
@@ -805,7 +794,6 @@ selbrush_t g_brFrontSplits{};
 selbrush_t g_brBackSplits{};
 
 int g_nPatchClickedView = 0;                // 0x73b108 — which view a patch was clicked in
-int g_bPatchBendMode    = 0;                // 0x25d5b04
 int g_qeglobals_redispersePatchVerts = 0;   // 0x25d5a6b — "redisperse control points" mode
 
 // 0x181f51c — MaterialDef realize-state word (materialdef.cpp clears it on success;
@@ -819,13 +807,13 @@ prefabLevel_t g_prefabStack[16] = {};
 
 // texWndGlob.materialNameRemap (0x25e7a00) — head of the material-name remap list
 // ({char* key; char* value; node* next}).  Populated by the unported material remap
-// system; null here, so sub_45AD50 just strips to basename.
+// system; null here, so Mtl_NormalizeName just strips to basename.
 struct TexWndGlob_t { void *materialNameRemap; } texWndGlob;   // IDB texWndGlob (assert strings name .materialNameRemap)
 
 // filter_usage_array 0x739f80 / filter_locale_array 0x73a780 — the usage/locale filter
 // name tables (filter_material_t {char *name; int index} x 256), filled from index 1 by
 // TexFilter_LoadMenuFile (qe3.cpp).  Entry [0] is the static {"all", 0} the IDB ships in
-// .data and CTexWnd_Shutdown's free loop skips it, so its literal is never freed.
+// .data (the binary's CTexWnd_Shutdown free loop skipped it; KIWI never frees the table).
 struct RadiantFilterEntry { char *name; int index; };
 static_assert(sizeof(RadiantFilterEntry) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)");
 RadiantFilterEntry filter_usage_array[256]  = { { (char *)"all", 0 } };
@@ -904,31 +892,27 @@ void MatrixInverse44(const void *src, void *dst)
     MatrixInverse44( *(const mat4x4 *)src, *(mat4x4 *)dst );
 }
 
-extern void Vec3Cross( const float *a, const float *b, float *out );   // com_math 0x40a4d0
-
 // 0x4a45d0 (com_math.cpp:690) — index of the vec3 component with the largest
 // magnitude.  Canonical port is linearmapping.cpp Vec3_MajorAxis (this file
 // carried a duplicate copy).
 extern int Vec3_MajorAxis( const float *dir );
 
 // 0x4769a0 — solve the 2D texture-coordinate gradient for a face from two texture planes.
-// a1 = out face normal, a2 = {Sx,Sy,Sz,Sd, Tx,Ty,Tz,Td}, a3 = out gradient.  Reached from
-// Brush_ApplyTextureProjection (Drag_FaceAlign: align texture between two faces).
-void sub_4769A0( float *a1, const float *a2, float *a3 )
+// planes = {Sx,Sy,Sz,Sd, Tx,Ty,Tz,Td}.  Reached from Brush_ApplyTextureProjection
+// (Drag_FaceAlign: align texture between two faces).
+void Face_TexPlaneGradient( float *normalOut, const float *planes, float *gradOut )
 {
-    float *normalOut = (float *)(intptr_t)a1;
-    const float *p   = a2;   // S plane p[0..3], T plane p[4..7]
-    float *grad      = (float *)(intptr_t)a3;
+    const float *p = planes;   // S plane p[0..3], T plane p[4..7]
 
     Vec3Cross( p, p + 4, normalOut );
     Vec3Normalize_R( normalOut );
-    int v4 = Vec3_MajorAxis( normalOut );
-    int v5 = ( v4 + 1 ) % 3;
-    int v6 = ( v4 + 2 ) % 3;
-    float v8 = p[v6 + 4] * p[v5] - p[v5 + 4] * p[v6];
-    grad[v5] = ( p[7] * p[v6] - p[v6 + 4] * p[3] ) / v8;
-    grad[v6] = ( p[v5 + 4] * p[3] - p[7] * p[v5] ) / v8;
-    grad[v4] = 0.0f;
+    int major = Vec3_MajorAxis( normalOut );
+    int u     = ( major + 1 ) % 3;
+    int v     = ( major + 2 ) % 3;
+    float det = p[v + 4] * p[u] - p[u + 4] * p[v];
+    gradOut[u]     = ( p[7] * p[v] - p[v + 4] * p[3] ) / det;
+    gradOut[v]     = ( p[u + 4] * p[3] - p[7] * p[u] ) / det;
+    gradOut[major] = 0.0f;
 }
 
 // ─── brush `contents` / `toolFlags` line: parse (0x42f710) + write (0x42f6a0) ─────
@@ -984,13 +968,13 @@ static int Map_ParseFlagsLine( const char **text, const char *keyword,
     return bits;
 }
 
-int  sub_42FB80( const char **text ) { return Map_ParseFlagsLine( text, "contents",  s_contentsTable  ); }
-int  sub_42FBA0( const char **text ) { return Map_ParseFlagsLine( text, "toolFlags", s_toolflagsTable ); }
+int  Map_ParseContentsLine( const char **text )  { return Map_ParseFlagsLine( text, "contents",  s_contentsTable  ); } // 0x42FB80
+int  Map_ParseToolFlagsLine( const char **text ) { return Map_ParseFlagsLine( text, "toolFlags", s_toolflagsTable ); } // 0x42FBA0
 
 // 0x45ad50 — material-name normaliser: strip to basename, then apply the
 // materialNameRemap table (case-insensitive).  Only the version==0 legacy .map parse
 // path calls it (Patch_ParseMesh / Face_ParseSurfDef gate on version == 0).
-char *sub_45AD50(char *name)
+char *Mtl_NormalizeName(char *name)
 {
     char *base = name;
     for ( char *p = name; *p; ++p )
@@ -1011,7 +995,7 @@ char *sub_45AD50(char *name)
 // to it; otherwise leave the value alone.  __usercall — the float arrives on the stack,
 // the threshold in ecx.  Sole caller Face_ParseSurfDef (0x472ec0) passes threshold=4 to
 // scrub two parsed texdef floats in the legacy (version<4) .map format.
-float sub_4AACC0( float f, int threshold )
+float Float_CleanLowBits( float f, int threshold )
 {
     unsigned int bits = *(unsigned int *)&f;
     int low = (int)( bits & 0xFFF );
@@ -1022,44 +1006,11 @@ float sub_4AACC0( float f, int threshold )
     return *(float *)&bits;
 }
 
-// 0x4aa220 — rotate a vec3 by sequential X/Y/Z Euler angles (degrees).  Component pairs
-// (a,b) per axis: X->(1,2) Y->(2,0) Z->(0,1) (the index table baked into the binary; the
-// decompiler renders the X pair as a stack-adjacency read of the preceding local).
-// dbl_6F42B0 is the float-rounded PI widened to double — exactly what the x87 code loads.
-// KIWI: the true PI here and in RAD_PI below (they pair: physics-primitive parse goes
-// AxisToAngles -> sub_4AA220), so the angles written for the game's exact AnglesToAxis
-// are not biased by float PI's -2.8e-8.
-static const double SUB4AA220_PI = 3.14159265358979323846;   // dbl_6F42B0 was float PI
-
-void sub_4AA220( const float *in, const float *anglesDeg, float *out )   // 0x4aa220
-{
-    static const int pair[3][2] = { { 1, 2 }, { 2, 0 }, { 0, 1 } };
-
-    float v[3] = { in[0], in[1], in[2] };
-    for ( int i = 0; i < 3; ++i )
-    {
-        if ( anglesDeg[i] != 0.0f )
-        {
-            double rad = (double)anglesDeg[i] * SUB4AA220_PI / 180.0;
-            float  c   = (float)cos( rad );
-            float  s   = (float)sin( rad );
-            int    a   = pair[i][0];
-            int    b   = pair[i][1];
-            float  va  = v[a];
-            float  vb  = v[b];
-            v[a] = va * c - vb * s;
-            v[b] = va * s + vb * c;
-        }
-    }
-    out[0] = v[0];
-    out[1] = v[1];
-    out[2] = v[2];
-}
-
 // vector->angle helpers: vectoangles 0x4a5020, vectosignedpitch 0x4a4f70, AxisToAngles
 // 0x4a8a00.  The originals are inline x87; the math is the standard Quake form.  Reached
 // on the prefab-enter camera reframe, not on the .map round-trip path.
-static const double RAD_PI = 3.14159265358979323846;   // KIWI: dbl_6F42B0 was float PI widened
+// KIWI: true PI (KIWI_PI), so the angles written for the game's exact AnglesToAxis are
+// not biased by the binary's float PI (-2.8e-8).
 
 void Radiant_VecToAngles( float *ang, const float *vec )         // 0x4a5020
 {
@@ -1072,11 +1023,11 @@ void Radiant_VecToAngles( float *ang, const float *vec )         // 0x4a5020
     }
     else
     {
-        yaw = (float)( atan2( (double)vec[1], (double)vec[0] ) * 180.0 / RAD_PI );
+        yaw = (float)( atan2( (double)vec[1], (double)vec[0] ) * 180.0 / KIWI_PI );
         if ( yaw < 0.0f )
             yaw += 360.0f;
         double fwd = sqrt( (double)vec[0] * vec[0] + (double)vec[1] * vec[1] );
-        pitch = (float)( atan2( (double)vec[2], fwd ) * -180.0 / RAD_PI );
+        pitch = (float)( atan2( (double)vec[2], fwd ) * -180.0 / KIWI_PI );
         if ( pitch < 0.0f )
             pitch += 360.0f;
     }
@@ -1091,7 +1042,7 @@ static float vectosignedpitch( const float *vec )
     if ( vec[1] == 0.0f && vec[0] == 0.0f )
         return ( -vec[2] < 0.0f ) ? -90.0f : 90.0f;   // flt_6F4410 / flt_6F4414
     double fwd = sqrt( (double)vec[0] * vec[0] + (double)vec[1] * vec[1] );
-    return (float)( atan2( (double)vec[2], fwd ) * -180.0 / RAD_PI );
+    return (float)( atan2( (double)vec[2], fwd ) * -180.0 / KIWI_PI );
 }
 
 void AxisToAngles( float *angles, float (*axis)[3] )   // 0x4a8a00
@@ -1133,8 +1084,6 @@ void AxisToAngles( float *angles, float (*axis)[3] )   // 0x4a8a00
 // com_math versions, which differ by const/return); the orientation pair is in draw.cpp.
 // Vec3RotateTranspose's top-level-const pointer params are load-bearing: MSVC mangles
 // them distinctly, and entity.cpp's call resolves against exactly this declaration.
-extern void OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );
-extern void OrientationDirToWorldDir( float *out, const orientation_t *orient, const float *dir );
 
 void OrientationConcatenate( const orientation_t *orFirst, const orientation_t *orSecond,
                              orientation_t *out )
@@ -1174,10 +1123,7 @@ void Vec3RotateTranspose( float * const in, float ( *matrix )[3], float * const 
 // 0x42fb40 — write `layer "<name>"` for a non-default layer.
 void MapLoad_ParseBrush_Layer(int (**writer)(void *, const char *, ...), const char *layerStr)
 {
-    // KEEP_VERBOSE: this IS the mapparsing.cpp:190 assert carrier (foreign common/ TU).
-    if ( !layerStr )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\common\\mapparsing.cpp",
-                190, 0, "%s", "layerName" );
+    iassert( layerStr );
     (**writer)( writer, "layer \"%s\"\n", layerStr );
 }
 // 0x42f6a0 — write `  <keyword> name name ... ;` when value is non-zero, nothing
@@ -1211,23 +1157,6 @@ void Error(const char *fmt, ...)
     Com_Error(ERR_FATAL, "Radiant Error: %s", buf);
 }
 
-// j__atol — IDA import thunk for atol.
-long j__atol(const char *s) { return atol(s); }
-
-// Trampolines for two brush.cpp entry points whose IDB __usercall shape passes
-// face/brush as ints: sub_476740 -> Brush_SetFaceTexdefSize, sub_4767E0 ->
-// Brush_SetFaceTexdef (find/replace "Live" path + select.cpp Brush_SetTextureMapping).
-void Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b);           // brush.cpp 0x476740
-brush_t *Brush_SetFaceTexdef( const texdef_sub_t *texDef, face_t *f, brush_t *b );  // brush.cpp 0x4767e0
-void sub_476740( const patchMesh_material *texdef, face_t *face, brush_t *brush)
-{
-    Brush_SetFaceTexdefSize(texdef, face, brush);
-}
-void sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushDef )
-{
-    Brush_SetFaceTexdef( texDef, (face_t *)(intptr_t)facePtr, (brush_t *)(intptr_t)brushDef );
-}
-
 
 extern void Com_BeginParseSession(const char *);  // q_parse.cpp
 
@@ -1245,78 +1174,11 @@ char *VA( int slot, const char *fmt, ... )
     return s_vaBufs[idx];
 }
 
-// 0x42c1e0 MainFrm_EntList is NOT a window populate: like MainFrm_BrushList (ported in
-// mainfrm.cpp) it is a pure Assert-based consistency walk over the entity list, and it
-// recurses into each prefab.  UNPORTED on purpose: several of its invariants
-// (ent->modelInst == 0 for a fixed-size entity, ent->version != ent->def->version) are
-// about bookkeeping this port deliberately does differently, so porting it verbatim
-// would fire asserts on healthy maps.  See CLEANUP_TRACKER (unit 11) before wiring it.
-void MainFrm_EntList( entity_s *, const char * ) {}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  PERFORCE COMMAND LAYER  (0x437640 / 0x4377e0 / 0x437850 / 0x4379c0)
-//
-//  CANNOT BE PORTED — the binary does NOT shell out to p4.exe.  P4_RunCommand
-//  (0x437640) drives the statically-linked PERFORCE C++ API directly:
-//      ClientApi client;              // sub_4DED90 ctor / sub_4DE910 dtor
-//      Error e;
-//      client.Init(&e);               // sub_4DE950   -> CheckError("Init")  0x437560
-//      char buf[1024]; strcpy(buf, path);
-//      char *argv[1] = { buf };
-//      client.SetArgv(1, argv);       // sub_4E8230
-//      client.Run(cmd, ui);           // sub_4DE980   (ui = the ClientUser subclass)
-//      bool failed = g_p4Failed;      // byte_25D5A69 — set by the ClientUser callbacks
-//      g_p4Failed = 0;
-//      client.Final(&e);              // sub_4DE990   -> CheckError("Final") 0x437560
-//      return !failed;
-//  and the three wrappers are each one line of it with a different ClientUser + verb:
-//      P4_OpenForEdit (0x4377e0)  StdClientUser    verb "edit"
-//      P4_AddFile     (0x437850)  StdClientUser    verb "add"
-//      FileExists     (0x4379c0)  SilentClientUser verb "fstat"   <- a PERFORCE query,
-//                                 NOT a filesystem probe (it answers "is this path known
-//                                 to the depot?").
-//  p4api (clientapi.h / p4api.lib) is a third-party dependency that is not in the
-//  KIWI tree, so the ClientApi half is unportable here.  What IS reproduced is the
-//  binary's own Init-FAILURE path (0x4376b9): CheckError("Init") true -> clear
-//  g_qeglobals.toggle_unk05 for the session and return false.  That is exactly what the
-//  real function does on a machine with no p4 connection, and it keeps every caller
-//  (Map_SaveFileToPerforce 0x48cc70, Eclass_RealizeModel) on a faithful branch.
-//  toggle_unk05 is zero-initialised and nothing in this port sets it, so these are
-//  unreachable in practice; wiring real p4 support means adding p4api and filling in
-//  P4_RunCommand below — nothing else changes.
-// ═════════════════════════════════════════════════════════════════════════════
-// 0x437640 — the shared entry point.  `ui` is the ClientUser subclass vtable the real
-// implementation would pass to ClientApi::Run; kept in the signature so the three
-// wrappers stay 1:1 with the binary.
-static bool P4_RunCommand( const char * /*uiKind*/, const char * /*path*/, const char * /*verb*/ )
-{
-    g_qeglobals.toggle_unk05 = false;   // 0x437772 — the Init/Final failure path
-    return false;                       // 0x4376df
-}
-
-bool P4_OpenForEdit( const char *path )      // 0x4377e0
-{
-    return P4_RunCommand( "StdClientUser", path, "edit" );
-}
-bool P4_AddFile( const char *path )          // 0x437850
-{
-    return P4_RunCommand( "StdClientUser", path, "add" );
-}
-int  FileExists( const char *path )          // 0x4379c0 — `p4 fstat`, see the banner
-{
-    return P4_RunCommand( "SilentClientUser", path, "fstat" ) ? 1 : 0;
-}
-
-// Historical port names kept as forwarders so the existing call sites (map.cpp) and the
-// IDB addresses stay greppable.
-void sub_437850( const char *path ) { P4_AddFile( path ); }
-int  sub_4377E0( const char *path ) { return P4_OpenForEdit( path ) ? 1 : 0; }
-
 // unknown_libname_291 — the CRT bounds-check abort (IDA _VEC_validate equivalent),
 // reached from g_SelectedFaces.GetAt indexing.
-void unknown_libname_291()
+void SelectedFaces_BoundsAbort()
 {
-    Com_Error(ERR_FATAL, "RADIANT: g_SelectedFaces bounds check failed (unknown_libname_291)");
+    Com_Error(ERR_FATAL, "RADIANT: g_SelectedFaces bounds check failed");
 }
 
 // 0x447860 — 1 iff no faces are selected and EVERY selected brush is a patch (selection

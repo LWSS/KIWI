@@ -11,9 +11,7 @@
 #include "kiwi_csg.h"
 #include "kiwi_autobool.h"
 #include "kiwi_command.h"                      // KIWI_CMD_AUTO_BOOL
-
-extern int  Sys_Printf( const char *fmt, ... );            // win_qe3.cpp
-extern void Radiant_ExecCommand( unsigned int cmdId );     // mainfrm.cpp
+#include "kiwi_ported.h"
 
 namespace
 {
@@ -77,7 +75,7 @@ bool KiwiCsg_CanHollow()
         return false;
     if ( first->next != &selected_brushes )
         return false;
-    return CsgUsable( first );
+    return CsgUsable( first ) && !first->xx5;   // KIWI: the core skips xx5 (csg.cpp)
 }
 
 bool KiwiCsg_CanMerge()
@@ -152,11 +150,11 @@ void KiwiCsg_MenuItems()
         Radiant_ExecCommand( (unsigned int)KIWI_CMD_AUTO_BOOL );
     ImGui::EndDisabled();
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Greedily merge every PAIR of selected brushes whose union\n"
-                           "is exactly ONE convex brush, until no pair is left.\n"
-                           "Lossless: no face is deleted and no plane is moved, so\n"
-                           "the volume cannot change.  Greedy, so the result depends\n"
-                           "on order.  One Ctrl+Z undoes the whole run." );
+        ImGui::SetTooltip( "Merge selected brushes whose union is exactly ONE convex\n"
+                           "brush - pairs first, then clusters of 3+ - until nothing\n"
+                           "changes.  No outer plane moves, so the volume cannot\n"
+                           "change.  Greedy, so the result depends on order; one\n"
+                           "undo reverts the whole run." );
 
     // csg.cpp has no subtract core; Boolean Difference composes the splitter instead.
     ImGui::TextDisabled( "Subtract: press Q (Boolean -> difference), kiwi_boolean.h" );

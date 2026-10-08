@@ -13,6 +13,7 @@
 #include "kiwi_test.h"          // KIWI-TEST: console tee (no-op outside test mode)
 #include "kiwi_shadowcache.h"   // KiwiShadowCache_Invalidate
 #include "kiwi_lightcache.h"    // KiwiLightCache_MapModified
+#include "kiwi_ported.h"        // KIWI: shared engine/editor externs
 
 // ────────────────────────────────────────────────────────────────────────────
 // Forward declarations from engine / other radiant TUs
@@ -128,15 +129,6 @@ int Sys_Printf( const char *fmt, ... )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x499eb0  Sys_DoubleTime - `(double)clock() / 1000.0` in the binary (the CRT clock(),
-// NOT timeGetTime/GetTickCount; CLOCKS_PER_SEC == 1000 on MSVC).
-// ─────────────────────────────────────────────────────────────────────────────
-double Sys_DoubleTime( void )
-{
-    return (double)clock() / 1000.0;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Sys_GetCursorPos  (0x499C90, 36 bytes)
 // Thin Win32 GetCursorPos() wrapper.  36 bytes on x86 = call + POINT local +
 // two field reads.  Fully portable.
@@ -155,7 +147,6 @@ void Sys_GetCursorPos( int *x, int *y )
 // The actual RedrawWindow broadcast is deferred to CMainFrame::UpdateWindows, flushed
 // each idle by RoutineProcessing (CRadiantApp::OnIdle). Faithful to the binary.
 // ─────────────────────────────────────────────────────────────────────────────
-extern int g_nUpdateBits;      // engine_stubs.cpp (0x25D5A74)
 void Sys_UpdateWindows( int bits )
 {
     g_nUpdateBits |= bits;
@@ -193,8 +184,6 @@ void Sys_Status( const char *psz )
 // 0x499bb0  MarkMapModified - set `modified` and put "<currentmap> *" (backslashes to
 // forward slashes) in the frame title.  Brush_Move calls it after every edit.
 // ─────────────────────────────────────────────────────────────────────────────
-extern int  modified;          // map.cpp (0x23f179c)
-extern char currentmap[];      // map.cpp (0x23f18d8)
 void MarkMapModified( void )
 {
     // The editor's "geometry changed" funnel: the recorded caster walk stores composed
@@ -210,65 +199,6 @@ void MarkMapModified( void )
             if ( *p == '\\' ) *p = '/';
         SetWindowTextA( g_qeglobals.d_hwndMain, title );
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499c40  Sys_SetTitle - SetWindowTextA(d_hwndMain, text).
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_SetTitle( const char *text )
-{
-    SetWindowTextA( g_qeglobals.d_hwndMain, text );
-}
-
-// hCursor in the binary (0x240A114) — the cursor Sys_BeginWait must restore.
-static HCURSOR g_hWaitCursor = NULL;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499c50  Sys_BeginWait - SetCursor(IDC_WAIT), saving the PREVIOUS cursor (SetCursor
-// returns the one it replaced) into hCursor for Sys_EndWait.
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_BeginWait( void )
-{
-    g_hWaitCursor = SetCursor( LoadCursorA( NULL, IDC_WAIT ) );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499c70  Sys_EndWait - restore the cursor Sys_BeginWait saved, and clear the slot.
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_EndWait( void )
-{
-    if ( g_hWaitCursor )
-    {
-        SetCursor( g_hWaitCursor );
-        g_hWaitCursor = NULL;
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499cc0  Sys_SetCursorPos - SetCursorPos(x, y); inverse of Sys_GetCursorPos.
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_SetCursorPos( int x, int y )
-{
-    SetCursorPos( x, y );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499cd0  Sys_Beep - MessageBeep(MB_ICONASTERISK).
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_Beep( void )
-{
-    MessageBeep( MB_ICONASTERISK );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499d50  Sys_ClearPrintf - SendMessageA(d_hwndEdit, WM_SETTEXT, 0, "") empties the
-// console edit control (no-op while d_hwndEdit is NULL, i.e. headless).
-// ─────────────────────────────────────────────────────────────────────────────
-void Sys_ClearPrintf( void )
-{
-    extern void ImGuiConsole_Clear();      // imgui_shell.cpp — clear the visible ImGui console
-    ImGuiConsole_Clear();
-    SendMessageA( g_qeglobals.d_hwndEdit, WM_SETTEXT, 0, (LPARAM)"" );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,137 +263,5 @@ BOOL LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSize )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x499a40  SaveWindowState - persist a child window's placement.  GetWindowRect; for any
-// window other than the main frame, reparent it under the frame (if it is not already) and
-// MapWindowPoints the rect into frame client coords, so it is stored RELATIVE to the
-// frame; then SaveRegistryInfo(pszName, &rect, 16).  __usercall hWnd@<esi> -> __cdecl.
-// Binary caller: CMainFrame::OnDestroy (saves every pane rect on shutdown); the port's
-// OnDestroy is a subset that only saves the MRU.
-// ─────────────────────────────────────────────────────────────────────────────
-BOOL SaveWindowState( HWND hWnd, const char *pszName )
-{
-    RECT rect;
-    GetWindowRect( hWnd, &rect );                 // 0x499a4b
-
-    if ( hWnd != g_qeglobals.d_hwndMain )         // 0x499a57
-    {
-        if ( GetParent( hWnd ) != g_qeglobals.d_hwndMain )   // 0x499a68
-            SetParent( hWnd, g_qeglobals.d_hwndMain );       // 0x499a6c
-        // map the screen RECT (2 points) into main-frame client coords  0x499a81
-        MapWindowPoints( 0, g_qeglobals.d_hwndMain, (LPPOINT)&rect, 2 );
-    }
-
-    return SaveRegistryInfo( pszName, &rect, 16 );           // 0x499a99
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499aa0  LoadWindowState - restore a placement saved by SaveWindowState: seed size=16,
-// LoadRegistryInfo into [left,top,right,bottom]; on failure return 0.  Clamp left/top to
-// >= 0 and right/bottom to leave at least a 16px window, then MoveWindow(..., FALSE).
-// __usercall pszName@<ecx> normalised to __cdecl.  Its binary caller
-// CMainFrame::OnCreateClient restores each pane rect; the port lays panes out manually.
-// ─────────────────────────────────────────────────────────────────────────────
-BOOL LoadWindowState( HWND hWnd, const char *pszName )
-{
-    int   rect[4];             // [left, top, right, bottom]  ([ebp+X], +Y, +var_10, +var_C)
-    DWORD lSize = 16;          // [ebp+var_8] = 0x10  (in/out size)
-
-    if ( !LoadRegistryInfo( pszName, rect, (long *)&lSize ) )   // 0x499ab7
-        return FALSE;                                          // 0x499b19
-
-    int left = rect[0];        // X
-    if ( left < 0 ) left = rect[0] = 0;                        // 0x499ac8
-
-    int top = rect[1];         // Y
-    if ( top < 0 ) top = rect[1] = 0;                          // 0x499ad4
-
-    int right = rect[2];       // var_10
-    if ( right < left + 16 ) right = rect[2] = left + 16;      // 0x499ae3
-
-    int bottom = rect[3];      // var_C
-    if ( bottom < top + 16 ) bottom = rect[3] = top + 16;      // 0x499af2
-
-    MoveWindow( hWnd, left, top, right - left, bottom - top, FALSE );   // 0x499b07
-    return TRUE;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x499600  MFCCreate - the name is the enthusiast IDB's; it creates NO windows.  It is
-// the saved-preferences loader / default-seeder called by CMainFrame::OnCreate:
-//   1. LoadRegistryInfo("SavedInfo", &g_qeglobals.d_savedinfo, size=0x2c4);
-//   2. if the loaded iSize != 0x2c4 (no/old saved data) seed the FULL default SavedInfo_t
-//      (colour palette + iTextMenu=32993 + d_gridsize + d_picmip=2), then - if the old
-//      iSize was SMALLER - re-load with the old size on top, preserving what an older
-//      build had saved;
-//   3. CheckMenuItem the six View->Show toggles whose d_xyShowFlags bits are set
-//      (menu ids 0x84b6 Connections / 0x84b3 Names / 0x84b5 Blocks / 0x84b7 Coordinates
-//      / 0x84b4 Angles / 0x8d1f ReverseFilter).  Returns the last CheckMenuItem result.
-// KISAK: NOT auto-called - the port's OnCreate seeds the same palette itself
-// (Radiant_SetDefaultGridState) and its View->Show handlers do their own menu checks.
-// Wiring this in to restore the registry-persisted SavedInfo is a follow-up.
-// ─────────────────────────────────────────────────────────────────────────────
-HMENU MFCCreate( void )
-{
-    SavedInfo_t &si = g_qeglobals.d_savedinfo;
-
-    DWORD size = 0x2C4;                                              // 0x499619
-    LoadRegistryInfo( "SavedInfo", &si, (long *)&size );             // 0x49961c
-
-    int  oldSize = si.iSize;                                         // 0x499621
-    bool wasSmaller = (unsigned)si.iSize < 0x2C4u;                   // 0x499629 (CF of cmp)
-    if ( si.iSize != 0x2C4 )                                         // 0x49962b
-    {
-        // ── default SavedInfo_t (verbatim 0x499637..0x49987d) ──
-        si.iSize = 0x2C4;                // 0x499637
-        si.iTextMenu = 32993;            // 0x499643
-        // 0x499653 is `mov dword [d_gridsize], 1` — an INTEGER store of the dword 1 into
-        // the float field, NOT 1.0f.  Bit pattern becomes 0x00000001 (a denormal, ~1.4e-45),
-        // matching the IDB's `LODWORD(d_gridsize) = 1`.  This SavedInfo_t copy of d_gridsize
-        // is never used as the live grid (Radiant_SetDefaultGridState sets the live one to 5);
-        // kept bit-exact for faithful registry round-trips.
-        *(int *)&si.d_gridsize = 1;      // 0x499653 (bit-exact int store)
-        si.d_picmip = 2;                 // 0x4997f5
-
-        si.colors[0][0] = 0.25f;  si.colors[0][1] = 0.25f;  si.colors[0][2] = 0.25f;  si.colors[0][3] = 1.0f;
-        si.colors[1][0] = 1.0f;   si.colors[1][1] = 1.0f;   si.colors[1][2] = 1.0f;   si.colors[1][3] = 1.0f;
-        si.colors[2][0] = 0.75f;  si.colors[2][1] = 0.75f;  si.colors[2][2] = 0.75f;  si.colors[2][3] = 1.0f;
-        si.colors[3][0] = 0.5f;   si.colors[3][1] = 0.5f;   si.colors[3][2] = 0.5f;   si.colors[3][3] = 1.0f;
-        si.colors[4][0] = 0.25f;  si.colors[4][1] = 0.25f;  si.colors[4][2] = 0.25f;  si.colors[4][3] = 1.0f;
-        // colors[5] / colors[6] left untouched by the binary
-        si.colors[7][0] = 0.0f;   si.colors[7][1] = 0.0f;   si.colors[7][2] = 1.0f;   si.colors[7][3] = 1.0f;
-        si.colors[8][0] = 0.0f;   si.colors[8][1] = 0.0f;   si.colors[8][2] = 0.0f;   si.colors[8][3] = 1.0f;
-        si.colors[9][0] = 0.0f;   si.colors[9][1] = 0.0f;   si.colors[9][2] = 0.0f;   si.colors[9][3] = 1.0f;
-        si.colors[10][0] = 1.0f;  si.colors[10][1] = 0.0f;  si.colors[10][2] = 0.0f;  si.colors[10][3] = 1.0f;
-        si.colors[11][0] = 1.0f;  si.colors[11][1] = 0.25f; si.colors[11][2] = 0.25f; si.colors[11][3] = 0.25f;
-        si.colors[12][0] = 0.0f;  si.colors[12][1] = 0.0f;  si.colors[12][2] = 1.0f;  si.colors[12][3] = 1.0f;
-        si.colors[13][0] = 0.5f;  si.colors[13][1] = 0.0f;  si.colors[13][2] = 0.75f; si.colors[13][3] = 1.0f;
-        si.colors[14][0] = 0.0f;  si.colors[14][1] = 0.60000002f; si.colors[14][2] = 0.0f; si.colors[14][3] = 1.0f;
-        // colors[15] left untouched
-        si.colors[16][0] = 1.0f;  si.colors[16][1] = 0.25f; si.colors[16][2] = 0.25f; si.colors[16][3] = 0.25f;
-        si.colors[17][0] = 0.75f; si.colors[17][1] = 0.75f; si.colors[17][2] = 0.75f; si.colors[17][3] = 1.0f;
-        si.colors[18][0] = 0.75f; si.colors[18][1] = 0.75f; si.colors[18][2] = 0.75f; si.colors[18][3] = 1.0f;
-        si.colors[19][0] = 0.5f;  si.colors[19][1] = 0.60000002f; si.colors[19][2] = 0.0f; si.colors[19][3] = 1.0f;
-        si.colors[20][0] = 0.64999998f; si.colors[20][1] = 0.0f; si.colors[20][2] = 0.0f; si.colors[20][3] = 1.0f;
-        si.colors[21][0] = 0.85000002f; si.colors[21][1] = 0.0f; si.colors[21][2] = 0.85000002f; si.colors[21][3] = 1.0f;
-        si.colors[22][0] = 0.80000001f; si.colors[22][1] = 0.60000002f; si.colors[22][2] = 0.0f; si.colors[22][3] = 1.0f;
-
-        if ( wasSmaller )                                            // 0x499883
-        {
-            DWORD v4 = (DWORD)oldSize;                               // 0x499885
-            LoadRegistryInfo( "SavedInfo", &si, (long *)&v4 );       // 0x499895
-        }
-    }
-
-    HMENU hMenu = GetMenu( g_qeglobals.d_hwndMain );                 // 0x4998a3
-    if ( hMenu )                                                     // 0x4998ad
-    {
-        HMENU v3 = hMenu;
-        if ( si.d_xyShowFlags & 0x4 )    hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x84B6, 0 ); // Connections
-        if ( si.d_xyShowFlags & 0x8 )    hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x84B3, 0 ); // Names
-        if ( si.d_xyShowFlags & 0x10 )   hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x84B5, 0 ); // Blocks
-        if ( si.d_xyShowFlags & 0x20 )   hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x84B7, 0 ); // Coordinates
-        if ( si.d_xyShowFlags & 0x2 )    hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x84B4, 0 ); // Angles
-        if ( si.d_xyShowFlags & 0x40 )   hMenu = (HMENU)(UINT_PTR)CheckMenuItem( v3, 0x8D1F, 0 ); // ReverseFilter
-    }
-    return hMenu;
-}
+// KIWI: MFCCreate (0x499600, OnCreate's "SavedInfo" registry-blob loader + default seeder) is
+// gone - Radiant_SetDefaultGridState seeds the same defaults, and nothing writes the blob.

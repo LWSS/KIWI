@@ -1,8 +1,5 @@
 /*
  * lightgrid.c — Light grid calculation and encoding for static lighting.
- *
- * All functions verified against cod2rad64 LST line by line.
- * Source: lightgrid.cpp (from LST source tags)
  */
 
 #include "cod2rad64.h"
@@ -460,7 +457,7 @@ extern void fseek_wrap(void *file, int offset, int whence);
 extern int ftell_wrap(void *file);
 extern long long fread_wrap(void *dst, int elemSize, long long count, void *file);
 extern void fclose_wrap(void *file);
-/* BuildFilePath — copies base path to out buffer. Inlined from binary. */
+/* BuildFilePath — copies base path to out buffer. */
 static void BuildFilePath(const char *basePath, char *outPath)
 {
     while ((*outPath++ = *basePath++) != '\0') { }
@@ -501,26 +498,6 @@ static int LightGrid_HasPointAtWorldPos(const float *worldPos)
         }
     }
     return 0;
-}
-
-/* geometry.cpp 0x40A040: classify an AABB (centre followed by extents)
- * against a plane.  The occupancy tree's recursive collector uses these
- * exact three return values: 0=back, 1=front, 3=straddling. */
-static int LightGrid_ClassifyAabbAgainstPlane(const float *plane,
-                                              const float *centre,
-                                              float planeDist)
-{
-    float radius = fabsf(centre[0]) * plane[3] +
-                   fabsf(centre[1]) * plane[4] +
-                   fabsf(centre[2]) * plane[5];
-    float distance = plane[0] * centre[0] + plane[1] * centre[1] +
-                     plane[2] * centre[2] - planeDist;
-
-    if (distance >= radius)
-        return 0;
-    if (distance <= -radius)
-        return 1;
-    return 3;
 }
 
 /* The retail 0x409E70/0x409F70 query walks a second triangle occupancy
@@ -755,9 +732,9 @@ static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
                                                    float *outBuffer,
                                                    float *cod4Vector);
 
-#define GRID_ORIGIN_OFFSET  (-131072.0f)  /* dword_458A90 = 0xC8000000 */
-#define GRID_SCALE_XY       0.03125f      /* dword_458784 = 0x3D000000 = 1/32 */
-#define GRID_SCALE_Z        0.015625f     /* dword_458A8C = 0x3C800000 = 1/64 */
+#define GRID_ORIGIN_OFFSET  (-131072.0f)
+#define GRID_SCALE_XY       0.03125f      /* 1/32 */
+#define GRID_SCALE_Z        0.015625f     /* 1/64 */
 
 /* ── LUMP 44/45/2 serialization, native 0x4134A0 → 0x413320 → 0x413160 →
  *    0x412E80 / 0x412CF0 ──────────────────────────────────────────────────
@@ -776,8 +753,8 @@ typedef struct GridCell_s
     unsigned char  needsTrace;
 } GridCell_t;
 
-static int s_gridRowAxis;   /* dword_61B2D14 */
-static int s_gridColAxis;   /* dword_61B2D18 */
+static int s_gridRowAxis;
+static int s_gridColAxis;
 
 /* 0x410110: order by row coordinate, then column, then z. */
 static int LightGrid_CellCompare(const void *a, const void *b)
@@ -1108,7 +1085,6 @@ static GridPendingColor_t *s_gridPendingColors;
  * CalculateLightGrid_Worker — calculate light grid for a single point.
  * Address: 0x411910 | Size: 141 bytes
  *
- * ecx=gridIndex, edx=flags
  * Allocates a grid sample, gathers incident light, encodes SH, stores result.
  */
 void CalculateLightGrid_Worker(int gridIndex, int flags)
@@ -1165,7 +1141,7 @@ void CalculateLightGrid_Worker(int gridIndex, int flags)
 void AllocGridTraceDirections(void)
 {
     int i;
-    float scale = 3.0517578e-5f; /* dword_458B18 = 0x38000000 ~ 1/32768 */
+    float scale = 3.0517578e-5f; /* ~1/32768 */
 
     /* allocate: numDirections * 3 * 4 bytes */
     g_traceDirections = (float *)malloc((unsigned long long)g_numTraceDirections * 3 * sizeof(float));
@@ -1173,10 +1149,9 @@ void AllocGridTraceDirections(void)
         ErrorMsg("Couldn't allocate %i bytes for grid trace directions\n",
                     g_numTraceDirections * 3 * (int)sizeof(float));
 
-    /* LST 0x411A45-0x411A83: call rand_int twice per iter, compute a random
-     * sphere point via PointOnSphereFromUniformDeviates (sub_428C50).
-     * This pass only advances rand state — the array is immediately
-     * overwritten by the Fibonacci-spiral call below. */
+    /* Calls rand_int twice per iteration and computes a random sphere point via
+     * PointOnSphereFromUniformDeviates.  This pass only advances rand state — the
+     * array is immediately overwritten by the Fibonacci-spiral call below. */
     for (i = 0; i < g_numTraceDirections; i++)
     {
         float theta, phi;
@@ -1189,8 +1164,8 @@ void AllocGridTraceDirections(void)
         PointOnSphereFromUniformDeviates(theta, phi, dir);
     }
 
-    /* LST 0x411AA6: jmp com_math_428EF0 = UniformPointsOnSphere(count, arr, 12).
-     * Deterministic golden-angle spiral; overwrites the random array above. */
+    /* UniformPointsOnSphere(count, arr, 12): deterministic golden-angle spiral;
+     * overwrites the random array above. */
     UniformPointsOnSphere(g_numTraceDirections, g_traceDirections, 12);
     LightGrid_BuildCod4Basis();
 }
@@ -1203,9 +1178,9 @@ void AllocGridTraceDirections(void)
  * origin expansion.  These helpers preserve its fixed record validation and
  * automatic/authored point merging.
  */
-/* CoD4Rad sub_40F970 centralizes validation for .grid, .grid_auto and
- * .vclog.  Keep the fixed-record checks shared so 0x410C90's source
- * precedence remains explicit in this port. */
+/* 0x40F970: centralizes validation for .grid, .grid_auto and .vclog.  The
+ * fixed-record checks stay shared so 0x410C90's source precedence remains
+ * explicit in this port. */
 static int LightGrid_OpenPointFile(const char *suffix, int recordSize,
                                    char *filePath, void **outFile,
                                    int *outPointCount)
@@ -1285,8 +1260,8 @@ void AddStaticModelLightGridSamples(void)
     /* assert: points == NULL (line 0x63) */
     Assert(g_gridPoints == NULL, 0);
 
-    /* sub_40FCF0 only wins when an authored .grid exists.  Its allocator
-     * sub_40FB70 prepends .grid_auto, so preserve that merge and ordering. */
+    /* The native loader (0x40FCF0) only wins when an authored .grid exists.  Its
+     * allocator (0x40FB70) prepends .grid_auto, so preserve that merge and ordering. */
     if (!LightGrid_OpenPointFile(".grid", sizeof(GridSamplePoint_t),
                                  gridPath, &gridFile, &gridPointCount))
         return;
@@ -1313,7 +1288,6 @@ void AddStaticModelLightGridSamples(void)
  * AllocGridSample — allocate and initialize a grid sample entry.
  * Address: 0x410F50 | Size: 266 bytes
  *
- * ecx=flags, rdx=gridPoint (GridSamplePoint*)
  * Returns a temporary annotated entry in the global sample array.
  */
 GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt)
@@ -1359,8 +1333,6 @@ GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt)
  * GatherIncidentEnergyInSpaceForLightFromDir — accumulate SH lighting from a direction.
  * Address: 0x411060 | Size: 534 bytes
  *
- * rcx=lightColor (float[3]), rdx=direction (float[3]), r8=outBuffer (float[24])
- *
  * For each set of 4 SH basis vectors (stored in global constant tables):
  *   Compute dot(direction, basisVector), if > 0 accumulate color * dot into output.
  * The loop processes 4 basis vectors per iteration, advancing by 0x30 (48 bytes).
@@ -1368,10 +1340,9 @@ GridSampleResult *AllocGridSample(int flags, GridSamplePoint_t *pt)
  */
 void GatherIncidentEnergyInSpaceForLightFromDir(float *lightColor, float *direction, float *outBuffer)
 {
-    float *basis = g_shBasis;
+    const float *basis = g_shBasis;
     float *out = outBuffer + 5; /* start at offset 0x14 = 5 floats */
-    float *basisEnd = g_shBasis + 24; /* 8 SH basis vectors * 3 components = 24 floats, binary uses 0x68 bytes */
-    int i;
+    const float *basisEnd = g_shBasis + 24; /* 8 SH basis vectors * 3 components = 24 floats */
 
     /* iterate SH basis sets — 4 basis vectors per set, each a vec3 */
     /* the loop is unrolled: processes 4 dot products per iteration */
@@ -1426,16 +1397,10 @@ void GatherIncidentEnergyInSpaceForLightFromDir(float *lightColor, float *direct
     }
 }
 
-void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer)
-{
-    CalculateLightGrid_GatherLightInternal(flags, gridIndex, outBuffer, NULL);
-}
-
 /*
- * CalculateLightGrid_GatherLight — gather all lighting for a grid point.
+ * CalculateLightGrid_GatherLightInternal (native CalculateLightGrid_GatherLight)
+ * — gather all lighting for a grid point.
  * Address: 0x411280 | Size: 937 bytes
- *
- * ecx=flags, edx=gridIndex, r8=outBuffer (float[24] = 96 bytes)
  *
  * Gathers incident light from:
  *   1. Trace directions (sky/bounce light via FindLightingSamplesAndNormal)
@@ -1554,7 +1519,7 @@ static void CalculateLightGrid_GatherLightInternal(int flags, int gridIndex,
  * LightGrid_EncodeSH — encode SH lighting buffer as gamma-corrected bytes.
  * Address: 0x4117D0 | Size: 320 bytes
  *
- * rcx=buffer (float[24]), rdx=scale(unused, passed to AdjustLightingContrast as baseIndex=-1)
+ * The scale argument is unused (AdjustLightingContrast gets baseIndex=-1).
  * Returns encoded color index (short) from LightGrid_FindOrInsertColor.
  */
 short LightGrid_EncodeSH(float scale, float *buffer)
@@ -1592,8 +1557,7 @@ short LightGrid_EncodeSH(float scale, float *buffer)
  * LightGrid_FindOrInsertColor — find or insert a color entry in the grid color table.
  * Address: 0x411630 | Size: 414 bytes
  *
- * rcx=colorData (24 bytes)
- * Returns color index (short).
+ * colorData is 24 bytes.  Returns color index (short).
  *
  * Searches existing entries for a match. If found, returns existing index.
  * Otherwise inserts new entry and returns new index.
@@ -1683,12 +1647,6 @@ insert_new:
     }
 }
 
-/*
- * CalculateLightGrid — main entry point for light grid calculation.
- * Address: 0x411AB0 | Size: 390 bytes
- *
- * ecx=flags
- */
 static void LightGrid_AppendDefaultProducerVector(void)
 {
     float vector[56 * 3];
@@ -1713,6 +1671,10 @@ static void LightGrid_AppendDefaultProducerVector(void)
     LightGrid_StoreProducerVector(g_gridSampleArrayCount, vector);
 }
 
+/*
+ * CalculateLightGrid — main entry point for light grid calculation.
+ * Address: 0x411AB0 | Size: 390 bytes
+ */
 void CalculateLightGrid(int flags)
 {
     int numDirs;
@@ -1874,7 +1836,7 @@ void CalculateLightGrid_Setup(void)
     Assert(g_gridPoints == NULL, 0);
 
     /* 0x410C90 tries .vclog after an absent .grid.  Whether .vclog exists
-     * or not, allocator sub_40FB70 then merges .grid_auto before it. */
+     * or not, the allocator (0x40FB70) then merges .grid_auto before it. */
     LightGrid_OpenPointFile(".vclog", sizeof(record),
                             visPath, &visFile, &visPointCount);
     LightGrid_OpenPointFile(".grid_auto", sizeof(GridSamplePoint_t),
@@ -1928,8 +1890,6 @@ void CalculateLightGrid_Setup(void)
  * 1. Assert pointCount > 0, qsort by GridSamplePoint_Compare
  * 2. Reverse-check last point validity (vis trace + material check)
  * 3. Forward-iterate: remove duplicates and invalid points
- *
- * Constants: dword_458A94 = Z height offset for trace, dword_4577D8 = Z below offset
  */
 /* Retail 0x410510: a point must see the world.  Each axis ray must land on
  * a front-facing, unflagged surface (or sky) for the point to survive; a
@@ -1973,7 +1933,9 @@ static int LightGrid_SeesNoWorld(const float *pos)
 /* Retail 0x410610/0x410760 prune the loaded point list harder than the x64
  * build's own validation below: points outside the world bounds, points
  * against geometry, points failing the under-world transport test, and
- * points that see no world at all are all dropped before any worker runs. */
+ * points that see no world at all are all dropped before any worker runs.
+ * The three checks after the bounds test mirror 0x410370 head (0x409F70),
+ * 0x409E10 and 0x410510. */
 static int LightGrid_RetailRejectsPoint(const GridSamplePoint_t *pt)
 {
     float pos[3];
@@ -1993,11 +1955,11 @@ static int LightGrid_RetailRejectsPoint(const GridSamplePoint_t *pt)
             return 1;
     }
     if (LightGrid_PointNearGeometry(pos))
-        return 1;                               /* 0x410370 head (0x409F70) */
+        return 1;
     if (Lighting_RejectTransportPoint(0, pos))
-        return 1;                               /* 0x409E10 */
+        return 1;
     if (LightGrid_SeesNoWorld(pos))
-        return 1;                               /* 0x410510 */
+        return 1;
     return 0;
 }
 
@@ -2005,7 +1967,6 @@ void CalculateLightGrid_SortPoints(void)
 {
     float zOffset;
     float zBelow;
-    int i;
 
     /* assert: pointCount > 0 (line 0x12B) */
     Assert((g_gridPointCount > 0), 0);
@@ -2013,8 +1974,8 @@ void CalculateLightGrid_SortPoints(void)
     /* sort grid points */
     qsort(g_gridPoints, g_gridPointCount, 6, (void *)GridSamplePoint_Compare);
 
-    zOffset = 64.0f;    /* dword_458A94 = 0x42800000 */
-    zBelow = 262144.0f; /* dword_4577D8 = 0x48800000 */
+    zOffset = 64.0f;    /* Z height offset for the trace */
+    zBelow = 262144.0f; /* Z below offset */
 
     /* reverse-check: validate last point, remove if invalid */
     {
@@ -2062,12 +2023,11 @@ void CalculateLightGrid_SortPoints(void)
     }
 
     /* forward-iterate: deduplicate and validate.
-     * Mirror orig's loop structure exactly — rdi is the iteration counter
-     * starting at count-1, rbx is the byte offset of CURRENT (starts at
-     * 6*(count-1)), esi is the index of NEXT (starts at count, so the first
-     * iteration compares against past-end memory — that read is garbage but
-     * orig never treats it as a duplicate unless current happens to match
-     * that garbage). Keeping orig's iteration count matters because the
+     * The iteration counter starts at count-1, CURRENT's byte offset at
+     * 6*(count-1), and the index of NEXT at count, so the first iteration
+     * compares against past-end memory — that read is garbage but the original
+     * never treats it as a duplicate unless current happens to match that
+     * garbage.  Keeping the original's iteration count matters because the
      * first iteration still runs the trace/material validation on the
      * reverse-check-approved last element. */
     {
@@ -2129,7 +2089,7 @@ void CalculateLightGrid_SortPoints(void)
                 int newCount = g_gridPointCount - 1;
                 GridSamplePoint_t *last = &g_gridPoints[newCount];
                 g_gridPointCount = newCount;
-                /* write 6 bytes: x,y (4) then z (2). orig uses mov dword + mov word. */
+                /* write 6 bytes: x,y (4) then z (2) */
                 *(int *)current = *(int *)last;
                 current->z = last->z;
             }
@@ -2158,6 +2118,11 @@ done_dedup:
 
         for (src = 0; src < g_gridPointCount; ++src)
         {
+            /* KIWI FIX: drop duplicates here - the swap-with-last pass only compares
+             * neighbours of an array it reorders, so copies survive it, and a copy
+             * stalls LightGrid_FlushRun (the rest of its run became sun fillers). */
+            if (dst > 0 && !GridSamplePoint_Compare(&pts[dst - 1], &pts[src]))
+                continue;
             if (LightGrid_RetailRejectsPoint(&pts[src]))
                 continue;
             if (dst != src)
@@ -2175,8 +2140,6 @@ epilogue:
  * TraceOctantSkyVisibility — trace sky visibility in 8 octant directions.
  * Address: 0x410BD0 | Size: 890 bytes
  *
- * ecx=flags, rdx=pos (float[3]), r8=outResult (byte[6])
- *
  * For each of 8 octants (corners of a cube around pos):
  *   1. Compute octant box from pos using direction constants
  *   2. Ray trace to check if octant hits geometry
@@ -2188,14 +2151,14 @@ epilogue:
 void TraceOctantSkyVisibility(int flags, float *pos, unsigned char *outResult)
 {
     int octant;
-    float posOctScale;      /* dword_458AE8 */
-    float negOctScale;      /* dword_457634 */
-    float posZScale;        /* dword_458AE4 */
-    float negZScale;        /* dword_458AE0 */
-    float smallOffset;      /* dword_457704 = 0.125f */
-    float largeZOffset;     /* dword_4577D8 = 262144.0f */
-    float midScale;         /* dword_458ADC */
-    float zConst;           /* dword_458AD8 */
+    float posOctScale;
+    float negOctScale;
+    float posZScale;
+    float negZScale;
+    float smallOffset;
+    float largeZOffset;
+    float midScale;
+    float zConst;
     float traceStart[3];
     float traceEnd[3];
     float traceStart2[3];
@@ -2209,10 +2172,10 @@ void TraceOctantSkyVisibility(int flags, float *pos, unsigned char *outResult)
     negOctScale =  0.40824827551841735839843750f;
     posZScale   = -0.81649655103683471679687500f;
     negZScale   =  0.81649655103683471679687500f;
-    smallOffset = 0.125f;     /* dword_457704 */
-    largeZOffset = 262144.0f; /* dword_4577D8 */
-    midScale = 78.1336669921875f; /* dword_458ADC = 0x429C4470 */
-    zConst = 0.1f;            /* dword_458AD8 = 0x3DCCCCCD */
+    smallOffset = 0.125f;
+    largeZOffset = 262144.0f;
+    midScale = 78.1336669921875f;
+    zConst = 0.1f;
 
     for (octant = 0; octant < 8; octant++)
     {
@@ -2271,10 +2234,8 @@ void TraceOctantSkyVisibility(int flags, float *pos, unsigned char *outResult)
                 goto next_octant;
 
             {
-                /* LST 0x410DEA-0x410DFA: ecx = contents (dword), then `cmp [rax+44h], 1;
-                 * jnz loc_410DFC` (mark-visible path); `test cl, cl; js loc_410E08` (skip).
-                 * `js` tests bit 7 of cl — the low byte — which is CONTENTS_MISSILECLIP
-                 * (0x80), NOT CONTENTS_NODROP (0x80000000). */
+                /* The skip test reads bit 7 of the LOW byte of contents, which is
+                 * CONTENTS_MISSILECLIP (0x80), NOT CONTENTS_NODROP (0x80000000). */
                 MaterialDef_t *mat2 = hit2.triangle->material;
                 if (mat2->contents & (CONTENTS_NONCOLLIDING | CONTENTS_SKY))
                     goto next_octant;
@@ -2400,7 +2361,6 @@ int GridSamplePoint_Compare(const void *a, const void *b)
  * AddStaticModelLightGridSample — allocate and link a grid sample node.
  * Address: 0x410070 | Size: 105 bytes
  *
- * rcx=data (3 ints to copy)
  * Allocates 24 bytes, copies 12 bytes of data, links into g_gridSampleList.
  */
 void AddStaticModelLightGridSample(int *data)

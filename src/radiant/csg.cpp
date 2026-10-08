@@ -19,10 +19,7 @@
 #include "stdafx.h"
 #include "winding.h"
 #include <universal/assertive.h>   // iassert (USE_ASSERTS always on; same handler as Assert)
-
-// ─── externs from qe3.cpp / engine_stubs.cpp ─────────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
+#include "kiwi_ported.h"           // KIWI: shared engine/editor externs
 
 // ─── externs from brush.cpp ──────────────────────────────────────────────────
 // Splits brush b with face f; front/back are new brushes (NULL if no piece).
@@ -32,49 +29,19 @@ extern void     Brush_SplitBrushByFace( brush_t *b, face_t *f,
 // Returns a pointer to the newly allocated face entry.
 // IDA signature: char* __cdecl Face_Alloc(int brush, _DWORD *face)
 extern face_t  *Face_Alloc( brush_t *dest, face_t *src );                    // 0x471500
-// Frees a DEF (88-byte brush_t) without list/entity cleanup (raw free).
-// IDA: __usercall(def@<edi>) — arg in edi; cdecl wrapper needed when brush.cpp is ported.
-extern void     Brush_Free_R( brush_t *def );                                  // 0x475af0
-// Allocates a selbrush_t INSTANCE for def, bumps def->refCount, links it into
-// owner's entity brush list, and returns the new instance node. (Misnamed in IDB;
-// really "instance-for-def" / Entity_LinkBrush.) IDA: __usercall@<eax>(a1@<eax>, a2).
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // 0x475980
-// Links an existing instance node into selected_brushes and notifies the UI.
-// IDA: __usercall(b@<eax>) — arg in eax; cdecl wrapper needed when brush.cpp is ported.
-extern void     Brush_AddToList2( selbrush_t *b );                             // 0x4765a0
-// Removes an instance from its lists and frees it (full cleanup; --def->refCount).
-extern void     Brush_Free( selbrush_t *b );                                   // 0x475ba0
-// Unlinks an instance node from the display list (clears next/prev).
-// IDA: __usercall(a1@<eax>) — arg in eax; cdecl wrapper needed when select.cpp is ported.
-extern void     Brush_RemoveFromList( selbrush_t *b );                         // 0x476680
-// Rebuilds windings for all faces of brush b.
-// IDA: __usercall(def@<ecx>, bsnap) — first arg in ecx; cdecl wrapper needed.
-extern void     Brush_BuildWindings( brush_t *b, int bFull );                  // 0x477ac0
 // Updates brush colour based on entity class.
-extern unsigned int Entity_ColorSth( brush_t *b );                             // 0x475110 (entity.cpp)
+extern unsigned int Brush_ApplyEntityColor( brush_t *b );                      // brush.cpp 0x475110
 // Applies a face material to the face in brush; used by AutoCaulk.
-extern void     sub_476740( const patchMesh_material *texdef, face_t *face, brush_t *brush );        // 0x476740
+extern void     Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b );   // brush.cpp 0x476740
 
-// ─── externs from materialdef.cpp ────────────────────────────────────────────
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );         // 0x4314a0
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );           // 0x431640
-extern void Entity_LinkBrush( brush_t *b, entity_s *world_ent );               // entity.cpp 0x484fc0
-extern void Entity_UnlinkBrush( brush_t *b );                                  // entity.cpp 0x485020
-// Sets *out to the material descriptor for name.
-extern void     SetMaterial( const char *name, patchMesh_material *out );      // 0x4315c0
-
-// CRT free thunk (IDA j__free_0) — matches the eclass.cpp pattern.
+// CRT free thunk (j__free_0) — matches the eclass.cpp pattern.
 static inline void j__free_0( void *p ) { free( p ); }
 
 // ─── globals ──────────────────────────────────────────────────────────────────
-// Indexed grid size table.  d_gridsize indexes into this.
-extern float    grid_sizes[];                                                   // 0x6dde5c
 // Active layer name string (default "000_Global").
 extern char     g_activeLayer_string[];                                         // 0x73bf78
-// Bitmask of pending window update bits.  Set to -1 (W_ALL) to refresh all.
-extern int      g_nUpdateBits;                                                  // 0x25d5a74
 
-// g_windingAlloc (winding.cpp, IDB dword_24CE4FC) — live winding malloc/free count.
+// g_windingAlloc (winding.cpp, 0x24CE4FC) — live winding malloc/free count.
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Face by native array index; face_t contains pointers and grows on x64.
@@ -85,15 +52,7 @@ static inline face_t *BrushFaceAt( brush_t *def, unsigned int idx )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Same, from a raw face pointer.
-// ─────────────────────────────────────────────────────────────────────────────
-static inline face_t *FaceAt( face_t *base, unsigned int idx )
-{
-    return &base[idx];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Brush_GetFaceFlags (0x47DC30, def@<esi>).  Accumulates the current-edit-layer
+// Brush_GetFaceFlags (0x47DC30).  Accumulates the current-edit-layer
 // material flags over every face of the brush geometry.  Any output pointer may be
 // NULL.  *anyInUse = OR of qtexture_s::in_use, *allInUse = AND (init -1),
 // *allFilter = AND of color_or_surfacetype_filter (init -1).  The binary also
@@ -110,16 +69,15 @@ void Brush_GetFaceFlags( brush_t *def,
 
     int anyInUse  = 0;
     int allInUse  = -1;
-    int anyFilter = 0;   // IDA: v11 — not returned but accumulated for internal use
-    int allFilter = -1;  // IDA: i  — returned in *out_allFilter
+    int anyFilter = 0;   // accumulated but not returned
+    int allFilter = -1;  // returned in *out_allFilter
 
     int layer = g_qeglobals.current_edit_layer;
 
     for ( unsigned int fi = 0; fi < (unsigned int)def->faceCount; fi++ )
     {
         face_t *f = BrushFaceAt( def, fi );
-        // IDA `a1[17] + fi*232 + 4*(9*layer+9)` == faces + fi*232 + 36*(layer+1)
-        // == &face->mtldef[layer] (mtldef starts at face_t+0x24, MaterialDef is 36 B).
+        // &face->mtldef[layer] (mtldef starts at face_t+0x24, MaterialDef is 36 B).
         MaterialDef *md = &f->mtldef[layer];
 
         qtexture_s *tex = MaterialDef_GetLayeredMaterial( md );
@@ -140,7 +98,7 @@ void Brush_GetFaceFlags( brush_t *def,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Brush_IsFixedOrPatch (0x47DD20, a1@<esi>).  True when the brush must be skipped in
+// Brush_IsFixedOrPatch (0x47DD20).  True when the brush must be skipped in
 // CSG ops: def->owner->eclass->fixedsize or def->patch != NULL.
 // ─────────────────────────────────────────────────────────────────────────────
 bool Brush_IsFixedOrPatch( brush_t *def )
@@ -149,46 +107,6 @@ bool Brush_IsFixedOrPatch( brush_t *def )
     iassert( def->owner );
     iassert( def->owner->eclass );
     return def->owner->eclass->fixedsize || ( def->patch != nullptr );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Brush_FaceFlags_Check80 (0x47DDB0).  True (not filtered) when no face flag carries
-// bit 0x80; wraps Brush_GetFaceFlags and tests allFilter & 0x80.
-// ─────────────────────────────────────────────────────────────────────────────
-bool Brush_FaceFlags_Check80( brush_t *def )
-{
-    int allFilter = 0;
-    Brush_GetFaceFlags( def, nullptr, nullptr, &allFilter );
-    return ( (unsigned int)allFilter & 0x80u ) == 0;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Brush_IsFiltered (0x47DDE0).  The layer-visible gate:
-//   !(anyInUse & 0x20000000) && (allInUse & 1).
-// ─────────────────────────────────────────────────────────────────────────────
-bool Brush_IsFiltered( brush_t *def )
-{
-    int anyInUse = 0, allInUse = 0, allFilter = 0;
-    Brush_GetFaceFlags( def, &anyInUse, &allInUse, &allFilter );
-    if ( anyInUse & 0x20000000 )
-        return false;
-    return ( allInUse & 1 ) != 0;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Brush_IsCulled (0x47DE10, a1@<eax>).  Brush_IsFixedOrPatch, or the negation of the
-// Brush_IsFiltered gate.
-// ─────────────────────────────────────────────────────────────────────────────
-bool Brush_IsCulled( brush_t *def )
-{
-    if ( Brush_IsFixedOrPatch( def ) )
-        return true;
-    // The binary passes a real &v3 for the 4th (allFilter) arg, not NULL (dead output).
-    int anyInUse = 0, allInUse = 0, allFilter = 0;
-    Brush_GetFaceFlags( def, &anyInUse, &allInUse, &allFilter );
-    if ( anyInUse & 0x20000000 )
-        return true;
-    return ( allInUse & 1 ) == 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,7 +128,7 @@ bool Brush_IsCulled( brush_t *def )
 bool CSG_FaceVisible( winding_t *w, float *faceNormal, brush_t *srcDef,
                       selbrush_t *b, unsigned int faceIndex )
 {
-    // The binary zeroes a5 in the prologue regardless of what the caller passed.
+    // The caller's faceIndex is ignored; the walk always starts at face 0.
     faceIndex = 0;
 
     if ( !w )
@@ -226,7 +144,6 @@ bool CSG_FaceVisible( winding_t *w, float *faceNormal, brush_t *srcDef,
 
             if ( def != srcDef && !Brush_IsFixedOrPatch( def ) )
             {
-                // The binary passes a real &v12 for the 4th arg, not NULL (dead output).
                 int anyInUse = 0, allInUse = 0, allFilter = 0;
                 Brush_GetFaceFlags( def, &anyInUse, &allInUse, &allFilter );
                 if ( ( anyInUse & 0x20000000 ) == 0 && ( allInUse & 1 ) != 0 )
@@ -272,10 +189,9 @@ bool CSG_FaceVisible( winding_t *w, float *faceNormal, brush_t *srcDef,
             return true;
         }
 
-        // 0x47df85 `cmp var_18, 2; jnz`: the dot test runs ONLY when Winding_Clip
-        // returned SIDE_ON (2 = winding fully coplanar with the clip plane).  For
-        // 0/1/3 the binary advances to the next FACE of the same brush; only a
-        // coplanar SAME-FACING clip skips to the next brush.
+        // The dot test runs ONLY when Winding_Clip returned SIDE_ON (2 = winding fully
+        // coplanar with the clip plane).  For 0/1/3 the walk advances to the next FACE of
+        // the same brush; only a coplanar SAME-FACING clip skips to the next brush.
         if ( sideCode == 2 )
         {
             float dot = clipPlane->normal[0] * faceNormal[0]
@@ -363,7 +279,7 @@ void CSG_MakeHollow()
 
                 if ( back )
                 {
-                    Entity_UnlinkBrush( back );   // inlined in the binary (entity.cpp:1208)
+                    Entity_UnlinkBrush( back );   // entity.cpp:1208
                     Brush_Free_R( back );
                 }
 
@@ -475,10 +391,8 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
                     if ( node3 )
                         continue;  // interior face, skip
 
-                    // Both outer — concavity test.  0x47d76c passes face1 in params
-                    // (1,4,5) and face2 in (2,3,6); +0x20 from a plane pointer is that
-                    // face's winding (plane@face+0xC0, +0x20 -> face+0xE0 == face.w).
-                    // Winding_PlanesConcave is symmetric, but match the binary's order.
+                    // Both outer — concavity test (plane@face+0xC0, +0x20 -> face+0xE0 ==
+                    // face.w).  Winding_PlanesConcave is symmetric, but match the binary's order.
                     if ( Winding_PlanesConcave( face1->w, face2->w,
                                                 plane2->normal, plane1->normal,
                                                 (float)plane1->dist, (float)plane2->dist ) )
@@ -543,18 +457,17 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
     }
 
     // Link the new brush to the entity and build its windings.
-    // The binary inlines Brush_SetLayerString( newBrush, g_activeLayer_string ) here —
-    // its brush.cpp:2354 head-check lives in the helper.
+    // Brush_SetLayerString holds the brush.cpp:2354 head-check.
     extern void Brush_SetLayerString( brush_t *b, const char *str );   // brush.cpp 0x4758A0
     Brush_SetLayerString( newBrush, g_activeLayer_string );
 
-    // The binary inlines Entity_LinkBrush( newBrush, listOwner->def ) here (entity.cpp:1190).
+    // Entity_LinkBrush( newBrush, listOwner->def ) — entity.cpp:1190.
     // A brush DEF's .owner holds the entity_s_def*, not the entity_s* — that is the
     // "b->owner == owner->def" invariant checked below.
     entity_s *listOwner = brushList->owner;                  // selbrush_t.owner (entity_s*)
     Entity_LinkBrush( newBrush, (entity_s *)listOwner->def );
 
-    brush_t *newBrushDef = newBrush;                 // the binary's local name
+    brush_t *newBrushDef = newBrush;
     iassert( newBrushDef->owner == brushList->owner->def );   // csg.cpp:190
 
     selbrush_t *result = Brush_AddToList( newBrush, listOwner );
@@ -588,14 +501,13 @@ int CSG_Merge()
 
     for ( selbrush_t *b = sel; b != &selected_brushes; b = b->next )
     {
-        iassert( b->owner->def == b->def->owner );   // casts dropped: entity_s.def is void*, so == entity_s* compiles; #expr now byte-matches IDB "b->owner->def == b->def->owner"
-
+        iassert( b->owner->def == b->def->owner );
         entity_s_def *bOwnerDef = (entity_s_def *)b->owner->def;
         eclass_t *ec = bOwnerDef->eclass;
         if ( *( int * )&ec->fixedsize )
             return Sys_Printf( "Cannot add fixed size entities.\n" );
 
-        if ( b->patch )   // selbrush_t.patch @0x20 — binary 0x47db07 reads [esi+20h] (the INSTANCE patch), NOT def->patch@0x50
+        if ( b->patch )   // selbrush_t.patch @0x20 — the INSTANCE patch, NOT def->patch@0x50
             return Sys_Printf( "Cannot add patches.\n" );
 
         if ( bOwnerDef != ownerDef0 )
@@ -609,7 +521,7 @@ int CSG_Merge()
     {
         selbrush_t *nextB = b->next;   // capture before RemoveFromList clears the links
         Brush_RemoveFromList( b );
-        b->next = mergeList;           // IDA: v0->next = v5; v0->prev = 0
+        b->next = mergeList;
         b->prev = nullptr;
         mergeList = b;
         b = nextB;
@@ -627,7 +539,7 @@ int CSG_Merge()
             Brush_Free( cur );
             cur = next;
         }
-        if ( merged->next || merged->prev )   // IDA: v7->next || v7->prev (not onext/oprev)
+        if ( merged->next || merged->prev )   // the display-list links, not onext/oprev
             Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
         Brush_AddToList2( merged );
         int r = Sys_Printf( "done.\n" );
@@ -663,13 +575,13 @@ bool Brush_AutoCaulkFace( brush_t *brush, face_t *face )
     {
         patchMesh_material mat{};
         SetMaterial( "caulk", &mat );
-        sub_476740( &mat, face, brush );   // pass &mat — sub_476740 derefs a1[0]/a1[1] = {lyrMtl,radMtl}; *(int*)&mat passed mat.lyrMtl (garbage/NULL-deref)
+        Brush_SetFaceTexdefSize( &mat, face, brush );   // the {lyrMtl,radMtl} pair by address
         return true;
     }
 
     winding_t *wClone = Winding_Clone( w );
 
-    // CSG_FaceVisible returns non-zero when the face is VISIBLE (0x47e0ba tests == 0).
+    // CSG_FaceVisible returns non-zero when the face is VISIBLE.
     selbrush_t *firstSelected = selected_brushes.next;
     bool hidden = !CSG_FaceVisible( wClone, face->plane.normal, brush, firstSelected, 0 );
 
@@ -677,7 +589,7 @@ bool Brush_AutoCaulkFace( brush_t *brush, face_t *face )
     {
         patchMesh_material mat{};
         SetMaterial( "caulk", &mat );
-        sub_476740( &mat, face, brush );
+        Brush_SetFaceTexdefSize( &mat, face, brush );
         return true;
     }
     return false;
@@ -687,11 +599,9 @@ bool Brush_AutoCaulkFace( brush_t *brush, face_t *face )
 // Brush_AutoCaulk (0x47E0F0).  For every non-fixed/non-patch selected brush whose
 // face flags lack 0x80, caulk each face whose current-layer material isn't already
 // "caulk" and is hidden by its neighbours; report the count.  The per-face name
-// compare reads radMtl->name (qtexture_s+4) per 0x47e1d8/db.  UI command only
+// compare reads radMtl->name (qtexture_s+4).  UI command only
 // (ON_COMMAND 33220 / OnSelectionAutoCaulk), off the map-load path.
 // ─────────────────────────────────────────────────────────────────────────────
-extern int  dword_181F51C;                          // materialdef.cpp realize-state
-extern void MaterialDef_02( MaterialDef *def, int ( *cb )( qtexture_s * ) );   // 0x431520
 extern int  MaterialDef_08( qtexture_s *mtl );       // 0x431990 (passed as the cb)
 
 void Brush_AutoCaulk()
@@ -717,7 +627,7 @@ void Brush_AutoCaulk()
                         MaterialDef_02( md, MaterialDef_08 );
                         if ( !dword_181F51C )
                         {
-                            // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
+                            // MaterialDef.cpp:85 lives in Materialdef_GetName
                             const char *name = (const char *)Materialdef_GetName( md );
                             if ( _stricmp( name, "caulk" ) )
                             {

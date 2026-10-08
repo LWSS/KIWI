@@ -9,18 +9,13 @@
 #include "kiwi_join.h"
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
+#include "kiwi_terrain.h"
 #include "kiwi_validity.h"          // plane-comparison tolerances
 #include "kiwi_vec.h"     // vector helpers
 
 #include <math.h>
-
-// Ported entry points.
-extern int  Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern void Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 (0x48E800)
-extern void Select_Brush( selbrush_t *brush, char some_overwrite,
-                          char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
 
 namespace
 {
@@ -66,65 +61,71 @@ namespace
         return fabsf( f1->plane.dist - sign * f2->plane.dist ) < KVALID_PLANE_DIST;
     }
 
-    // CSG_Merge consumes selected_brushes; command 32927 owns its undo/reporting
-    // and restores the originals on refusal (csg.cpp:572, 0x47DA40).
-    bool JoinFaces()
+    // Two faces, one on each of two brushes, on one plane.
+    bool CanJoinFaces( sel_item_t *a, sel_item_t *b )
+    {
+        return TwoFaces( a, b ) && a->brush != b->brush
+            && SameInfinitePlane( FaceOf( *a ), FaceOf( *b ) );
+    }
+
+    // Why two selected faces cannot merge; false when two faces are not selected.
+    bool FaceReason()
     {
         sel_item_t a, b;
         if ( !TwoFaces( &a, &b ) )
             return false;
         if ( a.brush == b.brush )
-        {
             Sys_Printf( "Join: those two faces are on the SAME brush — select one "
                         "face on each of two brushes.\n" );
-            return true;                     // the face arm claimed the command
-        }
-        if ( !SameInfinitePlane( FaceOf( a ), FaceOf( b ) ) )
-        {
+        else
             Sys_Printf( "Join: those two faces are not on the same plane, so the "
                         "brushes do not meet across one.\n" );
-            return true;
-        }
+        return true;
+    }
 
+    // CSG_Merge consumes selected_brushes; command 32927 owns its undo/reporting
+    // and restores the originals on refusal (csg.cpp:572, 0x47DA40).
+    void JoinFaces( const sel_item_t &a, const sel_item_t &b )
+    {
         // Drop typed face references before the merge replaces their brush defs.
         Sel_Clear( KiwiSel() );
         Select_Deselect( 1 );
         Select_Brush( a.brush, 0, 0, 0 );
         Select_Brush( b.brush, 0, 0, 0 );
         Radiant_ExecCommand( 32927 );        // classic undo-wrapped CSG merge
-        return true;
     }
 }
 
+// KIWI: the predicate and the dispatch try the same arms in the same order - faces that
+// can merge, terrain sheets that can join, construction lines - so an enabled Join always
+// joins something.
 bool KiwiJoin_CanJoin()
 {
-    {
-        extern bool KiwiTerrain_CanJoinSelected();   // kiwi_terrain.cpp
-        if ( KiwiTerrain_CanJoinSelected() )
-            return true;
-    }
     sel_item_t a, b;
-    if ( TwoFaces( &a, &b ) && a.brush != b.brush
-      && SameInfinitePlane( FaceOf( a ), FaceOf( b ) ) )
+    if ( CanJoinFaces( &a, &b ) )
+        return true;
+    if ( KiwiTerrain_CanJoinSelected() )
         return true;
     return KiwiConSel_CanJoin();
 }
 
-// The face-arm check precedes construction selection when both stores are populated,
-// matching the rest of the editor's brush-first command ordering.
 bool KiwiJoin_DispatchInstant( unsigned int commandId )
 {
     if ( commandId != KIWI_CMD_JOIN )
         return false;
 
-    if ( JoinFaces() )
+    sel_item_t a, b;
+    if ( CanJoinFaces( &a, &b ) )
+    {
+        JoinFaces( a, b );
         return true;
+    }
     // Terrain: two or more selected sheet patches that share full edges merge into one
     // grid (kiwi_terrain.cpp), as long as the result stays within the 16-point cap.
+    if ( KiwiTerrain_CanJoinSelected() )
     {
-        extern int KiwiTerrain_JoinSelected();   // kiwi_terrain.cpp — joins made, -1 = not a patch selection
-        if ( KiwiTerrain_JoinSelected() >= 0 )
-            return true;
+        KiwiTerrain_JoinSelected();
+        return true;
     }
     if ( KiwiConSel_CanJoin() )
     {
@@ -132,6 +133,11 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
         return true;
     }
 
+    // Nothing joins: the specific reason (two faces, then terrain sheets), else the help.
+    if ( FaceReason() )
+        return true;
+    if ( KiwiTerrain_JoinSelected() >= 0 )   // joins nothing here; prints the sheets' reason
+        return true;
     Sys_Printf( "Join: select either TWO coplanar faces on two brushes (they merge "
                 "into one solid), two or more edge-adjacent terrain patches (they merge "
                 "into one grid), or two or more construction lines (they chain into "
@@ -141,6 +147,5 @@ bool KiwiJoin_DispatchInstant( unsigned int commandId )
 
 void KiwiJoin_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiJoin", 0, 0, KIWI_CMD_JOIN );
 }

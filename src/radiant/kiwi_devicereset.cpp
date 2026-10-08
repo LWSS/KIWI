@@ -9,8 +9,8 @@
 #include <d3d9.h>                   // D3DERR_* diagnostics
 #include <gfx_d3d/r_init.h>         // dx, g_disableRendering
 #include "kiwi_devicereset.h"
+#include "kiwi_ported.h"
 
-extern int      Sys_Printf( const char *fmt, ... );                 // win_qe3.cpp
 // Brush_InvalidateVis (0x478340) drops face/patch visuals and arms their rebuild.
 extern brush_t *Brush_InvalidateVis( selbrush_t *b );               // brush.cpp
 

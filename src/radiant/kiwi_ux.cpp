@@ -12,6 +12,7 @@
 #include "kiwi_hints.h"
 #include "kiwi_keymap.h"
 #include "kiwi_plastbridge.h"
+#include "kiwi_ported.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
 #include "kiwi_selection.h"
@@ -21,8 +22,6 @@
 #include "radiant_registry.h"
 
 #include <imgui/imgui.h>
-
-extern int g_nUpdateBits;                  // engine_stubs.cpp:773 (0x25D5A74)
 
 namespace
 {
@@ -114,12 +113,9 @@ void KiwiUX_DrawSettings()
         KiwiWindows_SyncViewMenu();
     }
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "ROUND AJ: the ground lattice is drawn in ORTHO only.\n"
-                           "In perspective ('P') it is suppressed outright — a\n"
-                           "workaround while the perspective aliasing is open, not\n"
-                           "the end state.  The world axes are unaffected, and so\n"
-                           "is grid SNAPPING (its own checkbox, below and on the\n"
-                           "grid pill in the viewport's top right)." );
+        ImGui::SetTooltip( "Master switch for the ground lattice.  Ortho and\n"
+                           "perspective each have their own toggle on the grid pill;\n"
+                           "the world axes and grid snapping are separate." );
     bool axes = KiwiUX_ShowAxes();
     if ( ImGui::Checkbox( "World axes", &axes ) )
     {
@@ -133,8 +129,7 @@ void KiwiUX_DrawSettings()
     if ( ImGui::IsItemHovered() )
         ImGui::SetTooltip( "OFF disables the grid quantiser AND the light grid\n"
                            "magnet everywhere (moves, extrudes, splits, clones).\n"
-                           "Geometry / face / construction snapping is untouched,\n"
-                           "and CTRL still suppresses everything for one gesture." );
+                           "Geometry / face / construction snapping is untouched." );
     bool hover = KiwiUX_ShowHover();
     if ( ImGui::Checkbox( "Hover highlight", &hover ) )
         KiwiUX_SetShowHover( hover );
@@ -147,20 +142,16 @@ void KiwiUX_DrawSettings()
         g_nUpdateBits |= 1;
     }
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Shown while a modal command is running.\n"
-                           "Hold CTRL to suppress snapping itself." );
+        ImGui::SetTooltip( "Shown while a modal command is running." );
 
     bool gizmo = KiwiGizmo_Show();
     if ( ImGui::Checkbox( "Transform gizmos", &gizmo ) )
         KiwiGizmo_SetShow( gizmo );
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "The move handles and the rotate rings.\n"
-                           "Shakeout D: they appear only WHILE the matching\n"
-                           "command is running - the arrows during G, the three\n"
-                           "rings during R - and nothing is drawn on an idle\n"
-                           "selection.  Dragging a handle or a ring runs that\n"
-                           "SAME command, with its axis or plane already locked.\n"
-                           "OFF leaves G and R fully usable without them." );
+        ImGui::SetTooltip( "Move arrows, rotate rings and scale handles, drawn only\n"
+                           "while the matching command runs.  Dragging one runs that\n"
+                           "command with its axis or plane locked.  OFF leaves the\n"
+                           "commands fully usable." );
 
     bool cube = KiwiViewCube_Show();
     if ( ImGui::Checkbox( "Orientation view-cube", &cube ) )
@@ -191,9 +182,8 @@ void KiwiUX_DrawSettings()
                              ImGuiSliderFlags_Logarithmic ) )
         KiwiCam_SetFlySpeedScale( fly );
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Multiplier over the classic MoveSpeed preference,\n"
-                           "which the ARROW-KEY fly reads as units per second\n"
-                           "(stock 350).  Shift boosts while RMB is held." );
+        ImGui::SetTooltip( "Multiplier over the classic MoveSpeed preference (units\n"
+                           "per second in perspective; ortho pans at a screen rate)." );
 
     KiwiKeymap_DrawSettings();
 
@@ -209,7 +199,7 @@ void KiwiUX_DrawSettings()
         g_nUpdateBits |= 1;
     }
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Any positive value — not restricted to powers of two.\n"
+        ImGui::SetTooltip( "Any value from 0.0001 up - not restricted to powers of two.\n"
                            "Separate from the classic 1..256 grid (that still drives\n"
                            "the ported snap sites)." );
 

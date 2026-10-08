@@ -719,8 +719,7 @@ int ParseCommandLine(int argc, const char **argv)
     char progPath[0x418];
     char *slashFwd, *slashBack, *lastSep;
     char *dot;
-    char *bspResult;
-    int i;
+    const char *bspResult;
 
     ParseCommandLine_Init();
 

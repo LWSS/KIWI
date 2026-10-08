@@ -57,6 +57,7 @@ struct kiwiBaseBrush_t
     int                patchH    = 0;
     std::vector<float> planepts;
     std::vector<float> ctrl;
+    std::vector<float> st;      // KIWI: patch ctrl texCoord (6 per point, ctrl order) - lock-off moves change it
 };
 
 // Capture planepts or patch ctrl xyz. Empty brushes are allowed; null arguments fail.

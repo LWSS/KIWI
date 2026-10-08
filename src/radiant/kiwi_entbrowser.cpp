@@ -18,6 +18,7 @@
 #include "kiwi_grid.h"              // KiwiGrid_Snap
 #include "kiwi_lines.h"             // drag ghost edges
 #include "kiwi_pick.h"              // Pick_RayFromImagePos / Pick_CameraContents
+#include "kiwi_ported.h"
 #include "kiwi_str.h"                // case-insensitive filtering
 #include "kiwi_transform.h"
 #include "kiwi_windows.h"
@@ -27,26 +28,8 @@
 #include <vector>
 
 // Ported entry points; signatures checked against their definitions.
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );      // eclass.cpp:1096
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:465
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434
-extern void        Select_Deselect( int a1 );                                // select.cpp:1444
-extern void        CreateEntityFromName( const char *str );                  // xywnd.cpp:3429
 extern void        Test_Ray( float *start, float *dir, int contents,
                              edTrace_t *t, int num_traces );                 // select.cpp:770
-extern void        Undo_ClearRedo();                                         // undo.cpp:176
-extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
-extern void        Undo_End();                                               // undo.cpp:686
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-// Forwarder for static Ed_EnsureCurrentMaterial (xywnd.cpp:1595).
-extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1605
-// Reuses the ported link/instance/selection landing sequence.
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2360
-// Live dockspace id used by the just-opened re-dock latch.
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796
 
 // Must match the eclass row in win_ent.cpp and imgui_panel_entity.cpp until the
 // shared-header consolidation happens.
@@ -492,8 +475,8 @@ namespace
         return true;
     }
 
-    // Build the placeholder through CreateEntityBrush's ported five-call path;
-    // only its bounds originate here.
+    // Build the placeholder through the native CreateEntityBrush (0x466290) five-call
+    // path; only its bounds originate here.
     bool DropPlaceholder( const float mins[3], const float maxs[3] )
     {
         float lo[3], hi[3];
@@ -567,7 +550,7 @@ namespace
         // state (entity.cpp:1633-1666).
         Select_Deselect( 1 );
 
-        // CreateEntityFromClassname's own bracket, verbatim (xywnd.cpp:3375-3387).
+        // The native CreateEntityFromClassname (0x466480) bracket, verbatim.
         Undo_ClearRedo();
         Undo_GeneralStart( "create entity" );
         if ( !DropPlaceholder( mins, maxs ) )

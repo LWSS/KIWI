@@ -5,8 +5,6 @@
 static char s_errorFileName[MAX_OS_PATH];
 static char s_errorOccurred;
 static int s_errorCount;
-static char s_assertDisable_ErrorMessageQuote;
-static char s_assertDisable_ErrorMessageNewline;
 
 void Error_Init(void)
 {

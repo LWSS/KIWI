@@ -17,15 +17,13 @@
 #include "qe3.h"
 #include "qedefs.h"        // PATCH_TERRAIN
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <map>             // classCounts tally (was MFC CMap before U-SHIM removal)
 #include <string>
        // (already included by stdafx.h), so MapInfo_01/02 + mapInfoStats_t stay common.
 
 // ── extern declarations for globals/functions from other .cpp files ──────────
-extern void       Assert( const char *file, int line, int type, const char *fmt, ... );
 extern bool       Eclass_hasModel( eclass_t *ec );   // eclass.cpp 0x481740
-extern void       Select_Deselect( int bDeselectFaces ); // select.cpp 0x48E800
-extern entity_s   entityInsts;                       // map.cpp 0x23F1748 (entity-inst list head)
 // active_brushes / selected_brushes sentinels are declared in qe3.h.
 
 // CLASS_PREFAB: eclass classtype bit that identifies a misc_prefab entity.

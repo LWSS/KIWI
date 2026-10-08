@@ -3,6 +3,7 @@
 // "LayeredMaterialList" child + the MFC CNameDlg name prompt), cmd 35008 / F4.
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_ported.h"
 #include <imgui/imgui.h>
 
 // Include order mirrors kiwi_uveditor.cpp:59-62 — the other TU that walks a Material's
@@ -20,7 +21,6 @@ extern int         LyrMtlSelectLayer_Apply( int layerIndex );   // layeredmateri
 extern const char *LyrMtlWnd_ActiveName();                      // layeredmaterialwnd.cpp:199  const char *LyrMtlWnd_ActiveName()
 extern int         LyrMtlWnd_LayerCount();                      // layeredmaterialwnd.cpp:206  int LyrMtlWnd_LayerCount()
 extern qtexture_s *LyrMtlWnd_LayerHandle( int i );              // layeredmaterialwnd.cpp:213  qtexture_s *LyrMtlWnd_LayerHandle(int)
-extern qtexture_s *Texture_GetHandle( const char *name );       // texwnd.cpp 0x45a8e0
 
 static bool s_show      = false;
 static bool s_openName  = false;      // arm the name modal on the next draw

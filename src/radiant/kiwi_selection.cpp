@@ -8,6 +8,7 @@
 #include "stdafx.h"
 #include <universal/assertive.h>
 #include "qe3.h"
+#include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 
@@ -16,12 +17,6 @@
 #include <functional>
 
 // ── legacy entry points (verified against their definitions) ────────────────
-extern float world_orient_matrix[4][3];                          // entity.cpp(0x6DE290)
-
-extern void Select_Deselect( int bAlsoFreeFaces );               // select.cpp 0x48E800
-extern void Select_Brush( selbrush_t *brush, char some_overwrite,
-                          char bStatus, char center_grid_on_selection ); // select.cpp 0x48DCC0
-extern void sub_477D70( selbrush_t *b, const float *mat );       // brush.cpp  Brush_CheckBuildFaceVis
 // Re-applies hidden state that Brush_AddToList2 clears; see Sel_SyncToLegacy.
 extern void KiwiVis_SetHidden( selbrush_t *b, bool hidden );     // kiwi_visibility.h:141 / kiwi_visibility.cpp:289
 
@@ -452,7 +447,7 @@ void Sel_SyncToLegacy()
         if ( it.brush->patch )                 // patches have no selectable faces
             continue;
 
-        sub_477D70( it.brush, (const float *)world_orient_matrix );
+        Brush_CheckBuildFaceVis( it.brush, (const float *)world_orient_matrix );
         if ( !it.brush->faces || it.faceIndex >= it.brush->faceCount )
             continue;
 

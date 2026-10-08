@@ -217,36 +217,6 @@ int  numBSPUnlayeredTriSoups;
 int  numBSPVisBytes;
 int  num_entities;
 
-char s_assertDisable_GetBSPFileExtension;
-char s_assertDisable_GetPRTFileExtension;
-char s_assertDisable_GetPolyFileExtension;
-char s_assertDisable_SetBSPFileExtensions;
-char s_assertDisable_SetBSPFileExtensions;
-char s_assertDisable_SetBSPFileExtensions;
-char s_assertDisable_SwapCollisionAabbLumpData;
-char s_assertDisable_SwapCollisionAabbLumpData;
-char s_assertDisable_SwapCollisionPartitionLumpData;
-char s_assertDisable_SwapCollisionPartitionLumpData;
-char s_assertDisable_SwapDrawSurfLumpData;
-char s_assertDisable_SwapDrawSurfLumpData_0;
-char s_assertDisable_SwapLightGridEntryLumpData;
-char s_assertDisable_SwapLightGridEntryLumpData;
-char s_assertDisable_SwapLumpData;
-char s_assertDisable_SwapLumpData;
-char s_assertDisable_SwapLumpData;
-char s_assertDisable_SwapLumpData;
-char s_assertDisable_SwapMaterialLumpData;
-char s_assertDisable_SwapMaterialLumpData;
-char s_assertDisable_SwapOccluderLumpData;
-char s_assertDisable_SwapOccluderLumpData;
-char s_assertDisable_SwapShortBlock;
-char s_assertDisable_SwapShortBlock_0;
-char s_assertDisable_SwapTriangleLumpData;
-char s_assertDisable_SwapTriangleLumpData;
-char s_assertDisable_SwapVisData;
-char s_assertDisable_SwapVisData;
-char s_assertDisable_UnparseEntities;
-
 
 /*
 ================
@@ -707,33 +677,6 @@ int SwapBSPFile(int swapFlag)
   SwapLumpData(LUMP_PATHCONNECTIONS,     bspPaths,              MAX_MAP_PATHS,             numBSPPaths,            sizeof(bspPaths[0]),             swapFlag);
 
   return Swap_InitByteSwap();
-}
-
-/*
-================
-SwapAndLoadLump
-
-Swap and load a single BSP lump from file header
-================
-*/
-void SwapAndLoadLump(BspFileHeader_t *header, int lumpIdx, int elemSize, int swapFlag)
-{
-  unsigned int offset = 12 + 8 * header->chunkCount;
-  unsigned int i;
-
-  for ( i = 0; i < header->chunkCount; ++i )
-  {
-    if ( header->chunks[i].type == lumpIdx )
-    {
-      const unsigned int lumpSize = header->chunks[i].length;
-      if ( lumpSize % elemSize )
-        Com_Error("LoadBspFile: odd lump size");
-      SwapLumpData(lumpIdx, (byte *)header + offset, lumpSize / elemSize,
-                   lumpSize / elemSize, elemSize, swapFlag);
-      return;
-    }
-    offset += (header->chunks[i].length + 3) & ~3u;
-  }
 }
 
 /*
@@ -2077,7 +2020,7 @@ shadowing the global Buffer[16]. Generated from macro matching original pattern.
 #define DEFINE_GET_FILE_EXT(funcName, extVar, assertStr, assertLine) \
 char *funcName() \
 { \
-  Assert(extVar[0], s_assertDisable_##funcName); \
+  iassert( extVar[0] ); \
   return extVar; \
 }
 

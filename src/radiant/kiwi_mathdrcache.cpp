@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 #include "kiwi_mathdrcache.h"
+#include "kiwi_ported.h"
 
 #include <universal/com_files.h>    // fs_basepath, fs_searchpaths, searchpath_s, directory_t
 
@@ -13,8 +14,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-extern int Sys_Printf( const char *fmt, ... );
 
 namespace
 {

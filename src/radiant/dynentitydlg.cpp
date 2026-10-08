@@ -13,22 +13,9 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <cstring>
 
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
-// ── externs (per-TU, matching select.cpp / scriptgroup.cpp) ───────────────────
-extern entity_s *world_entity;                                              // 0x25D5B30 (map.cpp)
-extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value ); // 0x483690 (entity.cpp)
-extern void      DeleteKey( epair_t **head, const char *key );              // 0x483720 (entity.cpp)
-extern void      Checkkey_Model( entity_s_def *e, const char *key );        // 0x482F70 (=Checkkey_Model_0)
-extern void      Checkkey_Color( entity_s_def *e, const char *key );        // 0x483210 (entity.cpp)
-extern void      Undo_ClearRedo();                                          // 0x45DF20 (undo.cpp)
-extern void      Undo_GeneralStart( const char *op );                       // 0x45E3F0 (undo.cpp)
-extern void      Undo_AddEntity_W( entity_s *e );                           // 0x45E990 (undo.cpp)
-extern void      Undo_End();                                               // 0x45EA20 (undo.cpp)
-extern void      SetKeyValuePairs();                                        // 0x496CF0 (win_ent.cpp)
-extern int       g_nUpdateBits;                                            // 0x25D5A74 (engine_stubs.cpp)
 // selected_brushes sentinel is declared in qe3.h.
 
 // Is this selected-brush instance owned by a dyn_ entity we should edit?  Faithful to
@@ -91,7 +78,6 @@ void DynEntityDlg_01_SetPair( const char *value, const char *key )
         SetKeyValue( def, key, value );
     }
     Undo_End();
-    SetKeyValuePairs();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,7 +104,6 @@ void DynEntityDlg_02_RemovePair( const char *key )
         Checkkey_Color( def, key );          // 0x483210
     }
     Undo_End();
-    SetKeyValuePairs();
 }
 
 // UI-independent action behind CDynEntityDlg's per-field [Set] buttons.

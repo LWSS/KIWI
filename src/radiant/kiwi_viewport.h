@@ -16,9 +16,7 @@
 //   MMB   -> orbit / Shift-pan (legacy never dispatched camera MMB).
 //   wheel -> dolly (legacy had no camera wheel).
 //   LMB   -> pick / drag-select / move (CamWnd_OnLButtonDown -> DropModelsToPlane
-//            -> Drag_Begin).  EXCEPTION: a bare Alt+LMB while the terrain-paint tool
-//            is armed (sub_401D50) is NOT consumed — press/drag/release go to the
-//            legacy paint chain (Drag_Begin LABEL_34).  See KiwiVP_CameraButtonDown.
+//            -> Drag_Begin).
 //   RMB   -> mouselook (Alt) or pan; a no-drag RMB CONFIRMS a live modal command.
 //            The classic context menu was removed (user directive) — a bare RMB
 //            click does nothing; the CamWnd_OnRButton replay helper is dormant.

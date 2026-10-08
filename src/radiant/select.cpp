@@ -3,7 +3,7 @@
 #endif
 // cod3src\radiant\select.cpp - selection state: the pick-ray chain, the brush/face
 // selection lists, selection transforms, hide/show, and the vertex/edge edit handles.
-// Ground truth: CoD4Radiant IDA (IW3xRadiant.i64); GtkRadiant 1.6 for naming only.
+// Ported from CoD4Radiant (IW3xRadiant.i64); GtkRadiant 1.6 for naming only.
 
 #include "stdafx.h"
 #include <universal/assertive.h>    // iassert (USE_ASSERTS always on; same handler as Assert)
@@ -12,7 +12,7 @@
 #include "kiwi_lightcache.h"
 #include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "prefs.h"     // CPrefsDlg / g_PrefsDlg (Test_Ray pick-chain m_nEntityShowState/...)
-#include <gfx_d3d/r_xsurface.h>  // XModel, Editor_ExtractXModelGeo (sub_48CE60 model ray-pick)
+#include <gfx_d3d/r_xsurface.h>  // XModel, Editor_ExtractXModelGeo (Model_RayTest model ray-pick)
 #include <windows.h>
 #include <string.h>
 #include <stdio.h>
@@ -21,134 +21,88 @@
 #include <vector>     // Test_Ray cycle-pick (contents&0x40) brush gather (IDB CPtrArray)
 #include "kiwi_fmt.h" // KIWI: KiwiFmt_Vec3Exact ("angles" that read back exactly)
 #include "kiwi_angles.h" // KIWI: double "angles" composition (RotateFixedSize, DoFlip)
+#include "kiwi_floatsnap.h" // KIWI: KiwiRound_Fistp
+#include "kiwi_ported.h" // KIWI: shared engine/editor externs
 
-// ─── CRT import thunk (IDA: j__free_0 = __imp__free) ─────────────────────────
+// ─── CRT import thunk (j__free_0 = free) ─────────────────────────────────────
 static inline void j__free_0( void *p ) { free( p ); }
 
-// ─── editor helpers from engine_stubs.cpp / qe3.cpp ──────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
-
-// ─── U-GLOBALS: THE editor camera, shell-agnostic (camwnd.cpp; never NULL) ────
-extern camera_s *Ed_Camera();
+// ─── editor helpers from q_shared.cpp ────────────────────────────────────────
+extern void  I_strncpyz( char *dest, const char *src, int destsize );   // q_shared.cpp (0x4B9290)
 
 // KIWI-UX (ROUND AZ, ITEM 3): THE sky predicate — kiwi_skybox.h D-AZ-A.  Declared
 // here rather than by including the header, because this is the file's ONLY use of
 // it and select.cpp includes no kiwi_* header today.
 extern bool KiwiSky_IsSkyMaterial( const qtexture_s *q );   // kiwi_skybox.cpp  bool KiwiSky_IsSkyMaterial(const qtexture_s*)
 
-// ─── world_entity from map.cpp ────────────────────────────────────────────────
-extern entity_s *world_entity;  // 0x25D5B30
-
 // ─── forward declarations ──────────────────────────────────────────────────────
 // brush.cpp
-extern void        Brush_RemoveFromList( selbrush_t *b );
-extern void        Brush_AddToList2( selbrush_t *b );
-extern void        Brush_Free( selbrush_t *b );
-extern void        Brush_BuildWindings( brush_t *b, int bFull );
 // Made non-static in brush.cpp so select.cpp can call them.
 extern void Brush_Deselect_Helper( selbrush_t *b );
 extern void Brush_Select_Helper( selbrush_t *b );
 
 // entity.cpp
-extern bool        Entity_HasEpairMatch( entity_s *e, const char *key, const char *val );
-extern bool        HasKeyValuePair( entity_s_def *e, const char *key );
-extern char       *ValueForKey2( const entity_s *defPtr, const char *key );
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *val );
-extern int         Entity_GetVec3ForKey( entity_s_def *def, float *out, const char *key );
 extern void        Entity_RebuildBounds( entity_s *e );
-extern char       *va( const char *fmt, ... );
 
-// filters.cpp (0x46A1F0) — real implementation; was safe-stub in engine_stubs.cpp
-extern char        FilterBrush( selbrush_t *b, int flag );
 
-// qe3.cpp / engine_stubs.cpp
-extern void        SetupVertexSelection();
-extern void        MarkMapModified();
-extern int         UpdateSelection( int wParam, eclass_t *cls );   // win_ent.cpp (0x497180)
-
-// undo.cpp (all FATAL-stubbed in engine_stubs.cpp until undo.cpp is ported)
-extern void        Undo_ClearRedo();
-extern void        Undo_GeneralStart( const char *op );
-extern void        Undo_AddBrushList( selbrush_t *list );
-extern void        Undo_EndBrushList( selbrush_t *list );
-extern void        Undo_AddBrush( entity_brush_s *b );
-extern void        Undo_AddEntity( entity_s *entity );
-extern void        Undo_AddEntity_W( entity_s *e );
-extern void        Undo_End();
-
-// engine_stubs.cpp
-extern void        sub_43ECB0();   // addpoint mode cleanup (FATAL stub)
-
-// patch (pmesh.cpp / engine_stubs.cpp — all FATAL-stubbed)
+// patch (pmesh.cpp) + brush face helpers (brush.cpp)
 extern void        Patch_Deselect();
 extern void        Patch_ShiftTexture( patchMesh_t *p, float s, float t );
-extern curvePatchDef_t *PMESH_37( patchMesh_t *def, int axis );    // pmesh.cpp 0x445e30
+extern curvePatchDef_t *Patch_FlipTexture( patchMesh_t *def, int axis );    // pmesh.cpp 0x445e30
 extern void        Patch_ScaleTexture( patchMesh_t *p, float s, float t );
 extern void        Patch_RotateTexture( patchMesh_t *p, float deg );
 extern void        Patch_Scale( patchMesh_t *p, const float *mid, const float *scale, char doRebuild );
 extern void        Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap ); // pmesh.cpp 0x441E70
-extern int         g_bPatchBendMode;                     // engine_stubs.cpp 0x25d5b04
-extern void        sub_47C950( brush_t *brushDef, float y, float x );
-extern void        Texture_Fit( face_t *facePtr, float y, float x, int flag );
-extern void        sub_477D70( selbrush_t *b, const float *mat );
+extern void        Brush_FitTextureFaces( brush_t *def, float vTimes, float uTimes );
+extern void        Texture_Fit( face_t *f, float vTimes, float uTimes, int selectionBounds );
 extern void        Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );   // brush.cpp 0x4702b0
-extern void        sub_477080( brush_t *b, int sampleSize );
-extern void        sub_476ED0( brush_t *def, MaterialDef *mtldef, char flag, float f4, char flag2 ); // 0x476ed0 (real port in brush.cpp)
-extern void        sub_477020( brush_t *def, const texdef_sub_t *texdef );
+extern void        Brush_SetAllFacesSampleSize( brush_t *b, int sampleSize );
+extern void        Brush_SetAllFacesMaterial( brush_t *def, MaterialDef *material, char planarProject,
+                                              float useStoredST, char materialOnly );
+extern void        Brush_SetAllFacesTexdef( brush_t *b, const texdef_sub_t *texdef );
 
 // brush.cpp texture helpers
-extern void        sub_47B940( brush_t *def );
-extern void        sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushPtr );
-extern void        sub_4768B0( face_t *f, brush_t *b, int sz );
+extern brush_t    *Brush_SetFaceTexdef( const texdef_sub_t *texDef, face_t *f, brush_t *b );
+extern void        Face_SetSampleSize( face_t *f, brush_t *b, int sampleSize );
 
 // materialdef.cpp
 extern void        TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef );
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }
 
-// engine_stubs.cpp / qe3.cpp stubs for selection bounds
+// selection bounds (defined below)
 void Select_GetBounds( float *mins, float *maxs );
 void Select_GetMid( float *mid );
 
 
-// engine_stubs.cpp / undo.cpp globals
-extern float       world_orient_matrix[4][3];  // 0x6DE290
-extern void        unknown_libname_291();       // CRT bounds-check abort
-extern undo_s     *g_lastundo;                  // 0x23F162C — defined in undo.cpp
-extern int         g_nUpdateBits;              // 0x25D5A74
+// engine_stubs.cpp globals
 extern void       *zero;                       // empty-string sentinel (engine_stubs.cpp)
 
 // --- Test_Ray pick chain deps ---
 // Brush_Ray (0x475fe0): convex-clip the instance against the ray; returns the entry
 // faceVis_s* (&b->faces[entryIdx]) on a hit, NULL otherwise. *outDist = entry distance
-// along dir, *outNormal = entry face normal. Built faithfully below (uses the real
-// instance faceVis array sub_477D70 builds), NOT a separate struct.
+// along dir, *outNormal = entry face normal. Defined below (uses the real instance
+// faceVis array Brush_CheckBuildFaceVis builds), NOT a separate struct.
 extern faceVis_s  *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
                               const orientation_t *orient, float *outDist, float *outNormal );
-extern char        PMESH_51( const float *org, const float *dir, patch_t *pm,
+extern char        Patch_RayTest( const float *org, const float *dir, patch_t *pm,
                              float *outDist, int *outCol, int *outRow,
                              byte *outColor, float *outPlane );        // pmesh.cpp 0x44acc0
-extern char        PMESH_RaySegPick( const float *vB, const float *vA, const float *dir,
+extern char        Ray_TriangleHit( const float *vB, const float *vA, const float *dir,
                                      const float *base, const float *org,
                                      float *outT, float *outU, float *outV );   // pmesh.cpp 0x44ab10
 extern int         PlaneFromPoints_Real( float *out, const float *A, const float *B,
                                          const float *C );                      // pmesh.cpp 0x4a9950
 extern void        Entity_GetOrientationMatrix( entity_s *ent, float (*axis)[3] ); // entity.cpp 0x482940
 extern void        VectorRotateByAxis( float *out, const float *axisMatrix, const float *dir ); // draw.cpp 0x4ba6b0
-// The pick chain transforms the ray WORLD->LOCAL (0x4ba610), the INVERSE of
-// OrientationPosToWorldPos (0x4ba430) - two distinct binary functions.
+// The pick chain transforms the ray WORLD->LOCAL, the INVERSE of
+// OrientationPosToWorldPos - two distinct functions.
 extern void        OrientationWorldPosToLocalPos( float *out, const float *pos,
-                                                  const orientation_t *orient ); // draw.cpp 0x4ba610 (sub_4BA610)
+                                                  const orientation_t *orient ); // draw.cpp 0x4ba610
 extern void        OrientationConcatenate( const orientation_t *orFirst,
                                            const orientation_t *orSecond,
                                            orientation_t *out );                // engine_stubs.cpp 0x4ba7d0
-extern void        OrientationDirToWorldDir( float *out, const orientation_t *orient,
-                                             const float *dir );                // engine_stubs.cpp 0x4ba4b0
-extern float      *AnglesToAxis( float *angles, float (*axis)[3] );             // engine_stubs.cpp 0x4abeb0
-extern bool        Model_SetModel( entity_brush_s *b, const float *orientMatrix );       // brush.cpp 0x478780
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );            // materialdef.cpp 0x431640
-extern char        sub_46FCF0( Material *faceMtl );                             // filters.cpp 0x46fcf0
-extern void        Select_Deselect( int updateScene );                         // select.cpp 0x48e800
+extern char        Filter_IsFaceMaterialHidden( Material *faceMtl );            // filters.cpp 0x46fcf0
+void               Select_Deselect( int bDeselectFaces );                      // 0x48e800 (below)
 
 // KIWI-UX: the typed selection core's legacy-change notification (kiwi_selection.cpp).
 // Hooked at the funnels that bypass Brush_AddToList2 / Brush_RemoveFromList (the two
@@ -159,10 +113,10 @@ extern void        Sel_InvalidateFromLegacy();
 extern void        Sel_NoteLegacyDeselect();
 // g_PrefsDlg (prefData_t*) comes from prefs.h; Editor_ExtractXModelGeo from r_xsurface.h.
 
-// prefab_s (brush.cpp): the recursed prefab brush list passed to sub_48D460 is the
-// EMBEDDED sentinel at prefab+0x0C — the {active_brushlist(prev)@0x0C,
-// active_brushlist_next(next)@0x10} pair is a selbrush_t list head, exactly like the
-// &active_brushes / &selected_brushes sentinels. The binary takes &prefab->active_brushlist.
+// prefab_s (qe3.h): the recursed prefab brush list passed to BrushList_Trace is the
+// EMBEDDED `brushes` sentinel — the {active_brushlist(prev), active_brushlist_next(next)}
+// pair is a selbrush_t list head, exactly like the &active_brushes / &selected_brushes
+// sentinels.
 static inline selbrush_t *Prefab_BrushListSentinel( void *prefab )
 {
     return &((prefab_s *)prefab)->brushes;
@@ -185,27 +139,25 @@ static inline selbrush_t *Prefab_BrushListSentinel( void *prefab )
 // Cast selbrush_t.faces (void*) to faceVis_s[] and index it.
 #define SEL_FACES(b)      ((faceVis_s *)(b)->faces)
 
-// String zero — engine_stubs.cpp has `void *zero = nullptr`. In the original
-// binary this is an MFC CString "zero" value used as an empty string sentinel.
-// For plain-C usage we cast to (const char*) and guard against null.
+// String zero — engine_stubs.cpp points `zero` at an empty string (the binary's
+// empty-CString sentinel).  For plain-C usage we cast to (const char*) and guard
+// against null.
 static inline const char *zero_str() {
     return zero ? (const char *)zero : "";
 }
 
 // ── select.cpp globals ───────────────────────────────────────────────────────
-// g_SelectedFaces (IDB CArray<selface_t,selface_t&> at 0x73C70C) — the face-
-// selection storage; model in qe3.h.  m_pData=0x73C710, m_nSize=0x73C714,
-// m_nMaxSize=0x73C718 (the port's old selFace / g_ptrSelectedFaces_GetSize /
-// g_selFaceSize raw globals).
+// g_SelectedFaces (CArray<selface_t,selface_t&>, 0x73C70C) — the face-selection
+// storage; model in qe3.h.
 
 // ── undo helpers ─────────────────────────────────────────────────────────────
-// The "adding brushes after entity" guard tests entitylist.next (undo+0x70, IDA 0x48f210),
-// NOT the embedded brush head (+0x7C) - Undo only links entities via entity_s.next.
+// The "adding brushes after entity" guard tests entitylist.next, NOT the embedded
+// brush head - Undo only links entities via entity_s.next.
 static void Undo_TryAddBrush( brush_t *bDef )
 {
     if ( g_lastundo )
     {
-        if ( g_lastundo->entitylist.next != &g_lastundo->entitylist )   // IDA 0x48f210: entity_s.next@undo+0x70 vs &entitylist@+0x6C (NOT the embedded brushes head @+0x7C/+0x78)
+        if ( g_lastundo->entitylist.next != &g_lastundo->entitylist )
             Sys_Printf( "Undo_AddBrush: WARNING adding brushes after entity.\n" );
         entity_s *owner = (entity_s *)(intptr_t)bDef->owner;
         if ( *(int *)&owner->eclass->fixedsize )
@@ -219,8 +171,6 @@ static void Undo_TryAddBrush( brush_t *bDef )
 }
 
 // UNDO_LINK_BRUSH — record undo id in brush_t.ownerPrev and entity.epairEdits.
-// IDA: `v10->ownerPrev = (entity_s *)g_lastundo->id;`
-// We match that logic exactly.
 static void Undo_LinkBrush( brush_t *bDef )
 {
     if ( g_lastundo && !g_lastundo->done )
@@ -233,18 +183,12 @@ static void Undo_LinkBrush( brush_t *bDef )
 }
 
 // ── mode reset helper ─────────────────────────────────────────────────────────
-// CMainFrame::UpdatePatchToolbarButtons (0x42aa70) - refresh the patch-edit toolbar button
-// check-states AND the three Curve-menu check marks.  Disasm 0x42aa8c-0x42ab82: five
-// TB_CHECKBUTTON (0x402) sends on m_wndToolBar - 0x8072 patch-bend, 0x8068 redisperse,
-// 0x8174 lock, 0x8173 unlock, 0x8175 cycle-edge - then CheckMenuItem(0x8174/0x8173/0x8175).
-// TB_CHECKBUTTON for ids absent from the port's IDR_TOOLBAR152 is a harmless FALSE.
-//
-// U-GUARD-2: the SYMBOL stays COMMON (per-body fence, the AdvDlg_IsChecked / UpdatePatch-
-// Inspector house pattern) because ~20 core call sites across brush/drag/pmesh/select/
-// xywnd/mainfrm reach it; the BODY is MFC-only (CMainFrame::m_wndToolBar + the frame's
-// HMENU).  Under KISAK_NO_MFC it is a no-op — identical to the MFC shell with no frame up
-// (the existing `if (!g_pParentWnd) return;` early-out), since the ImGui shell renders the
-// patch-mode toggles straight from g_bPatchBendMode / bLockPatchVerts / d_select_mode.
+// CMainFrame::UpdatePatchToolbarButtons (0x42aa70) - the binary refreshed the patch-edit
+// toolbar check-states (0x8072 patch-bend, 0x8068 redisperse, 0x8174 lock, 0x8173 unlock,
+// 0x8175 cycle-edge) and the three Curve-menu check marks (0x8174/0x8173/0x8175).
+// The symbol stays because ~20 core call sites across brush/drag/pmesh/select/xywnd/mainfrm
+// reach it; the body is empty, since the ImGui shell renders the patch-mode toggles
+// straight from bLockPatchVerts / d_select_mode.
 void CMainFrame_UpdatePatchToolbarButtons()
 {
 }
@@ -255,8 +199,6 @@ static void ResetSelectMode()
     g_qeglobals.d_select_mode = sel_brush;
     if ( prev == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prev == sel_addpoint )
-        sub_43ECB0();
 }
 
 // ── Select_Brush_2 — links brush into list head ───────────────────────────────
@@ -282,27 +224,27 @@ static void Select_Brush_2( selbrush_t *list, selbrush_t *b )
 // ═════════════════════════════════════════════════════════════════════════════
 //  THE Test_Ray PICK CHAIN (brush + patch + prefab + model ray-pick):
 //    Brush_Ray   (0x475fe0)  convex-brush plane clip -> entry faceVis_s*
-//    sub_48CE60  (0x48ce60)  XModel per-triangle ray-pick
-//    sub_48D240  (0x48d240)  per-brush inner trace: brush -> patch -> prefab -> model
-//    sub_48D460  (0x48d460)  brush-list walker (keeps nearest, dedup by ~0.5 dist)
+//    Model_RayTest  (0x48ce60)  XModel per-triangle ray-pick
+//    Brush_TraceTest  (0x48d240)  per-brush inner trace: brush -> patch -> prefab -> model
+//    BrushList_Trace  (0x48d460)  brush-list walker (keeps nearest, dedup by ~0.5 dist)
 //    Test_Ray    (0x48d7c0)  top entry (incl. the contents&0x40 cycle-pick branch)
-//  edTrace_t (qe3.h) IS the byte-exact IDB trace_t (88 bytes: hit{brush@0, face@4, index@8},
-//  xx2@0xC, xx3@0x10, xx4@0x14 = a 0x30-byte orientation copy, dist@0x44, selected@0x48,
-//  _pad[0]@0x49, normal@0x4C).  The faceVis identity t->hit.face == &brush->faces[idx] holds
-//  because Brush_Ray returns into the real instance faceVis array (built by sub_477D70).
-//  KISAK: sub_48D460's camera/XY frustum cull is not ported - it is a pure
-//  optimization (a brush is processed unless culled by BOTH views), so never culling is safe.
+//  edTrace_t (qe3.h) is the trace record: hit{brush, face, index}, xx2, xx3, xx4 (an
+//  orientation copy), dist, selected, normal.  The faceVis identity t->hit.face ==
+//  &brush->faces[idx] holds because Brush_Ray returns into the real instance faceVis array
+//  (built by Brush_CheckBuildFaceVis).
+//  BrushList_Trace's camera/XY frustum cull is not ported - it is a pure optimization (a
+//  brush is processed unless culled by BOTH views), so never culling is safe.
 // ═════════════════════════════════════════════════════════════════════════════
-extern selbrush_t active_brushes;          // map.cpp (0x23F189C)
 
-// Forward declarations — the chain is mutually recursive (sub_48D240 → sub_48D460 →
-// sub_48D240 for prefab recursion; Test_Ray → sub_48D460; sub_48D460 → sub_48CE60).
-static char sub_48CE60( float *outDist, float *outNormal, const float *org,
-                        const float *dir, selbrush_t *brush );
-static char sub_48D240( const float *start, const float *dir, int contents,
-                        selbrush_t *a4, const orientation_t *a5, edTrace_t *a6 );
-static void sub_48D460( const float *start, const float *dir, int contents,
-                        selbrush_t *sb, const orientation_t *a5, edTrace_t *a6, int a7 );
+// Forward declarations — the chain is mutually recursive (Brush_TraceTest → BrushList_Trace →
+// Brush_TraceTest for prefab recursion; Test_Ray → BrushList_Trace; BrushList_Trace → Model_RayTest).
+static char Model_RayTest( float *outDist, float *outNormal, const float *org,
+                           const float *dir, selbrush_t *brush );
+static char Brush_TraceTest( const float *start, const float *dir, int contents,
+                             selbrush_t *inst, const orientation_t *orient, edTrace_t *trace );
+static void BrushList_Trace( const float *start, const float *dir, int contents,
+                             selbrush_t *list, const orientation_t *orient, edTrace_t *traces,
+                             int maxTraces );
 
 // ── Brush_Ray (0x475fe0) — ray-vs-convex-brush, returns the entry faceVis_s* ──────
 //  Builds the instance faceVis (Brush_CheckBuildFaceVis), then clips the ray segment
@@ -310,7 +252,7 @@ static void sub_48D460( const float *start, const float *dir, int contents,
 //  On entry returns &b->faces[entryFaceIdx] and *outDist = the entry distance along dir;
 //  on miss returns NULL with *outDist = 0.  The patch/model/prefab fallback (no instance
 //  faces or no entry face) returns &b->faces[0] (non-NULL, dist 0) with normal (0,0,1) - a
-//  pretend-hit so the caller's finer test (PMESH_51 / prefab recursion / model triangle
+//  pretend-hit so the caller's finer test (Patch_RayTest / prefab recursion / model triangle
 //  pick) decides; plain brushes miss.
 faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
                       const orientation_t *orient, float *outDist, float *outNormal )
@@ -320,22 +262,22 @@ faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
     float endY = dir[1] * 262144.0f + start[1];
     float endZ = dir[2] * 262144.0f + start[2];
 
-    sub_477D70( b, (const float *)orient );                // 0x47602a — Brush_CheckBuildFaceVis
+    Brush_CheckBuildFaceVis( b, (const float *)orient );
 
-    double entryDist = 0.0;       // v7
+    double entryDist = 0.0;
     faceVis_s *hitFace = NULL;
-    int    i         = 0;         // v8 — loop counter against b->faceCount (a1->unk1)
+    int    i         = 0;         // loop counter against b->faceCount
 
-    if ( b->faceCount )           // 0x47603b — a1->unk1
+    if ( b->faceCount )
     {
         // near point (p1) clipped forward, far point (p2) clipped back, as planes pass.
-        float p1x = start[0], p1y = start[1], p1z = start[2];   // v14/v12/v13
-        float p2x = endX,     p2y = endY,     p2z = endZ;       // v30/v11/v10
+        float p1x = start[0], p1y = start[1], p1z = start[2];
+        float p2x = endX,     p2y = endY,     p2z = endZ;
         for ( ;; )
         {
-            const plane_t &pl = b->def->faces[i].plane;         // &a1->def->brush_faces[v45].plane
-            float d1 = pl.normal[1]*p1y + pl.normal[0]*p1x + pl.normal[2]*p1z - pl.dist;  // v50
-            float d2 = pl.normal[1]*p2y + p2x*pl.normal[0] + pl.normal[2]*p2z - pl.dist;  // v48
+            const plane_t &pl = b->def->faces[i].plane;
+            float d1 = pl.normal[1]*p1y + pl.normal[0]*p1x + pl.normal[2]*p1z - pl.dist;
+            float d2 = pl.normal[1]*p2y + p2x*pl.normal[0] + pl.normal[2]*p2z - pl.dist;
             if ( d1 >= 0.0f && d2 >= 0.0f )                     // both in front → outside (convex)
             {
                 *outDist = 0.0f;
@@ -343,17 +285,17 @@ faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
             }
             if ( d1 <= 0.0f && d2 <= 0.0f )                     // both behind → plane doesn't clip
             {
-                // entryDist unchanged (binary: v23=0.0, carried to next iter)
+                // entryDist unchanged
             }
             else
             {
-                float frac = d1 / ( d1 - d2 );                  // v49
+                float frac = d1 / ( d1 - d2 );
                 if ( d1 <= 0.0f )                               // exit: clip the far endpoint
                 {
                     p2x = ( p2x - p1x ) * frac + p1x;
                     p2y = ( p2y - p1y ) * frac + p1y;
                     p2z = frac * ( p2z - p1z ) + p1z;
-                    // v23 = 0.0 (entryDist unchanged)
+                    // entryDist unchanged
                 }
                 else                                            // entry: record face/normal, clip near
                 {
@@ -364,34 +306,31 @@ faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
                         outNormal[2] = pl.normal[2];
                     }
                     hitFace = &b->faces[i];
-                    p1x = p1x + ( p2x - p1x ) * frac;           // v36 -> v14
-                    p1y = p1y + ( p2y - p1y ) * frac;           // v39 -> v12
-                    p1z = frac * ( p2z - p1z ) + p1z;           // v42 -> v19
-                    // v21 = 0.0 (entryDist source for the both-behind/exit cases)
+                    p1x = p1x + ( p2x - p1x ) * frac;
+                    p1y = p1y + ( p2y - p1y ) * frac;
+                    p1z = frac * ( p2z - p1z ) + p1z;
                 }
             }
-            ++i;                                                // ++v45 / ++v8 (advance together)
-            if ( (unsigned)i >= (unsigned)b->faceCount )        // 0x4761d4 — vs a1->unk1
+            ++i;
+            if ( (unsigned)i >= (unsigned)b->faceCount )
                 break;
         }
-        entryDist = 0.0;   // v7 = v21 (the both-behind/exit entryDist carry — always 0 in this path)
-        if ( hitFace )     // 0x4761e0 — an entry face was recorded
+        entryDist = 0.0;   // always 0 in this path
+        if ( hitFace )     // an entry face was recorded
         {
-            // *a5 = a2[1]*v40 + *a2*v37 + a2[2]*v43  (entry point - start, dotted with dir)
+            // (entry point - start) dotted with dir
             *outDist = dir[1] * ( p1y - start[1] )
                      + dir[0] * ( p1x - start[0] )
                      + dir[2] * ( p1z - start[2] );
             return hitFace;
         }
-        // hitFace == 0: fall through to the no-entry-face fallback (LABEL_17).
+        // hitFace == 0: fall through to the no-entry-face fallback.
     }
 
-    // LABEL_17 (0x4761e8) — no instance faces, or no entry face recorded.
+    // no instance faces, or no entry face recorded.
     *outDist = (float)entryDist;
-    // 0x4761ed `cmp dword ptr [esi+20h],0`: esi is the brush INSTANCE and selbrush_t has
-    // `patch` at +0x20 (the IDB's brush_t_with_custom_def mislabels +0x20 as mins, which
-    // hex-rays renders as a1->mins[0]).  PATCH instances - like prefabs / shown models
-    // below - get the pretend-hit so the caller's finer test (PMESH_51) decides.
+    // PATCH instances - like prefabs / shown models below - get the pretend-hit so the
+    // caller's finer test (Patch_RayTest) decides.
     if ( !b->patch )
     {
         entity_s *owner = b->owner;
@@ -400,7 +339,7 @@ faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
         if ( !owner
           || ( !owner->prefab
             && ( !owner->modelInst || ( g_PrefsDlg->m_nEntityShowState & 0x10000 ) == 0 ) ) )  // ENTITY_SKINNED
-            return nullptr;          // 0x476216
+            return nullptr;
     }
     if ( outNormal )
     {
@@ -408,10 +347,10 @@ faceVis_s *Brush_Ray( selbrush_t *b, const float *dir, const float *start,
         outNormal[1] = (float)entryDist;
         outNormal[2] = 1.0f;
     }
-    return b->faces;                 // return a1->refCount (== &b->faces[0])
+    return b->faces;                 // == &b->faces[0]
 }
 
-// Ed_BrushFloorRay - KISAK: headless distance wrapper over Brush_Ray for the
+// Ed_BrushFloorRay - headless distance wrapper over Brush_Ray for the
 // Cam_ChangeFloor / z.cpp floor-march callers (which hold only a def).
 bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir, float *outDist )
 {
@@ -424,20 +363,20 @@ bool Ed_BrushFloorRay( brush_t *def, const float *start, const float *dir, float
     float normal[3];
     faceVis_s *f = Brush_Ray( &tmp, dir, start, (const orientation_t *)world_orient_matrix,
                               outDist, normal );
-    // sub_477D70 may have built real faceVis (incl. surf-cache VB handles), so tear it
+    // Brush_CheckBuildFaceVis may have built real faceVis (incl. surf-cache VB handles), so tear it
     // down with Vis_Free rather than free() or the floor-march leaks a VB per face.
     if ( tmp.faces )
         Vis_Free( tmp.faceCount, tmp.faces, &tmp );
     return f != nullptr;
 }
 
-// ── sub_48CE60 (0x48ce60) — XModel PMESH per-triangle ray-pick ────────────────────
+// ── Model_RayTest (0x48ce60) — XModel PMESH per-triangle ray-pick ────────────────────
 //  Extract the brush's model geometry (Editor_ExtractXModelGeo), transform the ray into
 //  the model's local frame (inverse rotation by "angles", scaled by 1/modelscale), then
-//  ray-test every extracted triangle (PMESH_RaySegPick).  Keeps the nearest hit; returns
+//  ray-test every extracted triangle (Ray_TriangleHit).  Keeps the nearest hit; returns
 //  1 on a hit, 0 on miss (and 1 when the model has no geometry).
-//  Args (the binary's __fastcall): outDist, outNormal, org(start), dir, brush.
-static char sub_48CE60( float *outDist, float *outNormal, const float *org,
+//  Args: outDist, outNormal, org(start), dir, brush.
+static char Model_RayTest( float *outDist, float *outNormal, const float *org,
                         const float *dir, selbrush_t *brush )
 {
     // KIWI: resident geometry + model-local BVH avoid extraction and a full
@@ -445,11 +384,11 @@ static char sub_48CE60( float *outDist, float *outNormal, const float *org,
     extern int KiwiDrop_TraceModelCached( selbrush_t *, const float *, const float *, float *, float * );
     const int cached = KiwiDrop_TraceModelCached( brush, org, dir, outDist, outNormal );
     if ( cached >= 0 ) return (char)cached;
-    static byte vbuf[196612];   // v16  — extracted vertex bytes (4000h verts * 12)
-    static byte ibuf[131072];   // v37  — extracted tri indices (10000h)
+    static byte vbuf[196612];   // extracted vertex bytes (0x4000 verts * 12)
+    static byte ibuf[131072];   // extracted tri indices (0x10000)
 
-    entity_s *owner = brush->owner;                     // [esi+8]
-    entity_s *ownerDef = (entity_s *)owner->def;        // [eax+8]
+    entity_s *owner = brush->owner;
+    entity_s *ownerDef = (entity_s *)owner->def;
     iassert( ownerDef->modelClass );                    // select.cpp:64 brush->owner->def->modelClass
     entitymodel_t *mc = (entitymodel_t *)ownerDef->modelClass;
     iassert( mc->model );                               // select.cpp:65 ->model
@@ -457,88 +396,85 @@ static char sub_48CE60( float *outDist, float *outNormal, const float *org,
 
     int triCount = Editor_ExtractXModelGeo( (XModel *)(intptr_t)mc->model->handle,
                                             (float *)vbuf, 0x4000,
-                                            (uint16_t *)ibuf, 0x10000 );   // v29
+                                            (uint16_t *)ibuf, 0x10000 );
     if ( !triCount )
-        return 1;                                       // 0x48cf57
+        return 1;
 
-    float angles[3];                                    // v21
+    float angles[3];
     if ( !Entity_GetVec3ForKey( (entity_s_def *)ownerDef, angles, "angles" ) )
     {
         angles[0] = 0.0f; angles[1] = 0.0f; angles[2] = 0.0f;
     }
-    float axis[3][3];                                   // v18
+    float axis[3][3];
     AnglesToAxis( angles, axis );
 
-    // localOrg = axis · (org - entityOrigin) — WORLD→LOCAL (sub_4BA610, 0x4ba610), the
-    // INVERSE of OrientationPosToWorldPos. v17 = entity origin (def+0x68 = float[26..28]).
-    float localOrg[3];                                  // v26..v28
+    // localOrg = axis · (org - entityOrigin) — WORLD→LOCAL, the INVERSE of
+    // OrientationPosToWorldPos.
+    float localOrg[3];
     orientation_t modelOr;                              // {origin, axis}
-    modelOr.origin[0] = ownerDef->origin[0];           // v7[26]
+    modelOr.origin[0] = ownerDef->origin[0];
     modelOr.origin[1] = ownerDef->origin[1];
     modelOr.origin[2] = ownerDef->origin[2];
     modelOr.axis[0][0] = axis[0][0]; modelOr.axis[0][1] = axis[0][1]; modelOr.axis[0][2] = axis[0][2];
     modelOr.axis[1][0] = axis[1][0]; modelOr.axis[1][1] = axis[1][1]; modelOr.axis[1][2] = axis[1][2];
     modelOr.axis[2][0] = axis[2][0]; modelOr.axis[2][1] = axis[2][1]; modelOr.axis[2][2] = axis[2][2];
-    OrientationWorldPosToLocalPos( localOrg, org, &modelOr );   // sub_4BA610(a3, &v26, v17)
+    OrientationWorldPosToLocalPos( localOrg, org, &modelOr );
 
     // modelscale epair (default 1.0); when > 0, divide the local origin by it.
-    float scale = 1.0f;                                 // v31
-    // zero_str(), NOT (const char*)zero: the port stubs the binary's empty-string global
-    // `zero` (0x6D58F0) as a NULL void*, and atof(NULL) crashes.
-    const char *mscale = zero_str();                    // v10
-    for ( epair_t *ep = (epair_t *)ownerDef->epairs; ep; ep = (epair_t *)ep->next )   // [def+116]
+    float scale = 1.0f;
+    // zero_str(), NOT (const char*)zero: it guards a NULL `zero`, and atof(NULL) crashes.
+    const char *mscale = zero_str();
+    for ( epair_t *ep = (epair_t *)ownerDef->epairs; ep; ep = (epair_t *)ep->next )
     {
         if ( !_stricmp( ep->key, "modelscale" ) )
         {
-            mscale = ep->value ? ep->value : zero_str();   // v10 = v9[2]; if !v10 -> LABEL_17
+            mscale = ep->value ? ep->value : zero_str();
             break;
         }
     }
-    float invScale = 1.0f;                              // used to scale the result distance back
-    scale = (float)atof( mscale );                      // v31
+    float invScale = 1.0f;                              // divides the local origin
+    scale = (float)atof( mscale );
     if ( scale <= 0.0f )
     {
-        scale = 1.0f;                                   // LABEL_17
+        scale = 1.0f;
     }
     else
     {
-        invScale = 1.0f / scale;                        // v34
-        localOrg[0] *= invScale;                        // v26 *= v34
-        localOrg[1] *= invScale;                        // v27 *= v34
-        localOrg[2] *= invScale;                        // v28 *= v34
+        invScale = 1.0f / scale;
+        localOrg[0] *= invScale;
+        localOrg[1] *= invScale;
+        localOrg[2] *= invScale;
     }
 
     // localDir = dir rotated into model space.  VectorRotateByAxis reads the rotation from
     // axisMatrix[3..11], i.e. it expects the ORIENTATION block (origin[0..2] THEN
     // axis[3..11]) - pass &modelOr, NOT the bare `axis` array (offset by 3 floats).
-    // [0x48d095 &var_20098]
-    float localDir[3];                                  // v19
-    VectorRotateByAxis( localDir, (const float *)&modelOr, dir );   // VectorRotateByAxis(v19, &modelOr(origin+axis), v33(dir))
+    float localDir[3];
+    VectorRotateByAxis( localDir, (const float *)&modelOr, dir );
 
-    float best = 3.4028235e38f;                         // v33
-    float planeV[4];                                    // v20
-    int   idx = 0;                                      // v11
+    float best = 3.4028235e38f;
+    float planeV[4];
+    int   idx = 0;
     if ( triCount > 0 )
     {
         const uint16_t *i16 = (const uint16_t *)ibuf;
         do
         {
-            int a = i16[idx];                           // &v35[2*v11] — first index stream
-            int c = i16[idx + 1];                       // &v36[2*v11]
-            int bIdx = i16[idx + 2];                    // &v37[2*v11] (interleaved triplets)
-            float t;                                    // v32 (outU/outV passed NULL — binary 0,0)
+            int a = i16[idx];
+            int c = i16[idx + 1];
+            int bIdx = i16[idx + 2];                    // (interleaved triplets)
+            float t;                                    // outU/outV passed NULL
             const float *vA = (const float *)&vbuf[12 * a];
             const float *vB = (const float *)&vbuf[12 * c];
             const float *vC = (const float *)&vbuf[12 * bIdx];
-            if ( PMESH_RaySegPick( vA, vB, localDir, vC, localOrg, &t, nullptr, nullptr ) )
+            if ( Ray_TriangleHit( vA, vB, localDir, vC, localOrg, &t, nullptr, nullptr ) )
             {
-                t *= scale;                             // v32 *= v31
+                t *= scale;
                 if ( t < best )
                 {
                     if ( outNormal )
                     {
-                        // PlaneFromPoints_Real(v20, &v16[12*v24], &v16[12*v25], &v16[12*v22])
-                        // == (out, vC, vB, vA) in the index order above.
+                        // (out, vC, vB, vA) in the index order above.
                         PlaneFromPoints_Real( planeV, vC, vB, vA );
                         outNormal[0] = planeV[0];
                         outNormal[1] = planeV[1];
@@ -547,98 +483,98 @@ static char sub_48CE60( float *outDist, float *outNormal, const float *org,
                     best = t;
                 }
             }
-            idx += 3;                                   // LODWORD(v11) += 3
+            idx += 3;
         } while ( idx < triCount );
     }
 
-    if ( best == 3.4028235e38f )                        // 0x48d204 — no hit
+    if ( best == 3.4028235e38f )                        // no hit
         return 0;
-    *outDist = best;                                    // *v23 = v33
+    *outDist = best;
     return 1;
 }
 
-// ── sub_48D240 (0x48d240) — per-brush inner trace ─────────────────────────────────
-//  Ray-test ONE brush instance: convex brush (Brush_Ray) -> patch (PMESH_51) -> prefab
-//  (recurse via sub_48D460 through the prefab's local orientation) -> model (sub_48CE60).
-//  Fills a6 (a trace_t) with the hit; clears a6->hit.brush/face on miss.
-static char sub_48D240( const float *start, const float *dir, int contents,
-                        selbrush_t *a4, const orientation_t *a5, edTrace_t *a6 )
+// ── Brush_TraceTest (0x48d240) — per-brush inner trace ─────────────────────────────────
+//  Ray-test ONE brush instance: convex brush (Brush_Ray) -> patch (Patch_RayTest) -> prefab
+//  (recurse via BrushList_Trace through the prefab's local orientation) -> model (Model_RayTest).
+//  Fills `trace` with the hit; clears trace->hit.brush/face on miss.
+static char Brush_TraceTest( const float *start, const float *dir, int contents,
+                             selbrush_t *inst, const orientation_t *orient, edTrace_t *trace )
 {
-    float *normal = a6->normal;                         // a6->normal
-    float *p_dist = &a6->dist;                          // &a6->dist
+    float *normal = trace->normal;
+    float *p_dist = &trace->dist;
 
-    faceVis_s *face = Brush_Ray( a4, dir, start, a5, &a6->dist, a6->normal );   // 0x48d26b
-    a6->hit.face = face;                                    // a6->hit.face = patch
+    faceVis_s *face = Brush_Ray( inst, dir, start, orient, &trace->dist, trace->normal );
+    trace->hit.face = face;
     if ( !face )
     {
-        a6->hit.brush = nullptr;
+        trace->hit.brush = nullptr;
         return 0;
     }
-    a6->hit.brush = a4;                                     // a6->hit.brush = a4
-    a6->hit.leafBrush = a4;
-    a6->leafFace = face;
-    a6->orientation = *a5;
-    a6->prefabOwner = NULL;
-    a6->_pad[0] = 0;                                    // *(&a6->selected + 1) = 0
-    a6->selected = 0;
+    trace->hit.brush = inst;
+    trace->hit.leafBrush = inst;
+    trace->leafFace = face;
+    trace->orientation = *orient;
+    trace->prefabOwner = NULL;
+    trace->_pad[0] = 0;
+    trace->selected = 0;
 
-    patch_t *patch = a4->patch;                         // a4->patch
+    patch_t *patch = inst->patch;
     if ( patch )
     {
         if ( ( contents & 0x100 ) != 0 )               // patch-pick disabled this pass
             return 1;
-        char hit = PMESH_51( start, dir, patch, p_dist, nullptr, nullptr, nullptr, normal );   // 0x48d2d5
-        if ( !hit )                                     // LABEL_16
+        char hit = Patch_RayTest( start, dir, patch, p_dist, nullptr, nullptr, nullptr, normal );
+        if ( !hit )
         {
-            a6->hit.brush = nullptr;
-            a6->hit.face  = nullptr;
+            trace->hit.brush = nullptr;
+            trace->hit.face  = nullptr;
         }
         return hit;
     }
 
-    entity_s *owner = a4->owner;                        // patch = a4->owner
-    if ( owner->prefab )                                // owner->prefab
+    entity_s *owner = inst->owner;
+    if ( owner->prefab )
     {
-        orientation_t orFirst;                          // [ebp-B0h]
-        orientation_t out;                              // [ebp-E0h]
-        float localDir[3];                              // v19
-        float localStart[3];                            // a1a (int[3] in IDA = float[3])
+        orientation_t orFirst;
+        orientation_t out;
+        float localDir[3];
+        float localStart[3];
         Entity_GetOrientationMatrix( (entity_s *)owner->def, &orFirst.origin );   // fills {origin, axis}
-        VectorRotateByAxis( localDir, (const float *)&orFirst, dir );   // VectorRotateByAxis(v19, &orFirst, a2)
-        OrientationWorldPosToLocalPos( localStart, start, &orFirst );   // sub_4BA610(a1, a1a, &orFirst)
-        OrientationConcatenate( &orFirst, a5, &out );                   // OrientationConcatenate(&orFirst, a5, &out)
+        VectorRotateByAxis( localDir, (const float *)&orFirst, dir );
+        OrientationWorldPosToLocalPos( localStart, start, &orFirst );
+        OrientationConcatenate( &orFirst, orient, &out );
 
-        edTrace_t a6a;                                  // [ebp-80h]
-        a6a.dist = 262144.0f;                           // a6a.dist = 262144.0
-        sub_48D460( localStart, localDir, contents,
-                    Prefab_BrushListSentinel( owner->prefab ),
-                    &out, &a6a, 1 );                    // 0x48d366
+        edTrace_t inner;
+        inner.dist = 262144.0f;
+        BrushList_Trace( localStart, localDir, contents,
+                         Prefab_BrushListSentinel( owner->prefab ),
+                         &out, &inner, 1 );
         char result;
-        if ( a6a.dist == 262144.0f )                    // nothing hit in the prefab
+        if ( inner.dist == 262144.0f )                  // nothing hit in the prefab
         {
-            a6->hit.face  = nullptr;
-            a6->hit.brush = nullptr;
+            trace->hit.face  = nullptr;
+            trace->hit.brush = nullptr;
             result = 0;
         }
         else
         {
-            a6->hit.leafBrush = a6a.hit.leafBrush;
-            a6->leafFace = a6a.leafFace;
-            a6->selected = a6a.selected;
-            a6->orientation = a6a.orientation;
-            *p_dist = a6a.dist;
-            a6->_pad[0] = a6a._pad[0];                  // *(&a6->selected+1) = *(&a6a.selected+1)
-            OrientationDirToWorldDir( normal, &out, a6a.normal );        // map the prefab normal back out
-            a6->prefabOwner = a6a.prefabOwner;
+            trace->hit.leafBrush = inner.hit.leafBrush;
+            trace->leafFace = inner.leafFace;
+            trace->selected = inner.selected;
+            trace->orientation = inner.orientation;
+            *p_dist = inner.dist;
+            trace->_pad[0] = inner._pad[0];
+            OrientationDirToWorldDir( normal, &out, inner.normal );   // map the prefab normal back out
+            trace->prefabOwner = inner.prefabOwner;
             result = 1;
-            if ( !a6a.prefabOwner )
+            if ( !inner.prefabOwner )
             {
-                a6->prefabOwner = a4->owner;
+                trace->prefabOwner = inst->owner;
             }
         }
         return result;
     }
-    else if ( owner->modelInst )                        // patch->modelInst
+    else if ( owner->modelInst )
     {
         // model pick: only when "show models" (0x10000) is on and (contents&4 unset OR
         // the eclass is not an actor — actors are excluded from the &4 world pass).
@@ -646,7 +582,7 @@ static char sub_48D240( const float *start, const float *dir, int contents,
           && ( ( contents & 4 ) == 0
             || _strnicmp( ((entity_s *)owner->def)->eclass->name, "actor", 5 ) != 0 ) )
         {
-            // KIWI-UX divergence from 0x48d43e: the binary treats sub_48CE60's
+            // KIWI-UX divergence from 0x48d43e: the binary treats Model_RayTest's
             // per-triangle test as authoritative — a miss CLEARS the hit, making
             // skinny models (grass, poles, fences) nearly unclickable.  Here the
             // triangle pass only REFINES dist/normal on a mesh hit (it writes
@@ -654,11 +590,11 @@ static char sub_48D240( const float *start, const float *dir, int contents,
             // regardless, so the whole model bbox is the selection zone.  The
             // drop trace is unaffected: it passes contents|0x200, which excludes
             // fixedsize entities in the walker before this branch.
-            sub_48CE60( p_dist, normal, start, dir, a4 );
+            Model_RayTest( p_dist, normal, start, dir, inst );
             return 1;
         }
     }
-    return (char)(intptr_t)face;                        // return (char)patch
+    return (char)(intptr_t)face;
 }
 
 // KIWI: expose native recursive prefab tracing to the model-mode picker.
@@ -669,19 +605,20 @@ bool KiwiSelect_TracePrefab( selbrush_t *node, const float *start,
         return false;
     *trace = edTrace_t{};
     trace->dist = 262144.0f;
-    return sub_48D240( start, dir, 0, node,
+    return Brush_TraceTest( start, dir, 0, node,
         (const orientation_t *)world_orient_matrix, trace ) != 0
         && trace->hit.brush != nullptr;
 }
 
-// ── sub_48D460 (0x48d460) — brush-list walker ─────────────────────────────────────
-//  Iterate a brush list (sb is the sentinel head), ray-test each pickable brush via
-//  sub_48D240, and keep the nearest hit into the a6/a7 trace array (a7 = maxTraces).
+// ── BrushList_Trace (0x48d460) — brush-list walker ─────────────────────────────────────
+//  Iterate a brush list (`list` is the sentinel head), ray-test each pickable brush via
+//  Brush_TraceTest, and keep the nearest hit into the `traces` array (maxTraces long).
 //  The camera/XY frustum cull is skipped headless (see the chain header).
-static void sub_48D460( const float *start, const float *dir, int contents,
-                        selbrush_t *sb, const orientation_t *a5, edTrace_t *a6, int a7 )
+static void BrushList_Trace( const float *start, const float *dir, int contents,
+                             selbrush_t *list, const orientation_t *orient, edTrace_t *traces,
+                             int maxTraces )
 {
-    for ( selbrush_t *sbn = sb->next; sbn != sb; sbn = sbn->next )      // 0x48d46d
+    for ( selbrush_t *sbn = list->next; sbn != list; sbn = sbn->next )
     {
         // contents&4 (world pass): skip prefab/model entity brushes (owner != world &
         // owner is a prefab class) — those are picked via the prefab/model recursion.
@@ -694,11 +631,11 @@ static void sub_48D460( const float *start, const float *dir, int contents,
                 continue;
             }
         }
-        if ( FilterBrush( sbn, 0 ) )                                    // 0x48d4be
+        if ( FilterBrush( sbn, 0 ) )
         {
             continue;
         }
-        int brushflags = sbn->brushFlags;                              // 0x48d4ce
+        int brushflags = sbn->brushFlags;
         if ( ( brushflags & BRUSHFLAG_SELECTED ) != 0 )
         {
             continue;
@@ -710,12 +647,12 @@ static void sub_48D460( const float *start, const float *dir, int contents,
 
         iassert( sbn->def->owner == (entity_s *)sbn->owner->def );   // select.cpp:233 brush->def->owner==brush->owner->def
 
-        eclass_t *eclass = ((entity_s *)sbn->owner->def)->eclass;       // 0x48d579
-        // hidden/fixedsize/model gate (0x48d5d2): pickable unless a point/model entity the
+        eclass_t *eclass = ((entity_s *)sbn->owner->def)->eclass;
+        // hidden/fixedsize/model gate: pickable unless a point/model entity the
         // current pass excludes.
         bool ok = ( eclass->classtype & 0x10 ) != 0
                || ( ( ( contents & 0x200 ) == 0 || !*(int *)&eclass->fixedsize )
-                 && ( ( contents & 0x400 ) == 0 || !Model_SetModel( sbn, (const float *)a5 ) ) );
+                 && ( ( contents & 0x400 ) == 0 || !Model_SetModel( sbn, (const float *)orient ) ) );
         if ( !ok )
         {
             continue;
@@ -725,7 +662,7 @@ static void sub_48D460( const float *start, const float *dir, int contents,
             continue;
         }
 
-        // sky-brush disable (0x48d602): when SkyBrushOff is set, skip faces whose base
+        // sky-brush disable: when SkyBrushOff is set, skip faces whose base
         // material name contains "sky_".
         if ( g_PrefsDlg->sky_brush_off )
         {
@@ -747,37 +684,37 @@ static void sub_48D460( const float *start, const float *dir, int contents,
                 continue;
         }
 
-        edTrace_t v27;                                                  // [ebp-58h]
-        sub_48D240( start, dir, contents, sbn, a5, &v27 );             // 0x48d628
-        if ( !v27.hit.face )
+        edTrace_t hit;
+        Brush_TraceTest( start, dir, contents, sbn, orient, &hit );
+        if ( !hit.hit.face )
             continue;
         // face-texture-filter test: skip if the hit face's material is filtered out.
         // (CPU mode: visArray is NULL — derive the Material* from the def face's layer.)
-        Material *faceMtl = nullptr;                                    // v27.hit.face->visArray->handle
-        if ( v27.hit.face->visArray )
-            faceMtl = v27.hit.face->visArray->mtlHandle;
-        if ( sub_46FCF0( faceMtl ) )                                   // 0x46FCF0
+        Material *faceMtl = nullptr;
+        if ( hit.hit.face->visArray )
+            faceMtl = hit.hit.face->visArray->mtlHandle;
+        if ( Filter_IsFaceMaterialHidden( faceMtl ) )
             continue;
 
-        float dist = v27.dist;                                         // v27.dist
+        float dist = hit.dist;
         // de-dup: walk forward in the output trace array, stopping at the first slot
         // whose dist differs from this hit by > 0.5 (so a coincident multi-list hit
         // isn't recorded twice). Then keep it if it's strictly nearer than that slot.
-        edTrace_t *slot = a6;                                          // a6 advances
-        int v16 = 0;
-        while ( v16 < a7 - 1 )
+        edTrace_t *slot = traces;
+        int k = 0;
+        while ( k < maxTraces - 1 )
         {
             if ( fabs( dist - slot->dist ) > 0.5f )
                 break;
-            ++v16;
+            ++k;
             ++slot;
         }
-        if ( dist > 0.0f && slot->dist > dist )                        // 0x48d757
+        if ( dist > 0.0f && slot->dist > dist )
         {
-            memcpy( slot, &v27, sizeof( edTrace_t ) );
-            slot->selected = ( sb == &selected_brushes );             // a6->selected = sb==&selected_brushes
+            memcpy( slot, &hit, sizeof( edTrace_t ) );
+            slot->selected = ( list == &selected_brushes );
             if ( ( contents & 0x1000 ) != 0 && ( sbn->brushFlags & 0x20 ) != 0 )
-                slot->_pad[0] = 1;                                     // *(&a6->selected+1) = 1
+                slot->_pad[0] = 1;
         }
     }
 }
@@ -789,46 +726,44 @@ static void sub_48D460( const float *start, const float *dir, int contents,
 //  (a set bit SUPPRESSES that list) and then the &4 world-priority retry.
 void Test_Ray( float *start, float *dir, int contents, edTrace_t *t, int num_traces )
 {
-    memset( t, 0, sizeof( edTrace_t ) * num_traces );        // memset(t, 0, 0x58*num_traces)
-    for ( int k = 0; k < num_traces; ++k )                   // t[k].dist = 262144.0
+    memset( t, 0, sizeof( edTrace_t ) * num_traces );
+    for ( int k = 0; k < num_traces; ++k )
         t[k].dist = 262144.0f;
 
-    int x_contents = contents;                               // x_contents (the &1/&2/&4 mask below)
+    int x_contents = contents;                               // the &1/&2/&4 mask below
     if ( ( contents & 0x40 ) != 0 )
     {
         // ── cycle-pick branch (contents & 0x40) ──
-        std::vector<selbrush_t *> hits;                      // CPtrArray array (0x48d831)
+        std::vector<selbrush_t *> hits;
         // pToSelect = the currently-selected brush (or NULL): used to pick the one before it.
         selbrush_t *pToSelect = ( &selected_brushes != selected_brushes.next )
                               ? selected_brushes.next : nullptr;
-        Select_Deselect( 1 );                                // 0x48d856
+        Select_Deselect( 1 );
 
-        int passFlags = contents & 0x1000;                  // x_contents = contents & 0x1000
+        int passFlags = contents & 0x1000;
         for ( selbrush_t *brush = active_brushes.next;
               brush != &active_brushes;
               brush = brush->next )
         {
             if ( FilterBrush( brush, 0 ) )
                 continue;
-            int bf = brush->brushFlags;                      // [esi+34h]
-            if ( ( bf & BRUSHFLAG_SELECTED ) != 0 )          // shr 1, test 1 → bit1 (0x2)
+            int bf = brush->brushFlags;
+            if ( ( bf & BRUSHFLAG_SELECTED ) != 0 )
                 continue;
-            if ( ( bf & 0x20 ) != 0 )                        // shr 5, test 1 → bit5 (0x20)
+            if ( ( bf & 0x20 ) != 0 )
                 continue;
             if ( brush->patch && !*(int *)&g_PrefsDlg->m_bSelectCurves )
                 continue;
 
-            edTrace_t a4a;                                   // [ebp-68h]
-            sub_48D240( start, dir, passFlags, brush,
-                        (const orientation_t *)world_orient_matrix, &a4a );   // 0x48d8c5
-            if ( !a4a.hit.face )                                 // a4a.onext (== trace.face @+4)
+            edTrace_t hit;
+            Brush_TraceTest( start, dir, passFlags, brush,
+                        (const orientation_t *)world_orient_matrix, &hit );
+            if ( !hit.hit.face )
                 continue;
-            // a4a.hit.face->...+8 dereferenced as a brush owner→prev, fed to sub_46FCF0 — but
-            // sub_46FCF0 takes a Material*; the binary's [eax+8]/[eax] chain reads the
-            // faceVis owner. In CPU mode (visArray NULL) this filter is inert; gather all.
-            if ( sub_46FCF0( a4a.hit.face->visArray ? a4a.hit.face->visArray->mtlHandle : nullptr ) )
+            // In CPU mode (visArray NULL) this filter is inert; gather all.
+            if ( Filter_IsFaceMaterialHidden( hit.hit.face->visArray ? hit.hit.face->visArray->mtlHandle : nullptr ) )
                 continue;
-            hits.push_back( brush );                         // array_addsize(array, nSize, brush)
+            hits.push_back( brush );
         }
 
         selbrush_t *winner = pToSelect;
@@ -845,8 +780,8 @@ void Test_Ray( float *start, float *dir, int contents, edTrace_t *t, int num_tra
             }
             else
             {
-                int v15 = ( x <= 0 ) ? ( nSize - 1 ) : ( x - 1 );   // the brush BEFORE the selected one
-                winner = hits[v15];
+                int prevIdx = ( x <= 0 ) ? ( nSize - 1 ) : ( x - 1 );   // the brush BEFORE the selected one
+                winner = hits[prevIdx];
             }
         }
 
@@ -864,27 +799,27 @@ void Test_Ray( float *start, float *dir, int contents, edTrace_t *t, int num_tra
             t->hit.brush    = winner;
             t->hit.face     = face;
             t->selected = 0;
-            return;                                          // 0x48d9d9
+            return;
         }
-        // 0x48d9ff: cycle-pick found nothing -> FALL THROUGH to the ordinary two-list walk,
+        // cycle-pick found nothing -> FALL THROUGH to the ordinary two-list walk,
         // and with the cycle-pass mask (contents & 0x1000), not the original contents.  That
-        // retry is the only path that can still reach a flag-0x20 brush (sub_48D460 admits
+        // retry is the only path that can still reach a flag-0x20 brush (BrushList_Trace admits
         // one when contents&0x1000; the gather loop above rejects it unconditionally).
         x_contents = passFlags;
     }
 
     // ── normal walk: active list, selected list, then the &4 world-priority retry ──
     if ( ( x_contents & 1 ) == 0 )
-        sub_48D460( start, dir, x_contents, &active_brushes,
+        BrushList_Trace( start, dir, x_contents, &active_brushes,
                     (const orientation_t *)world_orient_matrix, t, num_traces );
     if ( ( x_contents & 2 ) == 0 )
-        sub_48D460( start, dir, x_contents, &selected_brushes,
+        BrushList_Trace( start, dir, x_contents, &selected_brushes,
                     (const orientation_t *)world_orient_matrix, t, num_traces );
     if ( ( x_contents & 4 ) != 0 && !t->hit.brush )
     {
-        edTrace_t a4a;
-        Test_Ray( start, dir, x_contents - 4, &a4a, 1 );
-        memcpy( t, &a4a, sizeof( edTrace_t ) );
+        edTrace_t retry;
+        Test_Ray( start, dir, x_contents - 4, &retry, 1 );
+        memcpy( t, &retry, sizeof( edTrace_t ) );
     }
 }
 
@@ -892,7 +827,6 @@ void Test_Ray( float *start, float *dir, int contents, edTrace_t *t, int num_tra
 //  0x48DAA0  Trace_AllDirectionsIfFailed - drop-to-floor ray with a jitter fallback.
 //  Trace `dir` from `cam_origin`; if nothing was hit, retry from four origins jittered
 //  +/-1 on X and Y (so a ray that slips between two world brushes still finds the floor).
-//  The IDB jitters via three contiguous stack floats (a1/v6/v7); the port uses a vec3.
 // ═════════════════════════════════════════════════════════════════════════════
 edTrace_t *Trace_AllDirectionsIfFailed( float *cam_origin, edTrace_t *trace_result,
                                         float *dir, int contents )
@@ -915,8 +849,7 @@ edTrace_t *Trace_AllDirectionsIfFailed( float *cam_origin, edTrace_t *trace_resu
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48DCC0  Select_Brush - move brushes between the active and selected lists.
-//  KISAK SUBSET: the MFC bStatus status-text + the center_grid PositionView are dropped.
-//  __usercall: b in ECX -> first param.
+//  The MFC bStatus status-text and the center_grid PositionView are dropped.
 // ═════════════════════════════════════════════════════════════════════════════
 void Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus, char center_grid_on_selection )
 {
@@ -931,40 +864,40 @@ void Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus, char ce
     }
     else
     {
-        selbrush_t *v6 = active_brushes.next;
-        if ( v6 != &active_brushes )
+        selbrush_t *ab = active_brushes.next;
+        if ( ab != &active_brushes )
         {
             do
             {
-                selbrush_t *v6next = v6->next;
-                if ( v6->owner == e )
+                selbrush_t *abNext = ab->next;
+                if ( ab->owner == e )
                 {
-                    Brush_RemoveFromList( v6 );
-                    Brush_AddToList2( v6 );
+                    Brush_RemoveFromList( ab );
+                    Brush_AddToList2( ab );
                 }
-                v6 = v6next;
+                ab = abNext;
             }
-            while ( v6 != &active_brushes );
+            while ( ab != &active_brushes );
         }
     }
 
-    // MFC status bar and grid centering are Phase 5; skip silently.
+    // MFC status bar and grid centering: skipped.
     (void)bStatus;
     (void)center_grid_on_selection;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  g_SelectedFaces CArray backbone (IDB CArray at off_73C70C / sub_494610).
+//  g_SelectedFaces CArray backbone (0x73C70C).
 //  m_pData = the selface_t[] data; m_nSize = the live count; m_nMaxSize = the
 //  allocated capacity.  SetSize models MFC CArray::SetSize (grow-by =
 //  clamp(count/8, 4, 1024)).
 // ═════════════════════════════════════════════════════════════════════════════
 SelectedFaceArray g_SelectedFaces;
 
-void SelectedFaceArray::SetSize( int n )        // sub_494610
+void SelectedFaceArray::SetSize( int n )        // 0x494610
 {
     Sel_InvalidateFromLegacy();   // KIWI-UX (every face-selection size change, incl. ::Add)
-    if ( n < 0 ) { unknown_libname_291(); return; }
+    if ( n < 0 ) { SelectedFaces_BoundsAbort(); return; }
     if ( n == 0 )
     {
         if ( m_pData ) { j__free_0( m_pData ); m_pData = nullptr; }
@@ -983,7 +916,7 @@ void SelectedFaceArray::SetSize( int n )        // sub_494610
     }
     if ( n > m_nMaxSize )                         // grow capacity
     {
-        // IDA 0x4946cc: grow-by = m_nSize/8 (MFC CArray), not capacity/8.
+        // grow-by = m_nSize/8 (MFC CArray), not capacity/8.
         int growby = m_nSize / 8;
         if ( growby < 4 )       growby = 4;
         else if ( growby > 1024 ) growby = 1024;
@@ -1003,24 +936,23 @@ void SelectedFaceArray::SetSize( int n )        // sub_494610
     m_nSize = n;
 }
 
-// CArray::Add (the binary inlines this as SetSize(GetSize()+1) + element write —
-// sub_4947A0 is the outlined copy).
+// CArray::Add (0x4947A0): SetSize(GetSize()+1) + element write.
 int SelectedFaceArray::Add( const selface_t &f )
 {
     int idx = m_nSize;
-    if ( idx < 0 ) unknown_libname_291();
+    if ( idx < 0 ) SelectedFaces_BoundsAbort();
     SetSize( idx + 1 );
     m_pData[idx] = f;
     return idx;
 }
 
-// CArray::RemoveAt (sub_480670): drop `count` entries starting at index i.
+// CArray::RemoveAt (0x480670): drop `count` entries starting at index i.
 void SelectedFaceArray::RemoveAt( int i, int count )
 {
     Sel_InvalidateFromLegacy();   // KIWI-UX (the one face removal that does not call SetSize)
     int end = i + count;
     if ( i < 0 || count < 0 || end > m_nSize || end < i || end < count )
-        unknown_libname_291();
+        SelectedFaces_BoundsAbort();
     if ( m_nSize != end )
         memmove( &m_pData[i], &m_pData[end], sizeof( selface_t ) * ( m_nSize - end ) );
     m_nSize -= count;
@@ -1040,37 +972,37 @@ static void Brush_ToActiveHead( selbrush_t *b )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48E050  sub_48E050 - remove ALL of a brush's faces from g_SelectedFaces.
+//  0x48E050  Brush_DeselectFaces - remove ALL of a brush's faces from g_SelectedFaces.
 //  (Patch brushes: move the brush back to the active list instead.)
 // ═════════════════════════════════════════════════════════════════════════════
-void sub_48E050( selbrush_t *a1 )
+void Brush_DeselectFaces( selbrush_t *b )
 {
-    if ( a1->patch )
+    if ( b->patch )
     {
-        Brush_ToActiveHead( a1 );
+        Brush_ToActiveHead( b );
         return;
     }
-    for ( unsigned v7 = 0; v7 < (unsigned)a1->faceCount; ++v7 )
+    for ( unsigned fi = 0; fi < (unsigned)b->faceCount; ++fi )
     {
-        faceVis_s *target = &SEL_FACES( a1 )[v7];
+        faceVis_s *target = &SEL_FACES( b )[fi];
         int sz = g_SelectedFaces.GetSize();
-        int v3 = 0;
-        while ( v3 < sz && g_SelectedFaces.GetAt( v3 ).face != target )
-            ++v3;
-        if ( v3 < sz )
-            g_SelectedFaces.RemoveAt( v3, 1 );
+        int k = 0;
+        while ( k < sz && g_SelectedFaces.GetAt( k ).face != target )
+            ++k;
+        if ( k < sz )
+            g_SelectedFaces.RemoveAt( k, 1 );
     }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48DEC0  sub_48DEC0 - ADD all of a brush's (winding-bearing) faces to
+//  0x48DEC0  Brush_SelectFaces - ADD all of a brush's (winding-bearing) faces to
 //  g_SelectedFaces, skipping any already present.  (Patch brushes: select-as-brush.)
-//  Brush_CheckBuildFaceVis runs once at the top; the version compare is 16-bit (0x48df89).
-//  The tautological assert 505 is folded away by hex-rays (omitted, inert).
+//  Brush_CheckBuildFaceVis runs once at the top; the version compare is 16-bit.
+//  The binary's tautological assert (select.cpp:505) is omitted.
 // ═════════════════════════════════════════════════════════════════════════════
-void sub_48DEC0( selbrush_t *brush )
+void Brush_SelectFaces( selbrush_t *brush )
 {
-    sub_477D70( brush, (const float *)world_orient_matrix );   // Brush_CheckBuildFaceVis
+    Brush_CheckBuildFaceVis( brush, (const float *)world_orient_matrix );
     if ( brush->patch )
     {
         Brush_RemoveFromList( brush );
@@ -1081,9 +1013,9 @@ void sub_48DEC0( selbrush_t *brush )
     }
     if ( !brush->faceCount )
         return;
-    for ( unsigned v10 = 0; v10 < (unsigned)brush->faceCount; ++v10 )
+    for ( unsigned fi = 0; fi < (unsigned)brush->faceCount; ++fi )
     {
-        faceVis_s *target = &SEL_FACES( brush )[v10];
+        faceVis_s *target = &SEL_FACES( brush )[fi];
         int sz = g_SelectedFaces.GetSize();
         int i = 0;
         while ( i < sz && g_SelectedFaces.GetAt( i ).face != target )
@@ -1097,7 +1029,7 @@ void sub_48DEC0( selbrush_t *brush )
             selface_t selFace;
             selFace.brush = brush;
             selFace.face  = target;
-            selFace.index = (int)v10;
+            selFace.index = (int)fi;
             iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:506
             g_SelectedFaces.Add( selFace );
         }
@@ -1105,13 +1037,13 @@ void sub_48DEC0( selbrush_t *brush )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48E170  sub_48E170 - convert the current whole-brush selection into a face
+//  0x48E170  Select_BrushesToFaces - convert the current whole-brush selection into a face
 //  selection: for every selected (non-patch) brush, clear any of its faces already
 //  recorded, add all winding-bearing faces, then demote the brush to the active list.
 // ═════════════════════════════════════════════════════════════════════════════
-void sub_48E170()
+void Select_BrushesToFaces()
 {
-    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp (U-GUARD-2)
+    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp
     extern void  g_PatchDialog_GetPatchInfo();
     if ( selected_brushes.next == &selected_brushes )
         return;
@@ -1120,17 +1052,17 @@ void sub_48E170()
     {
         if ( b->patch )
             continue;
-        sub_48E050( b );
+        Brush_DeselectFaces( b );
         for ( unsigned i = 0; i < (unsigned)b->faceCount; ++i )
         {
-            // IDA 0x48e1c2: capture the record, rebuild faceVis PER-FACE (idempotent,
-            // version-gated), then assert it didn't move (570) and the instance/def
-            // versions are synced (571).
+            // capture the record, rebuild faceVis PER-FACE (idempotent, version-gated),
+            // then assert it didn't move (570) and the instance/def versions are synced
+            // (571).
             selface_t selFace;
             selFace.brush = b;
             selFace.face  = &SEL_FACES( b )[i];
             selFace.index = (int)i;
-            sub_477D70( b, (const float *)world_orient_matrix );
+            Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
             iassert( selFace.face == &selFace.brush->faces[selFace.index] );        // select.cpp:570
             iassert( selFace.brush->version == selFace.brush->def->version );       // select.cpp:571
             if ( !b->def->faces[i].w )                   // skip faces with no winding
@@ -1146,57 +1078,15 @@ void sub_48E170()
             Brush_ToActiveHead( b );
         b = next;
     }
-    // IDA 0x48e314: re-bind the Patch Inspector to the new selection (sibling idiom).
+    // re-bind the Patch Inspector to the new selection.
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 }
 
-// Ed_SelectFirstEditableFace - KISAK helper (selftest texmod gate + the GUI texmod demo
-// hook): select the first active non-patch, non-fixedsize brush's first winding-bearing
-// face whose base-layer material is not "lightmap_gray" (which TexMatToFakeTexCoords
-// canonicalises, clobbering a shift/rotate edit on reload).  Returns 1 on success.
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );  // materialdef.cpp 0x431640
-extern char        g_bNewFace;                           // surfacedlg.cpp
-
-int Ed_SelectFirstEditableFace()
-{
-    g_SelectedFaces.m_nSize = 0;                         // start from an empty face selection
-
-    for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
-    {
-        if ( b->patch || !b->def || b->def->faceCount <= 0 )
-            continue;
-        entity_s_def *od = (entity_s_def *)b->owner->def;
-        if ( *(int *)&od->eclass->fixedsize )            // bbox brushes have no editable faces
-            continue;
-
-        int before = g_SelectedFaces.GetSize();
-        sub_48DEC0( b );                                  // build faceVis + add all winding faces
-        int added = g_SelectedFaces.GetSize() - before;
-        if ( added <= 0 )
-            continue;
-        if ( added > 1 )                                  // keep only the first face
-            g_SelectedFaces.RemoveAt( before + 1, added - 1 );
-
-        MaterialDef *md = &b->def->faces[ g_SelectedFaces.GetAt( before ).index ]
-                                .mtldef[ g_qeglobals.current_edit_layer ];
-        const char *nm = (const char *)Materialdef_GetName( md );
-        if ( nm && !strcmp( nm, "lightmap_gray" ) )       // unsuitable → drop and keep looking
-        {
-            g_SelectedFaces.RemoveAt( before, 1 );
-            continue;
-        }
-        g_bNewFace = 1;
-        return 1;
-    }
-    return 0;
-}
-
 // Select_SetTexture (0x456D70) - the default texture-repeat scale (x,y) for
-// Patch->Naturalize.  KISAK SUBSET: the IDB's inspector-OPEN branch multiplies the default
-// by the surface inspector's IDC_SURFACE_INSP_TEX_REP_X/Y edits, which the port's
-// hand-built inspector does not have; both IDB branches converge on the default-scale slot
-// random_texture_stuff[2100*layer + 36] (== [+0x24]) that the closed branch reads.
+// Patch->Naturalize.  The binary's inspector-OPEN branch also multiplied the default by
+// the surface inspector's IDC_SURFACE_INSP_TEX_REP_X/Y edits, which this inspector does not
+// have; only the default-scale slot (random_texture_stuff[layer].sampleSize) is read.
 void Select_SetTexture( float *out )
 {
     const int layer = g_qeglobals.current_edit_layer;
@@ -1208,8 +1098,7 @@ void Select_SetTexture( float *out )
 // Select_Invert (0x493F10) - Selection->Invert (Ctrl+I, cmd 33101).  Swaps the active and
 // selected display lists wholesale, then re-runs the per-brush bookkeeping
 // (Brush_Deselect_Helper on the now-active set, Brush_Select_Helper on the now-selected)
-// and the patch instance's selected byte (instance offset 6).  Empty-list cases reset the
-// sentinel to itself.  IDB selected_brushes / selected_brushes_next == .prev / .next here.
+// and the patch instance's selected byte.  Empty-list cases reset the sentinel to itself.
 void Select_Invert()
 {
     Sys_Printf( "inverting selection...\n" );
@@ -1246,7 +1135,7 @@ void Select_Invert()
     {
         Brush_Deselect_Helper( i );
         if ( i->patch )
-            i->patch->selected = 0;                        // per-instance selected flag (IDB BYTE2(patch[1].def))
+            i->patch->selected = 0;                        // per-instance selected flag
     }
     for ( selbrush_t *j = selected_brushes.next; j != &selected_brushes; j = j->next )
     {
@@ -1277,47 +1166,37 @@ void Deselect_Brush( selbrush_t *b )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48E340  SelectFaceSth - pick a brush/face under the ray and select/deselect.
+//  0x48E340  Select_ClickTrace - pick a brush/face under the ray and select/deselect.
 //    contents&8 (Ctrl+Shift+LMB, 520): single-FACE select/toggle into g_SelectedFaces.
-//    else, with faces already selected: brush<->faceset toggle (sub_48DEC0/sub_48E050).
+//    else, with faces already selected: brush<->faceset toggle (Brush_SelectFaces/Brush_DeselectFaces).
 //    else: whole-brush select/deselect; Alt = the whole entity group.
-//  IDA args: (trace_dir, trace_start, contents) in ecx/edx/eax.
 // ═════════════════════════════════════════════════════════════════════════════
-extern int  g_nUpdateBits;                       // 0x25D5A74
-extern void CMainFrame_UpdatePatchToolbarButtons();
 
-void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
+void Select_ClickTrace( float *trace_dir, float *trace_start, int contents )
 {
-    float *trace_dir   = (float *)(intptr_t)a1_dir;
-    float *trace_start = (float *)(intptr_t)a2_start;
-    int    contents    = a3_contents;
-
     edTrace_t t;
     Test_Ray( trace_start, trace_dir, contents, &t, 1 );
     selbrush_t *brush = t.hit.brush;
     if ( !brush )
         return;
-    // 0x48e381: on the Z-view (contents & 0x1000, set by Drag_Begin when viewz==2,
-    // drag.cpp:588) reject the pick when brush->brushFlags & 0x20 OR the trace's +0x49 byte
-    // is set (sub_48D460 sets it when a 0x20 brush was admitted by the 0x1000 pass - which
-    // for a prefab hit is an INNER brush, not this one).
+    // on the Z-view (contents & 0x1000, set by Drag_Begin when viewz==2) reject the pick
+    // when brush->brushFlags & 0x20 OR the trace's _pad[0] byte is set (BrushList_Trace sets
+    // it when a 0x20 brush was admitted by the 0x1000 pass - which for a prefab hit is an
+    // INNER brush, not this one).
     if ( ( contents & 0x1000 ) && ( ( brush->brushFlags & 0x20 ) || t._pad[0] ) )
         return;
 
-    // KISAK: 0x4000 = light-preview face pick.  The binary diverts to the per-light preview
-    // (sub_406330) only when the ray hit a LIGHT entity (eclass flag @+0x180) and otherwise
-    // falls through to the normal select.  sub_406330 is parked and the port does not
-    // populate the light-pick target (t.hit.index), so we fall through unconditionally:
-    // clicking a light bbox simply selects it.
+    // 0x4000 = light-preview face pick.  The binary diverted to the per-light preview
+    // (0x406330) only when the ray hit a LIGHT entity, else fell through to the normal
+    // select.  The port does not populate the light-pick target (t.hit.index), so it always
+    // falls through: clicking a light bbox simply selects it.
     (void)contents;
 
-    // Reset transient edit modes (IDA resets d_select_mode to sel_brush first).
+    // Reset transient edit modes (d_select_mode back to sel_brush first).
     select_t prevMode = g_qeglobals.d_select_mode;
     g_qeglobals.d_select_mode = sel_brush;
     if ( prevMode == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prevMode == sel_addpoint )
-        sub_43ECB0();
 
     // ── single-FACE selection (Ctrl+Shift+LMB) ────────────────────────────────
     if ( ( contents & 8 ) != 0 && !brush->patch )
@@ -1330,7 +1209,7 @@ void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
         if ( *(int *)&od->eclass->fixedsize )
             return;
 
-        sub_48E170();   // fold any whole-brush selection into face selection first
+        Select_BrushesToFaces();   // fold any whole-brush selection into face selection first
 
         int sz = g_SelectedFaces.GetSize();
         int hit = -1;
@@ -1386,9 +1265,9 @@ void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
                     Deselect_Brush( brush );
                 }
                 {
-                    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp (U-GUARD-2)
+                    extern bool  PatchDialog_IsOpen();           // patchdialog.cpp
                     extern void  g_PatchDialog_GetPatchInfo();
-                    if ( PatchDialog_IsOpen() )               // IDA 0x48e6f4: rebind Patch Inspector after deselect
+                    if ( PatchDialog_IsOpen() )               // rebind Patch Inspector after deselect
                         g_PatchDialog_GetPatchInfo();
                 }
                 g_qeglobals.toggle_unk04_mousedrag_state2 = 1;
@@ -1424,13 +1303,13 @@ void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
                 for ( selbrush_t *v = active_brushes.next; v != &active_brushes; )
                 {
                     selbrush_t *next = v->next;
-                    if ( v->owner == grpOwner ) sub_48E050( v );
+                    if ( v->owner == grpOwner ) Brush_DeselectFaces( v );
                     v = next;
                 }
             }
             else if ( !alt )
             {
-                sub_48E050( brush );
+                Brush_DeselectFaces( brush );
             }
             g_qeglobals.toggle_unk04_mousedrag_state2 = 1;
             g_nUpdateBits = -1;
@@ -1446,23 +1325,23 @@ void SelectFaceSth( float *a1_dir, float *a2_start, int a3_contents )
         for ( selbrush_t *v = active_brushes.next; v != &active_brushes; )
         {
             selbrush_t *next = v->next;
-            if ( v->owner == grpOwner ) sub_48DEC0( v );
+            if ( v->owner == grpOwner ) Brush_SelectFaces( v );
             v = next;
         }
     }
     else
     {
-        sub_48DEC0( brush );
+        Brush_SelectFaces( brush );
     }
     g_qeglobals.toggle_unk03_mousedrag_state1 = 1;
     g_nUpdateBits = -1;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48E800  Select_Deselect - a1=1 also frees selFace; a1=0 leaves the face selection.
+//  0x48E800  Select_Deselect - bDeselectFaces also clears the face selection.
 //  Head-node aliasing (selected.prev->next), 3-axis maxs>mins new-brush bounds template.
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_Deselect( int a1 )
+void Select_Deselect( int bDeselectFaces )
 {
     Patch_Deselect();
 
@@ -1475,37 +1354,37 @@ void Select_Deselect( int a1 )
     }
     ++g_qeglobals.d_workcount;
 
-    selbrush_t *v2 = selected_brushes.next;
+    selbrush_t *first = selected_brushes.next;
     g_qeglobals.d_select_count             = 0;
     g_qeglobals.d_select_info.numPatches   = 0;
     g_qeglobals.d_select_info.numBrushes   = 0;
     g_qeglobals.d_select_info.numFixedSize = 0;
     g_qeglobals.d_num_move_points          = 0;
 
-    if ( a1 )
+    if ( bDeselectFaces )
     {
         g_SelectedFaces.SetSize( 0 );    // inline CArray RemoveAll (free + cap=0 + size=0)
     }
 
-    if ( v2 != &selected_brushes )
+    if ( first != &selected_brushes )
     {
         ResetSelectMode();
 
         // Copy last-selected brush's bounds as the new-brush template.
-        if ( v2->def->maxs[0] > (double)v2->def->mins[0] )
+        if ( first->def->maxs[0] > (double)first->def->mins[0] )
         {
-            g_qeglobals.d_new_brush_bottom_x = v2->def->mins[0];
-            g_qeglobals.d_new_brush_top_x    = v2->def->maxs[0];
+            g_qeglobals.d_new_brush_bottom_x = first->def->mins[0];
+            g_qeglobals.d_new_brush_top_x    = first->def->maxs[0];
         }
-        if ( v2->def->maxs[1] > (double)v2->def->mins[1] )
+        if ( first->def->maxs[1] > (double)first->def->mins[1] )
         {
-            g_qeglobals.d_new_brush_bottom_y = v2->def->mins[1];
-            g_qeglobals.d_new_brush_top_y    = v2->def->maxs[1];
+            g_qeglobals.d_new_brush_bottom_y = first->def->mins[1];
+            g_qeglobals.d_new_brush_top_y    = first->def->maxs[1];
         }
-        if ( v2->def->maxs[2] > (double)v2->def->mins[2] )
+        if ( first->def->maxs[2] > (double)first->def->mins[2] )
         {
-            g_qeglobals.d_new_brush_bottom_z = v2->def->mins[2];
-            g_qeglobals.d_new_brush_top_z    = v2->def->maxs[2];
+            g_qeglobals.d_new_brush_bottom_z = first->def->mins[2];
+            g_qeglobals.d_new_brush_top_z    = first->def->maxs[2];
         }
 
         // Splice selected_brushes list into front of active_brushes.
@@ -1536,7 +1415,6 @@ void Select_Deselect( int a1 )
 //  (delete the defining brush after caging the region) and by Edit->Delete.  The transient
 //  face/patch-edit modes are reset first.
 // ═════════════════════════════════════════════════════════════════════════════
-extern void Entity_Free( char *a1 );    // entity.cpp (0x485750)
 
 void Select_Delete()
 {
@@ -1545,8 +1423,6 @@ void Select_Delete()
     g_qeglobals.d_select_mode = sel_brush;
     if ( prevMode == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prevMode == sel_addpoint )
-        sub_43ECB0();
 
     g_qeglobals.d_num_move_points = 0;
     while ( selected_brushes.next != &selected_brushes )
@@ -1557,7 +1433,7 @@ void Select_Delete()
         // If the owner entity has no brushes left (and isn't worldspawn), free it.
         if ( (void *)owner->brushes.ownerNext == (void *)&owner->brushes
              && owner != world_entity )
-            Entity_Free( (char *)owner );
+            Entity_Free( owner );
     }
     g_nUpdateBits = -1;
 }
@@ -1600,25 +1476,23 @@ void Select_BrushByLayer( char *layer_str )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  REGION / MARQUEE SELECTION  (Select_*Tall / Select_Touching_R / Select_Inside_R
-//  + sub_4902C0 marquee box-build)
+//  + Select_FlipFilteredBrushes marquee box-build)
 //
 //  The four "Select ... Tall / Touching / Inside" menu commands take the SINGLE selected
 //  brush as a selection BOX (QE_SingleBrush), grab its def mins/maxs, DELETE that brush,
 //  then walk active_brushes and (re)select every brush satisfying the box test.  "Tall"
 //  tests only the two SCREEN axes of the active XY view; Touching/Inside test all three.
-//  sub_4902C0 is the live MARQUEE drag-box select (Drag_MouseUp): it takes a precomputed
-//  world box + a flag selecting which list to walk (Alt+Shift+LMB box-ADD mode 12 /
-//  Alt+Shift+MMB box-DESELECT mode 13).
-//  View-axis selection (identical in all five, IDA-verified):
+//  Select_FlipFilteredBrushes is the live MARQUEE drag-box select (Drag_MouseUp): it takes
+//  a precomputed world box + a flag selecting which list to walk (Alt+Shift+LMB box-ADD
+//  mode 12 / Alt+Shift+MMB box-DESELECT mode 13).
+//  View-axis selection (identical in all five):
 //    v_a = (m_nViewType == 0)        // YZ view -> axis 1 (Y), else axis 0 (X)
 //    v_b = (m_nViewType != 2) + 1    // XY view -> axis 1 (Y), else axis 2 (Z)
 //  giving the two on-screen axes: XY {0,1}, XZ {0,2}, YZ {1,2}.
 // ═════════════════════════════════════════════════════════════════════════════
-extern signed int  QE_SingleBrush();                // qe3.cpp (0x48c8b0)
 
 // Active XY view's two on-screen axes (the depth axis is dropped for "Tall").
-// U-GLOBALS: Ed_ActiveXY() is never NULL, so the shell guard + the vt=2 fallback fall away
-// (the state block's own default IS ED_VIEW_XY == 2).
+// Ed_ActiveXY() is never NULL (the state block's own default is ED_VIEW_XY == 2).
 static inline int Region_ViewAxisA() {
     int vt = Ed_ActiveXY()->m_nViewType;
     return (vt == 0);                    // YZ→1, XZ/XY→0
@@ -1628,14 +1502,14 @@ static inline int Region_ViewAxisB() {
     return (vt != 2) + 1;                // XY→1, XZ/YZ→2
 }
 
-// Common prologue for the four menu cores (head of Select_CompleteTall 0x490183..0x4901db):
+// Common prologue for the four menu cores:
 // snapshot the single selected brush's box, reset the transient select mode, delete it.
 static bool Region_BeginFromSingleBrush( float boxMins[3], float boxMaxs[3] )
 {
     if ( !QE_SingleBrush() )
         return false;
 
-    ResetSelectMode();   // sel_cycle→UpdatePatchToolbar / sel_addpoint→sub_43ECB0; mode→sel_brush
+    ResetSelectMode();   // sel_cycle→UpdatePatchToolbar; mode→sel_brush
 
     brush_t *def = selected_brushes.next->def;
     boxMins[0] = def->mins[0];  boxMins[1] = def->mins[1];  boxMins[2] = def->mins[2];
@@ -1814,15 +1688,15 @@ void Select_FlipFilteredBrushes( const float *boxMins, const float *boxMaxs, cha
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48F170  Brush_SetTexture - mtldef copy stride 36*(layer+1), def version @0x4E is
-//  16-bit, patch brushes fan the copy out to every face.
+//  0x48F170  Brush_SetTexture - the def version is 16-bit; patch brushes fan the copy out
+//  to every face.
 // ═════════════════════════════════════════════════════════════════════════════
-void Brush_SetTexture( MaterialDef *a1, char a3 )
+void Brush_SetTexture( MaterialDef *material, char planarProject )
 {
-    int  v24 = g_SelectedFaces.GetSize();
+    int  faceCount = g_SelectedFaces.GetSize();
     const char *opName;
 
-    if ( v24 )
+    if ( faceCount )
         opName = "set face textures";
     else
     {
@@ -1834,35 +1708,30 @@ void Brush_SetTexture( MaterialDef *a1, char a3 )
     Undo_ClearRedo();
     Undo_GeneralStart( opName );
 
-    int v28 = 0;
-    if ( v24 > 0 )
+    if ( faceCount > 0 )
     {
-        for ( ; v28 < v24; ++v28 )
+        for ( int i = 0; i < faceCount; ++i )
         {
-            selface_t  &selFace = g_SelectedFaces.GetAt( v28 );   // CArray::GetAt (bounds ENSURE)
+            selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
             selbrush_t *b     = selFace.brush;
             int         index = selFace.index;
             brush_t    *b_def = b->def;
-            faceVis_s  *face  = selFace.face;
 
             Undo_TryAddBrush( b_def );
 
-            int v25 = index;
-            faceVis_s *fv = &SEL_FACES(b)[index];
             iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1114
             iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1115
             iassert( selFace.brush->faceCount == selFace.brush->def->faceCount );   // select.cpp:1116
 
-            // Copy MaterialDef into the face's current layer slot: the IDB writes to
-            // &def->faces[index].mtldef[layer] (= v26 + 4*(9*layer+9) = +36*(layer+1)).
+            // Copy MaterialDef into the face's current layer slot.
             MaterialDef *dstSlot = &b_def->faces[index].mtldef[g_qeglobals.current_edit_layer];
-            qmemcpy( dstSlot, a1, sizeof(MaterialDef) );
+            qmemcpy( dstSlot, material, sizeof(MaterialDef) );
 
             if ( b_def->patch )
             {
-                for ( unsigned v10 = 0; v10 < (unsigned)b_def->faceCount; ++v10 )
+                for ( unsigned j = 0; j < (unsigned)b_def->faceCount; ++j )
                 {
-                    qmemcpy( (char *)&b_def->faces[v10].mtldef[g_qeglobals.current_edit_layer],
+                    qmemcpy( (char *)&b_def->faces[j].mtldef[g_qeglobals.current_edit_layer],
                              dstSlot,
                              sizeof(MaterialDef) );
                 }
@@ -1874,25 +1743,25 @@ void Brush_SetTexture( MaterialDef *a1, char a3 )
                 SetupVertexSelection();
             MarkMapModified();
             ++b->def->version;
-            sub_47B940( b->def );
+            Brush_UpdateSpecialMaterialFlag( b->def );
             Undo_LinkBrush( b->def );
-            sub_477D70( b, (const float *)world_orient_matrix );
+            Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
             iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1125
             iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1126
         }
     }
 
     // Per-brush pass (non-fixedsize brushes only).
-    for ( selbrush_t *v16 = selected_brushes.next;
-          v16 != &selected_brushes;
-          v16 = v16->next )
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes;
+          b = b->next )
     {
-        entity_s_def *def = (entity_s_def *)v16->owner->def;
+        entity_s_def *def = (entity_s_def *)b->owner->def;
         if ( !*(int *)&def->eclass->fixedsize )
         {
-            Undo_TryAddBrush( v16->def );
-            sub_476ED0( v16->def, a1, a3, 0.0f, 1 );
-            Undo_LinkBrush( v16->def );
+            Undo_TryAddBrush( b->def );
+            Brush_SetAllFacesMaterial( b->def, material, planarProject, 0.0f, 1 );
+            Undo_LinkBrush( b->def );
         }
     }
 
@@ -1901,14 +1770,14 @@ void Brush_SetTexture( MaterialDef *a1, char a3 )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48F4F0  Brush_SetTextureMapping - Brush_SetFaceTexdef stride 232, def version @0x4E.
+//  0x48F4F0  Brush_SetTextureMapping - applies `texdef` via Brush_SetFaceTexdef.
 // ═════════════════════════════════════════════════════════════════════════════
-void Brush_SetTextureMapping( texdef_sub_t *a2 )
+void Brush_SetTextureMapping( texdef_sub_t *texdef )
 {
-    int v1 = g_SelectedFaces.GetSize();
+    int faceCount = g_SelectedFaces.GetSize();
     const char *opName;
 
-    if ( v1 )
+    if ( faceCount )
         opName = "set face texture mapping";
     else
     {
@@ -1920,48 +1789,39 @@ void Brush_SetTextureMapping( texdef_sub_t *a2 )
     Undo_ClearRedo();
     Undo_GeneralStart( opName );
 
-    int v22 = 0;
-    if ( v1 > 0 )
+    for ( int i = 0; i < faceCount; ++i )
     {
-        for ( ; v22 < v1; ++v22 )
-        {
-            selface_t  &selFace = g_SelectedFaces.GetAt( v22 );   // CArray::GetAt (bounds ENSURE)
-            selbrush_t *v4  = selFace.brush;
-            int         v5  = selFace.index;
-            brush_t    *v6  = v4->def;
-            faceVis_s  *v19 = selFace.face;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        selbrush_t *b     = selFace.brush;
+        int         index = selFace.index;
+        brush_t    *def   = b->def;
 
-            Undo_TryAddBrush( v6 );
+        Undo_TryAddBrush( def );
 
-            iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1161
-            iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1162
-            iassert( selFace.brush->faceCount == selFace.brush->def->faceCount );   // select.cpp:1163
+        iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1161
+        iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1162
+        iassert( selFace.brush->faceCount == selFace.brush->def->faceCount );   // select.cpp:1163
 
-            sub_4767E0( a2, &v6->faces[v5], v6 );
+        Brush_SetFaceTexdef( texdef, &def->faces[index], def );
 
-            Brush_BuildWindings( v6, 1 );
-            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                SetupVertexSelection();
-            MarkMapModified();
-            ++v6->version;
-            sub_47B940( v6 );
-            Undo_LinkBrush( v6 );
-            sub_477D70( v4, (const float *)world_orient_matrix );
-            iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1172
-            iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1173
-        }
+        Brush_RebuildAfterEdit( def );
+        Brush_UpdateSpecialMaterialFlag( def );
+        Undo_LinkBrush( def );
+        Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
+        iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1172
+        iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1173
     }
 
-    for ( selbrush_t *v13 = selected_brushes.next;
-          v13 != &selected_brushes;
-          v13 = v13->next )
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes;
+          b = b->next )
     {
-        entity_s_def *def = (entity_s_def *)v13->owner->def;
+        entity_s_def *def = (entity_s_def *)b->owner->def;
         if ( !*(int *)&def->eclass->fixedsize )
         {
-            Undo_TryAddBrush( v13->def );
-            sub_477020( v13->def, a2 );
-            Undo_LinkBrush( v13->def );
+            Undo_TryAddBrush( b->def );
+            Brush_SetAllFacesTexdef( b->def, texdef );
+            Undo_LinkBrush( b->def );
         }
     }
 
@@ -1974,10 +1834,10 @@ void Brush_SetTextureMapping( texdef_sub_t *a2 )
 // ═════════════════════════════════════════════════════════════════════════════
 void Brush_SetSampleSize( int size )
 {
-    int v1 = g_SelectedFaces.GetSize();
+    int faceCount = g_SelectedFaces.GetSize();
     const char *opName;
 
-    if ( v1 )
+    if ( faceCount )
         opName = "set face samplesize";
     else
     {
@@ -1989,47 +1849,38 @@ void Brush_SetSampleSize( int size )
     Undo_ClearRedo();
     Undo_GeneralStart( opName );
 
-    int v22 = 0;
-    if ( v1 > 0 )
+    for ( int i = 0; i < faceCount; ++i )
     {
-        for ( ; v22 < v1; ++v22 )
-        {
-            selface_t  &selFace = g_SelectedFaces.GetAt( v22 );   // CArray::GetAt (bounds ENSURE)
-            selbrush_t *v4  = selFace.brush;
-            int         v5  = selFace.index;
-            brush_t    *def = v4->def;
-            faceVis_s  *v19 = selFace.face;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        selbrush_t *b     = selFace.brush;
+        int         index = selFace.index;
+        brush_t    *def   = b->def;
 
-            Undo_TryAddBrush( def );
+        Undo_TryAddBrush( def );
 
-            iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1208
-            iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1209
-            iassert( selFace.brush->faceCount == selFace.brush->def->faceCount );   // select.cpp:1210
+        iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1208
+        iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1209
+        iassert( selFace.brush->faceCount == selFace.brush->def->faceCount );   // select.cpp:1210
 
-            sub_4768B0( &v4->def->faces[v5], v4->def, size );
-            Brush_BuildWindings( v4->def, 1 );
-            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                SetupVertexSelection();
-            MarkMapModified();
-            ++v4->def->version;
-            sub_47B940( v4->def );
-            Undo_LinkBrush( v4->def );
-            sub_477D70( v4, (const float *)world_orient_matrix );
-            iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1219
-            iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1220
-        }
+        Face_SetSampleSize( &b->def->faces[index], b->def, size );
+        Brush_RebuildAfterEdit( b->def );
+        Brush_UpdateSpecialMaterialFlag( b->def );
+        Undo_LinkBrush( b->def );
+        Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
+        iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:1219
+        iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:1220
     }
 
-    for ( selbrush_t *v13 = selected_brushes.next;
-          v13 != &selected_brushes;
-          v13 = v13->next )
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes;
+          b = b->next )
     {
-        entity_s_def *def = (entity_s_def *)v13->owner->def;
+        entity_s_def *def = (entity_s_def *)b->owner->def;
         if ( !*(int *)&def->eclass->fixedsize )
         {
-            Undo_TryAddBrush( v13->def );
-            sub_477080( v13->def, size );
-            Undo_LinkBrush( v13->def );
+            Undo_TryAddBrush( b->def );
+            Brush_SetAllFacesSampleSize( b->def, size );
+            Undo_LinkBrush( b->def );
         }
     }
 
@@ -2040,7 +1891,7 @@ void Brush_SetSampleSize( int size )
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48FDC0  Select_Scale
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_Scale( float a1, float a2, float a3 )
+void Select_Scale( float sx, float sy, float sz )
 {
     float mid[3];
     Select_GetMid( mid );
@@ -2054,8 +1905,8 @@ void Select_Scale( float a1, float a2, float a3 )
         patch_t *patch = (patch_t *)b->patch;
         if ( patch )
         {
-            float scale[3] = { a1, a2, a3 };
-            iassert( b->patch->def == b->def->patch );   // select.cpp:1351   // IDA 0x48fdc0
+            float scale[3] = { sx, sy, sz };
+            iassert( b->patch->def == b->def->patch );   // select.cpp:1351
             Patch_Scale( b->def->patch, mid, scale, 1 );
         }
         else
@@ -2068,9 +1919,9 @@ void Select_Scale( float a1, float a2, float a3 )
                     for ( int vi = 0; vi < 3; ++vi )
                     {
                         float *pt = planepts + vi * 3;
-                        pt[0] = ( pt[0] - mid[0] ) * a1 + mid[0];
-                        pt[1] = ( pt[1] - mid[1] ) * a2 + mid[1];
-                        pt[2] = ( pt[2] - mid[2] ) * a3 + mid[2];
+                        pt[0] = ( pt[0] - mid[0] ) * sx + mid[0];
+                        pt[1] = ( pt[1] - mid[1] ) * sy + mid[1];
+                        pt[2] = ( pt[2] - mid[2] ) * sz + mid[2];
                     }
                 }
             }
@@ -2087,8 +1938,7 @@ void Select_Scale( float a1, float a2, float a3 )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48FB10  Select_GetBounds - AABB enclosing every selected brush def.  Init to the
-//  editor's +/-131072 sentinel box, then union each brush's [mins,maxs].  The IDA calls
-//  vec3_clamp per brush; the union is inlined here (behaviour-identical).
+//  editor's +/-131072 sentinel box, then union each brush's [mins,maxs].
 // ═════════════════════════════════════════════════════════════════════════════
 void Select_GetBounds( float *mins, float *maxs )
 {
@@ -2117,15 +1967,14 @@ void Select_GetTrueMid( float *center )
     center[2] = ( maxs[2] + mins[2] ) * 0.5f;
 }
 
-// ─── sub_48FB70 (0x48FB70) — bounds of the current selection for Texture_Fit (a4!=0,
-//     "fit texture across the whole selection") ─────────────────────────────────────
+// ─── Select_GetFitBounds (0x48FB70) — bounds of the current selection for Texture_Fit
+//     (selectionBounds != 0, "fit texture across the whole selection") ───────────────
 // If individual FACES are selected, expand [mins,maxs] (already seeded +/-131072 by the
 // caller) by every selected face's winding points; otherwise fall back to the selected
-// BRUSHES' bbox (Select_GetBounds).  a4!=0 is unreachable from OnFit / Brush_FitTexture
-// today.  BINARY QUIRK (disasm 0x48fbb1): numpoints is read from the brush's FACE 0
-// winding while the points iterated belong to the selected face (selFace[i].index) -
-// transcribed verbatim, with null guards the binary lacks.
-void sub_48FB70( float *minsOut, float *maxsOut )
+// BRUSHES' bbox (Select_GetBounds).  Reached via Brush_FitTexture( ..., 1 ) (Fit All).
+// BINARY QUIRK, kept: numpoints is read from the brush's FACE 0 winding while the points
+// iterated belong to the selected face (selFace[i].index); the null guards are the port's.
+void Select_GetFitBounds( float *minsOut, float *maxsOut )
 {
     float *mins = (float *)(intptr_t)minsOut;
     float *maxs = (float *)(intptr_t)maxsOut;
@@ -2142,7 +1991,7 @@ void sub_48FB70( float *minsOut, float *maxsOut )
         face_t *faces = g_SelectedFaces.GetAt( i ).brush->def->faces;
         if ( !faces[0].w )
             continue;
-        const int numpoints = faces[0].w->numpoints;             // face 0's count (IDB quirk)
+        const int numpoints = faces[0].w->numpoints;             // face 0's count (binary quirk)
         if ( !numpoints )
             continue;
         winding_t *w = faces[g_SelectedFaces.GetAt( i ).index].w;   // selected face's winding
@@ -2164,11 +2013,9 @@ void sub_48FB70( float *minsOut, float *maxsOut )
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48E9C0  Select_Move - move every selected brush by `delta`, then refresh the status
 //  bar with the new selection origin.  Called by MoveSelection (drag.cpp) and XY_MouseDown.
-//  The IDA builds an MFC CString for the status text; the port routes the same values to
-//  MainFrm_SetStatusText (in the binary str_set is already a no-op stub here).
+//  The status text goes to MainFrm_SetStatusText.
 // ═════════════════════════════════════════════════════════════════════════════
-extern entity_s *Brush_Move( const float *move, brush_t *def, char snap );  // brush.cpp (0x47ba40)
-extern void      MainFrm_SetStatusText( int pane, const char *text );       // engine_stubs
+extern void      MainFrm_SetStatusText( int pane, const char *text );       // mainfrm.cpp
 
 void Select_Move( const float *delta, char bSnap )
 {
@@ -2178,9 +2025,8 @@ void Select_Move( const float *delta, char bSnap )
     float bmins[3], bmaxs[3];
     Select_GetBounds( bmins, bmaxs );
     char buf[128];
-    // IDA 0x48ea59-74: the VA reads X from the mins buffer but Y/Z from the maxs buffer
-    // (fld var_4C=mins[0], var_54=maxs[1], var_50=maxs[2]) - a mixed-corner readout in the
-    // original CoD3 source, reproduced verbatim.
+    // X comes from the mins buffer but Y/Z from the maxs buffer - a mixed-corner readout
+    // in the original CoD3 source, kept.
     _snprintf( buf, sizeof( buf ), "Origin X:: %.1f  Y:: %.1f  Z:: %.1f",
                bmins[0], bmaxs[1], bmaxs[2] );
     MainFrm_SetStatusText( 2, buf );
@@ -2194,11 +2040,10 @@ void Select_Move( const float *delta, char bSnap )
 //  rows 1..3 = the 3x3 axis matrix - then push every selected brush through
 //  Select_ApplyMatrix_SelectedBrushes -> Select_ApplyMatrix, which transforms each face's
 //  3 planepts about the pivot and rebuilds windings.
-//  The matrix layout IS an orientation_t: the IDB's Select_FlipAxis/Select_RotateAxis
-//  declare `float v2[3]` + `float v3[9]` at CONTIGUOUS stack offsets and pass only &v2, so
-//  they are declared here as one `float rot_around[4][3]`.  Select_ApplyMatrix's `mid` arg
-//  IS that block; it casts to orientation_t* and calls OrientationPosToWorldPos.
-//  The texture / lightmap lock (sub_470570 / sub_4706F0, lockFlags { m_bRotateLock,
+//  The matrix layout IS an orientation_t, so Select_FlipAxis/Select_RotateAxis declare it
+//  as one `float rot_around[4][3]`.  Select_ApplyMatrix's `mid` arg IS that block; it
+//  casts to orientation_t* and calls OrientationPosToWorldPos.
+//  The texture / lightmap lock (0x470570 / 0x4706F0, lockFlags { m_bRotateLock,
 //  m_bLightmapLock, 1 }) is live - MaterialDef_04 is > 0 for real materials.  KIWI does it
 //  exactly (kiwi_texlock.h: Face_TexLockAffineBegin / End).
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2210,22 +2055,14 @@ void Select_Move( const float *delta, char bSnap )
 #include <universal/com_math.h>
 
 // OrientationPosToWorldPos is DEFINED in draw.cpp (q_shared 0x4BA430), not com_math.h.
-// Declared as in brush.cpp (orientation_t is visible via qe3.h / fxprimitives.h).
-extern void OrientationPosToWorldPos( float *out, const float *localPos, const orientation_t *orient );
 
-extern entity_s *Brush_Move( const float *move, brush_t *def, char snap );  // brush.cpp (0x47ba40)
 extern brush_t  *Brush_Clone( brush_t *def );                               // brush.cpp (0x475d20)
-extern void      Entity_LinkBrush( brush_t *b, entity_s *world_ent );       // entity.cpp (0x484fc0)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp (0x475980)
-extern void      Select_Brush( selbrush_t *b, char overwrite, char status, char center ); // select.cpp (0x48dcc0)
-extern void      Select_Deselect( int bDeselectFaces );                     // select.cpp (0x48E800)
 extern char      g_nScaleHow;                                               // drag.cpp (0x23F16DC)
-extern float     grid_sizes[];                                              // engine_stubs (0x6DDE5C)
 #include "prefs.h"                                                          // g_PrefsDlg (m_bNoClamp ...)
 
 // 0x48FC70  Select_GetMid — selection-bounds midpoint. Grid-snapped (floor toward the
 // grid) unless the NoClamp pref is set. Used by rotate/flip/scale as the pivot.
-// FLOAT floorf here - contrast sub_47CFD0's DOUBLE floor.
+// FLOAT floorf here.
 void Select_GetMid( float *mid )
 {
     float bmins[3], bmaxs[3];
@@ -2241,19 +2078,15 @@ void Select_GetMid( float *mid )
         for ( int i = 0; i < 3; ++i )
         {
             float gs = grid_sizes[g_qeglobals.d_gridsize];
-            // IDB: mid[i] = floorf( ((mins+maxs)*0.5) / gridSize ) * gridSize  (floor-snap)
             mid[i] = floorf( ( bmins[i] + bmaxs[i] ) * 0.5f / gs ) * gs;
         }
     }
 }
 
-// SinCosDeg (0x4AABC0) — consolidated into texturevecs.cpp as Ed_SinCos (it was a
-// duplicate port of the same com_math SinCos; see the drift-hazard rule).
+// SinCosDeg (0x4AABC0) is texturevecs.cpp's Ed_SinCos.
 extern void Ed_SinCos( float deg, float *s, float *c );
 
-// Select_ApplyMatrix (0x47CDE0) now lives in brush.cpp — its only asserts are
-// brush.cpp:5598/5608, so brush.cpp is its source file (drag.cpp already externs it).
-// Its doc banner moved with it.
+// Select_ApplyMatrix (0x47CDE0) lives in brush.cpp (its asserts are brush.cpp:5598/5608).
 extern void Select_ApplyMatrix( float *mat, selbrush_t *b, int bSnap, float deg,
                                 char bSwap );   // brush.cpp 0x47CDE0
 
@@ -2264,44 +2097,35 @@ void Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char 
         Select_ApplyMatrix( mat, b, bSnap, deg, bSwap );
 }
 
-extern float grid_sizes[];   // engine_stubs.cpp (0x6dde5c)
-
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x47CFD0  sub_47CFD0 — the drop-to-floor scatter PIVOT: per-axis centre of a
-//  brush's bbox. NoClamp → the raw midpoint; otherwise the midpoint snapped DOWN
-//  to the grid. Writes mid[0..2]. (OnDropSelected's model scatter rotates the
-//  entity about this pivot; the IDA reads mins@def+32, maxs@def+44.)
+//  0x47CFD0  Brush_DropPivot — the drop-to-floor scatter PIVOT (OnDropSelected's model
+//  scatter rotates the entity about it).  The binary used the bbox mid snapped DOWN to the
+//  grid unless NoClamp.
+//  KIWI: the entity's own origin - a random yaw about the grid-floored mid swung the model
+//  around a point up to a grid cell away (~90 units at grid 64); now it turns in place.
 // ═════════════════════════════════════════════════════════════════════════════
-// DOUBLE floor here - contrast Select_GetMid's float floorf.  def@0x14.
-static void sub_47CFD0( float *mid, selbrush_t *b )
+static void Brush_DropPivot( float *mid, selbrush_t *b )
 {
-    int      d_gridsize = g_qeglobals.d_gridsize;
-    int      noClamp    = g_PrefsDlg->m_bNoClamp;
-    brush_t *def        = b->def;
-    for ( int k = 0; k < 3; ++k )
-    {
-        if ( noClamp )
-            mid[k] = ( def->maxs[k] - def->mins[k] ) * 0.5f + def->mins[k];
-        else
-            mid[k] = (float)floor( 0.5 * ( def->maxs[k] + def->mins[k] ) / grid_sizes[d_gridsize] )
-                     * grid_sizes[d_gridsize];
-    }
+    const entity_s_def *def = (const entity_s_def *)b->owner->def;
+    mid[0] = def->origin[0];
+    mid[1] = def->origin[1];
+    mid[2] = def->origin[2];
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x47CBA0  sub_47CBA0 — rotate one brush `deg` degrees about its bbox pivot on
+//  0x47CBA0  Brush_RotateAboutPivot — rotate one brush `deg` degrees about its pivot on
 //  `axis` (0=X/pitch, 1=Y/roll, 2=Z/yaw). Builds the orientation block (pivot +
 //  per-axis 3x3) and hands it to Select_ApplyMatrix. deg==0 is a no-op. The binary
 //  negates the angle before SinCosDeg + ApplyMatrix. Used by OnDropSelected's
 //  random model scatter (3 calls, axes 0/1/2).
 // ═════════════════════════════════════════════════════════════════════════════
-void sub_47CBA0( selbrush_t *b, int axis, float deg )
+void Brush_RotateAboutPivot( selbrush_t *b, int axis, float deg )
 {
     if ( deg == 0.0f )
         return;
 
     float m[12];                 // orientation_t: m[0..2]=pivot, m[3..11]=3x3 (row-major)
-    sub_47CFD0( m, b );          // pivot = bbox mid
+    Brush_DropPivot( m, b );          // pivot = the entity origin
 
     float rot = -deg;
     float s, c;
@@ -2327,7 +2151,6 @@ void sub_47CBA0( selbrush_t *b, int axis, float deg )
 //  the rotation onto its `angles` key. mid_point = the orientation block (mid_point[0]
 //  = pivot origin, mid_point[1] = the 3x3). `rot` is the eclass (unused; kept for sig).
 // ═════════════════════════════════════════════════════════════════════════════
-// origin@0x68 / owner@0x8 / def@0x14; ++def->version is the int16 @0x4E.
 void Select_RotateFixedSize( selbrush_t *sb, float (*mid_point)[3], const float * /*rot*/ )
 {
     entity_s_def *def = (entity_s_def *)sb->owner->def;
@@ -2366,8 +2189,7 @@ void Select_RotateFixedSize( selbrush_t *sb, float (*mid_point)[3], const float 
             def->origin[j] = (float)want[j];
     }
 
-    // IDA 0x47cd62: MatrixMultiply(in1=curAxis, in2=rotM, out=newAxis), i.e. newAxis =
-    // curAxis * rotM (in2@eax=mid_point+0Ch=rotM, in1@ecx=curAxis, out@edx).  NOT commutative.
+    // newAxis = curAxis * rotM.  NOT commutative.
     double base[3] = { 0.0, 0.0, 0.0 }, turned[3];
     const char *text = ValueForKey2( def, "angles" );
     if ( !text || sscanf( text, "%lf %lf %lf", &base[0], &base[1], &base[2] ) != 3 )
@@ -2377,11 +2199,7 @@ void Select_RotateFixedSize( selbrush_t *sb, float (*mid_point)[3], const float 
     char v[160];
     SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( v, sizeof( v ), angles, 0 ) );   // bare, as %g
 
-    Brush_BuildWindings( sb->def, 1 );
-    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-        SetupVertexSelection();
-    MarkMapModified();
-    ++sb->def->version;
+    Brush_RebuildAfterEdit( sb->def );
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2410,7 +2228,7 @@ void Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] )
             if ( !Entity_GetVec3ForKey( def, ang, "angles" ) )
                 ang[0] = ang[1] = ang[2] = 0.0f;
             AnglesToAxis( ang, localAxis );
-            switch ( g_nScaleHow & 7 )   // g_nScaleHow (0x23F16DC)
+            switch ( g_nScaleHow & 7 )
             {
                 case 6: axis = 0; fixedsize = true; break;
                 case 5: axis = 1; fixedsize = true; break;
@@ -2447,18 +2265,18 @@ void Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] )
 
     if ( fixedsize )
     {
-        // Re-base the rotation into the entity's local frame, matching the binary's
-        // LEFT-association + single-temp operand sequence (0x4900ab/be/ce):
-        //   result2 = localAxisᵀ;  result = localAxisᵀ · M;  M = (localAxisᵀ · M) · localAxis
-        // (algebraically == localAxisᵀ·M·localAxis, but the FP op order must match the binary).
+        // Re-base the rotation into the entity's local frame with the binary's
+        // LEFT-association + single-temp operand sequence:
+        //   lt = localAxisᵀ;  tmp = localAxisᵀ · M;  M = (localAxisᵀ · M) · localAxis
+        // (algebraically == localAxisᵀ·M·localAxis; the FP op order is kept).
         mat3x3 &M = *reinterpret_cast<mat3x3 *>( m );   // rows 1..3 of rot_around
         float lt[3][3], tmp[3][3];
-        MatrixTranspose( localAxis, lt );    // lt  = localAxisᵀ              (result2)
-        MatrixMultiply( lt, M, tmp );        // tmp = localAxisᵀ · M          (result)
+        MatrixTranspose( localAxis, lt );    // lt  = localAxisᵀ
+        MatrixMultiply( lt, M, tmp );        // tmp = localAxisᵀ · M
         MatrixMultiply( tmp, localAxis, M ); // M   = (localAxisᵀ · M) · localAxis
     }
 }
-// 0x48FF40: assert 1389 -> iassert; no version field.
+// the iassert at the top is select.cpp:1389.
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48FD50  Select_FlipAxis — mirror the selection across the `axis` plane through
@@ -2472,7 +2290,6 @@ static bool Select_FixedSizeOwner( const selbrush_t *b )
     return ent && ent->eclass && *(int *)&ent->eclass->fixedsize;
 }
 
-// The -1.0 is flt_6F40C4; rot_around[4][3] keeps the binary's v2/v3 stack contiguity.
 void Select_FlipAxis( int axis )
 {
     float rot_around[4][3];
@@ -2527,7 +2344,6 @@ void Select_FlipAxis( int axis )
 //  fixed-size entity ALSO flips its `angles` key by 180° on the mirror axis (so a
 //  mirrored prefab/model faces the reflected direction), rebuilding windings.
 // ═════════════════════════════════════════════════════════════════════════════
-// version bump is the brush_t int16 @0x4E; ToAngles == AngleNormalize360 (180.0 dbl_6F42A8).
 void DoFlip( int axis, const char *opName )
 {
     Undo_ClearRedo();
@@ -2542,14 +2358,12 @@ void DoFlip( int axis, const char *opName )
             continue;
 
         // Read the entity's `angles` epair (default 0 0 0), flip the mirror axis by 180,
-        // normalize, write it back. (IDB: sscanf "%f %f %f"; ToAngles = AngleNormalize360.)
+        // normalize, write it back (the binary: sscanf "%f %f %f" + AngleNormalize360).
         // KIWI (2026-10-05, precision): the text in double and a flip that is its own inverse
         // (KiwiAng_Flip180), written exact - AngleNormalize360 in float sent "-90" to 90 and
         // back to 270, and 12.3456 to 192.345596 and back to 12.345596.
         double angD[3] = { 0.0, 0.0, 0.0 };
-        const char *val = "0 0 0";
-        for ( epair_t *e = def->epairs; e; e = e->next )
-            if ( _stricmp( e->key, "angles" ) == 0 ) { val = e->value; break; }
+        const char *val = ValueForKey2( def, "angles" );   // "" when missing: zeroes below
         if ( sscanf( val, "%lf %lf %lf", &angD[0], &angD[1], &angD[2] ) != 3 )
             angD[0] = angD[1] = angD[2] = 0.0;
         angD[axis] = KiwiAng_Flip180( angD[axis] );
@@ -2557,11 +2371,7 @@ void DoFlip( int axis, const char *opName )
         char angText[160];
         SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), ang, 0 ) );
 
-        Brush_BuildWindings( b->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++b->def->version;
+        Brush_RebuildAfterEdit( b->def );
     }
 
     Undo_EndBrushList( &selected_brushes );
@@ -2577,10 +2387,10 @@ void DoFlip( int axis, const char *opName )
 //  and follows the paste with NudgeSelection(2)+(3).  KIWI (2026-09-09) restored that
 //  route through the in-app clipboard (RadiantClipboard_CloneSelection): entities,
 //  patches and worldspawn brushes all clone.  Only the cosmetic grid offset is not
-//  reproduced (`a1` = grid size, unused for that reason) — KiwiCmd_AfterPaste enters a
+//  reproduced (`gridSize`, unused for that reason) — KiwiCmd_AfterPaste enters a
 //  paused Move on the copies instead.
 // ═════════════════════════════════════════════════════════════════════════════
-void Clone_Selection( float /*a1*/ )
+void Clone_Selection( float /*gridSize*/ )
 {
     if ( selected_brushes.next == &selected_brushes )
         return;                               // nothing selected: no undo record either
@@ -2602,11 +2412,10 @@ void Clone_Selection( float /*a1*/ )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x490A70  Select_ByClass - forward ->next walk; brushFlags@0x34 &2/&0x20 gate.  The
-//  non-1:1 `v7 &&` null-guard is dropped so the structure matches the binary
-//  (assert-then-deref).
+//  0x490A70  Select_ByClass - forward ->next walk; brushFlags &2/&0x20 gate;
+//  assert-then-deref (no null guard).
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_ByClass( const char *a1 )
+void Select_ByClass( const char *key )
 {
     if ( selected_brushes.next == &selected_brushes )
         return;
@@ -2620,8 +2429,8 @@ void Select_ByClass( const char *a1 )
 
     iassert( brush->owner->def == brush->def->owner );   // 1776
 
-    char *v8 = ValueForKey2( owner->def, a1 );
-    Sys_Printf( "Selecting %s %s\n", a1, v8 );
+    char *value = ValueForKey2( owner->def, key );
+    Sys_Printf( "Selecting %s %s\n", key, value );
 
     Select_Deselect( 1 );
 
@@ -2637,11 +2446,10 @@ void Select_ByClass( const char *a1 )
                 if ( (bf & 2) == 0 && (bf & 0x20) == 0 )
                 {
                     iassert( brush->owner );   // 1793
-                    entity_s *v7 = brush->owner;
-                    if ( v7 != world_entity )
+                    if ( brush->owner != world_entity )
                     {
                         iassert( brush->owner->def == brush->def->owner );   // 1796
-                        if ( Entity_HasEpairMatch( (entity_s *)brush->owner->def, a1, v8 ) )
+                        if ( Entity_HasEpairMatch( (entity_s *)brush->owner->def, key, value ) )
                         {
                             Brush_RemoveFromList( brush );
                             Select_Brush_2( &selected_brushes, brush );
@@ -2659,39 +2467,33 @@ void Select_ByClass( const char *a1 )
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x490C00  Select_ByKeyValue  — Selection→Select by Key/Value (menu/cmd 33133).
 //
-//  The binary constructs CKeyValueSelectDlg (IDD 0xBC, ctor sub_416760) which pre-
+//  The binary constructs CKeyValueSelectDlg (IDD 0xBC, ctor 0x416760) which pre-
 //  fills its key/value CString members from the entity-window key/value edit fields,
 //  DoModals it, and — if OK — runs the active_brushes match-walk below.  The dialog's
 //  two CString members (key/value) and two flags (key_substr/value_substr) drive an
 //  8-way matcher dispatch (exact/substring × key/value × present/absent).
 //
-//  PORT: the dialog is HAND-BUILT (radiant.rc has no IDD template — same as
-//  CFindBrushDlg/CMapInfo, win_dlg.cpp).  The deterministic match-walk is factored
-//  into Select_ByKeyValue_Core so it can be driven without a message pump; the public
-//  Select_ByKeyValue() opens the modeless popup whose OK button calls the core.
+//  PORT: the deterministic match-walk is factored into Select_ByKeyValue_Core so it can
+//  be driven without a message pump; the public Select_ByKeyValue() toggles the ImGui
+//  panel, whose Select button calls the core (via KeyValueSelect_Apply).
 //
-//  The IDB reads the dialog members via raw esp slots (`key`/`value` at ebp-20h/-24h =
-//  this+120 / this+116; key_substr/value_substr at +124/+128); transcribed as named members.
 //  The active-list walk captures `saved=b->next` BEFORE relinking, then advances b=saved.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // The eight epair matchers (entity.cpp).  HasKeyValuePair / Entity_HasEpairMatch are
 // already extern'd above; the six substring variants are declared here.
-extern bool Entity_HasKeySubstr( entity_s_def *e, const char *key );               // sub_483900
-extern bool Entity_HasValue( entity_s_def *e, const char *val );                   // sub_483AC0
-extern bool Entity_HasValueSubstr( entity_s_def *e, const char *val );             // sub_483B10
-extern bool Entity_HasKeySubstrValue( entity_s_def *e, const char *key, const char *val );       // sub_4839C0
-extern bool Entity_HasKeyValueSubstr( entity_s_def *e, const char *key, const char *val );       // sub_483A20
-extern bool Entity_HasKeySubstrValueSubstr( entity_s_def *e, const char *key, const char *val ); // sub_483A80
+extern bool Entity_HasKeySubstr( entity_s_def *e, const char *key );               // 0x483900
+extern bool Entity_HasValue( entity_s_def *e, const char *val );                   // 0x483AC0
+extern bool Entity_HasValueSubstr( entity_s_def *e, const char *val );             // 0x483B10
+extern bool Entity_HasKeySubstrValue( entity_s_def *e, const char *key, const char *val );       // 0x4839C0
+extern bool Entity_HasKeyValueSubstr( entity_s_def *e, const char *key, const char *val );       // 0x483A20
+extern bool Entity_HasKeySubstrValueSubstr( entity_s_def *e, const char *key, const char *val ); // 0x483A80
 
-// Win_GetEntityKeyValueFields (win_ent.cpp) — the entity-window key/value edit text.
-extern void Win_GetEntityKeyValueFields( char *keyOut, char *valueOut );
-
-// ── the deterministic match-walk (the body of 0x490C00 after DoModal returns OK) ──
+// ── the deterministic match-walk (Select_ByKeyValue's body after DoModal returns OK) ──
 void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr, bool valueSubstr )
 {
-    const bool hasKey = ( key   && key[0]   != 0 );   // IDB: *(key  -12) != 0  (CString length)
-    const bool hasVal = ( value && value[0] != 0 );   // IDB: *(value-12) != 0
+    const bool hasKey = ( key   && key[0]   != 0 );
+    const bool hasVal = ( value && value[0] != 0 );
 
     if ( hasKey )
     {
@@ -2717,7 +2519,7 @@ void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr,
     else
     {
         if ( !hasVal )
-            return;                                   // nothing entered → no-op (IDB LABEL_2)
+            return;                                   // nothing entered → no-op
         if ( valueSubstr )
             Sys_Printf( "Selecting entities that have a key substring value of '%s'\n", value );
         else
@@ -2729,7 +2531,7 @@ void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr,
     selbrush_t *brush = active_brushes.next;
     while ( brush != &active_brushes )
     {
-        selbrush_t *saved = brush->next;                  // IDB &brush->next->prev (prev@0) captured pre-relink
+        selbrush_t *saved = brush->next;                  // captured pre-relink
         if ( !FilterBrush( brush, 0 )
           && ( brush->brushFlags & 2 ) == 0
           && ( brush->brushFlags & 0x20 ) == 0 )
@@ -2748,24 +2550,24 @@ void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr,
                         if ( valueSubstr )
                         {
                             if ( keySubstr )
-                                match = Entity_HasKeySubstrValueSubstr( def, key, value );  // sub_483A80
+                                match = Entity_HasKeySubstrValueSubstr( def, key, value );
                             else
-                                match = Entity_HasKeyValueSubstr( def, key, value );        // sub_483A20
+                                match = Entity_HasKeyValueSubstr( def, key, value );
                         }
                         else if ( keySubstr )
-                            match = Entity_HasKeySubstrValue( def, key, value );            // sub_4839C0
+                            match = Entity_HasKeySubstrValue( def, key, value );
                         else
                             match = Entity_HasEpairMatch( def, key, value );               // exact
                     }
                     else if ( keySubstr )
-                        match = Entity_HasKeySubstr( def, key );                            // sub_483900
+                        match = Entity_HasKeySubstr( def, key );
                     else
                         match = HasKeyValuePair( def, key );
                 }
                 else if ( valueSubstr )
-                    match = Entity_HasValueSubstr( def, value );                            // sub_483B10
+                    match = Entity_HasValueSubstr( def, value );
                 else
-                    match = Entity_HasValue( def, value );                                  // sub_483AC0
+                    match = Entity_HasValue( def, value );
 
                 if ( match )
                 {
@@ -2780,22 +2582,20 @@ void Select_ByKeyValue_Core( const char *key, const char *value, bool keySubstr,
     g_nUpdateBits = -1;
 }
 
-// UI-independent action behind CKeyValueSelectDlg's OK button.
+// UI-independent action behind the Key/Value panel's Select button.
 void KeyValueSelect_Apply( const char *key, const char *value, bool keySubstr, bool valueSubstr )
 {
     Select_ByKeyValue_Core( key, value, keySubstr, valueSubstr );
     g_nUpdateBits |= 1;
 }
 
-// ── MFC shell — CKeyValueSelectDlg, hand-built modeless popup (the win_dlg.cpp pattern).
-//    KeyValueSelect_Apply above stays COMMON (imgui_panel_kvselect.cpp calls it, seeded
-//    from Win_GetEntityKeyValueFields). ──────────────────────────────────────────────
+// ── KeyValueSelect_Apply above is called by imgui_panel_kvselect.cpp. ─────────────────
 
 void Select_ByKeyValue()
 {
-    // NO-MFC: no-op — the popup is an MFC CWnd; imgui_panel_kvselect.cpp is the ON-build
-    // entry point and calls KeyValueSelect_Apply directly.
-    return;
+    // KIWI: the MFC popup is gone; open/close the ImGui panel (it calls KeyValueSelect_Apply)
+    extern void ImGuiPanel_KVSelect_Toggle();   // imgui_panel_kvselect.cpp
+    ImGuiPanel_KVSelect_Toggle();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2809,12 +2609,12 @@ void Select_Connected()
 
     ResetSelectMode();
 
-    LinkList_t v37;   // Map_ParseLinkList parse buffer (qe3.h)
+    LinkList_t links;   // Map_ParseLinkList parse buffer (qe3.h)
 
-    char v30;
+    char added;
     do
     {
-        v30 = 0;
+        added = 0;
         selbrush_t *brush = selected_brushes.next;
         if ( brush == &selected_brushes )
             break;
@@ -2826,144 +2626,112 @@ void Select_Connected()
             {
                 iassert( brush->def->owner == brush->owner->def );   // 1969
 
-                entity_s_def *v36 = (entity_s_def *)brush->owner->def;
+                entity_s_def *def = (entity_s_def *)brush->owner->def;
 
                 // 1. targetname → select entities that target this one.
-                if ( HasKeyValuePair( v36, "targetname" ) )
+                if ( HasKeyValuePair( def, "targetname" ) )
                 {
-                    const char *value = zero_str();
-                    for ( epair_t *ep = v36->epairs; ep; ep = ep->next )
+                    const char *value = ValueForKey2( def, "targetname" );
+                    selbrush_t *ab = active_brushes.next;
+                    while ( ab != &active_brushes )
                     {
-                        if ( !_stricmp( ep->key, "targetname" ) )
-                        { value = ep->value; break; }
-                    }
-                    selbrush_t *v5 = active_brushes.next;
-                    while ( v5 != &active_brushes )
-                    {
-                        selbrush_t *v5next = v5->next;
-                        if ( v5->owner != world_entity
-                             && !FilterBrush( v5, 0 )
-                             && (v5->brushFlags & 2) == 0
-                             && (v5->brushFlags & 0x20) == 0
-                             && Entity_HasEpairMatch( (entity_s *)v5->owner->def, "target", value ) )
+                        selbrush_t *abNext = ab->next;
+                        if ( ab->owner != world_entity
+                             && !FilterBrush( ab, 0 )
+                             && (ab->brushFlags & 2) == 0
+                             && (ab->brushFlags & 0x20) == 0
+                             && Entity_HasEpairMatch( (entity_s *)ab->owner->def, "target", value ) )
                         {
-                            Brush_RemoveFromList( v5 );
-                            Brush_AddToList2( v5 );
-                            v30 = 1;
+                            Brush_RemoveFromList( ab );
+                            Brush_AddToList2( ab );
+                            added = 1;
                         }
-                        v5 = v5next;
+                        ab = abNext;
                     }
                 }
 
                 // 2. script_linkTo → select entities whose script_linkName is in the list.
-                if ( HasKeyValuePair( v36, "script_linkTo" ) )
+                if ( HasKeyValuePair( def, "script_linkTo" ) )
                 {
-                    const char *v9 = zero_str();
-                    for ( epair_t *ep = v36->epairs; ep; ep = ep->next )
-                    {
-                        if ( !_stricmp( ep->key, "script_linkTo" ) )
-                        { v9 = ep->value; break; }
-                    }
-                    Map_ParseLinkList( &v37, v9 );
-                    int count = v37.size;
+                    Map_ParseLinkList( &links, ValueForKey2( def, "script_linkTo" ) );
+                    int count = links.size;
 
-                    selbrush_t *v10 = active_brushes.next;
-                    while ( v10 != &active_brushes )
+                    selbrush_t *ab = active_brushes.next;
+                    while ( ab != &active_brushes )
                     {
-                        selbrush_t *v10next = v10->next;
-                        if ( v10->owner != world_entity && !FilterBrush( v10, 0 )
-                             && (v10->brushFlags & 2) == 0 && (v10->brushFlags & 0x20) == 0 )
+                        selbrush_t *abNext = ab->next;
+                        if ( ab->owner != world_entity && !FilterBrush( ab, 0 )
+                             && (ab->brushFlags & 2) == 0 && (ab->brushFlags & 0x20) == 0 )
                         {
-                            const char *v13 = nullptr;
-                            for ( epair_t *ep = ((entity_s *)v10->owner->def)->epairs; ep; ep = ep->next )
+                            const char *linkName = ValueForKey2( (entity_s *)ab->owner->def, "script_linkName" );
+                            if ( *linkName )
                             {
-                                if ( !_stricmp( ep->key, "script_linkName" ) )
-                                { v13 = ep->value; break; }
-                            }
-                            if ( v13 && *v13 )
-                            {
-                                int v14 = (int)atol( v13 );
+                                int linkId = (int)atol( linkName );
                                 for ( int si = 0; si < count; ++si )
                                 {
-                                    if ( v14 == v37.id[si] )
+                                    if ( linkId == links.id[si] )
                                     {
-                                        Brush_RemoveFromList( v10 );
-                                        Brush_AddToList2( v10 );
-                                        v30 = 1;
+                                        Brush_RemoveFromList( ab );
+                                        Brush_AddToList2( ab );
+                                        added = 1;
                                         break;
                                     }
                                 }
                             }
                         }
-                        v10 = v10next;
+                        ab = abNext;
                     }
                 }
 
                 // 3. script_linkName → select entities whose script_linkTo contains this id.
-                if ( HasKeyValuePair( v36, "script_linkName" ) )
+                if ( HasKeyValuePair( def, "script_linkName" ) )
                 {
-                    const char *v18 = zero_str();
-                    for ( epair_t *ep = v36->epairs; ep; ep = ep->next )
-                    {
-                        if ( !_stricmp( ep->key, "script_linkName" ) )
-                        { v18 = ep->value; break; }
-                    }
-                    int v19 = (int)atol( v18 );
+                    int myId = (int)atol( ValueForKey2( def, "script_linkName" ) );
 
-                    selbrush_t *v20 = active_brushes.next;
-                    while ( v20 != &active_brushes )
+                    selbrush_t *ab = active_brushes.next;
+                    while ( ab != &active_brushes )
                     {
-                        selbrush_t *v20next = v20->next;
-                        if ( v20->owner != world_entity && !FilterBrush( v20, 0 )
-                             && (v20->brushFlags & 2) == 0 && (v20->brushFlags & 0x20) == 0 )
+                        selbrush_t *abNext = ab->next;
+                        if ( ab->owner != world_entity && !FilterBrush( ab, 0 )
+                             && (ab->brushFlags & 2) == 0 && (ab->brushFlags & 0x20) == 0 )
                         {
-                            const char *v24 = nullptr;
-                            for ( epair_t *ep = ((entity_s *)v20->owner->def)->epairs; ep; ep = ep->next )
+                            const char *linkTo = ValueForKey2( (entity_s *)ab->owner->def, "script_linkTo" );
+                            if ( *linkTo )
                             {
-                                if ( !_stricmp( ep->key, "script_linkTo" ) )
-                                { v24 = ep->value; break; }
-                            }
-                            if ( v24 && *v24 )
-                            {
-                                Map_ParseLinkList( &v37, v24 );
-                                int count2 = v37.size;
+                                Map_ParseLinkList( &links, linkTo );
+                                int count2 = links.size;
                                 for ( int si = 0; si < count2; ++si )
                                 {
-                                    if ( v19 == v37.id[si] )
+                                    if ( myId == links.id[si] )
                                     {
-                                        Brush_RemoveFromList( v20 );
-                                        Brush_AddToList2( v20 );
-                                        v30 = 1;
+                                        Brush_RemoveFromList( ab );
+                                        Brush_AddToList2( ab );
+                                        added = 1;
                                         break;
                                     }
                                 }
                             }
                         }
-                        v20 = v20next;
+                        ab = abNext;
                     }
                 }
 
                 // 4. target → select entities with matching targetname.
-                if ( HasKeyValuePair( v36, "target" ) )
+                if ( HasKeyValuePair( def, "target" ) )
                 {
-                    const char *v34 = zero_str();
-                    for ( epair_t *ep = v36->epairs; ep; ep = ep->next )
+                    const char *target = ValueForKey2( def, "target" );
+                    selbrush_t *ab = active_brushes.next;
+                    while ( ab != &active_brushes )
                     {
-                        if ( !_stricmp( ep->key, "target" ) )
-                        { v34 = ep->value; break; }
-                    }
-                    selbrush_t *v28 = active_brushes.next;
-                    while ( v28 != &active_brushes )
-                    {
-                        selbrush_t *v28next = v28->next;
-                        if ( v28->owner != world_entity && !FilterBrush( v28, 0 )
-                             && (v28->brushFlags & 2) == 0 && (v28->brushFlags & 0x20) == 0
-                             && Entity_HasEpairMatch( (entity_s *)v28->owner->def, "targetname", v34 ) )
+                        selbrush_t *abNext = ab->next;
+                        if ( ab->owner != world_entity && !FilterBrush( ab, 0 )
+                             && (ab->brushFlags & 2) == 0 && (ab->brushFlags & 0x20) == 0
+                             && Entity_HasEpairMatch( (entity_s *)ab->owner->def, "targetname", target ) )
                         {
-                            Brush_RemoveFromList( v28 );
-                            Brush_AddToList2( v28 );
+                            Brush_RemoveFromList( ab );
+                            Brush_AddToList2( ab );
                         }
-                        v28 = v28next;
+                        ab = abNext;
                     }
                 }
             }
@@ -2971,15 +2739,16 @@ void Select_Connected()
         }
         while ( brush != &selected_brushes );
     }
-    while ( v30 );
+    while ( added );
 
     g_nUpdateBits = -1;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x491440  SelectTargettedEntity  (840 bytes)
-// Two 512-stride dedup loops; brushFlags@0x34 gate; restart-from-head on a match.  The
-// binary checks targets<16 ONCE at loop-1 exit, AFTER the strcpys - kept there.
+// Two 512-stride dedup loops; brushFlags gate; restart-from-head on a match.
+// KIWI: the binary strcpy'd every distinct target into its 16-slot stack buffer and checked
+// targets < 16 only after the loop, so 17+ distinct targets overran the stack.  It stops at 16.
 // ═════════════════════════════════════════════════════════════════════════════
 void SelectTargettedEntity()
 {
@@ -2988,8 +2757,10 @@ void SelectTargettedEntity()
 
     ResetSelectMode();
 
+    enum { MAX_TARGETS = 16 };
     int         targets = 0;
-    char        v20[16][512];
+    bool        dropped = false;
+    char        targetNames[MAX_TARGETS][512];
     selbrush_t *brush = selected_brushes.next;
 
     while ( brush != &selected_brushes )
@@ -3002,22 +2773,24 @@ void SelectTargettedEntity()
             entity_s_def *def = (entity_s_def *)brush->owner->def;
             if ( HasKeyValuePair( def, "target" ) )
             {
-                const char *value = zero_str();
-                for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-                {
-                    if ( !_stricmp( ep->key, "target" ) )
-                    { value = ep->value; break; }
-                }
+                const char *value = ValueForKey2( def, "target" );
                 int found = 0;
                 for ( int k = 0; k < targets; ++k )
-                    if ( !strcmp( v20[k], value ) ) { found = 1; break; }
+                    if ( !strcmp( targetNames[k], value ) ) { found = 1; break; }
                 if ( !found )
-                    strcpy( v20[targets++], value );   // unguarded, matches binary (LABEL_23)
+                {
+                    if ( targets < MAX_TARGETS )
+                        I_strncpyz( targetNames[targets++], value, sizeof( targetNames[0] ) );
+                    else
+                        dropped = true;
+                }
             }
         }
         brush = brush->next;
     }
-    iassert( targets < 16 );   // 2172 (binary checks once at loop-1 exit, AFTER the strcpys)
+    if ( dropped )
+        Sys_Printf( "Select targetted: more than %i distinct targets; using the first %i\n",
+                    MAX_TARGETS, MAX_TARGETS );
 
     brush = active_brushes.next;
     while ( brush != &active_brushes )
@@ -3030,22 +2803,17 @@ void SelectTargettedEntity()
             {
                 iassert( brush->def->owner == brush->owner->def );   // 2189
 
-                entity_s_def *v11 = (entity_s_def *)brush->owner->def;
-                if ( HasKeyValuePair( v11, "targetname" ) )
+                entity_s_def *def = (entity_s_def *)brush->owner->def;
+                if ( HasKeyValuePair( def, "targetname" ) )
                 {
-                    const char *v13 = zero_str();
-                    for ( epair_t *ep = v11->epairs; ep; ep = ep->next )
-                    {
-                        if ( !_stricmp( ep->key, "targetname" ) )
-                        { v13 = ep->value; break; }
-                    }
+                    const char *name = ValueForKey2( def, "targetname" );
                     for ( int k = 0; k < targets; ++k )
                     {
-                        if ( !strcmp( v20[k], v13 ) )
+                        if ( !strcmp( targetNames[k], name ) )
                         {
                             Brush_RemoveFromList( brush );
                             Brush_AddToList2( brush );
-                            // Restart the outer loop (IDA uses goto).
+                            // Restart the outer loop.
                             brush = active_brushes.next;
                             goto NEXT_ITER;
                         }
@@ -3062,12 +2830,12 @@ void SelectTargettedEntity()
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x491790  Select_ChangeBrushType  (253 bytes)
-//  The def->contents RMW lives INSIDE the faceCount-gated face loop (IDA 0x4917eb/0x4917f1)
-//  and the patch contents write targets i->patch->def->contents (IDA 0x491830).
+//  The def->contents RMW lives INSIDE the faceCount-gated face loop and the patch
+//  contents write targets i->patch->def->contents.
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_ChangeBrushType( int a1, int a2 )
+void Select_ChangeBrushType( int contents, int clearBits )
 {
-    int mask = ~a2;
+    int mask = ~clearBits;
     for ( selbrush_t *b = selected_brushes.next;
           b != &selected_brushes;
           b = b->next )
@@ -3075,38 +2843,38 @@ void Select_ChangeBrushType( int a1, int a2 )
         for ( int fi = 0; fi < b->faceCount; ++fi )
         {
             b->def->faces[fi].contents &= mask;
-            b->def->faces[fi].contents |= a1;
-            // def->contents RMW is INSIDE the face loop (IDA 0x4917eb/0x4917f1) — redundant per
-            // face (idempotent) but SKIPPED entirely for faceCount==0 (patch) brushes, whose
-            // authoritative contents live in patchMesh_t and which the binary leaves untouched here.
+            b->def->faces[fi].contents |= contents;
+            // def->contents RMW is INSIDE the face loop — redundant per face (idempotent) but
+            // SKIPPED entirely for faceCount==0 (patch) brushes, whose authoritative contents
+            // live in patchMesh_t and which the binary leaves untouched here.
             b->def->contents &= mask;
-            b->def->contents |= a1;
+            b->def->contents |= contents;
         }
 
         patch_t *patch = (patch_t *)b->patch;
         if ( patch )
         {
             iassert( b->patch->def == b->def->patch );   // select.cpp:2237
-            patch->def->contents &= mask;   // IDA 0x491830: b->patch->def->contents (instance patch)
-            patch->def->contents |= a1;
+            patch->def->contents &= mask;   // b->patch->def->contents (instance patch)
+            patch->def->contents |= contents;
         }
     }
-    for ( selbrush_t *result = selected_brushes.next;
-          result != &selected_brushes;
-          result = result->next )
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes;
+          b = b->next )
     {
-        result->xx6 = 0;
+        b->xx6 = 0;
     }
     g_nUpdateBits = -1;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x491890  Select_ChangeBrushToolflags  (200 bytes)
-//  The patch flags write targets v2->patch->def->flags (IDA 0x491927, the instance patch).
+//  The patch flags write targets b->patch->def->flags (the instance patch).
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_ChangeBrushToolflags( int a1, int a2 )
+void Select_ChangeBrushToolflags( int toolFlags, int clearBits )
 {
-    int mask = ~a2;
+    int mask = ~clearBits;
     for ( selbrush_t *b = selected_brushes.next;
           b != &selected_brushes;
           b = b->next )
@@ -3114,30 +2882,35 @@ void Select_ChangeBrushToolflags( int a1, int a2 )
         for ( int fi = 0; fi < b->faceCount; ++fi )
         {
             b->def->faces[fi].toolflags &= mask;
-            b->def->faces[fi].toolflags |= a1;
+            b->def->faces[fi].toolflags |= toolFlags;
         }
         patch_t *patch = (patch_t *)b->patch;
         if ( patch )
         {
             iassert( b->patch->def == b->def->patch );   // select.cpp:2265
-            patch->def->flags &= mask;   // IDA 0x491927: b->patch->def->flags (instance patch)
-            patch->def->flags |= a1;
+            patch->def->flags &= mask;   // b->patch->def->flags (instance patch)
+            patch->def->flags |= toolFlags;
         }
     }
     g_nUpdateBits = -1;
 }
 
+// A face material's current-layer texdef (the texture ops below; drag.cpp's texture pick).
+texdef_sub_t *Face_CurrentTexdef( MaterialDef *md )
+{
+    return &md->mat_texDef + LayerMat::GetCurrentLayer( md );
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x491F20  Brush_ShiftTexture  (850 bytes)
-//  Non-patch: (int)a1 is an _ftol2 TRUNCATE.  Patch: a1*0.001f.  The base shift comes from
-//  the current-layer slot mat_texDef.shift[7*curLayer].  ++def->version is the int16 @0x4E;
-//  the version asserts compare selbrush@0x24 vs def@0x4E (both 16-bit).
+//  Non-patch: (int)s is a TRUNCATE.  Patch: s*0.001f.  The base shift comes from the
+//  current-layer texdef slot.  The version asserts compare instance vs def (both 16-bit).
 // ═════════════════════════════════════════════════════════════════════════════
-void Brush_ShiftTexture( float a1, float a2 )
+void Brush_ShiftTexture( float s, float t )
 {
-    unsigned v28 = (unsigned)g_SelectedFaces.GetSize();
+    unsigned faceCount = (unsigned)g_SelectedFaces.GetSize();
 
-    if ( selected_brushes.next == &selected_brushes && !v28 )
+    if ( selected_brushes.next == &selected_brushes && !faceCount )
         return;
 
     selbrush_t *b = selected_brushes.next;
@@ -3145,42 +2918,36 @@ void Brush_ShiftTexture( float a1, float a2 )
     {
         do
         {
-            float v24, v23;
+            float ds, dt;
             if ( b->patch )
             {
-                v24 = a1 * 0.001f;
-                v23 = a2 * 0.001f;
+                ds = s * 0.001f;
+                dt = t * 0.001f;
             }
             else
             {
-                v24 = (float)(int)a1;
-                v23 = (float)(int)a2;
+                ds = (float)(int)s;
+                dt = (float)(int)t;
             }
 
             for ( int fi = 0; fi < b->faceCount; ++fi )
             {
-                MaterialDef *v8 = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
-                int curLayer    = LayerMat::GetCurrentLayer( v8 );
-                texdef_sub_t *v10 = &v8->mat_texDef + curLayer;
-                // IDA 0x491ff8/0x492002: the base shift is read from the SAME (current-layer)
-                // texdef_sub_t slot v10, not from sub-layer 0.  texdef_sub_t is 7 floats, so
-                // shift[7*N] == (&mat_texDef)[N].shift[0].
-                v10->shift[0] = v10->shift[0] + v24;
-                v10->shift[1] = v10->shift[1] + v23;
-                TexMatToFakeTexCoords( v8, v10 );
+                MaterialDef  *md = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
+                texdef_sub_t *td = Face_CurrentTexdef( md );
+                // the base shift is read from the SAME (current-layer) texdef_sub_t slot, not
+                // from sub-layer 0.
+                td->shift[0] = td->shift[0] + ds;
+                td->shift[1] = td->shift[1] + dt;
+                TexMatToFakeTexCoords( md, td );
             }
 
-            Brush_BuildWindings( b->def, 1 );
-            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                SetupVertexSelection();
-            MarkMapModified();
-            ++b->def->version;
+            Brush_RebuildAfterEdit( b->def );
 
             patch_t *patch = b->patch;
             if ( patch )
             {
                 iassert( b->patch->def == b->def->patch );   // select.cpp:2460
-                Patch_ShiftTexture( patch->def, v24, v23 );   // the patch DEF, not the instance
+                Patch_ShiftTexture( patch->def, ds, dt );   // the patch DEF, not the instance
             }
 
             b = b->next;
@@ -3188,30 +2955,23 @@ void Brush_ShiftTexture( float a1, float a2 )
         while ( b != &selected_brushes );
     }
 
-    for ( unsigned v21 = 0; v21 < v28; ++v21 )
+    for ( unsigned i = 0; i < faceCount; ++i )
     {
-        selface_t  &selFace = g_SelectedFaces.GetAt( v21 );   // CArray::GetAt (bounds ENSURE)
-        int         v14 = selFace.index;
-        selbrush_t *v15 = selFace.brush;
-        faceVis_s  *v29 = selFace.face;
-        int         v25 = v14;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        int         index = selFace.index;
+        selbrush_t *fb    = selFace.brush;
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2470
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2471
 
-        MaterialDef  *v16 = &v15->def->faces[v14].mtldef[g_qeglobals.current_edit_layer];
-        int           v17 = LayerMat::GetCurrentLayer( v16 );
-        texdef_sub_t *v18 = &v16->mat_texDef + v17;
-        v18->shift[0] = v18->shift[0] + a1;
-        v18->shift[1] = v18->shift[1] + a2;
-        TexMatToFakeTexCoords( v16, v18 );
+        MaterialDef  *md = &fb->def->faces[index].mtldef[g_qeglobals.current_edit_layer];
+        texdef_sub_t *td = Face_CurrentTexdef( md );
+        td->shift[0] = td->shift[0] + s;
+        td->shift[1] = td->shift[1] + t;
+        TexMatToFakeTexCoords( md, td );
 
-        Brush_BuildWindings( v15->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++v15->def->version;
-        sub_477D70( v15, (const float *)world_orient_matrix );
+        Brush_RebuildAfterEdit( fb->def );
+        Brush_CheckBuildFaceVis( fb, (const float *)world_orient_matrix );
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2482
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2483
@@ -3221,7 +2981,7 @@ void Brush_ShiftTexture( float a1, float a2 )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x492280  Brush_FlipTexture  (967 bytes)
-//  size[axis] = -size[axis], shift[axis] = 1-shift[axis]; PMESH_37 takes the patch DEF.
+//  size[axis] = -size[axis], shift[axis] = 1-shift[axis]; Patch_FlipTexture takes the patch DEF.
 // ═════════════════════════════════════════════════════════════════════════════
 void Brush_FlipTexture( int axis )
 {
@@ -3240,25 +3000,21 @@ void Brush_FlipTexture( int axis )
     {
         for ( int fi = 0; fi < b->faceCount; ++fi )
         {
-            MaterialDef  *v4 = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
-            texdef_sub_t *v5 = &v4->mat_texDef + LayerMat::GetCurrentLayer( v4 );
-            v5->size[axis]  = -v5->size[axis];
-            v5->shift[axis] = 1.0f - v5->shift[axis];
-            TexMatToFakeTexCoords( v4, v5 );
+            MaterialDef  *md = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
+            texdef_sub_t *td = Face_CurrentTexdef( md );
+            td->size[axis]  = -td->size[axis];
+            td->shift[axis] = 1.0f - td->shift[axis];
+            TexMatToFakeTexCoords( md, td );
         }
-        Brush_BuildWindings( b->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++b->def->version;
+        Brush_RebuildAfterEdit( b->def );
 
         patch_t *patch = (patch_t *)b->patch;
         if ( patch )
         {
-            // IDA passes the patch DEF (b->patch->def), NOT the instance; the binary
-            // also asserts the instance/def link first (select.cpp:2524).
+            // pass the patch DEF (b->patch->def), NOT the instance, after asserting the
+            // instance/def link.
             iassert( b->patch->def == b->def->patch );   // select.cpp:2524
-            PMESH_37( b->patch->def, axis );
+            Patch_FlipTexture( b->patch->def, axis );
         }
 
         b = b->next;
@@ -3266,32 +3022,27 @@ void Brush_FlipTexture( int axis )
 
     Undo_EndBrushList( &selected_brushes );
 
-    unsigned v23 = (unsigned)g_SelectedFaces.GetSize();
-    for ( unsigned v21 = 0; v21 < v23; ++v21 )
+    unsigned faceCount = (unsigned)g_SelectedFaces.GetSize();
+    for ( unsigned i = 0; i < faceCount; ++i )
     {
-        selface_t  &selFace = g_SelectedFaces.GetAt( v21 );   // CArray::GetAt (bounds ENSURE)
-        selbrush_t *v9  = selFace.brush;
-        int         v25 = selFace.index;
-        faceVis_s  *v24 = selFace.face;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        selbrush_t *fb    = selFace.brush;
+        int         index = selFace.index;
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2534
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2535
 
-        Undo_TryAddBrush( v9->def );
+        Undo_TryAddBrush( fb->def );
 
-        MaterialDef  *v12 = &v9->def->faces[v25].mtldef[g_qeglobals.current_edit_layer];
-        texdef_sub_t *v13 = &v12->mat_texDef + LayerMat::GetCurrentLayer( v12 );
-        v13->size[axis]  = -v13->size[axis];
-        v13->shift[axis] = 1.0f - v13->shift[axis];
-        TexMatToFakeTexCoords( v12, v13 );
+        MaterialDef  *md = &fb->def->faces[index].mtldef[g_qeglobals.current_edit_layer];
+        texdef_sub_t *td = Face_CurrentTexdef( md );
+        td->size[axis]  = -td->size[axis];
+        td->shift[axis] = 1.0f - td->shift[axis];
+        TexMatToFakeTexCoords( md, td );
 
-        Brush_BuildWindings( v9->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++v9->def->version;
-        Undo_LinkBrush( v9->def );
-        sub_477D70( v9, (const float *)world_orient_matrix );
+        Brush_RebuildAfterEdit( fb->def );
+        Undo_LinkBrush( fb->def );
+        Brush_CheckBuildFaceVis( fb, (const float *)world_orient_matrix );
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2549
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2550
@@ -3303,10 +3054,10 @@ void Brush_FlipTexture( int axis )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x492650  Brush_ScaleTexture  (918 bytes)
-//  (float)a1 == (double)a1 for the small int a1 here (no precision divergence);
+//  (float)ds == (double)ds for the small int ds here (no precision divergence);
 //  Patch_ScaleTexture takes the patch DEF.
 // ═════════════════════════════════════════════════════════════════════════════
-void Brush_ScaleTexture( int a1, int a2 )
+void Brush_ScaleTexture( int ds, int dt )
 {
     if ( selected_brushes.next == &selected_brushes
          && !g_SelectedFaces.GetSize() )
@@ -3321,24 +3072,19 @@ void Brush_ScaleTexture( int a1, int a2 )
     {
         for ( int fi = 0; fi < b->faceCount; ++fi )
         {
-            MaterialDef  *v3    = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
-            int           curL  = LayerMat::GetCurrentLayer( v3 );
-            texdef_sub_t *v5    = &v3->mat_texDef + curL;
-            v5->size[0]         = (float)a1 + v5->size[0];
-            v5->size[1]         = (float)a2 + v5->size[1];
-            TexMatToFakeTexCoords( v3, v5 );
+            MaterialDef  *md = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
+            texdef_sub_t *td = Face_CurrentTexdef( md );
+            td->size[0]      = (float)ds + td->size[0];
+            td->size[1]      = (float)dt + td->size[1];
+            TexMatToFakeTexCoords( md, td );
         }
-        Brush_BuildWindings( b->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++b->def->version;
+        Brush_RebuildAfterEdit( b->def );
 
         patch_t *patch = b->patch;
         if ( patch )
         {
             iassert( b->patch->def == b->def->patch );   // select.cpp:2589
-            Patch_ScaleTexture( patch->def, (float)a1, (float)a2 );   // the patch DEF
+            Patch_ScaleTexture( patch->def, (float)ds, (float)dt );   // the patch DEF
         }
 
         b = b->next;
@@ -3346,34 +3092,27 @@ void Brush_ScaleTexture( int a1, int a2 )
 
     Undo_EndBrushList( &selected_brushes );
 
-    unsigned v28 = (unsigned)g_SelectedFaces.GetSize();
-    for ( unsigned v25 = 0; v25 < v28; ++v25 )
+    unsigned faceCount = (unsigned)g_SelectedFaces.GetSize();
+    for ( unsigned i = 0; i < faceCount; ++i )
     {
-        selface_t  &selFace = g_SelectedFaces.GetAt( v25 );   // CArray::GetAt (bounds ENSURE)
-        int         v9  = selFace.index;
-        selbrush_t *v10 = selFace.brush;
-        faceVis_s  *v31 = selFace.face;
-        int         v30 = v9;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        int         index = selFace.index;
+        selbrush_t *fb    = selFace.brush;
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2599
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2600
 
-        Undo_TryAddBrush( v10->def );
+        Undo_TryAddBrush( fb->def );
 
-        MaterialDef  *v13 = &v10->def->faces[v9].mtldef[g_qeglobals.current_edit_layer];
-        int           v14 = LayerMat::GetCurrentLayer( v13 );
-        texdef_sub_t *v15 = &v13->mat_texDef + v14;
-        v15->size[0]      = (float)a1 + v15->size[0];
-        v15->size[1]      = (float)a2 + v15->size[1];
-        TexMatToFakeTexCoords( v13, v15 );
+        MaterialDef  *md = &fb->def->faces[index].mtldef[g_qeglobals.current_edit_layer];
+        texdef_sub_t *td = Face_CurrentTexdef( md );
+        td->size[0]      = (float)ds + td->size[0];
+        td->size[1]      = (float)dt + td->size[1];
+        TexMatToFakeTexCoords( md, td );
 
-        Brush_BuildWindings( v10->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++v10->def->version;
-        Undo_LinkBrush( v10->def );
-        sub_477D70( v10, (const float *)world_orient_matrix );
+        Brush_RebuildAfterEdit( fb->def );
+        Undo_LinkBrush( fb->def );
+        Brush_CheckBuildFaceVis( fb, (const float *)world_orient_matrix );
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2613
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2614
@@ -3388,7 +3127,7 @@ void Brush_ScaleTexture( int a1, int a2 )
 // sign) - a rotate / mirror texture lock leaves e.g. 37.21, which +90 then -90 rounded to 37.
 static float Ed_TexRotateSum( float sum )
 {
-    const double whole = (double)lrint( (double)sum + 9.313225746154785e-10 );
+    const double whole = (double)KiwiRound_Fistp( sum );
     if ( fabs( (double)sum - whole ) <= 1.0e-4 )
         return (float)( (int)whole % 360 );
     return (float)fmod( (double)sum, 360.0 );
@@ -3396,14 +3135,12 @@ static float Ed_TexRotateSum( float sum )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x4929F0  Brush_RotateTexture  (1008 bytes)
-//  Fistp rounding: (int)(val + 9.313225746154785e-10) % 360.
-//  The inline fistp ROUNDS (the 2^-30 bias is preserved) and is then %360 (0xB60B60B7
-//  reciprocal divide); Patch_RotateTexture takes the patch DEF.
-void Brush_RotateTexture( int a1 )
+//  New angle via Ed_TexRotateSum; Patch_RotateTexture takes the patch DEF.
+void Brush_RotateTexture( int deg )
 {
-    unsigned v25 = (unsigned)g_SelectedFaces.GetSize();
+    unsigned faceCount = (unsigned)g_SelectedFaces.GetSize();
 
-    if ( selected_brushes.next == &selected_brushes && !v25 )
+    if ( selected_brushes.next == &selected_brushes && !faceCount )
         return;
 
     Undo_ClearRedo();
@@ -3415,27 +3152,19 @@ void Brush_RotateTexture( int a1 )
     {
         for ( int fi = 0; fi < b->faceCount; ++fi )
         {
-            MaterialDef  *v3    = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
-            int           curL  = LayerMat::GetCurrentLayer( v3 );
-            texdef_sub_t *v5    = &v3->mat_texDef + curL;
-            float         v28   = (float)a1 + v5->rotate;
-            // Inline-fistp rounding: the 2^-30 bias must survive in DOUBLE.
-            // KIWI (2026-10-05, reversibility): lrint, not (int) - the cast truncated, so
-            // -45 + 2^-30 became -44 (Texture Rotate -45 then +45 left the texture 1 degree off).
-            v5->rotate = Ed_TexRotateSum( v28 );
-            TexMatToFakeTexCoords( v3, v5 );
+            MaterialDef  *md  = &b->def->faces[fi].mtldef[g_qeglobals.current_edit_layer];
+            texdef_sub_t *td  = Face_CurrentTexdef( md );
+            float         sum = (float)deg + td->rotate;
+            td->rotate = Ed_TexRotateSum( sum );   // KIWI: reversible (see Ed_TexRotateSum)
+            TexMatToFakeTexCoords( md, td );
         }
-        Brush_BuildWindings( b->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++b->def->version;
+        Brush_RebuildAfterEdit( b->def );
 
         patch_t *patch = b->patch;
         if ( patch )
         {
             iassert( b->patch->def == b->def->patch );   // select.cpp:2652
-            Patch_RotateTexture( patch->def, (float)a1 );   // the patch DEF
+            Patch_RotateTexture( patch->def, (float)deg );   // the patch DEF
         }
 
         b = b->next;
@@ -3443,35 +3172,26 @@ void Brush_RotateTexture( int a1 )
 
     Undo_EndBrushList( &selected_brushes );
 
-    for ( unsigned rot = 0; rot < v25; ++rot )
+    for ( unsigned i = 0; i < faceCount; ++i )
     {
-        selface_t  &selFace = g_SelectedFaces.GetAt( rot );   // CArray::GetAt (bounds ENSURE)
-        int         v9  = selFace.index;
-        selbrush_t *v10 = selFace.brush;
-        faceVis_s  *v30 = selFace.face;
-        int         v27 = v9;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        int         index = selFace.index;
+        selbrush_t *fb    = selFace.brush;
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2661
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2662
 
-        Undo_TryAddBrush( v10->def );
+        Undo_TryAddBrush( fb->def );
 
-        MaterialDef  *v13 = &v10->def->faces[v9].mtldef[g_qeglobals.current_edit_layer];
-        int           v14 = LayerMat::GetCurrentLayer( v13 );
-        texdef_sub_t *v15 = &v13->mat_texDef + v14;
-        float         v29 = (float)a1 + v15->rotate;
-        // Inline-fistp rounding: the 2^-30 bias must survive in DOUBLE.
-        // KIWI (2026-10-05): lrint, as above; a fractional angle keeps its fraction.
-        v15->rotate = Ed_TexRotateSum( v29 );
-        TexMatToFakeTexCoords( v13, v15 );
+        MaterialDef  *md  = &fb->def->faces[index].mtldef[g_qeglobals.current_edit_layer];
+        texdef_sub_t *td  = Face_CurrentTexdef( md );
+        float         sum = (float)deg + td->rotate;
+        td->rotate = Ed_TexRotateSum( sum );    // KIWI: reversible (see Ed_TexRotateSum)
+        TexMatToFakeTexCoords( md, td );
 
-        Brush_BuildWindings( v10->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++v10->def->version;
-        Undo_LinkBrush( v10->def );
-        sub_477D70( v10, (const float *)world_orient_matrix );
+        Brush_RebuildAfterEdit( fb->def );
+        Undo_LinkBrush( fb->def );
+        Brush_CheckBuildFaceVis( fb, (const float *)world_orient_matrix );
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2675
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2676
@@ -3481,32 +3201,26 @@ void Brush_RotateTexture( int a1 )
     g_nUpdateBits |= W_CAMERA;
 }
 
-// ─── prefab_s mirror (IDB 0x54; same layout as map.cpp / entity.cpp / mayaexport.cpp).
-//     entity_s.prefab (+0x48) points here; the prefab's instanced brush list lives at
-//     active_brushlist (+0x0C, tail sentinel) / active_brushlist_next (+0x10, head).
+// ─── prefab_s (qe3.h) alias.  entity_s.prefab points here; the prefab's instanced brush
+//     list lives at active_brushlist (tail) / active_brushlist_next (head).
 typedef prefab_s prefab_s_select;
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x493210  sub_493210  — recursive prefab/patch texture-name search.
+//  0x493210  Prefab_HasMaterial  — recursive prefab/patch texture-name search.
 //
-//  Walks a1's owning entity's PREFAB brush list (a1->owner->prefab : prefab_s, whose
-//  brush sentinel is at prefab+0x0C with the first node at prefab+0x10).  For each
+//  Walks b's owning entity's PREFAB brush list (b->owner->prefab : prefab_s, whose
+//  brush sentinel is &active_brushlist with the first node in active_brushlist_next).  For each
 //  unfiltered brush: a patch → compare the patch's per-layer material name; a nested
 //  prefab → recurse; otherwise → loop the def faces comparing the per-layer material
-//  name.  Returns 1 the moment a name matches a2 (caller selects the whole top-level
+//  name.  Returns 1 the moment a name matches `name` (caller selects the whole top-level
 //  brush), 0 if nothing in the subtree matches.  Match uses Materialdef_GetName
-//  (lyrMtl ? (char*)lyrMtl : radMtl->name) + _stricmp, exactly like the binary inline.
-//
-//  The binary brackets the body with two empty-CString RAII temporaries that are never
-//  read - VC7.1 cleanup scaffolding with no observable effect - so the port omits them.
-//  The inline name idiom == Materialdef_GetName; the face loop stride is 232.
+//  (lyrMtl ? (char*)lyrMtl : radMtl->name) + _stricmp.
 // ═════════════════════════════════════════════════════════════════════════════
-int sub_493210( selbrush_t *a1, const char *a2 )
+int Prefab_HasMaterial( selbrush_t *b, const char *name )
 {
-    selbrush_t *pfbBrush = (selbrush_t *)(intptr_t)a1;
-    prefab_s_select *prefab = (prefab_s_select *)pfbBrush->owner->prefab;
+    prefab_s_select *prefab = (prefab_s_select *)b->owner->prefab;
 
-    selbrush_t *sentinel = (selbrush_t *)&prefab->active_brushlist; // prefab + 0x0C
+    selbrush_t *sentinel = (selbrush_t *)&prefab->active_brushlist;
     selbrush_t *pfb = prefab->active_brushlist_next;
     if ( pfb == sentinel )
         return 0;
@@ -3522,15 +3236,15 @@ int sub_493210( selbrush_t *a1, const char *a2 )
                 iassert( pfb->patch->def == pfb->def->patch );   // select.cpp:2799
                 MaterialDef *md =
                     (MaterialDef *)( &pfb->patch->def->texture + g_qeglobals.current_edit_layer );
-                // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
-                const char *name = (const char *)Materialdef_GetName( md );
-                if ( !_stricmp( a2, name ) )
+                // (the MaterialDef.cpp:85 assert lives in Materialdef_GetName)
+                const char *nm = (const char *)Materialdef_GetName( md );
+                if ( !_stricmp( name, nm ) )
                     return 1;
             }
             else if ( pfb->owner->prefab )
             {
                 // nested prefab → recurse
-                if ( sub_493210( pfb, a2 ) )
+                if ( Prefab_HasMaterial( pfb, name ) )
                     return 1;
             }
             else
@@ -3543,13 +3257,13 @@ int sub_493210( selbrush_t *a1, const char *a2 )
                     while ( 1 )
                     {
                         MaterialDef *md = &def->faces[i].mtldef[g_qeglobals.current_edit_layer];
-                        // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
-                        const char *name = (const char *)Materialdef_GetName( md );
-                        if ( !_stricmp( a2, name ) )
-                            return 1;            // LABEL_16
-                        def = pfb->def;            // reload (IDA: def = v5->def)
+                        // (the MaterialDef.cpp:85 assert lives in Materialdef_GetName)
+                        const char *nm = (const char *)Materialdef_GetName( md );
+                        if ( !_stricmp( name, nm ) )
+                            return 1;
+                        def = pfb->def;            // reload
                         if ( ++i >= (unsigned int)def->faceCount )
-                            break;               // → next brush (LABEL_33)
+                            break;               // → next brush
                     }
                 }
             }
@@ -3569,15 +3283,13 @@ int sub_493210( selbrush_t *a1, const char *a2 )
 //  current-layer template (g_qeglobals.random_texture_stuff[layer].mtl).  Then walk
 //  active_brushes: filtered / brushFlags &2 / &0x20 skipped; a patch compares its
 //  per-layer material name (match → Brush_RemoveFromList + Select_Brush_2 to selected);
-//  a prefab owner (when a1 != 0) recurses via sub_493210 (match → select the whole brush);
-//  a normal brush loops its faces (match → Brush_RemoveFromList + Brush_AddToList2).
+//  a prefab owner (when includePrefabs) recurses via Prefab_HasMaterial (match → select the whole
+//  brush); a normal brush loops its faces (match → Brush_RemoveFromList + Brush_AddToList2).
 //
-//  Like sub_493210 the binary wraps the body in two unused empty-CString RAII temporaries;
-//  the port omits them.  a1 = the "search prefabs" flag (passed to sub_493210).
 //  A patch match uses Select_Brush_2(&selected_brushes, ...); a face match uses
 //  Brush_AddToList2 - both as in the binary.
 // ═════════════════════════════════════════════════════════════════════════════
-void Select_ByTexture( int a1 )
+void Select_ByTexture( int includePrefabs )
 {
     MaterialDef *src;
 
@@ -3601,7 +3313,7 @@ void Select_ByTexture( int a1 )
     selbrush_t *b = active_brushes.next;
     while ( b != &active_brushes )
     {
-        selbrush_t *bNext = b->next;            // p_prev = &b->next->prev (advance = b->next)
+        selbrush_t *bNext = b->next;
         if ( !FilterBrush( b, 0 ) )
         {
             int bf = b->brushFlags;
@@ -3621,10 +3333,10 @@ void Select_ByTexture( int a1 )
                         Select_Brush_2( &selected_brushes, b );
                     }
                 }
-                else if ( b->owner->prefab && a1 )
+                else if ( b->owner->prefab && includePrefabs )
                 {
                     // prefab owner → recurse; match selects the whole top-level brush
-                    if ( sub_493210( b, Name ) )
+                    if ( Prefab_HasMaterial( b, Name ) )
                     {
                         Brush_RemoveFromList( b );
                         Select_Brush_2( &selected_brushes, b );
@@ -3640,7 +3352,7 @@ void Select_ByTexture( int a1 )
                         while ( 1 )
                         {
                             MaterialDef *md = &def->faces[i].mtldef[g_qeglobals.current_edit_layer];
-                            // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
+                            // (the MaterialDef.cpp:85 assert lives in Materialdef_GetName)
                             const char *nm = (const char *)Materialdef_GetName( md );
                             if ( !_stricmp( Name, nm ) )
                             {
@@ -3648,10 +3360,10 @@ void Select_ByTexture( int a1 )
                                 if ( b->next || b->prev )
                                     Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
                                 Brush_AddToList2( b );
-                                break;           // → next brush (LABEL_38)
+                                break;           // → next brush
                             }
                             if ( ++i >= (unsigned int)b->def->faceCount )
-                                break;           // → next brush (LABEL_38)
+                                break;           // → next brush
                         }
                     }
                 }
@@ -3665,13 +3377,13 @@ void Select_ByTexture( int a1 )
 //  0x493830  Select_ByClassSimilar  (368 bytes)
 //  Selects all brushes sharing the same entity class as any
 //  currently-selected brush.  Iterates selected list in reverse (prev chain).
-//  The non-1:1 `&& v2->owner` fold is dropped so the _stricmp deref is unconditional.
+//  The _stricmp deref is unconditional (no owner guard).
 // ═════════════════════════════════════════════════════════════════════════════
 void Select_ByClassSimilar()
 {
-    // IDA 0x493835: v0 = selected_brushes (IDB +0 == kisak selected_brushes.PREV, the list
-    // TAIL), then walks ->prev to the head.  Starting at .next would break after the first
-    // node (head->prev == sentinel) and match only the head brush's class.
+    // Start at selected_brushes.PREV (the list TAIL), then walk ->prev to the head.
+    // Starting at .next would break after the first node (head->prev == sentinel) and
+    // match only the head brush's class.
     selbrush_t *brush = selected_brushes.prev;
 
     if ( brush == &selected_brushes )
@@ -3680,7 +3392,7 @@ void Select_ByClassSimilar()
         return;
     }
 
-    // Iterate selected list in reverse (IDA uses prev).
+    // Iterate selected list in reverse.
     while ( 1 )
     {
         entity_s *owner = brush->owner;
@@ -3721,148 +3433,52 @@ void Select_ByClassSimilar()
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x4939E0  Brush_FitTexture  (721 bytes)
 // ═════════════════════════════════════════════════════════════════════════════
-void Brush_FitTexture( float x, float y, int a4 )
+void Brush_FitTexture( float x, float y, int acrossSelection )
 {
-    int  v3  = g_SelectedFaces.GetSize();
-    int  v20 = v3;
+    int faceCount = g_SelectedFaces.GetSize();
 
-    if ( selected_brushes.next == &selected_brushes && !v3 )
+    if ( selected_brushes.next == &selected_brushes && !faceCount )
         return;
 
     Undo_ClearRedo();
     Undo_GeneralStart( "Fit texture" );
     Undo_AddBrushList( &selected_brushes );
 
-    for ( selbrush_t *i = selected_brushes.next;
-          i != &selected_brushes;
-          i = i->next )
+    for ( selbrush_t *b = selected_brushes.next;
+          b != &selected_brushes;
+          b = b->next )
     {
-        sub_47C950( i->def, y, x );
-        Brush_BuildWindings( i->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++i->def->version;
+        Brush_FitTextureFaces( b->def, y, x );
+        Brush_RebuildAfterEdit( b->def );
     }
 
-    for ( int v23 = 0; v23 < v20; ++v23 )
+    for ( int i = 0; i < faceCount; ++i )
     {
-        selface_t  &selFace = g_SelectedFaces.GetAt( v23 );   // CArray::GetAt (bounds ENSURE)
-        int         v7  = selFace.index;
-        selbrush_t *b   = selFace.brush;
-        faceVis_s  *v19 = selFace.face;
-        int         v21 = v7;
+        selface_t  &selFace = g_SelectedFaces.GetAt( i );   // CArray::GetAt (bounds ENSURE)
+        int         index = selFace.index;
+        selbrush_t *b     = selFace.brush;
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2973
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2974
 
         Undo_TryAddBrush( b->def );
-        Texture_Fit( &b->def->faces[v7], y, x, a4 );
-        Brush_BuildWindings( b->def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++b->def->version;
+        Texture_Fit( &b->def->faces[index], y, x, acrossSelection );
+        Brush_RebuildAfterEdit( b->def );
         Undo_LinkBrush( b->def );
-        sub_477D70( b, (const float *)world_orient_matrix );
+        Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
 
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );   // select.cpp:2982
         iassert( selFace.brush->version == selFace.brush->def->version );   // select.cpp:2983
     }
 
-    // Undo linkage for the selected list (IDA trailing loop).
-    if ( g_lastundo && !g_lastundo->done )
-    {
-        for ( selbrush_t *k = selected_brushes.next;
-              k != &selected_brushes;
-              k = k->next )
-        {
-            k->def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
-            entity_s *v18 = (entity_s *)(intptr_t)k->def->owner;
-            if ( *(int *)&v18->eclass->fixedsize )
-                v18->epairEdits = g_lastundo->id;
-        }
-    }
-
+    Undo_EndBrushList( &selected_brushes );
     Undo_End();
     g_nUpdateBits |= 1u;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x494030  Entity_SetAngles  (302 bytes)
-//  a2 = axis index (0=pitch, 1=yaw, 2=roll).
-//  sscanf must zero ALL 3 components on a !=3 return; angles[3] is the separate-floats
-//  packing trap.
-// ═════════════════════════════════════════════════════════════════════════════
-void Entity_SetAngles( float a1, int a2 )
-{
-    Undo_ClearRedo();
-    Undo_GeneralStart( "set entity angles" );
-
-    for ( selbrush_t *brush = selected_brushes.next;
-          brush != &selected_brushes;
-          brush = brush->next )
-    {
-        iassert( brush->owner->def == brush->def->owner );   // 3149
-
-        entity_s     *owner = brush->owner;
-        entity_s_def *def   = (entity_s_def *)owner->def;
-
-        if ( *(int *)&def->eclass->fixedsize )
-        {
-            Undo_AddEntity_W( (entity_s *)def );
-
-            const char *value = zero_str();
-            for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-            {
-                if ( !_stricmp( ep->key, "angles" ) )
-                { value = ep->value; break; }
-            }
-
-            // IDA 0x4940ee: zero ALL three only when sscanf != 3 (partial parse must not
-            // retain the one/two values it did read). Pre-zeroing then ignoring the return
-            // (the prior port) kept stale components on a partial "angles" string.
-            float v8, v9, v10;
-            if ( sscanf( value, "%f %f %f", &v8, &v9, &v10 ) != 3 )
-                v8 = v9 = v10 = 0.0f;
-            float angles[3] = { v8, v9, v10 };
-            angles[a2] = a1;
-            char angText[160];                             // KIWI: exact, not %g
-            SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), angles, 0 ) );
-        }
-    }
-    Undo_End();
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  0x494160  Entity_SetAngles_Old  (163 bytes)
-//  a1 is a float[3].
-// ═════════════════════════════════════════════════════════════════════════════
-void Entity_SetAngles_Old( float *a1 )
-{
-    Undo_ClearRedo();
-    Undo_GeneralStart( "set entity angles" );
-
-    for ( selbrush_t *brush = selected_brushes.next;
-          brush != &selected_brushes;
-          brush = brush->next )
-    {
-        iassert( brush->owner->def == brush->def->owner );   // 3171
-        entity_s_def *def = (entity_s_def *)brush->owner->def;
-        if ( *(int *)&def->eclass->fixedsize )
-        {
-            Undo_AddEntity_W( (entity_s *)def );
-            char angText[160];                             // KIWI: exact, not %g
-            SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( angText, sizeof( angText ), a1, 0 ) );
-        }
-    }
-    Undo_End();
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
 //  0x494210  SelectNext  (326 bytes)
-//  The `&&` short-circuit is dropped so the owner->def deref is unconditional (the binary
-//  asserts then derefs).
+//  The owner->def deref is unconditional (assert, then deref).
 // ═════════════════════════════════════════════════════════════════════════════
 void SelectNext()
 {
@@ -3878,18 +3494,18 @@ void SelectNext()
     iassert( g_qeglobals.d_select_order[0]->owner );          // 3196
     iassert( g_qeglobals.d_select_order[0]->owner->def );     // 3197
 
-    // d_select_order[0]->owner is the selbrush's entity INSTANCE; ->def (entity_s.def@8)
-    // is the DEF the epair lookups read (assert 3197 guards it non-null).
+    // d_select_order[0]->owner is the selbrush's entity INSTANCE; ->def is the DEF the
+    // epair lookups read (assert 3197 guards it non-null).
     entity_s_def *def = (entity_s_def *)g_qeglobals.d_select_order[0]->owner->def;
     if ( !HasKeyValuePair( def, "target" ) )
         return;
 
-    char *v1 = ValueForKey2( def, "target" );
+    char *target = ValueForKey2( def, "target" );
     selbrush_t *b = active_brushes.next;
     while ( b != &active_brushes )
     {
-        iassert( b->owner );   // 3205 (binary asserts then derefs UNCONDITIONALLY)
-        if ( Entity_HasEpairMatch( (entity_s *)b->owner->def, "targetname", v1 ) )
+        iassert( b->owner );   // 3205 (asserts, then derefs UNCONDITIONALLY)
+        if ( Entity_HasEpairMatch( (entity_s *)b->owner->def, "targetname", target ) )
         {
             Select_Deselect( 1 );
             Select_Brush( b, 1, 1, 0 );
@@ -3901,7 +3517,7 @@ void SelectNext()
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x494360  SelectPrev  (326 bytes)
-//  Mirror of SelectNext; the `&&` short-circuit is likewise dropped.
+//  Mirror of SelectNext (the same unconditional deref).
 // ═════════════════════════════════════════════════════════════════════════════
 void SelectPrev()
 {
@@ -3917,18 +3533,18 @@ void SelectPrev()
     iassert( g_qeglobals.d_select_order[0]->owner );          // 3231
     iassert( g_qeglobals.d_select_order[0]->owner->def );     // 3232
 
-    // d_select_order[0]->owner is the entity INSTANCE; ->def (entity_s.def@8) is the DEF
-    // the epair lookups read (assert 3232 guards it non-null).
+    // d_select_order[0]->owner is the entity INSTANCE; ->def is the DEF the epair lookups
+    // read (assert 3232 guards it non-null).
     entity_s_def *def = (entity_s_def *)g_qeglobals.d_select_order[0]->owner->def;
     if ( !HasKeyValuePair( def, "targetname" ) )
         return;
 
-    char *v1 = ValueForKey2( def, "targetname" );
+    char *targetName = ValueForKey2( def, "targetname" );
     selbrush_t *b = active_brushes.next;
     while ( b != &active_brushes )
     {
-        iassert( b->owner );   // 3240 (binary asserts then derefs UNCONDITIONALLY)
-        if ( Entity_HasEpairMatch( (entity_s *)b->owner->def, "target", v1 ) )
+        iassert( b->owner );   // 3240 (asserts, then derefs UNCONDITIONALLY)
+        if ( Entity_HasEpairMatch( (entity_s *)b->owner->def, "target", targetName ) )
         {
             Select_Deselect( 1 );
             Select_Brush( b, 1, 1, 0 );
@@ -3951,11 +3567,10 @@ void SelectPrev()
 //  seeded when absent.  Finally the second brush is re-selected (the first deselected
 //  unless Prefs→linking_keeps_selection).
 //
-//  atol(targetname+4) skips the "auto" prefix (4 chars) to read the numeric suffix -
-//  transcribed verbatim.  entities list = the entity-DEF sentinel (next@+4);
-//  d_select_order[i]->owner->def are the two entity defs.
+//  atol(targetname+4) skips the "auto" prefix (4 chars) to read the numeric suffix (a
+//  quirk kept).  entities list = the entity-DEF sentinel; d_select_order[i]->owner->def
+//  are the two entity defs.
 // ═════════════════════════════════════════════════════════════════════════════
-extern entity_s entities;   // 0x23F17A0 — entity-DEF doubly-linked list sentinel (map.cpp)
 
 void ConnectEntities_R()
 {
@@ -4005,9 +3620,9 @@ void ConnectEntities_R()
         for ( entity_s *e = entities.next; e != &entities; e = e->next )
         {
             char *tn = ValueForKey2( e, "targetname" );
-            if ( tn && *tn )
+            if ( tn && strlen( tn ) >= 4 )   // KIWI: a 1-3 char name read past its end
             {
-                int n = atol( tn + 4 );   // skip the "auto" prefix (verbatim: atol(tn+4))
+                int n = atol( tn + 4 );   // skip the "auto" prefix
                 if ( n > maxNum )
                     maxNum = n;
             }
@@ -4034,7 +3649,7 @@ void ConnectEntities_R()
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x48EB30  Select_InsertMidpointEntity (IDB sub_48EB30) — the NON-PATCH arm of
+//  0x48EB30  Select_InsertMidpointEntity — the NON-PATCH arm of
 //  Patch→Insert→Add Terrain Row/Column (CMainFrame::OnAddTerrainRowColumn 0x42B080,
 //  cmd 33153 / Shift+Ctrl+A).  With exactly TWO selected fixed-size entities of the
 //  SAME eclass that are already linked target↔targetname, it CLONES the source entity
@@ -4042,19 +3657,16 @@ void ConnectEntities_R()
 //  clone selected.  (That is how a terrain/path row is grown one node at a time when no
 //  patch is selected; the patch arm is Patch_InsertRemoveFromVertPair.)
 //
-//  Reproduced verbatim from the disassembly, including the four reject paths
-//  (count != 2 / world entity / different eclass / not fixedsize) with their exact
-//  status-bar + console strings and MessageBeep(0x40).  `eclass->fixedsize` is read as
-//  a DWORD at eclass+8 in the binary (`cmp dword ptr [eax+8], 0`); the port's eclass_t
-//  declares it bool@8 with 3 pad bytes, so the bool read is equivalent.
+//  Four reject paths (count != 2 / world entity / different eclass / not fixedsize),
+//  each with its status-bar + console string and MessageBeep(0x40).  `eclass->fixedsize`
+//  is read as a bool here (the binary read a DWORD; the same result).
 //
-//  KISAK: when NEITHER link direction matches, the binary leaves both local brush pointers
-//  NULL and then dereferences them (0x48EC5A `mov eax,[v4+8]`) - an original NULL-deref
-//  crash.  The port returns instead.
+//  When NEITHER link direction matches, the binary dereferenced two NULL brush pointers
+//  (an original crash).  The port returns instead.
 // ═════════════════════════════════════════════════════════════════════════════
 extern void Sys_Status( const char *psz );            // win_qe3.cpp 0x499B90
 
-// sub_409F20 — midpoint of two vec3 (also file-local in brush.cpp; the binary inlines it here).
+// 0x409F20 — midpoint of two vec3 (also file-local in brush.cpp).
 static void Select_BoundsMidpoint( const float *a, const float *b, float *out )
 {
     out[0] = ( a[0] + b[0] ) * 0.5f;
@@ -4125,12 +3737,12 @@ void Select_InsertMidpointEntity()
     }
     if ( !src || !dest )
     {
-        // See the KISAK note above - the binary walks off a NULL here.
+        // See the note above - the binary walks off a NULL here.
         Sys_Printf( "The two selected entities are not linked to each other.\n" );
         return;
     }
 
-    ResetSelectMode();                                       // idb sub_48CDF0
+    ResetSelectMode();                                       // 0x48CDF0
 
     const float *origin = ( (entity_s_def *)src->owner->def )->origin;
     float mid[3];
@@ -4169,9 +3781,9 @@ void Select_InsertMidpointEntity()
 //  Requires exactly one selected brush from a non-world entity.  Reads the entity's
 //  "target" key; walks the entity-DEF list for the entity whose "targetname" matches;
 //  moves the camera to the source origin and points it along (dest - src) via
-//  vectoangles (pitch is negated to the camera's convention).  Faithful to the binary.
-//  entities list = entity-DEF sentinel (next@+4); d_select_order[0]->owner->def is the
-//  selected entity's def.  All deps real (ValueForKey2/vectoangles/entities list).
+//  vectoangles (pitch is negated to the camera's convention).
+//  entities list = entity-DEF sentinel; d_select_order[0]->owner->def is the selected
+//  entity's def.
 // ═════════════════════════════════════════════════════════════════════════════
 extern void Radiant_VecToAngles( float *ang, const float *vec );   // engine_stubs.cpp 0x4A5020
 
@@ -4199,7 +3811,7 @@ void SetViewToEntity()
     {
         if ( !strcmp( target, ValueForKey2( e, "targetname" ) ) )
         {
-            camera_s *cam = Ed_Camera();   // U-GLOBALS: was g_pParentWnd->m_pCamWnd
+            camera_s *cam = Ed_Camera();
             cam->origin[0] = src->origin[0];
             cam->origin[1] = src->origin[1];
             cam->origin[2] = src->origin[2];
@@ -4222,16 +3834,12 @@ void SetViewToEntity()
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  HIDE / SHOW workflow (select.cpp lineage).  Each brush node carries a hidden bit
-//  (brushFlags & 4) plus a "hide depth" counter (xx5@0x28) so Show-Last-Hidden can
-//  peel one hide level at a time.  Faithful to the CoD4Radiant binary.
+//  HIDE / SHOW workflow.  Each brush node carries a hidden bit (brushFlags & 4) plus a
+//  "hide depth" counter (xx5) so Show-Last-Hidden can peel one hide level at a time.
 //    Select_Hide           0x493D50 — hide the SELECTED brushes (deepen depth on all)
 //    Select_HideUnselected 0x493DD0 — hide the ACTIVE (unselected) brushes
 //    ShowHidden            0x493E50 — clear all hidden bits + depth
 //    ShowLastHidden        0x493EA0 — peel one hide level; unhide when depth hits 0
-//  The hex-rays pointer-arith on xx5 (`(int)&xx5->prev + 1`, `(int)&v3[-1].xx10 + 3`)
-//  is decompiler noise for the plain integer `xx5 + 1` / `xx5 - 1` (prev@0, so
-//  `(int)&node->prev == (int)node`; the second is `v3 - 1`).
 // ═════════════════════════════════════════════════════════════════════════════
 void Select_Hide()
 {
@@ -4288,8 +3896,8 @@ void Select_HideUnselected()
 // 0x48EF40  Select_HideUnselected2_unused — "hide by classname" (Shift+Alt+Ctrl+H).
 // Same first two depth-deepening passes as Select_HideUnselected, but the third pass only
 // hides the ACTIVE brushes whose owning entity has the SAME eclass as the first selected
-// brush's.  The IDB name carries "_unused" because no MENU item reaches it — the keyboard
-// table does (HideByClassname, cmd 32925).  Verbatim.
+// brush's.  The name carries "_unused" because no MENU item reaches it — the keyboard
+// table does (HideByClassname, cmd 32925).
 void Select_HideUnselected2_unused()
 {
     if ( selected_brushes.next == &selected_brushes )
@@ -4363,8 +3971,7 @@ void ShowLastHidden()
 //  0x48C7B0  LinkSelected — Selection→Link Selected (33211, Ctrl+Shift+K).
 //  Requires exactly two selected brushes from two DIFFERENT non-world entities and
 //  Script_Links their DEFs (script_linkname / script_linkto epairs — core in qe3.cpp).
-//  Faithful to the binary; deselects (unless Prefs→linking_keeps_selection) and
-//  re-selects the second brush.
+//  Deselects (unless Prefs→linking_keeps_selection) and re-selects the second brush.
 // ═════════════════════════════════════════════════════════════════════════════
 extern void Script_Link( entity_s_def *a, entity_s_def *b );   // qe3.cpp 0x48BF10
 
@@ -4410,8 +4017,8 @@ void LinkSelected()
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x47A260  Get_DistanceBetweenEnts — Misc→Get Distance (33178, Alt+F1).
 //  Walks the selected brushes; between each consecutive pair of non-world entities
-//  prints the 2D (XY) distance between their origins.  Faithful to the binary (the
-//  distance uses only origin[0]/origin[1]; origin[2] is not read).
+//  prints the 2D (XY) distance between their origins (only origin[0]/origin[1];
+//  origin[2] is not read).
 // ═════════════════════════════════════════════════════════════════════════════
 void Get_DistanceBetweenEnts()
 {
@@ -4450,24 +4057,18 @@ void Get_DistanceBetweenEnts()
 //    * g_bScaleMode  : scale the selection by 1.1 / 0.9 (dir up/right vs down/left),
 //      masked per axis by g_nScaleHow (X=1/Y=2/Z=4).
 //    * default       : plain translate, axis picked from the active XY view type + the
-//      nudge direction (the binary tail-calls CMainFrame::Nudge 0x4298B0 for this).
-//  dir enum: 0=Left, 1=Up, 2=Right, 3=Down.  Faithful to the binary; the CString/OLE
-//  status machinery is replaced by the established MainFrm_SetStatusText(2, va(...)) sink.
+//      nudge direction (the binary tail-calls CMainFrame::Nudge for this).
+//  dir enum: 0=Left, 1=Up, 2=Right, 3=Down.  Status text goes to
+//  MainFrm_SetStatusText(2, va(...)).
 //
-//  U-GUARD-2 SPLIT: NudgeSelection_Apply(dir, amt) is the shell-agnostic core — the whole
-//  body, since the CMainFrame* argument was ONLY ever used for the final ->Nudge(nDim, amt)
-//  call, and CMainFrame::Nudge (0x4298B0) touches no CMainFrame state at all (it is a pure
-//  globals helper: MoveSelection for curve/terrain point selections, else Select_Move), so
-//  its two-branch body is transcribed here.  U-CMD-2 dispatches the four Alt+arrow nudge
-//  commands (32847..32850, mainfrm.cpp's deferred table) straight to _Apply; the fenced
-//  MFC-signature wrapper below keeps the binary's NudgeSelection(dir, frame, amt) symbol for
-//  the CMainFrame handlers (0x429510..0x429550) and forwards.  select.cpp:4530 was the ONLY
-//  caller of CMainFrame::Nudge, so that method becomes dead code for U-RIP to delete —
-//  keeping ONE live body avoids the duplicate-function drift trap.
+//  NudgeSelection_Apply(dir, amt) is the whole body: the binary's CMainFrame* argument fed
+//  only the final ->Nudge(nDim, amt) call, and CMainFrame::Nudge touches no
+//  CMainFrame state (MoveSelection for curve/terrain point selections, else Select_Move),
+//  so its two-branch body is inlined here.  mainfrm.cpp's command table dispatches the four
+//  Alt+arrow nudges (32847..32850, the binary's 0x429510..0x429550 handlers) straight here.
 // ═════════════════════════════════════════════════════════════════════════════
 extern float g_vRotation[3];        // drag.cpp 0x23F164C
 extern float g_vRotateOrigin[3];    // drag.cpp 0x23F1658
-extern bool  g_bRotateMode;         // drag.cpp 0x23F16D9
 extern bool  g_bScaleMode;          // drag.cpp 0x23F16DA
 
 void NudgeSelection_Apply( int dir, float amt )
@@ -4519,7 +4120,7 @@ void NudgeSelection_Apply( int dir, float amt )
 
     // Plain translate: pick the axis from the view type + nudge direction.
     int nDim;
-    int vt = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS: was frame->m_pActiveXY->m_nViewType
+    int vt = Ed_ActiveXY()->m_nViewType;
     switch ( dir )
     {
     case 0:  nDim = ( vt == 0 );          amt = -amt; break;   // Left
@@ -4528,17 +4129,22 @@ void NudgeSelection_Apply( int dir, float amt )
     default: nDim = ( vt != 2 ) + 1;      amt = -amt; break;   // Down
     }
 
-    // CMainFrame::Nudge (0x4298B0) transcribed verbatim — no CMainFrame state is read.
+    // CMainFrame::Nudge (0x4298B0) — no CMainFrame state is read.
     {
-        extern void MoveSelection( float *origin, float *dir, float *move );  // drag.cpp
-        extern void Select_Move( const float *delta, char bSnap );            // select.cpp 0x48E9C0
+        extern void MoveSelection( float *origin, float *dir, float *move, float *total );  // drag.cpp
+        extern void Patch_RedispersePreDrag();                                // pmesh.cpp 0x43D7A0
         float a[3] = { 0.0f, 0.0f, 0.0f };
         a[nDim] = amt;
         if ( ( g_qeglobals.d_select_mode == sel_curvepoint
             || g_qeglobals.d_select_mode == sel_terrainpoint )
           && g_qeglobals.d_num_move_points > 0 )
         {
-            MoveSelection( 0, 0, a );
+            // The binary passes the nudge as the total too.  KIWI: re-snapshot first, so a
+            // texture-lock-off nudge follows from the S/T as they are now, not from the last
+            // drag's start.
+            if ( g_qeglobals.d_select_mode == sel_curvepoint )
+                Patch_RedispersePreDrag();
+            MoveSelection( 0, 0, a, a );
             g_nUpdateBits = -1;
         }
         else
@@ -4553,9 +4159,7 @@ void NudgeSelection_Apply( int dir, float amt )
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x485B70  Select_AllByKeyValue — the "same target(name)" command core (36121/36123).
 //  Reads the FIRST selected entity that has key `key`, then writes that key's value onto
-//  EVERY selected entity's DEF (so a group shares one target / targetname).  Faithful to
-//  the binary (which uses the CString status buffer only as a scratch value holder — the
-//  net effect is this value-propagate).  Deps HasKeyValuePair/ValueForKey2/SetKeyValue.
+//  EVERY selected entity's DEF (so a group shares one target / targetname).
 // ═════════════════════════════════════════════════════════════════════════════
 void Select_AllByKeyValue( const char *key )
 {
@@ -4578,19 +4182,13 @@ void Select_AllByKeyValue( const char *key )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  VERTEX-EDIT MODE — the point/edge handle subsystem (select.cpp lineage).
+//  VERTEX-EDIT MODE — the point/edge handle subsystem.
 //  Builds the global d_points/d_edges handle lists from the selected brushes'
 //  faces, picks a vertex by ray for dragging, and feeds the drag path
 //  (Drag_Setup → SelectVertexByRay → MoveSelection → Brush_MoveVertex).
-//  Ported from the CoD4Radiant IDB (port 13343): FindPoint 0x494a10, FindEdge
-//  0x494ac0, MakeFace 0x494b30, SetupVertexSelection 0x494bc0,
-//  SelectVertexByRay 0x494fd0, AddPlanept 0x477250, SelectFaceEdge 0x494c30,
-//  Select_Edge 0x494dc0.
 // ═════════════════════════════════════════════════════════════════════════════
 
 extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp 0x471260
-extern int        g_windingAlloc;                                    // winding.cpp dword_24CE4FC
-extern float      grid_sizes[];                                      // engine_stubs/qe3 (0x6dde5c)
 
 // MAX_POINTS_ON_WINDING is #define'd locally in winding.cpp (1024); mirror it here
 // for the MakeFace point-index scratch (a single face winding never exceeds it).
@@ -4599,8 +4197,8 @@ extern float      grid_sizes[];                                      // engine_s
 #endif
 
 // ─── FindPoint (0x494a10) ────────────────────────────────────────────────────
-// The dedup epsilon is compared against a DOUBLE 0.1 (dbl_6F43D0 =
-// 0x3FB999999999999A), NOT float 0.1f (== 0.100000001490116, a wider window).
+// The dedup epsilon is compared against a DOUBLE 0.1, NOT float 0.1f
+// (== 0.100000001490116, a wider window).
 // Return the index of `pt` in g_qeglobals.d_points[], appending it (capped at
 // 2047) if not already present (0.1 tolerance per-axis).
 static int FindPoint( const float *pt )
@@ -4609,8 +4207,7 @@ static int FindPoint( const float *pt )
     {
         int axis = 0;
         for ( ; axis < 3; ++axis )
-            // IDA 0x494a4c fcomp vs dbl_6F43D0 = DOUBLE 0.1 (0x3FB999999999999A), NOT float 0.1f
-            // (=0.100000001490116). Keep the (float) magnitude round (binary fstp dword), compare double.
+            // the magnitude rounds to float, then compares against DOUBLE 0.1 (see above).
             if ( (float)fabs( pt[axis] - g_qeglobals.d_points[i][axis] ) > 0.1 )
                 break;
         if ( axis == 3 )
@@ -4627,7 +4224,7 @@ static int FindPoint( const float *pt )
 }
 
 // ─── FindEdge (0x494ac0) ─────────────────────────────────────────────────────
-// pedge_t stride 16, 511 cap.
+// 511 cap.
 // Register the edge (p1,p2) of face `f`. If the REVERSE edge (p1==.p2, p2==.p1 —
 // the binary tests d_edges[i].p1==p2 && .p2==p1) already exists, record `f` as its
 // second face and return that index; else append a new edge (capped at 511).
@@ -4655,8 +4252,6 @@ static int FindEdge( face_t *f, int p1, int p2 )
 // Rebuild face `f`'s winding (Brush_MakeFaceWinding), then register each corner
 // point (FindPoint) and each edge (FindEdge) into the global handle lists. The
 // temporary winding is freed afterward (the binary's --g_windingAlloc; free()).
-// IDA __usercall (a1@<eax>=def, a2=face); the call Brush_MakeFaceWinding(a2,a1)
-// maps to (face,def) per the disasm of the prologue (edi=face, esi=def).
 static void MakeFace( brush_t *def, face_t *f )
 {
     winding_t *w = Brush_MakeFaceWinding( f, def );
@@ -4685,9 +4280,9 @@ void SetupVertexSelection()
     g_qeglobals.d_numedges  = 0;
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
-        // KISAK: the binary loops b->faceCount (the INSTANCE count at selbrush_t+0x18, a
-        // cached copy of def->faceCount set by Brush_BuildFaceVis on the 3D draw), which is
-        // 0 right after a load or headless.  The DEF count is authoritative, so iterate
+        // the binary loops b->faceCount (the INSTANCE count, a cached copy of
+        // def->faceCount set by Brush_MakeFaceVisuals on the 3D draw), which is 0 right
+        // after a load or headless.  The DEF count is authoritative, so iterate
         // that - identical when valid, and also correct before the first camera draw.
         if ( !b->def )
             continue;
@@ -4699,8 +4294,8 @@ void SetupVertexSelection()
 // ─── SelectVertexByRay (0x494fd0) ────────────────────────────────────────────
 // Pick the d_points[] handle closest to the ray (start,dir) within 8 units and
 // push it as the single drag move-point. The dragged vertex's drawVert_t* is the
-// d_points[] slot reinterpreted (drawVert_t.xyz is at offset 0), exactly as the
-// binary does (12*idx + &d_points). MoveSelection reads d_move_points[0]->xyz.
+// d_points[] slot reinterpreted (drawVert_t.xyz is at offset 0), as in the binary.
+// MoveSelection reads d_move_points[0]->xyz.
 void SelectVertexByRay( float *origin, float *dir )
 {
     const float *start = (const float *)(intptr_t)origin;
@@ -4749,17 +4344,15 @@ void SelectVertexByRay( float *origin, float *dir )
 // Called by Drag_Setup when a non-Alt press starts in sel_curvepoint mode.
 //   * SHIFT held (buttons & MK_SHIFT/4): ray-pick the nearest control-point handle in
 //     g_qeglobals.d_points[] (filled by Patch_EditPatch) within (28 / g_zoomLevel)
-//     units, then hand it to Patch_ClickControlPoint (PMESH_11) which queues the
+//     units, then hand it to Patch_ClickControlPoint which queues the
 //     matching control point(s) as drag move-points.  Drag_Setup then arms drag_ok
 //     and MoveSelection → Patch_UpdateSelected bends the patch.
 //   * SHIFT not held (or the ray missed every handle): fall through to the MISS path —
 //     switch to sel_area so the press rubber-bands a control-point selection box
-//     instead of dragging (the binary's LABEL_10; the mode switch is faithful, the
-//     box-point rect-select itself is deferred).
-// `origin`/`dir` are the pick-ray vectors (passed as int per the IDB __usercall ebx/edi
-// shape); `buttons` is the mouse-button/modifier mask.
+//     instead of dragging (the mode switch is kept; the box-point rect-select itself is
+//     deferred).
+// `origin`/`dir` are the pick-ray vectors; `buttons` is the mouse-button/modifier mask.
 extern float g_zoomLevel;                              // 0x25D5A90 (mainfrm.cpp)
-extern bool  g_bRotateMode;                            // 0x23F16D9 (drag.cpp)
 extern bool  g_bScaleMode;                             // 0x23F16DA (drag.cpp)
 extern "C" void Patch_ClickControlPoint_C( const float *cp, char bMultiAppend, char bColRowSelect ); // pmesh.cpp
 
@@ -4797,7 +4390,7 @@ void SelectCurvePointByRay( float *origin, float *dir, unsigned int buttons )
 
         if ( bestIdx != -1 )
         {
-            // hand the clicked handle to PMESH_11: append=(buttons&8), colRow=(buttons&4).
+            // hand the clicked handle to Patch_ClickControlPoint: append=(buttons&8), colRow=(buttons&4).
             Patch_ClickControlPoint_C( g_qeglobals.d_points[bestIdx],
                                        (char)( ( buttons & 8 ) != 0 ),
                                        (char)( ( buttons & 4 ) != 0 ) );
@@ -4812,8 +4405,6 @@ void SelectCurvePointByRay( float *origin, float *dir, unsigned int buttons )
         g_qeglobals.d_select_mode = sel_area;
         if ( prev == sel_cycle_edge_direction_quad )
             CMainFrame_UpdatePatchToolbarButtons();
-        else if ( prev == sel_addpoint )
-            sub_43ECB0();
     }
 }
 
@@ -4828,7 +4419,7 @@ static int AddPlanept( float *pt )
     if ( g_qeglobals.d_num_move_points == 4096 )
         return 0;
     for ( int i = 0; i < g_qeglobals.d_numterrapoints; ++i )
-        if ( (float *)g_qeglobals.d_terrapoints[i] == pt )
+        if ( g_qeglobals.d_terrapoints[i] == pt )
             return 0;
     for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
         if ( (float *)g_qeglobals.d_move_points[i] == pt )
@@ -4838,26 +4429,25 @@ static int AddPlanept( float *pt )
 }
 
 // ─── ClipLineToFace (0x477150) ───────────────────────────────────────────────
-// Clip the segment (a2 = far point, a3 = near point) to the FRONT side of face f's
-// plane. Returns 0 when both endpoints are in front (segment fully outside the
-// half-space), 1 otherwise (fully behind/inside, or after clipping the front endpoint
-// to the plane). Ported verbatim from IDA 0x477150 (plane.dist read as float — the
-// IDB `*(double*)&dist` is the float-load-then-double-compare hex-rays artifact).
-static char ClipLineToFace( face_t *f, float *a2, float *a3 )
+// Clip the segment (farPt, nearPt) to the FRONT side of face f's plane. Returns 0 when
+// both endpoints are in front (segment fully outside the half-space), 1 otherwise (fully
+// behind/inside, or after clipping the front endpoint to the plane). plane.dist is read
+// as float.
+static char ClipLineToFace( face_t *f, float *farPt, float *nearPt )
 {
-    float v9  = f->plane.normal[1] * a3[1] + a3[0] * f->plane.normal[0] + f->plane.normal[2] * a3[2];
-    float v7  = v9 - f->plane.dist;
-    float v10 = f->plane.normal[1] * a2[1] + a2[0] * f->plane.normal[0] + f->plane.normal[2] * a2[2];
-    float v11 = v10 - f->plane.dist;
-    if ( v7 >= 0.0f && v11 >= 0.0f )
+    float nearDot  = f->plane.normal[1] * nearPt[1] + nearPt[0] * f->plane.normal[0] + f->plane.normal[2] * nearPt[2];
+    float nearDist = nearDot - f->plane.dist;
+    float farDot   = f->plane.normal[1] * farPt[1] + farPt[0] * f->plane.normal[0] + f->plane.normal[2] * farPt[2];
+    float farDist  = farDot - f->plane.dist;
+    if ( nearDist >= 0.0f && farDist >= 0.0f )
         return 0;
-    if ( v7 <= 0.0f && v11 <= 0.0f )
+    if ( nearDist <= 0.0f && farDist <= 0.0f )
         return 1;
-    float  v8 = v7 / ( v7 - v11 );
-    float *v6 = ( v7 <= 0.0f ) ? a2 : a3;
-    v6[0] = ( a2[0] - a3[0] ) * v8 + a3[0];
-    v6[1] = ( a2[1] - a3[1] ) * v8 + a3[1];
-    v6[2] = v8 * ( a2[2] - a3[2] ) + a3[2];
+    float  frac = nearDist / ( nearDist - farDist );
+    float *clip = ( nearDist <= 0.0f ) ? farPt : nearPt;
+    clip[0] = ( farPt[0] - nearPt[0] ) * frac + nearPt[0];
+    clip[1] = ( farPt[1] - nearPt[1] ) * frac + nearPt[1];
+    clip[2] = frac * ( farPt[2] - nearPt[2] ) + nearPt[2];
     return 1;
 }
 
@@ -4865,15 +4455,13 @@ static char ClipLineToFace( face_t *f, float *a2, float *a3 )
 // Add the face's 3 planepts to the move-point set, then (recursively) every face in
 // the OTHER selected brushes whose planepts are coplanar with this face's plane — so
 // dragging a shared wall drags all the brushes that share it.
-// KISAK SUBSET of 0x477330: the SHEAR branch (shear set, non-terrain: rebuild each
-// adjacent face's winding, find the edge coplanar with the dragged plane, AddPlanept its
+// The SHEAR branch (shear set, non-terrain: rebuild each adjacent face's winding, find the edge coplanar with the dragged plane, AddPlanept its
 // endpoints + insert rotated planepts) is deferred - it is the Ctrl+LMB face-SHEAR
 // gesture, not the plain side-stretch.  TERRAIN handling lives in Brush_SideSelect.
-void Brush_SelectFaceForDragging( brush_t *a1, face_t *a2, int shear )
+void Brush_SelectFaceForDragging( brush_t *def, face_t *dragFace, int shear )
 {
-    if ( *(int *)&a1->owner->eclass->fixedsize )   // fixed-size entity → no side-drag
+    if ( *(int *)&def->owner->eclass->fixedsize )   // fixed-size entity → no side-drag
         return;
-    face_t *dragFace = (face_t *)(intptr_t)a2;
 
     int added = 0;
     added += AddPlanept( dragFace->planepts[0] );
@@ -4884,23 +4472,23 @@ void Brush_SelectFaceForDragging( brush_t *a1, face_t *a2, int shear )
 
     for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
     {
-        brush_t *def = i->def;
-        if ( def == a1 )
+        brush_t *other = i->def;
+        if ( other == def )
             continue;
-        for ( unsigned fi = 0; fi < (unsigned)def->faceCount; ++fi )
+        for ( unsigned fi = 0; fi < (unsigned)other->faceCount; ++fi )
         {
-            face_t *cf = &def->faces[fi];
+            face_t *cf = &other->faces[fi];
             int k = 0;
             do {
                 float d = cf->planepts[k][1] * dragFace->plane.normal[1]
                         + cf->planepts[k][0] * dragFace->plane.normal[0]
                         + cf->planepts[k][2] * dragFace->plane.normal[2];
-                if ( fabs( d - dragFace->plane.dist ) > 0.1 )   // IDB tolerance v6 = 0.1
+                if ( fabs( d - dragFace->plane.dist ) > 0.1 )   // tolerance 0.1
                     break;
                 ++k;
             } while ( k < 3 );
             if ( k == 3 ) {
-                Brush_SelectFaceForDragging( def, cf, shear );
+                Brush_SelectFaceForDragging( other, cf, shear );
                 break;
             }
         }
@@ -4916,86 +4504,83 @@ void Brush_SelectFaceForDragging( brush_t *a1, face_t *a2, int shear )
 // face index 2, collect every side face's planept vec3's as draggable "terrain"
 // points (then RETURN), or (b) hand the face to Brush_SelectFaceForDragging.
 // The TERRAIN branch:
-//   * a2->numberId==2 (IDB total_size_0x58) AND the exiting face index >= 2 (byte
-//     offset >= 0x1D0 = 2*232) triggers the collector.
+//   * def->numberId==2 AND the exiting face index >= 2 triggers the collector.
 //   * For each face >= 2 of a non-fixedsize brush, the 3 planept vec3's
-//     (face_t.planepts[0..2], cast to terrainVert_t*) are appended to
+//     (face_t.planepts[0..2]) are appended to
 //     g_qeglobals.d_terrapoints[] (cap 4096), de-duped against the existing
 //     terrapoints AND d_move_points (raw pointer compare).
-//   * d_select_translate_unk = a2->faces[0].plane.normal (the dragged plane normal;
-//     IDB reads faces base + 0xC0 = face[0].plane.normal — the hex-rays
-//     brush_faces[8].normal is a plane_t-stride artifact, disasm is +0xC0).
+//   * d_select_translate_unk = def->faces[0].plane.normal (the dragged plane normal).
 //   The collector RETURNS once it fires (does NOT fall through to
 //   Brush_SelectFaceForDragging).  MoveSelection's terrain-drag branch consumes
 //   d_terrapoints/d_numterrapoints/d_select_translate_unk.
-void Brush_SideSelect( float *trace_start, brush_t *a2, float *trace_dir, int shear )
+void Brush_SideSelect( float *trace_start, brush_t *def, float *trace_dir, int shear )
 {
-    int facecount = a2->faceCount;
-    for ( int v28 = 0; v28 < facecount; ++v28 )
+    int facecount = def->faceCount;
+    for ( int fi = 0; fi < facecount; ++fi )
     {
-        float v25[3] = { trace_start[0], trace_start[1], trace_start[2] };           // near point
-        float v24[3] = { trace_dir[0] * 262144.0f + trace_start[0],                  // far point
-                         trace_dir[1] * 262144.0f + trace_start[1],
-                         262144.0f * trace_dir[2] + trace_start[2] };
-        for ( int v7 = 0; v7 < a2->faceCount; ++v7 )                                 // clip to the brush interior
-            if ( v7 != v28 )
-                ClipLineToFace( &a2->faces[v7], v24, v25 );
-        int v9 = 0;                                                                  // did the near point move?
-        for ( ; v9 < 3; ++v9 )
+        float nearPt[3] = { trace_start[0], trace_start[1], trace_start[2] };
+        float farPt[3]  = { trace_dir[0] * 262144.0f + trace_start[0],
+                            trace_dir[1] * 262144.0f + trace_start[1],
+                            262144.0f * trace_dir[2] + trace_start[2] };
+        for ( int fj = 0; fj < def->faceCount; ++fj )                               // clip to the brush interior
+            if ( fj != fi )
+                ClipLineToFace( &def->faces[fj], farPt, nearPt );
+        int k = 0;                                                                  // did the near point move?
+        for ( ; k < 3; ++k )
         {
-            float d = v25[v9] - trace_start[v9];
+            float d = nearPt[k] - trace_start[k];
             if ( d * d > 0.00000100000011116208 )
                 break;
         }
-        if ( v9 >= 3 )
-            continue;                                                                // ray never reached this face
-        if ( !ClipLineToFace( &a2->faces[v28], v24, v25 ) )                          // exits through this face → grab it
+        if ( k >= 3 )
+            continue;                                                               // ray never reached this face
+        if ( !ClipLineToFace( &def->faces[fi], farPt, nearPt ) )                    // exits through this face → grab it
         {
             // numberId==2 (terrain-style) brush AND the exiting face is index >= 2:
             // collect every side face's planepts as draggable terrain points, then bail.
-            if ( a2->numberId == 2 && (unsigned)v28 >= 2 )                           // v27(byte off) >= 0x1D0 ⇔ v28 >= 2
+            if ( def->numberId == 2 && (unsigned)fi >= 2 )
             {
-                if ( (unsigned)a2->faceCount > 2u )                                  // IDB: jbe (facecount<=2) skips collection
+                if ( (unsigned)def->faceCount > 2u )                                // facecount<=2 skips collection
                 {
                     int d_numterrapoints = g_qeglobals.d_numterrapoints;
                     int d_num_move_points = g_qeglobals.d_num_move_points;
-                    for ( int v29 = 2; v29 < a2->faceCount; ++v29 )                  // faces 2..N
+                    for ( int fk = 2; fk < def->faceCount; ++fk )                   // faces 2..N
                     {
                         // candidate terrain verts = the face's 3 planept vec3's.
-                        terrainVert_t *v18 = (terrainVert_t *)&a2->faces[v29];       // == &faces[v29].planepts[0]
-                        if ( !*(int *)&a2->owner->eclass->fixedsize )                // skip fixed-size (bbox) brushes
+                        float *tv = def->faces[fk].planepts[0];
+                        if ( !*(int *)&def->owner->eclass->fixedsize )              // skip fixed-size (bbox) brushes
                         {
-                            for ( int v19 = 3; v19; --v19 )
+                            for ( int n = 3; n; --n )
                             {
                                 if ( d_numterrapoints != 4096 )
                                 {
                                     bool dup = false;
-                                    for ( int v20 = 0; v20 < d_numterrapoints; ++v20 )
-                                        if ( g_qeglobals.d_terrapoints[v20] == v18 ) { dup = true; break; }
+                                    for ( int t = 0; t < d_numterrapoints; ++t )
+                                        if ( g_qeglobals.d_terrapoints[t] == tv ) { dup = true; break; }
                                     if ( !dup )
                                     {
-                                        for ( int v21 = 0; v21 < d_num_move_points; ++v21 )
-                                            if ( (terrainVert_t *)g_qeglobals.d_move_points[v21] == v18 ) { dup = true; break; }
+                                        for ( int m = 0; m < d_num_move_points; ++m )
+                                            if ( (float *)g_qeglobals.d_move_points[m] == tv ) { dup = true; break; }
                                     }
                                     if ( !dup )
                                     {
-                                        g_qeglobals.d_terrapoints[d_numterrapoints] = v18;
+                                        g_qeglobals.d_terrapoints[d_numterrapoints] = tv;
                                         d_num_move_points = g_qeglobals.d_num_move_points;
                                         d_numterrapoints = ++g_qeglobals.d_numterrapoints;
                                     }
                                 }
-                                v18 = (terrainVert_t *)((char *)v18 + 12);           // next planept (vec3)
+                                tv += 3;                                            // next planept (vec3)
                             }
                         }
                     }
                 }
-                // d_select_translate_unk = face[0]'s plane normal (faces base + 0xC0).
-                g_qeglobals.d_select_translate_unk[0] = a2->faces[0].plane.normal[0];
-                g_qeglobals.d_select_translate_unk[1] = a2->faces[0].plane.normal[1];
-                g_qeglobals.d_select_translate_unk[2] = a2->faces[0].plane.normal[2];
+                // d_select_translate_unk = face[0]'s plane normal.
+                g_qeglobals.d_select_translate_unk[0] = def->faces[0].plane.normal[0];
+                g_qeglobals.d_select_translate_unk[1] = def->faces[0].plane.normal[1];
+                g_qeglobals.d_select_translate_unk[2] = def->faces[0].plane.normal[2];
                 return;
             }
-            Brush_SelectFaceForDragging( a2, &a2->faces[v28], shear );
+            Brush_SelectFaceForDragging( def, &def->faces[fi], shear );
         }
     }
 }
@@ -5008,10 +4593,6 @@ void Brush_SideSelect( float *trace_start, brush_t *a2, float *trace_dir, int sh
 // via AddPlanept. The face plane is preserved (the 3 points are co-planar winding
 // verts), so when MoveSelection later translates those planepts + rebuilds the
 // windings, the brush reshapes along the dragged edge.
-//
-// IDA __usercall: a1@<eax>=def, a2@<ebx>=face_t* (also the planepts output buffer,
-// since face_t.planepts is at offset 0), a3=p1, a4=p2. The call site is
-// Brush_MakeFaceWinding(a2,a1) → (face,def) per the disasm (edi=face, esi=def).
 static void SelectFaceEdge( brush_t *def, face_t *f, int p1, int p2 )
 {
     winding_t *w = Brush_MakeFaceWinding( f, def );
@@ -5019,7 +4600,7 @@ static void SelectFaceEdge( brush_t *def, face_t *f, int p1, int p2 )
         return;
 
     int n = w->numpoints;
-    // v22[129] in the binary; a single brush-face winding never approaches that.
+    // 129 slots, as in the binary; a single brush-face winding never approaches that.
     int idx[129];
     if ( n > 129 )
         n = 129;
@@ -5081,9 +4662,7 @@ static void SelectFaceEdge( brush_t *def, face_t *f, int p1, int p2 )
 // then for every selected brush register the two faces sharing that edge via
 // SelectFaceEdge — once for each direction (f1: p1→p2, f2: p2→p1). The result is
 // the edge's two endpoints queued as drag move-points (in each face's planepts).
-//
-// IDA __usercall: a1@<eax>=dir, a2@<ecx>=origin. Drag_Setup calls
-// Select_Edge(trace_dir, trace_start) → (dir, origin).
+// Drag_Setup calls Select_Edge(trace_dir, trace_start).
 void Select_Edge( float *dir, float *origin )
 {
     const float *dirv  = (const float *)(intptr_t)dir;
@@ -5126,7 +4705,7 @@ void Select_Edge( float *dir, float *origin )
     g_qeglobals.d_num_move_points = 0;
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
-        // KISAK: the binary calls SelectFaceEdge unconditionally for BOTH faces with no
+        // the binary calls SelectFaceEdge unconditionally for BOTH faces with no
         // NULL guard, so it AVs in Brush_MakeFaceWinding(NULL) when an edge has only one
         // face registered - which FindEdge leaves whenever the reverse direction never
         // registered (a face whose winding failed to build).  Such an edge's midpoint IS
@@ -5140,33 +4719,22 @@ void Select_Edge( float *dir, float *origin )
 
 
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  RELOCATED HOME — this function's embedded Assert() calls name THIS file as
-//  their source (see the brush.cpp relocation protocol / line-uniqueness test).
-// ═════════════════════════════════════════════════════════════════════════════
-// deps of the moved Select_Ungroup (previously declared in entity.cpp):
-extern void        Entity_UnlinkBrush( brush_t *b );                              // entity.cpp
+// deps of Select_Ungroup:
 extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );   // entity.cpp
-extern void        sub_476330( selbrush_t *b );   // Brush_Deselect_Helper 0x476330
-extern void        sub_476470( selbrush_t *b );   // Brush_Select_Helper  0x476470
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x490780  Select_Ungroup  (select.cpp:1719 asserts)
 // Ungroups selected non-worldspawn brush entities by relinking brushes to worldspawn.
-// 0x490780: after BUG fix: added the gated
-// SetupVertexSelection() (sel_vertex/sel_edge) between Brush_BuildWindings and MarkMapModified
-// (IDA 0x490972), missing before -> dangling vtx/edge handles after ungroup. ++version brush_t@0x4E
-// 16-bit (correct). 6 select.cpp asserts KEEP_VERBOSE (cross-file).
+// The rebuild includes the vertex/edge handles (sel_vertex/sel_edge), else they dangle
+// after ungroup.
 // ─────────────────────────────────────────────────────────────────────────────
 LRESULT Select_Ungroup()
 {
-    selbrush_t *v0 = selected_brushes.next;
-    if ( v0 == &selected_brushes )
+    if ( selected_brushes.next == &selected_brushes )
         return (LRESULT)Sys_Printf( "No grouped entities selected.\n" );
 
     int numselectedgroups = 0;
 
     // We need to iterate selected_brushes but it changes as we relink; snapshot owner list.
-    // IDA iterates by walking the sentinel forward and tracking the entity being processed.
     selbrush_t *sb  = selected_brushes.next;
     entity_s   *last = nullptr;
 
@@ -5174,8 +4742,8 @@ LRESULT Select_Ungroup()
     {
         iassert( sb->owner );   // select.cpp:1719
         iassert( sb->def );   // select.cpp:1720
-        // IDA (0x4907FC) asserts the instance's owner and its def's owner agree (the def's
-        // owner is the entity DEF, reached via the instance's def). Was dropped.
+        // the instance's owner and its def's owner agree (the def's owner is the entity
+        // DEF, reached via the instance's def).
         iassert( sb->owner->def == sb->def->owner );   // select.cpp:1721
 
         entity_s *e      = sb->owner;
@@ -5188,12 +4756,11 @@ LRESULT Select_Ungroup()
             while ( b != &e->brushes )
             {
                 selbrush_t *biNext = b->ownerNext;
-                // IDA (0x490860) asserts the instance's def->owner == instance->owner->def. Dropped.
                 iassert( b->def->owner == b->owner->def );   // select.cpp:1730
                 bool wasSelected = ( ( b->brushFlags & 0x80 ) != 0 );
 
                 if ( wasSelected )
-                    sub_476330( b );
+                    Brush_Deselect_Helper( b );
 
                 // Unlink brush def from old entity
                 brush_t *bDef = b->def;
@@ -5206,17 +4773,12 @@ LRESULT Select_Ungroup()
                 // Relink brush instance into worldspawn's instance list
                 Entity_LinkBrush_0_extern( world_entity, b );
 
-                Brush_BuildWindings( bDef, 1 );
-                if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                    SetupVertexSelection();   // IDA 0x490972 -- rebuild d_points/d_edges; missing -> dangling vtx handles after ungroup
-                MarkMapModified();
-                ++bDef->version;
+                Brush_RebuildAfterEdit( bDef );   // vertex handles too: else they dangle after ungroup
 
                 if ( wasSelected )
-                    sub_476470( b );
+                    Brush_Select_Helper( b );
 
-                // IDA (0x49099A) re-asserts def->owner == owner->def after the relink (now both
-                // point at the worldspawn DEF). Dropped by the prior port.
+                // re-assert after the relink (now both point at the worldspawn DEF).
                 iassert( b->def->owner == b->owner->def );   // select.cpp:1746
 
                 b = biNext;
@@ -5224,7 +4786,7 @@ LRESULT Select_Ungroup()
 
             iassert( e->brushes.ownerNext == &e->brushes );   // select.cpp:1748
 
-            Entity_Free( (char *)e );
+            Entity_Free( e );
             ++numselectedgroups;
         }
 

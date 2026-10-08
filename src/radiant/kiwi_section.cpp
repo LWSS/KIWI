@@ -11,6 +11,7 @@
 #include "kiwi_command.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_ux.h"
 #include "kiwi_units.h"
@@ -18,12 +19,6 @@
 #include "radiant_frame.h"  // Radiant_RegisterCommand
 
 #include <math.h>
-
-// Ported/sibling entry points.
-extern camera_s *Ed_Camera();                          // camwnd.cpp:161
-extern int       g_nUpdateBits;                        // engine_stubs.cpp:773
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
-extern void      Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp:145
 
 namespace
 {
@@ -101,7 +96,7 @@ namespace
         float prev[3], pt[3];
         for ( int i = 0; i <= segs; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % segs ) ) / (float)segs;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % segs ) ) / (float)segs;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
             for ( int k = 0; k < 3; ++k )
@@ -114,8 +109,8 @@ namespace
             return;
         for ( int i = 0; i < segs / 2; ++i )
         {
-            const float th0 = ( 6.283185307179586f * (float)i ) / (float)segs;
-            const float th1 = th0 + 3.14159265358979f;
+            const float th0 = ( (float)( 2.0 * KIWI_PI ) * (float)i ) / (float)segs;
+            const float th1 = th0 + (float)KIWI_PI;
             float a[3], b[3];
             for ( int k = 0; k < 3; ++k )
             {
@@ -471,7 +466,7 @@ void KiwiSection_DrawWorld()
         float prev[3];
         for ( int i = 0; i <= KSEC_RING_SEGS; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % KSEC_RING_SEGS ) )
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % KSEC_RING_SEGS ) )
                            / (float)KSEC_RING_SEGS;
             float p[3];
             for ( int k = 0; k < 3; ++k )

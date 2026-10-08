@@ -18,14 +18,42 @@
 //       the camera viewport's own mouse entry points (KiwiVP_Camera*, what imgui_shell
 //       calls): btn 0 LMB, 1 RMB, 2 MMB; mods = shift ctrl alt.  MMB drag = orbit,
 //       Shift+MMB / RMB drag = pan, Alt+RMB = look, LMB = select / marquee / tools.
+//   xy_drag x0 y0 x1 y1 [steps] [shift] [ctrl]
+//       an LMB drag in the 2D view (XYWnd_OnLButtonDown / OnMouseMove / OnLButtonUp ->
+//       Drag_Begin / Drag_MouseMoved / MoveSelection / Drag_MouseUp) on a top view at
+//       scale 1 centred on the world origin; x/y are world units.
+//   patch_edit 0|1                         (1: the classic curve-point mode, Patch_EditPatch,
+//       on the selected patches - the one xy_drag's curve-point drag needs; 0: back to brushes)
 //   pick x y [object|face|edge|vertex|all] project x y z
 //   screenshot camera|xy <file.png>
 //   kstart <id>                            kmove x y      kpress x y [shift]
 //   khandle x y                            khandle_release
 //   kkey <key> [shift] [ctrl] [alt]        ktype <text>   kopt <row> <value>
 //   kstate                                 kconfirm
-//   pref noclamp|grid [value]              profile_get <section> <key>
-//   profile_set <section> <key> <int>
+//   uv_affine a b c d                      (the UV editor's Rot / Flip path on the selection)
+//   face_align e b f e b f                 (Drag_FaceAlign: dst face takes src face's texture)
+//   merge_coplanar e b                     (KiwiValid_MergeCoplanarFaces on one brush)
+//   tex_pick e b                           (camera MMB pick: face 0's material, a patch's ST grid)
+//   tex_apply_brush e b                    (camera Ctrl+MMB whole-brush apply, stored patch ST)
+//   pref noclamp|grid|lightmaplock|texlock|units|gridin [value]   (pref units reload)
+//   profile_get <section> <key>            profile_set <section> <key> <int>
+//   profile_setstr <section> <key> <string>
+//   raw_write <qpath> <text>               (KiwiFS_WriteRawAtomic into raw/)
+//   iwi_write <source image> <qpath>       (KiwiIwi_WriteFromFile + KiwiIwi_VerifyOnDisk)
+//   con_state                              (construction objects, undo depth, selection)
+//   con_label <index> <name> <group>       can <command id>   (KiwiCmd_CanExecute)
+//   con_select <index> [index ...]         face_add e b f     (adds to the face selection)
+//   cap_commit <type 0..3>                 undo_depth         (the unified journal's depth)
+//   simple_patch <wSel> <hSel>             (Curve > Simple Patch Mesh on the selected brush)
+//   sg_flags <key>                         (the Script group panel's flag rows)
+//   layer_hide <name> <0|1>                (Layers panel Hide/Show + the script_layer filters)
+//   find_replace <find> <replace> <flags>  (FindReplaceTextures + the map dirty flag)
+//   sg_select <entity> [entity ...]        sg_dump   (every saved entity's epairs + selection)
+//   sg_op <op> [a] [b]                     (the Script group tool's actions)
+//   snapshot <path>                        (Map_WriteSnapshot - the live check's write)
+//   xy_hover x y                           clip_state   (classic clipper points)
+//   cam_mode                               (camera draw mode + the Render Method menu id)
+//   filter <name> <0|1>                    filtered e b   (Filters checklist / FilterBrush)
 
 #include "stdafx.h"
 #include "qe3.h"
@@ -33,6 +61,9 @@
 #include "prefs.h"                 // g_PrefsDlg->m_bNoClamp
 #include "radiant_rtt.h"           // RTT_GetTexture: viewport screenshots
 #include "radiant_registry.h"      // profile_get / profile_set (the isolated test profile)
+#include "kiwi_units.h"            // pref units / gridin
+#include "kiwi_matwriter.h"        // raw_write (KiwiFS_WriteRawAtomic)
+#include "kiwi_iwi.h"              // iwi_write
 #include <d3dx9.h>                 // D3DXSaveSurfaceToFileA
 #include <imgui/imgui.h>           // io.KeyShift / KeyCtrl / KeyAlt: the viewport's modifiers
 
@@ -40,10 +71,15 @@
 #include "kiwi_test.h"
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
+#include "kiwi_conselect.h"
+#include "kiwi_construct.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
+#include "kiwi_uveditor.h"    // KiwiUvEd_TestAffine
 #include "kiwi_validity.h"
 #include "kiwi_viewport.h"
+#include "xywnd.h"                 // Ed_ActiveXY: xy_drag's view state
 
 #include <cctype>
 #include <cerrno>
@@ -58,22 +94,20 @@
 #include <vector>
 
 // Editor entry points (each checked against its definition).
-extern entity_s entities;                                                    // entity.cpp:325
-extern selbrush_t active_brushes;                                            // engine_stubs.cpp:787 (0x23F189C)
-extern char    *ValueForKey2( const entity_s *e, const char *key );          // entity.cpp:91
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );              // materialdef.cpp 0x431640
-extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                              const float *uvBase, float rotate, float crossterm );   // texturevecs.cpp 0x45A1C0
 extern void Entity_GetOrientationMatrix( entity_s *ent, float (*axis)[3] );           // entity.cpp:632
 extern void OrientationConcatenate( const orientation_t *orFirst, const orientation_t *orSecond,
                                     orientation_t *out );                              // engine_stubs.cpp:1136
-extern void OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );  // draw.cpp:24
-extern void OrientationDirToWorldDir( float *out, const orientation_t *orient, const float *dir );  // draw.cpp:35
-extern camera_s *Ed_Camera();                                                // camwnd.cpp:167
-extern void     CamWnd_BuildMatrix();                                        // camwnd.cpp:216
+extern char Texture_SetTexture( const int *patchGrid, MaterialDef *material );           // texwnd.cpp 0x45BE50
+extern char Radiant_PatchGetTexdef( patchMesh_t *patch, texdef_sub_t *texdef );         // brush.cpp 0x44B620
+extern void Brush_SetAllFacesMaterial( brush_t *def, MaterialDef *material, char planarProject,
+                                       float useStoredST, char materialOnly );          // brush.cpp 0x476ED0
+namespace LayerMat { int GetCurrentLayer( MaterialDef *mtlDef ); }                      // materialdef.cpp 0x431B30
 extern bool     Radiant_TryHotkey( unsigned int vk );                        // mainfrm.cpp:1752
-extern float    grid_sizes[];                                                // engine_stubs.cpp:780
-extern int      g_nUpdateBits;                                               // engine_stubs.cpp:782
+extern brush_t *Brush_ApplyTextureProjection( face_t *srcFace, brush_t *b, face_t *dstFace );   // brush.cpp 0x476a30
+extern void     XYWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );   // xywnd.cpp
+extern void     XYWnd_OnMouseMove( unsigned int nFlags, int x, int y );                // xywnd.cpp
+extern void     Patch_EditPatch();                                                     // pmesh.cpp 0x441FD0
+extern void     XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y );                // xywnd.cpp
 
 namespace
 {
@@ -308,6 +342,23 @@ namespace
                     JsonNum( js, tm[4] * p[0] + tm[5] * p[1] + tm[6] * p[2] + tm[7] );
                     js += ']';
                 }
+                // channel 1 (lightmap) the same way, plus its size (the lock's ch-1 path)
+                js += "],\"lst\":[";
+                const texdef_sub_t &ld = fc.mtldef[1].mat_texDef;
+                float lm[8];
+                Face_MoveTexture( ld.size, fc.plane.normal, lm, ld.shift, ld.rotate, ld.crossterm );
+                for ( int k = 0; w && k < w->numpoints; ++k )
+                {
+                    const float *p = w->p[k];
+                    js += k ? ",[" : "[";
+                    JsonNum( js, lm[0] * p[0] + lm[1] * p[1] + lm[2] * p[2] + lm[3] );
+                    js += ',';
+                    JsonNum( js, lm[4] * p[0] + lm[5] * p[1] + lm[6] * p[2] + lm[7] );
+                    js += ']';
+                }
+                js += "],\"lsz\":[";
+                JsonNum( js, ld.size[0] );  js += ',';
+                JsonNum( js, ld.size[1] );
                 js += "],\"td\":[";                 // size s t, shift s t, rotate, crossterm
                 JsonNum( js, td.size[0] );  js += ',';
                 JsonNum( js, td.size[1] );  js += ',';
@@ -827,6 +878,125 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         CamReport( "after" );
         return true;
     }
+    // A fixed XY view so a world point is an exact pixel; the user's view comes back after.
+    struct FixedXYView
+    {
+        xywndState_t *xy;
+        xywndState_t  saved;
+        FixedXYView() : xy( Ed_ActiveXY() ), saved( *xy )
+        {
+            xy->m_nViewType = ED_VIEW_XY;
+            xy->m_fScale    = 1.0f;
+            xy->m_vOrigin[0] = xy->m_vOrigin[1] = 0.0f;
+            xy->m_nWidth = xy->m_nHeight = 4096;
+        }
+        ~FixedXYView()
+        {
+            xy->m_nViewType = saved.m_nViewType;
+            xy->m_fScale    = saved.m_fScale;
+            memcpy( xy->m_vOrigin, saved.m_vOrigin, sizeof( xy->m_vOrigin ) );
+            xy->m_nWidth    = saved.m_nWidth;
+            xy->m_nHeight   = saved.m_nHeight;
+            g_nUpdateBits = -1;
+        }
+        int px( float wx ) const { return (int)floorf( wx + 0.5f ) + xy->m_nWidth / 2; }
+        int py( float wy ) const { return xy->m_nHeight / 2 - (int)floorf( wy + 0.5f ); }
+    };
+    if ( verb == "xy_drag" )
+    {
+        if ( !need( 5, 8, "xy_drag x0 y0 x1 y1 [steps] [shift] [ctrl]" ) ) return true;
+        float v[4];
+        int steps = 8;
+        size_t modsAt = 5;
+        if ( !floats( 1, 4, v ) ) return true;
+        if ( w.size() > 5 && ParseI( w[5], steps ) )
+            modsAt = 6;
+        mods_t m;
+        if ( !ParseMods( w, modsAt, m, error ) ) return true;
+        if ( m.alt ) { error = "xy_drag takes shift / ctrl only"; return true; }
+        if ( steps < 1 ) steps = 1;
+        FixedXYView view;
+        const unsigned int keys = ( m.shift ? MK_SHIFT : 0 ) | ( m.ctrl ? MK_CONTROL : 0 );
+        {
+            ScopedMods scoped( m );
+            XYWnd_OnLButtonDown( view.xy->m_hWnd, MK_LBUTTON | keys, view.px( v[0] ), view.py( v[1] ) );
+            for ( int s = 1; s <= steps; ++s )
+                XYWnd_OnMouseMove( MK_LBUTTON | keys, view.px( v[0] + ( v[2] - v[0] ) * s / steps ),
+                                   view.py( v[1] + ( v[3] - v[1] ) * s / steps ) );
+            XYWnd_OnLButtonUp( keys, view.px( v[2] ), view.py( v[3] ) );
+        }
+        return true;
+    }
+    if ( verb == "xy_hover" )
+    {
+        // xy_hover x y: a button-less XY mouse move (hover), in xy_drag's fixed view
+        if ( !need( 3, 3, "xy_hover x y" ) ) return true;
+        float v[2];
+        if ( !floats( 1, 2, v ) ) return true;
+        FixedXYView view;
+        XYWnd_OnMouseMove( 0, view.px( v[0] ), view.py( v[1] ) );
+        return true;
+    }
+    if ( verb == "filter" )
+    {
+        // filter <name> <0|1>: the Filters panel's checklist toggle (1 = shown, 0 = filtered out)
+        if ( !need( 3, 3, "filter <name> <0|1>" ) ) return true;
+        filter_entry_s *hit = nullptr;
+        for ( int c = 0; c < 4 && !hit; ++c )
+            for ( filter_entry_s *f = CFilterWnd_GetCategoryHead( c ); f; f = f->next_filter )
+                if ( f->name && !_stricmp( f->name, w[1].c_str() ) ) { hit = f; break; }
+        if ( !hit ) { KiwiTest_LogChannel( "ERROR", "filter: no entry %s", w[1].c_str() ); return true; }
+        RadiantFilters_ToggleEntry( hit, w[2] != "0" );
+        KiwiTest_LogChannel( "DATA", "filter %s shown %d", hit->name, hit->isShown ? 1 : 0 );
+        return true;
+    }
+    if ( verb == "filtered" )
+    {
+        // filtered e b: FilterBrush( node, 1 ) for that saved brush (1 = hidden)
+        if ( !need( 3, 3, "filtered e b" ) ) return true;
+        int v[2];
+        if ( !ints( 1, 2, v ) ) return true;
+        brush_t *def = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *d ) { if ( e == v[0] && b == v[1] ) def = d; } );
+        for ( selbrush_t *list : { &active_brushes, &selected_brushes } )
+            for ( selbrush_t *n = list->next; def && n != list; n = n->next )
+                if ( n->def == def )
+                {
+                    KiwiTest_LogChannel( "DATA", "filtered %d %d %d", v[0], v[1], FilterBrush( n, 1 ) ? 1 : 0 );
+                    return true;
+                }
+        KiwiTest_LogChannel( "ERROR", "filtered: no live node for %d %d", v[0], v[1] );
+        return true;
+    }
+    if ( verb == "cam_mode" )
+    {
+        // cam_mode: the camera's draw mode (0 wire .. 4 textures) and the stored menu id
+        KiwiTest_LogChannel( "DATA", "cam_mode %d menu %d", Ed_Camera()->draw_mode,
+                             g_qeglobals.d_savedinfo.iTextMenu );
+        return true;
+    }
+    if ( verb == "clip_state" )
+    {
+        // clip_state: clip mode and the three clip points ("clip_pt <n> <set> x y z")
+        KiwiTest_LogChannel( "DATA", "clip_mode %d", g_bClipMode ? 1 : 0 );
+        const CClipPoint *pts[3] = { &g_Clip1, &g_Clip2, &g_Clip3 };
+        for ( int i = 0; i < 3; ++i )
+            KiwiTest_LogChannel( "DATA", "clip_pt %d %d %g %g %g", i + 1, pts[i]->m_bSet ? 1 : 0,
+                                 pts[i]->m_ptClip[0], pts[i]->m_ptClip[1], pts[i]->m_ptClip[2] );
+        return true;
+    }
+    if ( verb == "patch_edit" )
+    {
+        if ( !need( 2, 2, "patch_edit 0|1" ) ) return true;
+        if ( w[1] != "0" )
+            Patch_EditPatch();
+        else
+            g_qeglobals.d_select_mode = sel_brush;
+        KiwiTest_LogChannel( "DATA", "patch_edit mode %d points %d", (int)g_qeglobals.d_select_mode,
+                             g_qeglobals.d_numpoints );
+        g_nUpdateBits = -1;
+        return true;
+    }
     if ( verb == "cam_ortho" )
     {
         if ( !need( 2, 2, "cam_ortho 0|1" ) ) return true;
@@ -986,6 +1156,87 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         KiwiTest_WaitFrames( 1 );
         return true;
     }
+    if ( verb == "uv_affine" )
+    {
+        if ( !need( 5, 5, "uv_affine a b c d" ) ) return true;
+        float m[4];
+        if ( !floats( 1, 4, m ) ) return true;
+        if ( !KiwiUvEd_TestAffine( m[0], m[1], m[2], m[3] ) )
+            error = "uv_affine: nothing selected";
+        g_nUpdateBits = -1;
+        KiwiTest_WaitFrames( 1 );
+        return true;
+    }
+    if ( verb == "merge_coplanar" )
+    {
+        // KiwiValid_MergeCoplanarFaces on one brush (the vertex-G fold merge); logs the count.
+        if ( !need( 3, 3, "merge_coplanar e b" ) ) return true;
+        int v[2];
+        if ( !ints( 1, 2, v ) ) return true;
+        brush_t *def = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *d ) { if ( e == v[0] && b == v[1] ) def = d; } );
+        if ( !def )
+        {
+            error = "merge_coplanar: no such brush";
+            return true;
+        }
+        KiwiTest_LogChannel( "DATA", "merged %d", KiwiValid_MergeCoplanarFaces( def ) );
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "face_align" )
+    {
+        // Drag_FaceAlign's projection: dst face takes src face's texture (brush ordinals as in dump).
+        if ( !need( 7, 7, "face_align e b f e b f" ) ) return true;
+        int v[6];
+        if ( !ints( 1, 6, v ) ) return true;
+        brush_t *src = nullptr, *dst = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *def )
+        {
+            if ( e == v[0] && b == v[1] ) src = def;
+            if ( e == v[3] && b == v[4] ) dst = def;
+        } );
+        if ( !src || !dst || v[2] < 0 || v[2] >= src->faceCount || v[5] < 0 || v[5] >= dst->faceCount )
+        {
+            error = "face_align: no such brush / face";
+            return true;
+        }
+        Brush_ApplyTextureProjection( &src->faces[v[2]], dst, &dst->faces[v[5]] );
+        Brush_BuildWindings( dst, 1 );
+        g_nUpdateBits = -1;
+        KiwiTest_WaitFrames( 1 );
+        return true;
+    }
+    if ( verb == "tex_pick" || verb == "tex_apply_brush" )
+    {
+        // Drag_Begin's camera MMB pick / Ctrl+MMB whole-brush apply (drag.cpp branches 1 and 2);
+        // modern input gives MMB to the orbit, so vp_click cannot reach them.
+        if ( !need( 3, 3, "tex_pick|tex_apply_brush e b" ) ) return true;
+        int v[2];
+        if ( !ints( 1, 2, v ) ) return true;
+        brush_t *def = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *d ) { if ( e == v[0] && b == v[1] ) def = d; } );
+        if ( !def || def->faceCount <= 0 )
+        {
+            error = verb + ": no such brush";
+            return true;
+        }
+        const int layer = g_qeglobals.current_edit_layer;
+        if ( verb == "tex_pick" )
+        {
+            MaterialDef *md = &def->faces[0].mtldef[layer];
+            if ( def->patch )
+                Radiant_PatchGetTexdef( def->patch, &md->mat_texDef + LayerMat::GetCurrentLayer( md ) );
+            Texture_SetTexture( (const int *)def->patch, md );
+        }
+        else
+        {
+            Brush_SetAllFacesMaterial( def, (MaterialDef *)&g_qeglobals.random_texture_stuff[layer], 1, 1.0f, 0 );
+        }
+        g_nUpdateBits = -1;
+        KiwiTest_WaitFrames( 1 );
+        return true;
+    }
     if ( verb == "kopt" )
     {
         if ( !need( 3, 3, "kopt <row> <value>" ) ) return true;
@@ -1021,8 +1272,22 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
     // ── preferences (the isolated test profile; see KiwiTest_IsolateProfile) ────
     if ( verb == "pref" )
     {
-        if ( !need( 2, 3, "pref noclamp|grid [value]" ) ) return true;
+        if ( !need( 2, 3, "pref noclamp|grid|lightmaplock|texlock [value]" ) ) return true;
         const std::string what = Lower( w[1] );
+        if ( what == "texlock" )
+        {
+            if ( w.size() == 3 )
+                g_PrefsDlg->m_bTextureLock = w[2] != "0";
+            KiwiTest_LogChannel( "DATA", "pref texlock %d", g_PrefsDlg->m_bTextureLock ? 1 : 0 );
+            return true;
+        }
+        if ( what == "lightmaplock" )
+        {
+            if ( w.size() == 3 )
+                g_PrefsDlg->m_bLightmapLock = w[2] != "0";
+            KiwiTest_LogChannel( "DATA", "pref lightmaplock %d", g_PrefsDlg->m_bLightmapLock ? 1 : 0 );
+            return true;
+        }
         if ( what == "noclamp" )
         {
             if ( w.size() == 3 )
@@ -1045,7 +1310,24 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
             KiwiTest_LogChannel( "DATA", "pref grid %g", grid_sizes[g_qeglobals.d_gridsize] );
             return true;
         }
-        error = "pref: noclamp or grid";
+        if ( what == "units" || what == "gridin" )
+        {
+            // the modern unit settings through their setters (the prefs fields' path);
+            // `pref units reload` re-reads both from the profile
+            if ( w.size() == 3 )
+            {
+                if ( what == "units" && Lower( w[2] ) == "reload" )
+                    KiwiUnits_ReloadForTest();
+                else if ( what == "units" )
+                    KiwiUnits_SetPerInch( (float)strtod( w[2].c_str(), nullptr ) );
+                else
+                    KiwiUnits_SetGridSpacingInches( (float)strtod( w[2].c_str(), nullptr ) );
+            }
+            KiwiTest_LogChannel( "DATA", "pref units %g gridin %g", (double)KiwiUnits_PerInch(),
+                                 (double)KiwiUnits_GridSpacingInches() );
+            return true;
+        }
+        error = "pref: noclamp, grid, lightmaplock, texlock, units or gridin";
         return true;
     }
     if ( verb == "profile_get" )
@@ -1061,6 +1343,271 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         int v;
         if ( !ints( 3, 1, &v ) ) return true;
         Radiant_ProfileSetInt( w[1].c_str(), w[2].c_str(), v );
+        return true;
+    }
+    if ( verb == "profile_setstr" )
+    {
+        if ( !need( 4, 4, "profile_setstr <section> <key> <string>" ) ) return true;
+        Radiant_ProfileSetString( w[1].c_str(), w[2].c_str(), w[3].c_str() );
+        return true;
+    }
+    if ( verb == "raw_write" )
+    {
+        // raw_write <qpath> <text>: KiwiFS_WriteRawAtomic (the material / .iwi writers' path)
+        if ( !need( 3, 3, "raw_write <qpath> <text>" ) ) return true;
+        char err[256] = { 0 };
+        const bool ok = KiwiFS_WriteRawAtomic( w[1].c_str(), w[2].c_str(), (unsigned)w[2].size(), err, sizeof( err ) );
+        KiwiTest_LogChannel( "DATA", "raw_write %d %s", ok ? 1 : 0, ok ? "" : err );
+        return true;
+    }
+    if ( verb == "iwi_write" )
+    {
+        // iwi_write <source image> <qpath>: KiwiIwi_WriteFromFile (ARGB8) then KiwiIwi_VerifyOnDisk
+        if ( !need( 3, 3, "iwi_write <source image> <qpath>" ) ) return true;
+        kiwiIwiOptions_t opt = {};
+        opt.encoding = KIWI_IWI_ENC_COLOR;
+        kiwiIwiResult_t res = {};
+        char err[256] = { 0 };
+        bool ok = KiwiIwi_WriteFromFile( w[1].c_str(), w[2].c_str(), &opt, &res, err, sizeof( err ) );
+        if ( ok )
+            ok = KiwiIwi_VerifyOnDisk( w[2].c_str(), err, sizeof( err ) );
+        KiwiTest_LogChannel( "DATA", "iwi_write %d %dx%d %d %s", ok ? 1 : 0, res.width, res.height,
+                             res.fileSize, ok ? "" : err );
+        return true;
+    }
+
+    // ── construction store / command gates ──────────────────────────────────────
+    if ( verb == "con_state" )
+    {
+        // one DATA line: count, construction undo depth, selected objects; then one per object
+        std::string sel;
+        for ( int i = 0; i < KiwiConSel_Count(); ++i )
+        {
+            const kconSelItem_t *it = KiwiConSel_At( i );
+            if ( it && it->kind == KCONSEL_OBJECT )
+                sel += ( sel.empty() ? "" : "," ) + std::to_string( it->object );
+        }
+        KiwiTest_LogChannel( "DATA", "con_state %d %d %s", KiwiCon_Count(), KiwiCon_UndoDepth(),
+                             sel.empty() ? "-" : sel.c_str() );
+        for ( int i = 0; i < KiwiCon_Count(); ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            KiwiTest_LogChannel( "DATA", "con %d type %d pts %d closed %d group %d name %s", i,
+                                 (int)o->type, (int)( o->pts.size() / 3 ), o->closed ? 1 : 0, o->group,
+                                 o->name.empty() ? "-" : o->name.c_str() );
+        }
+        return true;
+    }
+    if ( verb == "con_label" )
+    {
+        // con_label <index> <name> <group name>: name the object and put it in a new group
+        if ( !need( 4, 4, "con_label <index> <name> <group name>" ) ) return true;
+        int index;
+        if ( !ints( 1, 1, &index ) ) return true;
+        if ( !KiwiCon_At( index ) )
+        {
+            error = "con_label: no such construction object";
+            return true;
+        }
+        KiwiCon_SetName( index, w[2].c_str() );
+        KiwiCon_SetGroup( index, KiwiCon_NewGroup( w[3].c_str() ) );
+        return true;
+    }
+    if ( verb == "con_select" )
+    {
+        // con_select <index> [index ...]: replace the construction selection (whole objects)
+        if ( !need( 2, 9, "con_select <index> [index ...]" ) ) return true;
+        std::vector<int> objs( w.size() - 1 );
+        if ( !ints( 1, objs.size(), &objs[0] ) ) return true;
+        KiwiConSel_SelectObjects( &objs[0], (int)objs.size() );
+        return true;
+    }
+    if ( verb == "face_add" )
+    {
+        // face_add e b f: add one face of that brush to the face selection (keeps the rest)
+        if ( !need( 4, 4, "face_add e b f" ) ) return true;
+        int v[3];
+        if ( !ints( 1, 3, v ) ) return true;
+        brush_t *def = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *d ) { if ( e == v[0] && b == v[1] ) def = d; } );
+        selbrush_t *node = nullptr;
+        for ( selbrush_t *list : { &selected_brushes, &active_brushes } )
+            for ( selbrush_t *n = list->next; def && !node && n != list; n = n->next )
+                if ( n->def == def )
+                    node = n;
+        if ( !node || v[2] < 0 || v[2] >= def->faceCount )
+        {
+            error = "face_add: no such brush face";
+            return true;
+        }
+        Sel_Add( KiwiSel(), Sel_MakeFace( node, v[2] ) );
+        Sel_SyncToLegacy();
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "simple_patch" )
+    {
+        // simple_patch <wSel> <hSel>: Curve > Simple Patch Mesh's Create on the selected brush
+        // (PatchDensity_Commit; sel indexes {3,5,7,9,11,13,15}) - a flat, open patch
+        if ( !need( 3, 3, "simple_patch <wSel> <hSel>" ) ) return true;
+        int v[2];
+        if ( !ints( 1, 2, v ) ) return true;
+        extern void PatchDensity_Commit( bool terrain, int wSel, int hSel );   // patchdialog.cpp
+        PatchDensity_Commit( false, v[0], v[1] );
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "sg_flags" )
+    {
+        // sg_flags <key>: the Script group panel's flag list (ScriptGroupFlags_Gather), one DATA
+        // line per row, then the count
+        if ( !need( 2, 2, "sg_flags <key>" ) ) return true;
+        extern void ScriptGroupFlags_Gather( const char *key, std::vector<std::string> &rows );
+        std::vector<std::string> rows;
+        ScriptGroupFlags_Gather( w[1].c_str(), rows );
+        for ( size_t i = 0; i < rows.size(); ++i )
+            KiwiTest_LogChannel( "DATA", "sg_flag %s", rows[i].c_str() );
+        KiwiTest_LogChannel( "DATA", "sg_flags %d", (int)rows.size() );
+        return true;
+    }
+    if ( verb == "cap_commit" )
+    {
+        // cap_commit <type 0..3>: the open-patch cap prompt's OK (Cap_Commit), no prompt
+        if ( !need( 2, 2, "cap_commit <type 0..3>" ) ) return true;
+        int type;
+        if ( !ints( 1, 1, &type ) ) return true;
+        extern void Cap_Commit( int nType );           // pmesh.cpp
+        Cap_Commit( type );
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "layer_hide" )
+    {
+        // layer_hide <name> <0|1>: the Layers panel's Hide/Show (Layers_SetHidden), then one
+        // "layer_filter <name> <shown>" DATA line per script_layer visibility filter
+        if ( !need( 3, 3, "layer_hide <name> <0|1>" ) ) return true;
+        int hide;
+        if ( !ints( 2, 1, &hide ) ) return true;
+        extern bool Layers_SetHidden( const char *layerName, bool hidden );   // layersdlg.cpp
+        KiwiTest_LogChannel( "DATA", "layer_hide %d", Layers_SetHidden( w[1].c_str(), hide != 0 ) ? 1 : 0 );
+        for ( filter_entry_s *f = g_qeglobals.d_filterGlobals_layerFilters; f; f = f->next_filter )
+            KiwiTest_LogChannel( "DATA", "layer_filter %s %d", f->name ? f->name : "", f->isShown ? 1 : 0 );
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "find_replace" )
+    {
+        // find_replace <find> <replace> <flags>: Find/Replace's core (FindReplaceTextures) and
+        // the map dirty flag around it
+        if ( !need( 4, 4, "find_replace <find> <replace> <flags>" ) ) return true;
+        int flags;
+        if ( !ints( 3, 1, &flags ) ) return true;
+        extern bool FindReplaceTextures( const char *find, const char *replace, char flags );  // findtexture.cpp
+        const int before = modified ? 1 : 0;
+        const bool hit = FindReplaceTextures( w[1].c_str(), w[2].c_str(), (char)flags );
+        KiwiTest_LogChannel( "DATA", "find_replace %d modified %d %d", hit ? 1 : 0, before, modified ? 1 : 0 );
+        return true;
+    }
+    if ( verb == "sg_select" || verb == "sg_dump" )
+    {
+        // sg_select <entity> [entity ...]: replace the selection with those saved entities' nodes
+        // (point entities included).  sg_dump: every saved entity's epairs, in list order, as
+        // "sg_kv <entity> <sel> |key|=|value|" (the bars keep trailing spaces visible).
+        std::vector<entity_s *> saved;
+        size_t guard = 0;
+        for ( entity_s *ent = entities.next; ent && ent != &entities && guard < 1000000; ent = ent->next, ++guard )
+            if ( EntityIsSaved( ent ) )
+                saved.push_back( ent );
+        if ( verb == "sg_select" )
+        {
+            if ( !need( 2, 64, "sg_select <entity> [entity ...]" ) ) return true;
+            Select_Deselect( 1 );
+            std::vector<selbrush_t *> nodes;
+            for ( size_t i = 1; i < w.size(); ++i )
+            {
+                int idx;
+                if ( !ints( i, 1, &idx ) ) return true;
+                if ( idx < 0 || (size_t)idx >= saved.size() )
+                {
+                    KiwiTest_LogChannel( "ERROR", "sg_select: no saved entity %d", idx );
+                    return true;
+                }
+                for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
+                    if ( b->owner && b->owner->def == saved[idx] )
+                        nodes.push_back( b );
+            }
+            for ( selbrush_t *b : nodes )
+                Select_Brush( b, 0, 0, 0 );
+            g_nUpdateBits = -1;
+            return true;
+        }
+        for ( size_t i = 0; i < saved.size(); ++i )
+        {
+            bool sel = false;
+            for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+                if ( b->owner && b->owner->def == saved[i] ) { sel = true; break; }
+            for ( epair_t *ep = saved[i]->epairs; ep; ep = ep->next )
+                KiwiTest_LogChannel( "DATA", "sg_kv %d %d |%s|=|%s|", (int)i, sel ? 1 : 0, ep->key, ep->value );
+        }
+        return true;
+    }
+    if ( verb == "sg_op" )
+    {
+        // sg_op <op> [a] [b]: the Script group tool's actions -
+        //   code <c> | team <key> | add | disassociate | type
+        //   addkey <k> <v> | removekey <k> <v> | addtrig <k> <v> | removetrig <k> <v>
+        if ( !need( 2, 4, "sg_op <op> [a] [b]" ) ) return true;
+        const std::string &op = w[1];
+        const char *a = w.size() > 2 ? w[2].c_str() : "";
+        const char *b = w.size() > 3 ? w[3].c_str() : "";
+        extern void ScriptGroupColorCode_Apply( const char *code );                     // scriptgroup.cpp
+        extern void ScriptGroupTeam_Apply( const char *teamKey );
+        extern void ScriptGroup_AddColorToSelection();
+        extern void ScriptGroupDisassociate_Apply();
+        extern void ScriptGroup_Type();
+        extern void ScriptGroupAddSubKey_Apply( const char *subKey, const char *subValue );
+        extern void ScriptGroupRemoveSubKey_Apply( const char *subKey, const char *subValue );
+        extern int  ScriptGroup_AddKeyToSelectedTriggers( const char *key, const char *value );
+        extern int  ScriptGroup_RemoveKeyFromSelectedTriggers( const char *key, const char *value );
+        if      ( op == "code" )         ScriptGroupColorCode_Apply( a );
+        else if ( op == "team" )         ScriptGroupTeam_Apply( a );
+        else if ( op == "add" )          ScriptGroup_AddColorToSelection();
+        else if ( op == "disassociate" ) ScriptGroupDisassociate_Apply();
+        else if ( op == "type" )         ScriptGroup_Type();
+        else if ( op == "addkey" )       ScriptGroupAddSubKey_Apply( a, b );
+        else if ( op == "removekey" )    ScriptGroupRemoveSubKey_Apply( a, b );
+        else if ( op == "addtrig" )      ScriptGroup_AddKeyToSelectedTriggers( a, b );
+        else if ( op == "removetrig" )   ScriptGroup_RemoveKeyFromSelectedTriggers( a, b );
+        else
+        {
+            KiwiTest_LogChannel( "ERROR", "sg_op: unknown op %s", op.c_str() );
+            return true;
+        }
+        g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "snapshot" )
+    {
+        // snapshot <path>: the live fragile check's map write (Map_WriteSnapshot)
+        if ( !need( 2, 2, "snapshot <path>" ) ) return true;
+        extern bool Map_WriteSnapshot( const char *path );   // map.cpp
+        KiwiTest_LogChannel( "DATA", "snapshot %d", Map_WriteSnapshot( w[1].c_str() ) ? 1 : 0 );
+        return true;
+    }
+    if ( verb == "undo_depth" )
+    {
+        // the unified undo journal's depth (KiwiUndo_UndoDepth)
+        extern int KiwiUndo_UndoDepth();               // kiwi_undo.cpp
+        KiwiTest_LogChannel( "DATA", "undo_depth %d", KiwiUndo_UndoDepth() );
+        return true;
+    }
+    if ( verb == "can" )
+    {
+        // can <command id>: the palette predicate (KiwiCmd_CanExecute)
+        if ( !need( 2, 2, "can <command id>" ) ) return true;
+        int id;
+        if ( !ints( 1, 1, &id ) ) return true;
+        KiwiTest_LogChannel( "DATA", "can %d %d", id, KiwiCmd_CanExecute( id ) ? 1 : 0 );
         return true;
     }
     return false;

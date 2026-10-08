@@ -23,6 +23,7 @@
 // KIWI GLASS
 #include "kiwi_glass.h"         // KIWI_GLASS_CLASSNAME - the Glass section
 // KIWI END
+#include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_visibility.h"    // shared hidden state and undo
@@ -35,38 +36,14 @@
 #include <vector>
 
 // Ported entry points; locations anchor the exact ABI used here.
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773
-extern entity_s   *world_entity;                                             // map.cpp:62
-extern entity_s    entityInsts;                                              // entity.cpp:299
-extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629
-extern void        Entity_Free( char *a1 );                                  // entity.cpp:1500
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445
-extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:464
 extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:635
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434
-extern void        SetupVertexSelection();                                   // engine_stubs.cpp
-extern void        MarkMapModified();                                        // win_qe3.cpp
-extern void        sub_476330( selbrush_t *b );                              // brush.cpp:851; Brush_Deselect_Helper
-extern void        sub_476470( selbrush_t *b );                              // brush.cpp:970; Brush_Select_Helper
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212
-extern char       *ValueForKey2( const entity_s *e, const char *key );                   // entity.cpp:89; "" when absent
+extern void        Brush_Deselect_Helper( selbrush_t *b );                   // brush.cpp
+extern void        Brush_Select_Helper( selbrush_t *b );                     // brush.cpp
 extern void        KiwiRegion_ClearSelection();                              // kiwi_region.cpp
 extern void        KiwiSun_ClearSelection();                                 // kiwi_sun.cpp
 // File scope on purpose: declared inside the anonymous namespace it names a
 // namespace-local function and the link fails (LNK2019, 2026-09-22).
-extern void        DeleteKey( epair_t **head, const char *key );             // entity.cpp:175 (0x483720)
-extern void        Undo_ClearRedo();                                         // undo.cpp:176
-extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
-extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494; takes brush def
-extern void        Undo_AddBrushList( selbrush_t *sb );                      // undo.cpp:551
-extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663
-extern void        Undo_End();                                               // undo.cpp:686
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-// Live dockspace id used to re-dock a newly opened panel (imgui_shell.cpp:476).
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp
 
 // selected_brushes is passed only to Undo_AddBrushList, matching xywnd.cpp:3402.
 
@@ -1397,7 +1374,7 @@ void RelinkBrush( selbrush_t *sb, entity_s *targetInst, entity_s_def *targetDef 
     // select.cpp:5112: selected instances leave bookkeeping across the relink.
     const bool wasSelected = ( ( (unsigned)sb->brushFlags & KOUT_BRUSHFLAG_SELECTED ) != 0 );
     if ( wasSelected )
-        sub_476330( sb );
+        Brush_Deselect_Helper( sb );
 
     brush_t *bDef = sb->def;
     Entity_UnlinkBrush( bDef );                          // entity.cpp:465
@@ -1411,7 +1388,7 @@ void RelinkBrush( selbrush_t *sb, entity_s *targetInst, entity_s_def *targetDef 
     ++bDef->version;
 
     if ( wasSelected )
-        sub_476470( sb );
+        Brush_Select_Helper( sb );
 }
 
 bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, const char *op )
@@ -1458,7 +1435,7 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
     for ( size_t i = 0; i < move.size(); ++i )
         RelinkBrush( move[i], targetInst, targetDef );
     for ( size_t i = 0; i < emptied.size(); ++i )
-        Entity_Free( (char *)emptied[i] );                   // select.cpp:5146
+        Entity_Free( emptied[i] );                           // as select.cpp's ungroup
     Undo_End();
 
     g_nUpdateBits = -1;
@@ -1627,7 +1604,7 @@ entity_s *UGTxnNewWrapper( ugTxn_t &t, const std::string &path )
 void UGTxnEnd( ugTxn_t &t )
 {
     for ( size_t i = 0; i < t.freeAfter.size(); ++i )
-        Entity_Free( (char *)t.freeAfter[i] );                   // select.cpp:5146
+        Entity_Free( t.freeAfter[i] );                           // as select.cpp's ungroup
     Undo_End();
     Sel_InvalidateFromLegacy();
     if ( !t.reselect.empty() )
@@ -1954,7 +1931,7 @@ bool UngroupEntity( entity_s *inst, const char *op )
         selbrush_t *next = b->ownerNext;                 // the relink rewrites b's links
         const bool wasSelected = ( ( (unsigned)b->brushFlags & KOUT_BRUSHFLAG_SELECTED ) != 0 );
         if ( wasSelected )
-            sub_476330( b );
+            Brush_Deselect_Helper( b );
 
         brush_t *bDef = b->def;
         Entity_UnlinkBrush( bDef );
@@ -1968,11 +1945,11 @@ bool UngroupEntity( entity_s *inst, const char *op )
         ++bDef->version;
 
         if ( wasSelected )
-            sub_476470( b );
+            Brush_Select_Helper( b );
         ++n;
         b = next;
     }
-    Entity_Free( (char *)inst );                          // select.cpp:5146
+    Entity_Free( inst );                                  // as select.cpp's ungroup
     Undo_End();
     s_structural = true;                                  // this frame's rows are stale
 

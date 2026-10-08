@@ -12,6 +12,7 @@
 // KIWI GLASS
 #include "kiwi_glass.h"
 // KIWI END
+#include "kiwi_ported.h"
 #include "radiant_frame.h"
 
 #include <stdarg.h>
@@ -21,17 +22,14 @@
 #include <vector>
 
 // Ported and cross-file entry points.
-extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
 extern const char *Dvar_GetString( const char *dvarName );   // universal/dvar.cpp (fs_basepath)
-extern char currentmap[];                               // map.cpp 0x23F18D8; active map/prefab
+extern int  prefabStackLevel;                          // map.cpp 0x25D5B34
 extern void Pointfile_Errorfile_Public();                // errorfile.cpp:409
 extern void Pointfile_Clear();                           // points.cpp:112  (frees the error-log entries)
 extern void Pointfile_ResetPoints();                     // points.cpp:129  (s_num_points = 0)
 extern int  Pointfile_GetNumPoints();                    // points.cpp:132
 extern FILE *Pointfile_Check();                          // points.cpp:56   (reads <currentmap minus ext>.lin)
 extern int  s_errLogCount;                               // points.cpp:50
-extern int  g_nUpdateBits;                               // engine_stubs.cpp:773
 
 // State.
 namespace
@@ -240,7 +238,7 @@ struct launchPaths_t
 {
     char root[MAX_PATH];        // fs_basepath — the build root, and every child's CWD
     char binDir[MAX_PATH];      // the directory the running radiant exe sits in
-    char mapPath[MAX_PATH];     // s_currentMapPath, "" when the map is untitled
+    char mapPath[MAX_PATH];     // Radiant_CurrentMapPath, "" when the map is untitled
     char name[128];             // basename of mapPath without the extension
     char targetRel[MAX_PATH];   // raw\maps\mp\<name>.map     (relative to root)
     char targetAbs[MAX_PATH];   // <root>\raw\maps\mp\<name>.map
@@ -790,9 +788,26 @@ bool StartBsp( const launchPaths_t &p )
 
     if ( s_saveFirst )
     {
-        // p.haveMap prevents Save-As; this writes s_currentMapPath directly.
-        Radiant_FileSave();
-        LogLine( "saved %s", p.mapPath );
+        // KIWI: Build compiles what the user sees, so a build started inside a prefab leaves
+        // it first - each modified level with its own Save / Discard / Cancel (Cancel = no
+        // build) - and then saves the top-level map, the one cod4map reads.
+        if ( prefabStackLevel > 0 )
+        {
+            if ( !Radiant_LeavePrefabLevels() )
+            {
+                LogLine( "Build cancelled (still inside the prefab)." );
+                return false;
+            }
+            LogLine( "Build: left the prefab" );
+            Sys_Printf( "Build: left the prefab\n" );
+        }
+        // p.haveMap prevents Save-As; at the top level this writes Radiant_CurrentMapPath.
+        if ( !Radiant_FileSave() )
+        {
+            LogLine( "ERROR: save failed - build cancelled" );
+            return false;
+        }
+        LogLine( "saved %s", Radiant_CurrentMapPath() );
     }
 
     // Diagnostics follow the actual load source.

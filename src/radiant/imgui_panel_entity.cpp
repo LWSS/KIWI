@@ -6,6 +6,7 @@
 // KIWI GLASS
 #include "kiwi_glass.h"
 // KIWI END
+#include "kiwi_ported.h"
 #include "kiwi_windows.h"
 #include "radiant_ui_actions.h"
 
@@ -23,10 +24,6 @@
 
 extern entity_s_def *edit_entity;              // win_ent.cpp:77
 extern int           multiple_edit_entities;   // win_ent.cpp:78
-extern entity_s      entities;                 // entity.cpp:295
-extern entity_s      entityInsts;              // entity.cpp:302
-extern entity_s     *world_entity;             // map.cpp:62
-extern int           g_nUpdateBits;             // engine_stubs.cpp:773
 
 struct eclassRow_t
 {
@@ -41,8 +38,6 @@ extern void EclassCreate_Apply( const char *name );                    // win_en
 extern void EclassSelect_Apply( int listIndex, eclass_t *pec );        // win_ent.cpp:778
 extern void Entity_UpdateSelection();                                  // win_ent.cpp:791
 extern void ImGuiShell_FocusTab( const char *title );                  // imgui_shell.cpp:205
-extern ImGuiID ImGuiShell_DockRoot();                                  // imgui_shell.cpp:798
-extern void MarkMapModified( void );                                   // win_qe3.cpp:195
 
 namespace
 {
@@ -824,8 +819,8 @@ namespace
             epair_t *epair = FindEpair( edit_entity, parameter.name.c_str() );
             bool present = epair != nullptr;
             std::string currentValue = present ? epair->value : "";
-            // KIWI: a point entity's live origin - its "origin" epair is only rewritten at
-            // save / copy, so after a move editing X wrote back the OLD Y / Z.
+            // KIWI: a point entity's live origin - its "origin" epair is only rewritten on
+            // copy, so after a move editing X wrote back the OLD Y / Z.
             if ( !_stricmp( parameter.name.c_str(), "origin" ) && edit_entity && edit_entity->eclass
               && edit_entity->eclass->fixedsize )
             {

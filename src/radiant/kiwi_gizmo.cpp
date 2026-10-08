@@ -15,6 +15,7 @@
 #include "kiwi_lollipop.h"
 #include "kiwi_droptrace.h"          // KiwiDrop_IsModelEntity: models-only scale gizmo
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_transform.h"
 #include "kiwi_ux.h"
 #include "radiant_registry.h"
@@ -23,17 +24,6 @@
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
-
-extern camera_s *Ed_Camera();
-extern selbrush_t selected_brushes;     // map.cpp (models-only scale gizmo test)
-extern void      CamWnd_BuildMatrix();
-extern int       g_nUpdateBits;
-extern char      Byte4PackPixelColor( float *from, GfxColor *out );
-extern void __cdecl R_AddRenderCmdDrawTris(
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-    const float ( *st )[2] );
 
 namespace
 {
@@ -67,9 +57,9 @@ namespace
     const int KGZ_CONE_SEGMENTS   = 12;
     const int KGZ_CIRCLE_SEGMENTS = 64;
     const int KGZ_SPHERE_SEGMENTS = 16;
-    const float KGZ_PI      = 3.141592653589793f;
-    const float KGZ_TWO_PI  = 6.283185307179586f;
-    const float KGZ_DEGREES = 57.29577951308232f;
+    const float KGZ_PI      = (float)KIWI_PI;
+    const float KGZ_TWO_PI  = (float)( 2.0 * KIWI_PI );
+    const float KGZ_DEGREES = (float)KIWI_RAD2DEG;
 
     enum handle_t
     {
@@ -162,27 +152,6 @@ namespace
         float basis[3][3];
     };
 
-    float Length3( const float *v )
-    {
-        return sqrtf( Dot3( v, v ) );
-    }
-
-    bool Normalize3( float *v )
-    {
-        const float len = Length3( v );
-        if ( len <= 0.000001f )
-            return false;
-        v[0] /= len; v[1] /= len; v[2] /= len;
-        return true;
-    }
-
-    void Cross3Local( const float *a, const float *b, float *out )
-    {
-        out[0] = a[1] * b[2] - a[2] * b[1];
-        out[1] = a[2] * b[0] - a[0] * b[2];
-        out[2] = a[0] * b[1] - a[1] * b[0];
-    }
-
     void AxisVector( int axis, float *out )
     {
         out[0] = out[1] = out[2] = 0.0f;
@@ -272,7 +241,7 @@ namespace
             // Screen diagonal (up-right), so the stick never foreshortens to a dot.
             const camera_s *c = Ed_Camera();
             float dir[3] = { c->vright[0] + c->vup[0], c->vright[1] + c->vup[1], c->vright[2] + c->vup[2] };
-            if ( Normalize3( dir ) )
+            if ( Norm3( dir ) )
             {
                 g->uniformOnly = true;
                 Mad3( g->anchor, dir, g->axisLen, g->stick );
@@ -503,22 +472,22 @@ namespace
         const float alongRight = Dot3( c->vright, direction );
         for ( int k = 0; k < 3; ++k )
             u[k] = c->vright[k] - direction[k] * alongRight;
-        if ( !Normalize3( u ) )
+        if ( !Norm3( u ) )
         {
             const float alongUp = Dot3( c->vup, direction );
             for ( int k = 0; k < 3; ++k )
                 u[k] = c->vup[k] - direction[k] * alongUp;
         }
-        if ( !Normalize3( u ) )
+        if ( !Norm3( u ) )
         {
             const float fallback[3] = { fabsf( direction[0] ) < 0.8f ? 1.0f : 0.0f,
                                         fabsf( direction[0] ) < 0.8f ? 0.0f : 1.0f,
                                         0.0f };
-            Cross3Local( direction, fallback, u );
-            Normalize3( u );
+            Cross3( direction, fallback, u );
+            Norm3( u );
         }
-        Cross3Local( direction, u, v );
-        Normalize3( v );
+        Cross3( direction, u, v );
+        Norm3( v );
     }
 
     void DrawCone( const float *basePoint, const float *direction, float length, float radius,

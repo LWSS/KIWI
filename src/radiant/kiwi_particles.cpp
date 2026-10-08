@@ -19,9 +19,11 @@
 #include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_str.h"
 #include "kiwi_transform.h"     // KiwiXform_CommandForId (chained drops)
+#include "kiwi_vec.h"
 #include "kiwi_windows.h"
 #include "radiant_registry.h"
 
@@ -36,38 +38,14 @@
 #include <string>
 #include <vector>
 
-extern int         Sys_Printf( const char *fmt, ... );
-extern int         g_nUpdateBits;
-extern entity_s   *world_entity;                                             // map.cpp
-extern entity_s    entities;                                                 // entity.cpp:325 (definition list)
-extern selbrush_t  selected_brushes;
-extern selbrush_t  active_brushes;
 extern eclass_t   *g_eclass;                                                 // eclass.cpp:117
 extern eclass_t   *Eclass_InitFromText( void *textPtr );                     // eclass.cpp:792
-extern void        Eclass_InsertAlphabetized( const char ***a1, const char **a2 ); // eclass.cpp:947
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );      // eclass.cpp:1090
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
-extern void        Brush_BuildWindings( brush_t *def, int bFull );
-extern void        Select_Deselect( int a1 );
-extern void        CreateEntityFromName( const char *str );                  // xywnd.cpp
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:234
-extern char       *ValueForKey2( const entity_s *e, const char *key );       // entity.cpp:91
-extern void        Undo_ClearRedo();
-extern void        Undo_GeneralStart( const char *operation );
-extern void        Undo_AddEntity_W( entity_s *e );                          // undo.cpp 0x45E990
+extern void        Eclass_InsertAlphabetized( eclass_t **list, eclass_t *ec ); // eclass.cpp
 extern void        Undo_KiwiMarkCreated( brush_t *def );                     // undo.cpp (KIWI tail)
-extern void        Undo_End();
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
-extern void        Ed_EnsureCurrentMaterial_Kiwi();
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );
-extern ImGuiID     ImGuiShell_DockRoot();
-extern camera_s   *Ed_Camera();
-extern char        currentmap[];                                             // map.cpp
 
 namespace
 {
-    const float KFX_PI = 3.14159265358979323846f;
+    const float KFX_PI = (float)KIWI_PI;
     const char *KFX_PROFILE = "KiwiParticles";
     const char *KFX_OWNER_MARK = "KIWI-Radiant";          // generated-file ownership line
     const int   KFX_CLIENT_MAX_DEFS = 32;                 // g_effectDefMap[32] (cg_client_side_effects_mp.cpp)
@@ -135,7 +113,7 @@ namespace
     {
         char text[64];
         Radiant_ProfileSetInt( KFX_PROFILE, "Aim", s_aim );
-        Radiant_ProfileSetString( KFX_PROFILE, "Delay", KiwiFmt_Num( text, sizeof( text ), s_delay ) );
+        Radiant_ProfileSetString( KFX_PROFILE, "Delay", KiwiFmt_Exact( text, sizeof( text ), s_delay + 0.0f, 0 ) );
     }
 
     std::string ExeDir()
@@ -305,7 +283,7 @@ namespace
     }
 
     // The "origin" key (what the .map carries), else the entity's cached origin.  A point
-    // entity's live origin wins: its key is only rewritten at save, so an export after a
+    // entity's live origin wins: its key is only rewritten on copy, so an export after a
     // move wrote where the effect WAS.
     void FxOrigin( const entity_s_def *def, float out[3] )
     {
@@ -356,7 +334,7 @@ namespace
         return true;
     }
 
-    // The ported CreateEntityBrush placeholder sequence (kiwi_modelbrowser.cpp DropPlaceholder).
+    // The native CreateEntityBrush (0x466290) placeholder sequence (kiwi_modelbrowser.cpp DropPlaceholder).
     bool DropPlaceholder( eclass_t *ec, const float origin[3] )
     {
         float mins[3], maxs[3];
@@ -439,13 +417,13 @@ namespace
         }
         if ( created )
         {
-            char a[96], p[32], y[32], r[32], d[32];
+            char a[96], p[32], y[32], r[32], d[48];
             _snprintf( a, sizeof( a ), "%s %s %s", KiwiFmt_Num( p, sizeof( p ), angles[0], 2 ),
                        KiwiFmt_Num( y, sizeof( y ), angles[1], 2 ), KiwiFmt_Num( r, sizeof( r ), angles[2], 2 ) );
             a[sizeof( a ) - 1] = '\0';
             SetKeyValue( created, "fx", fx );
-            SetKeyValue( created, "angles", a );
-            SetKeyValue( created, "delay", KiwiFmt_Num( d, sizeof( d ), s_delay ) );
+            SetKeyValue( created, "angles", a );   // authored from a normal: 0.01 deg is enough
+            SetKeyValue( created, "delay", KiwiFmt_Exact( d, sizeof( d ), s_delay + 0.0f, 0 ) );
         }
         Undo_End();
         if ( !created )
@@ -597,7 +575,7 @@ void KiwiParticles_RegisterEclass()
         "*/";
     eclass_t *ec = Eclass_InitFromText( text );
     if ( ec )
-        Eclass_InsertAlphabetized( (const char ***)&g_eclass, (const char **)ec );
+        Eclass_InsertAlphabetized( &g_eclass, ec );
 }
 
 bool KiwiParticles_IsParticleNode( const selbrush_t *b )
@@ -843,8 +821,8 @@ namespace
         ImGui::InputFloat( "Start delay (s)", &s_editDelay, 1.0f, 5.0f, "%.2f" );
         if ( ImGui::IsItemDeactivatedAfterEdit() )
         {
-            char d[32];
-            SetOnSelected( "particle delay", "delay", KiwiFmt_Num( d, sizeof( d ), s_editDelay ) );
+            char d[48];
+            SetOnSelected( "particle delay", "delay", KiwiFmt_Exact( d, sizeof( d ), s_editDelay + 0.0f, 0 ) );
         }
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "When the effect starts, in seconds from map start.\n"

@@ -13,17 +13,14 @@
 #include "kiwi_lines.h"
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_units.h"
+#include "kiwi_vec.h"
 
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <vector>
-
-// 0x25d5a74: g_nUpdateBits, the ported editor update mask.
-extern int  Sys_Printf( const char *fmt, ... );
-extern int  g_nUpdateBits;
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
@@ -33,7 +30,7 @@ namespace
 
     const kiwiNumField_t KFIL_FIELDS[1] = { { "radius", KNUM_LENGTH, false } };
 
-    const float KFIL_PI = 3.14159265358979323846f;
+    const float KFIL_PI = (float)KIWI_PI;
 
     // Plane-space duplicate tests share the construction solver's fixed weld.
     const float KFIL_WELD_2D = KCON_WELD_2D;
@@ -442,6 +439,8 @@ namespace
             o.plane  = m_plane;                       // a SEED; KiwiCon_Add refits
             o.pts    = m_preview;
             o.closed = m_closed;
+            o.group  = src->group;                    // KIWI: the replacement keeps its group / name
+            o.name   = src->name;
 
             // Add validates its normalized copy after RemoveAt; retain recovery output.
             KiwiCon_UndoPush();
@@ -452,6 +451,7 @@ namespace
                             "original has been removed; press Ctrl+Z.\n" );
             else
             {
+                KiwiConSel_SelectObjects( &added, 1 );   // KIWI: the rounded chain stays selected
                 char b[32];
                 KiwiUnits_Format( b, sizeof( b ), m_radius );
                 char skips[192];

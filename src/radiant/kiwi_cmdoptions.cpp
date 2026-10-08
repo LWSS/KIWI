@@ -9,6 +9,7 @@
 #include "kiwi_cmdoptions.h"
 #include "kiwi_command.h"
 #include "kiwi_numeric.h"
+#include "kiwi_ported.h"
 #include "kiwi_units.h"
 
 #include <imgui/imgui.h>
@@ -17,7 +18,6 @@
 #include <stdio.h>
 
 extern bool ImGuiShell_CameraImageRect( float *x, float *y, float *w, float *h );  // imgui_shell.cpp
-extern int  g_nUpdateBits;                                                         // engine_stubs.cpp:773
 
 namespace
 {
@@ -227,7 +227,11 @@ void KiwiCmdOpts_Draw()
             float world = 0.0f;
             if ( !cmd->NumericFieldValue( o.field, &world ) )
                 break;
-            float shown = Units_ToDisplay( world );
+            // KIWI: only a length shows in display units; a factor / count / angle is its own value.
+            const kiwiNumField_t *defs = 0;
+            const int nDefs = cmd->NumericFields( &defs );
+            const bool length = ( o.field >= nDefs || !defs ) || defs[o.field].kind == KNUM_LENGTH;
+            float shown = length ? Units_ToDisplay( world ) : world;
             ImGui::SetNextItemWidth( -1.0f );
             BeforeNumeric( i );
             if ( ImGui::SliderFloat( "##n", &shown, o.lo, o.hi, "%.2f",

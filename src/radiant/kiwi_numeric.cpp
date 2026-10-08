@@ -10,6 +10,7 @@
 #include "kiwi_command.h"
 #include "kiwi_hints.h"     // Shared HUD band and hint visibility.
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_snap.h"
 #include "kiwi_str.h"        // Shared ASCII case fold.
 #include "kiwi_transform.h"  // Transform-gizmo activity queries.
@@ -18,9 +19,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// File scope avoids MSVC namespace-linkage mismatches.
-extern int Sys_Printf( const char *fmt, ... );                          // win_qe3.cpp:118
 
 namespace
 {
@@ -587,7 +585,6 @@ const char *KiwiNum_TextField( int field )
 
 bool  KiwiNum_Has()        { return KiwiNum_HasField( FocusedField() ); }
 bool  KiwiNum_HasValue()   { return KiwiNum_HasValueField( FocusedField() ); }
-float KiwiNum_ValueWorld() { return KiwiNum_ValueWorldField( FocusedField() ); }
 const char *KiwiNum_Text() { return KiwiNum_TextField( FocusedField() ); }
 
 // HUD

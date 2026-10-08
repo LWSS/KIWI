@@ -5,12 +5,10 @@
  *
  *****************************************************************************/
 #include "cod4map.h"
-#include <assert.h>
 
 #define QDECL __cdecl
 #define LittleShort
 #define LittleLong
-#define iassert assert
 
 static FILE *ZipFileOpen(const char *path)
 {

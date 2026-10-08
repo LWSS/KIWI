@@ -45,7 +45,7 @@ bool XYWnd_OverlayIsLive();
 // Every field keeps its CXYWnd member NAME so the handler / draw / clipper bodies are
 // unchanged (verbatim) after the sweep — only the pointer TYPE changed (CXYWnd* → xywndState_t*).
 //   m_hWnd   = the view's window handle, standing in for CWnd::m_hWnd / GetSafeHwnd() (the
-//              clipper capture tests and CreateEntityFromClassname's GetClientRect need it).
+//              clipper capture tests need it).
 //              Latched in XYWnd_OnCreate.
 // mainfrm.h still DECLARES all of these as CXYWnd members (U-GUARD deletes them with the class)
 // — see the unit report's dead-member list.

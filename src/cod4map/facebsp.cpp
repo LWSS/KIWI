@@ -15,19 +15,6 @@ float *splitCoplanarArray;
 float *splitMaxsArray;
 float *splitMinsArray;
 
-char s_assertDisable_SelectSplitPlane_BlockSubdivision;
-char s_assertDisable_SelectSplitPlane_BlockSubdivision;
-char s_assertDisable_SelectSplitPlane_BlockSubdivision;
-char s_assertDisable_SelectSplitPlane_DirectEval;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-char s_assertDisable_SelectSplitPlane_EvaluateAxes;
-
 
 /*
 ================
@@ -125,53 +112,6 @@ Face_t *CollectBrushWindings(Brush_t *brushList)
 
 /*
 ================
-CollectDetailWindings
-
-Collects winding references from detail brushes.
-Similar to CollectBrushWindings but filters for detail/non-structural brushes.
-Returns a linked list of winding references.
-================
-*/
-Face_t *CollectDetailWindings(Brush_t *brushList)
-{
-  Brush_t *b;
-  Face_t *f;
-  Face_t *list;
-  Winding_t *w;
-  int i;
-
-  list = NULL;
-
-  for ( b = brushList; b; b = b->next )
-  {
-    /* skip non-detail brushes (unless forced visible) */
-    if ( b->detail && !b->forceVisible )
-      continue;
-
-    for ( i = 0; i < b->numSides; i++ )
-    {
-      w = b->sides[i].visibleHull;
-      if ( !w )
-        continue;
-	
-      /* detail brushes only include sides with negative surface flags */
-      if ( b->detail && b->sides[i].shaderInfo->surfaceFlags >= 0 )
-        continue;
-
-      f = AllocFace();
-      f->next = list;
-      f->planenum = b->sides[i].planenum & ~1;
-      f->checked = 0;
-      f->w = CopyWinding(w);
-      list = f;
-    }
-  }
-
-  return list;
-}
-
-/*
-================
 ClassifyWindingAgainstPlane
 
 Determines how a winding relates to a split plane.
@@ -209,25 +149,6 @@ int ClassifyWindingAgainstPlane(Face_t *face, float *planeNormal, float planeDis
 
   /* split */
   return 3;
-}
-
-/*
-================
-CheckPlaneAgainstAllWindings
-
-Checks if a plane produces any coplanar result against any winding in the list.
-================
-*/
-int CheckPlaneAgainstAllWindings(float *planeNormal, Face_t *list, int axis)
-{
-  Face_t *f;
-
-  for ( f = list; f; f = f->next )
-  {
-    if ( ClassifyWindingAgainstPlane(f, planeNormal, planeNormal[3], axis) == CLASSIFY_COPLANAR )
-      return 0;
-  }
-  return 1;
 }
 
 /*
@@ -274,8 +195,8 @@ void SelectSplitPlane_DirectEval(int *evalResult, Face_t *list, int axis)
         skip = 1;
         break;
       }
-      else if ( side != 0 && side != 1 )
-        Assert(g_assertsDisabled, s_assertDisable_SelectSplitPlane_DirectEval);
+      else
+        iassert( alwaysfails ); /* unknown ClassifyWindingAgainstPlane result */
     }
 
     if ( skip )

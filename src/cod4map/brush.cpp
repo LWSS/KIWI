@@ -9,40 +9,6 @@ Reconstructed from cod2map.exe by Rose.
 int *g_brushPoints = NULL;
 int  useOptimizedSplit;
 
-char g_assertArrayIndex;
-char g_assertBrushNeighbor_0;
-char g_assertBrushNeighbor_1;
-char g_assertBrushNeighbor_2;
-char g_assertBrushNeighbor_3;
-char g_assertBrushNeighbor_4;
-char g_assertBrushNeighbor_5;
-char g_assertBrushNeighbor_6;
-char g_assertBrushNeighbor_7;
-char g_assertBrushNeighbor_8;
-char g_assertBrush_0;
-char g_assertBrush_1;
-char g_assertBrush_2;
-char g_assertBrush_3;
-char g_assertBrush_5;
-char g_assertBrush_9;
-char g_assertBrush_10;
-char g_assertBrush_11;
-char g_assertBrush_12;
-char g_assertBrush_15;
-char g_assertBrush_16;
-char g_assertBrush_17;
-char g_assertBrush_18;
-char g_assertBrush_19;
-char g_assertBrush_20;
-char g_assertBrush_21;
-char g_assertBrush_22;
-char g_assertBrush_23;
-char g_assertBrush_24;
-char g_assertCapsuleHeight;
-char g_assertCapsuleRadius;
-char g_assertWindingNull;
-char g_assertWindingZero;
-
 
 /*
 ================
@@ -297,148 +263,6 @@ int BoundBrush(Brush_t *brush)
 
 /*
 ================
-ReplacePointInWinding
-
-Replaces a point in a winding polygon based on axis comparison.
-Used by AddPointToWinding when the new point lies on an edge.
-================
-*/
-void ReplacePointInWinding(Winding_t *winding, float *point, int axisI, int axisJ, int index0, int index1)
-{
-  long double diffI;
-  int axis;
-  double val0;
-  float *pt0;
-  float *pt1;
-  float diffJ;
-  float chosenDiff;
-
-  /* compute axis deltas */
-  diffI = winding->points[index1][axisI] - winding->points[index0][axisI];
-  diffJ = winding->points[index1][axisJ] - winding->points[index0][axisJ];
-
-  Assert(winding->points[index0][axisI] != winding->points[index1][axisI]
-      || winding->points[index0][axisJ] != winding->points[index1][axisJ], g_assertBrush_9);
-
-  /* pick the axis with the larger delta */
-  axis = axisJ;
-  chosenDiff = (float)diffI;
-  if ( fabs(diffJ) <= fabs(diffI) )
-  {
-    axis = axisI;
-    axisJ = axisI;
-  }
-  else
-  {
-    chosenDiff = diffJ;
-  }
-
-  val0 = winding->points[index0][axis];
-  pt0 = &winding->points[index0][axis];
-  pt1 = &winding->points[index1][axis];
-
-  /* decreasing order: index0 > index1 on chosen axis */
-  if ( chosenDiff <= 0.0 )
-  {
-    Assert(val0 > *pt1, g_assertBrush_11);
-    if ( point[axis] > *pt0 )
-    {
-      VectorCopy(point, winding->points[index0]);
-    }
-    else if ( point[axis] < *pt1 )
-    {
-      VectorCopy(point, winding->points[index1]);
-    }
-    return;
-  }
-
-  /* increasing order: index0 < index1 on chosen axis */
-  Assert(val0 < *pt1, g_assertBrush_10);
-  if ( point[axis] < *pt0 )
-  {
-    VectorCopy(point, winding->points[index0]);
-    return;
-  }
-  if ( point[axis] > *pt1 )
-  {
-    VectorCopy(point, winding->points[index1]);
-  }
-}
-
-/*
-================
-AddPointToWinding
-
-Inserts a new point into a winding polygon in the correct sorted position.
-Uses 2D signed area to find the best insertion edge.
-================
-*/
-void AddPointToWinding(float *newPoint, Winding_t *winding, int sortAxisX, int sortAxisY)
-{
-  double signedArea;
-  int bestIdx;
-  float minSignedArea;
-  int i;
-
-  bestIdx = -1;
-  minSignedArea = FLT_MAX;
-  i = 0;
-
-  if ( winding->numpoints <= 0 )
-  {
-    Assert(0, g_assertBrush_12);
-  }
-  else
-  {
-    /* find the edge with the smallest signed area */
-    float newX = newPoint[sortAxisX];
-    float newY = newPoint[sortAxisY];
-    int numPts = winding->numpoints;
-    int prevIdx = numPts - 1;
-
-    do
-    {
-      float prevX = winding->points[prevIdx][sortAxisX];
-      float prevY = winding->points[prevIdx][sortAxisY];
-      float currX = winding->points[i][sortAxisX];
-      float currY = winding->points[i][sortAxisY];
-      signedArea = (double)(currY - newY) * prevX
-                 + (double)(newY - prevY) * currX
-                 + (double)(prevY - currY) * newX;
-
-      if ( minSignedArea > signedArea )
-      {
-        minSignedArea = (float)signedArea;
-        bestIdx = i;
-      }
-
-      prevIdx = i;
-      ++i;
-    }
-    while ( i < numPts );
-
-    if ( bestIdx < 0 )
-    {
-      Assert(0, g_assertBrush_12);
-    }
-  }
-
-  if ( minSignedArea < -PLANESIDE_EPSILON )
-  {
-    /* point is outside -- insert at best edge (KIWI FIX: memmove, the shift overlaps) */
-    memmove(winding->points[bestIdx + 1], winding->points[bestIdx], sizeof(vec3_t) * (winding->numpoints - bestIdx));
-    VectorCopy(newPoint, winding->points[bestIdx]);
-    ++winding->numpoints;
-  }
-  else if ( minSignedArea <= PLANESIDE_EPSILON )
-  {
-    /* point is on edge -- replace endpoint */
-    ReplacePointInWinding(winding, newPoint, sortAxisX, sortAxisY, (winding->numpoints + bestIdx - 1) % winding->numpoints, bestIdx);
-  }
-}
-
-/*
-================
 BrushVolume
 
 Calculates the volume of a brush by summing tetrahedra.
@@ -595,67 +419,6 @@ int IsTinyWinding(Winding_t *w)
     }
   }
   return 1;
-}
-
-/*
-================
-IsHugeWinding
-
-Returns true if the winding still has one of the points
-from basewinding for plane (outside MIN/MAX_WORLD_COORD).
-================
-*/
-int IsHugeWinding(Winding_t *w)
-{
-  int i, j;
-
-  for ( i = 0; i < w->numpoints; i++ )
-  {
-    for ( j = 0; j < 3; j++ )
-      if ( w->points[i][j] <= MIN_WORLD_COORD || w->points[i][j] >= MAX_WORLD_COORD )
-        return 1;
-  }
-  return 0;
-}
-
-/*
-================
-BrushMostlyOnSide
-
-Determines which side of a plane a brush is mostly on.
-Returns 1 (front) or 2 (back).
-================
-*/
-int BrushMostlyOnSide(Brush_t *brush, volatile float *plane)
-{
-  int i, j;
-  Winding_t *w;
-  vec_t d, max;
-  int side;
-
-  max = 0;
-  side = PSIDE_FRONT;
-  for ( i = 0; i < brush->numSides; i++ )
-  {
-    w = brush->sides[i].winding;
-    if ( !w )
-      continue;
-    for ( j = 0; j < w->numpoints; j++ )
-    {
-      d = DotProduct201(w->points[j], plane) - plane[3];
-      if ( d > max )
-      {
-        max = d;
-        side = PSIDE_FRONT;
-      }
-      if ( -d > max )
-      {
-        max = -d;
-        side = PSIDE_BACK;
-      }
-    }
-  }
-  return side;
 }
 
 /* KIWI FIX: BrushSideStillBounds runs while keep is set - around both world trees'
@@ -1926,10 +1689,10 @@ int BrushToPoints(
         if ( PlaneIntersection3(stk.planePointers, stk.intersectPoint) )
         {
           // KIWI (2026-10-05, load/save gauntlet): noise-only, as the editor (radiant brush.cpp
-          // CM_ForEachBrushPlaneIntersection, 0.001).  SNAP_EPSILON (0.01) moved every corner
+          // CM_ForEachBrushPlaneIntersection, 0.001).  The stock 0.01 moved every corner
           // within 0.01 of the quarter grid onto it - a rotated trim's -443.508 corner was drawn
           // and bounded at -443.5 in game while the editor showed -443.508.
-          SnapPlaneIntersection(stk.planePointers, stk.intersectPoint, SNAP_GRID_SIZE, 0.001f);
+          SnapPlaneIntersection(stk.planePointers, stk.intersectPoint, SNAP_GRID_SIZE, SNAP_EPSILON);
           stk.pointCount = addPointFn(brush, sides, numSides, capsuleRadius, capsuleHalfHeight,
                                       stk.storedPlaneIdx, checkBevel, stk.intersectPoint, stk.pointCount);
         }
@@ -2320,12 +2083,7 @@ int RemoveRedundantBrushPlanes(Brush_t *brush, Brush_t **neighbors, int numNeigh
          qfalse,
          AddBrushPointCapsule);
 
-  /* assert: need at least 4 points for a valid brush */
-  if ( numPoints < MIN_BRUSH_POINTS && !g_assertBrush_21 )
-  {
-    va("%s\n", "(ptCount >= 4)", numPoints);
-    Assert(0, g_assertBrush_21);
-  }
+  vassert( numPoints >= MIN_BRUSH_POINTS, "ptCount %i", numPoints );
 
   /* count how many points touch each side */
   numSides = brush->numCollisionSides;
@@ -2396,12 +2154,7 @@ int RemoveRedundantCollisionPlanes(Brush_t *brush, Brush_t **neighbors, int numN
   /* if collision sides are inline (same as brush sides), separate them */
   if ( brush->collisionSides == brush->sides )
   {
-    if ( brush->numCollisionSides != brush->numSides && !g_assertBrush_22 )
-    {
-      va("%i !", brush->numCollisionSides, brush->numSides);
-      va("%s\n\t%s", "brush->collisionSideCount == brush->sideCount", 0);
-      Assert(0, g_assertBrush_22);
-    }
+    vassert( brush->numCollisionSides == brush->numSides, "%i != %i", brush->numCollisionSides, brush->numSides );
     collSides = malloc(sizeof(BrushSide_t) * brush->numCollisionSides);
     memcpy(collSides, brush->sides, sizeof(BrushSide_t) * brush->numCollisionSides);
     brush->collisionSides = collSides;

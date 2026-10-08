@@ -27,7 +27,9 @@
 #include "kiwi_command.h"
 #include "kiwi_selection.h"
 #include "kiwi_hover.h"
+#include "kiwi_ported.h"
 #include "kiwi_uv.h"                 // KiwiUv_FaceTexdef — THE per-face texdef accessor
+#include "kiwi_vec.h"
 #include "kiwi_windows.h"
 
 // Include order mirrors kiwi_skybox.cpp:33-39, the other KIWI TU that walks a Material's
@@ -44,28 +46,11 @@
 #include <vector>
 
 // Ported/cross-file entry points, verified against their definitions.
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
-
-// Copied from brush.cpp:1736-1749. The pointer-as-int parameters preserve the binary's
-// usercall convention (texturevecs.cpp:94-101, 195-221).
-extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                               const float *uvBase, float sizeX, float sizeY );       // texturevecs.cpp:101  void Face_MoveTexture(int,const float*,int,int,float,float)
-extern void texturevecs_02( float *surfDef, float *uvVecs, float v5, const float *normal,
-                             float dist, float *arg6, float *arg7, float *arg8 );     // texturevecs.cpp:219  void texturevecs_02(int,int,float,int,float,int,int,int)
+extern void texturevecs_02_exact( float *outSize, const double *texMat, const float *planeNormal,
+                                  double planeDist, float *outShift, float *outRotate,
+                                  float *outCrossterm );                               // texturevecs.cpp
 
 extern void        TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef );  // materialdef.cpp:377  void TexMatToFakeTexCoords(MaterialDef*,texdef_sub_t*)
-extern void        Brush_BuildWindings( brush_t *b, int bFull );             // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
-extern void        SetupVertexSelection();                                   // select.cpp:4617   void SetupVertexSelection()
-extern void        MarkMapModified();                                        // win_qe3.cpp:195   void MarkMapModified(void)
-extern void        sub_477D70( selbrush_t *b, const float *mat );            // brush.cpp:205     void sub_477D70(selbrush_t*,const float*)
-extern float       world_orient_matrix[4][3];                                // entity.cpp:312    float world_orient_matrix[4][3]
-
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );       // materialdef.cpp:168  qtexture_s *MaterialDef_GetLayeredMaterial(MaterialDef*)
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp:159  LayerMaterialDef *Materialdef_GetName(MaterialDef*)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
 
 // Patch_ShiftTexture(p, 0, 0) supplies the ported rebuild tail after direct ST writes:
 // dirty layer 1, free curveDef, Patch_GenericMesh2, and increment version (pmesh.cpp:3241-3246).
@@ -79,7 +64,7 @@ namespace
     const float KUVE_EPS        = 1.0e-6f;
     const int   KUVE_MAX_WINDING = 64;   // EdLayerGeom's own cap (qe3.h:216) — brush faces
                                          // are convex, so 64 points is ample.
-    const float KUVE_PI         = 3.14159265358979323846f;
+    const float KUVE_PI         = (float)KIWI_PI;
 
     // Sampling texture luma would lock a GPU surface every frame. The dim background makes
     // this fixed light palette readable without owning or reading back a D3D resource.
@@ -1336,14 +1321,14 @@ namespace
         MarkMapModified();
         ++def->version;
         if ( node )
-            sub_477D70( node, (const float *)world_orient_matrix );
+            Brush_CheckBuildFaceVis( node, (const float *)world_orient_matrix );
     }
 
     // Transform the gesture-start texdef matrix, then use the binary's inverse decomposition.
     void TransformFace( face_t *fd, const texdef_sub_t *td0, const uvXform_t &A,
                         texdef_sub_t *out )
     {
-        // A singular affine collapses a texture axis; texturevecs_02 would divide by its
+        // A singular affine collapses a texture axis; the decomposition would divide by its
         // zero row length. Refuse that frame and let the next rebuild use the snapshot.
         const float det = A.m[0] * A.m[4] - A.m[1] * A.m[3];
         if ( fabsf( det ) < 1.0e-6f )
@@ -1355,24 +1340,18 @@ namespace
         float m0[8];
         BuildTexMat( td0, fd->plane.normal, m0 );
 
-        float m[8];
+        // The affine in double, decomposed exactly (only float noise snaps).
+        double m[8];
         for ( int k = 0; k < 3; ++k )
         {
-            m[k]     = A.m[0] * m0[k] + A.m[1] * m0[4 + k];
-            m[4 + k] = A.m[3] * m0[k] + A.m[4] * m0[4 + k];
+            m[k]     = (double)A.m[0] * m0[k] + (double)A.m[1] * m0[4 + k];
+            m[4 + k] = (double)A.m[3] * m0[k] + (double)A.m[4] * m0[4 + k];
         }
-        m[3] = A.m[0] * m0[3] + A.m[1] * m0[7] + A.m[2];
-        m[7] = A.m[3] * m0[3] + A.m[4] * m0[7] + A.m[5];
+        m[3] = (double)A.m[0] * m0[3] + (double)A.m[1] * m0[7] + A.m[2];
+        m[7] = (double)A.m[3] * m0[3] + (double)A.m[4] * m0[7] + A.m[5];
 
-        // texturevecs_02 consumes m as scratch and writes size/shift/rotate/crossterm byref.
-        // Call shape matches Face_TexLock_Reproject (brush.cpp:2978-2980); arg 3 is the
-        // ignored Hex-Rays x87 phantom.
-        texturevecs_02( (float *)&out->size[0], (float *)m,
-                        fd->plane.normal[2],
-                        (float *)fd->plane.normal, fd->plane.dist,
-                        (float *)&out->shift[0],
-                        (float *)&out->rotate,
-                        (float *)&out->crossterm );
+        texturevecs_02_exact( out->size, m, fd->plane.normal, fd->plane.dist,
+                              out->shift, &out->rotate, &out->crossterm );
     }
 
     // Exact translation: m3=-shift[0]/sx, so shift=shift0-d*size0, with the port's
@@ -3533,7 +3512,7 @@ namespace
     }
 
     // One-shot transforms use the gesture arithmetic: displayed A, conjugated per shape;
-    // faces use Face_MoveTexture/texturevecs_02 and patches use control ST. With no gesture
+    // faces use Face_MoveTexture/texturevecs_02_exact and patches use control ST. With no gesture
     // snapshot, each current shape state is td0. Faces and patches share one undo record.
     void ApplyAffineImmediate( const uvXform_t &A, const char *undoName )
     {
@@ -4049,12 +4028,7 @@ void KiwiUvEd_Draw()
     ImGui::End();
 }
 
-// Pure per-frame reads used by 3D overlay passes; see the header's scope contract.
-bool KiwiUvEd_InScope()
-{
-    return s_inScope;
-}
-
+// Pure per-frame read used by 3D overlay passes; see the header's scope contract.
 bool KiwiUvEd_OverlaySuppressed( const brush_t *def, int faceIndex )
 {
     if ( !s_inScope || !def )
@@ -4068,6 +4042,20 @@ bool KiwiUvEd_OverlaySuppressed( const brush_t *def, int faceIndex )
         return false;
     }
     return HaveFace( const_cast< brush_t * >( def ), faceIndex );
+}
+
+// Test hook (kiwi_testprobe "uv_affine"): the toolbar's Rot / Flip path on the current
+// selection - gather, target everything, pivot at the target box centre, apply [a b; c d].
+bool KiwiUvEd_TestAffine( float a, float b, float c, float d )
+{
+    Gather();
+    TargetAll();
+    s_originUser = false;
+    AutoPivot();
+    if ( !AnythingSelected() )
+        return false;
+    ApplyAffineImmediate( XfAboutOrigin( a, b, c, d, s_originU, s_originV ), "uv test affine" );
+    return true;
 }
 
 // Command palette.

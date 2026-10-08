@@ -463,7 +463,11 @@ bool KiwiCmd_SnapEngaged();
 // Ctrl held - the physical key, or (test modes) the harness's injected modifiers.
 bool KiwiCmd_CtrlHeld();
 
-// KIWI (test modes): every KIWI modifier query (CurrentMods, KiwiCmd_CtrlHeld) returns
+// Any key held (GetAsyncKeyState).  Test modes: Shift / Alt / Ctrl come from the injected
+// mask and every other key reads as up.
+bool KiwiCmd_KeyHeld( int vk );
+
+// KIWI (test modes): every KIWI modifier query (CurrentMods, KiwiCmd_KeyHeld) returns
 // `mods` (Shift=1 Alt=2 Ctrl=4 Win=8) instead of the keyboard; -1 = off.  A hidden test
 // instance must not read keys the user holds while typing elsewhere.
 void KiwiCmd_SetTestMods( int mods );

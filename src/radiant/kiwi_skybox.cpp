@@ -9,6 +9,7 @@
 #include "kiwi_skybox.h"
 #include "kiwi_camera.h"            // orbit pivot used by the see-through depth test
 #include "kiwi_command.h"
+#include "kiwi_ported.h"
 #include "kiwi_str.h"                // KiwiStr_ContainsNoCase
 #include "kiwi_texcache.h"           // by-name texture cache
 #include "kiwi_texgrave.h"           // deferred release (the face combo)
@@ -31,39 +32,14 @@
 #include <vector>
 
 // Ported and cross-file entry points; source anchors match their definitions.
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118   int Sys_Printf(const char*,...)
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp:773  int g_nUpdateBits
-extern camera_s   *Ed_Camera();                                              // camwnd.cpp:161    camera_s *Ed_Camera()
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );   // brush.cpp:465     brush_t *Brush_Alloc(const void*,eclass_t*)
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510  void Brush_Create(float*,float*,brush_t*,eclass_t*)
-extern void        Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp:1434    void Brush_BuildWindings(brush_t*,int)
-extern void        Select_Deselect( int a1 );                                // select.cpp:1444   void Select_Deselect(int)
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358  bool Radiant_RegisterCommand(const char*,byte,byte,int)
-// Static editor helpers are exported through their owning translation units.
-extern void        Ed_EnsureCurrentMaterial_Kiwi();                          // xywnd.cpp:1605    void Ed_EnsureCurrentMaterial_Kiwi()
-// Reuses the ported Entity_LinkBrush -> Brush_AddToList -> Brush_AddToList2 landing funnel.
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                      // kiwi_extrude.cpp:2360  selbrush_t *KiwiExtrude_LandDef(brush_t*)
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp:796   ImGuiID ImGuiShell_DockRoot()
-// Entity_Create allocates a new group only while every selected brush is world-owned.
-extern eclass_t   *Eclass_ForName( int hasBrushes, const char *name );       // eclass.cpp:1096   eclass_t *Eclass_ForName(int,const char*)
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1629   entity_s *Entity_Create(eclass_t*)
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:212  void SetKeyValue(entity_s_def*,const char*,const char*)
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:663      void Undo_SetIdForEntity(entity_s_def*)
-// Entity-definition sentinel and epair lookup support unique SkyBox targetnames.
-extern entity_s    entities;                                                 // entity.cpp 0x23F17A0 — entity-DEF list sentinel
-extern bool        Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp:520  bool Entity_HasEpairMatch(entity_s*,const char*,const char*)
 // texwnd_s is TU-local, so enumeration and application stay behind accessors.
 extern int         TexWnd_MaterialCount();                                   // texwnd.cpp:2562   int TexWnd_MaterialCount()
 extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp:2564   qtexture_s *TexWnd_MaterialAt(int)
 extern void        TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out );  // texwnd.cpp:2564   void TexWnd_MaterialDefFor(qtexture_s*,MaterialDef*)
 extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp:1263   void TexWnd_ApplyMaterialAtIndex(int)
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:314    qtexture_s *Texture_GetHandle(const char*)
 extern void        Prefs_SavePrefs( prefData_t *p );                         // prefs.cpp:216     void Prefs_SavePrefs(prefData_t*)
 // Undo operation names must be string literals because the record stores the pointer.
-
-// Ported brush-list sentinels; selected brushes remain part of map and sky walks.
-extern selbrush_t  active_brushes;                                           // map.cpp (0x23F189C)
-extern selbrush_t  selected_brushes;                                         // map.cpp (0x23F1864)
 
 namespace
 {

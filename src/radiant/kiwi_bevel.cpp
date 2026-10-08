@@ -15,6 +15,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"           // bevel command implementation
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -28,32 +29,13 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
-extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-
 extern face_t      *Face_Alloc( brush_t *b, face_t *f );                      // brush.cpp:304  0x471500
-extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 extern brush_t     *Brush_Clone( brush_t *def );                              // brush.cpp:729  0x475D20
-extern void         Brush_Free_R( brush_t *def );                             // brush.cpp:706  0x475AF0
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
-extern void         Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:445 0x484FC0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1444 0x48E800 (int, NOT char — mangling)
-extern void         Select_Delete();                                          // select.cpp:1520 0x48E9A0
 
-extern void         Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp:4054
-
-// texturevecs.cpp: texdef -> 2x4 world texture matrix (0x45A1C0) and its inverse (0x459CC0).
-extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                              const float *uvBase, float rotate, float crossterm );
-extern void texturevecs_02( float *outSize, float *texMatPtr, float st1_phantom,
-                            const float *planeNormalPtr, float planeDist,
-                            float *outShift, float *outRotate, float *outCrossterm );
-
-// Keep at file scope; a block-scope declaration inside the anonymous namespace
-// receives incompatible MSVC linkage.
-extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                             int commandId );                 // mainfrm.cpp:1340
+// texturevecs.cpp: the inverse of Face_MoveTexture (0x459CC0).
+extern void texturevecs_02_exact( float *outSize, const double *texMat, const float *planeNormal,
+                                  double planeDist, float *outShift, float *outRotate,
+                                  float *outCrossterm );
 
 namespace
 {
@@ -65,13 +47,6 @@ namespace
 
     const float KBV_COL_OK[3]    = { 0.55f, 0.85f, 1.00f };
     const float KBV_COL_BAD[3]   = { 1.00f, 0.30f, 0.25f };
-
-    inline bool PointNear( const float *a, const float *b, float tol )
-    {
-        float d[3];
-        Sub3( a, b, d );
-        return fabsf( d[0] ) <= tol && fabsf( d[1] ) <= tol && fabsf( d[2] ) <= tol;
-    }
 
     // Mirrors kiwi_transform.cpp's ray/plane test.
     bool RayPlane( const ray_t &ray, const float *pt, const float *n, float *out )
@@ -864,8 +839,8 @@ void KiwiBevel_BiasedNormal( const kiwiBevelEdge_t &e, float out[3] )
 // in-plane gradients, those are turned about the line the two planes share by the angle
 // between the normals, and the offset is chosen so both faces agree along that line.
 // Texel density is the source face's, the pattern runs on across the edge, and the chamfer
-// simply shows more of it.  texturevecs_02 (the binary's own inverse of Face_MoveTexture)
-// turns the result back into size / shift / rotate / crossterm for the chamfer's axis.
+// simply shows more of it.  texturevecs_02_exact (the inverse of Face_MoveTexture) turns
+// the result back into size / shift / rotate / crossterm for the chamfer's axis.
 static void KiwiBevel_UnfoldTexdefs( face_t *nf, const face_t *src, const float *nB, float dB )
 {
     const float *nF = src->plane.normal;
@@ -893,7 +868,7 @@ static void KiwiBevel_UnfoldTexdefs( face_t *nf, const face_t *src, const float 
             p0[k] = nF[k] * a + nB[k] * b;
     }
 
-    for ( int ch = 0; ch < 3; ++ch )            // the three projected channels (Face_TexLock_Save)
+    for ( int ch = 0; ch < 3; ++ch )            // the three projected channels, as Face_TexLockPointsSave walks them
     {
         MaterialDef *md = &nf->mtldef[ch];
         if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
@@ -928,7 +903,10 @@ static void KiwiBevel_UnfoldTexdefs( face_t *nf, const face_t *src, const float 
             continue;
 
         texdef_sub_t res = *td;                 // sample_size rides along untouched
-        texturevecs_02( res.size, out, 0.0f, nB, dB, res.shift, &res.rotate, &res.crossterm );
+        double tm[8];
+        for ( int k = 0; k < 8; ++k )
+            tm[k] = out[k];
+        texturevecs_02_exact( res.size, tm, nB, dB, res.shift, &res.rotate, &res.crossterm );
 
         bool finite = true;
         const float chk[6] = { res.size[0], res.size[1], res.shift[0], res.shift[1],

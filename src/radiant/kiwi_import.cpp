@@ -13,6 +13,7 @@
 #include "kiwi_import.h"
 #include "kiwi_iwi.h"
 #include "kiwi_matwriter.h"
+#include "kiwi_ported.h"
 #include "kiwi_texgrave.h"          // deferred release / deferred reload
 
 #include <gfx_d3d/r_image.h>
@@ -25,9 +26,6 @@
 #include <vector>
 
 // Ported/cross-file entry points.
-extern int  Sys_Printf( const char *fmt, ... );                                          // win_qe3.cpp:118
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-extern int  g_nUpdateBits;                                                               // engine_stubs.cpp:773
 // texwnd.cpp exposes no public header for these accessors.
 extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );                    // texwnd.cpp:601
 extern bool        TexWnd_MakeMaterialCurrentByName( const char *name );                 // texwnd.cpp:792
@@ -957,6 +955,24 @@ void KiwiImport_Draw()
     // Import at most one batch item per frame to keep pumping messages.
     if ( s_batch && !s_queue.empty() )
     {
+        // KIWI: overwrite consent is per name, so a batch file whose material or images already
+        // exist drops back to the dialog (its Overwrite box) instead of overwriting silently;
+        // "Apply these settings to the remaining materials" there resumes the batch.
+        {
+            PlannedNames plan;
+            PlanNames( &plan );
+            bool exists = KiwiMat_ExistsOnDisk( s_name );
+            for ( int i = 0; i < SLOT_COUNT && !exists; ++i )
+                if ( plan.active[i] )
+                    exists = KiwiIwi_ExistsOnDisk( plan.image[i] );
+            if ( exists )
+            {
+                Sys_Printf( "Import: '%s' already exists - asking before overwriting it.\n", s_name );
+                s_batch       = false;
+                s_openRequest = true;
+                return;
+            }
+        }
         const std::string src = s_queue.front().path[SLOT_COLOR];
         char err[512];
         err[0] = '\0';

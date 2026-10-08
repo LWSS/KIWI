@@ -55,25 +55,10 @@ void CEntityWnd_SetInspectorMode( int mode );
 extern int inspector_mode;            // IDB 0x240a110 — the active inspector pane
 
 
-// Texture-bar height consumed at the top of the frame (0 when the bar isn't up).
-extern int g_texBarHeight;
 
-
-// surfacedlg.cpp entry points (menu open + selection/load refresh).
-void Surf_OpenInspector();      // DoSurface (0x4585d0) — open/show the inspector
+// surfacedlg.cpp entry point (selection/load refresh).
 void Surf_UpdateInspector();    // UpdateSurfaceDialog (0x458590) — refresh fields on change
 
-
-// ─── CEntityListDlg — the Entity List browser (entitylist.cpp / EntityListDlg::*) ─
-// Edit→Entity Info... (menu 32787 → CMainFrame::OnEditEntityinfo 0x426D6F).  A tree of
-// every map entity grouped by classname (SysTreeView32 id 1022) + a Key/Value list for
-// the selected entity (SysListView32 id 1025); selecting/double-clicking a leaf selects
-// that entity's brushes in the views.  The binary is a MODAL CDialog (template
-// IDD_DLG_ENTITYLIST=129); radiant.rc has no template, so it is HAND-BUILT (the CMapInfo
-// pattern) and re-populated per open.  The class itself is private to entitylist.cpp; only
-// the open function is exposed.
-// (EntList_Open retired with U-RIP — Edit→Entity Info routes to the ImGui entity panel
-//  until the entity-list dock tab lands)
 
 
 // DoColor (win_dlg.cpp, IDB 0x499350) — the Colors-menu colour picker.  Seeds a CColorDialog

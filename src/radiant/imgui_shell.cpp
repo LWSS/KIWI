@@ -31,6 +31,7 @@
 #include <universal/profile.h>
 #include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
 #include "kiwi_perf.h"             // KiwiPerf: per-stage frame timers (the "KiwiPerf" HUD)
+#include "kiwi_ported.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <string>
@@ -91,8 +92,6 @@ static const char *DockIniPath()
     }
     return s_path;
 }
-
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
 
 // ── KIWI-UX (CLEANUP, C-9): retire the previous versions' dock inis ────────────
 // The layout-migration mechanism is "change the filename", so every superseded
@@ -355,16 +354,17 @@ static float         s_wheel[RTT_COUNT];          // wheel delta captured DURING
                                                   // io.MouseWheel (imgui.cpp:6442); the post-present
                                                   // dispatch would otherwise always see 0.
 
-// Camera-image mousespace for the terrain-paint cursor ring (see ImGuiShell_CameraPaintCursor).
+// Camera-image mousespace for the camera tools' picks (see ImGuiShell_CameraPaintCursor).
 static bool          s_camMouseOver = false;
 static int           s_camMouseX = 0, s_camMouseY = 0;   // image-relative, top-left origin
 static int           s_camImgW = 0, s_camImgH = 0;
 static rttViewport_t s_lastRefViewport = RTT_COUNT;
 static int           s_lastRefX = 0, s_lastRefY = 0;
 
-// Bridge for CamWnd_Draw's terrain-paint brush ring: the cursor position + size RELATIVE to the
-// camera RTT image (the 3D viewport panel). Returns false when the cursor isn't over the camera
-// image (so the ring isn't drawn), replacing the old ScreenToClient on the hidden native child.
+// The cursor position + size RELATIVE to the camera RTT image (the 3D viewport panel), for the
+// camera tools' picks (kiwi_pick / kiwi_uv / kiwi_command ...; it began as the bridge for the
+// removed terrain-paint ring). Returns false when the cursor isn't over the camera image,
+// replacing the old ScreenToClient on the hidden native child.
 bool ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h )
 {
     if ( !s_camMouseOver )
@@ -1350,12 +1350,6 @@ void ImGuiConsole_Append( const char *s )
     s_conScrollToBottom = true;
 }
 
-void ImGuiConsole_Clear()
-{
-    s_conText.clear();
-    s_conScrollToBottom = true;
-}
-
 static void ImGuiShell_DrawConsoleTab( HWND child )
 {
     s_consoleHwnd = child;      // ImGui owns the console now — the native EDIT stays hidden
@@ -1412,7 +1406,6 @@ void ImGuiShell_RenderViewportsToRT()
     // (b) the flag is checked here as well, so even a stale size can never resurrect a
     // hidden viewport.  The CAMERA has no flag — it is always rendered.
     {
-        extern int g_nUpdateBits;
         KiwiPerf_TickBegin( g_nUpdateBits );
         KiwiPerfScope perf( KPERF_CAMERA );
         CamWnd_RenderToRT( s_cellW[RTT_CAMERA],  s_cellH[RTT_CAMERA] );

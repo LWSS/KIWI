@@ -31,6 +31,8 @@
 #include "kiwi_lines.h"
 #include "kiwi_modelbrowser.h"      // KiwiModelBrowser_RequestRefresh after a build
 #include "kiwi_modelimport.h"
+#include "kiwi_ported.h"
+#include "kiwi_vec.h"
 #include "kiwi_windows.h"
 #include "radiant_frame.h"          // Radiant_RegisterCommand
 #include "radiant_rtt.h"            // RTT_BeginPreview / RTT_EndPreview / RTT_PreviewTexture
@@ -48,15 +50,7 @@
 #include <string>
 #include <vector>
 
-extern int  Sys_Printf( const char *fmt, ... );
-extern char Byte4PackPixelColor( float *from, GfxColor *out );                     // 0x402ac0
-extern void R_SortMaterials();                                                     // r_ed_scene.cpp:2118
 extern int  __cdecl R_Ed_CmdBufferHeadroom();                                      // r_rendercmds.cpp
-extern void __cdecl R_AddRenderCmdDrawTris(
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-    const float ( *st )[2] );
 
 namespace ki = kimport;
 namespace fs = std::filesystem;
@@ -71,7 +65,7 @@ namespace
     const float KMI_ZOOM_STEP = 0.85f;            // distance factor per wheel notch
     const float KMI_GHOST_A   = 0.30f;            // "Ghost" model alpha
     const float KMI_HULL_A    = 0.20f;            // hull face fill alpha
-    const float KMI_DEG2RAD   = 0.017453292f;
+    const float KMI_DEG2RAD   = (float)KIWI_DEG2RAD;
     // One R_AddRenderCmdDrawTris command must stay under 64 KB: GfxCmdHeader::byteCount
     // is a uint16_t that R_GetCommandBuffer stores unchecked, and the backend walks the
     // list by it, so a bigger command corrupts the stream.  The backend tess also caps a

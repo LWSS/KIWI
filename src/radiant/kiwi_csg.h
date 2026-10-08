@@ -21,7 +21,7 @@
 //
 // Command gates:
 //   Hollow (mainfrm.cpp 0x425570): exactly one non-patch, non-fixed brush; the
-//     core additionally skips xx5 instances.
+//     core additionally skips xx5 instances, and so does KiwiCsg_CanHollow.
 //   Merge: at least two non-patch, non-fixed brushes under one owner.
 //   Auto Caulk: at least one selected instance.
 

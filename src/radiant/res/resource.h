@@ -98,10 +98,6 @@
 // Brush→Primitives sides dialog (IDD_ARBITRARY_SIDES=113 exists; its edit-control ID
 // IDC_ARB_SIDES_IN was not reconstructed — invented here in the custom 5000+ range).
 #define IDC_ARB_SIDES_IN                                   5003
-// AdvPatchEditDlg (terrain-paint) — hand-built minimal template (binary IDD parked); its
-// control IDs ARE the binary's (1424-1474) so the ported sub_401DB0/sub_43E6F0 GetDlgItem
-// reads work.  The drives are g_curveEditCtrls (radii/strength) + the channel/mode reads.
-#define IDD_ADVPATCHEDIT                                   5010
 #define IDD_MAP_INFO                                       128
 #define IDD_ENTITIES                                       129     
 #define IDD_NEW_PROJECT                                    131     

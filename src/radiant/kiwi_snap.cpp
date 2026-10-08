@@ -20,6 +20,7 @@
 #include "kiwi_grid.h"
 #include "kiwi_region.h"      // KREG_JOIN_DIST weld tolerance
 #include "kiwi_lines.h"
+#include "kiwi_ported.h"
 #include "kiwi_primitive.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
@@ -27,13 +28,6 @@
 
 #include <math.h>
 #include <stdio.h>
-
-// ── ported entry points (verified against their definitions) ────────────────
-extern camera_s *Ed_Camera();             // camwnd.cpp
-// Active-list sentinel at 0x23F189C. Read only while gathering brush-edge
-// directions incident to the drawing-tool anchor.
-extern selbrush_t active_brushes;
-extern entity_s *world_entity;
 
 namespace
 {
@@ -163,7 +157,7 @@ namespace
         float prev[3], pt[3];
         for ( int i = 0; i <= segs; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)( i % segs ) ) / (float)segs;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)( i % segs ) ) / (float)segs;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
             for ( int k = 0; k < 3; ++k )
@@ -177,7 +171,7 @@ namespace
         // Long diagonals visually fill the small polygon.
         for ( int i = 0; i < segs / 2; ++i )
         {
-            const float th = ( 6.283185307179586f * (float)i ) / (float)segs;
+            const float th = ( (float)( 2.0 * KIWI_PI ) * (float)i ) / (float)segs;
             const float cx = cosf( th ) * r;
             const float cy = sinf( th ) * r;
             float a[3], b[3];
@@ -460,7 +454,7 @@ namespace
             // The guide half-length is shortened until BOTH ends project — an axis
             // through a point near the eye plane runs behind the camera at full
             // length, and Pick_WorldToImage refuses those (as it must).
-            float ax, ay, bx, by;
+            float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
             float use = half;
             bool  ok  = false;
             for ( int tryI = 0; tryI < 3 && !ok; ++tryI )
@@ -683,7 +677,7 @@ namespace
         float a[3], b[3];
         ChainPoint( L, L.t0, a );
         ChainPoint( L, L.t1, b );
-        float ax, ay, bx, by, t;
+        float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f, t = 0.0f;
         const bool whole = Pick_WorldToImage( a, &ax, &ay ) && Pick_WorldToImage( b, &bx, &by );
         if ( whole && Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t ) > reach )
             return;
@@ -2056,7 +2050,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             const float len = sqrtf( du * du + dv * dv );
             if ( len > 1.0e-3f )
             {
-                const float rawDeg  = atan2f( dv, du ) * 57.29577951f;
+                const float rawDeg  = atan2f( dv, du ) * (float)KIWI_RAD2DEG;
                 float stopDeg = floorf( rawDeg / KCON_ANGLE_STEP + 0.5f )
                               * KCON_ANGLE_STEP;
                 float miss = rawDeg - stopDeg;
@@ -2078,7 +2072,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                         const float pu = Dot3( pd, cu ), pv = Dot3( pd, cv );
                         if ( sqrtf( pu * pu + pv * pv ) > 1.0e-3f )
                         {
-                            const float baseDeg = atan2f( pv, pu ) * 57.29577951f;
+                            const float baseDeg = atan2f( pv, pu ) * (float)KIWI_RAD2DEG;
                             const float rel     = floorf( ( rawDeg - baseDeg ) / KCON_ANGLE_STEP + 0.5f )
                                                 * KCON_ANGLE_STEP;
                             float rmiss = rawDeg - ( baseDeg + rel );
@@ -2104,7 +2098,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                     if ( wpp > 0.0f )
                     {
                         float deg = ( ( KSNAP_ANGLE_BAND_PIX * wpp ) / len )
-                                  * 57.29577951f;
+                                  * (float)KIWI_RAD2DEG;
                         if ( deg < KSNAP_ANGLE_BAND_MIN )
                             deg = KSNAP_ANGLE_BAND_MIN;
                         if ( deg < band )
@@ -2114,7 +2108,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
 
                 if ( miss <= band )
                 {
-                    const float rad = stopDeg * 0.01745329252f;
+                    const float rad = stopDeg * (float)KIWI_DEG2RAD;
                     float dirW[3];
                     for ( int k = 0; k < 3; ++k )
                         dirW[k] = cu[k] * cosf( rad ) + cv[k] * sinf( rad );
@@ -2172,7 +2166,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 {
                     float cu[3], cv[3];
                     KiwiCon_BearingBasis( cplane.normal, cu, cv );
-                    phi0 = atan2f( Dot3( cu, cplane.v ), Dot3( cu, cplane.u ) ) * 57.29577951f;
+                    phi0 = atan2f( Dot3( cu, cplane.v ), Dot3( cu, cplane.u ) ) * (float)KIWI_RAD2DEG;
                 }
 
                 float baseDeg = 0.0f;
@@ -2185,17 +2179,17 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                         const float rv = Dot3( refDir, cplane.v );
                         if ( sqrtf( ru * ru + rv * rv ) > 1.0e-3f )
                         {
-                            baseDeg      = atan2f( rv, ru ) * 57.29577951f - phi0;
+                            baseDeg      = atan2f( rv, ru ) * (float)KIWI_RAD2DEG - phi0;
                             s_angleIsRel = true;
                         }
                     }
                 }
 
-                const float rawDeg = atan2f( dv, du ) * 57.29577951f - phi0;
+                const float rawDeg = atan2f( dv, du ) * (float)KIWI_RAD2DEG - phi0;
                 float rel = rawDeg - baseDeg;
                 rel = floorf( rel / KCON_ANGLE_STEP + 0.5f ) * KCON_ANGLE_STEP;
                 const float deg = baseDeg + rel;                 // canonical degrees
-                const float rad = ( deg + phi0 ) * 0.01745329252f;
+                const float rad = ( deg + phi0 ) * (float)KIWI_DEG2RAD;
                 uv[0] = auv[0] + cosf( rad ) * len;
                 uv[1] = auv[1] + sinf( rad ) * len;
                 // Absolute label uses wrapped canonical degrees.
@@ -2631,7 +2625,7 @@ void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, flo
         const float length = sqrtf( length2 );
         float z = fabsf( delta[2] ) / length;
         if ( z > 1 ) z = 1;
-        const float tilt = acosf( z ) * 57.295779513f;
+        const float tilt = acosf( z ) * (float)KIWI_RAD2DEG;
         // A dotted world-up reference makes actual tilt visible independently
         // of perspective. It is intentionally not another snapping axis.
         if ( tilt > 0.05f )

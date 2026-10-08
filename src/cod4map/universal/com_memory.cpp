@@ -6,47 +6,10 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-intptr_t com_fileDataHashTable[FILE_DATA_HASH_SIZE];
-intptr_t com_hunkData;
-char     g_heapPool0[HEAP_POOL_SMALL];
-char     g_heapPool1[HEAP_POOL_SMALL];
-char     g_heapPool2[HEAP_POOL_LARGE];
-char     g_heapPool3[HEAP_POOL_LARGE];
-char     g_heapPool4[HEAP_POOL_LARGE];
-char     g_heapPool5[HEAP_POOL_LARGE];
-char     g_heapPool6[HEAP_POOL_LARGE];
-int      hunk_high_permanent;
 int      hunk_high_temp;
-int      hunk_low_permanent;
 int      hunk_low_temp;
 intptr_t s_hunkData;
 int      s_hunkTotal;
-
-char s_assertDisable_Hunk_AllocAlign;
-char s_assertDisable_Hunk_AllocAlign;
-char s_assertDisable_Hunk_AllocAlign;
-char s_assertDisable_Hunk_AllocAlign;
-char s_assertDisable_Hunk_AllocAlign;
-char s_assertDisable_Hunk_AllocLowAlign;
-char s_assertDisable_Hunk_AllocLowAlign;
-char s_assertDisable_Hunk_AllocLowAlign;
-char s_assertDisable_Hunk_AllocLowAlign;
-char s_assertDisable_Hunk_AllocLowAlign;
-char s_assertDisable_Hunk_AllocateTempMemory;
-char s_assertDisable_Hunk_AllocateTempMemory;
-char s_assertDisable_Hunk_CheckTempMemoryHigh;
-char s_assertDisable_Hunk_CheckTempMemoryHigh;
-char s_assertDisable_Hunk_CheckTempMemoryHigh;
-char s_assertDisable_Hunk_CheckTempMemoryLow;
-char s_assertDisable_Hunk_CheckTempMemoryLow;
-char s_assertDisable_Hunk_CheckTempMemoryLow;
-char s_assertDisable_Hunk_Clear;
-char s_assertDisable_Hunk_ClearTempMemory;
-char s_assertDisable_Hunk_FreeTempMemory;
-char s_assertDisable_Hunk_FreeTempMemory;
-char s_assertDisable_Hunk_PurgeFreeListRange;
-char s_assertDisable_CopyStringHunk;
-char s_assertDisable_Z_Free;
 
 
 /*
@@ -72,17 +35,7 @@ Reports Z_Malloc allocation failure — asserts and calls Com_Error
 */
 void Z_MallocFailed(size_t size)
 {
-  if ( !g_assertsDisabled )
-  {
-    int assertResult = AssertFailed(
-      va("Z_Malloc: failed to allocate %zu bytes", size),
-      SRCFILE,
-      __LINE__,
-      0,
-      1);
-    if ( !assertResult )
-      DebugBreak();
-  }
+  vassert( alwaysfails, "Z_Malloc: failed to allocate %zu bytes", size );
   Sys_Printf("Z_Malloc: failed to allocate %zu bytes\n", size);
   Com_ErrorLevel(0, "Z_Malloc: EXE_ERR_OUT_OF_MEMORY");
 }
@@ -106,97 +59,6 @@ void *Z_Malloc(size_t size)
   }
   Z_MallocFailed(size);
   return NULL;
-}
-
-/*
-================
-Hunk_FindDataForFileInternal_Lookup
-
-Looks up cached file data by hash index, type, and name
-================
-*/
-/* hunkFileEntry_t */
-typedef struct HunkFileEntry_s {
-    void                    *data;    /* [0] cached data pointer */
-    struct HunkFileEntry_s  *next;    /* [4] next in hash chain */
-    unsigned char            type;    /* [8] file type */
-    char                     name[1]; /* [9] file name (variable length) */
-} hunkFileEntry_t;
-
-void *Hunk_FindDataForFileInternal_Lookup(int hashIndex, int type, const char *name)
-{
-  hunkFileEntry_t *entry;
-
-  for ( entry = (hunkFileEntry_t *)com_fileDataHashTable[hashIndex]; entry; entry = entry->next )
-  {
-    if ( entry->type == type && !_stricmp(entry->name, name) )
-      return entry->data;
-  }
-  return 0;
-}
-
-/*
-================
-Hunk_PurgeFreeListRange
-
-Removes free list entries in [lowAddr, highAddr) range
-================
-*/
-void Hunk_PurgeFreeListRange(hunkFileEntry_t **listHead, uintptr_t highAddr, uintptr_t lowAddr)
-{
-  hunkFileEntry_t *entry;
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_PurgeFreeListRange);
-  while ( *listHead )
-  {
-    entry = *listHead;
-    if ( (uintptr_t)entry < lowAddr || (uintptr_t)entry >= highAddr )
-      listHead = &entry->next;
-    else
-      *listHead = entry->next;
-  }
-}
-
-/*
-================
-Hunk_ClearTempMemory
-
-Purges all temp memory entries from the free list hash table
-================
-*/
-void Hunk_ClearTempMemory()
-{
-  uintptr_t low, high;
-  int i;
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_ClearTempMemory);
-
-  low = (uintptr_t)(hunk_low_permanent + s_hunkData);
-  high = (uintptr_t)(s_hunkData + s_hunkTotal - hunk_high_permanent);
-
-  /* purge all hash buckets */
-  #define HUNK_HASH_SIZE 1024
-  for ( i = 0; i < HUNK_HASH_SIZE; i++ )
-    Hunk_PurgeFreeListRange((hunkFileEntry_t **)&com_fileDataHashTable[i], high, low);
-
-  Hunk_PurgeFreeListRange((hunkFileEntry_t **)&com_hunkData, high, low);
-}
-
-/*
-================
-Hunk_Clear
-
-Resets all hunk allocation counters (low/high permanent and temp) to zero
-================
-*/
-void Hunk_Clear()
-{
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_Clear);
-  hunk_low_permanent = 0;
-  hunk_low_temp = 0;
-  hunk_high_permanent = 0;
-  hunk_high_temp = 0;
-  Hunk_ClearTempMemory();
 }
 
 /*
@@ -305,38 +167,6 @@ void Hunk_FreeTempMemory(void *buf)
 
 /*
 ================
-Hunk_CheckTempMemoryLow
-
-Asserts low hunk temp equals permanent (no outstanding temp allocations)
-================
-*/
-void Hunk_CheckTempMemoryLow()
-{
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_CheckTempMemoryLow);
-  Assert(s_hunkData, s_assertDisable_Hunk_CheckTempMemoryLow);
-
-  Assert(!(hunk_low_temp != hunk_low_permanent), s_assertDisable_Hunk_CheckTempMemoryLow);
-}
-
-/*
-================
-Hunk_CheckTempMemoryHigh
-
-Asserts high hunk temp equals permanent (no outstanding temp allocations)
-================
-*/
-void Hunk_CheckTempMemoryHigh()
-{
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_CheckTempMemoryHigh);
-  Assert(s_hunkData, s_assertDisable_Hunk_CheckTempMemoryHigh);
-
-  Assert(!(hunk_high_temp != hunk_high_permanent), s_assertDisable_Hunk_CheckTempMemoryHigh);
-}
-
-/*
-================
 CopyStringHunk
 
 Allocates and copies a string (strdup variant with Com_Memset)
@@ -352,94 +182,4 @@ char *CopyStringHunk(const char *str)
   copy = (char *)Z_Malloc(len);
   strcpy(copy, str);
   return copy;
-}
-
-/*
-================
-Hunk_AllocAlign
-
-Allocates from high hunk end with specified alignment, growing downward
-================
-*/
-intptr_t Hunk_AllocAlign(unsigned int size, int alignment)
-{
-  int alignMask;
-  int newHighPerm;
-  intptr_t allocPtr;
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_AllocAlign);
-  Assert(s_hunkData, s_assertDisable_Hunk_AllocAlign);
-
-  if (alignment <= 0 || alignment > 4096 || (alignment & (alignment - 1)))
-    Com_ErrorLevel(1, "Invalid hunk alignment %i", alignment);
-  alignMask = alignment - 1;
-  Assert(((alignMask) & alignment) == 0, s_assertDisable_Hunk_AllocAlign);
-  #define HUNK_MAX_ALIGNMENT 4096
-  Assert(!(alignment > HUNK_MAX_ALIGNMENT), s_assertDisable_Hunk_AllocAlign);
-
-  Hunk_CheckTempMemoryHigh();
-
-  /* allocate from high end, growing downward */
-  if ((((size_t)hunk_high_permanent + size + alignMask) & ~(size_t)alignMask) > (size_t)(s_hunkTotal - hunk_low_temp))
-    Com_ErrorLevel(1, "Hunk_AllocAlign: hunk exhausted (%u bytes)", size);
-  newHighPerm = ~alignMask & (alignMask + size + hunk_high_permanent);
-  allocPtr = s_hunkData + s_hunkTotal - newHighPerm;
-  hunk_high_permanent = newHighPerm;
-  hunk_high_temp = newHighPerm;
-
-  if ( hunk_low_temp + newHighPerm > s_hunkTotal )
-    Com_ErrorLevel(1, "Hunk_AllocAlign failed on %i bytes (total %i MB, low %i MB, high %i MB)",
-      size, s_hunkTotal >> 20, hunk_low_temp >> 20, newHighPerm >> 20);
-
-  /* assert alignment */
-  Assert(!((allocPtr & alignMask)), s_assertDisable_Hunk_AllocAlign);
-
-  memset((void *)allocPtr, 0, size);
-  return allocPtr;
-}
-
-/*
-================
-Hunk_AllocLowAlign
-
-Allocates from low hunk end with specified alignment, growing upward.
-================
-*/
-intptr_t Hunk_AllocLowAlign(unsigned int size, int alignment)
-{
-  int alignMask;
-  int aligned, newLowPerm;
-  intptr_t allocPtr;
-
-  Assert(Sys_IsMainThread(), s_assertDisable_Hunk_AllocLowAlign);
-  Assert(s_hunkData, s_assertDisable_Hunk_AllocLowAlign);
-
-  if (alignment <= 0 || alignment > 4096 || (alignment & (alignment - 1)))
-    Com_ErrorLevel(1, "Invalid hunk alignment %i", alignment);
-  alignMask = alignment - 1;
-
-  /* assert power of two */
-  Assert(!(alignMask & alignment), s_assertDisable_Hunk_AllocLowAlign);
-  Assert(!(alignment > HUNK_MAX_ALIGNMENT), s_assertDisable_Hunk_AllocLowAlign);
-
-  Hunk_CheckTempMemoryLow();
-
-  /* allocate from low end, growing upward */
-  if ((((size_t)hunk_low_permanent + alignMask) & ~(size_t)alignMask) + size > (size_t)(s_hunkTotal - hunk_high_temp))
-    Com_ErrorLevel(1, "Hunk_AllocLowAlign: hunk exhausted (%u bytes)", size);
-  aligned = ~alignMask & (hunk_low_permanent + alignMask);
-  allocPtr = aligned + s_hunkData;
-  newLowPerm = size + aligned;
-  hunk_low_permanent = newLowPerm;
-  hunk_low_temp = newLowPerm;
-
-  if ( hunk_high_temp + newLowPerm > s_hunkTotal )
-    Com_ErrorLevel(1, "Hunk_AllocLowAlign failed on %i bytes (total %i MB, low %i MB, high %i MB)",
-      size, s_hunkTotal >> 20, newLowPerm >> 20, hunk_high_temp >> 20);
-
-  /* assert alignment */
-  Assert(!((allocPtr & alignMask)), s_assertDisable_Hunk_AllocLowAlign);
-
-  memset((void *)allocPtr, 0, size);
-  return allocPtr;
 }

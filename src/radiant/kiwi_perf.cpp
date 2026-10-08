@@ -10,11 +10,10 @@
 
 #include "kiwi_perf.h"
 #include "kiwi_hints.h"      // KiwiHud_BandTake - the bottom band
+#include "kiwi_ported.h"
 
 #include <stdio.h>
 #include <string.h>
-
-extern int Sys_Printf( const char *fmt, ... );
 
 namespace
 {
@@ -38,11 +37,6 @@ namespace
             QueryPerformanceFrequency( &s_freq );
         return (double)s_freq.QuadPart;
     }
-}
-
-bool KiwiPerf_Enabled()
-{
-    return s_enabled;
 }
 
 void KiwiPerf_Toggle()

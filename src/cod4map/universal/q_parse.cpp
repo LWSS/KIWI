@@ -15,13 +15,6 @@ char       *punctuation[15] =
   "&&", "||", "<=", ">=", "==", "!=", NULL
 };
 
-char s_assertDisable_Com_RestoreParserState;
-char s_assertDisable_Com_RestoreParserState;
-char s_assertDisable_Com_SaveParserState;
-char s_assertDisable_Com_SaveParserState;
-char s_assertDisable_ParseToken;
-
-
 /*
 ================
 Com_GetParseThreadInfo
@@ -197,48 +190,6 @@ void Com_UngetToken(void)
 
 /*
 ================
-Com_SaveParserState
-
-Saves the current parser state into a mark for later restoration
-================
-*/
-void Com_SaveParserState(const char **text, ComParseMark_t *mark)
-{
-  ParseInfo_t *pi;
-
-  pi = &g_parse.parseInfo[g_parseDepth];
-  Assert(text, s_assertDisable_Com_SaveParserState);
-  Assert(mark, s_assertDisable_Com_SaveParserState);
-  mark->lines = pi->lines;
-  mark->text = *text;
-  mark->ungetToken = (unsigned char)pi->ungetToken;
-  mark->backup_lines = pi->backup_lines;
-  mark->backup_text = pi->backup_text;
-}
-
-/*
-================
-Com_RestoreParserState
-
-Restores a previously saved parser state from a mark
-================
-*/
-void Com_RestoreParserState(const char **text, ComParseMark_t *mark)
-{
-  ParseInfo_t *pi;
-
-  pi = &g_parse.parseInfo[g_parseDepth];
-  Assert(text, s_assertDisable_Com_RestoreParserState);
-  Assert(mark, s_assertDisable_Com_RestoreParserState);
-  pi->lines = mark->lines;
-  *text = mark->text;
-  pi->ungetToken = mark->ungetToken != 0;
-  pi->backup_lines = mark->backup_lines;
-  pi->backup_text = mark->backup_text;
-}
-
-/*
-================
 Com_SkipWhitespace
 
 Advances past whitespace chars, tracking newlines
@@ -267,18 +218,6 @@ char *Com_SkipWhitespace(char *data, int *hasNewline)
     return 0;
   }
   return data;
-}
-
-/*
-================
-Com_GetCurrentParseLine2
-
-Returns the current line pointer (token position) rather than the line number
-================
-*/
-intptr_t Com_GetCurrentParseLine2(void)
-{
-  return (intptr_t)g_tokenPos;
 }
 
 /*
@@ -785,38 +724,6 @@ char *COM_Parse1DMatrix(char **parsePtr, int numElements, float *outArray)
     }
     token = ParseToken(parsePtr, 1);
     outArray[i] = (float)atof(token);
-  }
-  pi = &g_parse.parseInfo[g_parseDepth];
-  if ( pi->ungetToken )
-  {
-    pi->ungetToken = 0;
-    *parsePtr = (char *)pi->backup_text;
-    pi->lines = pi->backup_lines;
-  }
-  result = ParseToken(parsePtr, 1);
-  if ( strcmp(result, ")") )
-    Com_ScriptError("MatchToken: %s != %s\n", result, ")");
-  return result;
-}
-
-/*
-================
-COM_Parse2DMatrix
-
-Parses "( (row0) (row1) ... )" into 2D float array
-================
-*/
-char *COM_Parse2DMatrix(char **parsePtr, int rows, int cols, float *outArray)
-{
-  int i;
-  ParseInfo_t *pi;
-  char *result;
-
-  COM_MatchToken(parsePtr, "(", 0);
-  for ( i = 0; i < rows; i++ )
-  {
-    COM_Parse1DMatrix(parsePtr, cols, outArray);
-    outArray += cols;
   }
   pi = &g_parse.parseInfo[g_parseDepth];
   if ( pi->ungetToken )

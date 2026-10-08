@@ -8,6 +8,7 @@
 
 #include "kiwi_caulk.h"
 #include "kiwi_command.h"
+#include "kiwi_ported.h"
 #include "kiwi_uv.h"        // shared availability and gesture handoff
 #include "kiwi_selection.h" // mixed-selection split
 
@@ -15,19 +16,11 @@
 #include <vector>
 
 // Cross-file entry points.
-extern int         Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
-extern int         g_nUpdateBits;                                            // engine_stubs.cpp
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
 // texwnd_s is TU-local, so browser materials are exposed through these accessors.
 extern int         TexWnd_MaterialCount();                                   // texwnd.cpp
 extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp
 extern void        TexWnd_ApplyMaterialAtIndex( int idx );                   // texwnd.cpp
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp
-extern void        Brush_FitTexture( float x, float y, int a4 );             // 0x4939E0
-// Command 33220 reaches the static, undo-bracketed Cmd_OnSelectionAutoCaulk.
-extern void        Radiant_ExecCommand( unsigned int cmdId );                // mainfrm.cpp
-// Materialdef_GetName asserts exactly one of lyrMtl/radMtl, so callers guard it.
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef );         // materialdef.cpp
+extern void        Brush_FitTexture( float x, float y, int acrossSelection ); // 0x4939E0
 
 namespace
 {

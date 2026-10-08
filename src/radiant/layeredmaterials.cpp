@@ -2,10 +2,10 @@
 #error this file is only for Radiant!
 #endif
 // cod3src\radiant\layeredmaterials.cpp
-// IDA: 0x416ac0 (LayeredMaterialLibrary, 616 B)
-//      0x417190 (LayeredMaterials_texcoords, 185 B)
-//      0x4D6C40 (CheckLayeredMaterial_Modifications — real CRC32, was silent-0 in engine_stubs)
-//      0x416a40 (q_shared_texcoords — file-static helper, no external callsites)
+// 0x416ac0 LayeredMaterialLibrary
+// 0x417190 LayeredMaterials_texcoords
+// 0x4D6C40 CheckLayeredMaterial_Modifications (real CRC32)
+// 0x416a40 q_shared_texcoords (file-static helper, no external callsites)
 // Assert: LayeredMaterials.cpp:65, :297
 //
 // Layered material library parser and texture utility.
@@ -17,39 +17,26 @@
 #include "qe3.h"                  // g_qeglobals, entity_s, epair_t, qtexture_s
 #include <universal/q_shared.h>   // I_stricmp, I_strnicmp
 #include <universal/q_parse.h>    // Com_Parse, Com_ParseInt, Com_MatchToken
-
-// Assert/Sys_Printf — defined in engine_stubs.cpp.
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int  Sys_Printf( const char *fmt, ... );
-extern void Com_Error( int code, const char *fmt, ... );
-extern char *va( const char *fmt, ... );
+#include "kiwi_ported.h"          // KIWI: shared engine/editor externs
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Forward declarations
 // ─────────────────────────────────────────────────────────────────────────────
-extern qtexture_s *Texture_GetHandle( const char *name );   // texwnd.cpp
+// Disk write (map.cpp) — opens the path "wb".
+extern FILE *Map_OpenForSave( const char *path );                          // 0x48CC70
 
-// j__atol (0x5c0495) — CRT atol wrapper; imported from engine.
-extern long j__atol( const char *str );
-
-// Disk write (map.cpp) — opens the path "wb" (Perforce-aware when enabled).
-extern FILE *Map_SaveFileToPerforce( const char *path, char a2 );          // 0x48CC70
-
-// LoadFile (cmdlib.cpp 0x40ABD0) — read a file into a qblockmalloc'd buffer; returns
-// the byte length, or -1 if the path is NULL/empty/not found.  NOTE: it does a plain
-// fopen() relative to the editor CWD (no FS search paths) — see LayerdMatWnd's epair.
-extern int LoadFile( const char *filename, void **bufferptr );             // 0x40ABD0
+// LoadFile (kiwi_ported.h) does a plain fopen() relative to the editor CWD (no FS
+// search paths) — see LayerdMatWnd's epair.
 
 // ── Layered-material WINDOW globals/helpers (layeredmaterialwnd.cpp) ──────────
 // AddEntries makes the newly-created entry the tool's active material; the caption and
 // toolbar-state refresh the binary did here is per-frame work in imgui_panel_lyrmtl.cpp.
 // (lyrMtlWndGlob extern comes from qe3.h)
-extern int  g_nUpdateBits;                           // 0x25D5A74
 
 // ─────────────────────────────────────────────────────────────────────────────
 // lyrMtlGlob — global storage for the layered material library.
 //
-// IDB layout (verified from disasm of LayeredMaterialLibrary 0x416ac0):
+// Layout (0x416ac0 LayeredMaterialLibrary):
 //   0x1814CF8  int      lyrMtlGlob.crcToken           CRC32 token
 //   0x1814CFC  int      lyrMtlGlob.entryCount   # of loaded entries
 //   0x1814D00  uint8[]  lyrMtlGlob.Layers        inline array, 512 × 84 bytes
@@ -57,15 +44,13 @@ extern int  g_nUpdateBits;                           // 0x25D5A74
 // Entry (84 bytes) layout:
 //   +0x00  char[64]  name         entry name
 //   +0x40  int       nextId       next layer id to assign
-//   +0x44  int       layerCount   number of layers in this entry (max 1 per IDA check)
+//   +0x44  int       layerCount   number of layers in this entry (max 1)
 //   +0x48  int       _pad
 //   +0x4C  int       layer[n].id       layer ids (8 bytes per layer: id + handle)
 //   +0x50  int       layer[n].handle   qtexture_s* handle (stored as int)
 //
-// IDA confirmed lyrMtlGlob.Layers is an INLINE array (not a pointer):
-//   disasm of 0x416b78: "add esi, offset lyrMtlGlob.Layers"  — address-of, not deref.
-// The earlier engine_stubs.cpp "void *lyrMtlGlob.Layers = nullptr" was incorrect.
-// These globals are now defined here; engine_stubs.cpp entries must be removed.
+// lyrMtlGlob.Layers is an INLINE array (not a pointer).
+// These globals are defined here.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Offsets within each 84-byte entry.
@@ -93,11 +78,10 @@ static_assert( sizeof( lyrMtlGlob.Layers ) == LYR_MAX_ENTRIES * LYR_ENTRY_SIZE,
                "LyrMtlGlob_t.Layers size" );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CheckLayeredMaterial_Modifications (IDA 0x4D6C40)
+// 0x4D6C40  CheckLayeredMaterial_Modifications
 // CRC32 with Ethernet polynomial 0xEDB88320, Lsb-first, 8 bits per byte.
 // a1=buffer, a2=size (bytes), a3=seed (used as ~a3 for the initial CRC value).
 // Returns ~crc (standard final XOR).
-// Was a silent return-0 stub in engine_stubs.cpp; real implementation here.
 // ─────────────────────────────────────────────────────────────────────────────
 unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 )
 {
@@ -108,16 +92,15 @@ unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 )
     while ( v3 != end )
     {
         // Lsb-first CRC32 bit-at-a-time, 8 rounds per byte.
-        // IDA unrolls to 4 rounds via v5/v6/v7 intermediates; we match behaviour.
         unsigned int x = (*v3 ^ crc);
 
-        // Round 1 (IDA v5):
+        // Round 1:
         unsigned int r1 = (x >> 1) ^ (0xEDB88320u & -(x & 1u));
         // Round 2:
         unsigned int r2 = (r1 >> 1) ^ (0xEDB88320u & -(r1 & 1u));
         // Round 3:
         unsigned int r3 = (r2 >> 1) ^ (0xEDB88320u & -(r2 & 1u));
-        // Round 4 (IDA v7 state, then 4 more in the loop update expression):
+        // Round 4:
         unsigned int r4 = (r3 >> 1) ^ (0xEDB88320u & -(r3 & 1u));
         unsigned int r5 = (r4 >> 1) ^ (0xEDB88320u & -(r4 & 1u));
         unsigned int r6 = (r5 >> 1) ^ (0xEDB88320u & -(r5 & 1u));
@@ -131,7 +114,7 @@ unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// q_shared_texcoords (IDA 0x416a40) — file-static
+// 0x416a40  q_shared_texcoords — file-static
 // Linear search for `name` in lyrMtlGlob.Layers[].
 // Returns the index of the matching entry, or lyrMtlGlob.entryCount if not found
 // (i.e. the "append here" slot).
@@ -146,7 +129,7 @@ static int q_shared_texcoords( const char *name )
         const uint8_t *v2 = lyrMtlGlob.Layers;
         do
         {
-            // I_stricmp inlined in the binary (it carries q_shared.cpp:640/641)
+            // q_shared.cpp:640/641 (I_stricmp)
             if ( !I_stricmp( (const char *)v2, name ) )
                 break;
             ++v1;
@@ -158,7 +141,7 @@ static int q_shared_texcoords( const char *name )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterials_GetMaterial (IDA 0x4172f0)
+// 0x4172f0  LayeredMaterials_GetMaterial
 // Binary search over the SORTED lyrMtlGlob.Layers[] for an entry whose name
 // (offset 0, 64-byte) case-insensitively equals `name`. Returns the entry pointer
 // (cast by SetMaterial to LayerMaterialDef*), or NULL if not found / library empty.
@@ -183,7 +166,7 @@ void *LayeredMaterials_GetMaterial( const char *name )
     {
         mid = (hi + lo) / 2;
         const uint8_t *entry = &lyrMtlGlob.Layers[LYR_ENTRY_SIZE * mid];
-        // I_stricmp inlined in the binary (it carries q_shared.cpp:640/641)
+        // q_shared.cpp:640/641 (I_stricmp)
         cmp = I_stricmp( (const char *)entry, name );               // entry vs name
         if ( cmp >= 0 )
         {
@@ -201,19 +184,19 @@ void *LayeredMaterials_GetMaterial( const char *name )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterialLibrary (IDA 0x416ac0)
+// 0x416ac0  LayeredMaterialLibrary
 // Assert: LayeredMaterials.cpp:65
 //
 // Parses a "LayeredMaterialLibrary" block from a text token stream.
 // Returns 1 on success/recoverable error, 0 on fatal parse error.
 //
-// Grammar (from IDA control flow):
+// Grammar:
 //   "LayeredMaterialLibrary" <version:int>
 //   { <name> <nextId:int> { (<id:int> <material> ";")* } }*
 // ─────────────────────────────────────────────────────────────────────────────
 char LayeredMaterialLibrary( const char **data_p )
 {
-    // v1 tracks the outer parse cursor (same as data_p, as confirmed by IDA).
+    // v1 tracks the outer parse cursor (same as data_p).
     const char **v1 = data_p;
 
     if ( !Com_MatchToken( data_p, "LayeredMaterialLibrary", 1 ) )
@@ -280,7 +263,7 @@ LABEL_9:
                     return 1;
                 }
 
-                // Layer count check: IDA allows max LYR_MAX_LAYERS (1).
+                // Layer count check: max LYR_MAX_LAYERS (1).
                 int layerCount = v6->layerCount;
                 if ( layerCount == LYR_MAX_LAYERS )
                 {
@@ -289,8 +272,8 @@ LABEL_9:
                     return 0;
                 }
 
-                // Parse id (stored in v12[4] in the original).
-                long v8 = j__atol( v7 );
+                // Parse id.
+                long v8 = atol( v7 );
 
                 if ( v8 >= (long)v6->nextId )
                 {
@@ -322,7 +305,7 @@ LABEL_9:
                         if ( v9 >= layerCount )
                         {
                             // No duplicate found — proceed to LABEL_21 (write).
-                            v1 = data_p;    // IDA restores v1 = data_p here
+                            v1 = data_p;
                             goto LABEL_21;
                         }
                     }
@@ -347,10 +330,10 @@ LABEL_21:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterial_NameCompare (IDA 0x416d30) — qsort comparator for the entry array.
+// 0x416d30  LayeredMaterial_NameCompare — qsort comparator for the entry array.
 // The entry name is the first field of each 84-byte record, so a bare I_stricmp on the
-// two record pointers sorts case-insensitively by name.  (The IDB symbol was the
-// /OPT:ICF fold name _WinMain@16; its only live use is this qsort callback.)
+// two record pointers sorts case-insensitively by name.  (Its only use is this qsort
+// callback.)
 // ─────────────────────────────────────────────────────────────────────────────
 static int __cdecl LayeredMaterial_NameCompare( const void *a, const void *b )
 {
@@ -358,15 +341,15 @@ static int __cdecl LayeredMaterial_NameCompare( const void *a, const void *b )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayerdMatWnd (IDA 0x416d40) — load the layered-material library.
+// 0x416d40  LayerdMatWnd — load the layered-material library.
 //
-// Called from QE_LoadProject (0x48bab0 @ 0x48bcfc), right after Load_Textures(), once
+// Called from QE_LoadProject (0x48bab0), right after Load_Textures(), once
 // the project entity has been parsed.  Resets the in-memory library, reads the file
 // named by the project entity's "layeredmaterials" epair, parses it with
 // LayeredMaterialLibrary (with spaceDelimited DISABLED so layer ids/names tokenise the
 // way the parser expects), sorts the entries by name, and CRC-baselines the clean load
 // (so LayeredMaterials_Save only writes when the operator has actually modified it).
-// Returns the CRC token on the load-and-parse path (the IDB's `result = CheckLayered...`),
+// Returns the CRC token on the load-and-parse path,
 // or the LoadFile result (-1) when the file is absent.
 //
 // FILE RESOLUTION (important): LoadFile() does a plain fopen() relative to the editor
@@ -374,7 +357,7 @@ static int __cdecl LayeredMaterial_NameCompare( const void *a, const void *b )
 // "cod4_layered_material_library.txt"; that file ships in the CoD4 install's bin\ dir,
 // so for the loader to find it the file must sit in the editor's working directory
 // (bin\Debug).  When it is absent, LoadFile returns -1, this function leaves
-// lyrMtlGlob.entryCount == 0, and the layered-material view is (faithfully) empty.
+// lyrMtlGlob.entryCount == 0, and the layered-material view is empty.
 // ─────────────────────────────────────────────────────────────────────────────
 signed int LayerdMatWnd()
 {
@@ -382,7 +365,7 @@ signed int LayerdMatWnd()
     memset( lyrMtlGlob.Layers, 0, LYR_MAX_ENTRIES * LYR_ENTRY_SIZE );   // 0xA800 = 512*84
 
     // Resolve the library path from the project entity's "layeredmaterials" epair.
-    // (Mirror of LayeredMaterials_Save's epair walk, and of the IDB's inline loop.)
+    // (Same epair walk as LayeredMaterials_Save.)
     const char *value = "";
     epair_t *ep = g_qeglobals.d_project_entity ? g_qeglobals.d_project_entity->epairs : nullptr;
     for ( ; ep; ep = ep->next )
@@ -395,27 +378,26 @@ signed int LayerdMatWnd()
     if ( result >= 0 )
     {
         Com_BeginParseSession( value );
-        // IDB: g_parse.parseInfo[g_parse.parseInfoNum].spaceDelimited = 0;
-        // The parser relies on this — Com_SetSpaceDelimited(0) is the exact API equivalent.
+        // The parser relies on space-delimiting being off.
         Com_SetSpaceDelimited( 0 );
 
         const char *cursor = (const char *)data;
         if ( !LayeredMaterialLibrary( &cursor ) )
             Com_Error( ERR_DROP, "Layered material library is corrupt.\n" );
 
-        Com_EndParseSession();          // IDB: underflow-guard then --g_parse.parseInfoNum
+        Com_EndParseSession();
         free( data );
 
         qsort( lyrMtlGlob.Layers, lyrMtlGlob.entryCount, LYR_ENTRY_SIZE, LayeredMaterial_NameCompare );
         lyrMtlGlob.crcToken = (int)CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
                                                                  LYR_ENTRY_SIZE * lyrMtlGlob.entryCount, 0 );
-        result = lyrMtlGlob.crcToken;         // IDB returns the CRC token from this path
+        result = lyrMtlGlob.crcToken;
     }
     return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterial_ValidateName (IDA 0x417000, file-static sub_417000)
+// 0x417000  LayeredMaterial_ValidateName (file-static)
 // Returns an error string if `name` is invalid (empty / non-alnum-non-'_' / >= 64
 // chars), or NULL if valid.  The >=64 message uses va().
 // ─────────────────────────────────────────────────────────────────────────────
@@ -437,7 +419,7 @@ static const char *LayeredMaterial_ValidateName( const char *name )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterials_WriteFile (IDA 0x416E50, file-static sub_416E50)
+// 0x416E50  LayeredMaterials_WriteFile (file-static)
 // Writes the whole library to an open FILE*: a "LayeredMaterialLibrary 1" header
 // then, per entry, "<name> <nextId>\n{ \t<id> "<material>";\n... }".  Returns 1.
 // The material name for a layer is the radMtl handle's name (qtexture_s.name @+4),
@@ -459,7 +441,7 @@ static char LayeredMaterials_WriteFile( FILE *f )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterials_AddEntries (IDA 0x417050)
+// 0x417050  LayeredMaterials_AddEntries
 // Validate the name, reject if the library is full (512) or the name already exists,
 // otherwise insert a new ZEROED 84-byte entry KEEPING the array sorted by name
 // (case-insensitive), make it the window's active material, refresh title/toolbar.
@@ -488,14 +470,9 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
         return;
     }
 
-    // Find the sorted insertion slot, shifting larger entries up.  IDA (0x417050) walks
-    // from the LAST entry downward and decrements the slot index (v12) once per shift:
-    //   cursor = &entry[count-1];  slot = count;
-    //   while (1) { cmp = I_stricmp(cursor,name);
-    //              if (cmp==0) dup-error;
-    //              if (cmp>=0) { copy cursor up one; cursor-=84; if(--slot<=0) break; continue; }
-    //              break; }                       // cmp<0 → insert at slot (unchanged)
-    // The final slot is v12 (slot here).
+    // Find the sorted insertion slot, shifting larger entries up: walk from the LAST
+    // entry downward, decrementing the slot index once per shift.  An equal name is a
+    // duplicate error; the first entry sorting before `name` stops the scan.
     int slot = lyrMtlGlob.entryCount;
     if ( lyrMtlGlob.entryCount > 0 )
     {
@@ -527,7 +504,7 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
 
     LyrEntry_t *entry = (LyrEntry_t *)&lyrMtlGlob.Layers[LYR_ENTRY_SIZE * slot];
     memset( entry, 0, LYR_ENTRY_SIZE );
-    entry->layerCount = 0;                                   // (IDA dword_1814D44[21*slot])
+    entry->layerCount = 0;
     strcpy( entry->name, name );
 
     lyrMtlWndGlob.activeLyrMtl = entry;
@@ -537,7 +514,7 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LayeredMaterials_Save (IDA 0x416f40)
+// 0x416f40  LayeredMaterials_Save
 // **DISK-MUTATING** (Directive #4).  If the library's CRC differs from the clean-load
 // token (i.e. the operator modified it), write it to the path named by the worldspawn
 // "layeredmaterials" project epair, then re-baseline the token.  Returns 1 on success
@@ -546,11 +523,11 @@ void LayeredMaterials_AddEntries( char *name, HWND hWnd )
 //
 // SAFETY: the CRC gate means this only writes when the operator has actually changed
 // the library through the authoring window (which is operator-attended), so in a
-// NORMAL (operator) build it writes faithfully.
+// NORMAL (operator) build it writes.
 // ─────────────────────────────────────────────────────────────────────────────
 char LayeredMaterials_Save()
 {
-    // lyrMtlGlob.crcToken is the clean-library CRC token (lyrMtlGlob_crcToken).  When the
+    // lyrMtlGlob.crcToken is the clean-library CRC token.  When the
     // current CRC matches it, nothing was modified → return 1 without writing.  The
     // headless round-trip gate has an empty library (entryCount==0 → CRC of 0 bytes ==
     // 0 == the initial token) so this is the path it always takes.
@@ -565,9 +542,7 @@ char LayeredMaterials_Save()
             if ( !_stricmp( ep->key, "layeredmaterials" ) ) { value = ep->value; break; }
         }
 
-        // IDA: f = Map_SaveFileToPerforce(value, 0);
-        //      if ( !f || (v5 = WriteFile(f), fclose(f), !v5) ) { error; return 0; }
-        FILE *f = Map_SaveFileToPerforce( value, 0 );
+        FILE *f = Map_OpenForSave( value );
         char ok = 0;
         if ( f )
         {
@@ -595,9 +570,7 @@ extern void FindReplaceVisited_Reset();  // findtexture.cpp (Set_EraseTreeRec + 
 
 void *LayeredMaterials_texcoords( char *a1 )
 {
-    // (1) reset the prefab-recursion visited set (IDB 0x4171A1: Set_EraseTreeRec(...right)
-    //     + reset the 3 RB-tree sentinels + dword_26656B8=0 = g_findReplaceVisited.clear()).
-    //     Now a real reset: the visited set is the genuine std::set<std::string> the flag&4
+    // (1) reset the prefab-recursion visited set: the std::set<std::string> the flag&4
     //     prefab-recursion branch of FindReplaceTexture_Brush consults (findtexture.cpp).
     FindReplaceVisited_Reset();
 

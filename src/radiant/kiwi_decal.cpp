@@ -25,6 +25,8 @@
 #include "kiwi_material.h"
 #include "kiwi_matwriter.h"     // KiwiMat_ReadSource (decals-only list, unloaded materials)
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
+#include "kiwi_vec.h"
 #include "kiwi_windows.h"
 #include "radiant_registry.h"
 
@@ -39,40 +41,20 @@
 #include <string>
 #include <vector>
 
-extern int          Sys_Printf( const char *fmt, ... );
-extern int          g_nUpdateBits;
-extern entity_s    *world_entity;
-extern selbrush_t   selected_brushes;
-extern selbrush_t   active_brushes;
-extern void         Select_Deselect( int deselectFaces );
-extern patchMesh_t *MakeNewPatch();                                            // pmesh.cpp 0x438210
-extern void         SetMaterial( const char *name, patchMesh_material *out );  // materialdef.cpp:101
 extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, int *rowMapArg ); // pmesh.cpp:721
-extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );   // pmesh.cpp:841
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:670
-extern void         Brush_AddToList2( selbrush_t *b );                         // brush.cpp:928
-extern void         Patch_Rebuild( patchMesh_t *p, char doBounds );            // pmesh.cpp
 extern void         Patch_PaintMarkUndo( patchMesh_t *def );                   // pmesh.cpp (tail)
-extern void         Undo_ClearRedo();
-extern void         Undo_GeneralStart( const char *operation );
-extern void         Undo_End();
-extern void         Undo_EndBrushList( selbrush_t *brushlist );                // undo.cpp:576
-extern void         Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                                      const float *uvBase, float rotate, float crossterm ); // texturevecs.cpp
 extern void         Patch_KiwiEnsureLmapCoords( patchMesh_t *p );              // pmesh.cpp: layer-1 pass the patch creators share
 namespace LayerMat  { int GetCurrentLayer( MaterialDef *def ); }               // materialdef.cpp 0x431B30
 extern bool         Cam_MaterialIsOverlay( Material *handle );                 // camwnd.cpp (decal badge)
 extern int          TexWnd_MaterialCount();                                    // texwnd.cpp (tail)
 extern qtexture_s  *TexWnd_MaterialAt( int idx );
-extern qtexture_s  *Texture_GetHandle( const char *name );                     // texwnd.cpp:315
-extern ImGuiID      ImGuiShell_DockRoot();                                     // imgui_shell.cpp
 extern void         ImGuiShell_FocusTab( const char *title );                  // imgui_shell.cpp:210
 extern bool         ImGuiShell_ScreenToImGui( int screenX, int screenY, float *outX, float *outY ); // imgui_shell.cpp
 
 namespace
 {
     const char *KDEC_PROFILE = "KiwiDecal";
-    const float KDEC_PI      = 3.14159265358979323846f;
+    const float KDEC_PI      = (float)KIWI_PI;
     const float KDEC_LAYER_STEP = 0.125f;     // extra normal offset per layer
     enum { KDEC_NAME_CHARS = 128, KDEC_MAX_LAYER = 15 };
 
@@ -171,7 +153,7 @@ namespace
     void WriteFloat( const char *entry, float v )
     {
         char text[64];
-        KiwiFmt_Num( text, sizeof( text ), v, 6 );
+        KiwiFmt_Exact( text, sizeof( text ), v + 0.0f, 0 );
         Radiant_ProfileSetString( KDEC_PROFILE, entry, text );
     }
     void CopyString( char *dst, int size, const char *src )

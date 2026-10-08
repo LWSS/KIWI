@@ -39,7 +39,6 @@ namespace
     const int KIWI_SURFCACHE_MAX_DIRTY = 256;
 
     unsigned s_epoch      = 1;         // bumped by every invalidation funnel
-    const char *s_lastWhy = "(never)";
 
     bool     s_have       = false;     // a whole-block capture exists and is believed valid
     unsigned s_capEpoch   = 0;         // KiwiSurfCache_Epoch() when it was taken
@@ -126,8 +125,8 @@ unsigned KiwiSurfCache_Epoch()
 // events use KiwiSurfCache_InvalidateAll.
 void KiwiSurfCache_Invalidate( const char *why )
 {
+    (void)why;                         // call-site documentation only
     ++s_epoch;
-    s_lastWhy = why ? why : "(unnamed)";
     // May run inside a draw walk, so retain storage.  Whole-block replay is refused
     // until the signatures re-prove the capture.
     s_have   = false;

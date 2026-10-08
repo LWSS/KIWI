@@ -6,34 +6,31 @@
 
 #include "stdafx.h"
 #include "qe3.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
+#include <algorithm>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 // ── forward declarations ──────────────────────────────────────────────────────
-
-// Runtime assert (engine_stubs.cpp -- same signature used across all radiant TUs).
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // prefab_s is defined in entity.cpp; forward-declare here to use in Prefab_Init signature.
 struct prefab_s;
 
 // brush.cpp
-extern void        Brush_Free_R( brush_t *def );
-extern void        Brush_Free( selbrush_t *inst );
 extern size_t      Brush_MemorySize( brush_t *def );
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );
-extern void        Brush_AddToList2( selbrush_t *inst );
-extern void        Brush_RemoveFromList( selbrush_t *inst );
-extern brush_t    *Brush_FullClone_sub475E80( selbrush_t *src );
+extern brush_t    *Brush_FullClone( brush_t *src );
 extern char       *AllocMaterialString( const char *src );
 
 // entity.cpp
-extern unsigned int Entity_ColorSth( brush_t *b );
-extern void        Entity_Free( char *e );
+extern unsigned int Brush_ApplyEntityColor( brush_t *b );
 extern void        Entity_Free_R( entity_s *e );
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );
-extern void        Entity_UnlinkBrush( brush_t *def );
+extern void        Entity_LinkBrushAt( brush_t *b, entity_s *ent, int ordinal );   // KIWI
+extern int         Entity_BrushOrdinal( const brush_t *b );                         // KIWI
 // KIWI-UX: the typed selection core's legacy-change notification (kiwi_selection.cpp).
 extern void        Sel_InvalidateFromLegacy();
 // KIWI-UX (shakeout I): the unified undo journal's four hooks (kiwi_undo.h).  Each
@@ -48,28 +45,22 @@ extern void        IncRef( entity_s *e, entity_s *list );   // entity.cpp 0x483b
 extern void        DecRef( entity_s *e );                   // entity.cpp 0x483c30
 extern entity_s   *Prefab_Init( prefab_s *instList, entity_s_def *def, selbrush_t *activeList );
 
-// Entity_Clone (sub_485090 @ 0x485090) -- allocs a new entity_s_def, copies epairs.
-extern entity_s   *Entity_Clone_sub485090( const entity_s *src );
-// Entity_MemorySize (sub_483DE0 @ 0x483de0) -- returns _msize(e) + sum of epair strings.
-extern size_t      Entity_MemorySize_sub483DE0( entity_s *e );
+// Entity_Clone (0x485090) -- allocs a new entity_s_def, copies epairs.
+extern entity_s   *Entity_Clone( const entity_s *src );
+// Entity_MemorySize (0x483de0) -- returns _msize(e) + sum of epair strings.
+extern size_t      Entity_MemorySize( entity_s *e );
 
 // engine_stubs.cpp / qe3.cpp / other
-extern int         Sys_Printf( const char *fmt, ... );
-extern void        MarkMapModified();
-// Sys_PrintActiveBrushes (IDB 0x42c640) populates the brush/entity list diagnostics. Used by
-// Undo_GeneralStart's head and Undo_End's tail; both call MainFrm_BrushList/EntList here.
-extern void        Select_Deselect( int bSilent );
+// Sys_PrintActiveBrushes (0x42c640) populates the brush/entity list diagnostics. Used by
+// Undo_GeneralStart's head and Undo_End's tail; both call MainFrm_BrushList here.
 extern void        MainFrm_BrushList( const char *label, selbrush_t *list );
-extern void        MainFrm_EntList( entity_s *list, const char *label );
 // va is in q_shared.h (included via stdafx.h)
 // entity.cpp global -- screen-update guard
 extern bool        g_bScreenUpdates;
-// brush.cpp helper stub
-extern void        sub_47B940( brush_t *def );
 
 // layers.cpp
 extern void        Layers_SetMapLayers();
-extern void        Layers_02();
+extern void        Layers_RefreshDialog();
 
 // ── globals ───────────────────────────────────────────────────────────────────
 // 0x23F1628
@@ -98,43 +89,69 @@ static int      g_redoId           = 1;
 // True when a redo record is available (matches OnUpdateEditRedo 0x428790).
 bool Undo_RedoAvailable() { return g_lastredo != nullptr; }
 
-// ── extern globals from other TUs ────────────────────────────────────────────
-extern selbrush_t  active_brushes;     // engine_stubs.cpp (sentinel)
-extern selbrush_t  selected_brushes;   // engine_stubs.cpp
-extern entity_s    entities;           // entity.cpp
-extern entity_s    entityInsts;        // entity.cpp
-extern entity_s   *world_entity;       // map.cpp
-extern int         g_nUpdateBits;      // engine_stubs.cpp
+// KIWI: where each brush def in an undo / redo record sat in its entity's brush list, so
+// Undo / Redo put it back there - Entity_LinkBrush appends, and every undo reordered the
+// saved map (and the brush numbers cod4map reports).  Keyed by the record's def; a stale
+// key is harmless, every lookup is of a def recorded in the same cycle.
+static std::unordered_map<const brush_t *, int> s_undoOrdinal;
+// Undo_AddBrushList's one walk per entity (a selection of n brushes stays O(n)).
+static const std::unordered_map<const brush_t *, int> *s_batchOrdinal = nullptr;
+
+static int Undo_OrdinalOf( const brush_t *def )
+{
+    if ( s_batchOrdinal )
+    {
+        auto it = s_batchOrdinal->find( def );
+        if ( it != s_batchOrdinal->end() )
+            return it->second;
+    }
+    return Entity_BrushOrdinal( def );
+}
+
+// Every brush of the entities that own the defs in `list`, by position.
+static void Undo_OrdinalsOf( selbrush_t *list, std::unordered_map<const brush_t *, int> &out )
+{
+    std::unordered_set<entity_s *> seen;
+    for ( selbrush_t *i = list->next; i && i != list; i = i->next )
+    {
+        brush_t *def = i->def;
+        if ( !def || !def->owner || !seen.insert( def->owner ).second )
+            continue;
+        entity_s *ent = def->owner;
+        brush_t *const sentinel = (brush_t *)&ent->def;
+        int n = 0;
+        for ( brush_t *d = (brush_t *)ent->brushes.prev; d && d != sentinel; d = d->onext, ++n )
+            out[d] = n;
+    }
+}
+
+// Re-link order: the defs of a record, by the position each had (unknown last).
+static std::vector<brush_t *> Undo_DefsInOrder( brush_t *list )
+{
+    std::vector<brush_t *> defs;
+    for ( brush_t *d = (brush_t *)list->onext; d && d != list; d = (brush_t *)d->onext )
+        defs.push_back( d );
+    std::stable_sort( defs.begin(), defs.end(), []( const brush_t *a, const brush_t *b ) {
+        auto ia = s_undoOrdinal.find( a ), ib = s_undoOrdinal.find( b );
+        return ( ia == s_undoOrdinal.end() ? INT_MAX : ia->second )
+             < ( ib == s_undoOrdinal.end() ? INT_MAX : ib->second );
+    } );
+    return defs;
+}
+
+static int Undo_TakeOrdinal( const brush_t *def )
+{
+    auto it = s_undoOrdinal.find( def );
+    if ( it == s_undoOrdinal.end() )
+        return -1;
+    const int ord = it->second;
+    s_undoOrdinal.erase( it );
+    return ord;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Wrappers for __usercall functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-static inline brush_t *BrushDef_FullClone( selbrush_t *src )
-{
-    return Brush_FullClone_sub475E80( src );
-}
-
-static inline entity_s *EntityDef_Clone( entity_s *src )
-{
-    return Entity_Clone_sub485090( src );
-}
-
-static inline size_t EntityDef_MemorySize( entity_s *e )
-{
-    return Entity_MemorySize_sub483DE0( e );
-}
-
-// Convenience: cast entity_s_def's def to entity_s*
-static inline entity_s *EntityDef_GetDef( entity_s_def *def )
-{
-    return (entity_s *)def->def;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 0x45de20  Undo_01_NoMoreUndo  (89 bytes)
+// 0x45de20  Undo_01_NoMoreUndo
 // Inserts a brush DEF at the HEAD of a brushlist sentinel (via onext/oprev).
-// __usercall: a1@<edi>=list, a2@<esi>=brush def to insert.
 // ─────────────────────────────────────────────────────────────────────────────
 static brush_t *Undo_01_NoMoreUndo( brush_t *list, brush_t *brush )
 {
@@ -151,7 +168,7 @@ static brush_t *Undo_01_NoMoreUndo( brush_t *list, brush_t *brush )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45de80  Undo_Refcount  (134 bytes)
+// 0x45de80  Undo_Refcount
 // Decrements refCount and UNLINKS a brush DEF from its current list.
 // ─────────────────────────────────────────────────────────────────────────────
 static brush_t *Undo_Refcount( brush_t *brush )
@@ -170,7 +187,7 @@ static brush_t *Undo_Refcount( brush_t *brush )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45df20  Undo_ClearRedo  (323 bytes)
+// 0x45df20  Undo_ClearRedo
 // Frees all redo records (brush defs + entity defs + undo_s nodes).
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_ClearRedo()
@@ -188,6 +205,7 @@ void Undo_ClearRedo()
             brush_t *pNext = (brush_t *)brush->onext;
             Undo_Refcount( brush );
             vassert( (brush->refCount == 0), "(brush->refCount) = %i", brush->refCount );   // Undo.cpp:131
+            s_undoOrdinal.erase( brush );   // KIWI
             Brush_Free_R( brush );
             brush = pNext;
         }
@@ -215,7 +233,7 @@ void Undo_ClearRedo()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e070  Undo_Clear  (440 bytes)
+// 0x45e070  Undo_Clear
 // Clears both the undo and redo lists.
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_Clear()
@@ -236,6 +254,7 @@ void Undo_Clear()
             g_undoMemorySize -= (int)Brush_MemorySize( brush );
             Undo_Refcount( brush );
             vassert( (brush->refCount == 0), "(brush->refCount) = %i", brush->refCount );   // Undo.cpp:166
+            s_undoOrdinal.erase( brush );   // KIWI
             Brush_Free_R( brush );
             brush = bNext;
         }
@@ -246,7 +265,7 @@ void Undo_Clear()
         {
             iassert( entity );   // 171
             entity_s *eNext = entity->next;
-            g_undoMemorySize -= (int)EntityDef_MemorySize( entity );
+            g_undoMemorySize -= (int)Entity_MemorySize( entity );
             iassert( entity->refCount == 1 );   // Undo.cpp:174
             --entity->refCount;
             Entity_Free_R( entity );
@@ -310,7 +329,7 @@ int Undo_GetMaxMemorySize()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e290  Undo_FreeFirstUndo  (352 bytes)
+// 0x45e290  Undo_FreeFirstUndo
 // Removes and frees the oldest undo from the undo list.
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_FreeFirstUndo()
@@ -330,6 +349,7 @@ void Undo_FreeFirstUndo()
         iassert( brush->refCount == 1 );   // Undo.cpp:237
         Undo_Refcount( brush );
         vassert( (brush->refCount == 0), "(brush->refCount) = %i", brush->refCount );   // Undo.cpp:239
+        s_undoOrdinal.erase( brush );   // KIWI
         Brush_Free_R( brush );
         // Re-read head (Undo_Refcount removes brush, Brush_Free_R frees it)
         brush = (brush_t *)undo->brushlist.onext;
@@ -341,7 +361,7 @@ void Undo_FreeFirstUndo()
     {
         iassert( entity );   // 244
         entity_s *eNext  = entity->next;
-        g_undoMemorySize -= (int)EntityDef_MemorySize( entity );
+        g_undoMemorySize -= (int)Entity_MemorySize( entity );
         iassert( entity->refCount == 1 );   // Undo.cpp:247
         --entity->refCount;
         Entity_Free_R( entity );
@@ -360,9 +380,8 @@ void Undo_FreeFirstUndo()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e3f0  Undo_GeneralStart  (407 bytes)
+// 0x45e3f0  Undo_GeneralStart
 // Allocates a new undo record and appends it to the undo list.
-// __usercall: operation@<eax>
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_GeneralStart( const char *operation )
 {
@@ -370,7 +389,6 @@ void Undo_GeneralStart( const char *operation )
     MainFrm_BrushList( s1, &active_brushes );
     char *s2 = (char *)va( "%s - active_brushes", operation );
     MainFrm_BrushList( s2, &selected_brushes );
-    MainFrm_EntList( &entityInsts, operation );
 
     if ( g_lastundo && !g_lastundo->done )
         Sys_Printf( "Undo_Start: WARNING last undo not finished.\n" );
@@ -410,7 +428,6 @@ void Undo_GeneralStart( const char *operation )
     _undo->operation = operation;
 
     // Reset ownerPrev (undoId) on all active brush defs that already carry this ID
-    // IDA: iterates the active display list via selbrush_t.next
     for ( selbrush_t *pInst = active_brushes.next;
           pInst != &active_brushes;
           pInst = pInst->next )
@@ -445,35 +462,33 @@ void Undo_GeneralStart( const char *operation )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e590  Undo_06 / Undo_BrushInUndo  (88 bytes)
-// Returns true if a brush DEF is already registered in the current undo.
-// __usercall: a1@<esi> = brush def pointer (int)
-// IDA: *(DWORD*)(a1+16) == g_lastundo->id  (brush_t.ownerPrev at offset 0x10)
+// 0x45e590  Undo_BrushInUndo
+// Returns true if a brush DEF is already registered in the current undo
+// (brush_t.ownerPrev == g_lastundo->id).
 // ─────────────────────────────────────────────────────────────────────────────
 static bool Undo_BrushInUndo( brush_t *brush )
 {
-    undo_s *undo = g_lastundo;              // the binary's local
+    undo_s *undo = g_lastundo;
     iassert( undo );    // Undo.cpp:335
     iassert( brush );   // Undo.cpp:336
     return brush->ownerPrev == (entity_s *)(intptr_t)undo->id;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e5f0  Undo_06_LastUndo / Undo_EntityInUndo  (99 bytes)
+// 0x45e5f0  Undo_EntityInUndo
 // Returns true if an entity DEF is already registered in the current undo.
-// __usercall: a1@<edi> = entity_s_def*
 // ─────────────────────────────────────────────────────────────────────────────
 static bool Undo_EntityInUndo( entity_s_def *ent )
 {
     undo_s *undo = g_lastundo;
     iassert( undo );   // 351
-    iassert( ent );    // 352 — #ent byte-matches the embedded "ent"
+    iassert( ent );    // 352
     return ent->epairEdits == undo->id
         || ent == (entity_s_def *)world_entity->def;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e660  Undo_Start  (the public Undo_Start2 entry point ~20 bytes)
+// 0x45e660  Undo_Start
 // Clears redo list, then starts a new undo record.
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_Start( const char *operation )
@@ -486,15 +501,12 @@ void Undo_Start( const char *operation )
 void Undo_AddEntity( entity_s *entity );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e680  Undo_AddBrush  (236 bytes)
-// Adds a brush DEF to the current undo record.
-// __cdecl: a1 = brush_t* (the brush DEF to save)
-// IDA parameter type is entity_brush_s* but it's the same 88-byte brush_t DEF node.
+// 0x45e680  Undo_AddBrush
+// Adds a brush DEF to the current undo record.  The parameter is typed entity_brush_s*
+// but is the brush_t DEF node.
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_AddBrush( entity_brush_s *pBrushInst )
 {
-    // IDA receives the brush DEF (88-byte node) but types it entity_brush_s.
-    // Our brush DEF is brush_t (88-byte); cast immediately.
     brush_t *brush = (brush_t *)(intptr_t)pBrushInst;
 
     iassert( brush );        // 380
@@ -503,34 +515,31 @@ void Undo_AddBrush( entity_brush_s *pBrushInst )
     // Skip if already in undo (ownerPrev == current undo id)
     if ( Undo_BrushInUndo( brush ) )
         return;
+    // KIWI: an ownerless def cannot be restored (undo re-links by the owner's numberId) and
+    // the clone below read brush->owner unguarded
+    iassert( brush->owner );
+    if ( !brush->owner )
+        return;
 
-    // Clone the brush def (sub_475E80).
-    // Brush_FullClone_sub475E80 is typed entity_brush_s* but actually receives
-    // a brush_t DEF pointer — cast matches IDA's own mixed typing.
-    brush_t *clone = BrushDef_FullClone( (selbrush_t *)brush );
+    // Clone the brush def (0x475E80).
+    brush_t *clone = Brush_FullClone( brush );
 
-    // IDA: ownerPrev of source (a1[1].ownerPrev = *(entity_brush_s*)((char*)a1+56)+ownerPrev)
-    // a1 is 88-byte brush_t. a1[1] would be second 88-byte element. But IDA uses
-    // entity_brush_s (56 bytes) so a1[1].ownerPrev = *(brush at offset 56).ownerPrev.
-    // In our type: brush_t has parent_layer_string at offset 0x48 = 72.
-    // IDA a1[1].ownerPrev: entity_brush_s* stride 56, [1] = offset 56, ownerPrev = +16 = offset 72.
-    // So this reads the parent_layer_string of the source brush (at offset 72 = 0x48).
-    char *srcLayerStr = brush->parent_layer_string;  // offset 0x48 = 72
+    // The source brush's layer string is copied onto the clone (the binary inlines
+    // Brush_SetLayerString here; its brush.cpp:2354 head-check lives in the helper).
+    char *srcLayerStr = brush->parent_layer_string;
 
-    // IDA 0x45e6fd: the binary inlines Brush_SetLayerString( clone, srcLayerStr ) here —
-    // its brush.cpp:2354 head-check lives in the helper.
     extern void Brush_SetLayerString( brush_t *b, const char *str );   // brush.cpp 0x4758A0
     Brush_SetLayerString( clone, srcLayerStr );
 
-    // IDA: v4->unk1 = a1->owner[2].next — the IDB's 64-byte selbrush_t stride lands on
-    // owner+132 = the owning entity's numberId (NOT an entity_s-stride index).
+    // The clone remembers the owning entity's numberId.
     clone->unk1 = brush->owner->numberId;
 
-    // IDA: v4->ownerPrev = a1->ownerPrev; v4->owner = 0;  (the prior port dropped both;
-    // clone->owner = 0 in particular keeps Undo_Undo's owner-walk from following a stale
-    // pointer.) Set BEFORE linking the clone into the brushlist.
+    // The clone keeps the source's ownerPrev; clone->owner = 0 keeps Undo_Undo's
+    // owner-walk from following a stale pointer.  Set BEFORE linking the clone into the
+    // brushlist.
     clone->ownerPrev = brush->ownerPrev;
     clone->owner     = nullptr;
+    s_undoOrdinal[clone] = Undo_OrdinalOf( brush );   // KIWI: undo re-links it there
 
     // Link clone into undo brushlist at head
     Undo_01_NoMoreUndo( &g_lastundo->brushlist, clone );
@@ -543,10 +552,8 @@ void Undo_AddBrush( entity_brush_s *pBrushInst )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e7c0  Undo_AddBrushList  (92 bytes)
+// 0x45e7c0  Undo_AddBrushList
 // Adds all brush DEFs from a selbrush_t display-list into the current undo.
-// __usercall: sb@<edi> = selbrush_t* (list sentinel)
-// IDA: iterates via sb->prev (backwards through display list).
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_AddBrushList( selbrush_t *sb )
 {
@@ -558,7 +565,11 @@ void Undo_AddBrushList( selbrush_t *sb )
     if ( g_lastundo->entitylist.next != &g_lastundo->entitylist )
         Sys_Printf( "Undo_AddBrushList: WARNING adding brushes after entity.\n" );
 
-    // IDA iterates via sb->prev (backwards through the display list)
+    std::unordered_map<const brush_t *, int> ordinals;   // KIWI: one walk per entity
+    Undo_OrdinalsOf( sb, ordinals );
+    s_batchOrdinal = &ordinals;
+
+    // Walks backwards through the display list (sb->prev).
     for ( selbrush_t *i = sb->prev; i != sb; i = i->prev )
     {
         entity_s_def *owner = (entity_s_def *)i->def->owner;
@@ -566,12 +577,12 @@ void Undo_AddBrushList( selbrush_t *sb )
             Undo_AddEntity( (entity_s *)owner );
         Undo_AddBrush( (entity_brush_s *)i->def );
     }
+    s_batchOrdinal = nullptr;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e870  Undo_EndBrushList  (64 bytes)
+// 0x45e870  Undo_EndBrushList
 // Stamps the current undo ID into all brush defs in a display list.
-// __usercall: brushlist@<esi>
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_EndBrushList( selbrush_t *brushlist )
 {
@@ -593,10 +604,8 @@ void Undo_EndBrushList( selbrush_t *brushlist )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e8b0  Undo_AddEntity  (212 bytes)
+// 0x45e8b0  Undo_AddEntity
 // Adds an entity DEF to the current undo record.
-// __usercall: a1@<eax> = entity_s* (as int for __usercall).
-// Called from select.cpp as Undo_AddEntity(int entPtr).
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_AddEntity( entity_s *entity )
 {
@@ -607,9 +616,7 @@ void Undo_AddEntity( entity_s *entity )
         return;
     }
 
-    entity_s *clone = EntityDef_Clone( entity );
-    // KEEP_VERBOSE: binary passes level=1 (SANITY CHECK) here (push 1 @0x45e901); the
-    // iassert/vassert macros hardcode level 0, so converting would drop the level-1 class.
+    entity_s *clone = Entity_Clone( entity );
     vassert( (clone->refCount == 0), "(clone->refCount) = %i", clone->refCount );   // Undo.cpp:506
     ++clone->refCount;
 
@@ -621,15 +628,14 @@ void Undo_AddEntity( entity_s *entity )
     entity->epairEdits = g_lastundo->id;
 
     // Link clone into the undo entitylist
-    IncRef( clone, &g_lastundo->entitylist );        // inlined in the binary
+    IncRef( clone, &g_lastundo->entitylist );
 
-    g_undoMemorySize += (int)EntityDef_MemorySize( clone );
+    g_undoMemorySize += (int)Entity_MemorySize( clone );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e990  Undo_AddEntity_W  (76 bytes)
+// 0x45e990  Undo_AddEntity_W
 // Adds an entity AND all of its brush defs to the current undo.
-// __usercall: a1@<eax> = entity_s*
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_AddEntity_W( entity_s *a1 )
 {
@@ -638,13 +644,9 @@ void Undo_AddEntity_W( entity_s *a1 )
         Undo_AddEntity( (entity_s *)a1 );
         if ( a1 != (entity_s *)world_entity->def )
         {
-            // Walk the entity's brush DEF list and Undo_AddBrush each.  Disasm-verified
-            // (0x45E9BE..0x45E9D6): start = *(a1+0x0C) (= a1->brushes.prev, IDA's
-            // "brushes.oprev" — the first 88-byte brush def), sentinel = &a1->def___or_
-            // firstActive (a1+0x08), step via the brush def's onext (brush_t+0x04), and
-            // pass the def DIRECTLY.  The prior port walked the wrong field (ownerNext),
-            // the wrong sentinel (&a1->brushes), and passed b->def — a latent NULL+0x14
-            // deref that AddProp (this loop's first GUI exerciser) finally hit.
+            // Walk the entity's brush DEF list and Undo_AddBrush each: start =
+            // brushes.prev (the first brush def), sentinel = &a1->def, step via the brush
+            // def's onext, and pass the def DIRECTLY.
             brush_t *b = (brush_t *)a1->brushes.prev;
             for ( ; (void *)b != (void *)&a1->def; b = b->onext )
                 Undo_AddBrush( (entity_brush_s *)b );
@@ -657,9 +659,8 @@ void Undo_AddEntity_W( entity_s *a1 )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45e9e0  Undo_SetIdForEntity  (63 bytes)
+// 0x45e9e0  Undo_SetIdForEntity
 // Stamps the current undo ID into an entity and all its brush defs.
-// __usercall: ent@<edx> = entity_s_def*
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_SetIdForEntity( entity_s_def *ent )
 {
@@ -671,17 +672,15 @@ void Undo_SetIdForEntity( entity_s_def *ent )
         return;
 
     ent->epairEdits = g_lastundo->id;
-    // Stamp the undo id into each brush DEF's +0x10 (brush_t.ownerPrev).  Disasm-verified
-    // (0x45EA00..0x45EA1B): same def-list walk as Undo_AddEntity_W — start = *(ent+0x0C)
-    // (ent->brushes.prev), sentinel = &ent->def (ent+0x08), step via the
-    // def's onext (brush_t+0x04).  (The prior ownerNext walk silently skipped the defs.)
+    // Stamp the undo id into each brush DEF's ownerPrev: same def-list walk as
+    // Undo_AddEntity_W (brushes.prev .. &ent->def, step via the def's onext).
     for ( brush_t *b = (brush_t *)ent->brushes.prev;
           (void *)b != (void *)&ent->def; b = b->onext )
         b->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45ea20  Undo_End  (100 bytes)
+// 0x45ea20  Undo_End
 // Closes the current undo record.
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_End()
@@ -712,7 +711,6 @@ void Undo_End()
         MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastundo->operation );
         MainFrm_BrushList( s2, &selected_brushes );
-        MainFrm_EntList( &entityInsts, g_lastundo->operation );
     }
 
     // KIWI-UX (shakeout I): THE single close point, and therefore the one place a
@@ -730,9 +728,8 @@ void Undo_End()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45ea90  Undo_Undo  (2125 bytes)
+// 0x45ea90  Undo_Undo
 // Undoes the last completed operation.
-// __thiscall (this@<ecx> unused -- plain cdecl wrapper).
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_Undo()
 {
@@ -750,7 +747,6 @@ void Undo_Undo()
         MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastundo->operation );
         MainFrm_BrushList( s2, &selected_brushes );
-        MainFrm_EntList( &entityInsts, g_lastundo->operation );
     }
 
     undo_s *undo = g_lastundo;
@@ -790,15 +786,15 @@ void Undo_Undo()
     redo->operation = undo->operation;
 
     // Reset redoId on all active brush defs and entities that already carry it
-    // IDA: iterates active_brushes via selbrush_t.next; tests def->def==redo->id
+    // (brush defs keep it in def->def).
     for ( selbrush_t *i = active_brushes.next; i != &active_brushes; i = i->next )
     {
         brush_t *def = i->def;
         if ( def->def == (brush_t_def *)(intptr_t)redo->id )
             def->def = nullptr;
     }
-    // The binary clears the redoId stamp at entity+0x80, NOT epairEdits (0x7C); the same
-    // field Phase 3 stamps (0x45efae `mov [esi+80h],ecx`) — stale stamps must not collide.
+    // Clears the entity redoId stamp, NOT epairEdits; it is the same field Phase 3
+    // stamps — stale stamps must not collide.
     for ( entity_s *v12 = entities.next; v12 != &entities; v12 = v12->next )
     {
         if ( v12->redoId == redo->id )
@@ -808,13 +804,26 @@ void Undo_Undo()
     // Deselect all
     Select_Deselect( 1 );
 
+    // KIWI: where the defs going to the redo record sit, before any unlink (Undo_Redo puts
+    // them back there).
+    {
+        std::unordered_map<const brush_t *, int> ordinals;
+        Undo_OrdinalsOf( &active_brushes, ordinals );
+        for ( selbrush_t *inst = active_brushes.next; inst != &active_brushes; inst = inst->next )
+            if ( inst->def->ownerPrev == (entity_s *)(intptr_t)undo->id )
+            {
+                auto it = ordinals.find( inst->def );
+                s_undoOrdinal[inst->def] = it != ordinals.end() ? it->second : -1;
+            }
+    }
+
     // ── Phase 1: Move "created" brush instances (ownerPrev==undo->id) into redo's brushlist.
     {
         brush_t   *p_redoBrushlist = &redo->brushlist;
         selbrush_t *inst = active_brushes.next;
         while ( inst != &active_brushes )
         {
-            selbrush_t *pNextInst = (selbrush_t *)&inst->next->prev; // IDA advance
+            selbrush_t *pNextInst = (selbrush_t *)&inst->next->prev;
             brush_t *def = inst->def;
 
             if ( def->ownerPrev == (entity_s *)(intptr_t)undo->id )
@@ -823,18 +832,18 @@ void Undo_Undo()
                 def->unk1 = def->owner->numberId;
 
                 {
-                    selbrush_t *brushInst = inst;   // the binary's local
+                    selbrush_t *brushInst = inst;
                     vassert( (brushInst->def->refCount >= 2), "(brushInst->def->refCount) = %i", brushInst->def->refCount );   // Undo.cpp:702
                 }
 
-                Entity_UnlinkBrush( def );   // inlined in the binary (entity.cpp:1208)
+                Entity_UnlinkBrush( def );   // entity.cpp:1208
 
                 // Move def into redo's brushlist
                 Undo_01_NoMoreUndo( p_redoBrushlist, def );
                 Brush_Free( inst );
 
                 {
-                    brush_t *brushDef = def;        // the binary's local
+                    brush_t *brushDef = def;
                     iassert( brushDef->refCount == 1 );   // Undo.cpp:707
                 }
             }
@@ -853,16 +862,15 @@ void Undo_Undo()
 
             if ( def->epairEdits == undo->id )
             {
-                // DecRef + IncRef inlined in the binary (IncRef's 690 assert is
-                // optimized out -- provably true after DecRef nulls both links).
+                // IncRef's 690 assert is provably true after DecRef nulls both links.
                 DecRef( (entity_s *)def );
                 IncRef( (entity_s *)def, p_entitylist_redo );
 
                 {
-                    entity_s_def *entity = def;     // the binary's local
+                    entity_s_def *entity = def;
                     iassert( entity->refCount == 1 );   // Undo.cpp:720
                     ++entity->refCount;
-                    Entity_Free( (char *)pEInst );
+                    Entity_Free( pEInst );
                     iassert( entity->refCount == 1 );   // Undo.cpp:723
                 }
             }
@@ -876,11 +884,11 @@ void Undo_Undo()
           j = undo->entitylist.next )
     {
         {
-            entity_s *entity = j;                   // the binary's local
+            entity_s *entity = j;
             iassert( entity->refCount == 1 );   // Undo.cpp:728
         }
 
-        g_undoMemorySize -= (int)EntityDef_MemorySize( j );
+        g_undoMemorySize -= (int)Entity_MemorySize( j );
 
         entity_s_def *worldDef = (entity_s_def *)world_entity->def;
         int jEntityId = j->numberId;
@@ -888,10 +896,8 @@ void Undo_Undo()
         if ( jEntityId == worldDef->numberId )
         {
             // World entity: restore the saved worldspawn epairs onto the live world.
-            // Same swap idiom as Undo_Redo (see the note there): entNode/j takes the OLD
-            // world epairs so Entity_Free_R frees those, world keeps the restored chain.
-            // Here the binary's path is correct too (it zeroes j->epairs before the free),
-            // so this matches the IDA end state; the swap just keeps both branches uniform.
+            // Same swap idiom as Undo_Redo (see the note there): j takes the OLD world
+            // epairs so Entity_Free_R frees those, world keeps the restored chain.
             epair_t *tmpEpairs       = worldDef->epairs;
             worldDef->epairs         = j->epairs;
             j->epairs                = tmpEpairs;
@@ -900,49 +906,39 @@ void Undo_Undo()
         else
         {
             // Non-world entity: unlink from undo list, insert into entities.
-            // DecRef + IncRef inlined in the binary (IncRef's 690 assert optimized out).
             DecRef( j );
             IncRef( j, &entities );
 
             j->redoId = redo->id;
 
             {
-                entity_s *entity = j;               // the binary's local
+                entity_s *entity = j;
                 iassert( entity->refCount == 1 );   // Undo.cpp:746
                 Prefab_Init( (prefab_s *)&entityInsts, (entity_s_def *)j, &active_brushes );
                 --entity->refCount;
                 iassert( entity->refCount == 1 );   // Undo.cpp:749
             }
 
-            // Verify the def's brush-def-list sentinel is empty. The sentinel spans
-            // offsets 0x08 (firstActive / "oprev") and 0x0C (its ->next, == "onext").
-            // §11 OFFSET FIX: disasm 0x45f019 reads `[esi+0Ch]` (= j->brushes.prev, the
-            // sentinel's onext side), NOT brushes.ownerPrev (0x1C). The prior port read
-            // 0x1C — an unrelated field that essentially never equals &def, so this FATAL
-            // assert would fire on every undo of a non-world entity (a path no gate drives).
-            // KEEP_VERBOSE (pair): the binary's entity->brushes head overlays the
-            // port's def(+0x08)/brushes(+0x0C) split — member path inexpressible.
-            if ( (void *)j->brushes.prev != (void *)&j->def )   // [j+0x0C] vs &[j+0x08]
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\Undo.cpp",
-                        750, 0, "%s", "entity->brushes.onext == &entity->brushes" );
-            if ( (void **)j->def != (void **)&j->def )
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\Undo.cpp",
-                        751, 0, "%s", "entity->brushes.oprev == &entity->brushes" );
+            // Verify the def's brush-def-list sentinel is empty: the sentinel's onext side
+            // is j->brushes.prev (NOT brushes.ownerPrev), and the list head is &j->def.
+            iassert( (void *)j->brushes.prev == (void *)&j->def );   // Undo.cpp:750 ([j+0x0C])
+            iassert( (void **)j->def == (void **)&j->def );           // Undo.cpp:751
         }
     }
 
     // ── Phase 4: Restore brush defs from the undo record back into the live list.
+    // KIWI: in the order of the positions they had, each linked back at its own (the
+    // binary walked the record head-first and appended every one).
     undo_s *v35 = undo;
     {
-        brush_t *bDef = (brush_t *)undo->brushlist.onext;
-        while ( bDef != &undo->brushlist )
+        const std::vector<brush_t *> defs = Undo_DefsInOrder( &undo->brushlist );
+        for ( brush_t *bDef : defs )
         {
+            const int ordinal = Undo_TakeOrdinal( bDef );
             g_undoMemorySize -= (int)Brush_MemorySize( bDef );
             Undo_Refcount( bDef );
 
-            // Find the entity instance whose DEF carries the saved owner numberId
-            // (disasm 0x45f0a1 `[ecx+84h]` — hex-rays' `instDef[2].next` is the IDB's
-            // 64-byte selbrush_t stride landing on the def's numberId).
+            // Find the entity instance whose DEF carries the saved owner numberId.
             entity_s *ownerInst = nullptr;
             for ( entity_s *e = entityInsts.next; e != &entityInsts; e = e->next )
             {
@@ -954,17 +950,17 @@ void Undo_Undo()
                 }
             }
 
-            // Link brush def into entity (Entity_LinkBrush inline)
+            // Link brush def into entity
             if ( ownerInst && ownerInst != &entityInsts )
             {
                 entity_s_def *ownerDef = (entity_s_def *)ownerInst->def;
-                Entity_LinkBrush( bDef, (entity_s *)ownerDef );   // inlined in the binary
+                Entity_LinkBrushAt( bDef, (entity_s *)ownerDef, ordinal );   // KIWI: was appended
             }
             else
             {
                 // Fall back to world entity
                 entity_s_def *worldDef = (entity_s_def *)world_entity->def;
-                Entity_LinkBrush( bDef, (entity_s *)worldDef );   // inlined in the binary
+                Entity_LinkBrush( bDef, (entity_s *)worldDef );
                 ownerInst = world_entity;
             }
 
@@ -976,9 +972,6 @@ void Undo_Undo()
 
             // Stamp with redo ID
             bDef->def = (brush_t_def *)(intptr_t)redo->id;
-
-            // Advance: re-read head (list shrinks as Undo_Refcount removes each node)
-            bDef = (brush_t *)v35->brushlist.onext;
         }
     }
 
@@ -994,31 +987,29 @@ void Undo_Undo()
     // Rebuild brush visuals for all selected + active brushes
     g_bScreenUpdates = 1;
     for ( selbrush_t *v44 = selected_brushes.next; v44 != &selected_brushes; v44 = v44->next )
-        sub_47B940( v44->def );
+        Brush_UpdateSpecialMaterialFlag( v44->def );
     for ( selbrush_t *m = active_brushes.next; m != &active_brushes; m = m->next )
-        sub_47B940( m->def );
+        Brush_UpdateSpecialMaterialFlag( m->def );
 
     char *v46 = (char *)va( "%s - active_brushes", "after undo" );
     MainFrm_BrushList( v46, &active_brushes );
     char *v47 = (char *)va( "%s - active_brushes", "after undo" );
     MainFrm_BrushList( v47, &selected_brushes );
-    MainFrm_EntList( &entityInsts, "after undo" );
 
     // KIWI: undo after saving changes the document and must restore the save prompt.
     MarkMapModified();
 
     Sys_Printf( "Updating layers...\n" );
     Layers_SetMapLayers();
-    Layers_02();
+    Layers_RefreshDialog();
     g_nUpdateBits = -1;
 
     Sel_InvalidateFromLegacy();   // KIWI-UX (wholesale brush-list rebuild)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45f2e0  Undo_Redo  (1423 bytes)
+// 0x45f2e0  Undo_Redo
 // Redoes the last undone operation.
-// __thiscall (this@<ecx> unused -- plain cdecl wrapper).
 // ─────────────────────────────────────────────────────────────────────────────
 void Undo_Redo()
 {
@@ -1037,7 +1028,6 @@ void Undo_Redo()
         MainFrm_BrushList( s1, &active_brushes );
         char *s2 = (char *)va( "%s - active_brushes", g_lastredo->operation );
         MainFrm_BrushList( s2, &selected_brushes );
-        MainFrm_EntList( &entityInsts, g_lastredo->operation );
     }
 
     undo_s *redo = g_lastredo;
@@ -1054,6 +1044,18 @@ void Undo_Redo()
     Undo_GeneralStart( operation );
     Select_Deselect( 1 );
 
+    // KIWI: where the defs going to the new undo record sit, before any unlink.
+    {
+        std::unordered_map<const brush_t *, int> ordinals;
+        Undo_OrdinalsOf( &active_brushes, ordinals );
+        for ( selbrush_t *inst = active_brushes.next; inst != &active_brushes; inst = inst->next )
+            if ( inst->def->def == (brush_t_def *)(intptr_t)redo->id )
+            {
+                auto it = ordinals.find( inst->def );
+                s_undoOrdinal[inst->def] = it != ordinals.end() ? it->second : -1;
+            }
+    }
+
     // ── Phase 1: Move active brush instances with redoId == redo->id
     //            into the new undo's brushlist.
     {
@@ -1066,7 +1068,7 @@ void Undo_Redo()
             if ( def->def == (brush_t_def *)(intptr_t)redo->id )
             {
                 {
-                    brush_t *brushDef = def;        // the binary's local
+                    brush_t *brushDef = def;
                     vassert( (brushDef->refCount >= 2), "(brushDef->refCount) = %i", brushDef->refCount );   // Undo.cpp:849
                 }
                 def->unk1 = def->owner->numberId;
@@ -1091,18 +1093,17 @@ void Undo_Redo()
             if ( def->redoId == redo->id )
             {
                 // Unlink from redo list, link into the new undo's entitylist.
-                // DecRef + IncRef inlined in the binary (IncRef's 690 assert optimized out).
                 DecRef( (entity_s *)def );
                 IncRef( (entity_s *)def, &g_lastundo->entitylist );
 
                 {
-                    entity_s_def *entity = def;     // the binary's local
+                    entity_s_def *entity = def;
                     iassert( entity->refCount == 1 );   // Undo.cpp:867
                     ++entity->refCount;
-                    Entity_Free( (char *)v7 );
+                    Entity_Free( v7 );
                     iassert( entity->refCount == 1 );   // Undo.cpp:870
                 }
-                g_undoMemorySize += (int)EntityDef_MemorySize( def );
+                g_undoMemorySize += (int)Entity_MemorySize( def );
             }
             v7 = (entity_s *)v9;
         }
@@ -1122,17 +1123,14 @@ void Undo_Redo()
         if ( entEntityId == worldDef->numberId )
         {
             // World entity: restore the saved worldspawn epairs onto the live world.
-            // DELIBERATE DIVERGENCE FROM IDA (do NOT "re-faithful" this): the binary
-            // (sub_45F2E0) frees world's current epairs inline, sets world->epairs =
-            // entNode->epairs, then Entity_Free_R(entNode) WITHOUT first zeroing
-            // entNode->epairs — but Entity_Free_R (0x483C80) calls Entity_FreeEpairs,
-            // so it frees entNode->epairs, which now ALIASES world->epairs → the
-            // freshly-restored world epairs are use-after-freed. (Undo_Undo's binary
-            // path zeroes j->epairs first and is fine; Undo_Redo's omits that zero —
-            // a latent binary UAF on redo of a worldspawn epair edit.) We swap instead:
-            // entNode takes the OLD world epairs so Entity_Free_R frees THOSE, and the
-            // restored chain (now world->epairs) survives. Same intended end state,
-            // no UAF.
+            // DELIBERATE DIVERGENCE from the binary: it frees world's current epairs
+            // inline, sets world->epairs = entNode->epairs, then Entity_Free_R(entNode)
+            // WITHOUT first zeroing entNode->epairs — but Entity_Free_R (0x483C80) calls
+            // Entity_FreeEpairs, so it frees entNode->epairs, which now ALIASES
+            // world->epairs and use-after-frees the freshly-restored chain (a latent
+            // binary UAF on redo of a worldspawn epair edit; Undo_Undo's path zeroes
+            // first and is fine).  We swap instead: entNode takes the OLD world epairs
+            // so Entity_Free_R frees THOSE, and the restored chain survives.
             epair_t *tmpEpairs  = worldDef->epairs;
             worldDef->epairs    = entNode->epairs;
             entNode->epairs     = tmpEpairs;
@@ -1141,44 +1139,35 @@ void Undo_Redo()
         else
         {
             // Unlink from redo list, insert into entities.
-            // DecRef + IncRef inlined in the binary (IncRef's 690 assert optimized out).
             DecRef( entNode );
             IncRef( entNode, &entities );
 
             {
-                entity_s *entity = entNode;         // the binary's local
+                entity_s *entity = entNode;
                 iassert( entity->refCount == 1 );   // Undo.cpp:891
                 Prefab_Init( (prefab_s *)&entityInsts, (entity_s_def *)entNode, &active_brushes );
                 --entity->refCount;
                 iassert( entity->refCount == 1 );   // Undo.cpp:894
             }
 
-            // §11 OFFSET FIX (mirrors Undo_Undo 750): disasm 0x45f7... reads `[next+12]`
-            // (= entNode->brushes.prev, the def-list sentinel's onext side at 0x0C), NOT
-            // brushes.ownerPrev (0x1C). Prior port read 0x1C → this FATAL would fire on
-            // every redo of a non-world entity.
-            // KEEP_VERBOSE (pair): same brushes-head overlay as Undo.cpp:750/751.
-            if ( (void *)entNode->brushes.prev != (void *)&entNode->def )  // [next+0x0C] vs &[next+0x08]
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\Undo.cpp",
-                        895, 0, "%s", "entity->brushes.onext == &entity->brushes" );
-            if ( (void **)entNode->def != (void **)&entNode->def )
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\Undo.cpp",
-                        896, 0, "%s", "entity->brushes.oprev == &entity->brushes" );
+            // Same empty-sentinel check as Undo_Undo (Undo.cpp:750): brushes.prev, NOT
+            // brushes.ownerPrev.
+            iassert( (void *)entNode->brushes.prev == (void *)&entNode->def );   // Undo.cpp:895
+            iassert( (void **)entNode->def == (void **)&entNode->def );           // Undo.cpp:896
         }
         entNode = v31->entitylist.next;
     }
 
     // ── Phase 4: Restore brush defs from redo's brushlist.
+    // KIWI: in position order, each at its own (see Undo_Undo's phase 4).
     {
-        brush_t *onext = (brush_t *)redo->brushlist.onext;
-        while ( onext != &redo->brushlist )
+        const std::vector<brush_t *> defs = Undo_DefsInOrder( &redo->brushlist );
+        for ( brush_t *onext : defs )
         {
+            const int ordinal = Undo_TakeOrdinal( onext );
             Undo_Refcount( onext );
 
             // Find owner entity instance by saved owner numberId.
-            // §11 STRIDE FIX (mirrors Undo_Undo Phase 4): disasm 0x45f6d3 reads `[ecx+84h]`
-            // (the entity_s_def's numberId @ 0x84), not the 56-byte-stride `instDef[2].next`
-            // (= 0x74 = epairs ptr) the IDA pseudocode rendered with the 64-byte IDB selbrush_t.
             entity_s *v17 = nullptr;
             for ( entity_s *e = entityInsts.next; e != &entityInsts; e = e->next )
             {
@@ -1193,14 +1182,14 @@ void Undo_Redo()
             if ( v17 && v17 != &entityInsts )
             {
                 entity_s_def *v19 = (entity_s_def *)v17->def;
-                Entity_LinkBrush( onext, (entity_s *)v19 );   // inlined in the binary
+                Entity_LinkBrushAt( onext, (entity_s *)v19, ordinal );   // KIWI: was appended
             }
             else
             {
                 // KIWI: the restored definition and instance must share an owner.
                 // Match Undo_Undo's world fallback instead of attaching to the list sentinel.
                 entity_s_def *worldDef = (entity_s_def *)world_entity->def;
-                Entity_LinkBrush( onext, (entity_s *)worldDef );   // inlined in the binary
+                Entity_LinkBrush( onext, (entity_s *)worldDef );
                 v17 = world_entity;
             }
 
@@ -1208,9 +1197,6 @@ void Undo_Redo()
             if ( newInst->next || newInst->prev )
                 Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
             Brush_AddToList2( newInst );
-
-            // Advance: re-read head
-            onext = (brush_t *)v31->brushlist.onext;
         }
     }
 
@@ -1225,7 +1211,6 @@ void Undo_Redo()
     MainFrm_BrushList( v24, &active_brushes );
     char *v25 = (char *)va( "%s - active_brushes", "after redo" );
     MainFrm_BrushList( v25, &selected_brushes );
-    MainFrm_EntList( &entityInsts, "after redo" );
     g_nUpdateBits = -1;
 
     Sel_InvalidateFromLegacy();   // KIWI-UX (wholesale brush-list rebuild)

@@ -26,97 +26,6 @@ char      g_emptyString[4] = {0};
 char      isDvarSystemActive;
 intptr_t  sortedDvars;
 
-char s_assertDisable_Dvar_AddFlags;
-char s_assertDisable_Dvar_AddFlags;
-char s_assertDisable_Dvar_AssignResetStringValue;
-char s_assertDisable_Dvar_ClampValueToDomain;
-char s_assertDisable_Dvar_ClampValueToDomain;
-char s_assertDisable_Dvar_ClampValueToDomain;
-char s_assertDisable_Dvar_ClampValueToDomain;
-char s_assertDisable_Dvar_ClampValueToDomain;
-char s_assertDisable_Dvar_ClearModified;
-char s_assertDisable_Dvar_ClearModifiedFlags;
-char s_assertDisable_Dvar_ClearModifiedFlags;
-char s_assertDisable_Dvar_ClearModifiedFlags;
-char s_assertDisable_Dvar_ClearModifiedFlags;
-char s_assertDisable_Dvar_CopyString;
-char s_assertDisable_Dvar_DisplayableLatchedValue;
-char s_assertDisable_Dvar_DisplayableResetValue;
-char s_assertDisable_Dvar_DomainToString_Internal;
-char s_assertDisable_Dvar_DomainToString_Internal;
-char s_assertDisable_Dvar_FindMalleableVar;
-char s_assertDisable_Dvar_FindMalleableVar;
-char s_assertDisable_Dvar_FreeResetValue;
-char s_assertDisable_Dvar_FreeResetValue;
-char s_assertDisable_Dvar_FreeResetValue;
-char s_assertDisable_Dvar_FreeResetValue;
-char s_assertDisable_Dvar_FreeResetValue;
-char s_assertDisable_Dvar_GetString;
-char s_assertDisable_Dvar_GetUnpackedColor;
-char s_assertDisable_Dvar_GetUnpackedColor;
-char s_assertDisable_Dvar_PerformUnregistration;
-char s_assertDisable_Dvar_RegisterString;
-char s_assertDisable_Dvar_RegisterString;
-char s_assertDisable_Dvar_RegisterString;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_RegisterVariant;
-char s_assertDisable_Dvar_SetBool;
-char s_assertDisable_Dvar_SetBool;
-char s_assertDisable_Dvar_SetBool;
-char s_assertDisable_Dvar_SetColor;
-char s_assertDisable_Dvar_SetColor;
-char s_assertDisable_Dvar_SetColor;
-char s_assertDisable_Dvar_SetFloat;
-char s_assertDisable_Dvar_SetFloat;
-char s_assertDisable_Dvar_SetFloat;
-char s_assertDisable_Dvar_SetInt;
-char s_assertDisable_Dvar_SetInt;
-char s_assertDisable_Dvar_SetInt;
-char s_assertDisable_Dvar_SetResetValue;
-char s_assertDisable_Dvar_SetString;
-char s_assertDisable_Dvar_SetString;
-char s_assertDisable_Dvar_SetString;
-char s_assertDisable_Dvar_SetString;
-char s_assertDisable_Dvar_SetString;
-char s_assertDisable_Dvar_SetVariant;
-char s_assertDisable_Dvar_SetVariant;
-char s_assertDisable_Dvar_SetVariant;
-char s_assertDisable_Dvar_SetVariant;
-char s_assertDisable_Dvar_SetVariant;
-char s_assertDisable_Dvar_ReRegisterVariant;
-char s_assertDisable_Dvar_ReRegisterVariant;
-char s_assertDisable_Dvar_SetVec2;
-char s_assertDisable_Dvar_SetVec2;
-char s_assertDisable_Dvar_SetVec2;
-char s_assertDisable_Dvar_SetVec3;
-char s_assertDisable_Dvar_SetVec3;
-char s_assertDisable_Dvar_SetVec3;
-char s_assertDisable_Dvar_SetVec4;
-char s_assertDisable_Dvar_SetVec4;
-char s_assertDisable_Dvar_SetVec4;
-char s_assertDisable_Dvar_StringToBool;
-char s_assertDisable_Dvar_StringToEnum;
-char s_assertDisable_Dvar_StringToEnum;
-char s_assertDisable_Dvar_StringToFloat;
-char s_assertDisable_Dvar_StringToInt;
-char s_assertDisable_Dvar_StringToValue;
-char s_assertDisable_Dvar_StringToValue;
-char s_assertDisable_Dvar_StringToValue;
-char s_assertDisable_Dvar_StringToValue;
-char s_assertDisable_Dvar_StringToVec2;
-char s_assertDisable_Dvar_StringToVec3;
-char s_assertDisable_Dvar_StringToVec4;
-char s_assertDisable_Dvar_ValueInDomain;
-char s_assertDisable_Dvar_ValueToString;
-char s_assertDisable_Dvar_ValueToString;
-char s_assertDisable_Dvar_ValueToString;
-char s_assertDisable_Dvar_ValuesEqual;
-
-
 /*
 ================
 Dvar_IsSystemActive
@@ -210,84 +119,6 @@ void Dvar_MakeExplicitType(
 
   if (shouldCopyString)
     Dvar_FreeString(&copiedString);
-}
-
-/*
-================
-Dvar_FreeCurrentValue
-
-Frees the current value string of a dvar, if it's uniquely owned.
-================
-*/
-void Dvar_FreeCurrentValue(Dvar_t *dvar)
-{
-  char *str;
-  char firstCh;
-
-  str = (char *)dvar->current.string;
-  if ( str == (char *)dvar->latched.string || str == (char *)dvar->reset.string )
-  {
-    dvar->current.string = NULL;
-  }
-  else
-  {
-    firstCh = *str;
-    if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
-      Z_Free(str);
-    dvar->current.string = NULL;
-  }
-}
-
-/*
-================
-Dvar_FreeLatchedValue
-
-Frees the latched value string of a dvar, if it's uniquely owned.
-================
-*/
-void Dvar_FreeLatchedValue(Dvar_t *dvar)
-{
-  char *str;
-  char firstCh;
-
-  str = (char *)dvar->latched.string;
-  if ( str == (char *)dvar->current.string || str == (char *)dvar->reset.string )
-  {
-    dvar->latched.string = NULL;
-  }
-  else
-  {
-    firstCh = *str;
-    if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
-      Z_Free(str);
-    dvar->latched.string = NULL;
-  }
-}
-
-/*
-================
-Dvar_FreeResetValue
-
-Frees the reset value string of a dvar, if it's uniquely owned.
-================
-*/
-void Dvar_FreeResetValue(Dvar_t *dvar)
-{
-  char *str;
-  char firstCh;
-
-  str = (char *)dvar->reset.string;
-  if ( str == (char *)dvar->current.string || str == (char *)dvar->latched.string )
-  {
-    dvar->reset.string = NULL;
-  }
-  else
-  {
-    firstCh = *str;
-    if ( *str && (str[1] || firstCh < '0' || firstCh > '9') && str != g_dvarStringOff && str != g_dvarStringOn )
-      Z_Free(str);
-    dvar->reset.string = NULL;
-  }
 }
 
 /*
@@ -1485,33 +1316,6 @@ void Dvar_PerformUnregistration(Dvar_t *dvar)
 
 /*
 ================
-Dvar_ClearModifiedFlags
-
-Clears a system flag from a dvar, unregistering it if no system flags remain.
-================
-*/
-void Dvar_ClearModifiedFlags( Dvar_t *dvar, int sysFlag )
-{
-  unsigned short dvarFlags;
-
-  Assert(dvar, s_assertDisable_Dvar_ClearModifiedFlags);
-  if ( (dvar->flags & DVAR_EXTERNAL) == 0 )
-  {
-    #define DVAR_SYS_FLAG  0x2000  /* (1 << 13) */
-    #define DVAR_SYS_MASK  0x7000  /* (1 << 12) | (1 << 13) | (1 << 14) */
-    Assert(!(sysFlag != DVAR_SYS_FLAG), s_assertDisable_Dvar_ClearModifiedFlags);
-    dvarFlags = dvar->flags;
-    Assert(!((dvarFlags & sysFlag) == 0), s_assertDisable_Dvar_ClearModifiedFlags);
-    dvarFlags = dvar->flags;
-    Assert(!((dvarFlags & DVAR_EXTERNAL) != 0), s_assertDisable_Dvar_ClearModifiedFlags);
-    dvar->flags &= ~(unsigned short)sysFlag;
-    if ( (dvar->flags & DVAR_SYS_MASK) == 0 )
-      Dvar_PerformUnregistration(dvar);
-  }
-}
-
-/*
-================
 Dvar_UpdateResetValue
 
 Sets the reset value of a dvar, handling vector and string types specially.
@@ -1807,13 +1611,12 @@ Dvar_FindMalleableVar
 Finds an existing dvar by name or registers a new one with the given parameters.
 ================
 */
+#define DVAR_SYS_MASK  0x7000  /* (1 << 12) | (1 << 13) | (1 << 14) */
 Dvar_t *Dvar_FindOrRegisterVariant(short flags, char *dvarName, int type, char *value, int domainMin, int domainMax)
 {
   union { int i; float f; } udomMax;
   DvarValue_t nativeValue = {};
   DvarLimits_t domain = {};
-  char *msg;
-  int ar;
   Dvar_t *dvar;
 
   Assert((flags & DVAR_SYS_MASK) != 0, s_assertDisable_Dvar_FindMalleableVar);
@@ -2087,9 +1890,7 @@ Sets a string or enum dvar's value from the specified source.
 */
 void Dvar_SetStringFromSource(Dvar_t *dvar, char *string, DvarSetSource_t source)
 {
-  int ar;
   char dvarType;
-  char *msg;
   DvarValue_t newValue = {};
   char stringBuf[MAX_OS_PATH];
 
@@ -2191,18 +1992,6 @@ void Dvar_SetString(Dvar_t *dvar, char *string)
 void Dvar_SetColor(Dvar_t *dvar, float r, float g, float b, float a)
 {
   Dvar_SetColorFromSource(dvar, r, g, b, a, DVAR_SOURCE_INTERNAL);
-}
-
-/*
-================
-Dvar_SetStringInternal
-
-Sets a string dvar's value internally (convenience wrapper).
-================
-*/
-void Dvar_SetStringInternal(Dvar_t *dvar, char *string)
-{
-  Dvar_SetString(dvar, string);
 }
 
 /*

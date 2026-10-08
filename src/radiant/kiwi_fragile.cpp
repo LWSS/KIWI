@@ -25,8 +25,10 @@
 #include "kiwi_command.h"           // KiwiCmd_Undo*
 #include "kiwi_fragile.h"
 #include "kiwi_launch.h"            // KiwiLaunch_SamePath
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"         // Sel_*, KiwiSel*
 #include "kiwi_validity.h"          // KiwiValid_*
+#include "kiwi_vec.h"
 #include "kiwi_viewdirty.h"
 
 #include <math.h>
@@ -37,23 +39,9 @@
 #include <vector>
 
 // Ported entry points.
-extern int   Sys_Printf( const char *fmt, ... );                                    // win_qe3.cpp 0x499e90
-extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                          const float *p1, const float *p2, const unsigned int *color,
-                          char width, int vertCount, int maxVertCount );            // draw.cpp 0x40c110
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );                     // 0x402ac0
-extern float world_orient_matrix[4][3];                                             // entity.cpp 0x6DE290
-extern camera_s *Ed_Camera();                                                       // camwnd.cpp
-extern void  Select_Deselect( int bAlsoFreeFaces );                                 // select.cpp 0x48E800
-extern void  Select_Brush( selbrush_t *brush, char some_overwrite,
-                           char bStatus, char center_grid_on_selection );           // select.cpp
 extern void  Radiant_VecToAngles( float *ang, const float *vec );                   // engine_stubs.cpp 0x4a5020
 extern face_t *Face_Alloc( brush_t *b, face_t *f );                                 // brush.cpp 0x471500
-extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );               // brush.cpp 0x471640
 extern bool  Map_WriteSnapshot( const char *path );                                 // map.cpp (KIWI)
-extern entity_s entityInsts;                                                        // map.cpp 0x23F1748
-extern char  currentmap[];                                                          // map.cpp 0x23F18D8
-extern int   g_nUpdateBits;                                                         // engine_stubs.cpp
 
 namespace
 {
@@ -126,15 +114,6 @@ namespace
     const DWORD KFRAG_RESCAN_MS     = 250;
     const float KFRAG_CORNER_RADIUS = 8.0f;     // brush corners this close to the spot get markers
     const float KFRAG_SHOW_DISTANCE = 24.0f;    // Show: closest camera distance / 2D span
-
-    float Dot3( const float *a, const float *b ) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-
-    void Cross3( const float *a, const float *b, float *out )
-    {
-        out[0] = a[1] * b[2] - a[2] * b[1];
-        out[1] = a[2] * b[0] - a[0] * b[2];
-        out[2] = a[0] * b[1] - a[1] * b[0];
-    }
 
     // Brush numbers only mean something in the map the compile came from.
     bool MarksForThisMap()
@@ -1488,7 +1467,6 @@ bool KiwiFragile_DrawBuildRow( bool offerBuildAnyway )
 //  * a patch whose control points all lie within KFRAG_FLAT_DEV of one plane is flattened
 //    onto it - onto the exact axial plane when that plane is within 1e-3 of an axis.
 // Scope: the selection, else the whole map.  One undo record.
-extern void Patch_Rebuild( patchMesh_t *p, char doBounds );                         // pmesh.cpp
 
 namespace
 {
@@ -1677,7 +1655,6 @@ void KiwiFragile_CleanPrecision()
 
 void KiwiFragile_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiCleanPrecision", 0, 0, KIWI_CMD_CLEAN_PRECISION );
 }
 

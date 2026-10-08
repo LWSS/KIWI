@@ -13,42 +13,13 @@
 // ---------------------------------------------------------------------------
 static void ( *console_stuff )( const char *fmt, va_list args ) = nullptr;
 
-// Three additional printf-style callbacks that the app wires up; they are
-// referenced by their setter / caller trampolines below.  In practice only
-// console_stuff is actively set in CoD4Radiant; the others exist for
-// compatibility with the BSP-tools heritage and are never called from the
-// editor proper.
-static void ( *s_qprintf_fn )( int level, const char *fmt, va_list args ) = nullptr;
-static void ( *s_qerrprintf_fn )( int level, int line, const char *fmt, va_list args ) = nullptr;
-static void ( *s_dprintf_fn )( int level, int line, const char *fmt, va_list args ) = nullptr;
-
-// ---------------------------------------------------------------------------
-// SetConsoleHandler / QPrintf / QErrPrintf / DPrintf — callback setters and
-// callers.  These are the small stub functions at 0x40a9e0–0x40aa10.
-// ---------------------------------------------------------------------------
+// KIWI: the BSP-tools QPrintf / QErrPrintf / DPrintf callbacks (0x40a980-0x40aa10) were
+// never set or called by the editor and are gone.
 
 // 0x40a9e0  SetConsoleHandler — installs the one-arg (fmt, va_list) printer.
 void SetConsoleHandler( void ( *fn )( const char *, va_list ) )
 {
     console_stuff = fn;
-}
-
-// 0x40a9f0  — installs the QPrintf handler.
-void SetQPrintfHandler( void ( *fn )( int, const char *, va_list ) )
-{
-    s_qprintf_fn = fn;
-}
-
-// 0x40aa00  — installs the QErrPrintf handler.
-void SetQErrPrintfHandler( void ( *fn )( int, int, const char *, va_list ) )
-{
-    s_qerrprintf_fn = fn;
-}
-
-// 0x40aa10  — installs the DPrintf handler.
-void SetDPrintfHandler( void ( *fn )( int, int, const char *, va_list ) )
-{
-    s_dprintf_fn = fn;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,42 +54,6 @@ void R_Warn( int warnType, const char *fmt, ... )
         va_list args;
         va_start( args, fmt );
         console_stuff( fmt, args );
-        va_end( args );
-    }
-}
-
-// 0x40a980  QPrintf trampoline.
-void QPrintf( int level, const char *fmt, ... )
-{
-    if ( s_qprintf_fn )
-    {
-        va_list args;
-        va_start( args, fmt );
-        s_qprintf_fn( level, fmt, args );
-        va_end( args );
-    }
-}
-
-// 0x40a9a0  QErrPrintf trampoline.
-void QErrPrintf( int level, int line, const char *fmt, ... )
-{
-    if ( s_qerrprintf_fn )
-    {
-        va_list args;
-        va_start( args, fmt );
-        s_qerrprintf_fn( level, line, fmt, args );
-        va_end( args );
-    }
-}
-
-// 0x40a9c0  DPrintf trampoline.
-void DPrintf( int level, int line, const char *fmt, ... )
-{
-    if ( s_dprintf_fn )
-    {
-        va_list args;
-        va_start( args, fmt );
-        s_dprintf_fn( level, line, fmt, args );
         va_end( args );
     }
 }

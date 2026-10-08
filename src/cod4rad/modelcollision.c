@@ -87,8 +87,6 @@ void BuildModelCollision(float *mins, float *maxs)
     float splitPos;
     float newBounds[2];
     int otherAxis;
-    char *model;       /* collision model pointer */
-    char *nextModel;
     float radius;
     float boundsMargin;
     int nodeIndex;

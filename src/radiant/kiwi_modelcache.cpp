@@ -10,8 +10,7 @@
 #include <gfx_d3d/r_xsurface.h>    // surface count helpers
 #include <gfx_d3d/r_dobj_skin.h>   // XSurface definition
 #include "kiwi_modelcache.h"
-
-extern int Sys_Printf( const char *fmt, ... );
+#include "kiwi_ported.h"
 
 namespace
 {
@@ -213,6 +212,15 @@ bool KiwiModelCache_Get( const XSurface *xsurf, KiwiModelGeo *out )
     // Reset records when the D3D device identity changes.
     if ( s_device != dx.device )
     {
+        // KIWI: R_ShutdownDirect3D releases the chunks before the device goes, so this should
+        // only ever meet empty tables; live chunks here belong to the old device.
+        static bool s_warnedDevice;
+        if ( ( s_vbChunkCount || s_ibChunkCount ) && !s_warnedDevice )
+        {
+            s_warnedDevice = true;
+            Sys_Printf( "KIWI model geometry cache: the D3D device changed under %d live buffer "
+                        "chunk(s); they are abandoned.\n", s_vbChunkCount + s_ibChunkCount );
+        }
         KMC_Forget();
         s_device = dx.device;
     }
@@ -261,5 +269,3 @@ void KiwiModelCache_Shutdown()
     s_device = nullptr;
 }
 
-int KiwiModelCache_ResidentSurfs() { return s_okCount; }
-int KiwiModelCache_ResidentKB()    { return (int)( s_residentBytes / 1024u ); }

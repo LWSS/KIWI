@@ -11,6 +11,7 @@
 
 #include "kiwi_matconvert.h"
 #include "kiwi_matwriter.h"
+#include "kiwi_ported.h"
 
 #include <algorithm>
 #include <stdarg.h>
@@ -19,14 +20,8 @@
 #include <string>
 #include <vector>
 
-extern int         Sys_Printf( const char *fmt, ... );
-extern qtexture_s *Texture_GetHandle( const char *name );
 extern qtexture_s *TexWnd_RegisterMaterialByName( const char *name );
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );
 extern bool        Materialdef_Realize( MaterialDef *def );
-extern void        sub_47D060( selbrush_t *brushList );
-extern int         g_nUpdateBits;
-extern entity_s    entities;
 
 namespace
 {
@@ -485,9 +480,9 @@ void RefreshLiveMaterial( const char *name, Material *oldMaterial, Material *fre
     if ( browserMaterial )
         browserMaterial->handle = oldMaterial;
 
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 

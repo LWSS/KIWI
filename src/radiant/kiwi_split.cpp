@@ -23,6 +23,7 @@
 #include "kiwi_material.h"                  // split-face inheritance
 #include "kiwi_numeric.h"                   // Face Split offset
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_region.h"                    // Ctrl+R on construction faces
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"                      // geometry snap classification
@@ -38,29 +39,8 @@
 #include <vector>
 
 // Ported entry points.
-extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp
-extern void        CamWnd_BuildMatrix();                                      // camwnd.cpp 0x403470
-extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-
 extern void        Brush_SplitBrushByFace( brush_t *in, face_t *face,
                                            brush_t **front, brush_t **back );  // brush.cpp:4605 (0x471960)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );           // brush.cpp:669 (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                          // brush.cpp:927 (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                                // brush.cpp:1002 (0x475ba0)
-extern void        Brush_Free_R( brush_t *def );                               // brush.cpp:706 (0x475af0)
-extern void        Entity_UnlinkBrush( brush_t *b );                           // entity.cpp:464 (0x485020)
-extern void        Select_Deselect( int bAlsoFreeFaces );                      // select.cpp:1444 (0x48E800)
-extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
-                                 char bStatus, char center_grid_on_selection ); // select.cpp:884
-
-// Same fill path as kiwi_region.cpp.
-extern char        Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
-extern void        __cdecl R_AddRenderCmdDrawTris(
-                       Material *material, MaterialTechniqueType techType, short indexCount,
-                       const uint16_t *indices, short vertexCount,
-                       const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-                       const float ( *st )[2] );                               // 0x4fd1c0
 
 namespace
 {
@@ -320,7 +300,7 @@ namespace
             }
             else
             {
-                const float a = ( 6.28318530718f * (float)( i - 1 ) )
+                const float a = ( (float)( 2.0 * KIWI_PI ) * (float)( i - 1 ) )
                               / (float)KSPLIT_DISC_SEGS;
                 const float cs = cosf( a ) * radius;
                 const float sn = sinf( a ) * radius;
@@ -3687,7 +3667,6 @@ bool KiwiSplit_CanSplitFace()
 
 void KiwiSplit_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiCut",       0, 0, KIWI_CMD_CUT );
     Radiant_RegisterCommand( "KiwiSplitFace", 0, 0, KIWI_CMD_SPLIT_FACE );
 }

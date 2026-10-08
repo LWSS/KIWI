@@ -17,9 +17,9 @@ Hash buckets track unique property combinations.
 CoalesceBspNode_t  *coalesceTreeRoot;
 TriSurf_t         **coalesceSurfListHead;
 
-/* Native CoD4 keeps a FixedWinding_t in TriSurf_t::auxData while building
-   the coalesce tree.  KIWI's appended compatibility payload owns auxData,
-   so retain the native fixed bounds in an out-of-line sidecar instead. */
+/* Native CoD4 keeps a FixedWinding_t in TriSurf_t::fw and its fixed bounds
+   at TriSurf +12 while building the coalesce tree.  KIWI's float mins/maxs
+   occupy +12, so retain the native fixed bounds in an out-of-line sidecar. */
 typedef struct NativeCoalesceBounds_s {
   TriSurf_t *surf;
   int mins[3];
@@ -272,76 +272,6 @@ static bool NativeCoalesceBounds_WithinTraversalBounds(const int *surfaceBounds,
   return true;
 }
 
-char s_assertDisable_ClipSurfToWinding;
-char s_assertDisable_ClipSurfToWinding;
-char s_assertDisable_ClipSurfToWinding;
-char s_assertDisable_CoalesceChainMatchesArray;
-char s_assertDisable_CoalesceChainMatchesArray;
-char s_assertDisable_CoalesceChainMatchesArray;
-char s_assertDisable_CollectCoalesceLeaves;
-char s_assertDisable_FindOrCreateCoalescedSurfProps;
-char s_assertDisable_FindOrCreateCoalescedSurfProps;
-char s_assertDisable_FreeCoalesceTree;
-char s_assertDisable_InitBspLeafNode;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_MergeCoplanarSurfs;
-char s_assertDisable_ValidateVisGroupList;
-char s_assertDisable_ValidateVisGroupList;
-char s_assertDisable_ValidateVisGroupList;
-
-
-/*
-================
-CoalesceTreeSearch
-
-Recursively searches coalesce BSP tree, invokes callback on overlapping leaves.
-================
-*/
-int CoalesceTreeSearch(CoalesceBspNode_t *node, float *mins, float *maxs, int (*callback)(CoalesceBspNode_t *, TriSurf_t *), TriSurf_t *userData)
-{
-  CoalesceBspNode_t *curNode;
-  int queryMins[3];
-  int queryMaxs[3];
-  int splitAxis;
-  int axis;
-
-  for ( axis = 0; axis < 3; ++axis )
-  {
-    queryMins[axis] = FixedFromFloat(mins[axis]);
-    queryMaxs[axis] = FixedFromFloat(maxs[axis]);
-  }
-
-  curNode = node;
-  for ( ;; )
-  {
-    splitAxis = curNode->splitAxis;
-    if ( splitAxis == -1 )
-      return callback(curNode, userData);
-
-    if ( queryMins[splitAxis] > curNode->splitCoord + 819 )
-    {
-      curNode = curNode->front;
-    }
-    else if ( queryMaxs[splitAxis] < curNode->splitCoord - 819 )
-    {
-      curNode = curNode->back;
-    }
-    else
-    {
-      if ( CoalesceTreeSearch(curNode->back, mins, maxs, callback, userData) == 1 )
-        return 1;
-      curNode = curNode->front;
-    }
-  }
-}
-
 /* CoD4 0x44E030: fixed-coordinate tree search used while walking the native
    coalescing traversal. */
 static int CoalesceTreeSearchNative(CoalesceBspNode_t *node, const int *bounds,
@@ -534,7 +464,7 @@ CoalesceNode_t *BuildCoalesceChain(intptr_t *array, int count)
     return 0;
   newNode = malloc(sizeof(*newNode));
   newNode->value = array[0];
-  /* Native 0x44ED54 marks every constituent MapDrawSurf at +0x35 as soon
+  /* Native marks every constituent MapDrawSurf at +0x35 as soon
      as it is admitted to a coalesce chain.  TriSurfProps_t retains
      ShaderInfo_t at +0 in KIWI, so the native source carrier lives in its
      sidecar.  The marker is consumed later by the draw-surface emission
@@ -567,13 +497,6 @@ static unsigned char NativeCoalesceChainHash(const intptr_t *array, int count)
     }
   }
   return hash;
-}
-
-/* CoD4 0x44F1A0: this only clears bucket heads.  Ownership is released by
-   FreeTriSurfProps at the matching end-of-emission boundary. */
-void ClearCoalescePropsHash(void)
-{
-  memset(g_windingHashBuckets, 0, sizeof(g_windingHashBuckets));
 }
 
 /*
@@ -614,19 +537,17 @@ void FreeCoalesceTree(CoalesceBspNode_t *node)
       /* Native 0x44DD10 releases the temporary fixed winding retained at
          TriSurf +4 and clears the slot during tree teardown.  CROSS
          surfaces can occur in multiple leaves, so the cleared pointer also
-         prevents duplicate ownership here.  KIWI uses this slot for other
-         auxiliary formats too; only the zero-stride fixed carrier belongs
-         to the coalescer. */
-      if (surf && !surf->auxElemSize && surf->auxData)
+         prevents duplicate ownership here. */
+      if (surf && surf->fw)
       {
-        FixedWinding_t *fixedWinding = (FixedWinding_t *)surf->auxData;
+        FixedWinding_t *fixedWinding = (FixedWinding_t *)surf->fw;
         if (fixedWinding->ptCount >= 3
             && fixedWinding->ptCount <= FIXEDWINDING_MAX_POINTS
             && (!surf->winding
                 || fixedWinding->ptCount == (uint32_t)surf->winding->numpoints))
         {
           FreeFixedWinding(fixedWinding);
-          surf->auxData = NULL;
+          surf->fw = NULL;
         }
       }
       freeNode = (DrawSurfRef_t *)node->surfList;
@@ -732,12 +653,12 @@ TriSurfProps_t *FindOrCreateCoalescedSurfProps(int *groupCallback, TriSurfProps_
   found = malloc(sizeof(TriSurfProps_t));
   memset(found, 0, sizeof(TriSurfProps_t));
   Vector4Copy(props0->plane, found->plane);
-  /* Native 0x44E979 copies ds->mtlTex from the selected first surviving
+  /* Native copies ds->mtlTex from the selected first surviving
      leaf.  In KIWI this is the ShaderInfo_t material identity used by the
      later 0x451600 partition. */
   found->si = ((TriSurfProps_t *)coalesceArray[hiddenCount])->si;
-  found->lmapGroupId = -1; /* native 0x44E97E */
-  found->lmapIndex = 31;   /* native 0x44E988 / LIGHTMAP_NONE */
+  found->lmapGroupId = -1;
+  found->lmapIndex = 31;   /* LIGHTMAP_NONE */
   selectedSidecar = TrisPropsSidecar_Get((TriSurfProps_t *)coalesceArray[hiddenCount]);
   Assert(selectedSidecar, s_assertDisable_FindOrCreateCoalescedSurfProps);
   /* The native 0xAC carrier owns only lmap group/index state.  Preserve the
@@ -777,78 +698,6 @@ TriSurfProps_t *FindOrCreateCoalescedSurfProps(int *groupCallback, TriSurfProps_
   found->freeListNext = g_windingHashBuckets[bucket];
   g_windingHashBuckets[bucket] = found;
   return found;
-}
-
-/*
-================
-BuildBspSplitNode
-
-Attempts BSP split of surface list along chosen axis.
-================
-*/
-char BuildBspSplitNode(CoalesceSurfListNode_t *surfList, int splitAxis, CoalesceBspNode_t *outNode, float *parentMins, float *parentMaxs, int surfCount)
-{
-  CoalesceSurfListNode_t *node, *next, *leftList, *rightList, *dup;
-  volatile float mid = MIDF(parentMins[splitAxis], parentMaxs[splitAxis]);
-  vec3_t leftMins, rightMaxs;
-  int frontCount = 0, backCount = 0;
-
-  /* count how many surfaces go to each side */
-  for ( node = surfList; node; node = node->next )
-  {
-    TriSurf_t *s = node->surf;
-    if ( s->mins[splitAxis] > mid )
-      frontCount++;
-    else
-    {
-      backCount++;
-      if ( s->maxs[splitAxis] >= mid )
-        frontCount++;
-    }
-  }
-  if ( frontCount == surfCount || backCount == surfCount )
-    return 0;
-
-  /* partition surfaces into left (back) and right (front) lists */
-  leftList = rightList = NULL;
-  for ( node = surfList; node; node = next )
-  {
-    TriSurf_t *s = node->surf;
-    next = node->next;
-
-    if ( s->mins[splitAxis] <= mid )
-    {
-      if ( s->maxs[splitAxis] < mid )
-      {
-        /* entirely on back side */
-        node->next = leftList;
-        leftList = node;
-        continue;
-      }
-	  
-      /* straddles — duplicate node for back side */
-      dup = malloc(sizeof(CoalesceSurfListNode_t));
-      dup->surf = s;
-      dup->next = leftList;
-      leftList = dup;
-    }
-	
-    /* front side (or straddling original) */
-    node->next = rightList;
-    rightList = node;
-  }
-
-  /* split parent bounds at midpoint and recurse */
-  VectorCopy(parentMins, leftMins);
-  leftMins[splitAxis] = mid;
-  VectorCopy(parentMaxs, rightMaxs);
-  rightMaxs[splitAxis] = mid;
-
-  outNode->splitDist = mid;
-  outNode->splitAxis = splitAxis;
-  outNode->back = BuildCoalesceBspNode(parentMins, rightMaxs, leftList, backCount);
-  outNode->front = BuildCoalesceBspNode(leftMins, parentMaxs, rightList, frontCount);
-  return 1;
 }
 
 CoalesceBspNode_t *BuildCoalesceBspNode(float *mins, float *maxs, CoalesceSurfListNode_t *surfList, int surfCount);
@@ -1296,47 +1145,39 @@ char SurfsAreMergeable(TriSurf_t *ts0, TriSurf_t *ts1)
   return mergeOrder;
 }
 
-/* CoD4 0x44EF00.  The native routine consumes a FixedWinding_t and rejects
-   clockwise output before inserting it.  KIWI's clipping path additionally
-   owns per-vertex auxiliary data, so retain that payload while applying the
-   same insert/bounds/tree-link sequence. */
-static void InsertCoalescedTriSurf(Winding_t *winding, void *auxData, int auxElemSize,
+/* CoD4 0x44EF00 insert/bounds/tree-link sequence.  The new surface takes
+   ownership of fixedWinding as its native fw. */
+static void InsertCoalescedTriSurf(Winding_t *winding, FixedWinding_t *fixedWinding,
                                    TriSurfProps_t *props, TriSurf_t *prev)
 {
   TriSurf_t *surf;
 
   if ( !winding )
     return;
-  surf = InsertTriSurfAfter(winding, auxData, auxElemSize, props, prev);
+  surf = InsertTriSurfAfter(winding, fixedWinding, props, prev);
   WindingBounds(surf->winding, surf->mins, surf->maxs);
   /* 0x44EF00 recomputes the FixedWinding bounds at surf + 12, then calls
      0x44E030 directly with those integer coordinates.  Re-entering through
      the legacy float query is observably different at the +/-819 threshold
      and can leave a fresh fragment out of one of its duplicated leaves. */
   {
-    const FixedWinding_t *fixedWinding = NULL;
+    const FixedWinding_t *boundsWinding = NULL;
     NativeCoalesceBounds_t *fixedBounds;
 
-    if (!auxElemSize && auxData)
-    {
-      const FixedWinding_t *candidate = (const FixedWinding_t *)auxData;
-
-      if (candidate->ptCount == (uint32_t)winding->numpoints
-          && candidate->ptCount >= 3
-          && candidate->ptCount <= FIXEDWINDING_MAX_POINTS)
-        fixedWinding = candidate;
-    }
-    fixedBounds = fixedWinding ? NativeCoalesceBounds_RebuildFixed(surf, fixedWinding)
-                               : NativeCoalesceBounds_Rebuild(surf);
+    if (fixedWinding
+        && fixedWinding->ptCount == (uint32_t)winding->numpoints
+        && fixedWinding->ptCount >= 3
+        && fixedWinding->ptCount <= FIXEDWINDING_MAX_POINTS)
+      boundsWinding = fixedWinding;
+    fixedBounds = boundsWinding ? NativeCoalesceBounds_RebuildFixed(surf, boundsWinding)
+                                : NativeCoalesceBounds_Rebuild(surf);
 
     CoalesceTreeSearchNative(coalesceTreeRoot, fixedBounds->mins, CoalesceLeafInsert, surf);
   }
 }
 
 /* CoD4 0x4165F0 / 0x43D3B0 use a [count, fixed vec3...] winding as the
-   coalescer's source of truth.  TriSurf_t's KIWI compatibility payload can
-   occupy auxData in other routes, so create that native carrier locally here
-   instead of reinterpreting a non-coalesce auxiliary buffer. */
+   coalescer's source of truth.  Build one for a surface that has no fw. */
 static FixedWinding_t *NativeFixedWindingFromFloat(const Winding_t *winding)
 {
   FixedWinding_t *fixedWinding;
@@ -1364,9 +1205,9 @@ static FixedWinding_t *NativeFixedWindingCopyForSurf(const TriSurf_t *surf)
   /* A prior native-style insertion retains its exact 18.14 source in this
      slot.  Do not reconstruct it from the float view: coordinates beyond
      float's unit-resolution range would otherwise lose fixed-point bits. */
-  if (!surf->auxElemSize && surf->auxData)
+  if (surf->fw)
   {
-    fixedWinding = (const FixedWinding_t *)surf->auxData;
+    fixedWinding = (const FixedWinding_t *)surf->fw;
     if (fixedWinding->ptCount == (uint32_t)surf->winding->numpoints
         && fixedWinding->ptCount >= 3
         && fixedWinding->ptCount <= FIXEDWINDING_MAX_POINTS)
@@ -1411,7 +1252,7 @@ static void InsertFixedCoalescedTriSurf(FixedWinding_t *fixedWinding,
     FreeFixedWinding(fixedWinding);
     return;
   }
-  InsertCoalescedTriSurf(winding, fixedWinding, 0, props, prev);
+  InsertCoalescedTriSurf(winding, fixedWinding, props, prev);
 }
 
 /* CoD4 0x44EFE0 -> 0x4171D0.  The fixed result is intentionally kept until
@@ -1431,9 +1272,9 @@ static FixedWinding_t *ClipSurfToFixedWinding(TriSurf_t *ts, FixedWinding_t *rem
 
   /* The native routine detaches surf->w/fW before it starts clipping. */
   FreeWinding(ts->winding);
-  free(ts->auxData);
+  free(ts->fw);
   ts->winding = NULL;
-  ts->auxData = NULL;
+  ts->fw = NULL;
   anyFrontYet = 0;
 
   for (edgeIndex = 0; edgeIndex < chopWinding->ptCount && remain; ++edgeIndex)
@@ -1468,58 +1309,6 @@ static FixedWinding_t *ClipSurfToFixedWinding(TriSurf_t *ts, FixedWinding_t *rem
 
 /*
 ================
-ClipSurfToWinding
-
-Clips surface by winding edges, splits into fragments.
-Returns clipped winding in EAX and auxiliary vert data via outAuxVerts (EDX in original).
-================
-*/
-Winding_t *ClipSurfToWinding(TriSurf_t *ts, Winding_t *chopWinding, float *planeNormal, void **outAuxVerts)
-{
-  Winding_t *result;
-  int numEdges, edgeIdx;
-  vec3_t edgePlane, edgeDir;
-  float edgePlaneDist;
-  WindingAuxPair_t remainPair, frontWinding, backWinding;
-
-  Assert(ts, s_assertDisable_ClipSurfToWinding);
-  Assert(chopWinding, s_assertDisable_ClipSurfToWinding);
-  Assert(planeNormal, s_assertDisable_ClipSurfToWinding);
-  remainPair.winding = ts->winding;
-  remainPair.auxData = ts->auxData;
-  ts->winding = NULL;
-  ts->auxData = NULL;
-  numEdges = chopWinding->numpoints;
-
-  for ( edgeIdx = 0; edgeIdx < numEdges && remainPair.winding; edgeIdx++ )
-  {
-    float *curVert = chopWinding->points[edgeIdx];
-    float *prevVert = chopWinding->points[(edgeIdx + numEdges - 1) % numEdges];
-
-    VectorSubtract(curVert, prevVert, edgeDir);
-    CrossProduct(planeNormal, edgeDir, edgePlane);
-    if ( VecNormalize(edgePlane) == 0.0 )
-      break;
-    edgePlaneDist = (float)DotProduct120(edgePlane, prevVert);
-
-    ClipTriWindingWithAux(&remainPair, chopWinding, ts->auxElemSize, edgePlane, edgePlaneDist, MERGE_EPSILON, &frontWinding, &backWinding);
-    if ( frontWinding.winding )
-    {
-      InsertCoalescedTriSurf(frontWinding.winding, frontWinding.auxData, ts->auxElemSize, ts->props, ts);
-    }
-    FreeVerts(&remainPair);
-    remainPair.winding = backWinding.winding;
-    remainPair.auxData = backWinding.auxData;
-  }
-
-  result = remainPair.winding;
-  if ( outAuxVerts )
-    *outAuxVerts = remainPair.auxData;
-  return result;
-}
-
-/*
-================
 MergeCoplanarSurfs
 
 Merges two coplanar surfaces into one.
@@ -1528,12 +1317,6 @@ Merges two coplanar surfaces into one.
 int MergeCoplanarSurfs(TriSurf_t *ts0, TriSurf_t *ts1)
 {
   TriSurfProps_t *mergedProps;
-  Winding_t *windingCopy;
-  
-  /* clipResult and clipAux must be contiguous — FreeVerts writes to both fields */
-  WindingAuxPair_t clipPair;
-  #define clipResult clipPair.winding
-  #define clipAux clipPair.auxData
 
   Assert(ts0, s_assertDisable_MergeCoplanarSurfs);
   Assert(ts1, s_assertDisable_MergeCoplanarSurfs);
@@ -1554,58 +1337,34 @@ int MergeCoplanarSurfs(TriSurf_t *ts0, TriSurf_t *ts1)
                            CoalesceLeafRemove, ts1);
 
   /* Native 0x44E410 does not round-trip through Winding_t here: it copies
-     surf0->fw, then 0x44EFE0 clips each surface against fixed winding edges.
-     Coalesced map surfaces have no KIWI auxiliary vertices; retain the
-     auxiliary-aware floating implementation only for the separate shadow
-     compatibility route. */
-  if (!ts0->auxElemSize && !ts1->auxElemSize)
+     surf0->fw, then 0x44EFE0 clips each surface against fixed winding edges. */
+  FixedWinding_t *fixed0 = NativeFixedWindingCopyForSurf(ts0);
+  FixedWinding_t *fixed1 = NativeFixedWindingCopyForSurf(ts1);
+  FixedWinding_t *fixedCopy;
+  FixedWinding_t *fixedResult;
+
+  Assert(fixed0, s_assertDisable_MergeCoplanarSurfs);
+  Assert(fixed1, s_assertDisable_MergeCoplanarSurfs);
+  fixedCopy = CopyFixedWinding(fixed0);
+  Assert(fixedCopy, s_assertDisable_MergeCoplanarSurfs);
+
+  fixedResult = ClipSurfToFixedWinding(ts0, fixed0, fixed1, p0->plane);
+  FreeFixedWinding(fixedResult);
+  fixedResult = ClipSurfToFixedWinding(ts1, fixed1, fixedCopy, p0->plane);
+  if (fixedResult)
   {
-    FixedWinding_t *fixed0 = NativeFixedWindingCopyForSurf(ts0);
-    FixedWinding_t *fixed1 = NativeFixedWindingCopyForSurf(ts1);
-    FixedWinding_t *fixedCopy;
-    FixedWinding_t *fixedResult;
+    /* FindOrCreateCoalescedSurfProps uses its winding only for the
+       MAX_COINCIDENT_WINDINGS diagnostic.  Give it the native fixed result
+       expressed as a temporary KIWI Winding_t, then transfer the original
+       fixed carrier to 0x44EF00's insertion analogue. */
+    Winding_t *groupWinding = NativeWindingFromFixed(fixedResult);
 
-    Assert(fixed0, s_assertDisable_MergeCoplanarSurfs);
-    Assert(fixed1, s_assertDisable_MergeCoplanarSurfs);
-    fixedCopy = CopyFixedWinding(fixed0);
-    Assert(fixedCopy, s_assertDisable_MergeCoplanarSurfs);
-
-    fixedResult = ClipSurfToFixedWinding(ts0, fixed0, fixed1, p0->plane);
-    FreeFixedWinding(fixedResult);
-    fixedResult = ClipSurfToFixedWinding(ts1, fixed1, fixedCopy, p0->plane);
-    if (fixedResult)
-    {
-      /* FindOrCreateCoalescedSurfProps uses its winding only for the
-         MAX_COINCIDENT_WINDINGS diagnostic.  Give it the native fixed result
-         expressed as a temporary KIWI Winding_t, then transfer the original
-         fixed carrier to 0x44EF00's insertion analogue. */
-      Winding_t *groupWinding = NativeWindingFromFixed(fixedResult);
-
-      Assert(groupWinding, s_assertDisable_MergeCoplanarSurfs);
-      mergedProps = FindOrCreateCoalescedSurfProps((int *)groupWinding, ts0->props, ts1->props);
-      FreeWinding(groupWinding);
-      InsertFixedCoalescedTriSurf(fixedResult, mergedProps, ts0);
-    }
-    FreeFixedWinding(fixedCopy);
-    ts0->winding = 0;
-    ts1->winding = 0;
-    UnlinkAndFreeSurf(ts0, coalesceSurfListHead);
-    UnlinkAndFreeSurf(ts1, coalesceSurfListHead);
-    FreeTriSurf(ts0);
-    return FreeTriSurf(ts1);
+    Assert(groupWinding, s_assertDisable_MergeCoplanarSurfs);
+    mergedProps = FindOrCreateCoalescedSurfProps((int *)groupWinding, ts0->props, ts1->props);
+    FreeWinding(groupWinding);
+    InsertFixedCoalescedTriSurf(fixedResult, mergedProps, ts0);
   }
-
-  windingCopy = CopyWinding(ts0->winding);
-  clipResult = ClipSurfToWinding(ts0, ts1->winding, p0->plane, &clipAux);
-  if ( clipResult )
-    FreeVerts(&clipPair);
-  clipResult = ClipSurfToWinding(ts1, windingCopy, p0->plane, &clipAux);
-  if ( clipResult )
-  {
-    mergedProps = FindOrCreateCoalescedSurfProps((int *)clipResult, ts0->props, ts1->props);
-    InsertCoalescedTriSurf(clipResult, clipAux, ts0->auxElemSize, mergedProps, ts0);
-  }
-  FreeWinding(windingCopy);
+  FreeFixedWinding(fixedCopy);
   ts0->winding = 0;
   ts1->winding = 0;
   UnlinkAndFreeSurf(ts0, coalesceSurfListHead);
@@ -1613,8 +1372,6 @@ int MergeCoplanarSurfs(TriSurf_t *ts0, TriSurf_t *ts1)
   FreeTriSurf(ts0);
   return FreeTriSurf(ts1); }
 }
-#undef clipResult
-#undef clipAux
 
 /*
 ================

@@ -12,8 +12,6 @@ to BSP collision lumps.
 #include "cod4map.h"
 
 int collisionNodeLimit = INT_MAX;
-static char s_assertDisable_SetCollisionNodeLimitFromWorldspawn;
-static char s_assertDisable_CM_BuildCollisionAabbTree;
 
 void SetCollisionNodeLimitFromWorldspawn(Entity_t *entity)
 {
@@ -51,45 +49,6 @@ int   g_cmPartStartIdx;
 int   g_cmTriStartIdx;
 int   g_cmVertStartIdx;
 char  g_collisionByte0;
-
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_AssignTriToPartitionSide;
-char s_assertDisable_CM_BuildLeafCollision;
-char s_assertDisable_CM_BuildLeafCollision;
-char s_assertDisable_CM_BuildNodeCollision_r;
-char s_assertDisable_CM_CompareTrisByMaterial;
-char s_assertDisable_CM_CompareTrisByMaterial;
-char s_assertDisable_CM_CompareTrisByMaterial;
-char s_assertDisable_CM_CompareTrisByMaterial;
-char s_assertDisable_CM_ComputeBarycentricPlane;
-char s_assertDisable_CM_EmitCollisionPartitions;
-char s_assertDisable_CM_FilterWindingIntoTree;
-char s_assertDisable_CM_FilterWindingIntoTree;
-char s_assertDisable_CM_FilterWindingIntoTree;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_PartitionTris;
-char s_assertDisable_CM_SortTrisByPartition;
-char s_assertDisable_CM_SortTrisByPartition;
-char s_assertDisable_CM_SubdivideTriArray;
-char s_assertDisable_CM_SubdivideTriArray;
-char s_assertDisable_CM_SubdivideTriArray;
-char s_assertDisable_CM_SubdivideTriArray;
-char s_assertDisable_CM_SubdivideTriArray;
-char s_assertDisable_CollisionAddEdge;
-char s_assertDisable_CollisionAddSurfaces;
-char s_assertDisable_CollisionAddSurfaces;
-char s_assertDisable_CollisionAddTriangle;
-char s_assertDisable_CollisionAddTriangle;
-char s_assertDisable_CollisionAddTriangle;
 
 
 /*
@@ -358,13 +317,13 @@ int CM_SubdivideTriArray(CollisionTri_t *triArray, int triCount, unsigned int ax
       { CollisionTri_t *scan = &triArray[part.sideCount[0]];
       while ( _pb.skipCount < part.triCount )
       {
-        Assert(part.sideMax[0] <= scan->maxs[axis] || s_assertDisable_CM_SubdivideTriArray, s_assertDisable_CM_SubdivideTriArray);
+        Assert(part.sideMax[0] <= scan->maxs[axis], s_assertDisable_CM_SubdivideTriArray);
         if ( part.sideMax[0] == scan->maxs[axis] )
           CM_AssignTriToPartitionSide(scan, 0, &part, triArray, axis);
         else
           _pb.skipCount++;
         scan++;
-        Assert(scan == &triArray[part.sideCount[0] + _pb.skipCount] || s_assertDisable_CM_SubdivideTriArray, s_assertDisable_CM_SubdivideTriArray);
+        Assert(scan == &triArray[part.sideCount[0] + _pb.skipCount], s_assertDisable_CM_SubdivideTriArray);
       } }
     }
     else
@@ -380,13 +339,13 @@ int CM_SubdivideTriArray(CollisionTri_t *triArray, int triCount, unsigned int ax
       { CollisionTri_t *scan = &triArray[part.triCount + part.sideCount[0] - 1];
       while ( _pb.skipCount < part.triCount )
       {
-        Assert(part.sideMin[1] >= scan->mins[axis] || s_assertDisable_CM_SubdivideTriArray, s_assertDisable_CM_SubdivideTriArray);
+        Assert(part.sideMin[1] >= scan->mins[axis], s_assertDisable_CM_SubdivideTriArray);
         if ( part.sideMin[1] == scan->mins[axis] )
           CM_AssignTriToPartitionSide(scan, 1, &part, triArray, axis);
         else
           _pb.skipCount++;
         scan--;
-        Assert(scan == &triArray[part.triCount - _pb.skipCount + part.sideCount[0] - 1] || s_assertDisable_CM_SubdivideTriArray, s_assertDisable_CM_SubdivideTriArray);
+        Assert(scan == &triArray[part.triCount - _pb.skipCount + part.sideCount[0] - 1], s_assertDisable_CM_SubdivideTriArray);
       } }
     }
 
@@ -408,7 +367,7 @@ subdivision_complete:
   }
   else
   {
-    Assert(!failureMode || s_assertDisable_CM_SubdivideTriArray, s_assertDisable_CM_SubdivideTriArray);
+    Assert(!failureMode, s_assertDisable_CM_SubdivideTriArray);
     if ( !side0 || !side1 )
       return 0;
     { double gap = (double)part.sideMax[0] - part.sideMin[1];
@@ -951,46 +910,6 @@ int CM_EmitCollisionVerts()
     numBSPCollisionVerts++;
   }
   return g_cmNumVerts;
-}
-
-/*
-================
-CM_EmitCollisionEdges
-
-Emits collision edges to the BSP file format
-================
-*/
-int CM_EmitCollisionEdges()
-{
-  CollisionEdge_t *edge;
-  BspCollisionEdge_t *emit;
-  int i;
-
-  for ( i = g_cmEdgeStartIdx; i < g_cmNumEdges; i++ )
-  {
-    edge = &g_cmEdgePool[i];
-
-    /* skip reverse-matched edges */
-    if ( edge->reverseMatch )
-    {
-      edge->reserved84 = -1;
-      continue;
-    }
-
-    if ( numBSPCollisionEdges == MAX_MAP_COLLISION_EDGES )
-      Com_Error("MAX_MAP_COLLISIONEDGES (%i) exceeded", MAX_MAP_COLLISION_EDGES);
-
-    edge->reserved84 = numBSPCollisionEdges;
-
-    /* write edge to BSP lump */
-    emit = &bspCollisionEdgeData[numBSPCollisionEdges];
-    emit->reserved = 0;
-    VectorCopy(edge->vertPoolData, emit->vertData);
-    AxisCopy(edge->perpVec, (float *)emit->perpVec);
-    emit->edgeLen = edge->edgeLen;
-    numBSPCollisionEdges++;
-  }
-  return i;
 }
 
 /*

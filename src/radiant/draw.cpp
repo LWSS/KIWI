@@ -125,49 +125,6 @@ int R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
     return vertCount + 2;
 }
 
-// ─── Draw_02 (IDB 0x40c530) ─────────────────────────────────────────────────────
-// Emit the closed outline of a winding as line segments into a GfxPointVertex batch,
-// including the wrap-around last→first edge. Caller: DrawRegions (0x406b30).
-// `poly` layout: poly[0] = numpoints, vec3 points start at byte offset 4 (poly+1).
-// Pointer arithmetic transcribed verbatim from the IDB: `cur` tracks the LAST
-// float of the current point, `prevOff` the byte offset of the previous point.
-int Draw_02( const unsigned int *poly, const int *color, int vertCount, GfxPointVertex *verts )
-{
-    iassert( vertCount >= 0 );
-    iassert( (vertCount & 1) == 0 );
-
-    if ( poly[0] )
-    {
-        unsigned int prevOff = 4 * (3 * poly[0] - 3);     // → last point (wrap-around prev)
-        const float *cur = (const float *)(poly + 3);     // → last float of point[0]
-        unsigned int i = 0;
-        do
-        {
-            if ( vertCount + 2 > 1362 )
-            {
-                R_AddCmd_Line3D( (short)(vertCount / 2), 1, verts );
-                vertCount = 0;
-            }
-            GfxPointVertex *v = &verts[vertCount];
-            int col = *color;
-            v->xyz[0] = *(const float *)((const char *)poly + prevOff + 4);
-            v->xyz[1] = *(const float *)((const char *)poly + prevOff + 8);
-            v->xyz[2] = *(const float *)((const char *)poly + prevOff + 12);
-            vertCount += 2;
-            v[1].xyz[0] = *(cur - 2);
-            v[1].xyz[1] = *(cur - 1);
-            v[1].xyz[2] = *cur;
-            *(unsigned int *)v->color   = col;
-            *(unsigned int *)v[1].color = col;
-            prevOff = (unsigned int)((const char *)cur - 12 - (const char *)poly);
-            cur += 3;
-            ++i;
-        }
-        while ( i < poly[0] );
-    }
-    return vertCount;
-}
-
 // Lines_AddLinkToScript (0x46b590) is NOT a draw.cpp function: its asserts are at
 // XYWnd.cpp:3238/3272 - it is CXYWnd's script-link visualizer (entity script_linkTo
 // arrows).  Noted here so it is not re-added to this file by an address-range guess.

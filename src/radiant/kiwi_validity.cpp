@@ -6,6 +6,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"  // Patch_DimsSane / KIWI_PATCH_MAX_DIM
 #include "kiwi_validity.h"
 #include "kiwi_vec.h"     // Dot3
@@ -14,13 +15,8 @@
 #include <string.h>
 
 // Ported entry points.
-extern void Brush_BuildWindings( brush_t *def, int bFull );   // brush.cpp 0x477AC0
-extern void Patch_Rebuild( patchMesh_t *p, char doBounds );   // pmesh.cpp; used by Patch_UpdateSelected_0
-extern void MarkMapModified();                                // win_qe3.cpp 0x499BB0
-
 extern winding_t *Brush_MakeFaceWinding( face_t *f, brush_t *def );   // brush.cpp:4712 (0x471260)
 extern void       Winding_Free( winding_t *w );                      // winding.cpp:153
-extern size_t     Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
 extern face_t    *Face_Alloc( brush_t *b, face_t *f );                     // brush.cpp:310  0x471500
 
 namespace
@@ -138,6 +134,7 @@ bool KiwiValid_Snapshot( brush_t *def, kiwiBaseBrush_t *out )
         out->patchW = pm->width;
         out->patchH = pm->height;
         out->ctrl.resize( (size_t)pm->width * pm->height * 3 );
+        out->st.resize( (size_t)pm->width * pm->height * 6 );
         for ( int col = 0; col < pm->width; ++col )
             for ( int row = 0; row < pm->height; ++row )
             {
@@ -145,6 +142,7 @@ bool KiwiValid_Snapshot( brush_t *def, kiwiBaseBrush_t *out )
                 out->ctrl[o + 0] = pm->ctrl[col][row].xyz[0];
                 out->ctrl[o + 1] = pm->ctrl[col][row].xyz[1];
                 out->ctrl[o + 2] = pm->ctrl[col][row].xyz[2];
+                memcpy( &out->st[o * 2], &pm->ctrl[col][row].texCoord, sizeof( float ) * 6 );
             }
         return true;
     }
@@ -188,6 +186,8 @@ bool KiwiValid_RestoreOnly( const kiwiBaseBrush_t &base )
                 pm->ctrl[col][row].xyz[0] = base.ctrl[o + 0];
                 pm->ctrl[col][row].xyz[1] = base.ctrl[o + 1];
                 pm->ctrl[col][row].xyz[2] = base.ctrl[o + 2];
+                if ( base.st.size() == base.ctrl.size() * 2 )
+                    memcpy( &pm->ctrl[col][row].texCoord, &base.st[o * 2], sizeof( float ) * 6 );
             }
     }
     return true;

@@ -17,7 +17,7 @@
 // PICKF_EXCLUDE_SELECTED snapshots selected_brushes plus every KiwiSel() brush
 // before both passes; face selections live only in KiwiSel(). This prevents dragged
 // geometry from picking or snapping to itself. PICKF_NONE preserves ordinary picks.
-// With exclusion enabled, sub_48D460 skips BRUSHFLAG_SELECTED (0x80) nodes and the
+// With exclusion enabled, BrushList_Trace skips BRUSHFLAG_SELECTED (0x80) nodes and the
 // post-filter handles face selections. Test_Ray retains only its nearest hit, so a
 // rejected hit cannot expose the surface behind; snapping falls through to the grid.
 
@@ -82,24 +82,24 @@ bool Pick_Project( const float *world, float *outX, float *outY );
 inline float Pick_SegDist2D( float px, float py, float ax, float ay,
                              float bx, float by, float *outT )
 {
-    const float dx = bx - ax, dy = by - ay;
-    const float len2 = dx * dx + dy * dy;
+    const float ddx = bx - ax, ddy = by - ay;
+    const float len2 = ddx * ddx + ddy * ddy;
     float t = 0.0f;
     if ( len2 > 1e-6f )
     {
-        t = ( ( px - ax ) * dx + ( py - ay ) * dy ) / len2;
+        t = ( ( px - ax ) * ddx + ( py - ay ) * ddy ) / len2;
         if ( t < 0.0f )      t = 0.0f;
         else if ( t > 1.0f ) t = 1.0f;
     }
-    const float ex = px - ( ax + dx * t );
-    const float ey = py - ( ay + dy * t );
+    const float ex = px - ( ax + ddx * t );
+    const float ey = py - ( ay + ddy * t );
     if ( outT )
         *outT = t;
     return sqrtf( ex * ex + ey * ey );
 }
 
 // Shared with box selection to keep its candidate set aligned with click picking;
-// mirrors the ported sub_48D460 admission rules.
+// mirrors the ported BrushList_Trace admission rules.
 bool Pick_BrushPickable( selbrush_t *b );
 
 // The Test_Ray `contents` mask a 3D-camera-viewport pick uses — the same bits

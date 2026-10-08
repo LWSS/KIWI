@@ -8,102 +8,75 @@
 #include "qe3.h"
 #include <universal/q_parse.h>   // Com_ParseExt, parseInfo_t, Com_GetParseThreadInfo
 #include <universal/assertive.h> // iassert (USE_ASSERTS always on; same handler as Assert)
+#include "kiwi_ported.h"         // KIWI: shared engine/editor externs
 extern void KiwiPrefabPrefix_Invalidate();   // brush.cpp:7110
 extern void KiwiShadowCache_Invalidate();    // kiwi_shadowcache.cpp:46
 extern void KiwiLightCache_EntityKeyChanged( entity_s_def *lightDef, const char *key );
 extern void KiwiWalkCache_MarkStructural();  // kiwi_walkcache.h
 
 // ─── helpers declared by other Radiant files ─────────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
 extern char *AllocMaterialString( const char *src );
-extern void  sub_483500( epair_t **head, const char *key, const char *value );   // eclass.cpp: raw epair set
+extern void  Epair_SetRaw( epair_t **head, const char *key, const char *value );   // eclass.cpp: raw epair set
 extern void  Error( const char *fmt, ... );    // wraps Com_Error (engine_stubs.cpp)
-extern void  MarkMapModified();
-extern void  SetupVertexSelection();
-extern void  Select_Delete();                   // map.cpp (0x48E760) — delete selected brushes
-extern int   UpdateSelection( int wParam, eclass_t *cls );   // win_ent.cpp (0x497180)
 namespace SurfaceInspector { void UpdateSurfaceDialog(); }
 
 // ─── globals from engine_stubs.cpp / other radiant files ─────────────────────
-extern entity_s     *world_entity;              // engine_stubs.cpp line 576
-extern char          g_activeLayer_string[];    // engine_stubs.cpp line 549
-extern int           g_nUpdateBits;             // engine_stubs.cpp line 553
-extern int           modified;                  // map.cpp (0x23F179C) — dirty flag
-extern void         *zero;                      // engine_stubs.cpp (MFC empty string)
-extern void         *lpBuffer;                  // engine_stubs.cpp
+extern char          g_activeLayer_string[];    // engine_stubs.cpp
 #include "mainfrm.h"
 #include "xywnd.h"                             // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 #include "kiwi_fmt.h"                          // KIWI: KiwiFmt_Exact (entity origins)
 extern void XYWnd_PasteClip();                 // mainfrm.cpp (U-CMD-1 free fn)
-extern camera_s     *Ed_Camera();              // camwnd.cpp — THE editor camera (never NULL)
 
 // ─── forward declarations for functions defined later in this file ────────────
-struct prefab_s;  // defined further below; forward-declare for use in Prefab_Init decl
-void            Entity_Free( char *a1 );
+struct prefab_s;  // defined in qe3.h; forward-declare for use in Prefab_Init decl
+void            Entity_Free( entity_s *e );
 void            Entity_Free_R( entity_s *e );
-entity_s       *Prefab_Init( prefab_s *a1, entity_s_def *entDef, selbrush_t *a3 );
-void            EntityAssignModel( entity_s_def *a1 );
+entity_s       *Prefab_Init( prefab_s *instList, entity_s_def *entDef, selbrush_t *activeList );
+void            EntityAssignModel( entity_s_def *e );
 void            Entity_LinkBrush( brush_t *b, entity_s *world_ent );
 void            Entity_UnlinkBrush( brush_t *b );
-unsigned int    Entity_ColorSth( brush_t *b_in );
+unsigned int    Brush_ApplyEntityColor( brush_t *b_in );
 void            Entity_RebuildBounds( entity_s *e );
 
 // ─── declarations for ported-elsewhere functions used here ───────────────────
 // brush.cpp
-extern brush_t      *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );
-extern int Init_MaterialLayer( MaterialDef *channel, float sampleSize );
-extern void          Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
 extern void          Brush_SetLayerString( brush_t *b, const char *str );  // 0x4758A0
-extern selbrush_t   *Brush_AddToList( brush_t *b, entity_s *e );
-extern void          Brush_AddToList2( selbrush_t *b );
-extern void          Brush_Free( selbrush_t *b );
-extern void          Brush_Free_R( brush_t *b );
-extern void          Brush_BuildWindings( brush_t *b, int rebuild );
 extern void          Brush_Build( brush_t *b, float *mins = nullptr, float *maxs = nullptr );
 // Brush_Write is defined in brush.cpp as int Brush_Write(WriteWriter_t, brush_t*).
 // WriteWriter_t = WriteFunc_t** — see brush.cpp.  Declared here with compatible type.
 typedef int (*WriteFunc_entity_t)( void *ctx, const char *fmt, ... );
 extern int           Brush_Write( WriteFunc_entity_t *writer, brush_t *b );
 extern selbrush_t   *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );
-extern void          sub_476330( selbrush_t *b );   // Brush_Deselect_Helper
-extern void          sub_476470( selbrush_t *b );   // Brush_Select_Helper
-// sub_478630 (0x478630, rotate face planepts about a pivot) is now REAL in brush.cpp
-// (Brush_RotateFacePlanepts, file-static).  It is only called there, on the physics
-// box/cylinder map-parse path — never from entity.cpp.
+extern void          Brush_Deselect_Helper( selbrush_t *b );   // brush.cpp 0x476330
+extern void          Brush_Select_Helper( selbrush_t *b );     // brush.cpp 0x476470
 
 // eclass.cpp
-extern eclass_t     *Eclass_ForName( int hasBrushes, const char *name );
-// Eclass_01 (0x482300): real signature takes the entity-context as an int (a2);
-// *(a2+96)=eclass, *(a2+100)=modelClass-out.  (A `entity_s_def*` decl mangled
-// differently and didn't link once Eclass_01 was first actually called.)
-extern models_t     *Eclass_01( const char *modelName, entity_s *entDefCtx );
+// Eclass_ForModel (0x482300): the per-map model class for a model name; reads the
+// entity's eclass and writes its modelClass.
+extern models_t     *Eclass_ForModel( const char *modelName, entity_s *ent );
 
 // ─── epair access ────────────────────────────────────────────────────────────
-//     epair list head is at entity offset 0x74; node is
-//     epair_t {next@0,key@4,value@8}. The engine `zero` empty-string is stubbed
-//     nullptr, so we return a real "" for missing keys (avoids strcmp/sscanf NULL deref).
-extern void sub_483500( epair_t **head, const char *key, const char *value );  // eclass.cpp key/value setter
+//     The engine `zero` empty-string is stubbed nullptr, so we return a real ""
+//     for missing keys (avoids strcmp/sscanf NULL deref).
 
 static char s_emptyKeyValue[] = "";
 
-// ValueForKey2 (0x4825C0)
-// 0x4825c0: epairs@0x74, next@0/key@4/value@8, _stricmp (case-insensitive), not-found returns
-// "" (engine zero global; s_emptyKeyValue safer than stubbed null).
+// ValueForKey2 (0x4825C0) — case-insensitive (_stricmp) key walk; a missing key returns ""
+// (the engine's `zero` global; s_emptyKeyValue is safer than the stubbed null).
 char *ValueForKey2( const entity_s *e, const char *key )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
     {
         if ( !_stricmp( ep->key, key ) )
         {
-            return ep->value;
+            return ep->value ? ep->value : s_emptyKeyValue;   // KIWI: "" for a NULL value too
         }
     }
     return s_emptyKeyValue;
 }
 
-// Entity_GetVec3ForKey (0x483860) — sscanf "%f %f %f"; returns 1 iff all 3 parsed.
-// 0x483860: _stricmp walk, sscanf "%f %f %f"==3, default "" on not-found.
+// Entity_GetVec3ForKey (0x483860) — case-insensitive key; sscanf "%f %f %f" of the value
+// ("" when missing); returns 1 iff all 3 parsed.
 int Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key )
 {
     const char *value = s_emptyKeyValue;
@@ -112,8 +85,7 @@ int Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key )
     return sscanf( value, "%f %f %f", out, out + 1, out + 2 ) == 3;
 }
 
-// Entity_GetFloatValueForKey (0x4837C0)
-// 0x4837c0: _stricmp walk, (float)atof, not-found = atof("")=0.0.
+// Entity_GetFloatValueForKey (0x4837C0) — case-insensitive key, (float)atof; missing = 0.0.
 float Entity_GetFloatValueForKey( const entity_s *e, const char *key )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -126,10 +98,9 @@ float Entity_GetFloatValueForKey( const entity_s *e, const char *key )
     return (float)atof( s_emptyKeyValue );
 }
 
-// Entity_GetIntValueForKey (0x483820)
-// 0x483820: the same _stricmp epair walk as ValueForKey2 with an atol on the value;
-// not-found = atol("") = 0.  Lives here (its IDB home, between GetFloat 0x4837C0 and
-// GetVec3 0x483860); camwnd.cpp / vehiclepath.cpp declare it extern.
+// Entity_GetIntValueForKey (0x483820) — the same case-insensitive walk as ValueForKey2 with
+// an atol on the value; missing = atol("") = 0.  camwnd.cpp, vehiclepath.cpp, shadowvolume.cpp
+// and kiwi_light.cpp declare it extern.
 int Entity_GetIntValueForKey( const entity_s *e, const char *key )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -142,8 +113,7 @@ int Entity_GetIntValueForKey( const entity_s *e, const char *key )
     return atol( s_emptyKeyValue );
 }
 
-// HasKeyValuePair (0x4838B0)
-// 0x4838b0: strcmp (case-sensitive) epair-walk; returns bool.
+// HasKeyValuePair (0x4838B0) — case-sensitive (strcmp) key walk; returns bool.
 bool HasKeyValuePair( entity_s_def *e, const char *key )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -152,8 +122,7 @@ bool HasKeyValuePair( entity_s_def *e, const char *key )
     return false;
 }
 
-// Entity_FreeEpairs (0x483BB0) — free the whole epair list and null the head.
-// 0x483bb0: next captured pre-free, free key/value/node order, head nulled.
+// Entity_FreeEpairs (0x483BB0) — free the whole epair list (key, value, node) and null the head.
 void Entity_FreeEpairs( entity_s_def *e )
 {
     epair_t **head = &e->epairs;
@@ -169,11 +138,7 @@ void Entity_FreeEpairs( entity_s_def *e )
 }
 
 // DeleteKey (0x483720) — remove the FIRST epair whose key matches (case-sensitive),
-// freeing the node + its key/value strings.  The binary passes `(epair_t *)&e->epairs`
-// (a fake head node whose `.next` field aliases e->epairs); the equivalent clean form
-// walks `&e->epairs` directly.  Only the first match is removed (faithful).
-// 0x483720: strcmp (case-sensitive), head-case relink, first-match free key/value/node
-// verified.
+// freeing the node + its key/value strings.  Only the first match is removed.
 void DeleteKey( epair_t **head, const char *key )
 {
     for ( epair_t **pp = head; *pp; pp = &( *pp )->next )
@@ -194,13 +159,13 @@ void DeleteKey( epair_t **head, const char *key )
 void  SetKeyValue( entity_s_def *e, const char *key, const char *value );  // 0x483690 (defined below)
 void  Checkkey_Model( entity_s_def *e, const char *key );        // 0x482f70 (model rebuild on key change)
 void  MapLoad_ParsePrefab( const char *classname, entity_s_def *e ); // 0x483010
-void  Checkkey_Color( entity_s_def *a1, const char *a2 );        // 0x483210
+void  Checkkey_Color( entity_s_def *e, const char *key );        // 0x483210
 void  Entity_UpdateCylinder( const char *key, entity_s_def *e );  // 0x483320
 
-// 0x483440 / 0x4834A0 — radius/height clamps. Only act on cylinder/prefab classes
-// (classtype & 0xC0 / & 0x40); for plain fixed-size and brush entities these are
-// no-ops. Ported faithfully so SetKeyValue's side-effect chain is complete.
-static void Entity_ClampRadius( const char *key, entity_s_def *e )   // sub_483440
+// Radius/height clamps, part of SetKeyValue's side-effect chain.  Only act on the cylinder
+// classes (classtype & 0xC0 = trigger_radius / trigger_disk; height: & 0x40, trigger_radius);
+// for plain fixed-size and brush entities these are no-ops.
+static void Entity_ClampRadius( const char *key, entity_s_def *e )   // 0x483440
 {
     if ( !_stricmp( key, "radius" ) && ( e->eclass->classtype & 0xC0 ) != 0 )
     {
@@ -214,7 +179,7 @@ static void Entity_ClampRadius( const char *key, entity_s_def *e )   // sub_4834
         }
     }
 }
-static void Entity_ClampHeight( const char *key, entity_s_def *e )   // sub_4834A0
+static void Entity_ClampHeight( const char *key, entity_s_def *e )   // 0x4834A0
 {
     if ( !_stricmp( key, "height" ) && ( e->eclass->classtype & 0x40 ) != 0 )
     {
@@ -229,10 +194,10 @@ static void Entity_ClampHeight( const char *key, entity_s_def *e )   // sub_4834
     }
 }
 
-// SetKeyValue (0x483690) — set key=value in entity e's epair list (@0x74) AND fire the
-// binary's side-effect chain: raw set (SetKeyValue_0 == sub_483500), Checkkey_Model (model
-// rebuild on angles/modelscale/model), MapLoad_ParsePrefab on "classname", EntityAssignModel
-// on "model", Checkkey_Color, then the radius/height clamps.
+// SetKeyValue (0x483690) — set key=value in entity e's epair list AND fire the side-effect
+// chain: raw set (Epair_SetRaw), Checkkey_Model (model rebuild on angles/modelscale/model),
+// MapLoad_ParsePrefab on "classname", EntityAssignModel on "model", Checkkey_Color, then the
+// radius/height clamps.
 void SetKeyValue( entity_s_def *e, const char *key, const char *value )
 {
     if ( !e || !key || !*key )
@@ -254,31 +219,27 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
     if ( !_stricmp( key, "classname" ) )
         KiwiWalkCache_MarkStructural();
 
-    sub_483500( &e->epairs, key, value );   // SetKeyValue_0 — raw set (primary effect)
+    Epair_SetRaw( &e->epairs, key, value );   // raw set (primary effect)
 
-    Checkkey_Model( e, key );                            // 0x482f70 (model rebuild)
+    Checkkey_Model( e, key );                            // model rebuild
     if ( !_stricmp( key, "classname" ) )
     {
-        MapLoad_ParsePrefab( value, e );  // 0x483010
+        MapLoad_ParsePrefab( value, e );
     }
     if ( !_stricmp( key, "model" ) )
         EntityAssignModel( e );
-    Checkkey_Color( e, key );                            // 0x483210
-    Entity_ClampRadius( key, e );                        // 0x483440
-    Entity_ClampHeight( key, e );                        // 0x4834A0
+    Checkkey_Color( e, key );
+    Entity_ClampRadius( key, e );
+    Entity_ClampHeight( key, e );
 }
 
 // math (engine or engine_stubs)
-extern char          Byte4PackPixelColor( float *rgba, GfxColor *out );  // engine_stubs.cpp returns char
 extern void          OrientationConcatenate( const orientation_t *a, const orientation_t *b, orientation_t *out );
-extern float        *AnglesToAxis( float *angles, float (*axisOut)[3] );
 extern void          Vec3RotateTranspose( vec3_t in, float (*axis)[3], vec3_t out );
-extern float         Vec3Normalize_R( float *v );                        // 0x40A5E0 (engine_stubs)
-extern void          Vec3Cross( const float *a, const float *b, float *out ); // 0x40A4D0 (out = a × b)
 extern void          AxisToAngles( float *angles, float (*axis)[3] );    // 0x4A8A00 (engine_stubs)
 // VectorMaxValues (0x4a8240) lives in brush.cpp's file-local `namespace edwind` — NOT a
 // global symbol — so it can't be reached via a global extern from here. entity.cpp callers
-// (Entity_GetModelInstBounds, Entity_UpdateCylinder) inline the expand-AABB loop instead.
+// (Entity_UpdateModelInst, Entity_UpdateCylinder) inline the expand-AABB loop instead.
 
 // map load helpers (stubs / unported)
 extern void          Map_Free();
@@ -286,10 +247,9 @@ extern void          Map_NewMap();
 extern void          Map_InitlLayers();
 extern void          Pointfile_Clear();
 extern void          Layers_SetMapLayers();
-extern void          Layers_02();
-extern int           LoadFile( const char *filename, void **buf );
+extern void          Layers_RefreshDialog();
 extern void          Com_BeginParseSession( const char *name );
-// Map header parsers (layers.cpp) — real ports of sub_4861F0 / sub_486280 / sub_42F8A0.
+// Map header parsers (layers.cpp).
 extern int           Map_ReadVersion( const void **text );                 // 0x4861F0
 extern void          Map_ParseLayers( const void **text, int skipFlags );  // 0x486280
 extern void          Map_ParseEntityLayerKey( const char **text, const char *def, char *out, const char *key ); // 0x42F8A0
@@ -300,19 +260,15 @@ extern int           AddModelToModelInstBuff( XModel *model, float *axis, float 
 extern void          ModelInstUpdate( int inst, float (*axis)[3], float scale );
 extern void          RemoveModelInstFromBuf( int inst );
 extern void          Entity_GetModelInstBounds( int inst, float *out_mins, float *out_maxs ); // 0x4FDE10
-extern void          OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient ); // sub_4BA610
 extern void          Brush_AccumulateWorldBounds( const orientation_t *orient, const brush_t *b, float *mins, float *maxs ); // 0x47ABE0
 
-// brushFlags / classtype (local enum).  Bit values are GROUND TRUTH from
-// Eclass_InitFromText (eclass.cpp:909) + the IDB:
+// brushFlags / classtype (local enum).  Bit values come from Eclass_InitFromText
+// (eclass.cpp):
 //   light 0x1, not-worldspawn 0x2, path 0x4, model-class 0x8 (misc_model/script_*/
 //   dyn_model), misc_prefab 0x10, node_ 0x20, trigger_radius 0x40, trigger_disk 0x80,
 //   reflection_probe 0x100.
-// PREFAB-PLACEMENT FIX: CLASS_PREFAB was 0x40 (= trigger_radius!) and CLASS_LIGHT was
-// 0x10 (= prefab!).  SetupModelInst gates Entity_InitPrefabInst on `classtype & CLASS_PREFAB`
-// — with PREFAB=0x40 a misc_prefab (classtype 0x10) NEVER matched, so it was routed to
-// Entity_UpdateModelInst instead and the prefab was never instanced.  The IDB SetupModelInst
-// / Entity_InitPrefabInst / Eclass_01 all test `& 0x10`.  Latent until now (both fns stubbed).
+// SetupModelInst gates Entity_InitPrefabInst on `classtype & CLASS_PREFAB`; SetupModelInst /
+// Entity_InitPrefabInst / Eclass_ForModel all test `& 0x10`.
 enum CLASS_FLAGS
 {
     CLASS_LIGHT       = 0x01,
@@ -323,24 +279,21 @@ enum CLASS_FLAGS
 
 // ─── globals defined in this translation unit ────────────────────────────────
 // Entity DEFINITION circular doubly-linked list head (sentinel).
-// IDB: entities @ 0x23F17A0.
 entity_s    entities{};          // 0x23F17A0
 
 // Entity INSTANCE circular list (prefab instance list, headed by entityInsts).
-// IDB: entityInsts @ 0x23F1748.
 entity_s    entityInsts{};       // 0x23F1748
 
-// Running entity numberId counter. IDB: dword_739DC4 @ 0x739DC4.
+// Running entity numberId counter (0x739DC4).
 int         dword_739DC4 = 0;
 
-// Screen-update guard. IDB: g_bScreenUpdates @ 0x739B0F.
+// Screen-update guard (0x739B0F).
 bool        g_bScreenUpdates = true;
 
-// Between-map clipboard flag. IDB: g_bRestoreBetween @ 0x25D5B07.
+// Between-map clipboard flag (0x25D5B07).
 bool        g_bRestoreBetween = false;
 
-// World-space identity orientation matrix (read-only .data).
-// IDB: world_orient_matrix @ 0x6DE290. Defined as local identity here.
+// World-space identity orientation matrix (the binary's read-only .data at 0x6DE290).
 float       world_orient_matrix[4][3] = {
     { 0.0f, 0.0f, 0.0f },   // origin
     { 1.0f, 0.0f, 0.0f },   // axis[0]
@@ -348,14 +301,10 @@ float       world_orient_matrix[4][3] = {
     { 0.0f, 0.0f, 1.0f },   // axis[2]
 };
 
-// ─── prefab_s struct (IDB: 5 pointer fields = 0x14 bytes head; 0x54 total) ───
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x483bf0  IncRef  (entity.cpp:690)
-// Links an entity into a list (circular, TAIL insertion).  Survives in the
-// binary as an uncalled standalone right before DecRef; every live use is
-// inlined (Entity_Create / Map_New / Map_LoadEntities / undo).
+// Links an entity into a list (circular, TAIL insertion).  In the binary every use
+// is inlined (Entity_Create / Map_New / Map_LoadEntities / undo).
 // ─────────────────────────────────────────────────────────────────────────────
 void IncRef( entity_s *e, entity_s *list )
 {
@@ -380,11 +329,10 @@ void DecRef( entity_s *e )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Static helper: frees child entity instances belonging to a prefab.
-// (sub_4825F0, 0x4825F0)
+// 0x4825F0  Entity_FreePrefab — frees the child entity instances of a prefab (its
+// circular instance list, down to the self-sentinel), then the prefab_s; e->prefab is
+// cleared.
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x4825f0: circular prefab-instance list (next_entity@prefab+0x04) freed to self-sentinel,
-// then free(pf), e->prefab@0x48 cleared. No asserts.
 void Entity_FreePrefab( entity_s *e )
 {
     prefab_s *pf = (prefab_s *)e->prefab;
@@ -392,21 +340,16 @@ void Entity_FreePrefab( entity_s *e )
         return;
     // Free all entity instances in the prefab's own list until only the sentinel remains.
     while ( pf->next_entity != (entity_s *)pf )
-        Entity_Free( (char *)pf->next_entity );
+        Entity_Free( pf->next_entity );
     free( pf );
     e->prefab = nullptr;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x483c80  Entity_Free_R  (entity.cpp:712)
-// Frees an entity DEFINITION and all its brush defs.
+// Frees an entity DEFINITION and all its brush defs (unlink, --refCount, zero the links,
+// Brush_Free_R), then its epairs.
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x483c80: oprev-end def-list walk (e->brushes.prev, sentinel &e->def@e+0x08, re-read each
-// iter), per-brush unlink (onext->oprev/oprev->onext) + --refCount + zero + Brush_Free_R, then
-// Entity_FreeEpairs+free. Asserts entity.cpp-native: 713/724/1208 CONVERTIBLE (vassert), 721
-// CONVERTIBLE (iassert b->owner==e); 722 KEEP_VERBOSE (binary string "&e->brushes" = the
-// e+0x08 field the port renamed `def` — converting would mis-target e->brushes@0x0C). [in-body
-// conversions pending]
 void Entity_Free_R( entity_s *e )
 {
     iassert( e );
@@ -418,25 +361,17 @@ void Entity_Free_R( entity_s *e )
     if ( e->next )
         DecRef( e );
 
-    // Walk the brush-def list (brush_t circular via onext/oprev). entity_s.def___or_
-    // firstActive (at e+0x08) is the circular sentinel; brush_t.onext/oprev (brush+0x04/
-    // +0x00) chain the defs. IDA (0x483CDE) re-reads e->brushes.oprev (e+0x0C — the def-
-    // list FIRST element / oldest-inserted brush) as the loop variable every iteration,
-    // freeing the list from the oprev end; after each unlink the sentinel's onext slot
-    // (= e+0x0C) advances to the next first element. (The prior port walked from
-    // def (e+0x08, the newest end) instead — it still freed every brush,
-    // but diverged from the binary's walk direction and dropped the b->oprev==sentinel and
-    // post-decrement refCount==0 asserts, which only make sense from the oprev end.)
+    // Walk the brush-def list (circular via onext/oprev; &e->def is the sentinel).  Every
+    // iteration re-reads e->brushes.prev (the def-list FIRST element / oldest-inserted brush),
+    // freeing the list from that end; after each unlink the sentinel's onext slot (=
+    // e->brushes.prev) advances to the next first element.  The b->oprev == sentinel and
+    // post-decrement refCount == 0 asserts only make sense from this end.
     for ( brush_t *b = (brush_t *)e->brushes.prev;
           b != (brush_t *)&e->def;
           b = (brush_t *)e->brushes.prev )
     {
-        // 721 LEVEL 1 (disasm 0x483cf7 push 1) — per-iter list invariant; NOT iassert (would downgrade to L0).
-        iassert( b->owner == e );   // entity.cpp:721
-        // 722 KEEP_VERBOSE: binary string "&e->brushes" is the e+0x08 field the port renamed `def`;
-        // converting would mis-target e->brushes@0x0C (the guard correctly uses &e->def = e+0x08).
-        if ( (void *)b->oprev != (void *)&e->def )
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 722, 1, "%s", "b->oprev == &e->brushes" );
+        iassert( b->owner == e );                          // entity.cpp:721
+        iassert( (void *)b->oprev == (void *)&e->def );    // :722 - the binary's &e->brushes is `def` here
         if ( !b->onext || !b->oprev )
             Com_Error( ERR_FATAL, "Entity_UnlinkBrush: Not currently linked" );
         vassert( (b->refCount > 0), "(b->refCount) = %i", b->refCount );
@@ -448,8 +383,8 @@ void Entity_Free_R( entity_s *e )
         b->oprev  = nullptr;
         b->onext  = nullptr;
         b->owner  = nullptr;
-        // 724 LEVEL 1 (disasm 0x483d91 push 1) — post-decrement invariant; NOT vassert (would downgrade to L0).
-        // b->refCount == newRef here (post-dec, pre-free); binary prints the post-dec value.
+        // Post-decrement invariant: b->refCount == newRef here (post-dec, pre-free); the
+        // message prints the post-dec value.
         vassert( (b->refCount == 0), "(b->refCount) = %i", newRef );   // entity.cpp:724
         Brush_Free_R( b );
     }
@@ -460,14 +395,9 @@ void Entity_Free_R( entity_s *e )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x484fc0  Entity_LinkBrush  (entity.cpp:1190)
-// Links a brush_t DEFINITION into an entity's active brush-def list.
-// IDA: eax = brush_t*, edi = entity_s*
+// Links a brush_t DEFINITION into an entity's active brush-def list (the binary also
+// inlines it at brush.cpp's Split_LinkCloneToEntity).
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x484fc0: canonical Entity_LinkBrush (cf brush.cpp Split_LinkCloneToEntity inline). Insert
-// at def-list head@&world_ent->def(0x08): onext=&head, oprev=*head, (*head)->next=b, head=b
-// (the binary's "writes ->next not ->prev" fix preserved). 1190 (b->refCount>=0) -> vassert
-// DONE (verified accurate vs IDA : cond str "(b->refCount >= 0)" + "%s\n\t(b->refCount) = %i"
-// fmt + level 0 byte-match).
 void Entity_LinkBrush( brush_t *b, entity_s *world_ent )
 {
     KiwiWalkCache_MarkStructural();   // ownership move: the tree's shape changed
@@ -476,32 +406,65 @@ void Entity_LinkBrush( brush_t *b, entity_s *world_ent )
     vassert( (b->refCount >= 0), "(b->refCount) = %i", b->refCount );
     b->owner = world_ent;
     ++b->refCount;
-    // Insert into the def-list. The list HEAD is at &world_ent->def
-    // (entity offset 0x08); the per-entity "first element" pointer lives at the
-    // overlapping brushes-field offset 0x0C and is updated ONLY on the first insert.
-    // IDA (Entity_LinkBrush 0x484FC0) writes old_head->NEXT (offset 0x04), NOT ->prev:
-    //   a1->onext = &world_ent->def;  a1->oprev = world_ent->def;
-    //   world_ent->def->next = a1;    world_ent->def = a1;
-    // On the empty list old_head == sentinel (ent+0x08), so writing (ent+0x08)->next
-    // == *(ent+0x0C) sets the brushes.oprev "first" pointer that MapFile_WriteEntity
-    // reads. (The prior port wrote ->prev/0x00 here, leaving 0x0C at the sentinel →
-    // the def-list looked empty to the writer → zero brushes emitted.)
+    // Insert into the def-list.  The list HEAD is &world_ent->def; the per-entity "first
+    // element" pointer is the overlapping brushes.prev and is updated ONLY on the first
+    // insert.  This writes old_head->NEXT, NOT ->prev: on the empty list old_head is the
+    // sentinel, whose ->next is brushes.prev, the "first" pointer MapFile_WriteEntity reads
+    // (writing ->prev left the def-list looking empty to the writer: zero brushes saved).
     b->onext                          = (brush_t *)&world_ent->def;
     b->oprev                          = (brush_t *)world_ent->def;
     ( (entity_s *)world_ent->def )->next = (entity_s *)b;
     world_ent->def                        = (entity_s *)b;
-    Entity_ColorSth( b );
+    Brush_ApplyEntityColor( b );
+}
+
+// KIWI: Entity_LinkBrush at a position - before the brush now `ordinal`-th in the entity's
+// list (appended when the list is shorter).  Undo / redo put a brush back where it was:
+// appending moved every undone brush to the end of the saved map.  The sentinel is
+// &ent->def as a brush_t: its oprev is the last brush, its onext ent->brushes.prev (the first).
+void Entity_LinkBrushAt( brush_t *b, entity_s *ent, int ordinal )
+{
+    brush_t *const sentinel = (brush_t *)&ent->def;
+    brush_t       *at       = (brush_t *)ent->brushes.prev;
+    for ( int i = 0; i < ordinal && at != sentinel; ++i )
+        at = at->onext;
+    if ( ordinal < 0 || at == sentinel )
+    {
+        Entity_LinkBrush( b, ent );
+        return;
+    }
+    KiwiWalkCache_MarkStructural();
+    if ( b->oprev || b->onext )
+        Com_Error( ERR_FATAL, "Entity_LinkBrush: Allready linked" );
+    vassert( (b->refCount >= 0), "(b->refCount) = %i", b->refCount );
+    b->owner = ent;
+    ++b->refCount;
+    b->onext         = at;
+    b->oprev         = at->oprev;
+    at->oprev->onext = b;       // the sentinel's onext is ent->brushes.prev
+    at->oprev        = b;
+    Brush_ApplyEntityColor( b );
+}
+
+// KIWI: `b`'s position in its owner's brush list, or -1.
+int Entity_BrushOrdinal( const brush_t *b )
+{
+    entity_s *ent = b ? b->owner : nullptr;
+    if ( !ent )
+        return -1;
+    brush_t *const sentinel = (brush_t *)&ent->def;
+    int i = 0;
+    for ( brush_t *d = (brush_t *)ent->brushes.prev; d && d != sentinel; d = d->onext, ++i )
+        if ( d == b )
+            return i;
+    return -1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x485020  Entity_UnlinkBrush  (entity.cpp:1208)
-// Unlinks a brush_t from its entity's def-list. Decrements refCount.
-// IDA: __usercall esi = brush_t*
+// Unlinks a brush_t from its entity's def-list, decrements refCount and zeroes the brush's
+// oprev/onext/owner (brush.cpp's Entity_UnlinkBrush_def forwards here).
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x485020: canonical Entity_UnlinkBrush (cf brush.cpp Entity_UnlinkBrush_def forwarder).
-// onext->oprev/oprev->onext unlink + --refCount + zero oprev/onext/owner. 1208 (b->refCount>0)
-// -> vassert DONE (verified accurate vs IDA : "(b->refCount > 0)" + value-fmt + level 0 byte-
-// match).
 void Entity_UnlinkBrush( brush_t *b )
 {
     KiwiWalkCache_MarkStructural();   // see Entity_LinkBrush
@@ -531,18 +494,16 @@ void Entity_RebuildBounds( entity_s *e )
     maxs[0] = ec->maxs[0] + e->origin[0];
     maxs[1] = ec->maxs[1] + e->origin[1];
     maxs[2] = ec->maxs[2] + e->origin[2];
-    // Get the sole brush def for this fixed-size entity. IDA (0x4853F6) reads
-    // e->brushes.oprev (entity+0x0C — the def-list first element), NOT def
-    // (entity+0x08). For a fixedsize entity the single bbox brush sits at both, so this is
-    // equivalent; use 0x0C to match the binary.
+    // Get the sole brush def for this fixed-size entity from e->brushes.prev (the def-list
+    // first element), as the binary does; with a single bbox brush it is also `def`.
     brush_t *b = (brush_t *)e->brushes.prev;
     Brush_Build( b, mins, maxs );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Static helper: check if entity has epair key with specific value (0x483930).
+// Entity_HasEpairMatch (0x483930) — does the entity have epair `key` with value `val`?
+// Short-circuits on the FIRST key match (case-sensitive strcmp on key and value).
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x483930: first-key-match short-circuit, value strcmp==0; epairs@0x74, next@0/key@4/value@8.
 bool Entity_HasEpairMatch( entity_s *e, const char *key, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -556,14 +517,12 @@ bool Entity_HasEpairMatch( entity_s *e, const char *key, const char *val )
 // ─────────────────────────────────────────────────────────────────────────────
 // Substring-aware epair matchers used by Select_ByKeyValue (select.cpp 0x490C00).
 // All eight matchers walk e->epairs; the six below are the substring variants of
-// HasKeyValuePair / Entity_HasEpairMatch (which are the exact-match pair).  Each is
-// a verbatim port of the IDB sub at the noted address.  NOTE the substring matchers
-// keep walking past a key match whose value mismatches (the OR loop condition),
-// unlike Entity_HasEpairMatch which short-circuits on the first key hit.
+// HasKeyValuePair / Entity_HasEpairMatch (which are the exact-match pair).  NOTE the
+// substring matchers keep walking past a key match whose value mismatches, unlike
+// Entity_HasEpairMatch which short-circuits on the first key hit.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// sub_483900 — key is a substring of an epair key (no value test).
-// 0x483900: strstr(ep->key, key); epairs@0x74, next@0/key@4.
+// 0x483900 — key is a substring of an epair key (no value test).
 bool Entity_HasKeySubstr( entity_s_def *e, const char *key )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -572,8 +531,7 @@ bool Entity_HasKeySubstr( entity_s_def *e, const char *key )
     return false;
 }
 
-// sub_483AC0 — value exact (no key test).
-// 0x483ac0: strcmp(ep->value, val)==0; value@8.
+// 0x483AC0 — value exact (no key test).
 bool Entity_HasValue( entity_s_def *e, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -582,8 +540,7 @@ bool Entity_HasValue( entity_s_def *e, const char *val )
     return false;
 }
 
-// sub_483B10 — value is a substring of an epair value (no key test).
-// 0x483b10: strstr(ep->value, val); value@8.
+// 0x483B10 — value is a substring of an epair value (no key test).
 bool Entity_HasValueSubstr( entity_s_def *e, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -592,8 +549,7 @@ bool Entity_HasValueSubstr( entity_s_def *e, const char *val )
     return false;
 }
 
-// sub_4839C0 — key is a substring AND value matches exactly.
-// 0x4839c0: while(!strstr(key) || strcmp(value)) advance.
+// 0x4839C0 — key is a substring AND value matches exactly.
 bool Entity_HasKeySubstrValue( entity_s_def *e, const char *key, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -602,8 +558,7 @@ bool Entity_HasKeySubstrValue( entity_s_def *e, const char *key, const char *val
     return false;
 }
 
-// sub_483A20 — key matches exactly AND value is a substring.
-// 0x483a20: while(strcmp(key) || !strstr(value)) advance.
+// 0x483A20 — key matches exactly AND value is a substring.
 bool Entity_HasKeyValueSubstr( entity_s_def *e, const char *key, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -612,8 +567,7 @@ bool Entity_HasKeyValueSubstr( entity_s_def *e, const char *key, const char *val
     return false;
 }
 
-// sub_483A80 — key is a substring AND value is a substring.
-// 0x483a80: while(!strstr(key) || !strstr(value)) advance.
+// 0x483A80 — key is a substring AND value is a substring.
 bool Entity_HasKeySubstrValueSubstr( entity_s_def *e, const char *key, const char *val )
 {
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
@@ -626,17 +580,13 @@ bool Entity_HasKeySubstrValueSubstr( entity_s_def *e, const char *key, const cha
 // 0x482940  Entity_GetOrientationMatrix  (entity.cpp:123)
 // Builds a 4x3 rotation matrix for a fixed-size entity from its "angles" and origin.
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x482940: anglesToAxis(angles, axis+1) fills rotation, axis[0]=origin. Asserts 123/124/125
-// -> iassert(ent/ent->eclass/ent->eclass->fixedsize) DONE (param renamed a1->ent; verified
-// byte-match vs IDA ); 126 "or" KEEP_VERBOSE (C++ reserved word, port uses `axis`).
-// non-static: also called by the prefab ray trace (sub_48D240) in select.cpp.
+// non-static: also called by the prefab ray trace (Brush_TraceTest) in select.cpp.
 void Entity_GetOrientationMatrix( entity_s *ent, float (*axis)[3] )
 {
     iassert( ent );
     iassert( ent->eclass );
-    iassert( ent->eclass->fixedsize );   // binary reads *(int*); bool nonzero-check equivalent
-    if ( !axis )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 126, 0, "%s", "or" );   // "or" = C++ reserved word, KEEP_VERBOSE
+    iassert( ent->eclass->fixedsize );
+    iassert( axis );
     float angles[3];
     if ( !Entity_GetVec3ForKey( (entity_s_def *)ent, angles, "angles" ) )
         angles[0] = angles[1] = angles[2] = 0.0f;
@@ -649,84 +599,66 @@ void Entity_GetOrientationMatrix( entity_s *ent, float (*axis)[3] )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x482a70  Entity_GetOrientation  (entity.cpp:148)
+// The entity's orientation matrix concatenated onto orParent.
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x482a70: getOrientationMatrix + OrientationConcatenate(&v4, orParent, orOut).
-// 148/149/150/151 -> iassert(ent/ent->eclass/ent->eclass->fixedsize/orParent) DONE (verified
-// byte-match vs IDA ); 152 "or" KEEP_VERBOSE (reserved word, port uses `orOut`).
 void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut )
 {
     iassert( ent );
     iassert( ent->eclass );
-    iassert( ent->eclass->fixedsize );   // binary reads *(int*); bool nonzero-check equivalent
+    iassert( ent->eclass->fixedsize );
     iassert( orParent );
-    if ( !orOut )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 152, 0, "%s", "or" );   // "or" = C++ reserved word, KEEP_VERBOSE
-    orientation_t v4;
-    Entity_GetOrientationMatrix( (entity_s *)ent, (float (*)[3])&v4 );
-    OrientationConcatenate( &v4, orParent, orOut );
+    iassert( orOut );
+    orientation_t local;
+    Entity_GetOrientationMatrix( (entity_s *)ent, (float (*)[3])&local );
+    OrientationConcatenate( &local, orParent, orOut );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x482b50  Entity_GetOrientationInverse  (entity.cpp:163)
+// The orientation matrix with Vec3RotateTranspose( origin ) taken off its origin, then
+// concatenated onto orParent.
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x482b50: getOrientationMatrix + Vec3RotateTranspose(origin, v4.axis, out) + v4.origin-=out
-// + OrientationConcatenate. Asserts 163/164/165/166 ->
-// iassert(ent/ent->eclass/ent->eclass->fixedsize/orParent) DONE (params renamed
-// a1->ent/a2->orParent; verified byte-match vs IDA ); 167 "or" KEEP_VERBOSE (reserved word,
-// port uses `a3`).
-void Entity_GetOrientationInverse( entity_s_def *ent, orientation_t *orParent, orientation_t *a3 )
+void Entity_GetOrientationInverse( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut )
 {
     iassert( ent );
     iassert( ent->eclass );
-    iassert( ent->eclass->fixedsize );   // binary reads *(int*); bool nonzero-check equivalent
+    iassert( ent->eclass->fixedsize );
     iassert( orParent );
-    if ( !a3 )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 167, 0, "%s", "or" );   // "or" = C++ reserved word, KEEP_VERBOSE
-    orientation_t v4;
-    Entity_GetOrientationMatrix( (entity_s *)ent, (float (*)[3])&v4 );
+    iassert( orOut );
+    orientation_t local;
+    Entity_GetOrientationMatrix( (entity_s *)ent, (float (*)[3])&local );
     float out[3];
-    Vec3RotateTranspose( ent->origin, v4.axis, out );
-    v4.origin[0] -= out[0];
-    v4.origin[1] -= out[1];
-    v4.origin[2] -= out[2];
-    OrientationConcatenate( &v4, orParent, a3 );
+    Vec3RotateTranspose( ent->origin, local.axis, out );
+    local.origin[0] -= out[0];
+    local.origin[1] -= out[1];
+    local.origin[2] -= out[2];
+    OrientationConcatenate( &local, orParent, orOut );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x482650  Entity_UpdateModelInst  (entity.cpp:65)
 // Updates (or creates) the model instance for a fixed-size entity, and (with out-params)
 // accumulates its world-space AABB over the 8 local-bounds corners.
-// 0x482650: after the line-665 transform
-// fix below.  NOT a deferred stub: the whole bounds path is implemented.
 // ─────────────────────────────────────────────────────────────────────────────
-void Entity_UpdateModelInst( entity_s *ent, float *_org, float *maxs, float *mins )
+// KIWI: the binary names the bounds out-params the other way round (its "maxs" holds the
+// running MIN); here they are named for what they hold.
+void Entity_UpdateModelInst( entity_s *ent, float *_org, float *mins, float *maxs )
 {
     iassert( ent );
     entity_s_def *def = (entity_s_def *)ent->def;
     iassert( ent->def );
     entitymodel_t *emc = (entitymodel_t *)def->modelClass;
     iassert( ent->def->modelClass );   // entity.cpp:67
-    // IDB: ent->def->modelClass->model->handle.  modelClass (entitymodel_t*) ->model is the
-    // models_t* sub-node; its handle (+4) holds the XModel* after Model_load → R_RegisterModel.
+    // modelClass (entitymodel_t*) ->model is the models_t* sub-node; its handle holds the
+    // XModel* after Model_load → R_RegisterModel.
     modelnode_t *mc = emc->model;
     iassert( ent->def->modelClass->model );   // entity.cpp:68
     XModel *xmodel = (XModel *)mc->handle;
     iassert( ent->def->modelClass->model->handle );   // entity.cpp:69
 
     // modelscale epair (default 1.0; <= 0 → 1.0).
-    float scale = 1.0f;
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-    {
-        if ( _stricmp( ep->key, "modelscale" ) == 0 )
-        {
-            if ( ep->value )
-            {
-                float s = (float)atof( ep->value );
-                if ( s > 0.0f ) scale = s;
-            }
-            break;
-        }
-    }
+    const float keyScale = (float)atof( ValueForKey2( def, "modelscale" ) );
+    const float scale    = keyScale > 0.0f ? keyScale : 1.0f;
 
     // World orientation = the entity's own orientation matrix concatenated with the parent
     // orientation passed in _org (a 12-float orientation_t: origin[3] then axis[3][3]).
@@ -743,22 +675,22 @@ void Entity_UpdateModelInst( entity_s *ent, float *_org, float *maxs, float *min
     iassert( (mins == NULL && maxs == NULL) || (mins != NULL && maxs != NULL) );   // entity.cpp:91
 
     int modelInst = ent->modelInst;
-    if ( modelInst && maxs && mins )
+    if ( modelInst && mins && maxs )
     {
         // Local-space model bounds → world-space AABB over the 8 corners.
         float lmin[3], lmax[3];
         Entity_GetModelInstBounds( modelInst, lmin, lmax );
-        maxs[0] = maxs[1] = maxs[2] =  131072.0f;
-        mins[0] = mins[1] = mins[2] = -131072.0f;
+        mins[0] = mins[1] = mins[2] =  131072.0f;
+        maxs[0] = maxs[1] = maxs[2] = -131072.0f;
         for ( int c = 0; c < 8; ++c )
         {
             float corner[3] = { (c & 1) ? lmin[0] : lmax[0],
                                 (c & 2) ? lmin[1] : lmax[1],
                                 (c & 4) ? lmin[2] : lmax[2] };
-            // Binary 0x482889 calls sub_4BA610 (q_shared.cpp:1638 @0x4ba610) -- the INVERSE
+            // OrientationWorldPosToLocalPos (0x4ba610, q_shared.cpp:1638) inlined -- the INVERSE
             // world->local transform  worldPt[i] = axis_row[i] . (corner - origin) -- NOT the
-            // forward OrientationPosToWorldPos (0x4ba430, axis^T*pos + origin) the old stub
-            // wrongly called.  (map.cpp inlines the same inverse.)
+            // forward OrientationPosToWorldPos (0x4ba430, axis^T*pos + origin).  (map.cpp
+            // inlines the same inverse.)
             const orientation_t *o = (const orientation_t *)_org;
             float rel[3] = { corner[0] - o->origin[0],
                              corner[1] - o->origin[1],
@@ -767,30 +699,22 @@ void Entity_UpdateModelInst( entity_s *ent, float *_org, float *maxs, float *min
                 o->axis[0][0]*rel[0] + o->axis[0][1]*rel[1] + o->axis[0][2]*rel[2],
                 o->axis[1][0]*rel[0] + o->axis[1][1]*rel[1] + o->axis[1][2]*rel[2],
                 o->axis[2][0]*rel[0] + o->axis[2][1]*rel[1] + o->axis[2][2]*rel[2] };
-            // VectorMaxValues(pt, maxs, mins) inlined (maxs holds the running
-            // MIN, mins the running MAX — the swapped-name convention sub 0x482650 uses
-            // when it passes maxs as the "mins" arg).
+            // VectorMaxValues(pt, mins, maxs) inlined.
             for ( int k = 0; k < 3; ++k )
             {
-                if ( maxs[k] > worldPt[k] ) maxs[k] = worldPt[k];   // running min
-                if ( mins[k] < worldPt[k] ) mins[k] = worldPt[k];   // running max
+                if ( mins[k] > worldPt[k] ) mins[k] = worldPt[k];
+                if ( maxs[k] < worldPt[k] ) maxs[k] = worldPt[k];
             }
         }
-        // Pad/clamp per axis (maxs holds the running MIN, mins the running MAX -- the
-        // swapped convention).  The binary's verbose assert here ("maxs[axis] >= mins[axis]",
-        // type-0) fires ONLY on a genuinely inverted box (running MIN > running MAX), NOT on
-        // every model -- VERIFIED vs disasm 0x4828c2 (fcompp; jnp skips when maxs <= mins; the
-        // port condition mins[axis] < maxs[axis] is identical).  The message string is
-        // inconsistent with the checked condition, so it can't be iassert/vassert 1:1 -> KEEP.
+        // Pad a thin axis to 8 units; the assert fires only on an inverted box.
         for ( int axis = 0; axis < 3; ++axis )
         {
-            if ( mins[axis] < maxs[axis] )   // true MAX < true MIN => genuinely inverted
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 107, 0, "%s", "maxs[axis] >= mins[axis]" );
-            if ( mins[axis] - maxs[axis] <= 8.0f )
+            iassert( maxs[axis] >= mins[axis] );   // entity.cpp:107
+            if ( maxs[axis] - mins[axis] <= 8.0f )
             {
-                float mid = ( mins[axis] + maxs[axis] ) * 0.5f;
-                mins[axis] = mid + 4.0f;     // mins (MAX) := mid+4, maxs (MIN) := mid-4
-                maxs[axis] = mid - 4.0f;     // verbatim from sub 0x482650 (swapped names)
+                float mid = ( maxs[axis] + mins[axis] ) * 0.5f;
+                maxs[axis] = mid + 4.0f;
+                mins[axis] = mid - 4.0f;
             }
         }
     }
@@ -798,31 +722,101 @@ void Entity_UpdateModelInst( entity_s *ent, float *_org, float *maxs, float *min
 
 // Model_SetModel (brush.cpp/0x478780) — assigns/loads the model for a brush's owning
 // entity.  Entity_InitPrefabInst calls it ONLY to recurse into a child instance whose
-// own eclass is a prefab/model class (nested prefabs).  (Still a documented no-op until
-// the model-render epic; for plain brush prefabs the recursion branch is not taken.)
-extern bool Model_SetModel( entity_brush_s *b, const float *orientMatrix );
+// own eclass is a prefab (nested prefabs); for plain brush prefabs the recursion branch
+// is not taken.
+
+extern void __cdecl XModelGetBounds( const XModel *model, float *mins, float *maxs );          // xmodel.cpp
+
+// KIWI: a prefab instance's proxy box from each child's OWN local geometry, through `orient`
+// (the prefab's frame in its parent's).  The binary accumulated every child's bbox DEF windings,
+// but a model's / nested prefab's bbox def is shared by every instance of the prefab and holds
+// whichever instance last set its model up (an AABB of that instance's world AABB, mapped
+// back) - so one prefab's instances took each other's boxes.  Brushes: their windings (as
+// before); a resolved model: XModel bounds x modelscale through its own orientation; a realized
+// nested prefab: its children, recursively; any other fixed-size child (a light, a model not
+// resolved yet): its eclass box around its origin - what Entity_RebuildBounds builds.
+static void Prefab_AccumulateLocalBounds( prefab_s *pf, const orientation_t *orient,
+                                          float *mins, float *maxs, int depth )
+{
+    for ( selbrush_t *bi = pf->active_brushlist_next;
+          bi != (selbrush_t *)&pf->active_brushlist;
+          bi = bi->next )
+    {
+        entity_s     *ce   = bi->owner;
+        entity_s_def *cdef = ce ? (entity_s_def *)ce->def : nullptr;
+        if ( !cdef || !cdef->eclass || !*(int *)&cdef->eclass->fixedsize )
+        {
+            Brush_AccumulateWorldBounds( orient, bi->def, mins, maxs );
+            continue;
+        }
+
+        orientation_t local, composed;
+        Entity_GetOrientationMatrix( (entity_s *)cdef, (float (*)[3])&local );
+        OrientationConcatenate( &local, orient, &composed );
+        if ( ce->prefab && depth < 16 )
+        {
+            Prefab_AccumulateLocalBounds( (prefab_s *)ce->prefab, &composed, mins, maxs, depth + 1 );
+            continue;
+        }
+
+        const entitymodel_t *emc = (const entitymodel_t *)cdef->modelClass;
+        const XModel *xm = ( emc && emc->model && !( cdef->eclass->classtype & CLASS_PREFAB ) )
+                         ? (const XModel *)emc->model->handle : nullptr;
+        float lmin[3], lmax[3];
+        const orientation_t *frame = &composed;
+        if ( xm )
+        {
+            XModelGetBounds( xm, lmin, lmax );
+            const float keyScale = (float)atof( ValueForKey2( cdef, "modelscale" ) );
+            const float scale    = keyScale > 0.0f ? keyScale : 1.0f;
+            for ( int k = 0; k < 3; ++k )
+            {
+                lmin[k] *= scale;
+                lmax[k] *= scale;
+            }
+        }
+        else
+        {
+            // the unrotated eclass box around the origin, in the prefab's frame
+            for ( int k = 0; k < 3; ++k )
+            {
+                lmin[k] = cdef->eclass->mins[k] + cdef->origin[k];
+                lmax[k] = cdef->eclass->maxs[k] + cdef->origin[k];
+            }
+            frame = orient;
+        }
+        for ( int c = 0; c < 8; ++c )
+        {
+            const float corner[3] = { ( c & 1 ) ? lmax[0] : lmin[0],
+                                      ( c & 2 ) ? lmax[1] : lmin[1],
+                                      ( c & 4 ) ? lmax[2] : lmin[2] };
+            float w[3];
+            OrientationPosToWorldPos( w, corner, frame );
+            for ( int k = 0; k < 3; ++k )
+            {
+                if ( w[k] < mins[k] ) mins[k] = w[k];
+                if ( w[k] > maxs[k] ) maxs[k] = w[k];
+            }
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x482c60  Entity_InitPrefabInst
 // Build the prefab_s for a misc_prefab entity and populate it with brush INSTANCES of
 // every entity-def in the loaded prefab model, then compute the placed prefab's overall
-// bounds (out_mins/out_maxs) which SetupModelInst feeds to Brush_Build for the bbox.
+// bounds (mins/maxs) which SetupModelInst feeds to Brush_Build for the bbox.
 //
 //   ent       = the misc_prefab entity instance
 //   identMtx  = world orientation matrix (forwarded to Model_SetModel for nested prefabs)
-//   out_mins/out_maxs = OUT: the placed prefab's world-space bounding box
+//   mins/maxs = OUT: the placed prefab's world-space bounding box
 //
-// The prefab model was loaded into ent->def->modelClass->x88 (a models_t sub-node) by
-// Model_SetModel→Eclass_01→Eclass_LoadModel→Prefab_Load→Eclass_RealizeModel.  Its loaded
-// entity-defs form a circular list: sentinel at subNode+8 (subNode->x2), first at
-// subNode->entities_next (subNode+0xC), each linked via entity_s.next (+4).  Prefab_Init
-// (already ported) instances one def's brushes into the prefab_s active list.
-// 0x482c60: CLASS_PREFAB gate = classtype
-// & 0x10; prefab_s 0x54 self-sentinel alloc; asserts 183/187/188/205 CONVERTED (187/188 via
-// out_mins/out_maxs->mins/maxs rename), 184-186 KEEP_VERBOSE (ent->def->modelClass void*-chain).
+// The prefab model was loaded into ent->def->modelClass->model (a models_t sub-node) by
+// Model_SetModel→Eclass_ForModel→Eclass_LoadModel→Prefab_Load→Eclass_RealizeModel.  Its loaded
+// entity-defs form a circular list: sentinel &model->entities, first model->entities.next,
+// each linked via entity_s.next.  Prefab_Init instances one def's brushes into the prefab_s
+// active list.
 // ─────────────────────────────────────────────────────────────────────────────
-// (Port out-params out_mins/out_maxs renamed mins/maxs to match the binary's identifiers
-// so the line-187/188 iasserts below stringize byte-identically to the originals "mins"/"maxs".)
 void Entity_InitPrefabInst( entity_s *ent, const float *identMtx, float *mins, float *maxs )
 {
     iassert( ent );
@@ -837,19 +831,18 @@ void Entity_InitPrefabInst( entity_s *ent, const float *identMtx, float *mins, f
     iassert( maxs );
     iassert( ent->prefab == NULL );
 
-    // Allocate + init the prefab_s (0x54), with both entity-list and brush-list as
-    // empty circular sentinels (IDA: next/prev = self; active_brushlist = &active_brushlist).
+    // Allocate + init the prefab_s, with both entity-list and brush-list as empty
+    // circular sentinels.
     prefab_s *pf = (prefab_s *)operator new( sizeof(prefab_s) );
     ent->prefab = pf;
     memset( pf, 0, sizeof(prefab_s) );
-    pf->next_entity           = (entity_s *)pf;             // +0x04 = self
-    pf->prev_entity           = (entity_s *)pf;             // +0x00 = self
-    pf->active_brushlist_next = (selbrush_t *)&pf->active_brushlist; // +0x10 = &(+0x0C)
-    pf->active_brushlist      = (selbrush_t *)&pf->active_brushlist; // +0x0C = self
+    pf->next_entity           = (entity_s *)pf;
+    pf->prev_entity           = (entity_s *)pf;
+    pf->active_brushlist_next = (selbrush_t *)&pf->active_brushlist;
+    pf->active_brushlist      = (selbrush_t *)&pf->active_brushlist;
 
     // Walk the loaded prefab's entity-defs and instance each (Prefab_Init links the
-    // brush instances into pf->active_brushlist).  Circular list: sentinel = &model->x2
-    // (model+8), first = model->entities_next (model+0xC), advance via entity_s.next (+4).
+    // brush instances into pf->active_brushlist).
     entity_s_def *sentinel = &model->entities;
     for ( entity_s_def *entDef = (entity_s_def *)model->entities.next;
           entDef != sentinel;
@@ -857,8 +850,8 @@ void Entity_InitPrefabInst( entity_s *ent, const float *identMtx, float *mins, f
     {
         entity_s *inst = Prefab_Init( pf, entDef, (selbrush_t *)&pf->active_brushlist );
 
-        // If the instanced child is itself a prefab/model class, recurse via Model_SetModel
-        // on its (single) brush instance (nested prefabs).  (IDA tests classtype & 0x10.)
+        // If the instanced child is itself a prefab (classtype & 0x10), recurse via
+        // Model_SetModel on its (single) brush instance (nested prefabs).
         if ( ( ( (entity_s_def *)inst->def )->eclass->classtype & CLASS_PREFAB ) != 0 )
         {
             entity_brush_s *b = (entity_brush_s *)inst->brushes.ownerNext;
@@ -868,212 +861,239 @@ void Entity_InitPrefabInst( entity_s *ent, const float *identMtx, float *mins, f
         }
     }
 
-    // Compute the placed prefab's world bounds: orient by THIS entity's matrix, then
-    // accumulate every instanced brush's def windings (sub_47ABE0).
+    // Compute the placed prefab's bounds: orient by THIS entity's matrix, then accumulate
+    // every child (the binary: each instanced brush's def windings, sub_47ABE0).
     float orientMtx[4][3];
     Entity_GetOrientationMatrix( (entity_s *)def, orientMtx );
 
     mins[0] = mins[1] = mins[2] =  131072.0f;
     maxs[0] = maxs[1] = maxs[2] = -131072.0f;
-
-    for ( selbrush_t *bi = pf->active_brushlist_next;
-          bi != (selbrush_t *)&pf->active_brushlist;
-          bi = bi->next )
-    {
-        Brush_AccumulateWorldBounds( (const orientation_t *)orientMtx, bi->def, mins, maxs );
-    }
+    Prefab_AccumulateLocalBounds( pf, (const orientation_t *)orientMtx, mins, maxs, 0 );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x483010  MapLoad_ParsePrefab  (IDB name "Checkkey_Model"; entity.cpp:285)
+// KIWI: models resolve on their first draw, AFTER Entity_InitPrefabInst built the instance's
+// proxy box from eclass stand-ins - and the version gate never rebuilds it.  Model_SetModel
+// bumps g_modelResolveSerial when an entity's model first resolves; the next idle tick
+// re-derives every realized instance's box (rebuilt only when it moved).  Deferred while a
+// KIWI tool is live or an undo bracket is open: the proxy's planes are a G/R/S baseline then.
+// ─────────────────────────────────────────────────────────────────────────────
+unsigned g_modelResolveSerial;
+class KiwiEditorCommand;
+extern KiwiEditorCommand *KiwiCmd_Active();                 // kiwi_command.cpp
+
+static bool Prefab_RefreshInstance( entity_s *inst, int depth )
+{
+    prefab_s *pf = (prefab_s *)inst->prefab;
+    selbrush_t *proxy = inst->brushes.ownerNext;
+    if ( !pf || !proxy || proxy == (selbrush_t *)&inst->brushes || !proxy->def )
+        return false;
+
+    bool moved = false;
+    for ( selbrush_t *bi = pf->active_brushlist_next;          // nested instances first
+          bi != (selbrush_t *)&pf->active_brushlist;
+          bi = bi->next )
+    {
+        if ( bi->owner && bi->owner->prefab && depth < 16 )
+            moved |= Prefab_RefreshInstance( bi->owner, depth + 1 );
+    }
+
+    float orientMtx[4][3];
+    Entity_GetOrientationMatrix( (entity_s *)inst->def, orientMtx );
+    float mins[3] = {  131072.0f,  131072.0f,  131072.0f };
+    float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
+    Prefab_AccumulateLocalBounds( pf, (const orientation_t *)orientMtx, mins, maxs, 0 );
+    if ( mins[0] > maxs[0] )
+        return moved;                                       // no geometry - leave it
+    brush_t *def = proxy->def;
+    for ( int k = 0; k < 3; ++k )
+    {
+        if ( fabsf( def->mins[k] - mins[k] ) > 0.01f || fabsf( def->maxs[k] - maxs[k] ) > 0.01f )
+        {
+            Brush_Build( def, mins, maxs );
+            return true;
+        }
+    }
+    return moved;
+}
+
+void Prefab_RefreshProxyBounds()
+{
+    static unsigned s_done;
+    if ( s_done == g_modelResolveSerial )
+        return;
+    if ( KiwiCmd_Active() || ( g_lastundo && !g_lastundo->done ) )
+        return;                                              // retried next tick
+    s_done = g_modelResolveSerial;
+
+    bool moved = false;
+    for ( selbrush_t *list : { &active_brushes, &selected_brushes, &filtered_brushes } )
+        for ( selbrush_t *b = list->next; b && b != list; b = b->next )
+            if ( b->owner && b->owner->prefab )
+                moved |= Prefab_RefreshInstance( b->owner, 0 );
+    if ( moved )
+        g_nUpdateBits = -1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 0x483010  MapLoad_ParsePrefab  (the binary's "Checkkey_Model"; entity.cpp:285)
 // Classname-change handler: re-class a fixed-size entity and (re)build its model +
-// bbox brush.  Called by SetKeyValue when "classname" changes.  NB the un-ported
-// function was 0x483010 (the COMPLEX handler); 0x482f70 is the SIMPLE epair handler,
-// ported above as Checkkey_Model.  Inert on Entity_Create/Map_New (eclass still NULL
-// at the classname set).  IDA __fastcall(ecx=classname, edx=entity); the port keeps
-// (classname, a2) so the SetKeyValue call site is already wired.
-//
-// Disasm field map (esi = entity_s_def* a2):
-//   [esi+0x60]=eclass  [esi+0x0C]=brushes.prev (the single bbox brush)
-//   [esi+0x64]=modelClass  [esi+0x68/6C/70]=origin  [esi+0x78]=def version (16-bit)
-//   [ebx+0x08]=v4->fixedsize  [ebx+0x04]=v4->name  [ebx+0x0C/0x18]=v4->mins/maxs
-//   [brush+0x4C]=unk01 (LOBYTE=modelFailed) [brush+0x4E]=brush version (16-bit)
+// bbox brush.  Called by SetKeyValue when "classname" changes.  Checkkey_Model (below) is
+// the SIMPLE epair handler.  Inert on Entity_Create/Map_New (eclass still NULL at the
+// classname set).
 // ─────────────────────────────────────────────────────────────────────────────
 void MapLoad_ParsePrefab( const char *classname, entity_s_def *e )
 {
 
-    // 0x483027/2d/33: bail unless the entity already has a FIXED-SIZE eclass.
-    eclass_t *cur = e->eclass;                            // [esi+0x60]
+    // Bail unless the entity already has a FIXED-SIZE eclass.
+    eclass_t *cur = e->eclass;
     if ( !cur )
         return;
-    if ( !*(int *)&cur->fixedsize )                      // cmp dword ptr [eax+8],0 → eclass->fixedsize@+8 (32-bit)
+    if ( !*(int *)&cur->fixedsize )
         return;
 
-    // 0x483044: look up the eclass for the NEW classname (no-brushes variant).
-    eclass_t *v4 = Eclass_ForName( 0, classname );        // ebx = v4
-    if ( !*(int *)&v4->fixedsize )                        // 0x483049: only fixed-size classes get a bbox brush
+    // Look up the eclass for the NEW classname (no-brushes variant).
+    eclass_t *newClass = Eclass_ForName( 0, classname );
+    if ( !*(int *)&newClass->fixedsize )                  // only fixed-size classes get a bbox brush
         return;
 
-    // 0x483053..0x48307e: if NEITHER the current eclass NOR the new eclass is "misc_prefab",
+    // If NEITHER the current eclass NOR the new eclass is "misc_prefab",
     // it's a plain re-class — set the new eclass and let EntityAssignModel rebuild.
-    if ( I_stricmp( e->eclass->name, "misc_prefab" ) && I_stricmp( v4->name, "misc_prefab" ) )
+    if ( I_stricmp( e->eclass->name, "misc_prefab" ) && I_stricmp( newClass->name, "misc_prefab" ) )
     {
-        e->eclass = v4;                                  // 0x483081: [esi+0x60] = v4
-        EntityAssignModel( e );                          // 0x483084
+        e->eclass = newClass;
+        EntityAssignModel( e );
     }
     else
     {
-        // 0x48308E: a model/prefab class — resolve the model name epair.
+        // A model/prefab class — resolve the model name epair.
         char *modelName = ValueForKey2( e, "model" );
-        iassert( modelName );                            // entity.cpp:292 (0x48309e)
+        iassert( modelName );                            // entity.cpp:292
 
-        // 0x4830BD..0x4830FD: for misc_model / script_model whose model isn't already a .map,
+        // For misc_model / script_model whose model isn't already a .map,
         // synthesise the prefab path "prefabs/misc_models/<name>.map", store it back, and
         // refresh the selection (UpdateSelection(-1, 0)).
         if ( ( !I_stricmp( e->eclass->name, "misc_model" ) || !I_stricmp( e->eclass->name, "script_model" ) )
              && !strstr( modelName, ".map" ) )
         {
-            char modelPath[516];                         // [ebp-208h]
-            _snprintf( modelPath, 0x200u, "prefabs/misc_models/%s.map", modelName );  // 0x483111
-            SetKeyValue( e, "model", modelPath );        // 0x483123
-            modelName = ValueForKey2( e, "model" );                    // 0x483132
-            UpdateSelection( 0xFFFFFFFF, 0 );            // 0x48313e (wParam=-1, cls=0)
+            char modelPath[516];
+            _snprintf( modelPath, 0x200u, "prefabs/misc_models/%s.map", modelName );
+            SetKeyValue( e, "model", modelPath );
+            modelName = ValueForKey2( e, "model" );
+            UpdateSelection( 0xFFFFFFFF, 0 );
         }
 
-        // 0x483143..0x483157: assign the new eclass, clear modelClass + the brush's
-        // model-failed flag, then (re)build the model entity class via Eclass_01.
-        brush_t *brush = (brush_t *)e->brushes.prev;     // [esi+0x0C]
-        e->eclass      = v4;                             // [esi+0x60] = v4
-        e->modelClass  = nullptr;                        // [esi+0x64] = 0
-        *(unsigned __int8 *)&brush->unk01 = 0;           // mov byte ptr [eax+4Ch],0 (LOBYTE = modelFailed)
-        Eclass_01( modelName, e );        // 0x483157
+        // Assign the new eclass, clear modelClass + the brush's
+        // model-failed flag, then (re)build the model entity class via Eclass_ForModel.
+        brush_t *brush = (brush_t *)e->brushes.prev;
+        e->eclass      = newClass;
+        e->modelClass  = nullptr;
+        *(unsigned __int8 *)&brush->unk01 = 0;           // low byte = modelFailed
+        Eclass_ForModel( modelName, e );
     }
 
-    // 0x48315C (loc_48315C): bump the def version and rebuild the bbox brush around
+    // Bump the def version and rebuild the bbox brush around
     // the new eclass mins/maxs offset by the entity origin.
-    ++*(unsigned __int16 *)&e->version_prob_wrong;       // add word ptr [esi+78h],1
+    ++*(unsigned __int16 *)&e->version_prob_wrong;
 
-    float bmins[3];                                      // var_214 (v10) — disasm "mins" arg
-    float bmaxs[3];                                      // var_220 (v9)  — disasm "maxs" arg
-    bmins[0] = e->origin[0] + v4->mins[0];               // 0x483165..0x483175
-    bmins[1] = v4->mins[1] + e->origin[1];               // 0x483181..0x483187
-    bmins[2] = v4->mins[2] + e->origin[2];               // 0x48318d..0x483193
-    bmaxs[0] = e->origin[0] + v4->maxs[0];               // 0x483199..0x48319f
-    bmaxs[1] = v4->maxs[1] + e->origin[1];               // 0x4831a5..0x4831ab
-    bmaxs[2] = v4->maxs[2] + e->origin[2];               // 0x4831b1..0x4831bb
+    float bmins[3];
+    float bmaxs[3];
+    bmins[0] = e->origin[0] + newClass->mins[0];
+    bmins[1] = newClass->mins[1] + e->origin[1];
+    bmins[2] = newClass->mins[2] + e->origin[2];
+    bmaxs[0] = e->origin[0] + newClass->maxs[0];
+    bmaxs[1] = newClass->maxs[1] + e->origin[1];
+    bmaxs[2] = newClass->maxs[2] + e->origin[2];
 
-    brush_t *brush = (brush_t *)e->brushes.prev;         // 0x4831b7: esi = [esi+0x0C]
-    Brush_Create( bmins, bmaxs, brush, v4 );             // 0x4831c1 (mins, maxs, brush, eclass)
-    Brush_BuildWindings( brush, 1 );                     // 0x4831c9 (bsnap=1)
+    brush_t *brush = (brush_t *)e->brushes.prev;
+    Brush_Create( bmins, bmaxs, brush, newClass );
+    Brush_BuildWindings( brush, 1 );                     // bsnap=1
 
     if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-        SetupVertexSelection();                          // 0x4831df
+        SetupVertexSelection();
 
-    MarkMapModified();                                   // 0x4831e4
-    ++*(unsigned __int16 *)&brush->version;              // add word ptr [esi+4Eh],1
+    MarkMapModified();
+    ++*(unsigned __int16 *)&brush->version;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x483210  Checkkey_Color  (entity.cpp:340)
-// Called when an entity epair changes; refreshes brush color if "_color" or "targetname".
-// 0x483210: scriptnode gate = classtype
-// & 0x20; asserts 344/345/346 KEEP_VERBOSE (binary uses field name "onext" vs port "prev").
+// Called when an entity epair changes; refreshes brush color if "_color" or "targetname"
+// (the latter only for script nodes, classtype & 0x20).
 // ─────────────────────────────────────────────────────────────────────────────
-void Checkkey_Color( entity_s_def *a1, const char *a2 )
+void Checkkey_Color( entity_s_def *e, const char *key )
 {
-    if ( _stricmp( a2, "_color" ) && _stricmp( a2, "targetname" ) )
+    if ( _stricmp( key, "_color" ) && _stricmp( key, "targetname" ) )
         return;
 
-    eclass_t *ec = a1->eclass;
+    eclass_t *ec = e->eclass;
     if ( !*(int *)&ec->fixedsize )
         return;
 
-    // The sole brush for a fixed-size entity is the first def in the def-list. IDA
-    // (0x48324A) reads a1->brushes.oprev (entity+0x0C), not def (0x08);
-    // for a single-brush fixedsize entity they coincide. Three asserts in the binary:
-    // !oprev (344), oprev==sentinel (345), oprev->onext != sentinel (346).
-    // 344-346 KEEP_VERBOSE (sentinel-overlap): the source's brushes-head fields overlay
-    // the port's def(+0x08)/brushes(+0x0C) split, so 'ent->brushes.onext' cannot be
-    // expressed against the port layout without re-cutting entity_s.
-    brush_t *b = (brush_t *)a1->brushes.prev;
-    if ( !b )
-        // KEEP_VERBOSE (this trio): the binary's ent->brushes head overlays the port's
-        // def(+0x08)/brushes(+0x0C) split — the member path can't be expressed.
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 344, 0, "%s", "ent->brushes.onext" );
-    if ( b == (brush_t *)&a1->def )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 345, 0, "%s", "ent->brushes.onext != &ent->brushes" );
-    if ( b && (void *)b->onext != (void *)&a1->def )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\entity.cpp", 346, 0, "%s", "ent->brushes.onext->onext == &ent->brushes" );
+    // The sole brush for a fixed-size entity is the first def in the def-list,
+    // e->brushes.prev (for a single-brush fixedsize entity it is also `def`).  Three asserts:
+    // !b (344), b == sentinel (345), b->onext != sentinel (346); the sentinel is the binary's
+    // ent->brushes head, &e->def in this layout.
+    brush_t *b = (brush_t *)e->brushes.prev;
+    iassert( b );
+    iassert( b != (brush_t *)&e->def );
+    iassert( !b || (void *)b->onext == (void *)&e->def );
 
-    if ( !_stricmp( a2, "_color" ) )
+    if ( !_stricmp( key, "_color" ) )
     {
-        Entity_ColorSth( b );
+        Brush_ApplyEntityColor( b );
         return;
     }
     if ( ( ec->classtype & CLASS_SCRIPTNODE ) != 0 )
     {
         if ( strncmp( ec->name, "node_scr", 8 ) != 0 )
         {
-            char *tn = ValueForKey2( a1, "targetname" );
+            char *tn = ValueForKey2( e, "targetname" );
             if ( tn && strncmp( tn, "auto", 4 ) != 0 )
-                Entity_ColorSth( b );
+                Brush_ApplyEntityColor( b );
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x483320  Entity_UpdateCylinder  (entity.cpp:374)  AUDIT: full trace vs IDA (2026-06-20)
-// -- FAITHFUL.  classtype & 0x80 byte-mask (trigger_disk); assert 374 KEEP_VERBOSE (binary
-// "stricmp" vs port "_stricmp").
-// When "radius" or "height" changes on a cylinder/prefab entity (classtype & 0xC0,
-// gated by Entity_ClampRadius/Height), recomputes the entity brush's bounds so the
-// 2D/camera bbox tracks the cylinder cap radius + height. The brush winding is rebuilt
+// 0x483320  Entity_UpdateCylinder  (entity.cpp:374)
+// When "radius" or "height" changes on a cylinder entity (classtype & 0xC0 = trigger_radius /
+// trigger_disk, gated by Entity_ClampRadius/Height), recomputes the entity brush's bounds so
+// the 2D/camera bbox tracks the cylinder cap radius + height. The brush winding is rebuilt
 // first (Brush_BuildWindings), then the AABB is EXPANDED to enclose the two cylinder
 // corners: XY = origin ± radius, Z = origin.z + eclass->mins[2] .. + height.
-//
-// Faithful to the disasm (0x483320): entPtr is the entity_s_def*. Field offsets:
-//   [a2+0x0C] = e->brushes.oprev (the entity's single brush DEF)   — Brush_BuildWindings arg
-//   [a2+0x60] = e->eclass ;  [eclass+0x180] = classtype ; [eclass+0x14] = eclass->mins[2]
-//   [a2+0x68/6C/70] = origin[0..2] ;  brush def +0x20 = mins, +0x2C = maxs (VectorMaxValues)
-//
-// The binary's lower corner is a float[3] the decompiler split into v7[2]+v8
-// (v7[2] / v8 share ebp-0Ch); both VectorMaxValues
-// calls pass &corner[0] over 3 floats. VectorMaxValues is namespace-local to brush.cpp
-// (edwind::), so the expand is INLINED here (matching the Entity_GetModelInstBounds port
-// above). VectorMaxValues only ever shrinks mins / grows maxs — it expands the
-// post-winding bbox, it does not reset it.
+// VectorMaxValues is namespace-local to brush.cpp (edwind::), so the expand is INLINED here
+// (as in Entity_UpdateModelInst above). VectorMaxValues only ever shrinks mins / grows
+// maxs — it expands the post-winding bbox, it does not reset it.
 // ─────────────────────────────────────────────────────────────────────────────
 void Entity_UpdateCylinder( const char *key, entity_s_def *e )
 {
     iassert( !stricmp( key, "radius" ) || !stricmp( key, "height" ) );   // entity.cpp:374
 
     float radius = Entity_GetFloatValueForKey( e, "radius" );
-    if ( radius <= 0.0f )                                    // 0x483387: only act on a real radius
+    if ( radius <= 0.0f )                                    // only act on a real radius
         return;
 
     // height: classtype & 0x80 (trigger_disk, the FLAT disk) => fixed 32.0; otherwise
-    // (trigger_radius, classtype 0x40) read the "height" key.
-    // The disasm is `test byte [eclass+0x180], 80h` — bit 0x80 of the LOW byte of
-    // classtype, NOT the int sign bit.  Hex-rays renders it as `*(char*)(...) < 0`, which
-    // a literal port would turn into bit 31.  0x80 == trigger_disk, 0x40 == trigger_radius.
+    // (trigger_radius, classtype 0x40) read the "height" key.  0x80 is a bit of the LOW
+    // byte of classtype, NOT the int sign bit.
     float height;
-    if ( ( e->eclass->classtype & 0x80 ) != 0 )              // 0x483390: trigger_disk => fixed height
-        height = 32.0f;                                      // flt_6F430C
+    if ( ( e->eclass->classtype & 0x80 ) != 0 )              // trigger_disk => fixed height
+        height = 32.0f;
     else
     {
         height = Entity_GetFloatValueForKey( e, "height" );
-        if ( height <= 0.0f )                                // 0x4833B2: bail on non-positive height
+        if ( height <= 0.0f )                                // bail on non-positive height
             return;
     }
 
-    // [a2+0x0C] = entity_s.brushes first link = the entity's first brush DEF. In the kisak
-    // selbrush_t layout this is `brushes.prev`, treated as a brush_t* (matching the gate-proven
-    // Map_ImportBuffer idiom `(brush_t *)eDef->brushes.prev`). A trigger_radius/disk owns exactly
-    // one brush, so this is the cylinder geometry brush.
-    brush_t *brush = (brush_t *)e->brushes.prev;             // [a2+0x0C] — the cylinder brush DEF
-    Brush_BuildWindings( brush, 1 );                         // 0x4833C8: rebuild winding + base bounds
+    // e->brushes.prev is the entity's first brush DEF, treated as a brush_t* (as
+    // Map_ImportBuffer does: `(brush_t *)eDef->brushes.prev`). A trigger_radius/disk owns
+    // exactly one brush, so this is the cylinder geometry brush.
+    brush_t *brush = (brush_t *)e->brushes.prev;
+    Brush_BuildWindings( brush, 1 );                         // rebuild winding + base bounds
 
-    const float baseZ = e->eclass->mins[2] + e->origin[2];   // [eclass+0x14] + origin.z
+    const float baseZ = e->eclass->mins[2] + e->origin[2];
     const float lower[3] = { e->origin[0] - radius, e->origin[1] - radius, baseZ };
     const float upper[3] = { e->origin[0] + radius, e->origin[1] + radius, baseZ + height };
 
@@ -1091,10 +1111,10 @@ void Entity_UpdateCylinder( const char *key, entity_s_def *e )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x482f70  Checkkey_Model (IDB "Checkkey_Model_0") — an entity epair changed; if the key
-// affects model geometry, trigger a rebuild.  The binary bumps the 16-bit DEF version @0x78
-// (add word ptr [esi+78h],1), NOT the 32-bit version @0x4C.  (The COMPLEX classname handler
-// 0x483010, IDB "Checkkey_Model", is a DIFFERENT function — MapLoad_ParsePrefab above.)
+// 0x482f70  Checkkey_Model (the binary's "Checkkey_Model_0") — an entity epair changed; if
+// the key affects model geometry, trigger a rebuild.  It bumps the 16-bit DEF version
+// (version_prob_wrong), NOT the 32-bit version.  (The COMPLEX classname handler, the
+// binary's "Checkkey_Model", is a DIFFERENT function — MapLoad_ParsePrefab above.)
 // ─────────────────────────────────────────────────────────────────────────────
 void Checkkey_Model( entity_s_def *e, const char *key )
 {
@@ -1105,65 +1125,61 @@ void Checkkey_Model( entity_s_def *e, const char *key )
         if ( !_stricmp( key, "angles" ) || !_stricmp( key, "modelscale" ) )
         {
             Entity_RebuildBounds( (entity_s *)e );
-            ++*(unsigned __int16 *)&e->version_prob_wrong;   // IDA add word ptr [esi+78h],1 (def ver @0x78,16-bit) -- NOT version@0x4C
+            ++*(unsigned __int16 *)&e->version_prob_wrong;
         }
     }
     if ( !_stricmp( key, "model" ) )
     {
         e->modelClass = nullptr;
-        // IDA (Checkkey_Model_0 0x482FF0) reads e->brushes.oprev (entity+0x0C — the def-list
-        // FIRST element), NOT def (entity+0x08), and clears LOBYTE(brush+0x4C)
-        // (the model-failed flag) UNCONDITIONALLY. For a fixedsize entity the single bbox brush
-        // sits at both 0x08 and 0x0C, so the read is equivalent; we keep the sentinel guard
-        // (the binary, when the list is empty, writes a harmless 0 to the sentinel-as-brush).
+        // Clear the model-failed flag of e->brushes.prev (the def-list FIRST element; for a
+        // fixedsize entity also `def`).  The binary clears it UNCONDITIONALLY; the sentinel
+        // guard skips its harmless write to the sentinel-as-brush on an empty list.
         brush_t *b = (brush_t *)e->brushes.prev;
         if ( b != (brush_t *)&e->def )
-            *(unsigned __int8 *)&b->unk01 = 0;   // IDA mov byte ptr [eax+4Ch],0 -- LOBYTE only (modelFailed)
-        ++*(unsigned __int16 *)&e->version_prob_wrong;   // IDA add word ptr [esi+78h],1 -- NOT version@0x4C
+            *(unsigned __int8 *)&b->unk01 = 0;   // low byte only (modelFailed)
+        ++*(unsigned __int16 *)&e->version_prob_wrong;
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x483e70  ParseEntity — parse one entity block { ... } from the text stream.
-// IDA __usercall: eax = entity_s_def*, ecx = const char** (the text cursor).
 // SUBSET: the fixed-size model-offset tail is documented at its site below.  hasBrushes /
-// empty checks read brushes.prev@0x0C (the binary's field), not def@0x08.
+// empty checks read brushes.prev (the binary's field), not def.
+// rawOnly: return the epair-only entity (no eclass / bbox; the project file).
+// keepFileLayers: brushes keep the file's layers (a load); else they join the active layer.
 // ─────────────────────────────────────────────────────────────────────────────
-entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
+entity_s *ParseEntity( const char **text, int version, char rawOnly, char keepFileLayers )
 {
     ParseThreadInfo *parseInfo = Com_GetParseThreadInfo();
     parseInfo_t     *pi        = &parseInfo->parseInfo[parseInfo->parseInfoNum];
 
-    // Read opening brace. IDA does the unget-restore prologue + Com_ParseExt(text,1),
-    // which is exactly Com_Parse — required so the '{' that Map_ParseLayers ungot
-    // (after the layer block) is honoured. (Raw Com_ParseExt skips the prologue and
-    // would read the token *after* '{'.)
+    // Read opening brace with Com_Parse — required so the '{' that Map_ParseLayers ungot
+    // (after the layer block) is honoured. (Raw Com_ParseExt skips the unget and would
+    // read the token *after* '{'.)
     parseInfo_t *tok = Com_Parse( text );
     if ( !tok->token[0] )
         return nullptr;
     if ( strcmp( tok->token, "{" ) )
         Com_Error( ERR_FATAL, "ParseEntity: { not found" );
 
-    entity_s *ent45 = (entity_s *)operator new( sizeof(entity_s) );
-    memset( ent45, 0, sizeof(entity_s) );
-    // Unique entity numberId (IDA 0x483F17: v8[33]) — the id undo.cpp matches on.
-    ent45->numberId = dword_739DC4++;
-    // Initialise the brush-def circular list sentinel. IDA sets BOTH the firstActive
-    // head (offset 8) AND the embedded brushes node's prev link (offset 0xC) to &head
-    // (= ent_raw+8) — an empty circular list. The porter set only offset 8; restore 0xC
-    // so functions that read ent->brushes.oprev (Entity_Free/WriteSelected) see the sentinel.
-    ent45->def = (entity_s *)&ent45->def;
-    ent45->brushes.prev = (selbrush_t *)&ent45->def;
+    entity_s *ent = (entity_s *)operator new( sizeof(entity_s) );
+    memset( ent, 0, sizeof(entity_s) );
+    // Unique entity numberId — the id undo.cpp matches on.
+    ent->numberId = dword_739DC4++;
+    // Initialise the brush-def circular list sentinel: BOTH the head (def) AND the embedded
+    // brushes node's prev link point at &def — an empty circular list — so functions that
+    // read ent->brushes.prev (Entity_Free/WriteSelected) see the sentinel.
+    ent->def = (entity_s *)&ent->def;
+    ent->brushes.prev = (selbrush_t *)&ent->def;
 
     char layerBuf[1028];
     Map_ParseEntityLayerKey( text, "000_Global", layerBuf, "layer" );
 
-    // Parse key/value pairs and brush blocks. IDA reads each key with the
-    // unget-restore prologue + Com_ParseExt(text,1) == Com_Parse (honours the
+    // Parse key/value pairs and brush blocks. Each key is read with Com_Parse (honours the
     // unget left by Map_ParseEntityLayerKey and by each prior epair).
-    // Epairs are APPENDED (IDA keeps a running tail pointer `origin` starting at
-    // &ent->epairs), preserving file order — prepending would reverse them.
-    epair_t **epairTail = &ent45->epairs;
+    // Epairs are APPENDED (a running tail pointer starting at &ent->epairs), preserving
+    // file order — prepending would reverse them.
+    epair_t **epairTail = &ent->epairs;
     while ( true )
     {
         parseInfo_t *tok2 = Com_Parse( text );
@@ -1181,7 +1197,7 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
             brush_t *b = Brush_Parse( text, version );
             if ( !b )
                 break;
-            if ( !a3 )
+            if ( !keepFileLayers )
             {
                 if ( b->parent_layer_string )
                     free( b->parent_layer_string );
@@ -1190,15 +1206,14 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
                 memcpy( lc, g_activeLayer_string, layerLen + 1 );
                 b->parent_layer_string = lc;
             }
-            Entity_LinkBrush( b, ent45 );
+            Entity_LinkBrush( b, ent );
         }
         else
         {
             // tok2->token is the KEY. The value read reuses the SAME parseInfo token
             // buffer (Com_GetParseThreadInfo() returns the same slot), so the key must
-            // be copied to its own storage BEFORE reading the value — exactly as IDA
-            // does (operator new + memcpy the key, THEN parse the value). The value is
-            // read on the same line with the unget prologue == Com_ParseOnLine.
+            // be copied to its own storage BEFORE reading the value. The value is read on
+            // the same line (Com_ParseOnLine).
             epair_t *ep = (epair_t *)operator new( sizeof(epair_t) );
             ep->next    = nullptr;
             size_t klen = strlen( tok2->token );
@@ -1222,9 +1237,9 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
     // where a non-zero "angle" (yaw) wins over "angles"; the editor (Entity_GetOrientationMatrix)
     // and its rotate tools read "angles" only, so such a model showed unrotated here and turned
     // in game.  Say it as "angles" - the orientation the game already used - and drop "angle".
-    if ( !a2 && !_stricmp( ValueForKey2( ent45, "classname" ), "misc_model" ) )
+    if ( !rawOnly && !_stricmp( ValueForKey2( ent, "classname" ), "misc_model" ) )
     {
-        const char *angle = ValueForKey2( ent45, "angle" );   // the first, as the game reads
+        const char *angle = ValueForKey2( ent, "angle" );   // the first, as the game reads
         if ( atof( angle ) != 0.0 )
         {
             char value[96];
@@ -1232,45 +1247,55 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
             value[sizeof( value ) - 1] = '\0';
             Sys_Printf( "misc_model: \"angle\" \"%s\" read as \"angles\" \"%s\" (the game takes \"angle\" first)\n",
                         angle, value );
-            sub_483500( &ent45->epairs, "angles", value );
+            Epair_SetRaw( &ent->epairs, "angles", value );
         }
         for ( int i = 0; i < 8; ++i )            // every copy; an "angle" of 0 the game ignores too
-            DeleteKey( &ent45->epairs, "angle" );
+            DeleteKey( &ent->epairs, "angle" );
     }
 
     // Check if we should return the raw parsed entity (group_info or force-return flag)
-    if ( !strcmp( ValueForKey2( ent45, "classname" ), "group_info" ) || a2 )
-        return ent45;
+    if ( !strcmp( ValueForKey2( ent, "classname" ), "group_info" ) || rawOnly )
+        return ent;
 
-    bool hasBrushes = ( (void *)ent45->brushes.prev != (void *)&ent45->def );   // IDA reads brushes.oprev@0x0C (not def@0x08)
-    Entity_GetVec3ForKey( (entity_s_def *)ent45, ent45->origin, "origin" );
-    char     *clsName = ValueForKey2( ent45, "classname" );
+    bool hasBrushes = ( (void *)ent->brushes.prev != (void *)&ent->def );
+    Entity_GetVec3ForKey( (entity_s_def *)ent, ent->origin, "origin" );
+    char     *clsName = ValueForKey2( ent, "classname" );
     eclass_t *ec      = Eclass_ForName( hasBrushes ? 1 : 0, clsName );
-    ent45->eclass     = ec;
+    ent->eclass     = ec;
 
     if ( *(int *)&ec->fixedsize )
     {
-        // Fixed-size entity (light/spawn/prefab/...): create the bounding-box brush
-        // (#14, IDA ParseEntity 0x483E70 fixed-size tail). The bbox brush is the
-        // editor's selectable proxy; it is NEVER written to the .map (MapFile_WriteEntity
-        // skips brush output for fixedsize). It IS required so the def-list is non-empty
-        // (the Map_SaveFile entity-write gate) and so the per-entity layer can be stored
-        // on / read back from the brush (parent_layer_string).
+        // Fixed-size entity (light/spawn/prefab/...): create the bounding-box brush. The
+        // bbox brush is the editor's selectable proxy; it is NEVER written to the .map
+        // (MapFile_WriteEntity skips brush output for fixedsize). It IS required so the
+        // def-list is non-empty (the Map_SaveFile entity-write gate) and so the per-entity
+        // layer can be stored on / read back from the brush (parent_layer_string).
         if ( hasBrushes )
         {
             Sys_Printf( "Warning: Fixed size entity with brushes\n" );
-            // IDA (0x484293): a fixedsize entity must own NO parsed brushes — reset the
-            // def-list to the empty sentinel (BOTH def@0x08 and
-            // brushes.oprev@0x0C point back at &def), discarding the
-            // warned brushes so the bbox brush below is the sole def-list element. (The
-            // prior port left the stray brushes linked and added the bbox on top.)
-            ent45->def = (entity_s *)&ent45->def;
-            ent45->brushes.prev         = (selbrush_t *)&ent45->def;
+            // KIWI: free the warned brushes (unlinked the way Entity_Free does) - the reset
+            // below alone leaked every one of them
+            for ( brush_t *b = (brush_t *)ent->brushes.prev; b != (brush_t *)&ent->def; )
+            {
+                brush_t *next = (brush_t *)b->onext;
+                b->onext = nullptr;
+                b->oprev = nullptr;
+                b->owner = nullptr;
+                if ( b->refCount > 0 )
+                    --b->refCount;
+                Brush_Free_R( b );
+                b = next;
+            }
+            // A fixedsize entity must own NO parsed brushes — reset the def-list to the
+            // empty sentinel (BOTH def and brushes.prev point back at &def), discarding the
+            // warned brushes so the bbox brush below is the sole def-list element.
+            ent->def = (entity_s *)&ent->def;
+            ent->brushes.prev         = (selbrush_t *)&ent->def;
         }
 
-        EntityAssignModel( (entity_s_def *)ent45 );
+        EntityAssignModel( (entity_s_def *)ent );
 
-        float *origin = ent45->origin;
+        float *origin = ent->origin;
         float  mins[3], maxs[3];
         mins[0] = ec->mins[0] + origin[0];
         mins[1] = ec->mins[1] + origin[1];
@@ -1279,19 +1304,17 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
         maxs[1] = ec->maxs[1] + origin[1];
         maxs[2] = ec->maxs[2] + origin[2];
 
-        // KISAK: SUBSET of 0x4842e3-0x48441d.  The binary's fixed-size tail additionally
+        // SUBSET: the binary's fixed-size tail additionally
         //   (1) for CLASS_MODELCLASS (classtype & 8) with a non-empty "model" key, reads the
-        //       entity's "angles" (sub_485570 == Entity_GetVec3ForKey(e,out,"angles") with a
-        //       zero fill) and calls Eclass_01(modelName, e) to realize the model class;
-        //   (2) Init_MaterialLayer(&matdef, flt_6F42F0) before building the bbox brush;
-        //   (3) when the angles are non-zero, Brush_RotateFacePlanepts(origin, angles, bbox)
-        //       so an angled misc_model gets a ROTATED bbox.
-        // All four deps are REAL in the port now (Brush_RotateFacePlanepts brush.cpp,
-        // Eclass_01 eclass.cpp, Init_MaterialLayer materialdef.cpp; sub_485570 is 5 lines).
-        // The bbox brush of a fixed-size entity is never written to the .map, so this is
-        // display-only — but it wants its own porter unit, not a cleanup edit.
+        //       entity's "angles" (zero-filled when absent) and calls Eclass_ForModel(modelName,
+        //       e) to realize the model class;
+        //   (2) when the angles are non-zero, rotates the bbox's face planepts about the
+        //       origin (0x478630) so an angled misc_model gets a ROTATED bbox.
+        // Eclass_ForModel (eclass.cpp) is real; the rotation would be the face planepts turned
+        // by KiwiAng_ToAxis about the origin.  The bbox brush of a fixed-size entity is never
+        // written to the .map, so this is display-only.
 
-        // Build the bounding-box brush = sub_475AC0(&matdef, ec, mins, maxs)
+        // Build the bounding-box brush = 0x475AC0(&matdef, ec, mins, maxs)
         //   == Brush_Alloc(&matdef, ec) + Brush_Create(mins, maxs, brush, ec).
         MaterialDef matdef;
         memset( &matdef, 0, sizeof( matdef ) );
@@ -1301,16 +1324,16 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
 
         brush_t *bbox = Brush_Alloc( &matdef, ec );
         Brush_Create( mins, maxs, bbox, ec );
-        if ( a3 )
+        if ( keepFileLayers )
             Brush_SetLayerString( bbox, layerBuf );   // store per-entity layer on the brush
-        Entity_LinkBrush( bbox, (entity_s *)ent45 );
-        return ent45;
+        Entity_LinkBrush( bbox, (entity_s *)ent );
+        return ent;
     }
 
-    if ( (void *)ent45->brushes.prev == (void *)&ent45->def )   // IDA reads brushes.oprev@0x0C
+    if ( (void *)ent->brushes.prev == (void *)&ent->def )
         Sys_Printf( "Warning: Brush entity with no brushes\n" );
 
-    return ent45;
+    return ent;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1318,18 +1341,18 @@ entity_s *ParseEntity( const char **text, int version, char a2, char a3 )
 // Writes a single entity and its selected brushes to the file.
 // The MemFile_fprintf handle is a pointer-to-pointer opaque writer (WriteWriter_t = WriteFunc_t**).
 // ─────────────────────────────────────────────────────────────────────────────
-void Entity_WriteSelected( entity_s_def *world_ent, WriteFunc_entity_t *MemFile_fprintf )
+void Entity_WriteSelected( entity_s_def *ent, WriteFunc_entity_t *writer )
 {
     iassert( world_entity );
 
     // Check if this entity has any selected brushes (or IS the worldspawn def)
-    bool isWorldDef = ( world_entity->def == (void *)world_ent );
+    bool isWorldDef = ( world_entity->def == (void *)ent );
     if ( !isWorldDef )
     {
         bool found = false;
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         {
-            if ( b->owner->def == (void *)world_ent )
+            if ( b->owner->def == (void *)ent )
             {
                 found = true;
                 break;
@@ -1339,35 +1362,35 @@ void Entity_WriteSelected( entity_s_def *world_ent, WriteFunc_entity_t *MemFile_
             return;
     }
 
-    if ( *(int *)&world_ent->eclass->fixedsize )
+    if ( *(int *)&ent->eclass->fixedsize )
     {
         // KIWI: exact origins (kiwi_fmt.h), not "%.1f": a copy / clone / paste is re-parsed
         // from this text, so every copy of a model landed on the 0.1 grid.
-        char v8[132], ox[40], oy[40], oz[40];
-        sprintf( v8, "%s %s %s", KiwiFmt_Exact( ox, sizeof( ox ), world_ent->origin[0] ),
-                 KiwiFmt_Exact( oy, sizeof( oy ), world_ent->origin[1] ),
-                 KiwiFmt_Exact( oz, sizeof( oz ), world_ent->origin[2] ) );
-        SetKeyValue( world_ent, "origin", v8 );
+        char originStr[132], ox[40], oy[40], oz[40];
+        sprintf( originStr, "%s %s %s", KiwiFmt_Exact( ox, sizeof( ox ), ent->origin[0] ),
+                 KiwiFmt_Exact( oy, sizeof( oy ), ent->origin[1] ),
+                 KiwiFmt_Exact( oz, sizeof( oz ), ent->origin[2] ) );
+        SetKeyValue( ent, "origin", originStr );
     }
 
-    // MemFile_fprintf is a WriteWriter_t = WriteFunc_entity_t* (ptr-to-fn-ptr).
-    // Call through the function pointer, passing the handle as context.
-    WriteFunc_entity_t fn = *MemFile_fprintf;
-    void *ctx = MemFile_fprintf;
+    // `writer` is a WriteWriter_t = WriteFunc_entity_t* (ptr-to-fn-ptr): call through the
+    // function pointer, passing the handle as context.
+    WriteFunc_entity_t fn = *writer;
+    void *ctx = writer;
 
     fn( ctx, "{\n" );
-    for ( epair_t *i = world_ent->epairs; i; i = i->next )
+    for ( epair_t *i = ent->epairs; i; i = i->next )
         fn( ctx, "\"%s\" \"%s\"\n", i->key, i->value );
 
-    if ( !*(int *)&world_ent->eclass->fixedsize )
+    if ( !*(int *)&ent->eclass->fixedsize )
     {
         int j = 0;
-        for ( selbrush_t *v5 = selected_brushes.next; v5 != &selected_brushes; v5 = v5->next )
+        for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
         {
-            if ( v5->owner->def == (void *)world_ent )
+            if ( sb->owner->def == (void *)ent )
             {
                 fn( ctx, "// brush %i\n", j++ );
-                Brush_Write( MemFile_fprintf, v5->def );
+                Brush_Write( writer, sb->def );
             }
         }
     }
@@ -1377,41 +1400,38 @@ void Entity_WriteSelected( entity_s_def *world_ent, WriteFunc_entity_t *MemFile_
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x485410  EntityAssignModel  (entity.cpp:1348)
 // Reads the "model" epair; if the entity has a default_model_name that differs,
-// forces it. Strips the leading "xmodel/" prefix from model keys.
-// 0x485410: the version bump is
-// the 16-bit DEF version @0x78 (add word [edi+78h],1), NOT version@0x4C; the unk01 clear is
-// byte-wide (mov byte [eax+4Ch],bl), not 16-bit. modelName NULL assert (1351) restored.
+// forces it. Strips the leading "xmodel/" prefix from model keys.  The version bump is
+// the 16-bit DEF version, NOT version; the unk01 clear is byte-wide, not 16-bit.
 // ─────────────────────────────────────────────────────────────────────────────
-void EntityAssignModel( entity_s_def *a1 )
+void EntityAssignModel( entity_s_def *e )
 {
     const char *modelName = "";
-    for ( epair_t *ep = a1->epairs; ep; ep = ep->next )
+    for ( epair_t *ep = e->epairs; ep; ep = ep->next )   // kept open-coded: the NULL-value assert
     {
         if ( _stricmp( ep->key, "model" ) == 0 )
         {
-            modelName = ep->value;                 // IDA 0x485448: esi = ep->value (may be NULL)
-            iassert( modelName );                  // IDA 0x48544f Assert(...,1351,0,"%s","modelName") -- fires on NULL model value
+            modelName = ep->value;                 // may be NULL
+            iassert( modelName );                  // entity.cpp:1351 -- fires on NULL model value
             if ( !modelName ) modelName = "";      // release-safe: binary carries NULL into _stricmp (latent AV)
             break;
         }
     }
 
-    eclass_t *ec = a1->eclass;
+    eclass_t *ec = e->eclass;
     if ( ec && *(int *)&ec->fixedsize &&
          ec->default_model_name && *ec->default_model_name )
     {
         if ( _stricmp( modelName, ec->default_model_name ) )
         {
-            SetKeyValue( a1, "model", ec->default_model_name );
-            // IDA (0x4854A9): oprev = a1->brushes.oprev (entity+0x0C, the first brush def),
-            // then ++version / modelClass=0 / LOBYTE(oprev+0x4C)=0 unconditionally. Read 0x0C
-            // (not def@0x08); keep the sentinel guard (the binary's empty-list
-            // write is a harmless 0 — see Checkkey_Model above).
-            brush_t *b = (brush_t *)a1->brushes.prev;
-            if ( b != (brush_t *)&a1->def )
-                *(unsigned __int8 *)&b->unk01 = 0;   // IDA 0x4854b7 mov byte ptr [eax+4Ch],bl -- LOBYTE only (high byte 0x4D = live cull flag)
-            ++*(unsigned __int16 *)&a1->version_prob_wrong;   // IDA 0x4854af add word ptr [edi+78h],1 -- def ver @0x78 16-bit, NOT version@0x4C
-            a1->modelClass = nullptr;
+            SetKeyValue( e, "model", ec->default_model_name );
+            // The first brush def (e->brushes.prev) loses its model-failed flag; the binary
+            // writes it unconditionally, the sentinel guard skips its harmless empty-list
+            // write (see Checkkey_Model above).
+            brush_t *b = (brush_t *)e->brushes.prev;
+            if ( b != (brush_t *)&e->def )
+                *(unsigned __int8 *)&b->unk01 = 0;   // low byte only (the high byte is the live cull flag)
+            ++*(unsigned __int16 *)&e->version_prob_wrong;
+            e->modelClass = nullptr;
         }
     }
     else if ( I_strnicmp( modelName, "xmodel", 6 ) == 0 )
@@ -1420,131 +1440,114 @@ void EntityAssignModel( entity_s_def *a1 )
         if ( c == '/' || c == '\\' )
         {
             char *stripped = AllocMaterialString( modelName + 7 );
-            SetKeyValue( a1, "model", stripped );
+            SetKeyValue( e, "model", stripped );
             free( stripped );
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x485510  Entity_SetDefaultModelKey  (sub_485510)
+// 0x485510  Entity_SetDefaultModelKey
 // Tail of CreateEntityFromName's re-class (Path B): after the owning entity has been
-// repointed to the new eclass `a2`, set the entity's "model" key to that eclass's
+// repointed to the new eclass `newClass`, set the entity's "model" key to that eclass's
 // default_model_name (when the eclass is a fixedsize class WITH a non-empty default
 // model name) and refresh the model-render caches.
 //
-//   a1 = brush_t* (the entity's new bbox brush DEF)   [esi, __usercall@<eax>]
-//   a2 = eclass_t* (the new eclass = v21 = Eclass_ForName result)
+//   bbox     = the entity's new bbox brush DEF
+//   newClass = the new eclass (the Eclass_ForName result)
 //
-// 0x485510: the "selbrush
-// 64B-vs-56B stride trap" deferral was a MISDIAGNOSIS: [esi+8]+0x0C is entity->brushes
-// (the embedded brush-list head), whose FIRST field (oprev) is a brush_t_def* — so
-// [edx+0x4C] clears brush_t.unk01 (88-byte def, offset 0x4C), NOT a selbrush instance.
-// This is the SAME tail EntityAssignModel (0x485410, already ported above) runs:
-//   SetKeyValue("model", default) / ++entity->version_prob_wrong (16-bit @0x78) /
-//   entity->modelClass = 0 / firstBrushDef->unk01 LOBYTE = 0.
+// This is the SAME tail EntityAssignModel runs:
+//   SetKeyValue("model", default) / ++entity->version_prob_wrong (16-bit) /
+//   entity->modelClass = 0 / firstBrushDef->unk01 low byte = 0
+// (entity->brushes.prev is a brush_t DEF, NOT a selbrush instance).
 // The gate reads the ENTITY's eclass (brush->owner->eclass) for the fixedsize/non-empty
-// check, but the model-name VALUE comes from the passed eclass a2 (default_model_name
-// @0x164); at the call site owner->def->eclass was just set to a2, so they are the same
-// object.  Match the binary EXACTLY (check via entity eclass, write a2's name).
+// check, but the model-name VALUE comes from the passed newClass; at the call site
+// owner->def->eclass was just set to newClass, so they are the same object.
 // ─────────────────────────────────────────────────────────────────────────────
-eclass_t *Entity_SetDefaultModelKey( brush_t *a1, eclass_t *a2 )
+eclass_t *Entity_SetDefaultModelKey( brush_t *bbox, eclass_t *newClass )
 {
-    entity_s_def *v2 = (entity_s_def *)a1->owner;   // [esi+8] = brush->owner (the entity DEF)
-    eclass_t *ec = v2->eclass;                       // [ecx+0x60]
+    entity_s_def *owner = (entity_s_def *)bbox->owner;   // the entity DEF
+    eclass_t *ec = owner->eclass;
     if ( !ec )                                        return ec;
-    if ( !*(int *)&ec->fixedsize )                    return ec;          // [eax+8]
-    if ( !ec->default_model_name )                    return (eclass_t *)ec->default_model_name;  // [eax+0x164]
+    if ( !*(int *)&ec->fixedsize )                    return ec;
+    if ( !ec->default_model_name )                    return (eclass_t *)ec->default_model_name;
     if ( !*ec->default_model_name )                   return (eclass_t *)ec->default_model_name;  // first char
 
-    SetKeyValue( v2, "model", a2->default_model_name );           // value = a2 (new eclass) default model
-    ++*(unsigned __int16 *)&v2->version_prob_wrong;              // IDA 0x48554d add word ptr [eax+78h],1
-    v2->modelClass = nullptr;                                     // IDA 0x485555 mov dword ptr [eax+64h],0
-    // IDA 0x48555c-0x485562: ecx = entity(+8); edx = *(ecx+0x0C) (= brushes.oprev = first brush DEF);
-    // mov byte ptr [edx+0x4C],0 -- LOBYTE of brush_t.unk01 (88-byte def @0x4C).  No sentinel guard
-    // in the binary here (unlike EntityAssignModel), so port it unconditionally.
-    brush_t *firstBrushDef = (brush_t *)v2->brushes.prev;        // entity+0x0C = brushes.oprev (a brush_t_def*)
+    SetKeyValue( owner, "model", newClass->default_model_name );
+    ++*(unsigned __int16 *)&owner->version_prob_wrong;
+    owner->modelClass = nullptr;
+    // The low byte of the first brush DEF's unk01.  No sentinel guard here (unlike
+    // EntityAssignModel).
+    brush_t *firstBrushDef = (brush_t *)owner->brushes.prev;
     *(unsigned __int8 *)&firstBrushDef->unk01 = 0;
-    return (eclass_t *)v2;   // IDA returns eax = entity(+8); value unused by the sole caller
+    return (eclass_t *)owner;   // the binary returns the entity; unused by the sole caller
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x485630  Prefab_Init  (entity.cpp:1423)
 // Creates a new entity INSTANCE from a def, links it into the prefab/entity list,
-// and creates brush instances for each brush def owned by entDef.
-// instance ver @0x4C seeded from DEF version_prob_wrong @0x78 minus 1, 16-bit (the prior port
-// read entDef->version @0x4C, the wrong field). 1427/1428 KEEP_VERBOSE (type-1 + v4-vs-entInst).
+// and creates brush instances for each brush def owned by entDef.  The instance version
+// is seeded from the DEF's version_prob_wrong minus 1 (16-bit), not from the DEF's version.
 // ─────────────────────────────────────────────────────────────────────────────
-entity_s *Prefab_Init( prefab_s *a1, entity_s_def *entDef, selbrush_t *a3 )
+entity_s *Prefab_Init( prefab_s *instList, entity_s_def *entDef, selbrush_t *activeList )
 {
     iassert( entDef );
 
-    entity_s *v4 = (entity_s *)operator new( sizeof(entity_s) );
-    memset( v4, 0, sizeof(entity_s) );
-    v4->def = entDef;
+    entity_s *entInst = (entity_s *)operator new( sizeof(entity_s) );
+    memset( entInst, 0, sizeof(entity_s) );
+    entInst->def = entDef;
 
-    {
-        entity_s *entInst = v4;                     // the binary's local
-        iassert( entInst->modelInst == NULL );   // entity.cpp:1427
-        iassert( entInst->prefab == NULL );      // entity.cpp:1428
-    }
+    iassert( entInst->modelInst == NULL );   // entity.cpp:1427
+    iassert( entInst->prefab == NULL );      // entity.cpp:1428
 
-    *(unsigned __int16 *)&v4->version = (unsigned __int16)entDef->version_prob_wrong - 1;   // IDA 0x4856bd mov ax,[ebx+78h]/sub ax,1/mov [esi+4Ch],ax -- DEF ver @0x78 -> instance ver @0x4C low word
-    v4->mapLayer = nullptr;
+    *(unsigned __int16 *)&entInst->version = (unsigned __int16)entDef->version_prob_wrong - 1;   // DEF version -> the instance version's low word
+    entInst->mapLayer = nullptr;
 
-    // Insert into the prefab entity list (via a1 sentinel)
-    v4->next                 = (entity_s *)a1;
-    v4->prev                 = a1->prev_entity;
-    a1->prev_entity->next    = v4;
-    a1->prev_entity          = v4;
+    // Insert into the prefab entity list (via the instList sentinel)
+    entInst->next               = (entity_s *)instList;
+    entInst->prev               = instList->prev_entity;
+    instList->prev_entity->next = entInst;
+    instList->prev_entity       = entInst;
 
     // Initialise the embedded brush-instance sentinel
-    v4->brushes.ownerNext = (selbrush_t *)&v4->brushes;
-    v4->brushes.ownerPrev = (selbrush_t *)&v4->brushes;
+    entInst->brushes.ownerNext = (selbrush_t *)&entInst->brushes;
+    entInst->brushes.ownerPrev = (selbrush_t *)&entInst->brushes;
 
-    // Walk the entity's brush-DEF list and create an instance per brush.
-    // IDA (Prefab_Init 0x485630) + MapFile_WriteEntity both start at brushes.oprev
-    // (= our brushes.prev, entity+0x0C — the def-list FIRST element), advance via
-    // brush_t.onext, and stop at the sentinel &def (entity+0x08).
-    // (The earlier port started at def itself — the list HEAD whose
-    // onext jumps straight to the sentinel — so it created only ONE instance regardless
-    // of how many brushes the entity owns. Harmless for 1-brush point entities, but it
-    // dropped 11 of worldspawn's 12 brushes — the whole map geometry.)
+    // Walk the entity's brush-DEF list and create an instance per brush.  Like
+    // MapFile_WriteEntity, start at brushes.prev (the def-list FIRST element), advance via
+    // brush_t.onext, and stop at the sentinel &def.  (Starting at def itself — the list
+    // HEAD, whose onext jumps straight to the sentinel — creates only ONE instance.)
     brush_t *bDef = (brush_t *)entDef->brushes.prev;
     brush_t *sentinel = (brush_t *)&entDef->def;
     while ( bDef != sentinel )
     {
-        selbrush_t *v7 = Brush_AddToList( bDef, v4 );
-        if ( v7->next || v7->prev )
+        selbrush_t *sb = Brush_AddToList( bDef, entInst );
+        if ( sb->next || sb->prev )
             Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-        if ( a3 == &selected_brushes )
+        if ( activeList == &selected_brushes )
         {
-            Brush_AddToList2( v7 );
+            Brush_AddToList2( sb );
         }
         else
         {
-            v7->next       = a3->next;
-            a3->next->prev = v7;
-            a3->next       = v7;
-            v7->prev       = a3;
+            sb->next               = activeList->next;
+            activeList->next->prev = sb;
+            activeList->next       = sb;
+            sb->prev               = activeList;
         }
         bDef = bDef->onext;
     }
     ++entDef->refCount;
-    return v4;
+    return entInst;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x485750  Entity_Free  (entity.cpp:1453)
 // Frees an entity INSTANCE: unlinks it, removes model instance, frees brush instances,
 // decrements def refcount, frees def if last ref.
-// IDA: __usercall esi = entity_s*
-// 0x485750: 1453/1456/1457 + 1454 CONVERTED;
-// 1455 KEEP_VERBOSE (void*-chain (e->def->refCount) vassert).
 // ─────────────────────────────────────────────────────────────────────────────
-void Entity_Free( char *a1 )
+void Entity_Free( entity_s *e )
 {
-    entity_s *e = (entity_s *)a1;
     iassert( e );
     iassert( e->def );
     entity_s_def *def = (entity_s_def *)e->def;
@@ -1575,18 +1578,15 @@ void Entity_Free( char *a1 )
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x485890  SetupModelInst  (entity.cpp:1480)
 // If the entity instance is out-of-date (version mismatch), rebuilds model instance and
-// bounding brush.  AUDIT: full trace vs IDA 0x485890 (2026-06-20) -- FAITHFUL after the
-// version-field fix (compare/write the DEF's 16-bit version_prob_wrong @0x78, not version@0x4C).
-// CLASS_PREFAB gate = classtype & 0x10; asserts 1480/1491/1492 CONVERTED.
+// bounding brush.  It compares / writes the DEF's 16-bit version_prob_wrong, not version.
+// CLASS_PREFAB gate = classtype & 0x10.
 // ─────────────────────────────────────────────────────────────────────────────
 void SetupModelInst( float *ident_mtx, entity_s *e )
 {
     iassert( e );
     entity_s_def *def = (entity_s_def *)e->def;
-    // IDA 0x4858c3: mov cx,[edi+4Ch] / cmp cx,[eax+78h] -- compare the INSTANCE version (0x4C)
-    // against the DEF's version_prob_wrong (0x78), both 16-bit.  (Prior port compared
-    // def->version @0x4C -- the wrong field; after Checkkey_Model's 0x78 bump it would never
-    // match, so the model instance would never be rebuilt.)
+    // Compare the INSTANCE version against the DEF's version_prob_wrong (the field
+    // Checkkey_Model bumps), both 16-bit.
     if ( (unsigned __int16)e->version == (unsigned __int16)def->version_prob_wrong )
         return;
 
@@ -1597,38 +1597,35 @@ void SetupModelInst( float *ident_mtx, entity_s *e )
         e->modelInst = 0;
     }
 
-    float v7[3] = {}, v6[3] = {};
+    float bmins[3] = {}, bmaxs[3] = {};
     if ( ( def->eclass->classtype & CLASS_PREFAB ) != 0 )
     {
-        Entity_InitPrefabInst( e, ident_mtx, v7, v6 );
+        Entity_InitPrefabInst( e, ident_mtx, bmins, bmaxs );
     }
     else
     {
-        Entity_UpdateModelInst( e, ident_mtx, v7, v6 );
+        Entity_UpdateModelInst( e, ident_mtx, bmins, bmaxs );
     }
 
-    // Rebuild the sole brush instance.  IDA (0x485924) asserts the instance owns exactly one
-    // brush (ownerNext != &brushes && ownerNext == ownerPrev, line 1491) and that brush has a
-    // def with refCount>=2 (line 1492), then builds it UNCONDITIONALLY. (The prior port replaced
-    // both asserts with silent if-guards that skipped Brush_Build — diverges from the binary in
-    // the assert-disabled case.)
+    // Rebuild the sole brush instance.  Asserts the instance owns exactly one brush
+    // (ownerNext != &brushes && ownerNext == ownerPrev, line 1491) and that brush has a
+    // def with refCount>=2 (line 1492), then builds it UNCONDITIONALLY.
     iassert( e->brushes.ownerNext != &e->brushes && e->brushes.ownerNext == e->brushes.ownerPrev );
     selbrush_t *ownerNext = e->brushes.ownerNext;
     brush_t *brushDef = ownerNext->def;
     iassert( e->brushes.ownerNext->def && e->brushes.ownerNext->def->refCount >= 2 );
-    Brush_Build( brushDef, v7, v6 );
-    e->version = (unsigned __int16)def->version_prob_wrong;   // IDA mov [edi+4Ch],dx ([ecx+78h])
+    Brush_Build( brushDef, bmins, bmaxs );
+    e->version = (unsigned __int16)def->version_prob_wrong;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x4859B0  sub_4859B0 — re-aim an entity's angles onto a target direction `dir`.
+// 0x4859B0  Angles_AimAlongDir — re-aim an entity's angles onto a target direction `dir`.
 // Builds the angles' current FORWARD vector (cos/sin of pitch/yaw), projects it onto the
 // plane perpendicular to `dir` (Gram-Schmidt), then assembles a 3x3 axis whose rows are
 // [forward', dir × forward', dir] and reads pitch/yaw/roll back out via AxisToAngles.
-// The IDB lays forward (axis[3]) and the cross/up rows (v5[6]) at CONTIGUOUS stack slots and
-// hands AxisToAngles the address of the first — i.e. one float[3][3].  MSVC may reorder
-// separate locals, so this MUST be a single contiguous matrix[9], not three loose vec3s.
-static void sub_4859B0( float *angles_out, float *dir )
+// AxisToAngles takes the rows as one float[3][3].  MSVC may reorder separate locals, so
+// this MUST be a single contiguous matrix[9], not three loose vec3s.
+static void Angles_AimAlongDir( float *angles_out, float *dir )
 {
     float matrix[9];   // row0 = forward', row1 = dir × forward', row2 = dir  (contiguous!)
 
@@ -1659,35 +1656,30 @@ static void sub_4859B0( float *angles_out, float *dir )
 }
 
 // 0x485ad0  AlignEntityToFace_OrientToFloor  (entity.cpp:1519)
-// Adjusts the entity's "angles" epair toward a given face direction.
-// 0x485ad0: (sub_4859B0 Gram-Schmidt, va %g
-// order, SetKeyValue args). 1519 KEEP_VERBOSE (fixedsize dword-read cast pollutes #expr).
+// Adjusts the entity's "angles" epair toward a given face direction (Angles_AimAlongDir,
+// then the angles written back).
 // ─────────────────────────────────────────────────────────────────────────────
 void AlignEntityToFace_OrientToFloor( entity_s_def *ent, float *dir )
 {
-    iassert( ent->eclass->fixedsize );   // entity.cpp:1519 (binary reads the dword; pad is 0)
+    iassert( ent->eclass->fixedsize );   // entity.cpp:1519
     float angles[3];
     if ( !Entity_GetVec3ForKey( ent, angles, "angles" ) )
         angles[0] = angles[1] = angles[2] = 0.0f;
-    sub_4859B0( angles, dir );
-    char v2[160];                                          // KIWI: exact, not %g
-    SetKeyValue( ent, "angles", KiwiFmt_Vec3Exact( v2, sizeof( v2 ), angles, 0 ) );
+    Angles_AimAlongDir( angles, dir );
+    char text[160];                                        // KIWI: exact, not %g
+    SetKeyValue( ent, "angles", KiwiFmt_Vec3Exact( text, sizeof( text ), angles, 0 ) );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x484980  Entity_Create  (entity.cpp)
 // Creates a new entity from the selected brushes (merge-into-existing OR fresh def+instance OR
-// fixedsize point-entity bbox).  AUDIT: full trace vs IDA 0x484980 (2026-06-20) -- verdict
-// SUBSET: all flow/offsets/links/version(brush_t.version@0x4E,16-bit)/arg-order FAITHFUL; the
-// only divergence is the dropped Init_MaterialLayer(&matdef,0.25f) @0x484b5b in the bbox path
-// (cosmetic bbox-texcoord seeding; documented below). 690 CONVERTED; 1160/1166/1167 KEEP_VERBOSE
-// (binary names inst/brushInst/e collide with locals -> rename unsafe; type-1 merge-path).
+// fixedsize point-entity bbox).
 // ─────────────────────────────────────────────────────────────────────────────
 entity_s *Entity_Create( eclass_t *eclass )
 {
-    char      foundNonWorld = 0;       // v3  — a non-world brush was selected
-    entity_s *targetDef     = nullptr; // v42 — existing entity def to merge into
-    entity_s *ownerInst     = nullptr; // a2  — owner instance / the result
+    char      foundNonWorld = 0;       // a non-world brush was selected
+    entity_s *targetDef     = nullptr; // existing entity def to merge into
+    entity_s *ownerInst     = nullptr; // owner instance / the result
 
     // ── Scan the current selection ───────────────────────────────────────────
     // A point entity can't be built from existing brushes; brushes of a single
@@ -1718,12 +1710,8 @@ entity_s *Entity_Create( eclass_t *eclass )
             targetDef = (entity_s *)owner;
             if ( !Entity_HasEpairMatch( owner, "classname", eclass->name ) )
             {
-                const char *cur = (const char *)zero;
-                for ( epair_t *ep = owner->epairs; ep; ep = ep->next )
-                    if ( !_stricmp( ep->key, "classname" ) )
-                    { cur = ep->value ? ep->value : (const char *)zero; break; }
                 Sys_Printf( "Can't change entity type from %s to %s; ungroup first\n",
-                            cur, eclass->name );
+                            ValueForKey2( owner, "classname" ), eclass->name );
                 MessageBeep( 0x40u );
                 return nullptr;
             }
@@ -1733,9 +1721,9 @@ entity_s *Entity_Create( eclass_t *eclass )
         if ( foundNonWorld )
         {
             // Re-class the selected brushes into the existing entity `targetDef`
-            // (ownerInst = its instance).  Faithful to the binary's loc_484E01 loop:
-            // a WORLD brush is reparented into targetDef (inlined Entity_UnlinkBrush +
-            // Entity_LinkBrush(def, targetDef) + Entity_LinkBrush_0(ownerInst, inst));
+            // (ownerInst = its instance): a WORLD brush is reparented into targetDef
+            // (Entity_UnlinkBrush + Entity_LinkBrush(def, targetDef) +
+            // Entity_LinkBrush_0(ownerInst, inst));
             // a brush ALREADY owned by the target is asserted-consistent and left in
             // place.  (No new entity is allocated here — the selection collapses into
             // the existing one.)
@@ -1756,38 +1744,33 @@ entity_s *Entity_Create( eclass_t *eclass )
                     }
                     continue;
                 }
-                sub_476330( sb );                            // Brush_Deselect_Helper
+                Brush_Deselect_Helper( sb );
                 brush_t *bDef = sb->def;
                 Entity_UnlinkBrush( bDef );                  // def out of worldspawn's def-list
-                Entity_LinkBrush( bDef, targetDef );         // def into targetDef's def-list (+ColorSth)
+                Entity_LinkBrush( bDef, targetDef );         // def into targetDef's def-list (+Brush_ApplyEntityColor)
                 Entity_LinkBrush_0_extern( ownerInst, sb );  // instance into ownerInst's owner-chain
-                bDef = sb->def;
-                Brush_BuildWindings( bDef, 1 );
-                if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                    SetupVertexSelection();
-                MarkMapModified();
-                ++bDef->version;
-                sub_476470( sb );                            // Brush_Select_Helper
+                Brush_RebuildAfterEdit( sb->def );
+                Brush_Select_Helper( sb );
             }
             g_nUpdateBits = -1;
             return ownerInst;
         }
     }
 
-    // ── Allocate a fresh entity def + instance (the binary's LABEL_10) ─────────
+    // ── Allocate a fresh entity def + instance ─────────────────────────────────
     entity_s_def *e = (entity_s_def *)operator new( sizeof(entity_s_def) );
     memset( e, 0, sizeof(entity_s_def) );
-    e->numberId = dword_739DC4++;                                    // IDA v5[33]
-    // empty def-side brush-list sentinel — BOTH the head ptr (+0x08) AND brushes.prev
-    // (+0x0C) point at &def (see Map_New / Entity_LinkBrush 0x484fc0).
+    e->numberId = dword_739DC4++;
+    // empty def-side brush-list sentinel — BOTH the head ptr (def) AND brushes.prev
+    // point at &def (see Map_New / Entity_LinkBrush).
     e->brushes.prev          = (selbrush_t *)&e->def;
     e->def  = (entity_s *)&e->def;
     SetKeyValue( e, "classname", eclass->name );
     e->eclass = eclass;
-    // copy the eclass's default key/values (eclass->xx8 list: [0]=next [4]=key [8]=value)
+    // copy the eclass's default key/values (the eclass->xx8 epair list)
     for ( epair_t *node = eclass->xx8; node; node = node->next )
     {
-        sub_483500( &e->epairs, node->key, node->value );
+        Epair_SetRaw( &e->epairs, node->key, node->value );
     }
 
     IncRef( (entity_s *)e, &entities );                              // inlined in the binary
@@ -1797,25 +1780,19 @@ entity_s *Entity_Create( eclass_t *eclass )
     if ( !*(int *)&eclass->fixedsize )
     {
         // Brush entity (func_*/trigger_*): reparent every selected world brush into the
-        // new entity `e`/`ownerInst`.  Faithful to the binary's loc_484CCC loop (the
-        // inlined Entity_UnlinkBrush(def) + Entity_LinkBrush(def, e) + Entity_LinkBrush_0
-        // (ownerInst, inst)).  With no selection the entity is returned empty (LABEL_73).
+        // new entity `e`/`ownerInst` (Entity_UnlinkBrush(def) + Entity_LinkBrush(def, e) +
+        // Entity_LinkBrush_0(ownerInst, inst)).  With no selection the entity is returned empty.
         // (The scan above already proved every selected brush is a WORLD brush — a
         // non-world selection would have early-returned via the merge/refuse paths.)
         for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
         {
-            sub_476330( sb );                            // Brush_Deselect_Helper
+            Brush_Deselect_Helper( sb );
             brush_t *bDef = sb->def;
             Entity_UnlinkBrush( bDef );                  // def out of worldspawn's def-list
-            Entity_LinkBrush( bDef, (entity_s *)e );     // def into the new entity's def-list (+ColorSth)
+            Entity_LinkBrush( bDef, (entity_s *)e );     // def into the new entity's def-list (+Brush_ApplyEntityColor)
             Entity_LinkBrush_0_extern( ownerInst, sb );  // instance into ownerInst's owner-chain
-            bDef = sb->def;
-            Brush_BuildWindings( bDef, 1 );
-            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                SetupVertexSelection();
-            MarkMapModified();
-            ++bDef->version;
-            sub_476470( sb );                            // Brush_Select_Helper
+            Brush_RebuildAfterEdit( sb->def );
+            Brush_Select_Helper( sb );
         }
         g_nUpdateBits = -1;
         return ownerInst;
@@ -1823,9 +1800,9 @@ entity_s *Entity_Create( eclass_t *eclass )
 
     // ── Point entity: build the bounding-box brush at the placeholder location ──
     // Origin = placeholder mins − eclass mins; the bbox spans the eclass [mins,maxs]
-    // placed at that origin (== the proven ParseEntity fixedsize tail above). The
-    // origin is written to the def's origin field; MapFile_WriteEntity derives the
-    // "origin" epair from it on save (fixedsize entities emit no brush).
+    // placed at that origin (== the ParseEntity fixedsize tail above). The
+    // origin is written to the def's origin field; MapFile_WriteEntity writes the
+    // "origin" text from it on save (fixedsize entities emit no brush).
     brush_t *refDef = selected_brushes.next->def;
     float origin[3];
     origin[0] = refDef->mins[0] - eclass->mins[0];
@@ -1843,9 +1820,8 @@ entity_s *Entity_Create( eclass_t *eclass )
     maxs[1] = eclass->maxs[1] + origin[1];
     maxs[2] = eclass->maxs[2] + origin[2];
 
-    // IDA calls Init_MaterialLayer(&matdef, 0.25f) here; omitted (as the proven loader
-    // does) — it only seeds the bbox texcoords, which are never emitted for a fixedsize
-    // entity. The eclass material (lyrMtl/radMtl) is enough for a valid bbox brush.
+    // Init_MaterialLayer only seeds the bbox texcoords, which are never emitted for a
+    // fixedsize entity.
     MaterialDef matdef;
     memset( &matdef, 0, sizeof( matdef ) );
     matdef.lyrMtl = eclass->material.lyrMtl;
@@ -1855,12 +1831,7 @@ entity_s *Entity_Create( eclass_t *eclass )
     brush_t *bbox = Brush_Alloc( &matdef, eclass );
     Brush_Create( mins, maxs, bbox, eclass );
     Entity_LinkBrush( bbox, (entity_s *)e );          // def-side link (refCount 0->1)
-
-    Brush_BuildWindings( bbox, 1 );
-    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-        SetupVertexSelection();
-    MarkMapModified();
-    ++bbox->version;
+    Brush_RebuildAfterEdit( bbox );
 
     Select_Delete();                                  // consume the placeholder selection
     selbrush_t *inst = Brush_AddToList( bbox, ownerInst );  // instance (refCount 1->2)
@@ -1878,12 +1849,7 @@ entity_s *Entity_Create( eclass_t *eclass )
 // Frees the current map, re-inits the sentinel lists, and builds a fresh worldspawn
 // entity DEF by hand (the text loader's per-entity build, done without .map text).
 // world_entity ends valid so a drag-created brush can Entity_LinkBrush onto it.
-// Faithful to the IDB: the entity-list insert is TAIL insertion (the decompiler
-// aliases the `entities` global to its .prev field — disasm 0x48717F is
-// [v0+4]=&entities / [v0]=entities.prev / entities.prev->next=v0 / entities.prev=v0).
-// 0x4870c0: (worldspawn def build, def sentinel
-// @0x08/0x0C, TAIL splice, camera/XY reset @CCamWnd+0x58 GUI-guarded). 690 CONVERTED to iassert
-// (port var v0 renamed `e` to match the binary so #expr == "!e->next && !e->prev" byte-exact, level 0).
+// The entity-list insert is TAIL insertion (IncRef).
 // ─────────────────────────────────────────────────────────────────────────────
 void Map_New()
 {
@@ -1895,19 +1861,15 @@ void Map_New()
     g_qeglobals.g_layerCount_maybe = 1;
     Sys_Printf( "Updating layers...\n" );
     Layers_SetMapLayers();
-    Layers_02();
+    Layers_RefreshDialog();
 
-    // Allocate worldspawn entity def (0x8C = 140 bytes)
-    // (Port var v0 renamed `e` to match the binary's identifier.)
+    // Allocate worldspawn entity def
     entity_s_def *e = (entity_s_def *)operator new( sizeof(entity_s_def) );
     memset( e, 0, sizeof(entity_s_def) );
-    // Self-initialise the def-side brush-list sentinel. The head lives at
-    // def (+0x08); an EMPTY list needs BOTH the head ptr (+0x08)
-    // AND brushes.prev (+0x0C, IDA's brushes.oprev) to point at &def — see
-    // Entity_LinkBrush (0x484fc0). Disasm 0x48712E-3A: lea eax,[ebx+8];
-    // mov [ebx+0Ch],eax; mov [eax],eax. (The prior port omitted the +0x0C write —
-    // self-corrected on first insert, but NULL-deref'd a backward walk of the empty
-    // list, e.g. saving an empty worldspawn.)
+    // Self-initialise the def-side brush-list sentinel. The head lives at def; an EMPTY
+    // list needs BOTH the head ptr AND brushes.prev to point at &def — see Entity_LinkBrush.
+    // (Without the brushes.prev write a walk of the empty list, e.g. saving an empty
+    // worldspawn, dereferences NULL.)
     e->brushes.prev          = (selbrush_t *)&e->def;
     e->def  = (entity_s *)&e->def;
 
@@ -1918,10 +1880,9 @@ void Map_New()
     // Link into entities list (IncRef inlined in the binary)
     IncRef( (entity_s *)e, &entities );
 
-    entity_s *v3  = Prefab_Init( (prefab_s *)&entityInsts, e, &active_brushes );
-    world_entity  = v3;
+    world_entity = Prefab_Init( (prefab_s *)&entityInsts, e, &active_brushes );
 
-    // Reset the camera + XY view to the new-map default (faithful 0x4871AB-end). Camera goes
+    // Reset the camera + XY view to the new-map default. Camera goes
     // to origin (0,0,48), pitch/yaw 0 (roll untouched); the active XY view recentres.
     // U-GLOBALS: the camera + XY state come from Ed_Camera()/Ed_ActiveXY() (never NULL), so the
     // GUI guards fall away; only the CXYWnd::Paste call still needs the MFC shell.
@@ -1949,8 +1910,7 @@ void Map_New()
     Ed_ActiveXY()->m_vOrigin[1] = 0.0f;
     Ed_ActiveXY()->m_vOrigin[2] = 0.0f;
     if ( g_bRestoreBetween )
-        XYWnd_PasteClip();   // carry a selection across File→New (U-CMD-1 free fn; was
-                             // g_pParentWnd->m_pActiveXY->Paste(), liveness guard dropped)
+        XYWnd_PasteClip();   // carry a selection across File→New (U-CMD-1 free fn)
 
     g_bRestoreBetween = false;
     modified          = 0;     // a fresh map is clean
@@ -1958,20 +1918,13 @@ void Map_New()
 }
 
 // ─── deps for Map_ImportBuffer (ported elsewhere) ─────────────────────────────
-extern void        Select_Deselect( int bDeselectFaces );                  // select.cpp 0x48E800
-extern void        Select_Brush( selbrush_t *b, char some_overwrite, char bStatus, char center ); // select.cpp 0x48DCC0
-extern void        Undo_ClearRedo();                                       // undo.cpp 0x45DF20
-extern void        Undo_GeneralStart( const char *op );                    // undo.cpp 0x45E3F0
-extern void        Undo_End();                                             // undo.cpp 0x45EA20
 extern int         Map_GetNextAutoTarget();                                // map.cpp 0x487950
-extern bool        Model_SetModel( entity_brush_s *b, const float *orientMatrix );  // brush.cpp 0x478780 (prefab load-on-open)
-extern undo_s     *g_lastundo;                                             // undo.cpp 0x23F162C
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Clipboard (CXYWnd::Copy / Paste: the in-app buffer + the Win32 clipboard mirror).
 //
-// The binary stores the copied selection in a global CMemFile (g_Clipboard @0x25EB210)
+// The binary stores the copied selection in a global CMemFile (g_Clipboard)
 // AND mirrors it to the Win32 OLE clipboard (RegisterClipboardFormatA("RadiantClippings")
 // + SetClipboardData) so brushes can be pasted between two running editors.  The CMemFile
 // + CString refcounting is a heap buffer here.  KIWI (2026-09-22, user: "copy/paste from 1
@@ -1984,9 +1937,9 @@ extern undo_s     *g_lastundo;                                             // un
 //
 // Copy writes the selection to the buffer via Entity_WriteSelected_R (the SAME .map
 // writer Map_SaveFile uses); Paste re-parses the buffer through Map_ImportBuffer.
-// Reset/Append/Writer are port-authored glue with no IDA target.  Copy core == 0x46E140
-// (Entity_WriteSelected_R); Paste core == 0x46E280 (Com_BeginParseSession +
-// Map_ImportBuffer(&buf,4) + teardown, "paste from clipboard", spaceDelim=0 / negNum=1).
+// Reset/Append/Writer are port-authored glue with no binary counterpart.  Copy core ==
+// Entity_WriteSelected_R; Paste core == Com_BeginParseSession + Map_ImportBuffer(&buf,4) +
+// teardown ("paste from clipboard", spaceDelim=0 / negNum=1).
 // ─────────────────────────────────────────────────────────────────────────────
 // Writer handle = WriteFunc_entity_t* (pointer to the fn-ptr at slot 0); matches the
 // entity.cpp Entity_WriteSelected convention (the fn is called with ctx==the handle).
@@ -2138,7 +2091,7 @@ static void RadiantClipboard_Capture()
     Entity_WriteSelected_R( writer );   // writer decays to WriteFunc_entity_t* (the handle)
 }
 
-// CXYWnd::Copy core (IDB 0x46E140). Serialise the current selection to the in-app
+// CXYWnd::Copy core (0x46E140). Serialise the current selection to the in-app
 // clipboard buffer and mirror it to the Win32 clipboard.
 void RadiantClipboard_Copy()
 {
@@ -2210,7 +2163,7 @@ bool RadiantClipboard_HasMapText()
     return ( s_clipboardLen != 0 && s_clipboardBuf != nullptr ) || RadiantClipboard_OSHasClippings();
 }
 
-// CXYWnd::Paste core (IDB 0x46E280). The Win32 clipboard's clippings replace the in-app
+// CXYWnd::Paste core (0x46E280). The Win32 clipboard's clippings replace the in-app
 // buffer when it holds some (the most recent copy, from any editor); then the buffer is
 // re-parsed, placed and selected.
 void RadiantClipboard_Paste()
@@ -2238,25 +2191,19 @@ static void RadiantClipboard_Import()
     extern char *Map_ImportBuffer( const char **text, int version );   // map.cpp 0x487C90
     Map_ImportBuffer( &cursor, 4 );
 
-    ParseThreadInfo *pi2 = Com_GetParseThreadInfo();
-    if ( !pi2->parseInfoNum )
-        Com_Error( ERR_FATAL, "Com_EndParseSession: session underflow" );
-    --pi2->parseInfoNum;
+    Com_EndParseSession();
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x483de0  Entity_MemorySize  (65 bytes)
-// Returns the total heap size of an entity_s_def + all its epairs (key+value+node).
-// __usercall: a1@<eax>
-// Called from undo.cpp as Entity_MemorySize_sub483DE0.
-// 0x483de0: (_msize + epair walk @0x74, no asserts).
+// 0x483de0  Entity_MemorySize
+// Returns the total heap size (_msize) of an entity_s_def + all its epairs
+// (key+value+node).  Called from undo.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
-size_t Entity_MemorySize_sub483DE0( entity_s *a1 )
+size_t Entity_MemorySize( entity_s *e )
 {
-    // IDA: result = _msize(a1); v3 = (void**)a1[29] = a1->epairs
-    size_t total = _msize( a1 );
-    epair_t *ep = a1->epairs;
+    size_t total = _msize( e );
+    epair_t *ep = e->epairs;
     while ( ep )
     {
         total += _msize( ep->key );
@@ -2268,30 +2215,22 @@ size_t Entity_MemorySize_sub483DE0( entity_s *a1 )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x485090  Entity_Clone_sub485090  (330 bytes)
-// Allocates a new entity_s_def (0x8C = 140 bytes), copies the source's
-// eclass/origin/refCount fields, deep-copies all epairs.
-// __usercall: a1@<eax> = entity_s* source (as int)
-// Called from undo.cpp as Entity_Clone_sub485090.
-// 0x485090: (numberId@0x84, def sentinel @0x08/0x0C,
-// straight float origin copies -- no double-read-of-float; epair deep-copy). key/value asserts
-// KEEP_VERBOSE (qe3.cpp:56 CROSS_FILE).
+// 0x485090  Entity_Clone
+// Allocates a new entity_s_def, copies the source's eclass/origin fields, deep-copies
+// all epairs.  Called from undo.cpp.
 // ─────────────────────────────────────────────────────────────────────────────
-entity_s *Entity_Clone_sub485090( const entity_s *src )
+entity_s *Entity_Clone( const entity_s *src )
 {
     entity_s *clone = (entity_s *)::operator new( sizeof(entity_s) );
     memset( clone, 0, sizeof(entity_s) );
 
-    // Assign unique entity ID.  IDA (0x4850BF) writes `v2[33] = dword_739DC4` —
-    // numberId@0x84, NOT epairEdits@0x7C.
+    // Assign unique entity ID (numberId, NOT epairEdits).
     clone->numberId = dword_739DC4++;
 
-    // Init the DEF-side brush-list sentinel. The binary does v2[2]=v2[3]=v2+2, i.e.
-    // BOTH def (+0x08) AND brushes.prev (+0x0C) point at
-    // &def (the empty-list sentinel; see Map_New / Entity_LinkBrush).
-    // The prior port wrongly set the INSTANCE-side ownerNext/ownerPrev (+0x18/+0x1C),
-    // leaving the def sentinel NULL — latent until an entity recorded for undo was
-    // EVICTED (Undo_FreeFirstUndo): Entity_Free_R read b->owner at NULL+8 → AV. (0x485090)
+    // Init the DEF-side brush-list sentinel: BOTH def AND brushes.prev point at &def (the
+    // empty-list sentinel; see Map_New / Entity_LinkBrush), NOT the instance-side
+    // ownerNext/ownerPrev — a NULL def sentinel crashes Entity_Free_R when undo evicts the
+    // entity (Undo_FreeFirstUndo).
     clone->def = (entity_s *)&clone->def;
     clone->brushes.prev         = (selbrush_t *)&clone->def;
 
@@ -2310,7 +2249,7 @@ entity_s *Entity_Clone_sub485090( const entity_s *src )
         newEp->key   = AllocMaterialString( srcEp->key );
         newEp->value = AllocMaterialString( srcEp->value );
 
-        // Prepend to clone's epair list (IDA: *v8 = v15[29]; v15[29] = v8)
+        // Prepend to clone's epair list
         newEp->next  = clone->epairs;
         clone->epairs = newEp;
 
@@ -2331,9 +2270,6 @@ entity_s *Entity_Clone_sub485090( const entity_s *src )
 //  The `i = i->prev` step before Select_Brush is the binary's own: Select_Brush moves
 //  the node out of active_brushes, so the loop resumes from the node BEFORE it.
 // ═════════════════════════════════════════════════════════════════════════════
-extern void Select_Deselect( char bResetMode );                       // select.cpp 0x48E800
-extern void Select_Brush( selbrush_t *b, char some_overwrite,
-                          char bStatus, char center_grid_on_selection ); // select.cpp 0x48DCC0
 
 bool Entity_NeedsAutoExportId( entity_s_def *def )
 {
@@ -2357,7 +2293,7 @@ void Delete_Exportables()
         if ( Entity_NeedsAutoExportId( (entity_s_def *)i->owner->def ) )
         {
             selbrush_t *victim = i;
-            i = i->prev;                      // 0x487C6C — resume from the node before it
+            i = i->prev;                      // resume from the node before it
             Select_Brush( victim, 1, 1, 0 );
         }
     }

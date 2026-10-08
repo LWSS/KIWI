@@ -9,6 +9,7 @@
 #include "kiwi_selext.h"
 #include "kiwi_command.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_vec.h"     // Shared vector helpers.
 
@@ -16,12 +17,6 @@
 #include <math.h>
 #include <string.h>
 #include <vector>
-
-// Ported entry points.
-extern int  Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
-extern int  g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
-extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {

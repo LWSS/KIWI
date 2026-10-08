@@ -25,6 +25,7 @@
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
 #include "kiwi_particles.h"   // particles-only hover + the particle arrows
+#include "kiwi_ported.h"
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
@@ -36,18 +37,6 @@
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
-
-// Ported entry points.
-extern camera_s   *Ed_Camera();          // camwnd.cpp
-extern void        CamWnd_BuildMatrix(); // camwnd.cpp 0x403470
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
-extern int   Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp:118
-extern int   g_nUpdateBits;                                             // engine_stubs.cpp:773
-extern void  __cdecl R_AddRenderCmdDrawTris(
-                 Material *material, MaterialTechniqueType techType, short indexCount,
-                 const uint16_t *indices, short vertexCount,
-                 const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-                 const float ( *st )[2] );                               // 0x4fd1c0
 
 namespace
 {

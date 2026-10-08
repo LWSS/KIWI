@@ -13,16 +13,15 @@
 #include "kiwi_refimage.h"      // KIWI (REFIMG): fourth whole-store domain
 #include "kiwi_selection.h"     // face-granular selection restore
 #include "kiwi_command.h"       // KiwiCmd_Active restore guard
+#include "kiwi_ported.h"
 
 #include <vector>
 #include <math.h>
 
 // Ported undo entry points.
-extern int   Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118 int Sys_Printf(const char*,...)
 extern void  Undo_Undo();                          // undo.cpp:736  void Undo_Undo()
 extern void  Undo_Redo();                          // undo.cpp:1019 void Undo_Redo()
 extern bool  Undo_RedoAvailable();                 // undo.cpp:99   bool Undo_RedoAvailable()
-extern undo_s *g_lastundo;                         // undo.cpp:82   undo_s *g_lastundo (0x23F162C)
 extern void  Undo_SetMaxSize( int size );          // undo.cpp:276  (clears the legacy stack)
 extern int   Undo_GetMaxSize();                    // undo.cpp:287
 extern void  Undo_SetMaxMemorySize( int size );    // undo.cpp:295  (clears the legacy stack)

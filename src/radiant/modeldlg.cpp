@@ -7,17 +7,10 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <cstring>
 #include <cstdlib>
 
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
-// ── externs (per-TU, matching vehicledlg.cpp / undo.cpp) ──────────────────────
-extern entity_s *world_entity;                                              // 0x25D5B30 (map.cpp)
-extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value ); // 0x483690 (entity.cpp)
-extern bool      Entity_HasEpairMatch( entity_s *e, const char *key, const char *value ); // 0x483930 (entity.cpp)
-extern char      FilterBrush( selbrush_t *b, int a2 );                      // 0x46A1F0 (filters.cpp)
-extern int       g_nUpdateBits;                                            // 0x25D5A74 (engine_stubs.cpp)
 // active_brushes / selected_brushes sentinels are declared in qe3.h.
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -56,7 +49,9 @@ void ModelDlg_DoReplace( const char *const *fromSet, int fromCount,
         entity_s_def *ent = (entity_s_def *)owner->def;
         selbrush_t *brush = b;
         if ( brush->def )
+        {
             iassert( brush->owner->def == brush->def->owner );   // ModelDlg.cpp:292
+        }
         if ( !ent )                                            { b = next; continue; }
 
         // 0x434FA6..: per FROM entry, test this entity by class + the class checkbox.
@@ -118,8 +113,8 @@ void ModelDlg_DoReplace( const char *const *fromSet, int fromCount,
 // ══════════════════════════════════════════════════════════════════════════════
 //  CModelDlg — the hand-built modeless popup (CVehicleDlg / CDynEntityDlg pattern)
 // ══════════════════════════════════════════════════════════════════════════════
-//  Two list boxes (FROM / TO), each with [Add file...] (→ a CFileDialog at main_shared\
-//  xmodel\, matching the binary's CModelFileDialog 0x434330/0x43464D) and [Remove], plus
+//  Two list boxes (FROM / TO), each with [Add file...] (→ a CFileDialog at main_shared/
+//  xmodel/, matching the binary's CModelFileDialog 0x434330/0x43464D) and [Remove], plus
 //  the three class checkboxes (misc_model / dyn_model / misc_prefab) and [Replace].
 //  radiant.rc has no IDD template, so it is hand-built (the established sibling pattern).
 //  U-GUARD: the control-id enum is MFC-shell-only; modelReplaceState_t + ModelReplace_Apply

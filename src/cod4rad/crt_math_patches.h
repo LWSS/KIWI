@@ -2,12 +2,12 @@
  * crt_math_patches.h — Original MSVC 2005 CRT math for cod2rad64
  * Extracted from cod2rad64_original.exe (statically linked CRT)
  *
- * MSVC 2022 ucrt uses different polynomial coefficients for sinf/cosf
- * and may use SSE4.1 ROUNDSS for floorf/ceilf. These implementations
- * preserve bit-identical output to the original binary.
+ * MSVC 2022 ucrt uses different polynomial coefficients for sinf/cosf.
+ * These implementations preserve bit-identical output to the original binary.
+ * (floorf/ceilf are exact in every CRT; their clones were dropped.)
  *
- * Functions patched: ceilf, floorf, sinf, cosf, powf
- * Addresses: 0x43B110, 0x43B200, 0x43DF10, 0x43E430, 0x43D600
+ * Functions patched: sinf, cosf, powf
+ * Addresses: 0x43DF10, 0x43E430, 0x43D600
  * Helpers: __rem_pio2f (0x43DC70), log2 core (0x44AE70)
  */
 
@@ -21,89 +21,6 @@
 typedef union { float f; unsigned int u; int i; } float_bits_t;
 typedef union { double d; unsigned __int64 u; __int64 i; } double_bits_t;
 
-/*
-================
-original_ceilf
-
-IEEE 754 bit manipulation ceilf from original MSVC 2005 CRT.
-Address: 0x43B110
-================
-*/
-static float original_ceilf(float x)
-{
-    float_bits_t val, trunc_val;
-    unsigned int abs_bits;
-    int is_neg;
-
-    val.f = x;
-    abs_bits = val.u & 0x7FFFFFFF;
-    is_neg = (val.u != abs_bits);
-
-    if (abs_bits < 0x4B800000)
-    {
-        if (abs_bits >= 0x3F800000)
-        {
-            trunc_val.u = val.u & ~((1 << (-106 - (val.u >> 23))) - 1);
-            if (!is_neg && val.u != trunc_val.u)
-                return trunc_val.f + 1.0f;
-            return trunc_val.f;
-        }
-        else if (abs_bits)
-        {
-            if (!is_neg)
-                return 1.0f;
-            else
-                return -0.0f;
-        }
-    }
-    else if (abs_bits > 0x7F800000)
-    {
-        return 0.0f;
-    }
-    return x;
-}
-
-/*
-================
-original_floorf
-
-IEEE 754 bit manipulation floorf from original MSVC 2005 CRT.
-Address: 0x43B200
-================
-*/
-static float original_floorf(float x)
-{
-    float_bits_t val, trunc_val;
-    unsigned int abs_bits;
-    int is_neg;
-
-    val.f = x;
-    abs_bits = val.u & 0x7FFFFFFF;
-    is_neg = (val.u != abs_bits);
-
-    if (abs_bits < 0x4B800000)
-    {
-        if (abs_bits >= 0x3F800000)
-        {
-            trunc_val.u = val.u & ~((1 << (-106 - (val.u >> 23))) - 1);
-            if (is_neg && val.u != trunc_val.u)
-                return trunc_val.f - 1.0f;
-            return trunc_val.f;
-        }
-        else if (abs_bits)
-        {
-            if (!is_neg)
-                return 0.0f;
-            else
-                return -1.0f;
-        }
-    }
-    else if (abs_bits > 0x7F800000)
-    {
-        return 0.0f;
-    }
-    return x;
-}
 
 /* polynomial coefficients from original binary — exact double values */
 static const double _sin_c3  = -0.1666666666386084;
@@ -118,7 +35,7 @@ static const double _cos_c10 = -0.0000002730101334317983;
 static const double _two_over_pi = 0.6366197723675814;
 static const double _pio2_hi     = 1.570796326734126;
 
-/* pi/2 range reduction table from binary at qword_47D870 */
+/* pi/2 range reduction table from the binary at 0x47D870 */
 static const unsigned __int64 _pio2f_table[13] = {
     0LL, 5215LL, 13000023176LL, 11362338026LL,
     67174558139LL, 34819822259LL, 10612056195LL, 67816420731LL,
@@ -146,7 +63,7 @@ static double _original_sin_poly(double x)
 _original_cos_poly
 
 Cos polynomial: 1 - 0.5*x^2 + c4*x^4 + c6*x^6 + c8*x^8 + c10*x^10
-Matches binary at 0x43E430 lines 13236-13275.
+Matches the binary at 0x43E430.
 ================
 */
 static double _original_cos_poly(double x)
@@ -588,12 +505,9 @@ static float original_powf(float x, float y)
     return (float)result_d;
 }
 
-/* floorf/ceilf: verified 0/10M diffs — not needed.
- * sinf/cosf: using x87_trig.asm wrappers instead.
- * powf: 0/20M diffs with 129-entry log2 tables — ENABLED.
+/* sinf/cosf: using x87_trig.asm wrappers instead.
+ * powf: 0/20M diffs with 129-entry log2 tables (its define below is left disabled).
  */
-/* #define ceilf  original_ceilf */
-/* #define floorf original_floorf */
 /* #define sinf   original_sinf  */
 /* #define cosf   original_cosf  */
 /* #define powf   original_powf  */

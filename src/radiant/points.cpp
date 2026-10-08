@@ -15,28 +15,19 @@
 #include "mainfrm.h"
 #include "qe3.h"
 #include "xywnd.h"          // xywndState_t / Ed_ActiveXY (U-GLOBALS)
+#include "kiwi_vec.h"       // KIWI: KIWI_RAD2DEG
+#include "kiwi_ported.h"    // KIWI: shared engine/editor externs
 #include <gfx_d3d/r_gfx.h>  // GfxPointVertex, GfxColor
 
 // ── externs from other radiant TUs ───────────────────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
-extern char  currentmap[];            // map.cpp 0x23F18D8
 extern void  StripExtension( char *path );  // cmdlib.cpp 0x40AE90
 // (g_pParentWnd extern retired — U-GLOBALS swept every use onto Ed_Camera()/Ed_ActiveXY())
-extern camera_s   *Ed_Camera();      // camwnd.cpp — THE editor camera (never NULL, U-GLOBALS)
 
 void Pointfile_Next();
 void Pointfile_Prev();
 
 // ── renderer / math deps ─────────────────────────────────────────────────────
 struct orientation_t;                                    // gfx_d3d/fxprimitives.h (pointer use only)
-extern int   g_nUpdateBits;                              // mainfrm.cpp 0x25D5A74
-extern float Vec3Normalize_R( float *v );                // engine_stubs.cpp 0x40A5E0 (length; ignored here)
-extern float world_orient_matrix[4][3];                  // entity.cpp 0x6DE290 (identity world orient)
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );                 // 0x402AC0
-extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                          const float *p1, const float *p2, const unsigned int *color,
-                          char width, int vertCount, int maxVertCount );        // 0x40C110
 extern void  R_AddCmd_Line3D( short count, char width, GfxPointVertex *verts ); // 0x4FD1A0 (r_rendercmds)
 
 // ── module globals (IDB addresses above) ─────────────────────────────────────
@@ -157,8 +148,8 @@ void Pointfile_Draw()
 // to point[startpoint+1] and aim the camera at point[startpoint+2].
 // The hex-rays atan2(a1,v12) / _CIasin(v12) args are x87-return artifacts; the disasm
 // FPU operands are the NORMALIZED dir (yaw = atan2(n[1],n[0]), pitch = asin(n[2])).
-// Degrees use the binary's EXACT constants *180.0 / 3.14159 (dbl_6F42A8 / dbl_6F4428 —
-// a TRUNCATED pi, not M_PI).  cam.origin @+0x64, angles @+0x70 pitch / +0x74 yaw.
+// KIWI: degrees use the true KIWI_RAD2DEG - the binary's * 180.0 / 3.14159 (dbl_6F42A8 /
+// dbl_6F4428, a truncated pi) aimed 8e-5 deg off.  cam.origin @+0x64, angles @+0x70 pitch / +0x74 yaw.
 void Pointfile_Next()
 {
     if ( s_startpoint < s_num_points - 2 )
@@ -181,9 +172,9 @@ void Pointfile_Next()
         normal[2] = s_pointFile[idx + 1][2] - cam->origin[2];
         Vec3Normalize_R( normal );
 
-        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
+        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * KIWI_RAD2DEG );
         g_nUpdateBits = -1;
-        cam->angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
+        cam->angles[0] = (float)( asin( (double)normal[2] ) * KIWI_RAD2DEG );
     }
     else
     {
@@ -216,9 +207,9 @@ void Pointfile_Prev()
         normal[2] = s_pointFile[idx + 1][2] - cam->origin[2];
         Vec3Normalize_R( normal );
 
-        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * 180.0 / 3.14159 );
+        cam->angles[1] = (float)( atan2( (double)normal[1], (double)normal[0] ) * KIWI_RAD2DEG );
         g_nUpdateBits = -1;
-        cam->angles[0] = (float)( asin( (double)normal[2] ) * 180.0 / 3.14159 );
+        cam->angles[0] = (float)( asin( (double)normal[2] ) * KIWI_RAD2DEG );
     }
     else
     {

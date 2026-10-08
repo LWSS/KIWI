@@ -8,13 +8,12 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <set>
 #include <string>
-
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
 
 // ── prefab-recursion dependencies (map.cpp) ───────────────────────────────────
 // The (owner->prefab && flag&4) branch enters the selected prefab's referenced .map,
@@ -22,8 +21,7 @@ extern void Assert( const char *file, int line, int type, const char *fmt, ... )
 // "recurse into prefabs" behaviour (sub_492E20 0x492E5D..0x492F63).
 extern void Prefab_NextLevel( void *a1 );   // map.cpp 0x489190 (ENTER the prefab sub-map)
 extern void Prefab_PrevLevel();             // map.cpp 0x489890 (LEAVE, restore parent)
-extern void Map_SaveFile( const char *path, char a1, char a2 );  // map.cpp 0x486C00
-extern char currentmap[];                   // map.cpp 0x23F18D8 (the loaded prefab .map path)
+extern bool Map_SaveFile( const char *path, char a1 );  // map.cpp 0x486C00
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  g_findReplaceVisited  —  std::set<std::string>  (IDB head/node @0x26656B0/B4).
@@ -52,32 +50,18 @@ void FindReplaceVisited_Reset()
     g_findReplaceVisited.clear();
 }
 
-// ── brush lists + selection (engine_stubs / map.cpp / select.cpp) ──────────────
-extern selbrush_t selected_brushes;          // 0x23F1864
-extern selbrush_t active_brushes;            // 0x23F189C
-extern void       Select_Deselect( int keepSelected );        // select.cpp 0x48E800
-extern int        g_nUpdateBits;             // engine_stubs 0x25D5A74
-
 // ── material name resolution + apply primitives ───────────────────────────────
 // NOTE: the IDB inlines LayeredMaterials_GetMaterial(name) / else Texture_GetHandle(name)
 // to resolve the replacement material; we call SetMaterial (which IS that dispatch, but
 // with the headless-safe degenerate fallback — Texture_GetHandle needs the live renderer).
-extern void              SetMaterial( const char *name, patchMesh_material *out );  // materialdef.cpp 0x4315C0
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );                     // materialdef.cpp 0x431640
-extern int               Init_MaterialLayer( MaterialDef *channel, float src ); // materialdef.cpp 0x472C00
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }                     // 0x431B30
 
 // face texdef apply (brush.cpp):
 //   Brush_SetFaceTexdefSize (0x476740) — write the {Material*, qtexture*} pair into the
-//     face's current-layer slot (the IDB's sub_476740 per-face apply, a1 = a 2-elem array).
+//     face's current-layer slot.
 //   Brush_SetFaceTexdef     (0x4767e0) — copy a full texdef_sub_t mapping into the slot.
 extern void    Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b );  // 0x476740
-extern void    sub_4767E0( const texdef_sub_t *texDef, face_t *facePtr, brush_t *brushDef );   // 0x4767E0 Brush_SetFaceTexdef
-
-// rebuild / housekeeping (brush.cpp / select.cpp / map.cpp):
-extern void    Brush_BuildWindings( brush_t *b, int bFull );  // 0x477AC0
-extern void    SetupVertexSelection();                        // 0x494BC0
-extern void    MarkMapModified();                             // 0x499BB0
+extern brush_t *Brush_SetFaceTexdef( const texdef_sub_t *texDef, face_t *f, brush_t *b );   // 0x4767e0
 
 // ── current-texture-window MaterialDef (qeglobals_t.random_texture_stuff) ──────
 // The IDB indexes &random_texture_stuff[2100 * current_edit_layer] as the active
@@ -120,7 +104,7 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
                 prefabReplaced = FindReplaceTextures( findName, replaceName,
                                                       (char)( flags & 0xFE ) ) ? 1 : 0;
                 if ( prefabReplaced )
-                    Map_SaveFile( currentmap, 0, 0 );          // re-save the modified .map
+                    Map_SaveFile( currentmap, 0 );             // re-save the modified .map
                 Prefab_PrevLevel();                            // LEAVE, restore the parent
             }
         }
@@ -141,7 +125,7 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
 
     // Face walk over the brush DEF's faces.  The IDB reads inst->faceCount (hex-rays
     // "unk1", the 56-byte INSTANCE field @0x18) — but that is the LAZY faceVis cache that
-    // sub_477D70 syncs from def->faceCount only when the brush is drawn/selected (0 on a
+    // Brush_CheckBuildFaceVis syncs from def->faceCount only when the brush is drawn/selected (0 on a
     // freshly-loaded, undrawn brush — the recurring instance-vs-def trap).  In the GUI the
     // dialog always runs after a draw so it is synced; we read def->faceCount directly (the
     // authoritative count the apply primitives assert against — Brush_SetFaceTexdefSize uses
@@ -182,13 +166,13 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
                 float sampleArg = g_qeglobals.random_texture_stuff[layer].sampleSize;
                 Init_MaterialLayer( curMtl, sampleArg );
                 int curLayer = LayerMat::GetCurrentLayer( curMtl );
-                sub_4767E0( &curMtl->mat_texDef + curLayer,
-                            faces, def );
+                Brush_SetFaceTexdef( &curMtl->mat_texDef + curLayer,
+                                     faces, def );
             }
 
             // Resolve the replacement name to its {lyrMtl, radMtl} pair and write it into
-            // the face's current-layer slot (the proven texture-apply path: the IDB's
-            // sub_476740 / Brush_SetFaceTexdefSize).  The IDB inlines
+            // the face's current-layer slot (the proven texture-apply path:
+            // Brush_SetFaceTexdefSize).  The IDB inlines
             // LayeredMaterials_GetMaterial(name) / else Texture_GetHandle(name) here; we go
             // through SetMaterial (materialdef.cpp) instead — it is EXACTLY that dispatch
             // but with the headless-safe degenerate fallback when the renderer/material
@@ -205,7 +189,9 @@ static char FindReplaceTexture_Brush( selbrush_t *inst, const char *findName,
     // Rebuild the brush after edits (matches the IDB tail: build windings, vertex-sel
     // upkeep, mark modified, bump version).  (def resolved above; always valid for a real
     // brush — guarded so a degenerate node can't AV.)
-    if ( def )
+    // KIWI: only when something was replaced; a no-match walk dirtied the map and
+    // rebuilt every brush
+    if ( replaced && def )
     {
         Brush_BuildWindings( def, 1 );
         if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )

@@ -61,7 +61,3 @@ void SpawnFlags_Apply( int flags );          // NOTE: no !edit_entity guard (fai
 // imgui_shell.cpp — panels call this between Begin()/End() so a floating panel auto-closes
 // when clicked off (and its show-bool resyncs, so one hotkey press reopens it).
 void ImGuiShell_CloseOnFocusLoss( bool *p_open );
-
-void EntAngle_Apply( int idx );              // 0..9: the angle-button switch.
-                                             // NOTE: cases 8/9 (Up/Dn) deref edit_entity
-                                             // unguarded (faithful) — guard at call site

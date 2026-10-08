@@ -8,7 +8,9 @@
 #include "kiwi_pasteplace.h"
 #include "kiwi_command.h"
 #include "kiwi_droptrace.h"            // KiwiDrop_IsModelEntity / KiwiDrop_GetModelInfo
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"            // Sel_InvalidateFromLegacy
+#include "kiwi_vec.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -18,28 +20,9 @@
 #include <vector>
 
 // Ported entry points (verified against their definitions).
-extern int         Sys_Printf( const char *fmt, ... );
-extern int         g_nUpdateBits;
-extern selbrush_t  selected_brushes;                                          // map.cpp
-extern selbrush_t  active_brushes;                                            // map.cpp
 extern bool        g_kiwiImportInCallerUndo;                                  // map.cpp (KIWI hook)
 extern bool        RadiantClipboard_HasMapText();                             // entity.cpp (KIWI tail)
 extern void        RadiantClipboard_Paste();                                  // entity.cpp
-extern void        Select_Deselect( int a1 );                                 // select.cpp:1444
-extern void        Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus, char center ); // select.cpp:904
-extern void        Select_Delete();                                           // select.cpp:1539
-extern void        Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat, float deg, char bSwap ); // select.cpp:2260
-extern entity_s   *Brush_Move( const float *move, brush_t *def, char snap );  // brush.cpp 0x4782A0
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:213
-extern void        sub_47B940( brush_t *def );                                // brush.cpp Brush_UpdateSpecialMaterialFlag
-extern void        Undo_ClearRedo();
-extern void        Undo_GeneralStart( const char *operation );
-extern void        Undo_AddBrushList( selbrush_t *list );
-extern void        Undo_EndBrushList( selbrush_t *list );
-extern void        Undo_AddEntity_W( entity_s *e );
-extern void        Undo_End();
-extern void        MarkMapModified();
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
@@ -65,7 +48,7 @@ namespace
     // (forward, left, up) rows from pitch / yaw / roll - AnglesToAxis.
     void AnglesAxis( const float *ang, float out[3][3] )
     {
-        const float k = 3.14159265358979323846f / 180.0f;
+        const float k = (float)KIWI_PI / 180.0f;
         const float sp = sinf( ang[0] * k ), cp = cosf( ang[0] * k );
         const float sy = sinf( ang[1] * k ), cy = cosf( ang[1] * k );
         const float sr = sinf( ang[2] * k ), cr = cosf( ang[2] * k );
@@ -253,7 +236,7 @@ namespace
             }
             for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
             {
-                sub_47B940( b->def );
+                Brush_UpdateSpecialMaterialFlag( b->def );
                 created.push_back( b );
             }
         }

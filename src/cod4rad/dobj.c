@@ -842,7 +842,6 @@ void DObjCalcSkel(const DObj_t *obj, int *partBits)
     int boneIndexHigh;
     int numRootBones;
     int parentIndex;
-    int parentBit;
     XModelParts_t *parts;
     unsigned char parent;
     unsigned char *parentList;

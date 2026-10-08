@@ -25,18 +25,10 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <cstring>
 
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
 // ── externs (per-TU, matching dynentitydlg.cpp / select.cpp) ──────────────────
-extern entity_s *world_entity;                                              // 0x25D5B30 (map.cpp)
-extern void      SetKeyValue( entity_s_def *e, const char *key, const char *value ); // 0x483690 (entity.cpp)
-extern void      DeleteKey( epair_t **head, const char *key );              // 0x483720 (entity.cpp)
-extern void      Checkkey_Model( entity_s_def *e, const char *key );        // 0x482F70 (=Checkkey_Model_0)
-extern void      Checkkey_Color( entity_s_def *e, const char *key );        // 0x483210 (entity.cpp)
-extern void      SetKeyValuePairs();                                        // 0x496CF0 (win_ent.cpp)
-extern int       g_nUpdateBits;                                            // 0x25D5A74 (engine_stubs.cpp)
 extern void      VehicleDlg_SetScriptGroupKey( const char *key );          // 0x45FBA0 (scriptgroup.cpp)
 // selected_brushes sentinel is declared in qe3.h.
 
@@ -58,7 +50,9 @@ static bool Veh_SelectedDef( selbrush_t *i, entity_s_def **outDef )
     // The binary's invariant (type 0 → log+continue).  b = the binary's local.
     selbrush_t *b = i;
     if ( b->def )
+    {
         iassert( b->owner->def == b->def->owner );   // VehicleDlg.cpp:133
+    }
 
     *outDef = def;
     return true;
@@ -80,10 +74,8 @@ void VehicleDlg_SetPair( const char *value, const char *key )
             continue;
         SetKeyValue( def, key, value );
     }
-    // The dialog refreshes the entity inspector + invalidates the views.  (The binary's
-    // EndDialog/SetFocus tail is the modeless-dialog "field applied, return focus to the
-    // camera" gesture; the headless gate has no HWNDs so this is just the data refresh.)
-    SetKeyValuePairs();
+    // The dialog invalidates the views.  (The binary also refilled the MFC inspector list and
+    // ran its EndDialog/SetFocus tail; the ImGui panels re-gather each frame.)
     g_nUpdateBits = -1;
 }
 
@@ -104,7 +96,6 @@ void VehicleDlg_RemovePair( const char *key )
         Checkkey_Model( def, key );          // 0x482F70 (Checkkey_Model_0)
         Checkkey_Color( def, key );          // 0x483210
     }
-    SetKeyValuePairs();
     g_nUpdateBits = -1;
 }
 

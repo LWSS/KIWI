@@ -44,7 +44,6 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/scriptgroup.cpp"
     "${SRC_DIR}/radiant/layers.cpp"
     "${SRC_DIR}/radiant/filters.cpp"
-    "${SRC_DIR}/radiant/filtersettings.cpp"
     "${SRC_DIR}/radiant/shadowvolume.cpp"
     "${SRC_DIR}/radiant/layeredmaterials.cpp"
     "${SRC_DIR}/radiant/layeredmaterialwnd.cpp"
@@ -62,12 +61,10 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/camwnd.cpp"
     "${SRC_DIR}/radiant/z.cpp"
     "${SRC_DIR}/radiant/texwnd.cpp"
-    "${SRC_DIR}/radiant/texturebar.cpp"
     "${SRC_DIR}/radiant/win_ent.cpp"
 
     # ── Phase 6 — dialogs ────────────────────────────────────────────────────
     "${SRC_DIR}/radiant/surfacedlg.cpp"
-    "${SRC_DIR}/radiant/entitylist.cpp"     # CEntityListDlg — Edit→Entity Info entity browser (tree + K/V)
     "${SRC_DIR}/radiant/findtexture.cpp"    # CFindTextureDlg + FindReplaceTextures (find/replace texture)
     "${SRC_DIR}/radiant/patchdialog.cpp"
     "${SRC_DIR}/radiant/win_dlg.cpp"
@@ -99,12 +96,14 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/imgui_panel_scriptgroup.cpp" # script group (was IDD_SCRIPT_GROUP_NAME)
     "${SRC_DIR}/radiant/imgui_panel_project.cpp"  # project settings (was IDD_PROJECT_SETTINGS)
     "${SRC_DIR}/radiant/imgui_panel_sides.cpp"    # arbitrary sides (was IDD_ARBITRARY_SIDES)
+    "${SRC_DIR}/radiant/imgui_panel_cap.cpp"      # open-patch cap type (was CCapDialog, IDD 0xA1)
     # ── UX overhaul (RADIANT_UX_DESIGN) Phase 1a — selection core + unified pick ──
     "${SRC_DIR}/radiant/kiwi_selection.h"    # §1 typed selection model (sel_item_t/selection_t)
     "${SRC_DIR}/radiant/kiwi_selection.cpp"  # §1 legacy adapter (Sel_SyncToLegacy / RebuildFromLegacy)
     "${SRC_DIR}/radiant/kiwi_pick.h"         # §2 unified pick API (Pick / ray + projection helpers)
     "${SRC_DIR}/radiant/kiwi_pick.cpp"       # §2 Test_Ray surface pick + screen-space vert/edge pick
     "${SRC_DIR}/radiant/kiwi_vec.h"          # CLEANUP A-15 — the one spelling of Dot3/Sub3/Cross3/... (header only)
+    "${SRC_DIR}/radiant/kiwi_ported.h"       # shared externs for ported editor/engine symbols (header only)
     # ── UX overhaul Phase 1b — camera, grid/units, chips, hover tints, box select ──
     "${SRC_DIR}/radiant/kiwi_units.h"        # §17 display-units layer (inches) + modern grid spacing
     "${SRC_DIR}/radiant/kiwi_units.cpp"

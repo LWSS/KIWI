@@ -14,14 +14,9 @@
 #include "kiwi_camera.h"    // projection mode and world-per-pixel
 #include "radiant_registry.h"   // grid-snap preference
 #include "kiwi_vec.h"     // Dot3
+#include "kiwi_ported.h"
 
 #include <math.h>
-
-// Ported entry points, verified against their definitions.
-extern camera_s *Ed_Camera();          // camwnd.cpp:161
-extern void      CamWnd_BuildMatrix(); // camwnd.cpp:210 (0x403470)
-extern int       Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
-extern int       g_nUpdateBits;                        // 0x25D5A74 (mainfrm.cpp)
 
 namespace
 {

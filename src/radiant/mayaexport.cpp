@@ -6,6 +6,7 @@
 #include "stdafx.h"
 #include "winding.h"
 #include "prefs.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 
 // ─── editor geometry types (qe3.h) ──────────────────────────────────────────
 //   selbrush_t (56)  brush instance / selection list node     (def@0x14, faces@0x1C, patch@0x20)
@@ -18,9 +19,9 @@
 
 // ─── patch INSTANCE (IDB pPatch_t, 68 bytes) — only the fields Maya export reads ──
 //   off 0x00 mesh        patchMesh_t*  (its curveDef @ +0x5038 holds the tessellated verts)
-//   off 0x0C indexCount  int           (built by PMESH_24 = (cw-1)*(6*ch-6))
+//   off 0x0C indexCount  int           (built by Patch_Fill_BuildIndices = (cw-1)*(6*ch-6))
 //   off 0x10 indices     ushort* (forward tri index list, 3 per tri)
-// Verified against PMESH_24 (0x440213) which writes a1[3]=indexCount, a1[4]=indices.
+// Verified against Patch_Fill_BuildIndices (0x440213) which writes a1[3]=indexCount, a1[4]=indices.
 struct edPatchInst_t
 {
     patchMesh_t    *mesh;        // 0x00
@@ -38,28 +39,11 @@ static_assert(offsetof(edPatchInst_t, indices) == (sizeof(void *) == 8 ? 24 : 16
 // Shared native prefab_s is declared in qe3.h.
 
 // ─── externs (radiant target) ───────────────────────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-
-extern selbrush_t selected_brushes;                 // 0x23F1864 (display-list sentinel)
-extern float      world_orient_matrix[4][3];        // 0x6DE290  (identity world orientation)
-
 // brush.cpp
-extern char  FilterBrush( selbrush_t *b, int flag );
 extern void *PlanePts_Alloc( int count );
 extern void  Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );
-extern void  Face_MoveTexture( int surfDef, const float *normal, int outVecs,
-                               int uvBase, float rotate, float crossterm );
-extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );
-extern void  sub_46F6C0( MaterialDef *mtlDef, const face_t *faceDef, int visIdx, int *outData );  // packed face colour
-
-// draw.cpp
-extern void  OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );
-extern void  OrientationDirToWorldDir( float *out, const orientation_t *orient, const float *dir );
-
-// entity.cpp
-extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key );
-extern bool  HasKeyValuePair( entity_s_def *e, const char *key );
-extern void  Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
+extern texdef_sub_t *MaterialDef_FindTexdef( MaterialDef *mtlDef, int layerHandle );
+extern void  Face_GetLayerColor( MaterialDef *mtlDef, const face_t *faceDef, int visIdx, int *outData );  // packed face colour
 
 // ─── progress counters (IDB dword_240A0EC = "this pass" count; dword_240A0E8 = total) ──
 // Not file-local: ExportTo3D bumps s_mayaObjCount and its source file is brush.cpp (its
@@ -84,7 +68,7 @@ static int  Prefab_ExportToMaya( selbrush_t *b, orientation_t *parentOrient, FIL
 //       (lyrMtl ? (char*)lyrMtl : radMtl->name) — same idiom as FilterCond_Material.
 //    2. Walk g_qeglobals.d_filterGlobals.faceTexMap (std::map<string,int>) and return
 //       1 if ANY key is a SUBSTRING of the face name (strstr(name, key)).  This is
-//       the "filter faces by material" hide list, populated by RadiantFilters05/06_large.
+//       the "filter faces by material" hide list (Filter_Add/ReleaseFaceMaterialRefs).
 //    3. If g_PrefsDlg->draw_toggle is set, also run the MaterialDef realize probe
 //       (dword_181F51C=2 seed; MaterialDef_02(mtlDef, MaterialDef_06) ANDs each layer's
 //       game-flag low word) — a survivor means the "special draw" flag set, also filter.
@@ -94,15 +78,12 @@ static int  Prefab_ExportToMaya( selbrush_t *b, orientation_t *parentOrient, FIL
 //  the default/headless path.
 // ════════════════════════════════════════════════════════════════════════════
 extern bool FaceTexMap_HasSubstringOf( const char *materialName );        // filters.cpp
-extern void MaterialDef_02( MaterialDef *m, int (*cb)( qtexture_s * ) );   // 0x431520
 extern int  MaterialDef_06( qtexture_s *radMtl );                         // 0x4318A0
-extern int  dword_181F51C;                                               // realize-state seed
 
 // Non-static so the light-region submit (brush.cpp Brush_DrawSubmitFaceWindings)
 // can reach the binary's MtlDef_IsFaceFiltered (0x46FBE0) directly.
 char MtlDef_IsFaceFiltered( MaterialDef *mtlDef )
 {
-    extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );   // materialdef.cpp 0x431640
     // the binary inlines Materialdef_GetName here (MaterialDef.cpp:85 lives in it)
     const char *name = (const char *)Materialdef_GetName( mtlDef );
 

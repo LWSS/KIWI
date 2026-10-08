@@ -23,6 +23,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_patchfillet.h"        // KiwiFillet_CarryOnPlaneMove
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
 #include "kiwi_angles.h"             // double entity-angle composition
@@ -42,41 +43,14 @@
 #include <algorithm>    // std::find (SelectionMedian)
 
 // Ported entry points.
-extern int   Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp
-extern camera_s *Ed_Camera();                                          // camwnd.cpp
-extern void  CamWnd_BuildMatrix();                                     // camwnd.cpp 0x403470
-extern int   g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out, const char *key ); // entity.cpp:100
-extern void  SetKeyValue( entity_s_def *e, const char *key, const char *value );    // entity.cpp:213
-extern void  DeleteKey( epair_t **head, const char *key );                          // entity.cpp:177
-extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );      // entity.cpp:115
-extern entity_s *Brush_Move( const float *move, brush_t *def, char snap );          // brush.cpp 0x47BA40
 extern void  Select_GetTrueMid( float *center );                       // select.cpp 0x48FC20
-extern void  Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] );  // select.cpp 0x48FF40
 extern char  g_nScaleHow;                                              // drag.cpp 0x23F16DC (axis mask)
-extern void  Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
-                                                  float deg, char bSwap );          // select.cpp 0x48FD10
 
 extern int   Face_MakePlane( face_t *face );                           // brush.cpp 0x470470
-extern int   Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end ); // brush.cpp 0x471C30
-extern bool  g_kiwiExactVertexEnd;                                    // brush.cpp: skip its legacy-grid snap
-extern void  Patch_Rebuild( patchMesh_t *p, char doBounds );           // pmesh.cpp
-extern void  MarkMapModified();                                        // win_qe3.cpp 0x499BB0
-extern void  Brush_BuildWindings( brush_t *def, int bFull );           // brush.cpp 0x477AC0
-
-extern void  SetupVertexSelection();                                    // select.cpp 0x494bc0
-
-// Face selections need per-brush undo coverage beyond selected_brushes.
-extern void  Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  (0x45E680)
-extern void  Undo_AddEntity( entity_s *entity );                                 // undo.cpp:601  (0x45E8B0)
-// Push-through deletion uses the classic selection delete core.
-extern void  Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:633
-extern void  Select_Deselect( int bAlsoFreeFaces );                    // select.cpp:1444 (0x48E800)
-extern void  Select_Brush( selbrush_t *brush, char some_overwrite,
-                           char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void  Select_Delete();                                          // select.cpp:1520 (0x48E760)
-
-extern bool  ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
+extern int   Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end, bool exactEnd ); // brush.cpp 0x471C30
+extern bool  Brush_ExactCorner( const brush_t *b, float *p );          // brush.cpp (KIWI)
+extern void  Patch_SaveLayerMtl( patchMesh_t *p );                     // pmesh.cpp 0x44CFB0 (texCoord -> savedTexCoord)
+extern bool  Patch_TexFollow( const patchMesh_t *p, int col, int row, const float *delta, float outST[6] );   // pmesh.cpp
 
 namespace
 {
@@ -107,13 +81,6 @@ namespace
     const kiwiNumField_t KXF_MOVE  [1] = { { "length", KNUM_LENGTH, false } };
     const kiwiNumField_t KXF_ROTATE[1] = { { "angle",  KNUM_ANGLE,  false } };
     const kiwiNumField_t KXF_SCALE [1] = { { "factor", KNUM_FACTOR, false } };
-
-    inline bool PointNear( const float *a, const float *b, float tol )
-    {
-        float d[3];
-        Sub3( a, b, d );
-        return fabsf( d[0] ) <= tol && fabsf( d[1] ) <= tol && fabsf( d[2] ) <= tol;
-    }
 
     // Brush thickness along n, measured once from baseline windings.
     float FaceDepthAlong( const brush_t *def, const float n[3], const float basePts[9] )
@@ -2080,6 +2047,8 @@ namespace
                 u.def        = it.brush->def;
                 u.patchPoint = ( it.faceIndex < 0 );
                 u.col = u.row = 0;
+                if ( !u.patchPoint )
+                    Brush_ExactCorner( u.def, p );   // KIWI: the corner as authored, so `want` is exact
                 Copy3( p, u.basePos );
                 Copy3( p, u.curPos );
 
@@ -2097,6 +2066,7 @@ namespace
                     if ( dup )
                         continue;
                     AddBaseline( u.def );      // patch ctrl baseline IS restorable
+                    Patch_SaveLayerMtl( pm );  // the gesture-start S/T the texture follow reads
                 }
                 else
                 {
@@ -2210,16 +2180,44 @@ namespace
             if ( m_kind == SEL_FACE )
             {
                 // Face constraints re-aim the push: face normal when free, world axis when locked.
+                float dir[3];
+                Copy3( m_pushDir, dir );
                 if ( m_con == CON_AXIS )
                 {
-                    m_pushDir[0] = m_pushDir[1] = m_pushDir[2] = 0.0f;
-                    m_pushDir[m_axis] = 1.0f;
+                    dir[0] = dir[1] = dir[2] = 0.0f;
+                    dir[m_axis] = 1.0f;
                 }
                 else if ( !m_faces.empty() )
                 {
-                    Copy3( m_driveNormal, m_pushDir );      // back to the DRIVE face's normal
+                    Copy3( m_driveNormal, dir );            // back to the DRIVE face's normal
                     m_con = CON_FREE;             // plane locks are meaningless here
                 }
+                // KIWI: a constraint key alone must not move the face.  The push moves the drive
+                // face's plane by m_scalar * dot( dir, n ), so the new direction takes the scalar
+                // that keeps that offset; an axis within ~3 degrees of the face's plane cannot push
+                // it and is refused (the constraint the current direction came from comes back).
+                if ( !m_faces.empty() )
+                {
+                    const float oldDot = Dot3( m_pushDir, m_driveNormal );
+                    const float newDot = Dot3( dir, m_driveNormal );
+                    if ( m_con == CON_AXIS && fabsf( newDot ) < 0.05f )
+                    {
+                        Sys_Printf( "Move: the %c axis lies in the face's plane, so it cannot push "
+                                    "it - kept the previous direction.\n", "XYZ"[m_axis] );
+                        m_con = CON_FREE;
+                        if ( Dot3( m_pushDir, m_driveNormal ) < 0.999f )
+                            for ( int k = 0; k < 3; ++k )
+                                if ( fabsf( m_pushDir[k] ) > 0.999f )
+                                {
+                                    m_con  = CON_AXIS;
+                                    m_axis = k;
+                                }
+                        Copy3( m_pushDir, dir );
+                    }
+                    else if ( fabsf( newDot ) > 1.0e-6f )
+                        m_scalar = m_scalar * oldDot / newDot;
+                }
+                Copy3( dir, m_pushDir );
                 m_scalarBase = m_scalar;
             }
             else
@@ -2951,6 +2949,8 @@ namespace
             if ( !m_undoOpen && Len3( m_total ) <= KX_EPS )
                 return;
             OpenUndoForBrushes();
+            if ( !g_PrefsDlg->m_bTextureLock )
+                FollowPatchTextures();
 
             bool touchedPatch = false;
             bool touchedBrush = false;
@@ -2977,9 +2977,7 @@ namespace
                 Sub3( want, u.curPos, delta );
                 if ( Len3( delta ) <= KX_EPS )
                     continue;
-                g_kiwiExactVertexEnd = true;      // `want` is exact (typed / KIWI-snapped)
-                const int moved = Brush_MoveVertex( delta, u.def, u.curPos, end );
-                g_kiwiExactVertexEnd = false;
+                const int moved = Brush_MoveVertex( delta, u.def, u.curPos, end, true );   // `want` is exact
                 if ( moved )
                 {
                     Copy3( end, u.curPos );
@@ -3007,6 +3005,33 @@ namespace
                 g_nUpdateBits = -1;
 
             ValidateOnly();
+        }
+
+        // KIWI: texture lock OFF, a dragged patch control point keeps its texture in world space
+        // (Patch_TexFollow, the classic curve-point drag's re-solve).  Solved on the baseline
+        // geometry from the gesture-start S/T, so it is absolute like the move itself.
+        void FollowPatchTextures()
+        {
+            std::vector<float> st( m_verts.size() * 6 );
+            std::vector<char>  ok( m_verts.size(), 0 );
+            for ( size_t i = 0; i < m_verts.size(); ++i )
+            {
+                const vertUnit_t &u = m_verts[i];
+                patchMesh_t *pm = u.patchPoint ? u.def->patch : nullptr;
+                if ( pm && u.col < pm->width && u.row < pm->height )
+                    Copy3( u.basePos, pm->ctrl[u.col][u.row].xyz );
+            }
+            for ( size_t i = 0; i < m_verts.size(); ++i )
+            {
+                const vertUnit_t &u = m_verts[i];
+                patchMesh_t *pm = u.patchPoint ? u.def->patch : nullptr;
+                if ( pm && u.col < pm->width && u.row < pm->height )
+                    ok[i] = Patch_TexFollow( pm, u.col, u.row, m_total, &st[i * 6] );
+            }
+            for ( size_t i = 0; i < m_verts.size(); ++i )
+                if ( ok[i] )
+                    memcpy( &m_verts[i].def->patch->ctrl[m_verts[i].col][m_verts[i].row].texCoord,
+                            &st[i * 6], sizeof( float ) * 6 );
         }
 
         // Sub-element brushes are absent from selected_brushes; cover each touched
@@ -3234,7 +3259,7 @@ namespace
             float mins[3], maxs[3], ang[3], scale, origin[3];
             if ( !KiwiDrop_GetModelInfo( b, mins, maxs, ang, &scale, origin ) )
                 continue;
-            const float k = 3.14159265358979323846f / 180.0f;
+            const float k = (float)KIWI_PI / 180.0f;
             const float sp = sinf( ang[0] * k ), cp = cosf( ang[0] * k );
             const float sy = sinf( ang[1] * k ), cy = cosf( ang[1] * k );
             const float sr = sinf( ang[2] * k ), cr = cosf( ang[2] * k );
@@ -3794,7 +3819,7 @@ namespace
         // (negated degrees, right-hand rule: what Select_RotateAxis does for brushes).
         static void AxisMatrix( int axis, float degrees, float m[3][3] )
         {
-            const float rad = -degrees * 3.14159265358979323846f / 180.0f;
+            const float rad = -degrees * (float)KIWI_PI / 180.0f;
             const float c = cosf( rad ), sn = sinf( rad );
             const int i = ( axis + 1 ) % 3, j = ( axis + 2 ) % 3;
             for ( int a = 0; a < 3; ++a )
@@ -4095,7 +4120,7 @@ namespace
                 if ( !( m.scale > 0.0f ) )
                     m.scale = 1.0f;
                 // KIWI (2026-10-05): the live origin.  The "origin" epair is only rewritten
-                // at save / copy (map.cpp, entity.cpp), so after a move it lags - and a
+                // on copy (entity.cpp), so after a move it lags - and a
                 // model dropped since the last save has none, so S scaled it about 0,0,0.
                 Copy3( def->origin, m.origin );
                 m_models.push_back( m );
@@ -4516,7 +4541,6 @@ bool KiwiXform_CanScale()
 void KiwiXform_RegisterCommands()
 {
     // G/R/S bindings come from the modern profile, not these registry rows.
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiTransformMove",   0, 0, KIWI_CMD_MOVE );
     Radiant_RegisterCommand( "KiwiTransformRotate", 0, 0, KIWI_CMD_ROTATE );
     Radiant_RegisterCommand( "KiwiTransformScale",  0, 0, KIWI_CMD_SCALE );
@@ -4625,11 +4649,6 @@ bool KiwiXform_ActivePushDir( float *out3 )
     if ( !out3 || KiwiCmd_Active() != &s_move )
         return false;
     return s_move.PushDir( out3 );
-}
-
-bool KiwiXform_PivotOverride( float *out3 )
-{
-    return PivotActive( out3 );
 }
 
 // Draw candidate dots only while V places a pivot or a move handle is held;

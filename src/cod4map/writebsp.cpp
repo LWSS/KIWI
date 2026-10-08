@@ -6,22 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_EmitBrushes;
-char s_assertDisable_EmitBrushes;
-char s_assertDisable_EndBSPFile;
-char s_assertDisable_VerifyBSPBrushCount;
-char s_assertDisable_RemapBrushSidePlanes;
-char s_assertDisable_RemapBrushSidePlanes;
-char s_assertDisable_RemapBrushSidePlanes;
-char s_assertDisable_RemapNodePlanes;
-char s_assertDisable_RemapNodePlanes;
-char s_assertDisable_BeginModel;
-char s_assertDisable_EndModel;
-static char s_assertDisable_GetBrushModelIndex;
-static char s_assertDisable_GetPhysicsModelIndex;
-static char s_assertDisable_BeginPhysicsModel;
-static char s_assertDisable_EndPhysicsModel;
-
 /*
 ================
 BeginBSPFile
@@ -40,8 +24,7 @@ int BeginBSPFile(void)
   numBSPLeafSurfaces = 0;
   numBSPLeafBrushes = 0;
   numBSPLeafs = 1;
-  if ( TrisLmap_NativeRouteEnabled() )
-    numLightmaps = 0;
+  numLightmaps = 0;
   Tris_InitDrawSurfaceContexts();
   return 0;
 }
@@ -115,8 +98,6 @@ The material-capacity diagnostic expands those segments so that the actual
 source materials are visible in the report, matching the CoD4 compiler.
 ================
 */
-static char s_assertDisable_PrintMaterialNameExpansion;
-
 static void PrintMaterialNameExpansion(const char *mtlName)
 {
   const char *nameIter;
@@ -882,6 +863,34 @@ int EndPhysicsModel(void)
   return numBSPModels;
 }
 
+/* KIWI: each child node's box clamped into its parent's.  The portal clip that bounds a
+   child runs with ON_EPSILON after the parent's box was taken, so a ceil / floor could put
+   the child 1 unit outside; the game culls top down, so nothing out there was reachable.
+   Nodes are emitted preorder, so a parent is final before its children are clamped. */
+static void ClampNodeBoxes( int firstNode )
+{
+  int i, k, a;
+
+  for ( i = firstNode; i < numBSPNodes; i++ )
+  {
+    for ( k = 0; k < 2; k++ )
+    {
+      BspNode_disk_t *child;
+
+      if ( bspNodes[i].children[k] < 0 )
+        continue;
+      child = &bspNodes[bspNodes[i].children[k]];
+      for ( a = 0; a < 3; a++ )
+      {
+        if ( child->mins[a] < bspNodes[i].mins[a] )
+          child->mins[a] = bspNodes[i].mins[a];
+        if ( child->maxs[a] > bspNodes[i].maxs[a] )
+          child->maxs[a] = bspNodes[i].maxs[a];
+      }
+    }
+  }
+}
+
 /*
 ================
 EndModel
@@ -894,16 +903,18 @@ counts, leaf cluster reference, and brush counts.
 int EndModel(Node_t *headnode)
 {
   BspModel_t *mod;
-  int firstLeaf;
+  int firstLeaf, firstNode;
 
   Com_DPrintf("--- EndModel ---\n");
 
   EmitBrushes(0.0, g_entities[g_currentEntityIndex].brushes);
 
   firstLeaf = numBSPLeafs;
+  firstNode = numBSPNodes;
   mod = &bspModels[GetBrushModelIndex(g_currentEntityIndex)];
 
   EmitDrawNode_r(headnode);
+  ClampNodeBoxes(firstNode);
 
   Assert(numBSPTriSoups - mod->firstTriSoup <= USHRT_MAX, s_assertDisable_EndModel);
   mod->numTriSoups = (unsigned short)(numBSPTriSoups - mod->firstTriSoup);

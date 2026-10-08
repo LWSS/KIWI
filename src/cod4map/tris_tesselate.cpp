@@ -26,26 +26,6 @@ int g_tessClipEarTable[NUM_TESS_CLIP_EAR_PASSES * 2] = {
   0x00000001, 0x00000000,  /* command=1, tol=0.0f */
 };
 
-char s_assertDisable_SetupTriSide;
-char s_assertDisable_SetupTriSide;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateCheckEarValidity;
-char s_assertDisable_TesselateClipEar;
-char s_assertDisable_TesselateClipEar;
-char s_assertDisable_TesselateFixIntersections;
-char s_assertDisable_TesselateFixIntersections;
-char s_assertDisable_TesselateFixIntersections;
-char s_assertDisable_TesselateRemoveDegenerateEdges;
-char s_assertDisable_TesselateRemoveDegenerateEdges;
-char s_assertDisable_TesselateRemoveVertex;
-char s_assertDisable_TesselateWinding;
-char s_assertDisable_TesselateWinding;
-
-
 /*
 ================
 TessSplitPointCompare
@@ -58,7 +38,6 @@ typedef struct TessSplitPoint_s {
     int      edgeIdx;  /* [0]  edge index in winding */
     float    position; /* [4]  position along edge */
     int      vertIdx;  /* [8]  source vertex index */
-    intptr_t auxData;  /* [12] aux data pointer (freed after use) */
 } tessSplitPoint_t;
 
 int TessSplitPointCompare(tessSplitPoint_t *splitA, tessSplitPoint_t *splitB)
@@ -361,19 +340,17 @@ TesselateInsertVertices
 Inserts split vertices into winding at edge positions
 ================
 */
-char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w, Winding_t **wOrig, void **auxData, int auxElemSize )
+char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w, Winding_t **wOrig )
 {
   tessSplitPoint_t *splits = (tessSplitPoint_t *)splitPoints;
   Winding_t *srcW = *w;
   Winding_t *srcWOrig = wOrig ? *wOrig : NULL;
   Winding_t *newW, *newWOrig;
-  void *newAux;
   int numPts, src, dst, si, splitVert;
 
   Assert( w, s_assertDisable_TesselateCheckEarValidity );
   Assert( *w, s_assertDisable_TesselateCheckEarValidity );
   Assert( !wOrig || *wOrig, s_assertDisable_TesselateCheckEarValidity );
-  Assert( !auxElemSize || (auxData && *auxData), s_assertDisable_TesselateCheckEarValidity );
 
   g_totalSplits += numSplits;
   numPts = srcW->numpoints;
@@ -382,7 +359,6 @@ char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w,
 
   newW = AllocWinding( numSplits + numPts );
   newWOrig = srcWOrig ? AllocWinding( numSplits + numPts ) : NULL;
-  newAux = auxElemSize ? malloc( auxElemSize * (numSplits + numPts) ) : 0;
 
   /* walk source vertices, inserting split points at edge boundaries */
   dst = 0;
@@ -393,8 +369,6 @@ char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w,
     VectorCopy( srcW->points[src], newW->points[dst] );
     if ( srcWOrig )
       VectorCopy( srcWOrig->points[src], newWOrig->points[dst] );
-    if ( auxElemSize )
-      AuxDataCopy( auxElemSize, (char *)*auxData, src, 1, (char *)newAux, dst );
     dst++;
 
     /* insert any split points belonging to this edge */
@@ -407,12 +381,8 @@ char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w,
         VectorCopy( srcW->points[splitVert], newW->points[dst] );
         if ( srcWOrig )
           VectorCopy( srcWOrig->points[splitVert], newWOrig->points[dst] );
-        if ( auxElemSize )
-          AuxDataCopy( auxElemSize, (char *)splits[si].auxData, 0, 1, (char *)newAux, dst );
         dst++;
       }
-      if ( auxElemSize )
-        free( (void *)splits[si].auxData );
       si++;
     }
   }
@@ -423,13 +393,9 @@ char **TesselateInsertVertices( char *splitPoints, int numSplits, Winding_t **w,
   FreeWinding( srcW );
   if ( srcWOrig )
     FreeWinding( srcWOrig );
-  if ( auxElemSize )
-    free( *auxData );
   *w = newW;
   if ( wOrig )
     *wOrig = newWOrig;
-  if ( auxData )
-    *auxData = newAux;
   return (void *)wOrig;
 }
 
@@ -465,7 +431,7 @@ static float TesselateSplitCandidateNeighborDistance(const Winding_t *w,
   return fabsf(perpendicularDistance);
 }
 
-void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding_t **wOrigPtr, void **auxDataPtr, unsigned int auxElemSize )
+void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding_t **wOrigPtr )
 {
   Winding_t *w;
   float *pts;
@@ -526,23 +492,6 @@ void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding
       sp->edgeIdx = prev;
       sp->position = proj;
       sp->vertIdx = testIdx;
-      if ( auxElemSize )
-      {
-        char *auxBase;
-
-        Assert(auxDataPtr && *auxDataPtr, s_assertDisable_TesselateCheckEarValidity);
-        auxBase = (char *)*auxDataPtr;
-        sp->auxData = (intptr_t)malloc( auxElemSize );
-        g_lerpAuxDataCallback(
-            (float *)(auxBase + prev * auxElemSize),
-            (float *)(auxBase + edge * auxElemSize),
-            (double)projDist / (double)edgeLen,
-            (float *)sp->auxData);
-      }
-      else
-      {
-        sp->auxData = 0;
-      }
       numSplits++;
     }
 
@@ -550,7 +499,7 @@ void *TesselateFindSplitCandidates( float *surfNormal, Winding_t **wPtr, Winding
   }
 
   if ( numSplits )
-    return TesselateInsertVertices( splitBuf, (int)numSplits, wPtr, wOrigPtr, auxDataPtr, auxElemSize );
+    return TesselateInsertVertices( splitBuf, (int)numSplits, wPtr, wOrigPtr );
   return NULL;
 
   #undef TESS_PERP_THRESHOLD
@@ -564,7 +513,7 @@ TesselateRemoveDegenerateEdges
 Removes zero-length edges from winding
 ================
 */
-int TesselateRemoveDegenerateEdges( Winding_t *w, Winding_t *wOrig, char *auxData, int auxElemSize )
+int TesselateRemoveDegenerateEdges( Winding_t *w, Winding_t *wOrig )
 {
   int pp, prev, cur, n;
 
@@ -601,16 +550,12 @@ int TesselateRemoveDegenerateEdges( Winding_t *w, Winding_t *wOrig, char *auxDat
             memmove( w->points[pp], w->points[cur], sizeof(vec3_t) * (w->numpoints - pp) );
             if ( wOrig )
               memmove( wOrig->points[pp], wOrig->points[cur], sizeof(vec3_t) * (wOrig->numpoints - pp) );
-            if ( auxElemSize )
-              memmove( &auxData[auxElemSize * pp], &auxData[auxElemSize * (pp + 2)], auxElemSize * (w->numpoints - pp) );
           }
           else
           {
             memmove( w->points[0], w->points[2], sizeof(vec3_t) * w->numpoints );
             if ( wOrig )
               memmove( wOrig->points[0], wOrig->points[2], sizeof(vec3_t) * wOrig->numpoints );
-            if ( auxElemSize )
-              memmove( auxData, &auxData[2 * auxElemSize], auxElemSize * w->numpoints );
           }
         }
         break;  /* restart scan */
@@ -626,8 +571,7 @@ int TesselateRemoveDegenerateEdges( Winding_t *w, Winding_t *wOrig, char *auxDat
 
 /* Native 0x45AE40.  COD4 keeps the original-winding channel only in
    TRIS_TRANSIENT_MAIN (mode 1); the lightmap and merge modes preprocess the
-   surface winding alone.  KIWI's auxiliary payload is an integration
-   sidecar, so it follows the same insert/remove operations when present. */
+   surface winding alone. */
 int PreprocessLmapWinding( TriSurf_t *surf )
 {
   Winding_t **origWinding;
@@ -644,13 +588,9 @@ int PreprocessLmapWinding( TriSurf_t *surf )
     Assert(surf->origWinding, s_assertDisable_TesselateCheckEarValidity);
     origWinding = &surf->origWinding;
   }
-  TesselateFindSplitCandidates(surf->props->plane, &surf->winding, origWinding,
-                               surf->auxElemSize ? &surf->auxData : NULL,
-                               surf->auxElemSize);
+  TesselateFindSplitCandidates(surf->props->plane, &surf->winding, origWinding);
   return TesselateRemoveDegenerateEdges(surf->winding,
-                                        origWinding ? *origWinding : NULL,
-                                        (char *)surf->auxData,
-                                        surf->auxElemSize);
+                                        origWinding ? *origWinding : NULL);
 }
 
 /*
@@ -785,7 +725,7 @@ char TesselateFixIntersections( TriSurf_t *ts, int axisX, int axisY, float toler
   if ( !modified )
     return 0;
 
-  TesselateFindSplitCandidates( ts->props->plane, &ts->winding, &ts->origWinding, &ts->auxData, ts->auxElemSize );
+  TesselateFindSplitCandidates( ts->props->plane, &ts->winding, &ts->origWinding );
   return 1;
 }
 
@@ -816,10 +756,6 @@ int TesselateRemoveVertex( int vertIdx, TriSurf_t *ts )
   remaining = w->numpoints - idx;
   memmove( w->points[idx], w->points[idx + 1], sizeof(vec3_t) * remaining );
   memmove( wOrig->points[idx], wOrig->points[idx + 1], sizeof(vec3_t) * remaining );
-  if ( ts->auxElemSize )
-    memmove( (char *)ts->auxData + idx * ts->auxElemSize,
-             (char *)ts->auxData + (idx + 1) * ts->auxElemSize,
-             ts->auxElemSize * remaining );
 
   return w->numpoints;
 }
@@ -911,7 +847,7 @@ void TesselateClipEar( TriSurf_t *ts, int cellIndex, int cullGroupIndex, int axi
      && w->points[prevClip][1] == w->points[afterClip][1]
      && w->points[prevClip][2] == w->points[afterClip][2]) )
   {
-    TesselateRemoveDegenerateEdges( w, ts->origWinding, (char *)ts->auxData, ts->auxElemSize );
+    TesselateRemoveDegenerateEdges( w, ts->origWinding );
   }
 }
 
@@ -942,9 +878,9 @@ int TesselateWinding( TriSurf_t *ts, int cellIndex, int cullGroupIndex, void (*t
   }
 
   /* insert split points and remove degenerate edges */
-  TesselateFindSplitCandidates( ts->props->plane, &ts->winding, &ts->origWinding, &ts->auxData, ts->auxElemSize );
+  TesselateFindSplitCandidates( ts->props->plane, &ts->winding, &ts->origWinding );
   w = ts->winding;
-  TesselateRemoveDegenerateEdges( w, ts->origWinding, (char *)ts->auxData, ts->auxElemSize );
+  TesselateRemoveDegenerateEdges( w, ts->origWinding );
 
   if ( w->numpoints < 3 )
     return w->numpoints;
@@ -1128,13 +1064,12 @@ static int TrisLmap_TessFixIntersections(TrisLmapTessWork_t *work, TriSurfProps_
 
   orderedOrig = work->wOrig ? CopyWinding(work->wOrig) : NULL;
   TesselateFindSplitCandidates(props->plane, &ordered,
-                               orderedOrig ? &orderedOrig : NULL,
-                               NULL, 0);
+                               orderedOrig ? &orderedOrig : NULL);
   TrisLmap_TessFreeWork(work);
   work->w = ordered;
   work->wOrig = orderedOrig;
   work->ownsWinding = 1;
-  TesselateRemoveDegenerateEdges(ordered, orderedOrig, NULL, 0);
+  TesselateRemoveDegenerateEdges(ordered, orderedOrig);
   return 1;
 }
 

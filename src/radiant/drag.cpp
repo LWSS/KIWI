@@ -2,98 +2,72 @@
 #error this file is only for Radiant!
 #endif
 // cod3src\radiant\drag.cpp - the mouse press/drag/release state machine.
-// Ground truth: CoD4Radiant IDA (IW3xRadiant.i64); GtkRadiant 1.6 for naming only.
+// Ported from CoD4Radiant (IW3xRadiant.i64); GtkRadiant 1.6 for naming only.
 //   0x47e3a0  Drag_Setup       mouse-down setup (what a press starts)
 //   0x47e810  Drag_FaceAlign   copy the texture projection between two selected faces
 //   0x463a80  ClampGridSize    grid index -> rotation-snap step
 //   0x47e890  Drag_Begin       mouse-down dispatcher (select / drag / texture pick-apply)
-//   0x47f0c0  MoveSelection    translate / scale / rotate / bend / vertex / terrain
+//   0x47f0c0  MoveSelection    translate / scale / rotate / vertex / terrain
 //   0x47ff30  Drag_MouseMoved  pixel delta -> grid-snapped world move
 //   0x4802a0  Drag_MouseUp     marquee box-select + undo close
 // The screen->world drag basis (g_drag_xvec/yvec) is AXIALISED to UNIT vectors, so the
 // move is computed in PIXEL units and then grid-snapped; m_fScale is applied only in
-// rotate/bend.  BOTH xvec components must land in g_drag_xvec[] (0x23f1718..0x23f1720):
-// splitting the z into a separate local leaves AxializeVector reading an uninitialised
-// component.
+// rotate.  ALL THREE xvec components must land in g_drag_xvec[]: splitting the z into a
+// separate local leaves AxializeVector reading an uninitialised component.
 
 #include "stdafx.h"
 #include "qe3.h"
 #include "prefs.h"       // g_PrefsDlg (prefData_t* — real settings)
 #include "mainfrm.h"     // CMainFrame / CXYWnd (m_pActiveXY->m_fScale in rotate/bend path)
 #include "xywnd.h"       // xywndState_t / Ed_ActiveXY (U-GLOBALS)
+#include "kiwi_ported.h" // KIWI: shared engine/editor externs
 #include <math.h>
 #include <stdlib.h>
 
 // ─── forward declarations ─────────────────────────────────────────────────────
-// engine_stubs / qe3.cpp
-extern void    Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int     Sys_Printf( const char *fmt, ... );
-extern int     g_nUpdateBits;
-
 // undo.cpp
-extern void    Undo_ClearRedo();
-extern void    Undo_GeneralStart( const char *op );
-extern void    Undo_AddBrushList( selbrush_t *list );
 extern void    Undo_Start( const char *op );
-extern void    Undo_End();
-extern void    Undo_EndBrushList( selbrush_t *list );
 
 // select.cpp
-extern void    SelectFaceSth( float *a1, float *a2, int a3 );
-extern void    Select_Deselect( int bDeselectFaces );
+extern void    Select_ClickTrace( float *trace_dir, float *trace_start, int contents );
 
-// engine_stubs.cpp (stubs for Phase-5 functions)
-extern void    sub_43ECB0();           // addpoint mode cleanup (FATAL stub)
+// select.cpp
 extern void    SelectVertexByRay( float *origin, float *dir );
 extern void    SelectCurvePointByRay( float *origin, float *dir, unsigned int buttons );
 extern void    Select_Edge( float *dir, float *origin );
-// IDA a2 = (int)&brush->def->faces[idx] — face address as int, NOT a raw index.
+// facePtr is the face's address (&brush->def->faces[idx]), NOT a raw index.
 extern void Brush_SelectFaceForDragging( brush_t *def, face_t *facePtr, int shear );
 extern void    Brush_SideSelect( float *origin, brush_t *def, float *dir, int control );
-extern void    Patch_RedispersePreDrag();   // pmesh.cpp (0x43D7A0; was sub_43D7A0)
+extern void    Patch_RedispersePreDrag();   // pmesh.cpp (0x43D7A0)
 
-// pmesh.cpp / engine_stubs.cpp (Phase-5 patch stubs)
+// pmesh.cpp / engine_stubs.cpp
 extern void    Patch_TurnEdge( float *origin, float *dir );
-extern void    Patch_UpdateSelected( float *move );
+extern void    Patch_UpdateSelected( float *move, const float *total );
 extern int     Patch_DragScale( float *delta, void *patchDef, float *move );
-extern void    Patch_SelectBendNormal();
-extern void    Patch_SelectBendAxis();
-extern int     Patch_Paint_Start();
 extern int     OnlyPatchesSelected();
 
 // brush.cpp
-extern void    Brush_BuildWindings( brush_t *b, int bFull );
-extern void    SetupVertexSelection();
-extern void    MarkMapModified();
-extern int     Brush_MoveVertex( vec3_t delta, brush_t *brush, vec3_t move_points, vec3_t end );
-extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );  // 0x471640
-extern void    Brush_Free( selbrush_t *b );                                  // 0x475ba0
+extern int     Brush_MoveVertex( vec3_t delta, brush_t *brush, vec3_t move_points, vec3_t end, bool exactEnd );
 
 // select.cpp - selection movers used by MoveSelection
-extern void    Select_Move( const float *delta, char bSnap );
 extern void    Select_Scale( float sx, float sy, float sz );
-extern void    Select_RotateAxis( int axis, float deg, float (*rot_around)[4][3] );
 extern void    Select_ApplyMatrix( float *matrix, selbrush_t *b, int bSnap, float deg, char bSwap );
 
 // mainfrm / status
 extern void        MainFrm_SetStatusText( int pane, const char *text );
-// (g_pParentWnd extern retired — U-GLOBALS swept every use onto Ed_ActiveXY())
-extern void        CMainFrame_UpdatePatchToolbarButtons();// select.cpp (FATAL until P5)
-extern void sub_43E6F0( int buttons, float *origin, float *dir );
 
 // qcommon / com_math
 extern void    Com_PrintMessage( const char *fmt, ... );
-extern float   grid_sizes[];                              // 0x6dde5c
 
-// abs32 (IDA): integer absolute value.
+// abs32: integer absolute value.
 static inline int abs32( int x ) { return x < 0 ? -x : x; }
 
 // patch_t (the patch instance node; .def @0, .selected @6) is now the shared struct in
 // qe3.h — selbrush_t.patch is a patch_t*.
 
-// IDA renders the editor's "point-editing" select sub-modes (sel_editpoint=10 and
-// its sub-states 11..15, shown as sel_editpoint|sel_vertex etc.) as a contiguous
-// range [10,15]. None equal sel_brush(0), so the normal drag path is unaffected.
+// The editor's "point-editing" select sub-modes (sel_editpoint=10 and its sub-states
+// 11..15) form the contiguous range [10,15]. None equal sel_brush(0), so the normal drag
+// path is unaffected.
 static inline bool Drag_IsPointEditMode( int m ) { return m >= sel_editpoint && m <= 15; }
 
 // Test_Ray (select.cpp): casts a pick ray against the brush lists, filling an edTrace_t
@@ -103,78 +77,59 @@ extern void    Test_Ray( float *start, float *dir, int contents,
 
 // g_PrefsDlg (0x73c704) — the editor preference singleton (prefs.h declares it as
 // a real prefData_t*, non-NULL with the binary defaults from static-init onward).
-// Reads use named fields (the prior byte-offset PREFS_* macros + NULL guards are
-// retired: g_PrefsDlg is never NULL now).
 
 // g_nPatchClickedView (0x73b108)
-extern int  g_nPatchClickedView;   // defined in engine_stubs.cpp or pmesh.cpp
+extern int  g_nPatchClickedView;   // engine_stubs.cpp
 
-// ─── drag globals (IDB-verified addresses) ────────────────────────────────────
-// IDB address 0x23f16f8: pressdelta (3-float accumulated drag offset).
-// IDA names this g_someDragGlob in the decompile.
+// ─── drag globals ─────────────────────────────────────────────────────────────
+// pressdelta (3-float accumulated drag offset).
 float  g_pressdelta[3];          // 0x23f16f8
-// IDB 0x23f1718: press xvec (the axialised xaxis vector).
-float  g_drag_xvec[3];           // 0x23f1718  (IDA "pressx" — misleading, it's a float[3])
-// IDB 0x23f170c: press yvec (the axialised yaxis vector).
-float  g_drag_yvec[3];           // 0x23f170c  (IDA "flt_23F170C")
-// IDB 0x23f1708: integer press X pixel.
+// press xvec (the axialised xaxis vector).
+float  g_drag_xvec[3];           // 0x23f1718
+// press yvec (the axialised yaxis vector).
+float  g_drag_yvec[3];           // 0x23f170c
+// integer press X pixel.
 int    g_pressx_real;            // 0x23f1708
-// IDB 0x23f1704: integer press Y pixel.
+// integer press Y pixel.
 int    g_pressy_real;            // 0x23f1704
-// NOTE: IDB 0x23f1720 ("flt_23F1720", once mis-named g_drag_vPressStart_z) is NOT a
-// separate variable — it is g_drag_xvec[2] (0x23f1718 + 8). The real press-start
-// vector is g_vPressStart[] at 0x23f16ec (declared below). Drag_Setup writes the
-// xvec basis's z into g_drag_xvec[2] so AxializeVector(g_drag_xvec) sees all three
-// components (the prior port wrote a separate var, leaving xvec[2] uninitialised).
-// IDB 0x23f16e0: drag_first flag.
+// 0x23f1720 is NOT a separate variable — it is g_drag_xvec[2]. The real press-start
+// vector is g_vPressStart[] (declared below). Drag_Setup writes the xvec basis's z into
+// g_drag_xvec[2] so AxializeVector(g_drag_xvec) sees all three components.
+// drag_first flag.
 int    drag_first;               // 0x23f16e0
-// IDB 0x23f1724: drag_ok flag.
+// drag_ok flag.
 int    drag_ok;                  // 0x23f1724
 
-// IDB 0x23f16ec–0x23f16f4: vPressStart (3 floats, used in MoveSelection).
+// vPressStart (3 floats, used in MoveSelection).
 float  g_vPressStart[3];         // 0x23f16ec
 
-// IDB 0x23f16d9: g_bRotateMode (bool)
 bool   g_bRotateMode;            // 0x23f16d9
-// IDB 0x23f16da: g_bScaleMode (bool)
 bool   g_bScaleMode;             // 0x23f16da
-// IDB 0x23f16dc: g_nScaleHow (char, low 3 bits = X/Y/Z lock)
+// low 3 bits = X/Y/Z lock
 char   g_nScaleHow;              // 0x23f16dc
 
-// SCALE_X/Y/Z bit flags (IDA: g_nScaleHow & 1/2/4)
+// SCALE_X/Y/Z bit flags (g_nScaleHow & 1/2/4)
 #define SCALE_X  1
 #define SCALE_Y  2
 #define SCALE_Z  4
 
-// IDB 0x25d5b04: g_bPatchBendMode (int)
-extern int g_bPatchBendMode;     // 0x25d5b04  defined in pmesh.cpp or engine_stubs
-
-// IDB 0x23f164c: g_vRotation[3] (rotation accumulator for rotate mode)
+// rotation accumulator for rotate mode
 float  g_vRotation[3];           // 0x23f164c
-// IDB 0x23f1658: g_vRotateOrigin[3] (center of rotation)
+// center of rotation
 float  g_vRotateOrigin[3];       // 0x23f1658
-// IDB 0x231f548: g_vBendOrigin[3] (patch-bend origin; written by XY_MouseDown's
-// rotate/bend branch, read by the patch-bend MoveSelection path below).
-float  g_vBendOrigin[3];         // 0x231f548
 
-// IDB 0x23f16f8: selected_brushes_next is a pointer to the second element of
-// selected_brushes (the display list). This is just selected_brushes.next.
-// We DON'T redefine selected_brushes here (it's in engine_stubs.cpp).
-// The IDA global 'selected_brushes_next' at 0x23f1868 is the 'next' pointer
-// INSIDE the sentinel node. This is selected_brushes.next.
-// Access it as selected_brushes.next everywhere.
+// selected_brushes_next (0x23f1868) is the 'next' pointer INSIDE the selected_brushes
+// sentinel node: access it as selected_brushes.next everywhere.  selected_brushes itself
+// is defined in engine_stubs.cpp.
 
 // Helper to get the face index of a faceVis_s* within a selbrush_t's face array.
-// IDA: (face - &brush->faces[0]) / sizeof(faceVis_s)  (the decompile renders the byte
-// distance over a refCount-typed base; b->faces is the faceVis_s[] array).
 static inline int drag_face_index( selbrush_t *b, faceVis_s *face )
 {
     return (int)( face - b->faces );          // typed pointer subtraction = element index
 }
 
-// ─── AxializeVector (IDB 0x47e2a0, 105 bytes) ────────────────────────────────
-// Collapses a vector to its dominant axis unit vector (same as GtkRadiant).
-// __usercall: a1@<ecx> (the vector to normalize in-place).
+// ─── 0x47e2a0  AxializeVector ────────────────────────────────────────────────
+// Collapses a vector in place to its dominant axis unit vector (same as GtkRadiant).
 // The binary's >=-negation tie-breaking picks the same axis as the strict-> chain here.
 static void AxializeVector( float *v )
 {
@@ -201,36 +156,17 @@ static void AxializeVector( float *v )
     v[i] = ( o < 0.0f ) ? -1.0f : 1.0f;
 }
 
-// ─── 0x47e3a0  Drag_Setup (1134 bytes) ───────────────────────────────────────
-// KISAK (safer, kept per directive): the port adds `if(hitBrush)` null-guards in the
-// buttons 9/0xD face paths, where the binary derefs v19.hit.brush unconditionally - a latent
-// null-deref reachable via alt-edge-drag with no ray hit.
+// ─── 0x47e3a0  Drag_Setup ────────────────────────────────────────────────────
 // Initialises a drag operation given the current mouse position and selection state.
 // Called by Drag_Begin when MK_LBUTTON is pressed (non-area-select path).
-//
-// IDA __usercall params (normalised to cdecl):
-//   trace_dir   (ecx) = 3D ray direction
-//   trace_start (edx) = 3D ray origin
-//   origin      (eax) = vPressStart / origin vector (3 floats, a3 in IDA)
-//   x, y           = pixel coords of press
-//   buttons        = MK_ button flags
-//   a7             = xyvec (yvec in XY coords)
-//
-// We normalise to: Drag_Setup(origin, trace_start, trace_dir, x, y, buttons, xyvec)
-// matching the Drag_Begin callsite:
-//   Drag_Setup(trace_dir, trace_start, y, a3, x, buttons, a6)  [IDA 0x47eade]
-// Callers pass:
-//   trace_dir  -> 1st  (orig ecx)
-//   trace_start-> 2nd  (orig edx)
-//   y          -> 3rd  (orig eax, the origin/press-start float[3])
-//   a3         -> 4th  (original x int)
-//   x          -> 5th  (original y int)
-//   buttons    -> 6th
-//   a6         -> 7th  (xyvec)
-// So the prototype visible to Drag_Begin is identical to Drag_Begin's call.
-//
-// Here we expose it as the engine calls it: with the three register args
-// collapsed into explicit pointer params.
+//   trace_dir, trace_start = the pick ray
+//   press_origin           = the view's screen-X world basis (Drag_Begin's xvec)
+//   x, y                   = pixel coords of press
+//   buttons                = MK_ button flags
+//   xyvec                  = the view's screen-Y world basis (Drag_Begin's yvec)
+// The port adds `if(hitBrush)` null-guards in the buttons 9/0xD face paths, where the
+// binary derefs the hit brush unconditionally - a latent null-deref reachable via
+// alt-edge-drag with no ray hit.
 void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
                  int x, int y, unsigned int buttons, float *xyvec )
 {
@@ -241,20 +177,20 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
     g_pressdelta[1] = 0.0f;
     g_pressdelta[2] = 0.0f;
 
-    // Store the screen X-axis world basis (IDA "pressx" @ 0x23f1718 — really the xvec).
+    // Store the screen X-axis world basis.
     // All three components go into g_drag_xvec so AxializeVector below sees them.
-    g_drag_xvec[0] = press_origin[0];  // IDA: pressx[0] = *a3
-    g_drag_xvec[1] = press_origin[1];  // IDA: pressx[1]/"pressy" = a3[1]
-    g_drag_xvec[2] = press_origin[2];  // IDA: flt_23F1720 (== xvec[2]) = a3[2]
+    g_drag_xvec[0] = press_origin[0];
+    g_drag_xvec[1] = press_origin[1];
+    g_drag_xvec[2] = press_origin[2];
 
-    g_pressx_real = x;                // IDA: pressx_real = x
+    g_pressx_real = x;
     drag_first    = 1;
     g_pressy_real = y;
 
-    // Axialise the xvec (IDA: sub_47E2A0((int)pressx))
+    // Axialise the xvec
     AxializeVector( g_drag_xvec );
 
-    // Copy and axialise the yvec (IDA: sub_47E2A0((int)flt_23F170C))
+    // Copy and axialise the yvec
     g_drag_yvec[0] = xyvec[0];
     g_drag_yvec[1] = xyvec[1];
     g_drag_yvec[2] = xyvec[2];
@@ -273,7 +209,7 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
             if ( g_qeglobals.d_num_move_points || g_qeglobals.d_select_mode == sel_area )
             {
                 drag_ok = 1;
-                // Store selection rect (IDA: drag_selectionbox_x_1/x_2/y_1/y_2)
+                // Store selection rect
                 g_qeglobals.drag_selectionbox_x_1 = x;
                 g_qeglobals.drag_selectionbox_x_2 = y;
                 g_qeglobals.drag_selectionbox_y_1 = x;
@@ -284,7 +220,7 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
         Undo_ClearRedo();
         Undo_GeneralStart( "drag curve point" );
         Undo_AddBrushList( &selected_brushes );
-        Patch_RedispersePreDrag();   // snapshot live texCoords → savedTexCoord (PMESH_56)
+        Patch_RedispersePreDrag();   // snapshot live texCoords → savedTexCoord (Patch_SaveLayerMtl)
         return;
     }
 
@@ -300,16 +236,13 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
     g_qeglobals.d_numterrapoints  = 0;
 
     // ── area select mode (sel_areatall equivalent) ────────────────────────────
-    // IDA: if g_nPatchClickedView != 1 && !g_bRotateMode && !g_bScaleMode && buttons == 5
-    //      with an additional check for Alt key or buttons == 6.
-    //      The combined condition triggers sel_areatall with the selectionbox coords.
-    if ( g_nPatchClickedView != 1 && !g_bRotateMode && !g_bScaleMode && buttons == 5 )
+    // Alt with LMB+Shift (5, gated on the 2D view and no rotate/scale mode) or
+    // RMB+Shift (6) starts a marquee box select.  Each path reads the Alt key once.
+    const bool boxGate   = g_nPatchClickedView != 1 && !g_bRotateMode && !g_bScaleMode;
+    const bool boxSelect = ( ( buttons == 5 && boxGate ) || buttons == 6 )
+                           ? GetAsyncKeyState( VK_MENU ) < 0 : false;
+    if ( boxSelect )
     {
-        if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 )
-        {
-            goto LABEL_15;
-        }
-    LABEL_19:
         // 0x47e57b: d_select_mode = (buttons & 2 | MK_CONTROL | MK_MBUTTON) >> 1, i.e.
         // (buttons & 2) ? 0x1A>>1 = 13 (box DESELECT) : 0x18>>1 = 12 (box ADD).
         g_qeglobals.d_select_mode = (select_t)(( (buttons & 2) | (MK_CONTROL | MK_MBUTTON) ) >> 1);
@@ -322,13 +255,6 @@ void Drag_Setup( float *trace_dir, float *trace_start, float *press_origin,
         return;
     }
 
-    // Additional check: buttons == 6 && Alt down → LABEL_19
-    if ( buttons == 6 && GetAsyncKeyState( VK_MENU ) < 0 )
-    {
-        goto LABEL_19;
-    }
-
-LABEL_15:
     // ── no selection? start a 'create brush' undo and return ─────────────────
     if ( selected_brushes.next == &selected_brushes )
     {
@@ -347,7 +273,6 @@ LABEL_15:
         {
             drag_ok = 1;
             Undo_Start( "drag vertex" );
-            // LABEL_41:
             Undo_AddBrushList( &selected_brushes );
             return;
         }
@@ -388,7 +313,6 @@ LABEL_15:
                 iassert( t.hit.brush->version == t.hit.brush->def->version );   // drag.cpp:203
                 iassert( t.hit.face >= &t.hit.brush->faces[0] && t.hit.face < &t.hit.brush->faces[t.hit.brush->faceCount] );   // drag.cpp:204
                 int fIdx = drag_face_index( hitBrush, hitFace );
-                // IDA: arg2 = (int)&brush->def->faces[fIdx]
                 Brush_SelectFaceForDragging( hitBrush->def,
                     &hitBrush->def->faces[fIdx], 1 );
             }
@@ -398,12 +322,8 @@ LABEL_15:
             // Sticky drag: select all faces on the hit brush
             if ( hitBrush && hitBrush->faceCount )
             {
-                for ( int v17 = 0; (unsigned)v17 < (unsigned)hitBrush->faceCount; v17++ )
-                {
-                    // IDA: arg2 = (int)&brush->def->faces[v17]
-                    Brush_SelectFaceForDragging( hitBrush->def,
-                        &hitBrush->def->faces[v17], 0 );
-                }
+                for ( int f = 0; (unsigned)f < (unsigned)hitBrush->faceCount; f++ )
+                    Brush_SelectFaceForDragging( hitBrush->def, &hitBrush->def->faces[f], 0 );
             }
         }
         return;
@@ -415,9 +335,7 @@ LABEL_15:
         return;  // no side-hit in vertex/edge mode
     }
 
-    // IDA: check if single vs multiple selected brushes.
-    // IDA shows (selbrush_t **)selected_brushes_next->next — the cast is a
-    // decompiler artifact; this is just a selbrush_t* comparison.
+    // single vs multiple selected brushes
     if ( selected_brushes.next->next == &selected_brushes )
     {
         // Single brush selected
@@ -433,17 +351,15 @@ LABEL_15:
     else
     {
         // Multiple brushes selected — iterate
-        for ( selbrush_t *v10 = selected_brushes.next;
-              v10 != &selected_brushes;
-              v10 = v10->next )
+        for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
         {
             if ( buttons & MK_CONTROL )
             {
-                Brush_SideSelect( trace_start, v10->def, trace_dir, 1 );
+                Brush_SideSelect( trace_start, sb->def, trace_dir, 1 );
             }
             else
             {
-                Brush_SideSelect( trace_start, v10->def, trace_dir, 0 );
+                Brush_SideSelect( trace_start, sb->def, trace_dir, 0 );
             }
         }
     }
@@ -453,24 +369,17 @@ LABEL_15:
     Undo_AddBrushList( &selected_brushes );
 }
 
-// ─── 0x47e810  Drag_FaceAlign (115 bytes, was sub_47E810) ────────────────────
+// ─── 0x47e810  Drag_FaceAlign ────────────────────────────────────────────────
 // Aligns the texture of the second selected face to the first selected face.
-// Called from Drag_Begin when exactly 2 faces are selected and the middle-button
-// with Alt is released (IDA line 270 assert).
-//
-// IDA: Assert(count == 2), then:
-//   sub_476A30(&g_SelectedFaces.GetAt( 0 ).brush->def->faces[g_SelectedFaces.GetAt( 0 ).index],
-//              g_SelectedFaces.GetAt( 1 ).brush->def,
-//              &g_SelectedFaces.GetAt( 1 ).brush->def->faces[g_SelectedFaces.GetAt( 1 ).index])
-// sub_476A30 = Brush_ApplyTextureProjection (brush.cpp, 0x476a30).
+// Called from Drag_Begin when exactly 2 faces are selected after an Alt + texture-button
+// press.
 //
 // NOTE: g_SelectedFaces lives in select.cpp (model in qe3.h).
 
-// Forward: Brush_ApplyTextureProjection (brush.cpp 0x476a30)
-// IDA a1=srcFace, a2=dstBrushDef (brush_t*), a3=dstFace — brush is the middle arg.
+// brush.cpp 0x476a30; the destination brush def is the middle arg.
 extern brush_t *Brush_ApplyTextureProjection( face_t *srcFace, brush_t *b, face_t *dstFace );
 
-// count != 2 -> Assert 270; count < 2 -> unknown_libname_291 (CRT range-check abort,
+// count != 2 -> Assert 270; count < 2 -> SelectedFaces_BoundsAbort (CRT range-check abort,
 // noreturn).  The port's explicit `return` after the abort is harmless; the binary falls
 // through into dead code.
 void Drag_FaceAlign()
@@ -480,16 +389,11 @@ void Drag_FaceAlign()
 
     if ( count < 2 )
     {
-        // IDA: unknown_libname_291() — CRT bounds-check abort
-        extern void unknown_libname_291();
-        unknown_libname_291();
+        SelectedFaces_BoundsAbort();
         return;
     }
 
     // Apply the texture projection from g_SelectedFaces.GetAt( 0 ) to g_SelectedFaces.GetAt( 1 )
-    // IDA: sub_476A30(&g_SelectedFaces.GetAt( 0 ).brush->def->faces[g_SelectedFaces.GetAt( 0 ).index],
-    //                  g_SelectedFaces.GetAt( 1 ).brush->def,            ← a2 = brush_t*
-    //                  &g_SelectedFaces.GetAt( 1 ).brush->def->faces[g_SelectedFaces.GetAt( 1 ).index])
     Brush_ApplyTextureProjection(
         &g_SelectedFaces.GetAt( 0 ).brush->def->faces[ g_SelectedFaces.GetAt( 0 ).index ],
              g_SelectedFaces.GetAt( 1 ).brush->def,
@@ -498,8 +402,8 @@ void Drag_FaceAlign()
 }
 
 // ─── 0x463a80  ClampGridSize ─────────────────────────────────────────────────
-// The angle/grid snap table (IDA name is misleading — it maps the grid index to a
-// rotation-snap step). Used by Drag_MouseMoved / MoveSelection in rotate/bend mode.
+// The angle/grid snap table (the name is misleading — it maps the grid index to a
+// rotation-snap step). Used by Drag_MouseMoved / MoveSelection in rotate mode.
 // 0/1->1, 2->2, 3->5, 4->15, 5->30, 6/7->45, default->90.
 extern "C" int ClampGridSize();
 int ClampGridSize()
@@ -518,55 +422,42 @@ int ClampGridSize()
 
 // ─── 0x47e890  Drag_Begin (the mouse-down dispatcher) ─────────────────────────
 // Decides, from the button/modifier combination and the select mode, what a press starts:
-// a group/face select (SelectFaceSth), a brush drag (Drag_Setup), an alt-terrain-paint, or
-// a texture pick/apply.  Contents-flag prefs: entities_off 0x200 / models 0x400 / sky 0x800
+// a group/face select (Select_ClickTrace), a brush drag (Drag_Setup), or a texture
+// pick/apply.  Contents-flag prefs: entities_off 0x200 / models 0x400 / sky 0x800
 // / viewz 2 -> 0x1000, 0 -> 4.  The middle/right-button tail has five sub-branches by
 // nMouseButton + modifier bits (pick / apply-brush / apply-face / "set face but leave
-// info" / face-align).  KISAK: the brush-apply branches route to sub_476ED0, a benign
-// no-op until the per-brush texture-projection helpers are ported.
+// info" / face-align).  The brush-apply branches route to Brush_SetAllFacesMaterial.
 //
-// Clean cdecl signature (the IDA is __usercall with eax/edx/ecx args — see
-// CXYWnd::XY_MouseDown 0x467850 for the call). Params:
-//   pressFunc   = press/snap callback ptr (IDA a1 → g_qeglobals.camera_fov_setup)
+// See CXYWnd::XY_MouseDown (0x467850) for the call. Params:
+//   pressFunc   = press/snap callback ptr (stored in g_qeglobals.camera_fov_setup)
 //   buttons     = MK_ button flags
-//   viewz       = view depth-axis selector (XY view passes 0)  [IDA ecx0]
+//   viewz       = view depth-axis selector (XY view passes 0)
 //   px, py      = press pixel coords
 //   xvec, yvec  = the view's screen-X / screen-Y world basis (1/scale magnitude)
 //   trace_start, trace_dir = the picking ray
 //
-extern int  sub_401D50();                       // "is terrain-paint mode" gate (stub: 0)
-extern int  CurvEditDlg_OnSomeSetting();        // CurvEditDlg (P5 dialog) — FATAL stub
 extern int  g_nPatchClickedView;                // 0x73b108
 
 // --- middle/right-button texture pick/apply tail deps ---
 // (Test_Ray + g_SelectedFaces + Drag_FaceAlign already declared above.)
 extern void UpdatePatchInspector();                                   // patchdialog.cpp 0x436db0
-namespace SurfaceInspector { void UpdateSurfaceDialog(); }            // 0x458590 (engine_stubs no-op)
+namespace SurfaceInspector { void UpdateSurfaceDialog(); }            // 0x458590 (surfacedlg.cpp)
 // brush.cpp ports used by the apply branches:
 //   Brush_SetFaceTexdefSize == Face_SetMaterial (0x476740): write {lyrMtl,radMtl} into face->mtldef[layer]
 extern void Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f, brush_t *b ); // 0x476740
-extern void sub_4766F0( brush_t *def, const face_t *srcFace );        // brush.cpp 0x4766f0 (propagate face texdef)
-// per-BRUSH apply (set every face to the current material) — documented benign NO-OP stub
-// (the faithful body needs the unported per-brush texture-projection helpers; engine_stubs.cpp).
-extern void sub_476ED0( brush_t *def, MaterialDef *srcTexBlock, char a3, float a4, char a5 ); // 0x476ed0 (real port in brush.cpp)
+extern void Brush_PropagateFaceTexdef( brush_t *def, const face_t *srcFace );   // brush.cpp 0x4766f0
+// per-BRUSH apply (set every face to the current material; patch: Patch_ApplyMaterial projection)
+extern void Brush_SetAllFacesMaterial( brush_t *def, MaterialDef *material, char planarProject,
+                                       float useStoredST, char materialOnly );   // brush.cpp 0x476ed0
 // texture-pick deps:
 //   Texture_SetTexture (0x45be50, texwnd.cpp): writes the picked MaterialDef into
 //       random_texture_stuff[layer], realizes it, applies it (Brush_SetTexture) and
 //       scrolls the browser to it.
-//   sub_45D320 (0x45d320): &mtldef->mat_texDef + LayerMat::GetCurrentLayer (below).
-//   sub_44B620 (0x44b620, brush.cpp Ed_Patch_GetTexdef): patch-texdef extraction
-//       (inline-FPU).  Always returns 0 (the binary has no success path); the texdef
-//       WRITE is the observable.
-namespace LayerMat { int GetCurrentLayer( MaterialDef *md ); }   // materialdef.cpp 0x431b30
-extern char Texture_SetTexture( const int *a1, MaterialDef *a2 ); // texwnd.cpp 0x45be50
+//   Face_CurrentTexdef (0x45d320, select.cpp): the material's current-layer texdef.
+//   Radiant_PatchGetTexdef (0x44b620, brush.cpp): patch-texdef extraction.  Always returns
+//       0 (the binary has no success path); the texdef WRITE is the observable.
+extern char Texture_SetTexture( const int *patchGrid, MaterialDef *material ); // texwnd.cpp 0x45be50
 extern char Radiant_PatchGetTexdef( patchMesh_t *patch, texdef_sub_t *texdef ); // brush.cpp 0x44b620
-
-// sub_45D320 (0x45d320): return &md->mat_texDef + GetCurrentLayer(md).  texdef_sub_t is the
-// per-layer texdef element; the IDB adds the LayerMat current-layer index to the texdef ptr.
-static texdef_sub_t *sub_45D320( MaterialDef *md )
-{
-    return &md->mat_texDef + LayerMat::GetCurrentLayer( md );
-}
 
 void Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
                  int px, int py, float *xvec, float *yvec,
@@ -590,108 +481,78 @@ void Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
 
     const select_t mode = g_qeglobals.d_select_mode;
 
-    if ( buttons == ( MK_LBUTTON | MK_SHIFT ) )            // 3 = select group
+    // The binary's goto web, kept (labels named): shift_alt = Shift+Alt click,
+    // ctrl_click = a click without Alt, click_trace = the click pick, button_drag = the
+    // plain button drag, start_drag = Drag_Setup.
+    if ( buttons == ( MK_LBUTTON | MK_SHIFT ) )            // 5 = select group
     {
         if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 )
-            goto LABEL_29;
-        goto LABEL_18;
+            goto ctrl_click;
+        goto shift_alt;
     }
     if ( buttons == ( MK_RBUTTON | MK_SHIFT ) )            // 6
     {
         if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 )
-            goto LABEL_34;
-    LABEL_18:
+            goto button_drag;
+    shift_alt:
         if ( mode != sel_curvepoint )
         {
             if ( g_nPatchClickedView == 1 )
             {
-            LABEL_33:
-                SelectFaceSth( trace_dir, trace_start, contents );
+            click_trace:
+                Select_ClickTrace( trace_dir, trace_start, contents );
                 return;
             }
-            goto LABEL_20;
+            goto start_drag;
         }
     }
     if ( buttons == 13 )                                  // LMB|SHIFT|CTRL
     {
         if ( GetAsyncKeyState( VK_MENU ) < 0 && mode != sel_curvepoint )
         {
-            SelectFaceSth( trace_dir, trace_start, contents | 0x40 );
+            Select_ClickTrace( trace_dir, trace_start, contents | 0x40 );
             return;
         }
         if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 && mode != sel_curvepoint )
         {
-            SelectFaceSth( trace_dir, trace_start, 520 );
+            Select_ClickTrace( trace_dir, trace_start, 520 );
             return;
         }
-        goto LABEL_34;
+        goto button_drag;
     }
-    if ( buttons != 5 )                                   // LMB|CTRL
-        goto LABEL_34;
-LABEL_29:
+    if ( buttons != 5 )                                   // LMB|SHIFT
+        goto button_drag;
+ctrl_click:
     if ( ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) == 0 && mode != sel_curvepoint )
     {
         if ( g_PrefsDlg->enable_light_preview )   // light/sun preview pick (default 1)
             contents |= 0x4000;
-        goto LABEL_33;
+        goto click_trace;
     }
-LABEL_34:
-    // Alt + LMB/RMB terrain-paint start. Now reachable — sub_401D50() reads the ImGui
-    // AdvPatch mode/channel store (was a 0-stub). DIAG: report which sub-condition gates
-    // the stroke, so a "terrain paint does nothing" can be pinned to alt/buttons/mode/
-    // sub_401D50/selection/Patch_Paint_Start. Remove once terrain paint is verified.
-    {
-        extern void Radiant_FL_Log( const char *fmt, ... );   // mainfrm.cpp
-        const bool altD = GetAsyncKeyState( VK_MENU ) < 0;
-        if ( altD && ( buttons == 1 || buttons == 2 ) )
-            Radiant_FL_Log( "PAINTGATE alt=%d btn=%u mode=%d d50=%d onlyPatch=%d",
-                            (int)altD, buttons, (int)mode, sub_401D50(), OnlyPatchesSelected() );
-    }
-    if ( GetAsyncKeyState( VK_MENU ) < 0
-         && ( buttons == 1 || buttons == 2 )
-         && ( mode == sel_brush || mode == sel_addpoint )
-         && sub_401D50() )
-    {
-        if ( OnlyPatchesSelected()
-             || ( selected_brushes.next == &selected_brushes && CurvEditDlg_OnSomeSetting() ) )
-        {
-            if ( Patch_Paint_Start() )
-            {
-                extern void Radiant_FL_Log( const char *fmt, ... );
-                Radiant_FL_Log( "PAINTGATE -> entered sel_addpoint (stroke armed)" );
-                bool wasCycle = ( g_qeglobals.d_select_mode == sel_cycle_edge_direction_quad );
-                g_qeglobals.d_select_mode = sel_addpoint;
-                if ( wasCycle )
-                    CMainFrame_UpdatePatchToolbarButtons();
-                drag_ok = 1;
-            }
-        }
-        return;
-    }
-
+button_drag:
+    // KIWI: the binary's Alt + LMB/RMB terrain-paint start sat here (AdvPatchEditDlg);
+    // Terrain Sculpt replaced it and the paint path is gone.
     if ( ( buttons & MK_LBUTTON ) != 0 )
     {
-    LABEL_20:
-        // press_origin = xvec, xyvec = yvec (see Drag_Setup's IDA mapping).
+    start_drag:
+        // press_origin = xvec, xyvec = yvec (see Drag_Setup's params).
         Drag_Setup( trace_dir, trace_start, xvec, px, py, buttons, yvec );
         return;
     }
 
     // ── middle/right-button texture pick / apply / face-align ────────────────
-    // FAITHFUL vs IDA 0x47eb00..0x47f0b8.  nMouseButton selects the texture-edit
-    // button (16 for 3-button mice, 2 for 2-button).  Five sub-branches by modifier
-    // bits; the texture-PICK branch (branch 1) needs the unported texture-window
-    // subsystem (Texture_SetTexture 0x45be50 + the patch-texdef inline-FPU sub_44B620)
-    // so it FATALs precisely there.  All other branches are real ports (brush/face
-    // apply via sub_476ED0 [benign no-op] / Face_SetMaterial / sub_4766F0; face-align
-    // via the ported Drag_FaceAlign).  Not reachable from a plain left-click drag.
+    // nMouseButton selects the texture-edit button (16 for 3-button mice, 2 for
+    // 2-button).  Five sub-branches by modifier bits: texture pick (Texture_SetTexture /
+    // Radiant_PatchGetTexdef), brush / face apply (Brush_SetAllFacesMaterial /
+    // Face_SetMaterial / Brush_PropagateFaceTexdef) and face-align (Drag_FaceAlign).
+    // Not reachable from a plain left-click drag.
     const int nMouseButton = ( g_PrefsDlg->m_nMouseButtons != MK_RBUTTON ) ? 16 : 2;
     const bool altDown = ( GetAsyncKeyState( VK_MENU ) & 0x8000 ) != 0;
     const int layer = g_qeglobals.current_edit_layer;
 
     edTrace_t t;
 
-    // ── BRANCH 1: nMouseButton, no Alt → pick the hit face's texture (0x47eb00) ──
+    // ── BRANCH 1: nMouseButton, no Alt → pick the hit face's texture ──
     if ( buttons == (unsigned)nMouseButton && !altDown )
     {
         Test_Ray( trace_start, trace_dir, 512, &t, 1 );
@@ -703,10 +564,10 @@ LABEL_34:
         selbrush_t *brush = t.hit.brush;
         brush_t    *def   = brush->def;
         // Remember the hit brush's vertical extent (bottom/top) as the new-brush template.
-        g_qeglobals.d_new_brush_bottom_x = def->mins[0];   // def+0x20
+        g_qeglobals.d_new_brush_bottom_x = def->mins[0];
         g_qeglobals.d_new_brush_bottom_y = def->mins[1];
         g_qeglobals.d_new_brush_bottom_z = def->mins[2];
-        g_qeglobals.d_new_brush_top_x = def->maxs[0];      // def+0x2C
+        g_qeglobals.d_new_brush_top_x = def->maxs[0];
         g_qeglobals.d_new_brush_top_y = def->maxs[1];
         g_qeglobals.d_new_brush_top_z = def->maxs[2];
 
@@ -717,21 +578,20 @@ LABEL_34:
         face_t *face = &def->faces[ faceIdx ];
         if ( brush->patch )
         {
-            texdef_sub_t *td = sub_45D320( &face->mtldef[ layer ] );
-            Radiant_PatchGetTexdef( def->patch, td );   // 0x44b620 (return discarded — see brush.cpp)
+            texdef_sub_t *td = Face_CurrentTexdef( &face->mtldef[ layer ] );
+            Radiant_PatchGetTexdef( def->patch, td );   // return discarded — see brush.cpp
         }
         // patch-consistency assert
         patch_t *pinst = brush->patch;
-        // Verbatim condition (drag.cpp:422). Short-circuit keeps it deref-safe for both
+        // drag.cpp:422. The short-circuit keeps it deref-safe for both
         // consistent states (plain brush: first clause true; patch brush: patch != NULL);
         // the inconsistent patch==NULL && def->patch!=NULL state derefs NULL exactly as
         // the original source would have.
         iassert( (t.hit.brush->patch == NULL && t.hit.brush->def->patch == NULL) || (t.hit.brush->patch->def == t.hit.brush->def->patch) );
-        // a1 = the patch-vertex projection block (patch_t def) for a patch pick, else 0.
-        // The brush-FACE pick (non-patch, the common case) passes 0 → no projection copy,
-        // and is now fully functional.  The PATCH pick reaches sub_44B620 (FATAL) above first.
+        // The patch def (its ST grid) for a patch pick, else 0: a brush-face pick copies no
+        // projection.
         const int *patchDef = pinst ? (const int *)pinst->def : nullptr;
-        Texture_SetTexture( patchDef, &face->mtldef[ layer ] );   // NOW PORTED (texwnd.cpp 0x45be50)
+        Texture_SetTexture( patchDef, &face->mtldef[ layer ] );
         SurfaceInspector::UpdateSurfaceDialog();
         UpdatePatchInspector();
         return;
@@ -746,16 +606,14 @@ LABEL_34:
             Sys_Printf( "Didn't hit a brush\n" );
             return;
         }
-        // IDA reads eclass via owner->def (entity_s_def), NOT owner->eclass directly
-        // (the instance-vs-def pattern): [owner+8]=def, [def+0x60]=eclass, [eclass+8]=fixedsize.
+        // eclass is read via owner->def (entity_s_def), NOT owner->eclass directly
+        // (the instance-vs-def pattern).
         if ( ( (entity_s_def *)t.hit.brush->owner->def )->eclass->fixedsize )
         {
             Sys_Printf( "Can't change an entity texture\n" );
             return;
         }
-        // sub_476ED0 = per-brush apply (benign no-op stub until the per-brush
-        // texture-projection helpers are ported).
-        sub_476ED0( t.hit.brush->def, (MaterialDef *)&g_qeglobals.random_texture_stuff[ layer ], 1, 1.0f, 0 );
+        Brush_SetAllFacesMaterial( t.hit.brush->def, (MaterialDef *)&g_qeglobals.random_texture_stuff[ layer ], 1, 1.0f, 0 );
         g_nUpdateBits = -1;
         return;
     }
@@ -776,9 +634,9 @@ LABEL_34:
             return;
         }
         brush_t *def = brush->def;
-        if ( brush->patch )   // IDA: cmp [ebx+20h],0 — patch INSTANCE present ⇒ whole-brush apply
+        if ( brush->patch )   // patch INSTANCE present ⇒ whole-brush apply
         {
-            sub_476ED0( def, (MaterialDef *)&g_qeglobals.random_texture_stuff[ layer ], 1, 0.0f, 0 );
+            Brush_SetAllFacesMaterial( def, (MaterialDef *)&g_qeglobals.random_texture_stuff[ layer ], 1, 0.0f, 0 );
             g_nUpdateBits = -1;
             return;
         }
@@ -789,14 +647,10 @@ LABEL_34:
         // copy the whole current-layer MaterialDef (36 bytes) onto the picked face.
         memcpy( &face->mtldef[ layer ], &g_qeglobals.random_texture_stuff[ layer ].mtl, sizeof(MaterialDef) );
         if ( def->patch )
-            sub_4766F0( def, face );          // propagate to all faces (patch case)
+            Brush_PropagateFaceTexdef( def, face );   // propagate to all faces (patch case)
         else
             ++def->version;
-        Brush_BuildWindings( def, 1 );
-        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-            SetupVertexSelection();
-        MarkMapModified();
-        ++def->version;
+        Brush_RebuildAfterEdit( def );
         g_nUpdateBits = -1;
         return;
     }
@@ -820,12 +674,12 @@ LABEL_34:
         brush_t *def = brush->def;
         if ( brush->patch )   // patch instance present ⇒ write the patch's texture/lightmap/smoothing pair
         {
-            patchMesh_t *pd = brush->patch->def;          // [esi+20h] then [eax]
-            patchMesh_material *slot = (&pd->texture) + layer;   // 0x18 + 8*layer
+            patchMesh_t *pd = brush->patch->def;
+            patchMesh_material *slot = (&pd->texture) + layer;
             slot->lyrMtl = g_qeglobals.random_texture_stuff[ layer ].mtl.lyrMtl;
             slot->radMtl = g_qeglobals.random_texture_stuff[ layer ].mtl.radMtl;
-            ++pd->version;                                 // patch+0x5040
-            UpdatePatchInspector();                        // if (CWnd_PatchDialog.m_hWnd) GetPatchInfo()
+            ++pd->version;
+            UpdatePatchInspector();                        // refreshes the patch dialog if open
             g_nUpdateBits = -1;
             return;
         }
@@ -847,79 +701,113 @@ LABEL_34:
         int n = g_SelectedFaces.GetSize();
         if ( n > 1 )
             g_SelectedFaces.RemoveAt( 0, n - 1 );   // keep only the last selected face
-        SelectFaceSth( trace_dir, trace_start, 520 );
+        Select_ClickTrace( trace_dir, trace_start, 520 );
         if ( g_SelectedFaces.GetSize() == 2 )
-            Drag_FaceAlign();                   // ported; internally parks on texturevecs_02
+            Drag_FaceAlign();                   // decomposes with texturevecs_02_exact
         return;
     }
 }
 
-// ─── 0x4a5930  ProjectPointOntoRay (IDB-misnamed "Vec3Normalize") ─────────────
-// Ported verbatim from IDA 0x4a5930.  NOT a normalize: projects `point` onto the
-// ray (origin, dir) and writes the foot of the perpendicular into `out`.
+// ─── 0x4a5930  ProjectPointOntoRay (misnamed "Vec3Normalize" in the binary) ──
+// NOT a normalize: projects `point` onto the ray (origin, dir) and writes the foot of
+// the perpendicular into `out`.
 //   v = point - origin;  t = dot(dir, v);  out = origin + dir*t
 // `dir` must be unit length (the binary asserts Vec3IsNormalized at com_math.cpp:1357).
-// Register map (verified at the MoveSelection call site 0x47f714: ebx=out, edi=origin,
-// esi=dir, push &point): out@<ebx>, origin@<edi>, dir@<esi>, point@arg.
 static void Drag_ProjectPointOntoRay( float *out, const float *origin,
                                       const float *dir, const float *point )
 {
-    // KEEP_VERBOSE (also Drag_RayPointDistSq below): local copy of a CoD3 com_math fn
-    // kisak's engine doesn't carry — the com_math.cpp:1357/1344 strings stay verbatim.
-    if ( !Vec3IsNormalized( dir ) )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\universal\\com_math.cpp",
-                1357, 0, "%s", "Vec3IsNormalized( dir )" );
+    iassert( Vec3IsNormalized( dir ) );
 
-    float v6 = point[0] - origin[0];
-    float v7 = point[1] - origin[1];
-    float v8 = point[2] - origin[2];
-    float v9 = dir[0] * v6 + dir[1] * v7 + dir[2] * v8;
-    out[0] = dir[0] * v9 + origin[0];
-    out[1] = dir[1] * v9 + origin[1];
-    out[2] = v9 * dir[2] + origin[2];
+    float dx = point[0] - origin[0];
+    float dy = point[1] - origin[1];
+    float dz = point[2] - origin[2];
+    float t  = dir[0] * dx + dir[1] * dy + dir[2] * dz;
+    out[0] = dir[0] * t + origin[0];
+    out[1] = dir[1] * t + origin[1];
+    out[2] = t * dir[2] + origin[2];
 }
 
 // ─── 0x4a5860  RayPointDistSq (terrain distance² helper) ──────────────────────
-// Ported verbatim from IDA 0x4a5860.  Returns the squared perpendicular distance of
-// `point` from the ray (origin, dir).  `dir` must be unit length (the binary asserts
-// Vec3IsNormalized at com_math.cpp:1344).
+// Returns the squared perpendicular distance of `point` from the ray (origin, dir).
+// `dir` must be unit length (the binary asserts Vec3IsNormalized at com_math.cpp:1344).
 //   d = point - origin;  proj = dot(dir, d);  perp = d - dir*proj;  return |perp|²
-// Register map (verified at 0x47f7fd: ebx=point, edi=origin, esi=dir): point@<ebx>,
-// origin@<edi>, dir@<esi>.  (Hex-rays prints the math with proj negated then re-added;
-// transcribed in that exact order to preserve float32 rounding.)
+// The math negates proj then re-adds it, in that exact order, to preserve float32 rounding.
 static float Drag_RayPointDistSq( const float *point, const float *origin,
                                   const float *dir )
 {
-    if ( !Vec3IsNormalized( dir ) )
-        Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\universal\\com_math.cpp",
-                1344, 0, "%s", "Vec3IsNormalized( dir )" );
+    iassert( Vec3IsNormalized( dir ) );
 
-    float v5 = point[0] - origin[0];
-    float v7 = point[1] - origin[1];
-    float v9 = point[2] - origin[2];
-    float v11 = dir[2] * v9 + dir[0] * v5 + dir[1] * v7;
-    float v12 = -v11;
-    float v6 = v5 + dir[0] * v12;
-    float v8 = v7 + dir[1] * v12;
-    float v10 = v12 * dir[2] + v9;
-    return v10 * v10 + v8 * v8 + v6 * v6;
+    float dx      = point[0] - origin[0];
+    float dy      = point[1] - origin[1];
+    float dz      = point[2] - origin[2];
+    float proj    = dir[2] * dz + dir[0] * dx + dir[1] * dy;
+    float negProj = -proj;
+    float px      = dx + dir[0] * negProj;
+    float py      = dy + dir[1] * negProj;
+    float pz      = negProj * dir[2] + dz;
+    return pz * pz + py * py + px * px;
 }
 
 // ─── 0x47f0c0  MoveSelection (apply a world-space move to the selection) ──────
 // Called by Drag_MouseMoved with the snapped world delta.  Dispatches by mode:
-//   rotate/bend (LABEL_119) - grid-snap (move/grid * ClampGridSize) + sub-unit 0.1, axis and
+//   rotate - grid-snap (move/grid * ClampGridSize) + sub-unit 0.1, axis and
 //     angle from m_pActiveXY->m_nViewType, g_vRotation accumulate + status text, then the
-//     free-rotate (Select_RotateAxis -> Select_ApplyMatrix per selected brush) and the
-//     patch-bend (Patch_SelectBendNormal @2*angle, Patch_SelectBendAxis @angle) sub-branches.
-//     The patch-bend check runs BEFORE the scale dispatch (IDA order).
+//     free-rotate (Select_RotateAxis -> Select_ApplyMatrix per selected brush).  (KIWI: the
+//     binary's patch-bend sub-branches went with bend mode.)
 //   scale - axis locks from scale-how; factor move[1]<0 -> 0.9 / >0 -> 1.1
 //   translate - move-points add, per-brush BuildWindings + the maxs<=mins / >262144 validity
 //     test + Patch_DragScale; a blocked move is undone
 //   sel_curvepoint (Patch_UpdateSelected) / sel_vertex (Brush_MoveVertex accumulate)
 //   terrain points - the sculpt path (d_terrapoints), see below
-// Asserts 711/800/747/748.  KISAK: the status text goes to the decoupled
+// Asserts drag.cpp:711/800/747/748.  The status text goes to the decoupled
 // MainFrm_SetStatusText (the binary uses get_m_strStatus + UpdateStatusText).
-void MoveSelection( float *origin, float *dir, float *move )
+
+// KIWI: the per-brush check both MoveSelection drags open-coded (point drag, terrain-point
+// drag).  Rebuild every selected brush after its points moved; return the first that went
+// degenerate (max <= min, or > 262144, on an axis) or whose patch refused the scale
+// (Patch_DragScale) - nullptr when every brush took the move.
+static selbrush_t *Selection_RebuildCheckMove( float *move )
+{
+    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+    {
+        brush_t *def = b->def;
+        float preExt[3] = { def->maxs[0] - def->mins[0],
+                            def->maxs[1] - def->mins[1],
+                            def->maxs[2] - def->mins[2] };
+        Brush_RebuildAfterEdit( def );
+
+        int okAxes = 0;
+        for ( ; okAxes < 3; ++okAxes )
+        {
+            if ( def->maxs[okAxes] <= def->mins[okAxes] ) break;
+            if ( def->maxs[okAxes] - def->mins[okAxes] > 262144.0f ) break;
+        }
+        if ( okAxes != 3 )
+            return b;
+
+        if ( b->patch )
+        {
+            float center[3] = {
+                ( def->maxs[0] - def->mins[0] ) - preExt[0],
+                ( def->maxs[1] - def->mins[1] ) - preExt[1],
+                ( def->maxs[2] - def->mins[2] ) - preExt[2] };
+            iassert( b->def->patch == b->patch->def );   // drag.cpp:800
+            if ( !Patch_DragScale( center, b->patch->def, move ) )
+                return b;
+        }
+    }
+    return nullptr;
+}
+
+// The undo half: rebuild every selected brush after the move was taken back.
+static void Selection_RebuildAll()
+{
+    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+        Brush_RebuildAfterEdit( b->def );
+}
+
+// `total` is the move since the press (the binary's fourth argument; Nudge passes its step).
+void MoveSelection( float *origin, float *dir, float *move, float *total )
 {
     char statusBuf[160];
 
@@ -936,15 +824,10 @@ void MoveSelection( float *origin, float *dir, float *move )
         if ( how & SCALE_Y ) move[1] = 0.0f;
         if ( how & SCALE_Z ) move[2] = 0.0f;
 
-        // IDA 0x47f1a8 checks patch-bend BEFORE scale: if ::g_bPatchBendMode is set the binary
-        // jumps to the rotate/bend path (LABEL_119) regardless of scale mode. (Both modes are off
-        // by default + mutually exclusive in practice, but match the binary's check order.)
-        if ( g_bPatchBendMode )
-            goto ROTATE_OR_BEND;
-
+        // (IDA 0x47f1a8 checked patch-bend here, before scale - KIWI: bend mode is gone.)
         if ( g_bScaleMode )
         {
-            // IDA: factor from sign of move[1] (v12==0 vs v13==move[1]); 0.9/1.1/1.0.
+            // factor from the sign of move[1]: 0.9/1.1/1.0.
             float f = 1.0f;
             if      ( move[1] < 0.0f ) f = 0.89999998f;
             else if ( move[1] > 0.0f ) f = 1.1f;
@@ -969,10 +852,10 @@ void MoveSelection( float *origin, float *dir, float *move )
     }
 
     {
-        char v73 = 0;
+        char pointDrag = 0;   // move points (or sel_area) are being dragged
         if ( g_qeglobals.d_num_move_points == 0 && g_qeglobals.d_select_mode != sel_area )
             goto ON_BRUSH_MOVE;
-        v73 = 1;
+        pointDrag = 1;
 
         if ( g_qeglobals.d_select_mode == sel_area )
         {
@@ -981,7 +864,7 @@ void MoveSelection( float *origin, float *dir, float *move )
         }
         if ( g_qeglobals.d_select_mode == sel_curvepoint )
         {
-            Patch_UpdateSelected( move );
+            Patch_UpdateSelected( move, total );
             return;
         }
         if ( g_qeglobals.d_select_mode != sel_vertex )
@@ -996,87 +879,38 @@ void MoveSelection( float *origin, float *dir, float *move )
                 mp->xyz[0] += move[0]; mp->xyz[1] += move[1]; mp->xyz[2] += move[2];
             }
 
-            selbrush_t *blocked = nullptr;
-            selbrush_t *b = selected_brushes.next;
-            if ( b != &selected_brushes )
+            if ( Selection_RebuildCheckMove( move ) )
             {
-                for ( ; b != &selected_brushes; b = b->next )
+                Com_PrintMessage( "MoveSelection: Attempted drag or nudge blocked because "
+                                  "it would invalidate or destroy a brush.\n" );
+                // Undo the move-point translation and rebuild.
+                for ( int jj = 0; jj < g_qeglobals.d_num_move_points; ++jj )
                 {
-                    brush_t *def = b->def;
-                    float preExt[3] = { def->maxs[0] - def->mins[0],
-                                        def->maxs[1] - def->mins[1],
-                                        def->maxs[2] - def->mins[2] };
-                    Brush_BuildWindings( def, 1 );
-                    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                        SetupVertexSelection();
-                    MarkMapModified();
-                    ++def->version;
-
-                    int okAxes = 0;
-                    for ( ; okAxes < 3; ++okAxes )
-                    {
-                        if ( def->maxs[okAxes] <= def->mins[okAxes] ) break;
-                        if ( def->maxs[okAxes] - def->mins[okAxes] > 262144.0f ) break;
-                    }
-                    if ( okAxes != 3 ) { blocked = b; break; }
-
-                    if ( b->patch )
-                    {
-                        float center[3] = {
-                            ( def->maxs[0] - def->mins[0] ) - preExt[0],
-                            ( def->maxs[1] - def->mins[1] ) - preExt[1],
-                            ( def->maxs[2] - def->mins[2] ) - preExt[2] };
-                        iassert(b->def->patch == b->patch->def);
-                        if ( !Patch_DragScale( center, b->patch->def, move ) )
-                        { blocked = b; break; }
-                    }
+                    drawVert_t *mp = g_qeglobals.d_move_points[jj];
+                    mp->xyz[0] -= move[0]; mp->xyz[1] -= move[1]; mp->xyz[2] -= move[2];
                 }
-
-                if ( blocked )
-                {
-                    Com_PrintMessage( "MoveSelection: Attempted drag or nudge blocked because "
-                                      "it would invalidate or destroy a brush.\n" );
-                    // Undo the move-point translation and rebuild.
-                    for ( int jj = 0; jj < g_qeglobals.d_num_move_points; ++jj )
-                    {
-                        drawVert_t *mp = g_qeglobals.d_move_points[jj];
-                        mp->xyz[0] -= move[0]; mp->xyz[1] -= move[1]; mp->xyz[2] -= move[2];
-                    }
-                    for ( selbrush_t *kk = selected_brushes.next; kk != &selected_brushes; kk = kk->next )
-                    {
-                        Brush_BuildWindings( kk->def, 1 );
-                        if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                            SetupVertexSelection();
-                        MarkMapModified();
-                        ++kk->def->version;
-                    }
-                }
+                Selection_RebuildAll();
             }
-            }  // end nested scope (blocked/b/ii)
+            }  // end nested scope (ii)
 
         ON_BRUSH_MOVE:
             if ( g_qeglobals.d_numterrapoints )
             {
-                // --- terrain-point drag (sculpt), IDA 0x47f646..0x47fbc3 ---
+                // --- terrain-point drag (sculpt) ---
                 // d_terrapoints[] are the side-face planept vec3's collected by
-                // Brush_SideSelect (numberId==2 brush).  Each d_terrapoints[i] is a terrainVert_t*
-                // read as a contiguous vec3: ->height(x) / ->scale(y) / [1].height(z).
+                // Brush_SideSelect (numberId==2 brush).
                 // d_select_translate_unk = the dragged plane's normal (set by Brush_SideSelect).
                 // Algorithm: centroid of the cluster → project onto the click ray → find the
                 // nearest cluster point → scale the WHOLE cluster about the centroid by the
                 // dragged radius ratio (capped at 5×); rebuild the selected brushes; if any
                 // brush goes degenerate, undo the scale (×1/ratio) and rebuild.
                 float centroid[3] = { 0.0f, 0.0f, 0.0f };
-                int v36 = 0;
-                if ( g_qeglobals.d_numterrapoints > 0 )
+                for ( int i = 0; i < g_qeglobals.d_numterrapoints; ++i )
                 {
-                    do
-                    {
-                        terrainVert_t *v37 = g_qeglobals.d_terrapoints[v36++];
-                        centroid[0] = v37->height    + centroid[0];
-                        centroid[1] = v37->scale     + centroid[1];
-                        centroid[2] = v37[1].height  + centroid[2];
-                    } while ( v36 < g_qeglobals.d_numterrapoints );
+                    const float *p = g_qeglobals.d_terrapoints[i];
+                    centroid[0] = p[0] + centroid[0];
+                    centroid[1] = p[1] + centroid[1];
+                    centroid[2] = p[2] + centroid[2];
                 }
                 float inv = 1.0f / (double)g_qeglobals.d_numterrapoints;
                 centroid[0] = inv * centroid[0];
@@ -1093,31 +927,31 @@ void MoveSelection( float *origin, float *dir, float *move )
                 // find the cluster point nearest the projected point.
                 int best = 0;
                 {
-                    terrainVert_t *t0 = g_qeglobals.d_terrapoints[0];
-                    float d0[3] = { t0->height - end[0], t0->scale - end[1], t0[1].height - end[2] };
+                    const float *p0 = g_qeglobals.d_terrapoints[0];
+                    float d0[3] = { p0[0] - end[0], p0[1] - end[1], p0[2] - end[2] };
                     float bestDist = d0[2] * d0[2] + d0[0] * d0[0] + d0[1] * d0[1];
-                    for ( int v38 = 0; v38 < g_qeglobals.d_numterrapoints; ++v38 )
+                    for ( int i = 0; i < g_qeglobals.d_numterrapoints; ++i )
                     {
-                        terrainVert_t *v39 = g_qeglobals.d_terrapoints[v38];
-                        float dd[3] = { v39->height - end[0], v39->scale - end[1], v39[1].height - end[2] };
+                        const float *p = g_qeglobals.d_terrapoints[i];
+                        float dd[3] = { p[0] - end[0], p[1] - end[1], p[2] - end[2] };
                         float dist = dd[2] * dd[2] + dd[0] * dd[0] + dd[1] * dd[1];
                         if ( bestDist > dist )
                         {
                             bestDist = dist;
-                            best = v38;
+                            best = i;
                         }
                     }
                 }
 
                 // current radius of the nearest point from the ray (origin=centroid, dir=normal).
                 float startRadius = (float)sqrt(
-                    Drag_RayPointDistSq( (const float *)g_qeglobals.d_terrapoints[best],
+                    Drag_RayPointDistSq( g_qeglobals.d_terrapoints[best],
                                          centroid, g_qeglobals.d_select_translate_unk ) );
                 if ( startRadius > 0.0f )
                 {
                     // radius after applying the drag `move` to the nearest point.
-                    terrainVert_t *vb = g_qeglobals.d_terrapoints[best];
-                    float moved[3] = { vb->height + move[0], vb->scale + move[1], vb[1].height + move[2] };
+                    const float *pb = g_qeglobals.d_terrapoints[best];
+                    float moved[3] = { pb[0] + move[0], pb[1] + move[1], pb[2] + move[2] };
                     float endRadius = (float)sqrt(
                         Drag_RayPointDistSq( moved, centroid, g_qeglobals.d_select_translate_unk ) );
                     float ratio = ( endRadius - startRadius ) / startRadius + 1.0f;
@@ -1127,103 +961,46 @@ void MoveSelection( float *origin, float *dir, float *move )
                             ratio = 5.0f;
 
                         // scale the whole cluster about the centroid by `ratio`.
-                        for ( int v43 = 0; v43 < g_qeglobals.d_numterrapoints; ++v43 )
+                        for ( int i = 0; i < g_qeglobals.d_numterrapoints; ++i )
                         {
-                            terrainVert_t *v46 = g_qeglobals.d_terrapoints[v43];
-                            float p[3] = { v46->height   - centroid[0],
-                                           v46->scale    - centroid[1],
-                                           v46[1].height - centroid[2] };
+                            float *pt = g_qeglobals.d_terrapoints[i];
+                            float p[3] = { pt[0] - centroid[0],
+                                           pt[1] - centroid[1],
+                                           pt[2] - centroid[2] };
                             p[0] = p[0] * ratio;
                             p[1] = p[1] * ratio;
                             p[2] = p[2] * ratio;
-                            v46->height   = p[0] + centroid[0];
-                            v46->scale    = p[1] + centroid[1];
-                            v46[1].height = p[2] + centroid[2];
+                            pt[0] = p[0] + centroid[0];
+                            pt[1] = p[1] + centroid[1];
+                            pt[2] = p[2] + centroid[2];
                         }
 
-                        // rebuild the selected brushes; bail to undo if any goes degenerate.
-                        selbrush_t *v47 = selected_brushes.next;
-                        if ( v47 != &selected_brushes )
+                        // rebuild the selected brushes; undo the scale if any went degenerate.
+                        if ( Selection_RebuildCheckMove( move ) )
                         {
-                            while ( 1 )
+                            Com_PrintMessage( "MoveSelection: Attempted drag or nudge blocked because "
+                                              "it would invalidate or destroy a brush.\n" );
+                            // undo: scale the cluster back about the centroid by 1/ratio.
+                            float invRatio = 1.0f / ratio;
+                            for ( int i = 0; i < g_qeglobals.d_numterrapoints; ++i )
                             {
-                                brush_t *v48 = v47->def;
-                                float pre[3] = { v48->maxs[0] - v48->mins[0],
-                                                 v48->maxs[1] - v48->mins[1],
-                                                 v48->maxs[2] - v48->mins[2] };
-                                Brush_BuildWindings( v48, 1 );
-                                if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                                    SetupVertexSelection();
-                                MarkMapModified();
-                                ++v48->version;
-
-                                brush_t *v49 = v47->def;
-                                int v50 = 0;
-                                for ( ; v50 < 3; ++v50 )
-                                {
-                                    if ( v49->maxs[v50] <= (double)v49->mins[v50] )
-                                        break;
-                                    if ( v49->maxs[v50] - v49->mins[v50] > 262144.0 )
-                                        break;
-                                }
-                                if ( v50 != 3 )
-                                    break;
-
-                                patch_t *v52 = v47->patch;
-                                if ( v52 )
-                                {
-                                    float center[3] = {
-                                        ( v49->maxs[0] - v49->mins[0] ) - pre[0],
-                                        ( v49->maxs[1] - v49->mins[1] ) - pre[1],
-                                        ( v49->maxs[2] - v49->mins[2] ) - pre[2] };
-                                    iassert( v49->patch == v52->def );  // drag.cpp:800
-                                    if ( !Patch_DragScale( center, v47->patch->def, move ) )
-                                    {
-                                        v47 = nullptr;
-                                        break;
-                                    }
-                                }
-                                v47 = v47->next;
-                                if ( v47 == &selected_brushes )
-                                    goto LABEL_148;
+                                float *pt = g_qeglobals.d_terrapoints[i];
+                                float p[3] = { pt[0] - centroid[0],
+                                               pt[1] - centroid[1],
+                                               pt[2] - centroid[2] };
+                                p[0] = p[0] * invRatio;
+                                p[1] = p[1] * invRatio;
+                                p[2] = p[2] * invRatio;
+                                pt[0] = p[0] + centroid[0];
+                                pt[1] = p[1] + centroid[1];
+                                pt[2] = p[2] + centroid[2];
                             }
-
-                            if ( v47 != &selected_brushes )
-                            {
-                                Com_PrintMessage( "MoveSelection: Attempted drag or nudge blocked because "
-                                                  "it would invalidate or destroy a brush.\n" );
-                                // undo: scale the cluster back about the centroid by 1/ratio.
-                                float invRatio = 1.0f / ratio;
-                                for ( int v53 = 0; v53 < g_qeglobals.d_numterrapoints; ++v53 )
-                                {
-                                    terrainVert_t *v58 = g_qeglobals.d_terrapoints[v53];
-                                    float p[3] = { v58->height   - centroid[0],
-                                                   v58->scale    - centroid[1],
-                                                   v58[1].height - centroid[2] };
-                                    p[0] = p[0] * invRatio;
-                                    p[1] = p[1] * invRatio;
-                                    p[2] = p[2] * invRatio;
-                                    v58->height   = p[0] + centroid[0];
-                                    v58->scale    = p[1] + centroid[1];
-                                    v58[1].height = p[2] + centroid[2];
-                                }
-                                for ( selbrush_t *i1 = selected_brushes.next; i1 != &selected_brushes; i1 = i1->next )
-                                {
-                                    brush_t *v60 = i1->def;
-                                    Brush_BuildWindings( v60, 1 );
-                                    if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
-                                        SetupVertexSelection();
-                                    MarkMapModified();
-                                    ++v60->version;
-                                }
-                            }
+                            Selection_RebuildAll();
                         }
                     }
                 }
-            LABEL_148:
-                ;
             }
-            else if ( !v73 )
+            else if ( !pointDrag )
             {
                 Select_Move( move, 0 );      // ← the brush-drag demo path
             }
@@ -1234,9 +1011,9 @@ void MoveSelection( float *origin, float *dir, float *move )
         {
             float end[3] = { 0, 0, 0 };
             int allOk = 1;
-            for ( selbrush_t *v21 = selected_brushes.next; v21 != &selected_brushes; v21 = v21->next )
-                allOk &= Brush_MoveVertex( move, v21->def,
-                                           g_qeglobals.d_move_points[0]->xyz, end );
+            for ( selbrush_t *sb = selected_brushes.next; sb != &selected_brushes; sb = sb->next )
+                allOk &= Brush_MoveVertex( move, sb->def,
+                                           g_qeglobals.d_move_points[0]->xyz, end, false );
             if ( allOk )
             {
                 drawVert_t *mp0 = g_qeglobals.d_move_points[0];
@@ -1247,41 +1024,39 @@ void MoveSelection( float *origin, float *dir, float *move )
     }
 
 ROTATE_OR_BEND:
-    // ── Rotate (g_bRotateMode) / patch-bend (g_bPatchBendMode) drag ──────────────
-    // IDA 0x47f0c0 LABEL_119 (0x47fbe9..0x47fee8).  Reached from `goto ROTATE_OR_BEND` at
-    // the top (g_bRotateMode) and after the scale dispatch (g_bPatchBendMode).  KISAK: the
-    // CString status machinery is replaced by MainFrm_SetStatusText.
+    // ── Rotate (g_bRotateMode) drag ───────────────────────────────────────────────
+    // Reached from `goto ROTATE_OR_BEND` at the top (g_bRotateMode; the binary's
+    // patch-bend mode jumped here too).  The CString status machinery is replaced by
+    // MainFrm_SetStatusText.
     {
         // (1) Grid-snap each move component to the angle/grid step (ClampGridSize),
-        //     matching the binary's float32 round-trip: move[i] = (move[i]/grid)*step.
-        //     (0x47fbe9..0x47fc26 — fdiv grid_sizes[gs] then fimul (int)ClampGridSize.)
+        //     a float32 round-trip: move[i] = (move[i]/grid)*step.
         for ( int i = 0; i < 3; ++i )
         {
             if ( move[i] != 0.0f )
             {
                 move[i] = move[i] / grid_sizes[g_qeglobals.d_gridsize];
-                move[i] = move[i] * (float)ClampGridSize();   // fimul: integer multiply
+                move[i] = move[i] * (float)ClampGridSize();   // integer multiply
             }
         }
-        // (2) Sub-unit grid → extra 0.1 scale (0x47fc28..0x47fc61; runs when grid<=1).
-        //     dbl_6F4260 is the QWORD constant 0.10000000149011612 (= (double)0.1f); the
-        //     binary's x87 fmul promotes move[j] to 80-bit, so multiply in double then
-        //     truncate to float32 (matches the fld qword / fmul / fstp dword sequence).
+        // (2) Sub-unit grid → extra 0.1 scale (runs when grid<=1).  The constant is
+        //     0.10000000149011612 (= (double)0.1f); multiply in double then truncate to
+        //     float32, as the binary's 80-bit x87 multiply did.
         if ( grid_sizes[g_qeglobals.d_gridsize] <= 1.0f )
         {
             for ( int j = 0; j < 3; ++j )
                 if ( move[j] != 0.0f )
-                    move[j] = (float)( (double)move[j] * 0.10000000149011612 );   // dbl_6F4260
+                    move[j] = (float)( (double)move[j] * 0.10000000149011612 );
         }
 
-        // (3) Pick the rotation axis + the signed angle from the active XY view type
-        //     (0x47fc63..0x47fcbf). m_nViewType: 2=XY(default), 1=XZ, 0=YZ.
-        //       rotAxisAngle (= -move[axis], hex-rays v75) is the rotation amount;
-        //       rotationDelta (= +move[axis], hex-rays mm) accumulates into g_vRotation.
+        // (3) Pick the rotation axis + the signed angle from the active XY view type.
+        //     m_nViewType: 2=XY(default), 1=XZ, 0=YZ.
+        //       rotAxisAngle (-move[1] XY, +move[2] XZ, -move[2] YZ) is the rotation amount;
+        //       rotationDelta (the same component, unnegated) accumulates into g_vRotation.
         int   axisIdx       = 0;
         float rotAxisAngle  = -move[2];
         float rotationDelta =  move[2];
-        xywndState_t *activeXY = Ed_ActiveXY();  // U-GLOBALS: was g_pParentWnd->m_pActiveXY
+        xywndState_t *activeXY = Ed_ActiveXY();
         if ( activeXY->m_nViewType == 2 )        // XY (top) → rotate about Z
         {
             rotAxisAngle  = -move[1];
@@ -1296,48 +1071,23 @@ ROTATE_OR_BEND:
         }
         // else YZ (side) → axisIdx 0 (rotate about X), rotAxisAngle = -move[2].
 
-        // (4) Accumulate the rotation total + status text (0x47fcc1..0x47fd49).
+        // (4) Accumulate the rotation total + status text.
         g_vRotation[axisIdx] += rotationDelta;
         {
             char statusRot[160];
-            const char *label = g_bPatchBendMode ? "Bend angle" : "Rotation";
             _snprintf( statusRot, sizeof( statusRot ),
                        "%s x:: %.1f  y:: %.1f  z:: %.1f",
-                       label, g_vRotation[0], g_vRotation[1], g_vRotation[2] );
+                       "Rotation", g_vRotation[0], g_vRotation[1], g_vRotation[2] );
             MainFrm_SetStatusText( 2, statusRot );
         }
 
         // (5) Apply the rotation. rot_around[0] = pivot origin (g_vRotateOrigin),
         //     rot_around[1..3] = the 3x3 built by Select_RotateAxis. The buffer is
         //     [4][3] (12 floats) per the established caller pattern (mainfrm.cpp).
+        // (The binary's patch-bend sub-branch - Patch_SelectBendNormal at 2*angle, then
+        // Patch_SelectBendAxis at angle - went with bend mode.)
         float rot_around[4][3];
-        if ( g_bPatchBendMode )
-        {
-            // Patch-bend: bend the patch about its NORMAL (double angle) then its
-            // AXIS (single angle). The bend selectors pick which half/row to move.
-            Patch_SelectBendNormal();             // 0x447d30
-            float bendNormalAngle = rotAxisAngle + rotAxisAngle;   // 2*v75
-            if ( bendNormalAngle != 0.0f )
-            {
-                rot_around[0][0] = g_vRotateOrigin[0];
-                rot_around[0][1] = g_vRotateOrigin[1];
-                rot_around[0][2] = g_vRotateOrigin[2];
-                Select_RotateAxis( axisIdx, bendNormalAngle, (float (*)[4][3])rot_around );
-                for ( selbrush_t *k = selected_brushes.next; k != &selected_brushes; k = k->next )
-                    Select_ApplyMatrix( rot_around[0], k, 0, bendNormalAngle, 0 );
-            }
-            Patch_SelectBendAxis();               // 0x447cc0
-            if ( rotAxisAngle != 0.0f )
-            {
-                rot_around[0][0] = g_vRotateOrigin[0];
-                rot_around[0][1] = g_vRotateOrigin[1];
-                rot_around[0][2] = g_vRotateOrigin[2];
-                Select_RotateAxis( axisIdx, rotAxisAngle, (float (*)[4][3])rot_around );
-                for ( selbrush_t *m = selected_brushes.next; m != &selected_brushes; m = m->next )
-                    Select_ApplyMatrix( rot_around[0], m, 0, rotAxisAngle, 0 );
-            }
-        }
-        else if ( rotAxisAngle != 0.0f )
+        if ( rotAxisAngle != 0.0f )
         {
             // Free rotate: rotate every selected brush about the pivot by rotAxisAngle.
             rot_around[0][0] = g_vRotateOrigin[0];
@@ -1352,15 +1102,15 @@ ROTATE_OR_BEND:
 }
 
 // ─── 0x47ff30  Drag_MouseMoved (a mouse-move during a press) ─────────────────
-// Drag_IsPointEditMode(m) = (m >= sel_editpoint(10) && m <= 15) EXACTLY equals the binary's
-// explicit exclusion chains (the OR'd-enum lists {13,15,11,12,14,10} = [10,15]).
+// Drag_IsPointEditMode(m) = (m >= sel_editpoint(10) && m <= 15) equals the binary's
+// explicit exclusion chains (modes 10..15).
 // Converts the pixel delta since the press into a grid-snapped world move and
-// hands it to MoveSelection. a1/a2 are the CURRENT pixel coords (CXYWnd passes
-// raw pixels — see XY_MouseMoved 0x468230); a4/a5 are the ray origin/dir (only
-// used by the addpoint path).  The move basis g_drag_xvec/yvec is the AXIALISED (unit)
+// hands it to MoveSelection. x/y are the CURRENT pixel coords (CXYWnd passes
+// raw pixels — see XY_MouseMoved 0x468230); origin/dir are the pick ray (the terrain-point
+// drag and the addpoint path).  The move basis g_drag_xvec/yvec is the AXIALISED (unit)
 // view basis, so the move is in pixel units and then grid-snapped; m_fScale is applied
-// only in rotate/bend mode.
-void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
+// only in rotate mode.
+void Drag_MouseMoved( int x, int y, int buttons, float *origin, float *dir )
 {
     if ( !buttons )
     {
@@ -1371,17 +1121,17 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
     }
 
     const select_t d_select_mode = g_qeglobals.d_select_mode;
-    unsigned int v5 = buttons;
+    unsigned int btn = buttons;
 
     // Shift held: constrain the drag to the dominant pixel axis.
     if ( buttons == MK_SHIFT && !Drag_IsPointEditMode( g_qeglobals.d_select_mode ) )
     {
         drag_first = 0;
-        v5 = MK_SHIFT;
-        if ( abs32( a1 - g_pressx_real ) <= abs32( a2 - g_pressy_real ) )
-            a1 = g_pressx_real;
+        btn = MK_SHIFT;
+        if ( abs32( x - g_pressx_real ) <= abs32( y - g_pressy_real ) )
+            x = g_pressx_real;
         else
-            a2 = g_pressy_real;
+            y = g_pressy_real;
     }
 
     if ( g_qeglobals.toggle_unk03_mousedrag_state1 || g_qeglobals.toggle_unk04_mousedrag_state2 )
@@ -1389,7 +1139,7 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
         if ( g_qeglobals.d_select_mode != sel_curvepoint
              && !Drag_IsPointEditMode( g_qeglobals.d_select_mode ) )
         {
-            switch ( v5 )
+            switch ( btn )
             {
                 case MK_LBUTTON | MK_SHIFT:                       return;
                 case MK_LBUTTON | MK_CONTROL:
@@ -1406,40 +1156,21 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
     if ( !drag_ok )
         return;
 
-    // (v5 & MK_CONTROL) → re-apply the shift axis-lock for the control-drag case.
-    if ( ( v5 & 4 ) != 0 && !Drag_IsPointEditMode( g_qeglobals.d_select_mode ) )
+    // Shift held with another button: the same dominant-axis lock.
+    if ( ( btn & MK_SHIFT ) != 0 && !Drag_IsPointEditMode( g_qeglobals.d_select_mode ) )
     {
-        v5 = buttons;
+        btn = buttons;
         drag_first = 0;
-        if ( abs32( a1 - g_pressx_real ) <= abs32( a2 - g_pressy_real ) )
-            a1 = g_pressx_real;
+        if ( abs32( x - g_pressx_real ) <= abs32( y - g_pressy_real ) )
+            x = g_pressx_real;
         else
-            a2 = g_pressy_real;
-    }
-
-    if ( d_select_mode == sel_addpoint )
-    {
-        if ( GetAsyncKeyState( VK_MENU ) < 0 )
-        {
-            sub_43E6F0( v5, a4, a5 );
-        }
-        else
-        {
-            select_t prev = g_qeglobals.d_select_mode;
-            g_qeglobals.d_select_mode = sel_brush;
-            if ( prev == sel_cycle_edge_direction_quad )
-                CMainFrame_UpdatePatchToolbarButtons();
-            else if ( prev == sel_addpoint )
-                sub_43ECB0();
-            drag_ok = 0;
-        }
-        return;
+            y = g_pressy_real;
     }
 
     // ── the drag: pixel delta → snapped world move → MoveSelection ───────────
     const bool rotate = g_bRotateMode;
-    float dx = (float)( a1 - g_pressx_real );
-    float dy = (float)( a2 - g_pressy_real );
+    float dx = (float)( x - g_pressx_real );
+    float dy = (float)( y - g_pressy_real );
     float drag_vec[3];
 
     for ( int i = 0; i < 3; ++i )
@@ -1447,9 +1178,9 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
         float w = g_drag_xvec[i] * dx + g_drag_yvec[i] * dy;
         drag_vec[i] = w;
 
-        if ( rotate || g_bPatchBendMode )
+        if ( rotate )
         {
-            w *= Ed_ActiveXY()->m_fScale;                 // scale only in rotate/bend (U-GLOBALS)
+            w *= Ed_ActiveXY()->m_fScale;                 // scale only in rotate
             drag_vec[i] = w;
             int c = ClampGridSize();
             if ( c == 1 )      drag_vec[i] = w * 0.5f;
@@ -1478,18 +1209,18 @@ void Drag_MouseMoved( int a1, int a2, int buttons, float *a4, float *a5 )
 
     if ( d_select_mode == sel_area || Drag_IsPointEditMode( d_select_mode ) )
     {
-        g_qeglobals.drag_selectionbox_y_1 = a1;
-        g_qeglobals.drag_selectionbox_y_2 = a2;
+        g_qeglobals.drag_selectionbox_y_1 = x;
+        g_qeglobals.drag_selectionbox_y_2 = y;
     }
     else
     {
-        MoveSelection( a4, a5, move );
+        MoveSelection( origin, dir, move, drag_vec );
     }
 }
 
 // ── marquee box-select wiring (select.cpp / xywnd.cpp) ───────────────────────
 extern void Select_FlipFilteredBrushes( const float *boxMins, const float *boxMaxs, char bActiveList );
-extern void Ed_XY_ToPoint( xywndState_t *wnd, int x, int y, float *start, float *dir );  // U-GLOBALS (was CXYWnd*)
+extern void Ed_XY_ToPoint( xywndState_t *wnd, int x, int y, float *start, float *dir );
 
 // ── sel_area control-point rect-select (pmesh.cpp 0x448460 / 0x448620) ────────
 extern void Terrain_SelectAreaPoints( const void *planes, char select );
@@ -1500,10 +1231,9 @@ extern void Patch_SelectAreaPoints( const void *planes, char select );
 // (Brush_RemoveFace shifts the array down, so don't advance the index after a
 // removal), then either bump the def version (>=4 faces survive → still a valid
 // brush) or free the brush outright (<4 faces → collapsed). Called by Drag_MouseUp
-// when the closed drag was a vertex/edge edit (sel_vertex/sel_edge). IDA reads the
-// DEF faceCount (the authoritative count), matching the binary's def->faceCount.
-// The binary's dual indices v2 (RemoveFace arg + bound) and v3 (winding test) ALWAYS stay
-// equal, so the port's single running index `i` is exact.
+// when the closed drag was a vertex/edge edit (sel_vertex/sel_edge). It reads the
+// DEF faceCount (the authoritative count).  The binary's two indices (RemoveFace arg +
+// bound, winding test) always stay equal, so the single running index `i` is exact.
 static void Select_RemoveEmptyFaces()
 {
     selbrush_t *sb = selected_brushes.next;
@@ -1512,8 +1242,7 @@ static void Select_RemoveEmptyFaces()
         selbrush_t *next = sb->next;
         brush_t    *def  = sb->def;
 
-        // Remove null-winding faces. IDA keeps a single running index `i` (its v2/v3
-        // stay equal: both step on a kept face, both hold on a removed one).
+        // Remove null-winding faces. `i` steps on a kept face and holds on a removed one.
         for ( unsigned int i = 0; (int)i < def->faceCount; )
         {
             if ( def->faces[i].w )
@@ -1532,18 +1261,18 @@ static void Select_RemoveEmptyFaces()
 }
 
 // ─── 0x4802a0  Drag_MouseUp (end of a press) ─────────────────────────────────
-// Box-select min/max + the Select_FlipFilteredBrushes flag verified NOT inverted (the mode-A
-// click branch = sel_areabrush_sub(13) -> flip(0); 12 -> flip(1)).
+// The Select_FlipFilteredBrushes flag is NOT inverted: sel_areabrush_sub(13) -> flip(0);
+// 12 -> flip(1).
 // Resets the drag toggles, performs the MARQUEE box-select if one was active, and
 // closes the undo record opened by Drag_Setup/Drag_Begin (Undo_End/Undo_EndBrushList
 // self-guard when no record is open, e.g. a shift+click select).
 //
 // Selection modes set by Drag_Setup's box-drag branch:
 //   sel_areabrush     (12)  Alt+Shift+LMB drag → box ADD-select   (active → selected)
-//   sel_areabrush_sub (13)  Alt+Shift+MMB drag → box DESELECT     (selected → active),
-//                            or a single click-select via SelectFaceSth if barely moved.
+//   sel_areabrush_sub (13)  Alt+Shift+RMB drag → box DESELECT     (selected → active),
+//                            or a single click-select via Select_ClickTrace if barely moved.
 // The world box is built from the drag rectangle (press corner = x_1,x_2; current
-// corner = y_1,y_2) via XY_ToPoint per the IDB (0x480484..0x48057b).
+// corner = y_1,y_2) via XY_ToPoint (0x480484..0x48057b).
 //
 // sel_area (5) is the 3D camera-view point rect-select (terrain/patch CONTROL POINTS):
 // build the view frustum from the drag rect via the press-callback (g_qeglobals.camera_fov_setup,
@@ -1551,22 +1280,21 @@ static void Select_RemoveEmptyFaces()
 // covered control points to the move-point sets (Terrain/Patch_SelectAreaPoints).  After it the
 // binary switches the tool to curve-point mode (4) and re-reads d_select_mode for the
 // UpdatePatchToolbarButtons (mode 9) / Patch_FinishCurveDrag (mode 8) tail — both inert when the
-// entry mode was sel_area (5), but transcribed verbatim.  Editpoint siblings 11/14/15 = point edit.
+// entry mode was sel_area (5); the port keeps only the mode-9 test.  Editpoint siblings
+// 11/14/15 = point edit.
 void Drag_MouseUp( unsigned int buttons )
 {
     g_qeglobals.toggle_unk03_mousedrag_state1 = 0;
     g_qeglobals.toggle_unk04_mousedrag_state2 = 0;
     drag_ok = 0;
 
-    // IDA 0x4802cc: status-bar pane 0 = "drag completed." (the prior port dropped this).
-    // SendMessageA + d_hwndStatus is the established status pattern here — cf. Drag_Setup
-    // drag.cpp:354 and the brush.cpp/select.cpp/win_dlg.cpp sites.
+    // status-bar pane 0 = "drag completed." (SendMessageA + d_hwndStatus, as in Drag_Setup).
     SendMessageA( g_qeglobals.d_hwndStatus, WM_USER | WM_CREATE, 0, (LPARAM)"drag completed." );
 
     const select_t mode = g_qeglobals.d_select_mode;
 
     // ── sel_area (5): camera-view rect-select of terrain/patch CONTROL POINTS ──
-    // IDA 0x4802e8..0x480391.  Build the 4-plane view frustum from the drag rect via the
+    // Build the 4-plane view frustum from the drag rect via the
     // installed press callback (g_qeglobals.camera_fov_setup == Camera_GetRectSelection3D),
     // then collect the covered control points.  `(buttons>>3)&1` (the cleaned MK flag) =
     // the ADD-vs-fresh select arg.
@@ -1574,7 +1302,7 @@ void Drag_MouseUp( unsigned int buttons )
     {
         if ( g_qeglobals.camera_fov_setup )
         {
-            int planeBuf[32];   // 4 planes × 32 bytes (v25[32] in the IDB)
+            int planeBuf[32];   // 4 planes × 32 bytes
             ( (void (__cdecl *)( int, int, int, int, int * ))g_qeglobals.camera_fov_setup )(
                 g_qeglobals.drag_selectionbox_x_1, g_qeglobals.drag_selectionbox_x_2,
                 g_qeglobals.drag_selectionbox_y_1, g_qeglobals.drag_selectionbox_y_2, planeBuf );
@@ -1583,33 +1311,29 @@ void Drag_MouseUp( unsigned int buttons )
             Terrain_SelectAreaPoints( planeBuf, select );
             Patch_SelectAreaPoints( planeBuf, select );
 
-            const select_t v2 = g_qeglobals.d_select_mode;   // re-read (unchanged by the above)
+            const select_t prev = g_qeglobals.d_select_mode; // re-read (unchanged by the above)
             g_qeglobals.d_select_mode = sel_curvepoint;      // switch to curve-point edit (4)
-            if ( v2 == sel_cycle_edge_direction_quad )       // 9
+            if ( prev == sel_cycle_edge_direction_quad )     // 9
             {
                 CMainFrame_UpdatePatchToolbarButtons();
-            }
-            else if ( v2 == sel_addpoint )                   // 8
-            {
-                sub_43ECB0();                                // Patch_FinishCurveDrag
             }
             g_nUpdateBits = -1;
         }
         // (mode now sel_curvepoint(4), so the marquee branch below is skipped and the
-        //  shared LABEL_41 translate/undo-close tail runs — matching the binary's fall-through.)
+        //  shared translate/undo-close tail runs.)
     }
     // ── sel_areabrush / sel_areabrush_sub (12/13): the BRUSH marquee box-select ─
-    // IDA gates the whole marquee/click dispatch on g_nPatchClickedView != W_CAMERA
-    // (0x48039c: a camera-view press skips straight to the undo-close at LABEL_41).
-    // Drag_Setup only ARMS modes 12/13 when g_nPatchClickedView != 1, so the two are
-    // mutually exclusive in practice, but mirror the binary's guard for faithfulness.
+    // The whole marquee/click dispatch is gated on g_nPatchClickedView != W_CAMERA
+    // (a camera-view press skips straight to the undo-close).  Drag_Setup only ARMS
+    // modes 12/13 when g_nPatchClickedView != 1, so the two are mutually exclusive in
+    // practice; the guard is kept anyway.
     else if ( ( mode == sel_areabrush || mode == sel_areabrush_sub )
               && g_nPatchClickedView != W_CAMERA )
     {
-        xywndState_t *xy = Ed_ActiveXY();   // U-GLOBALS: was g_pParentWnd->m_pActiveXY (never NULL now)
+        xywndState_t *xy = Ed_ActiveXY();   // never NULL
 
         // mode 13 (box deselect) with a sub-pixel drag = a click → single face/brush
-        // pick via SelectFaceSth (IDA 0x4803a5..0x48047a).
+        // pick via Select_ClickTrace.
         bool didClick = false;
         if ( mode == sel_areabrush_sub )
         {
@@ -1628,7 +1352,7 @@ void Drag_MouseUp( unsigned int buttons )
                      && mode != sel_curvepoint && mode != sel_terrainpoint
                      && mode != sel_terraintexture )
                     flag = 4;
-                SelectFaceSth( dir, start, flag );
+                Select_ClickTrace( dir, start, flag );
                 g_qeglobals.d_select_mode = sel_brush;
                 g_nUpdateBits = -1;
                 didClick = true;
@@ -1660,49 +1384,38 @@ void Drag_MouseUp( unsigned int buttons )
         }
     }
     // ── point-edit rectangle siblings 14/15: close the rect back to sel_vertex ──
-    // IDA 0x4805a6: the `else if (d_select_mode != 12)` arm tests 14/15 and does
-    // `d_select_mode = 1; g_nUpdateBits = -1;` before falling into LABEL_41.  Same
-    // g_nPatchClickedView != W_CAMERA gate as the marquee arm above (0x48039c).
+    // Same g_nPatchClickedView != W_CAMERA gate as the marquee arm above.
     else if ( ( mode == sel_areapoint_curve || mode == sel_areapoint )
               && g_nPatchClickedView != W_CAMERA )
     {
-        g_qeglobals.d_select_mode = sel_vertex;   // 0x4805a8: mode = 1
+        g_qeglobals.d_select_mode = sel_vertex;   // mode = 1
         g_nUpdateBits = -1;
     }
 
-    // ── LABEL_41: pending nudge-translate, then close the undo record ──────────
-    // IDA 0x4805db: if a translate was queued (Select_Move w/ snap), apply it and
-    // clear it. d_select_translate is written by the keyboard-nudge path; it is {0,0,0}
-    // until that lands, so this is currently a no-op, but transcribe it verbatim.
+    // ── pending nudge-translate, then close the undo record ────────────────────
+    // If a translate was queued (Select_Move w/ snap), apply it and clear it.
+    // d_select_translate is written by the keyboard-nudge path; it is {0,0,0} until that
+    // lands, so this is currently a no-op.
     if ( g_qeglobals.d_select_translate[0] != 0.0f
       || g_qeglobals.d_select_translate[1] != 0.0f
       || g_qeglobals.d_select_translate[2] != 0.0f )
     {
-        Select_Move( g_qeglobals.d_select_translate, W_CAMERA );
+        Select_Move( g_qeglobals.d_select_translate, 1 );   // KIWI: snap = 1 (IDA shows the 1 as W_CAMERA)
         g_qeglobals.d_select_translate[0] = 0.0f;
         g_qeglobals.d_select_translate[1] = 0.0f;
         g_qeglobals.d_select_translate[2] = 0.0f;
         g_nUpdateBits |= W_CAMERA;
     }
 
-    // IDA 0x480627 here: get_m_strStatus(&m_strStatus[3], "") + CMainFrame::UpdateStatusText
-    // (clears status pane 3 + refresh). The port DECOUPLED the MFC m_strStatus mechanism (see
-    // win_qe3.cpp:192) and drives status panes via SendMessageA instead; UpdateStatusText is
-    // unported, so this pane-3 clear is intentionally omitted (cosmetic, decoupled).
+    // The binary cleared status pane 3 here (get_m_strStatus + CMainFrame::UpdateStatusText).
+    // The port decoupled the MFC m_strStatus mechanism (see Sys_UpdateStatusBar,
+    // win_qe3.cpp) and drives status panes via SendMessageA instead, so this cosmetic
+    // clear is omitted.
 
-    if ( g_qeglobals.d_select_mode == sel_addpoint )
-    {
-        g_qeglobals.d_select_mode = sel_brush;
-        sub_43ECB0();
-    }
-    else
-    {
-        // A vertex/edge drag can collapse a face to a null winding — IDA 0x48064d calls
-        // sub_4718D0 (Select_RemoveEmptyFaces) to drop empties / free sub-4-face brushes
-        // before closing the undo record.
-        if ( g_qeglobals.d_select_mode == sel_edge || g_qeglobals.d_select_mode == sel_vertex )
-            Select_RemoveEmptyFaces();
-        Undo_EndBrushList( &selected_brushes );
-        Undo_End();
-    }
+    // A vertex/edge drag can collapse a face to a null winding — Select_RemoveEmptyFaces
+    // drops empties / frees sub-4-face brushes before closing the undo record.
+    if ( g_qeglobals.d_select_mode == sel_edge || g_qeglobals.d_select_mode == sel_vertex )
+        Select_RemoveEmptyFaces();
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
 }

@@ -10,22 +10,6 @@ lists, and snaps winding vertices to the shared vertex pool.
 
 #include "cod4map.h"
 
-char s_assertDisable_ApplyMergeMap;
-char s_assertDisable_ApplyMergeMap;
-char s_assertDisable_BuildMergeMap;
-char s_assertDisable_BuildMergeMap;
-char s_assertDisable_BuildMergeMap;
-char s_assertDisable_BuildMergeMap;
-char s_assertDisable_BuildMergeMap;
-char s_assertDisable_FindLoopLength;
-char s_assertDisable_FindLoops;
-char s_assertDisable_FindLoops;
-char s_assertDisable_FindLoops;
-char s_assertDisable_FindLoops;
-char s_assertDisable_FindLoops;
-char s_assertDisable_FindLoops;
-
-
 /*
 ================
 FindLoopLength
@@ -70,7 +54,7 @@ int FindLoops( int *loopLength, int ptCount, int *indices, int *loopStart, int l
   for ( i = 0; i < ptCount; i++ )
   {
     len = FindLoopLength( i, indices, ptCount );
-    Assert( len >= 1 && len < ptCount || s_assertDisable_FindLoops, s_assertDisable_FindLoops );
+    Assert( len >= 1 && len < ptCount, s_assertDisable_FindLoops );
 
     if ( len > 1 )
     {
@@ -261,7 +245,7 @@ RemoveLoops
 Removes one pair of matching duplicate loops from index array
 ================
 */
-int RemoveLoops( int ptCount, int *indices, intptr_t auxData, int auxElemSize, int *loopStarts, int *loopLengths, int loopCount )
+int RemoveLoops( int ptCount, int *indices, int *loopStarts, int *loopLengths, int loopCount )
 {
   int i, j, start, len, remain;
 
@@ -283,8 +267,6 @@ int RemoveLoops( int ptCount, int *indices, intptr_t auxData, int auxElemSize, i
         start = loopStarts[j];
       remain = ptCount - len - start;
       memmove( &indices[start], &indices[start + len], sizeof(int) * remain );
-      if ( auxElemSize )
-        memmove( (void *)(auxData + auxElemSize * start), (const void *)(auxData + auxElemSize * (start + len)), auxElemSize * remain );
       return ptCount - len;
     }
   }
@@ -299,7 +281,7 @@ RemoveDuplicateLoops
 Iteratively removes all duplicate vertex loops
 ================
 */
-int RemoveDuplicateLoops( int ptCount, int auxElemSize, int *indices, intptr_t auxData )
+int RemoveDuplicateLoops( int ptCount, int *indices )
 {
   int loopLengths[MAX_LOOPS];
   int loopStarts[MAX_LOOPS];
@@ -312,7 +294,7 @@ int RemoveDuplicateLoops( int ptCount, int auxElemSize, int *indices, intptr_t a
   numLoops = FindLoops( loopLengths, ptCount, indices, loopStarts, MAX_LOOPS );
   while ( numLoops > 1 )
   {
-    newCount = RemoveLoops( ptCount, indices, auxData, auxElemSize, loopStarts, loopLengths, numLoops );
+    newCount = RemoveLoops( ptCount, indices, loopStarts, loopLengths, numLoops );
     if ( newCount == ptCount )
       break;
     ptCount = newCount;
@@ -329,7 +311,7 @@ SnapAndMergeWinding
 Maps winding through merge map, deduplicates and strips loops
 ================
 */
-int SnapAndMergeWinding( int firstVert, int ptCount, int *indexMap, int *outIndices, char *auxData, int auxElemSize )
+int SnapAndMergeWinding( int firstVert, int ptCount, int *indexMap, int *outIndices )
 {
   int *out = outIndices;
   int src, dst, head;
@@ -348,11 +330,9 @@ int SnapAndMergeWinding( int firstVert, int ptCount, int *indexMap, int *outIndi
       continue;
     dst++;
     out[dst] = indexMap[firstVert + src];
-    if ( auxElemSize && src != dst )
-      AuxDataCopy( auxElemSize, (char *)auxData, src, 1, (char *)auxData, dst );
   }
 
   /* remove remaining duplicates and loops */
-  dst = RemoveDuplicateIndices( dst + 1, out, auxData, auxElemSize );
-  return RemoveDuplicateLoops( dst, auxElemSize, out, (intptr_t)auxData );
+  dst = RemoveDuplicateIndices( dst + 1, out );
+  return RemoveDuplicateLoops( dst, out );
 }

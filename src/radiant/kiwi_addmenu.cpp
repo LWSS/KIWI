@@ -165,7 +165,7 @@ void KiwiAdd_MenuItem()
     if ( ImGui::Button( "Open add menu (create)" ) )
         KiwiAdd_Open();
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Every creation command, at the cursor (modern keymap: Shift+A).\n"
+        ImGui::SetTooltip( "Every creation command, at the cursor.\n"
                            "Construction lines, solid primitives, extrude, construction planes." );
 }
 

@@ -7,23 +7,16 @@
 #include "mainfrm.h"
 #include "qe3.h"
 #include <universal/q_parse.h>   // parseInfo_t / Com_Parse / Com_BeginParseSession
+#include "kiwi_ported.h"         // KIWI: shared engine/editor externs
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 // ── extern declarations for globals/functions from other .cpp files ──────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );
-extern char  currentmap[];            // map.cpp 0x23F18D8
-extern int   g_nUpdateBits;          // engine_stubs.cpp 0x25D5A74
-extern bool  Radiant_ConfirmModified();   // mainfrm.cpp — U-CMD-2's free twin of CMainFrame::ConfirmModified
-extern camera_s *Ed_Camera();        // camwnd.cpp — THE editor camera (never NULL, U-GLOBALS)
-extern void  Select_Deselect( int bits ); // select.cpp 0x48E800
+extern bool  Radiant_OkToDiscard();      // mainfrm.cpp — the shared destroy-the-map guard
 
 // ── forward declarations ──────────────────────────────────────────────────────
 // Functions implemented in other ported files.
-// HasUnsavedChangesOrInsidePrefab (0x489D90) is ported below; not extern.
-extern unsigned int CheckLayeredMaterial_Modifications( uint8_t *a1, int a2, int a3 ); // layeredmaterials.cpp
 extern void Prefab_LevelBack();
 extern void Map_LoadFromFile( const char *filename );
 extern void I_strncpyz( char *dest, const char *src, int destsize ); // q_shared.cpp (0x4B9290)
@@ -33,7 +26,6 @@ extern void Radiant_VecToAngles( float *angles, const float *vec );
 
 // ── error-log loader deps (Pointfile_Errorfile parse path) ───────────────────
 // Com_Parse / Com_BeginParseSession come from <universal/q_parse.h> (included above).
-extern int    LoadFile( const char *filename, void **bufferptr );   // cmdlib.cpp (0x40ABD0)
 extern void   StripExtension( char *path );                         // cmdlib.cpp (0x40AE90)
 
 // s_errLogCount — defined in points.cpp (this is s_errLogCount).
@@ -72,38 +64,6 @@ static int s_errLogIndex = 0;
 // since navigated to a different map and the original must be reloaded.  Previously omitted
 // (the §11 note below); restored now that the navigators are ported.
 static char s_errLogMapPath[1024];
-
-// ── lyrMtlGlob globals (IDB 0x1814CFC / 0x1814D00) ──────────────────────────
-// Defined in layeredmaterials.cpp (ported 2026-06-11, unit 2).
-// Forward-declared here for the CheckLayeredMaterial_Modifications call below.
-
-// ── 0x489D90  HasUnsavedChangesOrInsidePrefab ─────────────────────────────────
-// Returns true if the map has unsaved changes, or we are inside a prefab level
-// with pending edits.
-// Globals: modified (0x23F179C), byte_25EB240 (0x25EB240), prefabStackLevel (0x25D5B34).
-// These are already defined in engine_stubs.cpp / map.cpp.
-extern int  modified;              // 0x23F179C (map.cpp or engine_stubs.cpp)
-extern int  prefabStackLevel;      // 0x25D5B34 (map.cpp)
-
-static bool HasUnsavedChangesOrInsidePrefab()
-{
-    if ( modified )
-        return true;
-
-    if ( prefabStackLevel > 0 )
-    {
-        // Walk the prefab stack; return true if any level was modified.
-        prefabLevel_t *p = g_prefabStack;
-        for ( int v1 = 0; ; ++p )
-        {
-            if ( p->modified )
-                return true;
-            if ( ++v1 >= prefabStackLevel )
-                return false;
-        }
-    }
-    return false;
-}
 
 // ── Q_stristr (sub_4B93C0) — case-insensitive substring search ───────────────
 // Returns pointer to first occurrence of substr in str (case-insensitive), or NULL.
@@ -198,17 +158,11 @@ have_value:
         goto do_position;
 
     // Check for unsaved changes or layered-material modifications.
-    if ( ( HasUnsavedChangesOrInsidePrefab()
-           || CheckLayeredMaterial_Modifications( lyrMtlGlob.Layers,
-                                                  sizeof(LyrEntry_t) * lyrMtlGlob.entryCount,
-                                                  0 ) != lyrMtlGlob.crcToken )
-         // NO-MFC: the same prompt, now that U-CMD-2 lifted it out of CMainFrame.  The
-         // g_pParentWnd liveness half of the MFC expression has no analog (the prompt is a
-         // MessageBoxA over ::GetActiveWindow(), not a frame method), so it drops out.
-         && !Radiant_ConfirmModified() )
-    {
+    // KIWI: the binary inlined HasUnsavedChangesOrInsidePrefab + the layered-material CRC +
+    // ConfirmModified here; it is Radiant_OkToDiscard's guard, which also leaves each modified
+    // prefab level with its own prompt.
+    if ( !Radiant_OkToDiscard() )
         return 0;
-    }
 
     Prefab_LevelBack();
     Map_LoadFromFile( path );

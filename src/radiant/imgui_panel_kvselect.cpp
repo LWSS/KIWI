@@ -10,32 +10,26 @@
 //     of the eight matcher dispatches inside Select_ByKeyValue_Core.
 //   * "Select" = OnOk2 — KeyValueSelect_Apply WITHOUT the trailing ShowWindow( SW_HIDE ).
 //   * first open = OnCreate's tail (select.cpp:2791-2797): pre-fill both edits from the
-//     entity window's key/value fields via Win_GetEntityKeyValueFields, focus Key.
+//     entity window's key/value fields (KIWI: that window is gone, so they open blank),
+//     focus Key.
 // The panel-stays-open flow is the sanctioned Phase-3 divergence noted in
 // RADIANT_UI_REWORK_PLAN.md: OK (apply + hide) and Cancel/Close (hide) collapse into
 // "Select" plus the window's own close box, and Select_ByKeyValue's parent-relative
 // GetWindowRect placement (select.cpp:2834-2840) is dropped — HWND-lifetime plumbing with
 // no core-action content (ImGui persists its own window rect).
 //
-// NO HWND/MFC anywhere in this file: the only binds are KeyValueSelect_Apply (declared in
-// radiant_ui_actions.h) and Win_GetEntityKeyValueFields, both UI-independent and both
-// non-static — the latter extern'd exactly as select.cpp:2636 does, since win_ent.cpp's
-// entwnd_* handles are TU-static and reachable only through that accessor.
+// NO HWND/MFC anywhere in this file: the only bind is KeyValueSelect_Apply (declared in
+// radiant_ui_actions.h), UI-independent.
 #include "stdafx.h"
 #include "qe3.h"
 #include "radiant_ui_actions.h"
 #include <imgui/imgui.h>
 
-// win_ent.cpp — the entity-window key/value edit text.  Buffers must hold at least
-// 0x1000 bytes each (it reads up to 0xFFF chars per field).
-extern void Win_GetEntityKeyValueFields( char *keyOut, char *valueOut );
-
 static bool s_showKVSelect = false;
 
 // The dialog's two edit controls.  0x1000 bytes each, matching OnOk2's stack buffers
 // (select.cpp:2803) — ImGui reserves the NUL, so the same 0xFFF-char capacity as the MFC
-// ::GetWindowTextA( ..., sizeof( key ) - 1 ) reads, and the size Win_GetEntityKeyValueFields
-// requires of its outputs.
+// ::GetWindowTextA( ..., sizeof( key ) - 1 ) reads.
 static char s_key[0x1000]   = { 0 };
 static char s_value[0x1000] = { 0 };
 
@@ -49,6 +43,12 @@ static bool s_opened = false;         // first-open latch (OnCreate equivalent)
 void ImGuiPanel_KVSelect_MenuItem()
 {
     ImGui::Checkbox( "Select by key/value", &s_showKVSelect );
+}
+
+// KIWI: Ctrl+Shift+F / cmd 33133 (Select_ByKeyValue) — was a no-op
+void ImGuiPanel_KVSelect_Toggle()
+{
+    s_showKVSelect = !s_showKVSelect;
 }
 
 void ImGuiPanel_KVSelect_Draw()
@@ -65,11 +65,11 @@ void ImGuiPanel_KVSelect_Draw()
 
     if ( !s_opened )
     {
-        // OnCreate tail (select.cpp:2791-2795).  Unconditional overwrite, like the MFC
-        // ::SetWindowTextA pair: the accessor clears each buffer first, so an entity
-        // window with no key/value text blanks the fields rather than leaving stale text.
+        // OnCreate tail (select.cpp:2791-2795): seeded from the entity window's key/value
+        // fields, which KIWI does not have - so a fresh open is blank, never stale text.
         s_opened = true;
-        Win_GetEntityKeyValueFields( s_key, s_value );
+        s_key[0]   = 0;
+        s_value[0] = 0;
     }
 
     if ( ImGui::Begin( "Select by Key/Value", &s_showKVSelect, ImGuiWindowFlags_AlwaysAutoResize ) )

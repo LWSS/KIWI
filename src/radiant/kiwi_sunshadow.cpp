@@ -5,10 +5,9 @@
 #include "stdafx.h"
 #include "kiwi_sunshadow.h"
 #include "kiwi_sun.h"
+#include "kiwi_ported.h"
 #include "prefs.h"
 #include "radiant_frame.h"
-
-extern int g_nUpdateBits;
 
 bool KiwiSunPreview_Enabled()
 {

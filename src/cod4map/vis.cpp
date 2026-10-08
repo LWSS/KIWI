@@ -28,8 +28,6 @@ int    visFloodCount;
 int    visPortalLongs;
 char   visTmpDir[MAX_OS_PATH];
 
-char s_assertDisable_VisMain;
-
 /* KIWI FIX (AUDIT_cod4map finding 13): the fixed-size portal bitvectors in this file are all
    Pstack_t::mightsee-sized (cod4map.h), so that array is the real cap on portalbytes.
    LoadPortals now errors instead of silently overrunning them. */
@@ -222,55 +220,6 @@ void CalcVis(void)
   for ( clusterIdx = 0; clusterIdx < portalclusters; clusterIdx++ )
     ClusterMerge(clusterIdx);
   Com_Printf("Average clusters visible: %i\n", totalvis / portalclusters);
-}
-
-/*
-================
-BuildPHS
-
-Builds the Potentially Hearable Set from PVS data (dead code in original — never called).
-For each cluster, OR's together the PVS rows of all clusters visible to it,
-creating a transitive closure. Validates PVS bit indices.
-================
-*/
-void BuildPHS(void)
-{
-  int i, j, k, bit, cluster, totalHearable = 0;
-  unsigned int phsBuf[MAX_MAP_LEAFS / 8 / sizeof(unsigned int)];
-  unsigned char *pvsRow;
-
-  Com_Printf("Building PHS...\n");
-
-  for ( i = 0; i < portalclusters; i++ )
-  {
-    pvsRow = (unsigned char *)(((BspVisibility_t *)bspVisBytes)->data + leafbytes * i);
-    memcpy(phsBuf, pvsRow, leafbytes);
-
-    /* for each bit set in PVS, OR in that cluster's PVS row */
-    for ( j = 0; j < leafbytes; j++ )
-    {
-      if ( !pvsRow[j] )
-        continue;
-      for ( bit = 0; bit < 8; bit++ )
-      {
-        if ( !(pvsRow[j] & (1 << bit)) )
-          continue;
-        cluster = bit + j * 8;
-        if ( cluster >= portalclusters )
-          Com_Error("Bad bit in PVS");
-        { unsigned int *srcRow = (unsigned int *)(((BspVisibility_t *)bspVisBytes)->data + leafbytes * cluster);
-        for ( k = 0; k < leaflongs; k++ )
-          phsBuf[k] |= srcRow[k];
-        }
-      }
-    }
-
-    /* count hearable clusters */
-    for ( k = 0; k < portalclusters; k++ )
-      if ( ((unsigned char *)phsBuf)[k >> 3] & (1 << (k & 7)) )
-        totalHearable++;
-  }
-  Com_Printf("Average clusters hearable: %i\n", totalHearable / portalclusters);
 }
 
 /*
@@ -1095,34 +1044,6 @@ int CountBits(unsigned char *bits, int numbits)
 
 /*
 ================
-CheckStack
-
-Debug validation for BSP recursion stack (dead code in original — never called).
-Walks the pstack chain checking for duplicate leaf nodes which would indicate
-infinite recursion in the vis flood fill.
-
-================
-*/
-void CheckStack(int leafNum, VisThreadData_t *thread)
-{
-  Pstack_t *cur;
-  Pstack_t *inner;
-
-  for ( cur = thread->pstack_head.next; cur != NULL; cur = cur->next )
-  {
-    if ( (intptr_t)cur->leaf == leafNum )
-      Com_Error("CheckStack: leaf recursion");
-
-    for ( inner = thread->pstack_head.next; inner != cur; inner = inner->next )
-    {
-      if ( inner->leaf == cur->leaf )
-        Com_Error("CheckStack: late leaf recursion");
-    }
-  }
-}
-
-/*
-================
 AllocStackWinding
 
 Allocates a free winding from the pstack winding pool
@@ -1167,77 +1088,6 @@ int FreeStackWinding(Winding_t *w, Pstack_t *stack)
     stack->freewindings[i] = 1;
   }
   return result;
-}
-
-/*
-================
-RecursivePassageFlow
-
-Recursive passage-based visibility flood fill
-================
-*/
-int RecursivePassageFlow(Vportal_t *portal, VisThreadData_t *thread, Pstack_t *prevstack)
-{
-  Leaf_t *leaf;
-  Passage_t *passage, *nextpassage;
-  Vportal_t *p;
-  uint32_t *cansee, *portalvis, *might, *vis;
-  uint32_t more;
-  int i, j, pnum;
-  Pstack_t stack;
-
-  leaf = &leafs[portal->leaf];
-  stack.next = NULL;
-  stack.depth = prevstack->depth + 1;
-  prevstack->next = &stack;
-  vis = (uint32_t *)thread->portal->portalvis;
-
-  passage = portal->passages;
-  nextpassage = passage;
-
-  for ( i = 0; i < leaf->numportals; i++, passage = nextpassage )
-  {
-    p = leaf->portals[i];
-    if ( p->removed )
-      continue;
-    nextpassage = passage->next;
-
-    pnum = (int)(p - visPortals);
-    if ( !(prevstack->mightsee[pnum >> 3] & (1 << (pnum & 7))) )
-      continue;
-
-    cansee = (uint32_t *)passage->cansee;
-    might = (uint32_t *)stack.mightsee;
-    memcpy(stack.mightsee, prevstack->mightsee, portalbytes);
-    portalvis = (uint32_t *)(p->status == stat_done ? p->portalvis : p->portalflood);
-
-    more = 0;
-    for ( j = 0; j < visPortalLongs; j++ )
-    {
-      if ( *might )
-      {
-        *might &= *cansee++ & *portalvis++;
-        more |= (*might & ~vis[j]);
-      }
-      else
-      {
-        cansee++;
-        portalvis++;
-      }
-      might++;
-    }
-
-    if ( !more )
-    {
-      if ( thread->portal->portalvis[pnum >> 3] & (1 << (pnum & 7)) )
-        continue;
-    }
-
-    thread->portal->portalvis[pnum >> 3] |= 1 << (pnum & 7);
-    RecursivePassageFlow(p, thread, &stack);
-    stack.next = NULL;
-  }
-  return i;
 }
 
 /*
@@ -1705,53 +1555,6 @@ int BasePortalVis(LPVOID lpThreadParameter)
   p->nummightsee = CountBits(p->portalflood, numportals * 2);
   visFloodCount += p->nummightsee;
   return 0;
-}
-
-/*
-================
-RecursiveLeafBitFlow
-
-Second order approximation of portal visibility via recursive bit flood fill
-================
-*/
-Leaf_t *RecursiveLeafBitFlow( int leafnum, unsigned char *mightsee, unsigned char *cansee )
-{
-  Leaf_t *leaf;
-  Vportal_t *p;
-  int i, j, pnum;
-  uint32_t more;
-  uint32_t newmight[sizeof(((Pstack_t *)0)->mightsee) / sizeof(uint32_t)];
-
-  leaf = &leafs[leafnum];
-
-  /* check all portals for flowing into other leafs */
-  for ( i = 0; i < leaf->numportals; i++ )
-  {
-    p = leaf->portals[i];
-    if ( p->removed )
-      continue;
-    pnum = (int)(p - visPortals);
-
-    /* if some previous portal can't see it, skip */
-    if ( !(((unsigned char *)mightsee)[pnum >> 3] & (1 << (pnum & 7))) )
-      continue;
-
-    /* if this portal can see some portals we mightsee, recurse */
-    more = 0;
-    for ( j = 0; j < visPortalLongs; j++ )
-    {
-      newmight[j] = ((uint32_t *)mightsee)[j] & ((uint32_t *)p->portalflood)[j];
-      more |= newmight[j] & ~((uint32_t *)cansee)[j];
-    }
-
-    if ( !more )
-      continue;
-
-    ((unsigned char *)cansee)[pnum >> 3] |= (1 << (pnum & 7));
-    RecursiveLeafBitFlow( p->leaf, (unsigned char *)newmight, cansee );
-  }
-
-  return leaf;
 }
 
 /*

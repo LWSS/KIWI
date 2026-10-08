@@ -5,16 +5,6 @@
 // ═════════════════════════════════════════════════════════════════════════════
 //  PATCH MESH (curve/terrain) subsystem: parse, write, tessellate, edit and draw.
 //
-//  IDENTIFICATION CORRECTIONS (the enthusiast `PMESH_nn` names were positional guesses
-//  over the 20556-byte patchMesh_t; corrected here + renamed in the IDB):
-//    0x444ac0  PMESH_TexLayer     -> Patch_ParseMesh  (block parser: `mesh{...}` ->
-//                                   patchMesh_t + symbiont brush; NOT a "tex layer")
-//    0x4446f0  Patch_Parse        -> Patch_ParseVert  (ONE control vertex; assert
-//                                   string "patchVert")
-//    0x4458f0  MapLoad_ParsePatch -> Patch_Write      (block writer, NOT a load fn)
-//    0x4456f0  PMESH_WriteToMap   -> Patch_WriteVert  (writes ONE control vertex)
-//    0x4449e0  sub_4449E0         -> Patch_CalcVertColors
-//
 //  Round-trip data flow:
 //    LOAD  Brush_Parse -> Patch_ParseMesh -> MakeNewPatch + Patch_ParseVert(xN) +
 //          AddBrushForPatch (symbiont brush_t, brush->patch = patch).  ParseEntity links
@@ -25,15 +15,14 @@
 //  affects the round-trip.
 //
 //  CoD's .map uses `mesh`/`curve` blocks with a per-vertex
-//  `v xyz [c rgba] t s0 t0 s1 t1 [f edge]` grammar - NOT GtkRadiant's patchDef2/patchDef3,
-//  so the per-byte format comes from the IDA decompilation, not GtkRadiant.
+//  `v xyz [c rgba] t s0 t0 s1 t1 [f edge]` grammar - NOT GtkRadiant's patchDef2/patchDef3.
 // ═════════════════════════════════════════════════════════════════════════════
 
 #include "stdafx.h"
 #include "qe3.h"
 #include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L patch diagnostic
 #include <universal/q_parse.h>
-#include <gfx_d3d/r_gfx.h>          // GfxPointVertex, GfxColor, GfxStateBits (terrain-paint ring + patch-fill)
+#include <gfx_d3d/r_gfx.h>          // GfxPointVertex, GfxColor, GfxStateBits (patch-fill)
 #include <gfx_d3d/r_material.h>     // Material stateBitsEntry/stateBitsTable (patch-fill opaque gate)
 #include <gfx_d3d/r_state.h>        // GFXS1_DEPTHWRITE
 #include <gfx_d3d/r_rendercmds.h>   // GfxCmdDrawPoints (R_AddPointCmd_W return)
@@ -42,65 +31,24 @@
 #include <stdio.h>    // sprintf
 #include "kiwi_floatsnap.h"   // KIWI: noise-only half-grid snap
 #include "kiwi_angles.h"      // KIWI: exact sin / cos of degrees
-
-#define PMESH_CPP "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\PMESH.CPP"
+#include "kiwi_ported.h"      // KIWI: shared engine/editor externs
 
 // ─── editor / engine externs (ported elsewhere) ──────────────────────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );
 extern void  Error( const char *fmt, ... );
-extern int   Sys_Printf( const char *fmt, ... );   // win_qe3.cpp (0x499E90)
-extern long  j__atol( const char *s );
-extern void  Vec3Cross( const float *a, const float *b, float *out );   // engine math (0x40a4d0)
 
 // materialdef.cpp
-extern void        SetMaterial( const char *name, patchMesh_material *out );
-extern qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *def );
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *def );   // name string (lyrMtl@0 or radMtl->name)
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }
 
 // brush.cpp
-extern brush_t *Brush_Alloc( const void *materialDefSrc, eclass_t *ecls );
-extern void     Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
-extern void     Brush_BuildWindings( brush_t *b, int rebuild );
-extern void     SetupVertexSelection();
-extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
-extern void     Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                                  const float *uvBase, float rotate, float crossterm ); // brush.cpp 0x45A1C0
-
-// draw.cpp (q_shared 0x4BA430) — out = orient->origin + orient->axisᵀ · pos.
-extern void     OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient );
-// engine_stubs.cpp (0x25d5b04) — patch bend-mode active flag (off by default).
-extern int      g_bPatchBendMode;
-
-// ── renderer / math deps for the terrain-paint cursor RING (PMESH_19/20 + sub_43ED50) ──
-extern float    world_orient_matrix[4][3];                     // entity.cpp 0x6DE290 (identity world orient)
-extern char     Byte4PackPixelColor( float *from, GfxColor *out );                  // 0x402AC0
-extern int      R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                             const float *p1, const float *p2, const unsigned int *color,
-                             char width, int vertCount, int maxVertCount );          // 0x40C110
-extern void     R_AddCmd_Line3D( short count, char width, GfxPointVertex *verts );   // 0x4FD1A0
-extern GfxCmdDrawPoints *R_AddPointCmd_W( short pointCount, char size, const GfxPointVertex *verts ); // 0x4FD080
-
-// entity.cpp / map.cpp
-extern void     Entity_LinkBrush( brush_t *b, entity_s *e );   // 0x484FC0 (def-list linker)
-extern void     MarkMapModified();
+extern texdef_sub_t *MaterialDef_FindTexdef( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
 
 // ─── PATCH CREATE + GRID MANIPULATION deps ───────────────────────────────────
-// select.cpp — single-brush precondition + (de)select / delete the selection.
-extern int        QE_SingleBrush();                              // qe3.cpp (0x48C8B0)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner ); // brush.cpp (0x475980)
-extern void       Brush_AddToList2( selbrush_t *b );             // brush.cpp (0x4765A0)
-extern void       Select_Delete();                              // select.cpp (0x48E760)
-extern void       Select_Brush( selbrush_t *b, char overwrite, char status, char center ); // select.cpp (0x48DCC0)
 // brush.cpp — rebuild a patch symbiont's 6-face bbox brush from new bounds (0x438760).
 extern void       Brush_RebuildBrush( brush_t *b, float *mins, float *maxs );
-// the global brush-instance display lists (engine_stubs).
-extern selbrush_t active_brushes;                                // 0x23F189C
-extern selbrush_t selected_brushes;                              // 0x23F1864
 
 // engine_stubs.cpp (mapparsing.cpp ports) — `contents <names>;` / `toolFlags <names>;`
-extern int      sub_42FB80( const char **text );   // reads a "contents"  line → bits
-extern int      sub_42FBA0( const char **text );   // reads a "toolFlags" line → bits
+extern int      Map_ParseContentsLine( const char **text );    // reads a "contents"  line → bits
+extern int      Map_ParseToolFlagsLine( const char **text );   // reads a "toolFlags" line → bits
 // layers.cpp — optional `<keyword> "value"` (or unquoted) line, else default.
 extern void     Map_ParseEntityLayerKey( const char **text, const char *def,
                                           char *out, const char *key );
@@ -112,23 +60,19 @@ extern void     MapLoad_ParseBrush_Content( const char *keyword, int (**writer)(
 extern void     MapLoad_ParseBrush_Layer( int (**writer)(void *, const char *, ...),
                                           const char *layerStr );   // engine_stubs 0x42fb40
 
-// qtexture_s is the canonical 40-byte IDB layout in qe3.h (was a wrong local
-// char[64]@0 copy; width@0x14 / height@0x18).
-
 // ─── forward declarations (this file) ────────────────────────────────────────
 patchMesh_t *MakeNewPatch();
 void         Patch_CalcBounds( float *mins, float *maxs, patchMesh_t *p, bool expand );
 brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );
 static char  Patch_ParseVert( const char **text, drawVert_t *v );
 static int   Patch_CalcVertColors( patchMesh_t *p );
-static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, float sampleSize ); // sub_439350
-static void  PMESH_02( patchMesh_t *p, int layer, float sampleSize );                            // 0x439580
+static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, float sampleSize );
+static void  Patch_ResampleCurveST( patchMesh_t *p, int layer, float sampleSize );
 
-// Patch-inspector dialog refresh hooks (patchdialog.cpp SHIPPED).  PatchDialog_IsOpen()
-// (U-GUARD-2) IS the binary's `if (CWnd_PatchDialog.m_hWnd)` gate — true only while the
-// modeless CPatchInspectorDlg exists, false headless AND false in the no-MFC shell (the ImGui
-// patch panel re-gathers, so there is no push to make).  Replaced the CWnd*-returning
-// g_PatchDialog_GetHwnd(), whose return type cannot exist without MFC.
+// Patch-inspector dialog refresh hooks (patchdialog.cpp).  PatchDialog_IsOpen() IS the
+// binary's `if (CWnd_PatchDialog.m_hWnd)` gate — true only while the modeless
+// CPatchInspectorDlg exists, false headless AND false in the no-MFC shell (the ImGui
+// patch panel re-gathers, so there is no push to make).
 extern bool  PatchDialog_IsOpen();
 extern void  g_PatchDialog_GetPatchInfo();
 
@@ -164,7 +108,7 @@ patchMesh_t *MakeNewPatch()
 //  Patch_CalcBounds  (0x4385e0)
 //  Computes the AABB of the control points; optionally expands degenerate axes
 //  (< 8 units) to a centred 8-unit span so the symbiont bbox brush is non-empty.
-//  IDA calls VectorMaxValues per vertex (a fatal stub in this build) — inlined.
+//  The per-vertex VectorMaxValues (a fatal stub in this build) is inlined.
 // ════════════════════════════════════════════════════════════════════════════
 void Patch_CalcBounds( float *mins, float *maxs, patchMesh_t *p, bool expand )
 {
@@ -201,32 +145,29 @@ void Patch_CalcBounds( float *mins, float *maxs, patchMesh_t *p, bool expand )
 
 // ════════════════════════════════════════════════════════════════════════════
 //  PATCH TESSELLATION (the Bezier subdivision that produces curveDef, the render
-//  mesh).  Ported fresh from IW3xRadiant.i64 for STAGE-1 patch WIREFRAME render —
-//  see the block at DrawPatchesWireframeGrid.  All structs (curveVert_t /
-//  curvePatchDef_t / patchMesh_t) are editor-only (NOT shared engine structs), so
-//  this is radiant-only.  The chain:
-//      Patch_GenericMesh2 (0x438b60)  control grid → flat curveVert array, then:
+//  mesh).  All structs (curveVert_t / curvePatchDef_t / patchMesh_t) are editor-only
+//  (NOT shared engine structs), so this is radiant-only.  The chain:
+//      Patch_GenericMesh2  control grid → flat curveVert array, then:
 //        TERRAIN  → copy verts as-is, compute normals (Curve_ComputeNormals)
 //        BEZIER   → Curve_SubdivideSetup (subdivide both axes via de Casteljau)
 //                   → Curve_MidpointFixup → Curve_ComputeNormals
 //                   → Curve_RemoveDegenerate (drop collapsed rows/cols)
 //  The S/T fields are filled but UNUSED by the wireframe path (geometry only); the
-//  curveDef-dependent texCoord REFINEMENT (PMESH_02 / sub_439350) stays PARKED — it
-//  affects only texturing, not the wireframe grid.  Math transcribed verbatim from
-//  the disasm (float-exact; the de Casteljau midpoints are plain (a+b)*0.5).
+//  curveDef-dependent texCoord REFINEMENT (Patch_ResampleCurveST / Patch_TerrainTexProject)
+//  affects only texturing, not the wireframe grid.  The de Casteljau midpoints are plain
+//  (a+b)*0.5.
 // ════════════════════════════════════════════════════════════════════════════
 
-// The binary subdivides into a fixed 512x512 curveVert scratch grid in .data
-// (unk_181F520 .. 0x231F520 = 512*512*44).  We mirror that as a single static grid;
-// the editor is single-threaded and tessellation is non-reentrant.  Row stride is
-// MAX_CURVE_COLS verts; the binary's `unk_1824D20` alias is simply row 1.
+// A fixed 512x512 curveVert scratch grid (512*512*44 bytes, as in the binary); the
+// editor is single-threaded and tessellation is non-reentrant.  Row stride is
+// CURVE_GRID_DIM verts.
 static const int CURVE_GRID_DIM = 512;
 static curveVert_t s_curveScratch[CURVE_GRID_DIM][CURVE_GRID_DIM];
-// row 0 / row 1 aliases (the binary uses both as separate base symbols).
+// row 0 / row 1 aliases.
 #define CURVE_ROW0 ( &s_curveScratch[0][0] )
 #define CURVE_ROW1 ( &s_curveScratch[1][0] )
 
-// ─── sub_4a47d0 — normalize `in` into `out`, return original length (0-guarded). ─
+// ─── 0x4a47d0 — normalize `in` into `out`, return original length (0-guarded). ─
 static float Curve_NormalizeTo( float *out, const float *in )
 {
     float len = (float)sqrt( in[0] * in[0] + in[1] * in[1] + in[2] * in[2] );
@@ -240,9 +181,8 @@ static float Curve_NormalizeTo( float *out, const float *in )
     return len;
 }
 
-// ─── sub_4a54d0 — project point `p` onto the line through `base` toward `dir`,
+// ─── 0x4a54d0 — project point `p` onto the line through `base` toward `dir`,
 //     store the projected point in `out`.  (used by Curve_RemoveDegenerate.)
-//     a1=p, a2=out, a3=base, a4=dir.
 static void Curve_ProjectOntoLine( const float *p, float *out, const float *base, const float *dir )
 {
     float e0 = p[0] - base[0];
@@ -268,8 +208,8 @@ static void Curve_ProjectOntoLine( const float *p, float *out, const float *base
     }
 }
 
-// ─── sub_431f40 — de Casteljau midpoint: out = (a + b) * 0.5 (7 floats + 4 colour
-//     bytes averaged with >>1).  a2=a, a3=b in the IDB (result = a1).
+// ─── 0x431f40 — de Casteljau midpoint: out = (a + b) * 0.5 (7 floats + 4 colour
+//     bytes averaged with >>1).
 static void Curve_LerpHalf( curveVert_t *out, const curveVert_t *a, const curveVert_t *b )
 {
     float       *o  = (float *)out;
@@ -286,10 +226,10 @@ static void Curve_LerpHalf( curveVert_t *out, const curveVert_t *a, const curveV
     oc[3] = (byte)( ( ac[3] + bc[3] ) >> 1 );
 }
 
-// ─── sub_432b20 — adaptive subdivision along COLUMNS (insert midpoint columns
+// ─── 0x432b20 — adaptive subdivision along COLUMNS (insert midpoint columns
 //     until each curve segment's flatness is within tolerance).  Operates on the
-//     scratch grid's row 0 (unk_181F520).  a1=&{cols,rows}, a2=indexMap (or null),
-//     a4=subdiv tolerance, a5=999 chord limit.
+//     scratch grid's row 0.  dims = {cols,rows}, indexMap may be null, tol = subdiv
+//     tolerance, chordMax = the 999 chord limit.
 static void Curve_SubdivideCols( int *dims, int *indexMap, int col0, float tol, float chordMax )
 {
     while ( dims[0] + 2 < CURVE_GRID_DIM )
@@ -333,13 +273,13 @@ static void Curve_SubdivideCols( int *dims, int *indexMap, int col0, float tol, 
         {
             for ( int row = 0; row < dims[1]; ++row )
             {
-                curveVert_t *p = &s_curveScratch[row][col0 + 1];   // unk_181F54C base
+                curveVert_t *p = &s_curveScratch[row][col0 + 1];
                 curveVert_t mid0, mid1, mid2;
                 Curve_LerpHalf( &mid0, &p[0],  &p[-1] );
                 Curve_LerpHalf( &mid1, &p[1],  &p[0]  );
                 Curve_LerpHalf( &mid2, &mid1,  &mid0  );
-                // shift the tail right by TWO to open the 2-column gap (IDA `v13-88`
-                // = src is 2 verts back); then write mid0/mid2/mid1 at p[0..2].
+                // shift the tail right by TWO to open the 2-column gap; then write
+                // mid0/mid2/mid1 at p[0..2].
                 for ( int k = dims[0] - 1; k > col0 + 3; --k )
                     s_curveScratch[row][k] = s_curveScratch[row][k - 2];
                 p[0] = mid0;
@@ -350,8 +290,8 @@ static void Curve_SubdivideCols( int *dims, int *indexMap, int col0, float tol, 
     }
 }
 
-// ─── sub_432e20 — adaptive subdivision along ROWS (mirror of Curve_SubdivideCols
-//     with the scratch grid's column/row strides swapped).  a1=&{cols,rows}.
+// ─── 0x432e20 — adaptive subdivision along ROWS (mirror of Curve_SubdivideCols
+//     with the scratch grid's column/row strides swapped).
 static void Curve_SubdivideRows( int *dims, int *indexMap, int row0, float tol, float chordMax )
 {
     while ( dims[1] + 2 < CURVE_GRID_DIM )
@@ -394,13 +334,12 @@ static void Curve_SubdivideRows( int *dims, int *indexMap, int row0, float tol, 
         {
             for ( int col = 0; col < dims[0]; ++col )
             {
-                // base = unk_1824D20 + 44*col = scratch row (row0+1), column col.
                 curveVert_t *p = &s_curveScratch[row0 + 1][col];
                 curveVert_t mid0, mid1, mid2;
                 Curve_LerpHalf( &mid0, &p[0],                 &p[-CURVE_GRID_DIM] );
                 Curve_LerpHalf( &mid1, &p[CURVE_GRID_DIM],    &p[0] );
                 Curve_LerpHalf( &mid2, &mid1,                 &mid0 );
-                // shift the tail right by TWO rows (IDA `v13-45056` = src is 2 rows back).
+                // shift the tail right by TWO rows.
                 for ( int k = dims[1] - 1; k > row0 + 3; --k )
                     s_curveScratch[k][col] = s_curveScratch[k - 2][col];
                 p[0]                 = mid0;
@@ -411,9 +350,8 @@ static void Curve_SubdivideRows( int *dims, int *indexMap, int row0, float tol, 
     }
 }
 
-// ─── sub_433140 — subdivision SETUP: copy the control grid into the scratch grid,
+// ─── 0x433140 — subdivision SETUP: copy the control grid into the scratch grid,
 //     seed the index maps, subdivide both axes, pack into a curvePatchDef_t.
-//     a1=cols, a2=rows, a4=src curveVert array, a6=subdiv tol, a7=999, a8/a9=index maps.
 static curvePatchDef_t *Curve_SubdivideSetup( int cols, int rows, const curveVert_t *src,
                                               float tol, float chordMax,
                                               int *colMap, int *rowMap )
@@ -430,11 +368,10 @@ static curvePatchDef_t *Curve_SubdivideSetup( int cols, int rows, const curveVer
     if ( colMap )
         for ( int j = 0; j < cols; ++j ) colMap[j] = j;
 
-    // IDA uses do/while loops whose continue-test reads the LIVE (subdivision-grown)
-    // dims[0]/dims[1] AFTER advancing the cursor by 2 (`while (v20 + 2 < v30)`).  The
-    // outer guard is the ORIGINAL count (cols/rows > 2).  A `for (c+2 < dims[0])` is
-    // NOT equivalent: the do/while runs one extra segment at the tail (`c < v30`, not
-    // `c < v30-2`) since dims[0] grows during the body.  Transcribed verbatim.
+    // The do/while continue-test reads the LIVE (subdivision-grown) dims[0]/dims[1]
+    // AFTER advancing the cursor by 2; the outer guard is the ORIGINAL count (cols/rows
+    // > 2).  A `for (c+2 < dims[0])` is NOT equivalent: dims[0] grows during the body,
+    // so the do/while runs one extra segment at the tail.
     if ( cols > 2 )
     {
         int c = 0;
@@ -460,9 +397,9 @@ static curvePatchDef_t *Curve_SubdivideSetup( int cols, int rows, const curveVer
     return out;
 }
 
-// ─── sub_4329c0 — midpoint fixup: replace every odd interior vertex with the line
+// ─── 0x4329c0 — midpoint fixup: replace every odd interior vertex with the line
 //     midpoint of its two even neighbours (smooths the inserted control points),
-//     first along rows then along columns.  a1=cols, a2=rows, a4=verts.
+//     first along rows then along columns.
 static void Curve_MidpointFixup( int cols, int rows, curveVert_t *verts )
 {
     // along columns: for each col, fix odd rows from even neighbours.
@@ -497,19 +434,16 @@ static void Curve_MidpointFixup( int cols, int rows, curveVert_t *verts )
     }
 }
 
-// neighbour offset table from .rdata (g_curveNeighborOffsets, 0x6DE534): 8-connected
-// (dcol,drow) deltas, in the binary's EXACT order (di=*p applied to the row, dj=*(p-1)
-// applied to the column → neighbour vertex = verts[(row+di)*width + (col+dj)]).  As the
-// port applies entry[0] to the column (ni=col+entry0) and entry[1] to the row
-// (nj=row+entry1), entry = (dcol, drow).  Transcribed verbatim from the IDB:
-//   IDA n: (0,1)(1,1)(1,0)(1,-1)(0,-1)(-1,-1)(-1,0)(-1,1)  as (dcol,drow).
+// neighbour offset table (g_curveNeighborOffsets, 0x6DE534): 8-connected deltas in the
+// binary's EXACT order.  entry[0] is applied to the column (ni=col+entry0) and entry[1]
+// to the row (nj=row+entry1), so entry = (dcol, drow).
 static const int s_curveNeighbors[8][2] =
 {
     {  0,  1 }, {  1,  1 }, {  1,  0 }, {  1, -1 },
     {  0, -1 }, { -1, -1 }, { -1,  0 }, { -1,  1 },
 };
 
-// ─── sub_432190 — per-vertex NORMAL computation.  For each vertex, sum the
+// ─── 0x432190 — per-vertex NORMAL computation.  For each vertex, sum the
 //     normalized cross products of adjacent edge pairs to its 8 neighbours
 //     (with cyclic wrap when the patch is closed in that axis), then normalize.
 static void Curve_ComputeNormals( curvePatchDef_t *curve )
@@ -517,11 +451,11 @@ static void Curve_ComputeNormals( curvePatchDef_t *curve )
     int width  = curve->width;
     int height = curve->height;
 
-    // Detect cyclic closure (the binary's v62 / v61 flags):
-    //   wrapWidth  (v62) — every row's first vs last COLUMN vertex coincide → the
-    //                      patch wraps in the WIDTH axis (cylinder seam); wraps `ni`.
-    //   wrapHeight (v61) — every col's first vs last ROW vertex coincide → the patch
-    //                      wraps in the HEIGHT axis; wraps `nj`.
+    // Detect cyclic closure:
+    //   wrapWidth  — every row's first vs last COLUMN vertex coincide → the patch
+    //                wraps in the WIDTH axis (cylinder seam); wraps `ni`.
+    //   wrapHeight — every col's first vs last ROW vertex coincide → the patch
+    //                wraps in the HEIGHT axis; wraps `nj`.
     int wrapWidth = 0;
     if ( height > 0 )
     {
@@ -563,21 +497,20 @@ static void Curve_ComputeNormals( curvePatchDef_t *curve )
                 int di = s_curveNeighbors[n][0];
                 int dj = s_curveNeighbors[n][1];
                 // try up to 3 steps outward to find a non-degenerate neighbour edge.
-                // IDA (0x4323c0/0x4323cd init, 0x432505/0x432511 advance): the running
-                // step accumulators v54/v22 are UN-wrapped (col+step*dcol, row+step*drow);
-                // the wrap formula is re-derived FRESH into temporaries each step and the
-                // range check / vertex fetch use the wrapped temporaries — the un-wrapped
-                // accumulator is never overwritten by the wrap.  (Prior port carried the
-                // WRAPPED index forward via `ci=ni;rj=nj`, which diverges on closed patches
-                // when a step re-crosses the seam within 3 steps.)
+                // The running step accumulators are UN-wrapped (col+step*dcol,
+                // row+step*drow); the wrap is re-derived FRESH into temporaries each step
+                // and the range check / vertex fetch use the wrapped temporaries — the
+                // accumulator is never overwritten by the wrap (carrying the WRAPPED index
+                // forward diverges on closed patches when a step re-crosses the seam
+                // within 3 steps).
                 int ci = col, rj = row;
                 for ( int step = 1; step <= 3; ++step )
                 {
-                    ci += di;               // un-wrapped accumulator (v54 += dcol)
-                    rj += dj;               // (v22 += drow)
-                    int ni = ci;            // wrap a FRESH copy each step (v55/v56)
+                    ci += di;               // un-wrapped accumulator
+                    rj += dj;
+                    int ni = ci;            // wrap a FRESH copy each step
                     int nj = rj;
-                    // cyclic wrap (matches v62/v61 branches).
+                    // cyclic wrap.
                     if ( wrapWidth )
                     {
                         if ( ni < 0 )            ni = width  + ni - 1;
@@ -608,8 +541,8 @@ static void Curve_ComputeNormals( curvePatchDef_t *curve )
                 int m = ( n + 1 ) & 7;
                 if ( !have[m] ) continue;
                 float cr[3], crn[3];
-                // IDA: Vec3Cross(dirs[(n+1)&7], dirs[n], out) → cr = dirs[m] × dirs[n]
-                // (cross arg order matters: it sets the normal's SIGN).
+                // cr = dirs[m] × dirs[n] (cross arg order matters: it sets the normal's
+                // SIGN).
                 Vec3Cross( dirs[m], dirs[n], cr );          // (a, b, out=cr)
                 if ( Curve_NormalizeTo( crn, cr ) != 0.0f )
                 {
@@ -623,9 +556,8 @@ static void Curve_ComputeNormals( curvePatchDef_t *curve )
     }
 }
 
-// ─── sub_4332d0 — remove DEGENERATE rows/cols (segments collapsed to < 0.1 units)
-//     so the tessellated grid has no zero-area quads.  Works on the scratch grid;
-//     a1=&{cols,rows} (from the prior pass), a2=colMap, a3=rowMap.
+// ─── 0x4332d0 — remove DEGENERATE rows/cols (segments collapsed to < 0.1 units)
+//     so the tessellated grid has no zero-area quads.  Works on the scratch grid.
 static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *colMap, int *rowMap )
 {
     int cols = in->width;
@@ -646,8 +578,8 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
             curveVert_t *prev = &s_curveScratch[row][c - 1];
             curveVert_t *next = &s_curveScratch[row][c + 1];
             float proj[3];
-            // IDA: ProjectOntoLine(p=next, out, base=prev, dir=cur) — project CUR onto
-            // the prev→next line.  (p and dir args are next/cur, NOT cur/next.)
+            // project CUR onto the prev→next line (the p and dir args are next/cur,
+            // NOT cur/next).
             Curve_ProjectOntoLine( next->xyz, proj, prev->xyz, cur->xyz );
             float e0 = cur->xyz[0] - proj[0];
             float e1 = cur->xyz[1] - proj[1];
@@ -655,7 +587,7 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
             float chord = (float)sqrt( e0 * e0 + e1 * e1 + e2 * e2 );
             if ( maxChord < chord ) maxChord = chord;
         }
-        if ( maxChord < 0.1 )   // IDA fcomp dbl_6F43D0 = DOUBLE 0.1 (not float 0.1f); widen maxChord to double
+        if ( maxChord < 0.1 )   // DOUBLE 0.1 (not float 0.1f); maxChord widens to double
         {
             // drop column c (shift cols c+1.. left by one).
             for ( int row = 0; row < rows; ++row )
@@ -680,8 +612,7 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
             curveVert_t *prev = &s_curveScratch[r - 1][col];
             curveVert_t *next = &s_curveScratch[r + 1][col];
             float proj[3];
-            // IDA: ProjectOntoLine(p=next, out, base=prev, dir=cur) — project CUR onto
-            // the prev→next line.
+            // project CUR onto the prev→next line.
             Curve_ProjectOntoLine( next->xyz, proj, prev->xyz, cur->xyz );
             float e0 = cur->xyz[0] - proj[0];
             float e1 = cur->xyz[1] - proj[1];
@@ -689,7 +620,7 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
             float chord = (float)sqrt( e0 * e0 + e1 * e1 + e2 * e2 );
             if ( maxChord < chord ) maxChord = chord;
         }
-        if ( maxChord < 0.1 )   // IDA fcomp dbl_6F43D0 = DOUBLE 0.1 (not float 0.1f); widen maxChord to double
+        if ( maxChord < 0.1 )   // DOUBLE 0.1 (not float 0.1f); maxChord widens to double
         {
             for ( int col = 0; col < cols; ++col )
                 for ( int k = r; k < rows - 1; ++k )
@@ -716,21 +647,20 @@ static curvePatchDef_t *Curve_RemoveDegenerate( const curvePatchDef_t *in, int *
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Patch_GenericMesh2  (0x438b60)  — build curveDef from the control grid.
-//  a2 = the texture layer whose S/T pair is copied into the render verts (the
-//  caller passes g_qeglobals.current_edit_layer); a3/a4 = the index maps the
-//  binary threads through (null on the render path).  Returns a freshly malloc'd
+//  `layer` = the texture layer whose S/T pair is copied into the render verts (the
+//  caller passes g_qeglobals.current_edit_layer); colMapArg/rowMapArg = the index
+//  maps (null on the render path).  Returns a freshly malloc'd
 //  curvePatchDef_t (caller assigns it to patchMesh_t.curveDef and owns the free).
 // ════════════════════════════════════════════════════════════════════════════
 curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, int *rowMapArg )
 {
     int   width  = p->width;
     int   height = p->height;
-    // The binary (0x438b82) allocates unconditionally and has NO null-return path — the copy
-    // loops below simply don't execute when width/height<=0, and it returns a valid (degenerate)
-    // curvePatchDef_t.  Unreachable for real patches (min control grid), so the prior
-    // `if(width<=0||height<=0) return nullptr` was an invented guard — dropped to match IDA.
+    // Allocates unconditionally with NO null-return path — the copy loops below simply don't
+    // execute when width/height<=0, and a valid (degenerate) curvePatchDef_t comes back
+    // (unreachable for real patches, which have a minimum control grid).
 
-    // flat control-vertex array cv[col + row*width] (the binary's `operator new`).
+    // flat control-vertex array cv[col + row*width].
     curveVert_t *cv = (curveVert_t *)operator new( (size_t)44 * height * width );
 
     for ( int row = 0; row < height; ++row )
@@ -785,10 +715,10 @@ curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, 
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Patch_CalcVertColors  (0x4449e0, was sub_4449E0)
+//  Patch_CalcVertColors  (0x4449e0)
 //  Recomputes per-vertex colours from the texture's layered-material lightmap
-//  mode. The layered material's unk_flags2 (@0x0C, filled by MaterialDef_06/15
-//  off the real registration) selects the mode: only (flags & 0x70) == 0x60
+//  mode. The layered material's unk_flags2 (filled by MaterialDef_06/15 off the
+//  real registration) selects the mode: only (flags & 0x70) == 0x60
 //  triggers a recompute. Every other case — no layered library entry
 //  (lm == null → flags 0), or any non-lightmap mode — is a PASSTHROUGH: the
 //  parsed vertex colours are kept verbatim (what the round-trip needs).
@@ -800,25 +730,25 @@ curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMapArg, 
 //  authored and left untouched (early-out, also a passthrough).
 //
 //  Under the headless selftest the renderer is not up, so the material shim
-//  keeps lm == null → flags 0 → passthrough → gate-neutral. Faithful to IDA:
-//  bytes summed unsigned, signed /3 (0x55555556 magic), result fits a byte.
+//  keeps lm == null → flags 0 → passthrough → gate-neutral.  Bytes are summed
+//  unsigned, signed /3, result fits a byte.
 // ════════════════════════════════════════════════════════════════════════════
 static int Patch_CalcVertColors( patchMesh_t *p )
 {
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)&p->texture );
-    int flags = lm ? lm->unk_flags2 : 0;        // 0x4449eb..0x4449fc
+    int flags = lm ? lm->unk_flags2 : 0;
 
     if ( ( flags & 0x70 ) != 0x60 )             // not lightmap-alpha mode → keep
         return 0;
 
     // Pass 1 — if any vertex alpha is already != 0xFF, the colours were authored;
-    // leave them (0x444a07..0x444a44).
+    // leave them.
     for ( int i = 0; i < p->width; i++ )
         for ( int j = 0; j < p->height; j++ )
             if ( (byte)p->ctrl[i][j].vert_color.a != 0xFF )
                 return j;
 
-    // Pass 2 — recompute: alpha = (R+G+B)/3, RGB = white (0x444a46..0x444aa9).
+    // Pass 2 — recompute: alpha = (R+G+B)/3, RGB = white.
     for ( int i = 0; i < p->width; i++ )
     {
         for ( int j = 0; j < p->height; j++ )
@@ -888,14 +818,13 @@ brush_t *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Patch_ParseVert  (0x4446f0, was Patch_Parse)  — parse ONE control vertex.
+//  Patch_ParseVert  (0x4446f0)  — parse ONE control vertex.
 //  Grammar:  v <x> <y> <z>  [c <b> <g> <r> <a>]  t <s0> <t0> <s1> <t1>  [f <edge>]
 //  Texcoords are stored ÷1024 (the file holds the ×1024 integer form).
 // ════════════════════════════════════════════════════════════════════════════
 static char Patch_ParseVert( const char **text, drawVert_t *v )
 {
-    if ( !v )
-        Assert( PMESH_CPP, 5375, 0, "%s", "patchVert" );
+    iassert( v );
 
     // "v"
     if ( strcmp( Com_Parse( text )->token, "v" ) )
@@ -909,16 +838,16 @@ static char Patch_ParseVert( const char **text, drawVert_t *v )
     const char *tok = Com_Parse( text )->token;
     if ( !strcmp( tok, "c" ) )
     {
-        // wire order is b g r a (bytes 50,49,48,51 → vert_color.b/g/r/a)
-        v->vert_color.b = (char)j__atol( Com_ParseOnLine( text )->token );
-        v->vert_color.g = (char)j__atol( Com_ParseOnLine( text )->token );
-        v->vert_color.r = (char)j__atol( Com_ParseOnLine( text )->token );
-        v->vert_color.a = (char)j__atol( Com_ParseOnLine( text )->token );
+        // wire order is b g r a
+        v->vert_color.b = (char)atol( Com_ParseOnLine( text )->token );
+        v->vert_color.g = (char)atol( Com_ParseOnLine( text )->token );
+        v->vert_color.r = (char)atol( Com_ParseOnLine( text )->token );
+        v->vert_color.a = (char)atol( Com_ParseOnLine( text )->token );
         tok = Com_Parse( text )->token;
     }
     else
     {
-        *(unsigned int *)&v->vert_color = 0xFFFFFFFF;   // a2+48 = -1 (white)
+        *(unsigned int *)&v->vert_color = 0xFFFFFFFF;   // white
     }
 
     if ( strcmp( tok, "t" ) )
@@ -937,10 +866,8 @@ static char Patch_ParseVert( const char **text, drawVert_t *v )
         {
             float s = (float)( (float)atof( Com_ParseOnLine( text )->token ) * 0.0009765625 );
             float t = (float)( (float)atof( Com_ParseOnLine( text )->token ) * 0.0009765625 );
-            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5412, 0, "%s", "!IS_NAN(s)" );
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5413, 0, "%s", "!IS_NAN(t)" );
+            iassert( isfinite( s ) );
+            iassert( isfinite( t ) );
             st[2 * i]     = s;
             st[2 * i + 1] = t;
         }
@@ -949,7 +876,7 @@ static char Patch_ParseVert( const char **text, drawVert_t *v )
     // optional "f <turned_edge>"
     if ( !strcmp( Com_Parse( text )->token, "f" ) )
     {
-        v->turned_edge = (int)j__atol( Com_ParseOnLine( text )->token );
+        v->turned_edge = (int)atol( Com_ParseOnLine( text )->token );
         return 1;
     }
     v->turned_edge = 0;
@@ -958,13 +885,13 @@ static char Patch_ParseVert( const char **text, drawVert_t *v )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  Patch_ParseMesh  (0x444ac0, was PMESH_TexLayer)  — parse a `mesh`/`curve` block.
+//  Patch_ParseMesh  (0x444ac0)  — parse a `mesh`/`curve` block.
 //  Called by Brush_Parse for the patch branch. `isMesh` = the block matched the
 //  terrain variant ("mesh"/"patchTerrainDef3") → patchMesh_t gets PATCH_TERRAIN.
 //  Returns the symbiont brush (brush->patch set), or null on parse error.
 //  Only the iwmap-4 (version >= 4) grammar is ported — every stock test map is
 //  version 4. The legacy (< 4) path needs the subdivision/version-0 material
-//  remap helpers (PMESH_02 / sub_439350 / sub_45AD50), all out of round-trip scope.
+//  remap helpers (Patch_ResampleCurveST / Patch_TerrainTexProject / Mtl_NormalizeName), all out of round-trip scope.
 // ════════════════════════════════════════════════════════════════════════════
 brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
 {
@@ -972,19 +899,20 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
     if ( Com_Parse( text )->token[0] != '{' )
         return nullptr;
 
-    patchMesh_t *p = MakeNewPatch();
-
+    // KIWI: checked before MakeNewPatch - the patch leaked on this path
     if ( version < 4 )
     {
         Error( "pmesh: legacy patch version < 4 not supported (round-trip subset); "
-               "needs PMESH_02 / sub_439350 / sub_45AD50" );
+               "needs Patch_ResampleCurveST / Patch_TerrainTexProject / Mtl_NormalizeName" );
         return nullptr;
     }
 
+    patchMesh_t *p = MakeNewPatch();
+
     char layerBuf[1024];
     Map_ParseEntityLayerKey( text, "000_Global", layerBuf, "layer" );
-    p->contents = sub_42FB80( text );   // optional `contents <names>;`
-    p->flags    = sub_42FBA0( text );   // optional `toolFlags <names>;`
+    p->contents = Map_ParseContentsLine( text );    // optional `contents <names>;`
+    p->flags    = Map_ParseToolFlagsLine( text );   // optional `toolFlags <names>;`
 
     // material names. spaceDelimited=1 so '/' in a material path isn't a delimiter;
     // it covers BOTH the texture and lightmap reads, then reset to 0 for smoothing.
@@ -1008,7 +936,7 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
             Com_UngetToken();
             break;
         }
-        const int slot = (int)j__atol( Com_ParseOnLine( text )->token );
+        const int slot = (int)atol( Com_ParseOnLine( text )->token );
         pi->parseInfo[pi->parseInfoNum].spaceDelimited = 1;
         parseInfo_t *nameTok = Com_ParseOnLine( text );
         pi->parseInfo[pi->parseInfoNum].spaceDelimited = 0;
@@ -1021,7 +949,7 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
 
     // params:  <width> <height> <size> <subDivType>
     p->width  = Com_ParseInt( text );
-    p->height = (int)j__atol( Com_ParseOnLine( text )->token );
+    p->height = (int)atol( Com_ParseOnLine( text )->token );
     // KIWI: the binary (0x444AC0) reads the grid straight into ctrl[16][16] with no clamp,
     // so a hand-edited or foreign .map with "24 24" corrupts the heap on load.  Reject it
     // as a parse error instead (the writer never emits anything outside 2..16).
@@ -1036,7 +964,7 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
     *(float *)&p->size_of_struct_0x504C = sizeVal;
     p->bDirty = ( sizeVal != 0.0f );
 
-    int sdt = (int)j__atol( Com_ParseOnLine( text )->token );
+    int sdt = (int)atol( Com_ParseOnLine( text )->token );
     p->subDivType = ( sdt < 1 ) ? 1 : sdt;
 
     // control grid:  for each column "(" <height vertices> ")"
@@ -1091,18 +1019,11 @@ typedef WriteFunc_t **WriteWriter_t;
 // format identically to brush planepts.
 extern const char *Fmt8g( char *buf, double v );
 
-// ─── Patch_WriteVert  (0x4456f0, was PMESH_WriteToMap) — write ONE control vertex.
+// ─── Patch_WriteVert  (0x4456f0) — write ONE control vertex.
 static void Patch_WriteVert( drawVert_t *v, WriteWriter_t writer )
 {
-    if ( !v )
-        Assert( PMESH_CPP, 5621, 0, "%s", "patchVert" );
-
-    if ( ( *(unsigned int *)&v->xyz[0] & 0x7F800000 ) == 0x7F800000 ||
-         ( *(unsigned int *)&v->xyz[1] & 0x7F800000 ) == 0x7F800000 ||
-         ( *(unsigned int *)&v->xyz[2] & 0x7F800000 ) == 0x7F800000 )
-        Assert( PMESH_CPP, 5623, 0, "%s",
-                "!IS_NAN((patchVert->qv.xyz)[0]) && !IS_NAN((patchVert->qv.xyz)[1]) "
-                "&& !IS_NAN((patchVert->qv.xyz)[2])" );
+    iassert( v );
+    iassert( isfinite( v->xyz[0] ) && isfinite( v->xyz[1] ) && isfinite( v->xyz[2] ) );
 
     char bx[64], by[64], bz[64];
     WRITE( writer, "\tv %s %s %s",
@@ -1124,10 +1045,8 @@ static void Patch_WriteVert( drawVert_t *v, WriteWriter_t writer )
         {
             float s = (float)( st[2 * i]     * 1024.0 );
             float t = (float)( st[2 * i + 1] * 1024.0 );
-            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5637, 0, "%s", "!IS_NAN(s)" );
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5638, 0, "%s", "!IS_NAN(t)" );
+            iassert( isfinite( s ) );
+            iassert( isfinite( t ) );
             char bs[64], bt[64];
             WRITE( writer, " %s %s", Fmt8g( bs, s ), Fmt8g( bt, t ) );
         }
@@ -1139,10 +1058,8 @@ static void Patch_WriteVert( drawVert_t *v, WriteWriter_t writer )
     WRITE( writer, "\n" );
 }
 
-// ─── Patch_Write  (0x4458f0, was MapLoad_ParsePatch) — write a patch as a
-//     `mesh`/`curve` block.  Called by Brush_Write.  Layer comes from the symbiont
-//     brush's parent_layer_string (IDA `pSymbiot[1].ownerPrev` = brush_t+0x48 via
-//     its 56-byte selbrush_t mistyping).
+// ─── Patch_Write  (0x4458f0) — write a patch as a `mesh`/`curve` block.  Called by
+//     Brush_Write.  Layer comes from the symbiont brush's parent_layer_string.
 int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
 {
     if ( ( p->type & PATCH_TERRAIN ) != 0 )
@@ -1151,7 +1068,7 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
         WRITE( writer, " {\n  curve\n  {\n" );
 
     const char *layerName = ( (brush_t *)p->pSymbiot )->parent_layer_string;
-    if ( strcmp( layerName, "000_Global" ) )   // MapLoad_ParseBrush_Layer inlined in the binary
+    if ( strcmp( layerName, "000_Global" ) )
     {
         MapLoad_ParseBrush_Layer( writer, layerName );
     }
@@ -1165,7 +1082,7 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
     // (char*)lyrMtl cast: when the renderer is up, SetMaterial resolves a real material and
     // stores it in lyrMtl — but pseudo-materials ("$default", "lightmap_gray",
     // "smoothing_smooth") aren't layered assets, so lyrMtl comes back NULL and the name lives
-    // in radMtl->name. The old direct cast read NULL and strcmp() crashed when copying a patch.
+    // in radMtl->name. A direct cast reads NULL and strcmp() crashes when copying a patch.
     const char *texName = (const char *)Materialdef_GetName( (MaterialDef *)&p->texture );
     WRITE( writer, "   %s\n", texName );
     const char *lmName = (const char *)Materialdef_GetName( (MaterialDef *)&p->lightmap );
@@ -1178,7 +1095,7 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
         if ( p->kiwiLayer[slot][0] )
             WRITE( writer, "   kiwilayer %i %s\n", slot, p->kiwiLayer[slot] );
 
-    // IDA uses plain "%g" for the LOD size (6 sig figs).  KIWI: Fmt8g - a scaled patch's
+    // The binary used plain "%g" for the LOD size (6 sig figs).  KIWI: Fmt8g - a scaled patch's
     // 21.333334 saved as 21.3333; stock integer sizes (0 in blackout) print as before.
     float sizeVal = p->bDirty ? *(float *)&p->size_of_struct_0x504C : 0.0f;
     char sizeBuf[40];
@@ -1199,29 +1116,21 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
 // ════════════════════════════════════════════════════════════════════════════
 //  PATCH CREATE + GRID MANIPULATION (the control-grid DATA layer)
 //    * create a patch from a brush (Patch_BrushToMesh / Patch_GenericMesh) - fill the
-//      control grid + lay LINEAR per-control texCoords via Patch_Naturalize2.
-//      KISAK: the binary then REFINES those texCoords with PMESH_02 0x439580 /
-//      sub_439350 (they tessellate the patch and re-sample S/T off the render mesh);
-//      this port skips that refinement.  The linear coords are valid, finite and
-//      deterministic, so the patch still round-trips byte-stably.
+//      control grid + lay LINEAR per-control texCoords via Patch_Naturalize2, then
+//      REFINE those texCoords with Patch_ResampleCurveST / Patch_TerrainTexProject (they
+//      tessellate the patch and re-sample S/T off the render mesh).
 //    * grow/shrink the grid (Patch_InsertColumn/Row, Patch_RemoveColumn/Row) and rebuild
-//      the symbiont bbox via Patch_CalcBounds + Brush_RebuildBrush - the curveDef-free
-//      half of Patch_Rebuild (0x438D80).
+//      via Patch_Rebuild (texCoord refine + bbox + curveDef).
 // ════════════════════════════════════════════════════════════════════════════
 
-// the global brush-instance display-list head sentinels (engine_stubs). The IDB
-// 'selected_brushes_next'/'active_brushes_next' (0x23F1868/0x23F18A0) are just the
-// .next members of these sentinel nodes (per brush.cpp's ruling at ~3056).
-extern int         g_nUpdateBits;           // pending window-update mask (0x25D5A74)
-
-static const double kOneThird = 0.3333333432674408;   // IDB dbl_6F46D8 (1/3 as a float)
+static const double kOneThird = 0.3333333432674408;   // 1/3 as a float
 
 // ── Patch_WidthDistanceTo (0x438FA0) / Patch_HeightDistanceTo (0x439040) ──────
 //    Cumulative 3D distance walking the first row's columns 0..n-1 (width) or the
 //    first column's rows 0..n-1 (height). Used by Patch_Naturalize2 for linear S/T.
-// IDA accumulates in a FLOAT (`v5`): each segment's `sqrt` result is rounded to a
-// float (`v7`) and the running total `v5` is a float too.  A double accumulator would
-// carry more precision than the binary and shift the laid S/T coords — keep float.
+// Accumulates in a FLOAT: each segment's `sqrt` result is rounded to a float and the
+// running total is a float too.  A double accumulator would carry more precision than
+// the binary and shift the laid S/T coords — keep float.
 static double Patch_WidthDistanceTo( int n, patchMesh_t *p )
 {
     float sum = 0.0f;
@@ -1250,40 +1159,38 @@ static double Patch_HeightDistanceTo( int n, patchMesh_t *p )
     return sum;
 }
 
-// ── Patch_Naturalize2 (0x439840) — lay LINEAR per-control-point S/T on layer `a2`.
-//    S advances with cumulative width-distance / (texWidth * a3); T with negated
-//    cumulative height-distance / (texHeight * a4). Self-contained (no curveDef).
+// ── Patch_Naturalize2 (0x439840) — lay LINEAR per-control-point S/T on `layer`.
+//    S advances with cumulative width-distance / (texWidth * scaleS); T with negated
+//    cumulative height-distance / (texHeight * scaleT). Self-contained (no curveDef).
 //    For the degenerate headless material, GetLayeredMaterial→null → 512×512 default.
-static void Patch_Naturalize2( patchMesh_t *p, int a2, float a3, float a4 )
+static void Patch_Naturalize2( patchMesh_t *p, int layer, float scaleS, float scaleT )
 {
-    qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)( &p->texture + a2 ) );
+    qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)( &p->texture + layer ) );
     int w = lm ? lm->width  : 512;
     int h = lm ? lm->height : 512;
 
-    // The binary keeps both reciprocals AND the distance accumulators in 32-bit FLOAT slots
-    // (IDB stack frame: var_C/var_10 = sScale/tScale, var_4/arg_8 = widthDist/heightDist, all
-    // `float`), and rounds the S-product widthDist*sScale to a float intermediate hoisted out
-    // of the inner loop (0x4398b1 `fld var_4; fmul var_C; fstp var_4`) before storing.  Using
-    // double here carried up to 1 ULP of extra precision into the serialized control-point
-    // texCoords on the Naturalize/Redisperse paths.
-    float sScale = (float)(  1.0 / ( (double)w * a3 ) );
-    float tScale = (float)( -1.0 / ( (double)h * a4 ) );
+    // Both reciprocals AND the distance accumulators are 32-bit FLOATs, and the S-product
+    // widthDist*sScale is rounded to a float intermediate hoisted out of the inner loop
+    // before storing.  Double here carries up to 1 ULP of extra precision into the
+    // serialized control-point texCoords on the Naturalize/Redisperse paths.
+    float sScale = (float)(  1.0 / ( (double)w * scaleS ) );
+    float tScale = (float)( -1.0 / ( (double)h * scaleT ) );
 
     float widthDist = 0.0f;
     for ( int i = 0; i < p->width; ++i )
     {
         float heightDist = 0.0f;
-        float sCoord = widthDist * sScale;   // float intermediate, once per row (IDA var_4 reuse)
+        float sCoord = widthDist * sScale;   // float intermediate, once per row
         for ( int j = 0; j < p->height; ++j )
         {
-            float *st = &p->ctrl[i][j].texCoord.st[2 * a2];
+            float *st = &p->ctrl[i][j].texCoord.st[2 * layer];
             st[0] = sCoord;
             st[1] = heightDist * tScale;
             heightDist = (float)Patch_HeightDistanceTo( j + 1, p );
         }
         widthDist = (float)Patch_WidthDistanceTo( i + 1, p );
     }
-    if ( a2 == 1 )
+    if ( layer == 1 )
         p->bDirty = 0;
 }
 
@@ -1313,8 +1220,6 @@ static void InterpolateInteriorPoints( patchMesh_t *p )
 // ════════════════════════════════════════════════════════════════════════════
 //  Patch_BrushToMesh  (0x43ACC0)  — create a curve patch (cylinder / bevel / endcap /
 //  square / cone) from the single selected brush, then replace the brush with it.
-//  Geometry transcribed verbatim from the IDB; the texturing/curve tail is the
-//  curveDef-free subset (see Patch_FinishCreate).
 // ════════════════════════════════════════════════════════════════════════════
 void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 {
@@ -1434,37 +1339,33 @@ void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
     p->texture  = *(patchMesh_material *)&def->faces->mtldef[0].lyrMtl;
     p->lightmap = *(patchMesh_material *)&def->faces->mtldef[1].lyrMtl;
 
-    // IDA order: Naturalize2 → the two texCoord refinement passes → curveDef → cone
-    // reshape → link.  Cone reshape AFTER Naturalize2 (matches the binary; the cone
-    // collapses each column's apex point to the bbox centre).
-    // IDA passes random_texture_stuff[0].sampleSize (the layer-0 default tex scale) as
-    // BOTH scale args — NOT a hardcoded 0.25.  The GUI seeds sampleSize on init; headless
-    // the test harness only memcpy's the MaterialDef (sizeof 0x24) into layer 0 and leaves
-    // sampleSize (offset 0x24) zero, which would make sScale=1/(w*0)=inf → NaN S/T → a
-    // Patch_Write IS_NAN assert.  Read the real field; fall back to the editor's 0.25
-    // default only when it is unseeded (== 0), so this matches the binary whenever the GUI
-    // is up and stays gate-safe headless.
+    // Order: Naturalize2 → the two texCoord refinement passes → curveDef → cone reshape →
+    // link.  Cone reshape AFTER Naturalize2 (the cone collapses each column's apex point
+    // to the bbox centre).
+    // BOTH scale args are random_texture_stuff[0].sampleSize (the layer-0 default tex
+    // scale) — NOT a hardcoded 0.25.  The GUI seeds sampleSize on init; headless the test
+    // harness only memcpy's the MaterialDef into layer 0 and leaves sampleSize zero, which
+    // would make sScale=1/(w*0)=inf → NaN S/T → a Patch_Write IS_NAN assert.  So the
+    // editor's 0.25 default is used only when it is unseeded (== 0).
     float natScale = g_qeglobals.random_texture_stuff[0].sampleSize;
     if ( natScale == 0.0f )
         natScale = 0.25f;
     Patch_Naturalize2( p, 0, natScale, natScale );
-    // texCoord refinement passes (0x43b1a4-0x43b204) — identical shape to the sibling
-    // Patch_GenericMesh: layer 1 @ flt_6F427C (16.0), then size_0x504C = 16.0 / bDirty = 1
-    // (0x43b1d3 / 0x43b1e0), then layer 2 @ flt_6F42F0 (0.25). Restored 2026-07-31: these
-    // were parked while PMESH_02 / Patch_TerrainTexProject were unported, which left a
-    // newly-created cylinder/bevel/endcap/cone with only the linear Naturalize2 S/T.
+    // texCoord refinement passes — identical shape to the sibling Patch_GenericMesh:
+    // layer 1 at 16.0, then size = 16.0 / bDirty = 1, then layer 2 at 0.25.  Without them a
+    // newly-created cylinder/bevel/endcap/cone has only the linear Naturalize2 S/T.
     // bDirty also gates the `size` field in Patch_Write (a created patch would otherwise
     // save `size 0` instead of `size 16`).
     const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
     *(float *)&p->size_of_struct_0x504C = 16.0f;
     p->bDirty = 1;
     if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
-    else           PMESH_02( p, 2, 0.25f );
+    else           Patch_ResampleCurveST( p, 2, 0.25f );
     if ( p->curveDef )
         free( p->curveDef );
-    // STAGE 1: builds the tessellated curveDef render mesh (Bezier subdivision for the
+    // builds the tessellated curveDef render mesh (Bezier subdivision for the
     // cylinder/bevel/endcap/cone control grid) so the new patch renders as wireframe.
     p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
     ++p->version;
@@ -1513,7 +1414,7 @@ void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 //  is the shape all three agree on and not one of them generalised.
 //
 //  It exists because the two workers it needs — Patch_Naturalize2 (0x439840) and
-//  PMESH_02 (0x439580) — are file-static and must stay that way: they are ported
+//  Patch_ResampleCurveST (0x439580) — are file-static and must stay that way: they are ported
 //  internals with IDA-pinned float behaviour, and widening them into the public
 //  header to serve one caller would be worse than one forwarder.
 //
@@ -1533,7 +1434,7 @@ void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 //
 //  WHAT WAS WRONG, and it is a SCALE, not a projection.  Patch_Naturalize2 lays S
 //  from the cumulative WIDTH DISTANCE in world units (Patch_WidthDistanceTo,
-//  :1183) divided by `texWidth * a3`, so `texWidth * a3` IS the number of world
+//  :1183) divided by `texWidth * scaleS`, so `texWidth * scaleS` IS the number of world
 //  units one full texture repeat covers.  A brush FACE expresses the same quantity
 //  directly as its texdef `size[0]` (brush.cpp:3327 / pmesh.cpp:855 both seed it
 //  as `texWidth * 0.25`, i.e. exactly this product at the default sample size).
@@ -1544,7 +1445,7 @@ void Patch_BrushToMesh( char bCone, byte bBevel, byte bEndcap, char bSquare )
 //  texture change, which is exactly what "doesn't look natural with the parent
 //  solid edge area" describes.
 //
-//  So: a3 = srcTex->size[0] / texWidth reproduces the face's own texel density on
+//  So: scaleS = srcTex->size[0] / texWidth reproduces the face's own texel density on
 //  the patch, in the patch's own arc-length parametrisation.  Both are read from
 //  the SAME material (the patch has already inherited the face's), so the widths
 //  cancel and the two surfaces agree by construction rather than by luck.
@@ -1579,11 +1480,11 @@ void Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex )
 
     const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
     *(float *)&p->size_of_struct_0x504C = 16.0f;
     p->bDirty = 1;                       // gates `size` in Patch_Write (:1146)
     if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
-    else           PMESH_02( p, 2, 0.25f );
+    else           Patch_ResampleCurveST( p, 2, 0.25f );
 
     if ( p->curveDef )
         free( p->curveDef );
@@ -1607,7 +1508,7 @@ void Patch_KiwiFinishNew( patchMesh_t *p )
 //  selectability chain (fixed in kiwi_pick.cpp), and this is it.
 //
 //  WHAT THE PORTED APPLY DOES, AND WHY IT STRETCHES.  Texture_SetTexture reaches a
-//  patch through sub_476ED0 (brush.cpp:2852-2871) with a5 == 1, whose patch branch
+//  patch through Brush_SetAllFacesMaterial (brush.cpp) with materialOnly, whose patch branch
 //  copies the two material POINTERS (lyrMtl, radMtl) and bumps p->version.  It
 //  never touches ctrl[][].texCoord and it never naturalizes — faithful to 0x476ED0
 //  and NOT to be changed there.  So the per-control-point S/T stay exactly as
@@ -1618,8 +1519,8 @@ void Patch_KiwiFinishNew( patchMesh_t *p )
 //  (Patch_KiwiFinishNewLike above) — that reads as exactly the reported stretch.
 //
 //  THE COMPOSITION RULE, AND IT IS RECOVERABLE WITHOUT CAPTURING ANYTHING FIRST.
-//  Patch_Naturalize2 lays a LINEAR map: st[0]_i = widthDist(i) / (w * a3), and
-//  `w * a3` IS the world units one repeat covers.  Since the apply does not touch
+//  Patch_Naturalize2 lays a LINEAR map: st[0]_i = widthDist(i) / (w * scaleS), and
+//  `w * scaleS` IS the world units one repeat covers.  Since the apply does not touch
 //  ctrl[][], the OLD product survives the swap in the coordinates themselves:
 //
 //      WUPR_s = widthDist ( width  - 1 ) /  ctrl[width -1][0].texCoord.st[0]
@@ -1627,7 +1528,7 @@ void Patch_KiwiFinishNew( patchMesh_t *p )
 //
 //  (the T sign comes from Patch_Naturalize2's negated tScale, :1233).  Feeding
 //  those back as a synthesized texdef_sub_t.size[] makes Patch_KiwiFinishNewLike
-//  compute a3 = WUPR_s / newWidth, and Patch_Naturalize2 then re-lays at
+//  compute scaleS = WUPR_s / newWidth, and Patch_Naturalize2 then re-lays at
 //  1 / (newWidth * WUPR_s / newWidth) = 1 / WUPR_s — the density the patch already
 //  had, against the material it now has.  The old width cancels out, so nothing has
 //  to be captured before the apply runs.
@@ -1640,7 +1541,7 @@ void Patch_KiwiFinishNew( patchMesh_t *p )
 //  and is always better than leaving the stretch in place.
 //
 //  It also rebuilds curveDef (Patch_KiwiFinishNewLike's tail), which is what
-//  PMESH_51's pick needs — so this is self-healing on that axis too.
+//  Patch_RayTest's pick needs — so this is self-healing on that axis too.
 static void Patch_KiwiReNaturalize( patchMesh_t *p )
 {
     if ( !p || p->width < 2 || p->height < 2 )
@@ -1698,37 +1599,37 @@ void Patch_KiwiReNaturalizeSelected()
 //  texcoords, builds the render curveDef, links the new patch brush into the active
 //  list, and (bDeleteSource) replaces the source selection with it.
 //
-//  IDA-verbatim notes:
+//  Notes:
 //   * nWidth/nHeight bounds: nHeight>15 || (unsigned)(nWidth-3)>12 → reject (3..15).
-//   * Orientation→axis map (LABEL_9/LABEL_10): the (u,v) plane axes for the view:
+//   * Orientation→axis map: the (u,v) plane axes for the view:
 //       view 0 → (u=1,v=2)   view 1 → (u=0,v=2)   view 2 → (u=0,v=1)
 //     and the patch is flattened at def->maxs[nOrientation] on the normal axis.
 //   * u/v coords are INT-truncated walks of def->mins[axis] stepped by the
-//     fabs()'d axis span / (count-1) — transcribed exactly (the int truncations
-//     and double-precision step adds are the binary's; preserved).
+//     fabs()'d axis span / (count-1) (the int truncations and double-precision
+//     step adds are the binary's; preserved).
 //   * Texture/lightmap layers come from g_qeglobals.random_texture_stuff (the
 //     current-edit-layer templates), NOT the source brush's faces.
 //   * Naturalize scale = random_texture_stuff[0].sampleSize; falls back to the
-//     editor's 0.25 default when unseeded (headless gate-safety, matching the
-//     Patch_BrushPrimit port's identical guard — identical when the GUI is up).
-//   * The bDirty texCoord refinement (sub_439350 terrain / PMESH_02 curve, both at
-//     16.0 then 0.25, layers 1/2) is the REAL ported refinement, not parked.
-//   * type is 0 (0x43b36f) — the `type & PATCH_TERRAIN` forks below are therefore DEAD
-//     in the binary too; they are kept because the binary emits them.
+//     editor's 0.25 default when unseeded (headless gate-safety, the same guard as
+//     Patch_BrushToMesh — identical when the GUI is up).
+//   * The bDirty texCoord refinement (Patch_TerrainTexProject terrain / Patch_ResampleCurveST
+//     curve, both at 16.0 then 0.25, layers 1/2) runs.
+//   * type is 0 — the `type & PATCH_TERRAIN` forks below are therefore DEAD in the
+//     binary too; they are kept because the binary emits them.
 //
-//  Terrain creation is the separate Create_Terrain function at 0x43B660. It uses
+//  Terrain creation is the separate Create_Terrain function. It uses
 //  random_texture_stuff; it is not a PATCH_TERRAIN variant of this function and does
 //  not project materials from the selected brush face.
 // ════════════════════════════════════════════════════════════════════════════
 selbrush_t *Patch_GenericMesh( int nWidth, int nHeight, int nOrientation,
                                char bDeleteSource, char bOverwrite )
 {
-    if ( nHeight > 15 || (unsigned int)( nWidth - 3 ) > 12 )     // 0x43b331
+    if ( nHeight > 15 || (unsigned int)( nWidth - 3 ) > 12 )
     {
         Sys_Printf( "Invalid patch width or height.\n" );
         return nullptr;
     }
-    if ( !bOverwrite && !QE_SingleBrush() )                      // 0x43b33d
+    if ( !bOverwrite && !QE_SingleBrush() )
     {
         Sys_Printf( "Cannot generate a patch from multiple selections.\n" );
         return nullptr;
@@ -1737,9 +1638,9 @@ selbrush_t *Patch_GenericMesh( int nWidth, int nHeight, int nOrientation,
     patchMesh_t *p = MakeNewPatch();
     p->height = nHeight;
     p->width  = nWidth;
-    p->type   = (PATCH_TYPES)0;                                  // 0x43b36f
+    p->type   = (PATCH_TYPES)0;
 
-    // Orientation → (u-axis, v-axis) of the view plane (IDA LABEL_9/LABEL_10).
+    // Orientation → (u-axis, v-axis) of the view plane.
     int uAxis, vAxis;
     if ( nOrientation == 0 )       { uAxis = 1; vAxis = 2; }
     else if ( nOrientation == 1 )  { uAxis = 0; vAxis = 2; }
@@ -1768,8 +1669,8 @@ selbrush_t *Patch_GenericMesh( int nWidth, int nHeight, int nOrientation,
         u = (int)( (double)u + uStep );
     }
 
-    // Stamp the current-edit-layer templates (0x43b4f2..0x43b50c): layer 0 = texture,
-    // layer 1 = lightmap.  smoothing keeps MakeNewPatch's "smoothing_smooth".
+    // Stamp the current-edit-layer templates: layer 0 = texture, layer 1 = lightmap.
+    // smoothing keeps MakeNewPatch's "smoothing_smooth".
     p->texture.lyrMtl  = g_qeglobals.random_texture_stuff[0].mtl.lyrMtl;
     p->texture.radMtl  = g_qeglobals.random_texture_stuff[0].mtl.radMtl;
     p->lightmap.lyrMtl = g_qeglobals.random_texture_stuff[1].mtl.lyrMtl;
@@ -1778,17 +1679,17 @@ selbrush_t *Patch_GenericMesh( int nWidth, int nHeight, int nOrientation,
     float natScale = g_qeglobals.random_texture_stuff[0].sampleSize;
     if ( natScale == 0.0f )
         natScale = 0.25f;
-    Patch_Naturalize2( p, 0, natScale, natScale );                // 0x43b521
+    Patch_Naturalize2( p, 0, natScale, natScale );
 
-    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;       // 0x43b538 (always false)
+    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;       // always false
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
-    *(float *)&p->size_of_struct_0x504C = 16.0f;                 // 0x43b55e
-    p->bDirty = 1;                                               // 0x43b56b
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
+    *(float *)&p->size_of_struct_0x504C = 16.0f;
+    p->bDirty = 1;
     if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
-    else           PMESH_02( p, 2, 0.25f );
+    else           Patch_ResampleCurveST( p, 2, 0.25f );
 
-    if ( p->curveDef )                                           // 0x43b592
+    if ( p->curveDef )
         free( p->curveDef );
     p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
     ++p->version;
@@ -1821,22 +1722,22 @@ selbrush_t *Patch_GenericMesh( int nWidth, int nHeight, int nOrientation,
 //    inline the same three statements.
 static curvePatchDef_t *Patch_BuildCurveDef( patchMesh_t *p )
 {
-    if ( p->curveDef )                                           // 0x438d51
+    if ( p->curveDef )
         free( p->curveDef );
     curvePatchDef_t *result = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
-    p->curveDef = result;                                        // 0x438d78
+    p->curveDef = result;
     return result;
 }
 
 // Create_Terrain (0x43B660), called by TerrainDlg_NewPatch (0x458FB0).
 selbrush_t *Create_Terrain( int width, int height, int orientation )
 {
-    if ( (unsigned int)( height - 2 ) > 14 || (unsigned int)( width - 2 ) > 14 )   // 0x43b684
+    if ( (unsigned int)( height - 2 ) > 14 || (unsigned int)( width - 2 ) > 14 )
     {
         Sys_Printf( "Invalid terrain width or height.\n" );
         return nullptr;
     }
-    if ( !QE_SingleBrush() )                                                       // 0x43b68a
+    if ( !QE_SingleBrush() )
     {
         Sys_Printf( "Cannot generate a terrain from multiple selections.\n" );
         return nullptr;
@@ -1845,9 +1746,9 @@ selbrush_t *Create_Terrain( int width, int height, int orientation )
     patchMesh_t *p = MakeNewPatch();
     p->height = height;
     p->width  = width;
-    p->type   = PATCH_TERRAIN;                                                     // 0x43b6bc
+    p->type   = PATCH_TERRAIN;
 
-    int uAxis, vAxis;                                                              // LABEL_8/LABEL_9
+    int uAxis, vAxis;
     if ( orientation == 0 )       { uAxis = 1; vAxis = 2; }
     else if ( orientation == 1 )  { uAxis = 0; vAxis = 2; }
     else                          { uAxis = 0; vAxis = 1; }
@@ -1874,28 +1775,28 @@ selbrush_t *Create_Terrain( int width, int height, int orientation )
         u = (int)( (double)u + uStep );
     }
 
-    p->texture.lyrMtl  = g_qeglobals.random_texture_stuff[0].mtl.lyrMtl;           // 0x43b841
-    p->texture.radMtl  = g_qeglobals.random_texture_stuff[0].mtl.radMtl;           // 0x43b849
-    p->lightmap.lyrMtl = g_qeglobals.random_texture_stuff[1].mtl.lyrMtl;           // 0x43b852
-    p->lightmap.radMtl = g_qeglobals.random_texture_stuff[1].mtl.radMtl;           // 0x43b85b
+    p->texture.lyrMtl  = g_qeglobals.random_texture_stuff[0].mtl.lyrMtl;
+    p->texture.radMtl  = g_qeglobals.random_texture_stuff[0].mtl.radMtl;
+    p->lightmap.lyrMtl = g_qeglobals.random_texture_stuff[1].mtl.lyrMtl;
+    p->lightmap.radMtl = g_qeglobals.random_texture_stuff[1].mtl.radMtl;
 
-    const float natScale = g_qeglobals.random_texture_stuff[0].sampleSize;         // 0x43b870
+    const float natScale = g_qeglobals.random_texture_stuff[0].sampleSize;
     Patch_Naturalize2( p, 0, natScale, natScale );
 
-    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;                         // 0x43b886 (always true here)
+    const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;                         // always true here
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
-    *(float *)&p->size_of_struct_0x504C = 16.0f;                                   // 0x43b8ad
-    p->bDirty = 1;                                                                 // 0x43b8ba
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
+    *(float *)&p->size_of_struct_0x504C = 16.0f;
+    p->bDirty = 1;
     if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
-    else           PMESH_02( p, 2, 0.25f );
+    else           Patch_ResampleCurveST( p, 2, 0.25f );
 
-    Patch_BuildCurveDef( p );                                                      // 0x43b8e1
-    ++p->version;                                                                  // 0x43b8e6
+    Patch_BuildCurveDef( p );
+    ++p->version;
 
-    brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );              // 0x43b8f7
-    selbrush_t *inst = Brush_AddToList( pdef, owner );                             // 0x43b907
-    // Select_Brush_2(&active_brushes, inst)  (0x476630, inlined — list != selected_brushes)
+    brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
+    selbrush_t *inst = Brush_AddToList( pdef, owner );
+    // Select_Brush_2(&active_brushes, inst) (0x476630), inlined — list != selected_brushes
     if ( inst->next || inst->prev )
         Error( "Brush_AddToList: already linked" );
     if ( &active_brushes == &selected_brushes )
@@ -1908,8 +1809,8 @@ selbrush_t *Create_Terrain( int width, int height, int orientation )
         inst->prev = &active_brushes;
     }
 
-    Select_Delete();                                                               // 0x43b90e
-    Select_Brush( inst, 1, 1, 0 );                                                 // 0x43b91b
+    Select_Delete();
+    Select_Brush( inst, 1, 1, 0 );
     return inst;
 }
 
@@ -1918,20 +1819,18 @@ selbrush_t *Create_Terrain( int width, int height, int orientation )
 //
 //  Each function has a TERRAIN branch (type & PATCH_TERRAIN) that adds/removes a
 //  SINGLE row/col via the 4 helpers below, and a BEZIER branch that adds/removes
-//  TWO (keeping the odd 2n+1 grid).  Transcribed from the IDB (0x443410 / 0x443830 /
-//  0x443B60 / 0x443C90).  CoD divergences vs GtkRadiant (IDA = ground truth):
-//   * the new flanking points are offset by ±1/3 of the adjacent segment delta
-//     (dbl_6F46D8 = 1/3), NOT GtkRadiant's ±1/2;
+//  TWO (keeping the odd 2n+1 grid).  CoD divergences vs GtkRadiant:
+//   * the new flanking points are offset by ±1/3 of the adjacent segment delta,
+//     NOT GtkRadiant's ±1/2;
 //   * the insert/remove POSITION is chosen by the `flag` arg (front vs back), NOT
 //     GtkRadiant's PointInMoveList vertex-selection scan;
 //   * REMOVE is a plain 2-column/row drop (no GtkRadiant extrapolation);
-//   * the tail refreshes CWnd_PatchDialog instead of Patch_EditPatch (the patch
-//     inspector shipped with patchdialog.cpp; Patch_AdjustSelected 0x444550 has no
-//     refresh tail in the binary, verified — the refresh belongs to the callers).
+//   * the tail refreshes CWnd_PatchDialog instead of Patch_EditPatch (Patch_AdjustSelected
+//     has no refresh tail — the refresh belongs to the callers).
 // ════════════════════════════════════════════════════════════════════════════
 
 // ─── terrain single-row/col helpers ──────────────────────────────────────────
-// sub_4436A0 — insert ONE row at index `at` (height += 1), midpoint-averaged.
+// 0x4436A0 — insert ONE row at index `at` (height += 1), midpoint-averaged.
 static void Patch_TerrainInsertRow( patchMesh_t *p, int at )
 {
     if ( p->height + 1 > 16 )
@@ -1956,7 +1855,7 @@ static void Patch_TerrainInsertRow( patchMesh_t *p, int at )
         ((byte *)&nv->vert_color)[1] = (byte)( ( ((byte*)&lo->vert_color)[1] + ((byte*)&hi->vert_color)[1] ) / 2 );
         ((byte *)&nv->vert_color)[2] = (byte)( ( ((byte*)&lo->vert_color)[2] + ((byte*)&hi->vert_color)[2] ) / 2 );
         ((byte *)&nv->vert_color)[3] = (byte)( ( ((byte*)&lo->vert_color)[3] + ((byte*)&hi->vert_color)[3] ) / 2 );
-        // register the new control point as an editable handle (IDB d_points append).
+        // register the new control point as an editable handle (d_points append).
         for ( int k = 0; k < 3; ++k )
             g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = nv->xyz[k];
         if ( g_qeglobals.d_numpoints < 2047 )
@@ -1965,7 +1864,7 @@ static void Patch_TerrainInsertRow( patchMesh_t *p, int at )
     ++p->height;
 }
 
-// sub_443260 — insert ONE column at index `at` (width += 1), midpoint-averaged.
+// 0x443260 — insert ONE column at index `at` (width += 1), midpoint-averaged.
 static void Patch_TerrainInsertColumn( patchMesh_t *p, int at )
 {
     if ( p->width + 1 > 16 )
@@ -1989,7 +1888,7 @@ static void Patch_TerrainInsertColumn( patchMesh_t *p, int at )
         ((byte *)&nv->vert_color)[1] = (byte)( ( ((byte*)&lo->vert_color)[1] + ((byte*)&hi->vert_color)[1] ) / 2 );
         ((byte *)&nv->vert_color)[2] = (byte)( ( ((byte*)&lo->vert_color)[2] + ((byte*)&hi->vert_color)[2] ) / 2 );
         ((byte *)&nv->vert_color)[3] = (byte)( ( ((byte*)&lo->vert_color)[3] + ((byte*)&hi->vert_color)[3] ) / 2 );
-        // register the new control point as an editable handle (IDB d_points append).
+        // register the new control point as an editable handle (d_points append).
         for ( int k = 0; k < 3; ++k )
             g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = nv->xyz[k];
         if ( g_qeglobals.d_numpoints < 2047 )
@@ -1998,7 +1897,7 @@ static void Patch_TerrainInsertColumn( patchMesh_t *p, int at )
     ++p->width;
 }
 
-// sub_443AE0 — remove ONE row at index `at` (height -= 1, min 3), shift rows down.
+// 0x443AE0 — remove ONE row at index `at` (height -= 1, min 3), shift rows down.
 static void Patch_TerrainRemoveRow( patchMesh_t *p, int at )
 {
     if ( p->height <= 2 )
@@ -2011,7 +1910,7 @@ static void Patch_TerrainRemoveRow( patchMesh_t *p, int at )
             p->ctrl[col][row] = p->ctrl[col][row + 1];
 }
 
-// sub_443C10 — remove ONE column at index `at` (width -= 1, min 3), shift cols left.
+// 0x443C10 — remove ONE column at index `at` (width -= 1, min 3), shift cols left.
 static void Patch_TerrainRemoveColumn( patchMesh_t *p, int at )
 {
     if ( p->width <= 2 )
@@ -2056,17 +1955,17 @@ void Patch_InsertColumn( patchMesh_t *p, char flag )
         // insert 2 columns at the FRONT (after col 0): shift up, build cols 1 & 2.
         for ( int h = 0; h < p->height; ++h )
         {
-            // IDA 0x44358C shifts col 0 INCLUSIVE (full 0x50 rep movsd): ctrl[col+2]=ctrl[col]
-            // for col=width-1..0, so ctrl[2] inherits col-0's full vertex.
+            // the shift includes col 0: ctrl[col+2]=ctrl[col] for col=width-1..0, so ctrl[2]
+            // inherits col-0's full vertex.
             for ( int col = p->width - 1; col >= 0; --col )
                 p->ctrl[col + 2][h] = p->ctrl[col][h];
             float third[3];
             for ( int k = 0; k < 3; ++k )
                 third[k] = ( p->ctrl[3][h].xyz[k] - p->ctrl[0][h].xyz[k] ) * (float)kOneThird;
-            // IDA 0x4435F3+ writes ONLY the 3 xyz floats to the two new columns (fld/fstp, NO
-            // rep movsd): ctrl[1] keeps ORIGINAL col-1's texCoord/normal/color (never a shift
-            // dest), ctrl[2] keeps col-0's (from the inclusive shift above).  The prior port's
-            // full-struct copies clobbered ctrl[1]'s non-xyz fields with col-0's.
+            // ONLY the 3 xyz floats of the two new columns are written: ctrl[1] keeps ORIGINAL
+            // col-1's texCoord/normal/color (never a shift dest), ctrl[2] keeps col-0's (from
+            // the inclusive shift above).  Full-struct copies would clobber ctrl[1]'s non-xyz
+            // fields with col-0's.
             for ( int k = 0; k < 3; ++k ) p->ctrl[1][h].xyz[k] = p->ctrl[0][h].xyz[k] + third[k];
             for ( int k = 0; k < 3; ++k ) p->ctrl[2][h].xyz[k] = p->ctrl[1][h].xyz[k] + third[k];
         }
@@ -2093,8 +1992,8 @@ void Patch_InsertRow( patchMesh_t *p, char flag )
         for ( int w = 0; w < p->width; ++w )
         {
             float third[3];
-            // IDA Patch_InsertRow uses `delta / 3.0` (x87 fdiv), NOT InsertColumn's
-            // `* 0.3333333432674408` — keep the exact constant (float-exact).
+            // InsertRow uses `delta / 3.0`, NOT InsertColumn's `* 0.3333333432674408` —
+            // keep the exact constant.
             for ( int k = 0; k < 3; ++k )
                 third[k] = (float)( (double)( p->ctrl[w][h - 1].xyz[k] - p->ctrl[w][h - 2].xyz[k] ) / 3.0 );
             p->ctrl[w][h + 1] = p->ctrl[w][h - 1];
@@ -2111,12 +2010,12 @@ void Patch_InsertRow( patchMesh_t *p, char flag )
             for ( int row = p->height - 1; row >= 1; --row )
                 p->ctrl[w][row + 2] = p->ctrl[w][row];
             float third[3];
-            // IDA Patch_InsertRow: `delta / 3.0` (x87 fdiv), not `* kOneThird`.
+            // `delta / 3.0`, not `* kOneThird`.
             for ( int k = 0; k < 3; ++k )
                 third[k] = (float)( (double)( p->ctrl[w][3].xyz[k] - p->ctrl[w][0].xyz[k] ) / 3.0 );
-            // IDA 0x4439F8/0x443A60 write ONLY xyz to the two new rows (fld/fstp, NO rep movsd):
-            // ctrl[w][1] keeps ORIGINAL row-1's non-xyz, ctrl[w][2] keeps row-2's — the row shift
-            // is row>=1 (ctrl[w][2] is never a dest), unlike InsertColumn's col0-inclusive shift.
+            // ONLY xyz of the two new rows is written: ctrl[w][1] keeps ORIGINAL row-1's non-xyz,
+            // ctrl[w][2] keeps row-2's — the row shift is row>=1 (ctrl[w][2] is never a dest),
+            // unlike InsertColumn's col0-inclusive shift.
             for ( int k = 0; k < 3; ++k ) p->ctrl[w][1].xyz[k] = p->ctrl[w][0].xyz[k] + third[k];
             for ( int k = 0; k < 3; ++k ) p->ctrl[w][2].xyz[k] = p->ctrl[w][1].xyz[k] + third[k];
         }
@@ -2165,28 +2064,25 @@ void Patch_RemoveRow( patchMesh_t *p, char flag )
 }
 
 // ─── Patch_Rebuild (0x438D80) — texCoord refine + bbox + curveDef rebuild ─────
-//    The binary refines texCoords (PMESH_02/sub_439350) when bDirty, then rebuilds
-//    the symbiont bbox (Brush_RebuildBrush) and the curveDef (Patch_GenericMesh2).
-//    The refinement block was parked while PMESH_02/Patch_TerrainTexProject were
-//    unported; both shipped with the terrain-texture unit, so it is RESTORED here
-//    (2026-07-31). Without it, every grid edit that routes through Patch_Rebuild
+//    Refines texCoords (Patch_ResampleCurveST/Patch_TerrainTexProject) when bDirty, then
+//    rebuilds the symbiont bbox (Brush_RebuildBrush) and the curveDef (Patch_GenericMesh2).
+//    Without the refinement, every grid edit that routes through Patch_Rebuild
 //    (insert/remove row+column via Patch_AdjustSelected, OnDropSelectedRelativeZ)
-//    left the patch's S/T untouched, so edited patches kept pre-edit texturing.
+//    would leave the patch's S/T untouched, so edited patches would keep pre-edit texturing.
 void Patch_Rebuild( patchMesh_t *p, char doBounds )   // non-static: OnDropSelectedRelativeZ calls it
 {
     if ( doBounds )
     {
         if ( p->bDirty )
         {
-            // 0x438d9b: sampleSize is SAVED to a stack slot, passed to the refine, then
-            // written BACK afterwards along with bDirty=1 — the refine may clobber both,
-            // and the binary deliberately preserves size / re-dirties. Layer is 1 for both
-            // branches (the bezier one passes it in ecx, which is why hex-rays drops it).
+            // sampleSize is SAVED, passed to the refine, then written BACK afterwards
+            // along with bDirty=1 — the refine may clobber both, and the binary
+            // deliberately preserves size / re-dirties. Layer is 1 for both branches.
             float sampleSize = *(float *)&p->size_of_struct_0x504C;
             if ( ( p->type & PATCH_TERRAIN ) != 0 )
                 Patch_TerrainTexProject( p, 1, sampleSize );
             else
-                PMESH_02( p, 1, sampleSize );
+                Patch_ResampleCurveST( p, 1, sampleSize );
             p->bDirty = 1;
             *(float *)&p->size_of_struct_0x504C = sampleSize;
         }
@@ -2196,32 +2092,14 @@ void Patch_Rebuild( patchMesh_t *p, char doBounds )   // non-static: OnDropSelec
     }
     if ( p->curveDef )
         free( p->curveDef );
-    // STAGE 1: rebuild the tessellated render mesh so grid edits re-render as wireframe.
+    // rebuild the tessellated render mesh so grid edits re-render as wireframe.
     p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
     ++p->version;
 }
 
-// ─── PMESH_49 (0x4495C0) — regenerate EVERY active patch's curveDef ───────────
-//   Same curveDef free/rebuild/version-bump as Patch_Rebuild's tail, applied to every
-//   patch in active_brushes. Called by CMainFrame::OnPrefs (0x426a2d) because the
-//   render mesh is built for g_qeglobals.current_edit_layer, and the prefs dialog can
-//   change which layer that is — without this, patches keep meshes tessellated for the
-//   old layer until each is edited.
-void PMESH_49()
-{
-    for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
-    {
-        if ( !b->patch )
-            continue;
-        iassert( b->patch->def == b->def->patch );   // PMESH.CPP:7147
-        patchMesh_t *def = b->patch->def;
-        if ( def->curveDef )
-            free( def->curveDef );
-        curvePatchDef_t *mesh = Patch_GenericMesh2( def, g_qeglobals.current_edit_layer, 0, 0 );
-        ++def->version;
-        def->curveDef = mesh;
-    }
-}
+// KIWI: Patch_RebuildAllCurveDefs (0x4495C0, OnPrefs's re-tessellation of every active patch)
+// is gone - no preference feeds the tessellation, and the texture-layer switch re-tessellates
+// through Material_SetMode -> BrushList_RebuildDisplay.
 
 // ─── Patch_AdjustSelected (0x444550) — apply insert/remove to every selected patch ─
 void Patch_AdjustSelected( char bInsert, char bColumn, char bFlag )
@@ -2234,10 +2112,7 @@ void Patch_AdjustSelected( char bInsert, char bColumn, char bFlag )
         if ( !b->patch )
             continue;
         patchMesh_t *p = b->def->patch;       // the patch DEF (instance.patch->def == def->patch)
-        // IDA 0x44459b: patch-symbiont invariant assert (PMESH.CPP:5316), dropped in the prior
-        // port; the sibling Patch_Transpose keeps the same assert.  KEEP_VERBOSE preserves the
-        // exact binary PMESH.CPP:5316 string (member-expression cond).
-        iassert( b->patch->def == b->def->patch );
+        iassert( b->patch->def == b->def->patch );   // PMESH.CPP:5316
         if ( !p )
             continue;                         // defensive: never-built patch (binary asserts above)
         if ( bInsert )
@@ -2251,7 +2126,7 @@ void Patch_AdjustSelected( char bInsert, char bColumn, char bFlag )
             else           Patch_RemoveRow( p, bFlag );
         }
         bUpdate = 1;
-        // IDA 0x445XXX: post-op stability assert (PMESH.CPP:5333) — def didn't realloc.
+        // post-op stability assert (PMESH.CPP:5333) — def didn't realloc.
         iassert( p == b->patch->def );
         Patch_Rebuild( p, 1 );
     }
@@ -2260,13 +2135,9 @@ void Patch_AdjustSelected( char bInsert, char bColumn, char bFlag )
 }
 
 // ─── patchInvert2 (0x446480) — VERTICAL FLIP: mirror each column's rows ────────
-//   Transcribed from the IDB flat-pointer walk.  ctrl is drawVert_t[16][16] at
-//   patchMesh_t+56 (verified), drawVert 80B; the IDB's v3 resolves to ctrl[col][r]
-//   and v5 = (char*)p + 80*height + 80*(16*col - r) - 24 resolves to
-//   ctrl[col][height-1-r] (since ctrl_base = p+56 ⇒ -24 = 56-80).  So it swaps
-//   ctrl[col][r] <-> ctrl[col][height-1-r] for r in [0, height/2).  Terrain patches
-//   then propagate each control vertex's turned_edge bit0 up one row over rows
-//   0..height-2 (`*v7 ^= (*v7 ^ v7[+1row]) & 1`).
+//   Swaps ctrl[col][r] <-> ctrl[col][height-1-r] for r in [0, height/2).  Terrain
+//   patches then propagate each control vertex's turned_edge bit0 up one row over rows
+//   0..height-2.
 static void patchInvert2( patchMesh_t *p )
 {
     for ( int col = 0; col < p->width; ++col )
@@ -2289,10 +2160,9 @@ static void patchInvert2( patchMesh_t *p )
 // ─── Patch_ToggleInverted (0x4465c0) — Curve→Negative: vertical-flip selection ─
 //   For every selected patch: vertical-flip its control grid (patchInvert2) and
 //   rebuild the tessellated render mesh (free + Patch_GenericMesh2, ++version).
-//   The IDB does NOT bbox-rebuild here (a vertical flip leaves the bounds
-//   unchanged), so — unlike Patch_Transpose — there is no Patch_Rebuild/
-//   Brush_RebuildBrush call.  The trailing patch-inspector dialog refresh
-//   (g_PatchDialog.GetPatchInfo) is deferred with the rest of patchdialog.cpp.
+//   NO bbox-rebuild here (a vertical flip leaves the bounds unchanged), so — unlike
+//   Patch_Transpose — there is no Patch_Rebuild/Brush_RebuildBrush call.  Ends with the
+//   patch-inspector dialog refresh (g_PatchDialog_GetPatchInfo).
 void Patch_ToggleInverted()
 {
     char bUpdate = 0;
@@ -2316,21 +2186,19 @@ void Patch_ToggleInverted()
     if ( bUpdate )
         g_nUpdateBits = -1;
 
-    // IDA 0x44666b: refresh the patch-inspector dialog (unconditional tail, outside the selection
-    // block).  Parked GUI no-op headless (GetHwnd() returns null); ported here for 1:1 control flow
-    // + consistency with Patch_Move's identical tail.
+    // refresh the patch-inspector dialog (unconditional tail, outside the selection block); a
+    // no-op headless.  Patch_Move has the identical tail.
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 }
 
-// ─── Patch_TransposeGrid (sub_449020, 0x449020) — in-place control-grid TRANSPOSE ──
+// ─── Patch_TransposeGrid (0x449020) — in-place control-grid TRANSPOSE ──
 //   The matrix-transpose half of Patch_Transpose: reflects ctrl[c][r] across the
-//   diagonal (ctrl[i][j] <-> ctrl[j][i]), then swaps width<->height.  The IDB splits
-//   the reflection into two orientations (width<=height vs width>height) so the
+//   diagonal (ctrl[i][j] <-> ctrl[j][i]), then swaps width<->height.  The reflection
+//   is split into two orientations (width<=height vs width>height) so the
 //   rectangular cells whose mirror lies OUTSIDE the original grid are COPIED into
 //   their soon-to-be-valid slot rather than swapped.  Terrain patches first toggle
-//   every control vertex's turned_edge bit0.  Transcribed from the IDB flat-pointer
-//   walk (ctrl @ patchMesh_t+56, drawVert 80B, 16-wide backing rows).
+//   every control vertex's turned_edge bit0.
 static patchMesh_t *Patch_TransposeGrid( patchMesh_t *p )
 {
     if ( ( p->type & PATCH_TERRAIN ) != 0 )
@@ -2377,11 +2245,11 @@ static patchMesh_t *Patch_TransposeGrid( patchMesh_t *p )
 
 // ─── Patch_Transpose (0x4491D0) — Curve→Matrix Transpose: transpose selected patches ─
 //   For every selected patch: transpose the control grid (Patch_TransposeGrid) THEN
-//   vertical-flip it (patchInvert2 — the IDB pairs the two), rebuild the tessellated
+//   vertical-flip it (patchInvert2 — the binary pairs the two), rebuild the tessellated
 //   curveDef (free + Patch_GenericMesh2, ++version), then Patch_Rebuild(def,1) (bbox +
-//   curveDef rebuild — a transpose changes the bounds, unlike a pure flip).  The IDB
-//   does the inline curveDef rebuild AND Patch_Rebuild (so version bumps twice and the
-//   mesh builds twice); kept verbatim.  g_nUpdateBits is set by the OnCurveMatrixTranspose
+//   curveDef rebuild — a transpose changes the bounds, unlike a pure flip).  Both the
+//   inline curveDef rebuild AND Patch_Rebuild run (so version bumps twice and the mesh
+//   builds twice), as in the binary.  g_nUpdateBits is set by the OnCurveMatrixTranspose
 //   handler, not here.
 void Patch_Transpose()
 {
@@ -2407,8 +2275,7 @@ void Patch_Transpose()
 //   Make a fresh patch, copy the control grid + header, rebuild the tessellated
 //   curveDef, and create a NEW symbiont brush (AddBrushForPatch) owned by the source's
 //   owner.  Reached by the undo/clone path (Brush_FullClone 0x475E80, Brush_Clone,
-//   Brush_CloneComplex), so undo of ANY patch edit routes through here — was a FATAL
-//   stub (engine_stubs.cpp), which crashed the first Undo-bracketed patch command.
+//   Brush_CloneComplex), so undo of ANY patch edit routes through here.
 patchMesh_t *Patch_Duplicate( patchMesh_t *pFrom )
 {
     patchMesh_t *p = MakeNewPatch();
@@ -2419,12 +2286,7 @@ patchMesh_t *Patch_Duplicate( patchMesh_t *pFrom )
     return p;
 }
 
-// Undo bracket helpers (undo.cpp) — used by Patch_NaturalizeSelected.
-extern void Undo_ClearRedo();                          // 0x45DF20
-extern void Undo_GeneralStart( const char *operation );// 0x45E3F0
-extern void Undo_AddBrushList( selbrush_t *sb );       // 0x45E7C0
-extern void Undo_EndBrushList( selbrush_t *sb );       // 0x45E870
-extern void Undo_End();                                // 0x45EA20 (also declared below)
+// used by Patch_Lightmap_Texturing_Sub.
 extern void Select_SetTexture( float *out );           // 0x456D70 select.cpp (layer sample size)
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2435,14 +2297,10 @@ extern void Select_SetTexture( float *out );           // 0x456D70 select.cpp (l
 //  real, with a 512 fallback) and the already-real Face_MoveTexture projection.
 // ════════════════════════════════════════════════════════════════════════════
 
-extern void  Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                               const float *uvBase, float rotate, float crossterm );   // brush.cpp 0x45A1C0
-extern float Vec3Normalize_R( float *v );                                     // 0x40A5E0 (returns length)
-
 int g_nFaceCycle = 0;   // 0x25D5B10 — Patch_GetAxisFace's round-robin face cursor
 
-// 8-connected neighbour directions (di=col, dj=row), IDB unk_73B130 — the order sets the
-// cross-product winding so the accumulated vertex normal matches the binary.
+// 8-connected neighbour directions (di=col, dj=row) — the order sets the cross-product
+// winding so the accumulated vertex normal matches the binary.
 static const int s_patchNeighborDirs[8][2] =
 { {0,1},{1,1},{1,0},{1,-1},{0,-1},{-1,-1},{-1,0},{-1,1} };
 
@@ -2537,14 +2395,14 @@ static patchMesh_t *Patch_MeshNormals( patchMesh_t *p )
     return p;
 }
 
-// ── PMESH_03 (0x439990) — pick a cap reference face (first long-edged face) ────
+// ── Patch_CapReferenceFace (0x439990) — pick a cap reference face (first long-edged face) ────
 //  Returns the symbiont brush's first face whose first winding edge spans > 8 units in
 //  any axis (else face[0]).  The auto-cap projection reference.
-static face_t *PMESH_03( patchMesh_t *p )
+static face_t *Patch_CapReferenceFace( patchMesh_t *p )
 {
-    iassert( p );                                   // 1079 — #p byte-matches embedded "p"
+    iassert( p );                                   // 1079
     brush_t *b = (brush_t *)p->pSymbiot;
-    iassert( b );                                   // 1081 — #b byte-matches embedded "b"
+    iassert( b );                                   // 1081
 
     if ( b->faceCount == 0 )
         return b->faces;
@@ -2552,7 +2410,7 @@ static face_t *PMESH_03( patchMesh_t *p )
     for ( int i = 0; i < b->faceCount; ++i )
     {
         winding_t *w = b->faces[i].w;
-        iassert( w );                               // 1085 — #w byte-matches embedded "w"
+        iassert( w );                               // 1085
         const float *p0 = w->p[0];
         const float *p1 = w->p[1];
         int spans = ( 8.0f < p1[0] - p0[0] )
@@ -2573,11 +2431,9 @@ static face_t *Patch_GetAxisFace( patchMesh_t *p )
     unsigned int idx = (unsigned int)++g_nFaceCycle;
     unsigned int cap = ( faceCount <= 6 ) ? faceCount : 6;
     if ( idx >= cap ) { idx = 0; g_nFaceCycle = 0; }
+    iassert( idx < faceCount );
     if ( idx >= faceCount )
-    {
-        Assert( PMESH_CPP, 1115, 1, "%s", "g_nFaceCycle >= 0 && g_nFaceCycle < b->faceCount" );
         idx = g_nFaceCycle;
-    }
     return &b->faces[idx];
 }
 
@@ -2605,8 +2461,7 @@ static void Patch_ST( const float *params, const float *faceNormal, patchMesh_t 
             if ( slo > 4 ) { if ( (int)( 4096 - slo ) <= 4 ) sb += ( 4096 - slo ); }
             else            sb -= slo;
             s = *(float *)&sb;
-            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 796, 0, "%s", "!IS_NAN(st[0])" );
+            iassert( isfinite( s ) );
             st[0] = s;
 
             float t = mat[4] * xyz[0] + mat[5] * xyz[1] + mat[6] * xyz[2] + mat[7];
@@ -2615,125 +2470,87 @@ static void Patch_ST( const float *params, const float *faceNormal, patchMesh_t 
             if ( tlo > 4 ) { if ( (int)( 4096 - tlo ) <= 4 ) tb += ( 4096 - tlo ); }
             else            tb -= tlo;
             t = *(float *)&tb;
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 801, 0, "%s", "!IS_NAN(st[1])" );
+            iassert( isfinite( t ) );
             st[1] = t;
         }
     }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  PMESH_34 (0x4428f0) — apply the current material to a PATCH on drag-texture /
-//  whole-brush texture apply.  Reached from sub_476ED0 (brush.cpp) when the brush
-//  carries a patch and a5==0 (the drag-texture-onto-a-patch and patch-instance
-//  whole-brush apply paths).  Two things happen:
+//  Patch_ApplyMaterial (0x4428f0) — apply the current material to a PATCH on drag-texture /
+//  whole-brush texture apply.  Reached from Brush_SetAllFacesMaterial (brush.cpp) when
+//  the brush carries a patch and materialOnly is 0 (the drag-texture-onto-a-patch and
+//  patch-instance whole-brush apply paths).  Two things happen:
 //   1) Always: stamp the clicked material's two ptrs (lyrMtl/radMtl) into the
-//      patch's per-layer texture slots and bump version.  The first arg `a1` here is
-//      the SAME MaterialDef block as sub_476ED0's a2 — the IDB reads its first two
-//      DWORDs (a1->width / a1->height in the curvePatchDef_t cast == lyrMtl/radMtl
-//      of the MaterialDef; the union aliasing the disasm uses) into the texture
-//      slots.  (Disasm: `mov [edi+layer*8+0x18], [esi]` / `[edi+layer*8+0x1C], [esi+4]`.)
-//   2) Conditionally project: if a4!=0 AND the current texture template
-//      (random_texture_stuff[layer]) has a stored ST-projection (flag @ +40) whose
-//      stored grid w/h (@ +44/+48) match the patch's, copy that stored per-control-
-//      point ST block (@ +52, the SAME block Texture_SetTexture writes — see
-//      texwnd.cpp) onto the patch's control grid texCoords, then rebuild the
-//      tessellated curveDef.  Otherwise, if a3 (planar) is set, planar-project via
-//      Ed_Patch_PlanarTest + Patch_ApplyCapST (sub_439280).  Tail: refresh the patch
-//      inspector if open (GUI-only; null headless).
-//
-//  Raw-offset idiom (transcribed verbatim from the disasm):
-//    * the projection store block lives at random_texture_stuff[layer] + 52 (cur+0x34),
-//      stepping +8 bytes per column, +128 bytes per row — the exact mirror of
-//      Texture_SetTexture's writer (texwnd.cpp curBytes+52 / v8=v3<<7).
-//    * the patch control-grid texCoord destination is the raw-float-stride
-//      &p->ctrl[0][0].texCoord.st[2*idx + 2*layer] (idx steps +10 per column, +160 per
-//      row), identical to Patch_Naturalize2's `&p->ctrl[i][j].texCoord.st[2*a2]`.
+//      patch's per-layer texture slots and bump version.  `material` is the SAME
+//      MaterialDef block as Brush_SetAllFacesMaterial's.
+//   2) Conditionally project: if useStoredST AND the current texture template
+//      (random_texture_stuff[layer]) has a stored ST-projection whose grid w/h match
+//      the patch's, copy that stored per-control-point ST block (cur->st[col][row], the
+//      block Texture_SetTexture writes on a patch pick) onto the patch's control grid,
+//      then rebuild the tessellated curveDef.  Otherwise, if planarProject is set,
+//      planar-project via Ed_Patch_PlanarTest + Patch_ApplyCapST.  Tail:
+//      refresh the patch inspector if open (GUI-only; null headless).
 // ════════════════════════════════════════════════════════════════════════════
 extern char Ed_Patch_PlanarTest( patchMesh_t *patch, void *outBlk );   // brush.cpp (0x4382D0)
-extern bool  PatchDialog_IsOpen();                                     // patchdialog.cpp (U-GUARD-2)
+extern bool  PatchDialog_IsOpen();                                     // patchdialog.cpp
 extern void  g_PatchDialog_GetPatchInfo();
-static curvePatchDef_t *Patch_ApplyCapST( patchMesh_t *p, const float *faceNormal, const float *params ); // sub_439280 (below)
+static curvePatchDef_t *Patch_ApplyCapST( patchMesh_t *p, const float *faceNormal, const float *params ); // (below)
 
-char PMESH_34( MaterialDef *a1, patchMesh_t *a2, char a3, float a4 )
+char Patch_ApplyMaterial( MaterialDef *material, patchMesh_t *patch, char planarProject, float useStoredST )
 {
     const int layer = g_qeglobals.current_edit_layer;
 
     // 1) Stamp the material's two ptrs into the patch's per-layer texture slots.
-    patchMesh_material *texSlot = &a2->texture + layer;
-    texSlot->lyrMtl = a1->lyrMtl;                                                   // 0x442902
-    texSlot->radMtl = a1->radMtl;                                                   // 0x44290e
-    ++a2->version;                                                                  // 0x442912
+    patchMesh_material *texSlot = &patch->texture + layer;
+    texSlot->lyrMtl = material->lyrMtl;
+    texSlot->radMtl = material->radMtl;
+    ++patch->version;
 
     // the stored ST-projection block in the current-texture template.
     curTexWndLayer_t *cur = &g_qeglobals.random_texture_stuff[layer];
 
-    if ( a4 != 0.0f && cur->hasProjection )                                         // 0x44291a/0x44292f
+    if ( useStoredST != 0.0f && cur->hasProjection )
     {
-        if ( a2->width  == cur->gridWidth                                           // 0x44293e
-          && a2->height == cur->gridHeight )                                        // 0x44294d
+        if ( patch->width  == cur->gridWidth
+          && patch->height == cur->gridHeight )
         {
-            int v7 = 0, v17 = 0;
-            if ( a2->width > 0 )                                                    // 0x442960
-            {
-                int v8 = 0, v16 = 0;
-                do                                                                  // outer: columns (v7 < width)
+            for ( int col = 0; col < patch->width; ++col )
+                for ( int row = 0; row < patch->height; ++row )
                 {
-                    int v18 = 0;
-                    if ( a2->height > 0 )                                           // 0x44296b
-                    {
-                        int v10 = v7 << 7;                                          // 0x44297c row byte offset in block
-                        do                                                          // inner: rows (v18 < height)
-                        {
-                            const float *stp = (const float *)( (char *)cur->st + v10 );  // 0x44298a cur+0x34+v10
-                            float s = stp[0];
-                            float t = stp[1];
-                            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                                Assert( PMESH_CPP, 4624, 0, "%s", "!IS_NAN(s)" );
-                            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                                Assert( PMESH_CPP, 4625, 0, "%s", "!IS_NAN(t)" );
-                            a2->ctrl[0][0].texCoord.st[2 * v8     + 2 * layer] = s; // 0x442a15
-                            a2->ctrl[0][0].texCoord.st[2 * v8 + 1 + 2 * layer] = t; // 0x442a25
-                            v10 += 8;                                              // next column src
-                            v8  += 10;                                            // next control vert (80 bytes / 8)
-                            ++v18;
-                        }
-                        while ( v18 < a2->height );                                // 0x442a3b
-                        v7 = v17;
-                    }
-                    ++v7;
-                    v8 = v16 + 160;                                                // next row dest base
-                    v17 = v7;
-                    v16 += 160;
+                    const float s = cur->st[col][row][0];
+                    const float t = cur->st[col][row][1];
+                    iassert( isfinite( s ) );
+                    iassert( isfinite( t ) );
+                    patch->ctrl[col][row].texCoord.st[2 * layer]     = s;
+                    patch->ctrl[col][row].texCoord.st[2 * layer + 1] = t;
                 }
-                while ( v7 < a2->width );                                          // 0x442a58
-            }
 
-            if ( layer == 1 )                                                      // 0x442a5e
-                a2->bDirty = 0;
-            if ( a2->curveDef )                                                    // 0x442a6e
-                free( a2->curveDef );
-            a2->curveDef = Patch_GenericMesh2( a2, layer, 0, 0 );                  // 0x442a8e
-            ++a2->version;                                                         // 0x442a96
+            if ( layer == 1 )
+                patch->bDirty = 0;
+            if ( patch->curveDef )
+                free( patch->curveDef );
+            patch->curveDef = Patch_GenericMesh2( patch, layer, 0, 0 );
+            ++patch->version;
         }
     }
-    else if ( a3 )                                                                 // 0x442aaa planar project
+    else if ( planarProject )                                                      // planar project
     {
         char planeBlk[32];                                                        // {float N[3]@0, double dist@16}
-        if ( Ed_Patch_PlanarTest( a2, planeBlk ) )                                // 0x442ab1
+        if ( Ed_Patch_PlanarTest( patch, planeBlk ) )
         {
-            int curLayer = LayerMat::GetCurrentLayer( a1 );                       // 0x442abd
-            Patch_ApplyCapST( a2, (const float *)planeBlk,                        // 0x442ad5 (sub_439280)
-                              (const float *)( &a1->mat_texDef + curLayer ) );
+            int curLayer = LayerMat::GetCurrentLayer( material );
+            Patch_ApplyCapST( patch, (const float *)planeBlk,
+                              (const float *)( &material->mat_texDef + curLayer ) );
         }
     }
 
-    if ( PatchDialog_IsOpen() )                                                 // 0x442add CWnd_PatchDialog.m_hWnd
-        g_PatchDialog_GetPatchInfo();                                             // 0x442aeb refresh patch inspector
+    if ( PatchDialog_IsOpen() )
+        g_PatchDialog_GetPatchInfo();                                             // refresh patch inspector
     return 0;
 }
 
-// ── sub_439280 (0x439280) — Patch_ST + rebuild the tessellated curveDef ───────
+// ── Patch_ApplyCapST (0x439280) — Patch_ST + rebuild the tessellated curveDef ───────
 static curvePatchDef_t *Patch_ApplyCapST( patchMesh_t *p, const float *faceNormal, const float *params )
 {
     Patch_ST( params, faceNormal, p, g_qeglobals.current_edit_layer );
@@ -2750,13 +2567,13 @@ static curvePatchDef_t *Patch_ApplyCapST( patchMesh_t *p, const float *faceNorma
 // ─── Patch_CapTexture (0x439B10) — patch CAP texturing ────────────────────────
 //  Reached by Patch_NaturalizeSelected's unk=1 branch (the "Apply Patch Cap" command).
 //  Recompute mesh normals, pick a reference face (Patch_GetAxisFace round-robin when
-//  cap, else PMESH_03's first long face), read its layer material's texel size (512
+//  cap, else Patch_CapReferenceFace's first long face), read its layer material's texel size (512
 //  fallback), and project that face's texture plane (scaled by x/y) across the grid.
 curvePatchDef_t *Patch_CapTexture( patchMesh_t *p, char cap, float x, float y )
 {
     Patch_MeshNormals( p );
 
-    face_t *axisFace = cap ? Patch_GetAxisFace( p ) : PMESH_03( p );
+    face_t *axisFace = cap ? Patch_GetAxisFace( p ) : Patch_CapReferenceFace( p );
 
     qtexture_s *lm = MaterialDef_GetLayeredMaterial(
                          &axisFace->mtldef[g_qeglobals.current_edit_layer] );
@@ -2775,8 +2592,8 @@ curvePatchDef_t *Patch_CapTexture( patchMesh_t *p, char cap, float x, float y )
 //   For each selected patch (Undo-bracketed): unk=0 → Patch_Naturalize2 lays linear
 //   per-control-point S/T at scale (x,y) on the current edit layer, then rebuilds the
 //   tessellated curveDef (free + Patch_GenericMesh2) and bumps version.  unk=1 routes
-//   to Patch_CapTexture (cap texturing, deferred).  No-op when no patch is selected
-//   (the IDB scans for the first selected `patch` and returns early if none).
+//   to Patch_CapTexture (cap texturing).  No-op when no patch is selected (scans for
+//   the first selected `patch` and returns early if none).
 void Patch_NaturalizeSelected( bool unk, bool cap, float x, float y )
 {
     selbrush_t *first = selected_brushes.next;
@@ -2822,26 +2639,26 @@ void Patch_NaturalizeSelected( bool unk, bool cap, float x, float y )
 // ─── Patch_Lightmap_Texturing_Sub (0x4397B0) — re-lay a single patch's lightmap-layer S/T ──
 //   Reads the current layer's sample size (Select_SetTexture), then projects the lightmap-
 //   layer texCoords either by the TERRAIN dominant-axis path (Patch_TerrainTexProject) or
-//   the curve sample-size resampler (PMESH_02).  When the edit layer is the lightmap layer
-//   (1) it also stamps the sample size into the patch (bDirty + size_of_struct_0x504C@0x5048,
-//   a __int16 version bump@0x5040).  Finally rebuilds the tessellated curveDef and bumps the
-//   version.  (Faithful to the disasm: the layer passed to Patch_Terrain/PMESH_02 is the
-//   current edit layer in ecx, not a fixed lightmap layer.)
+//   the curve sample-size resampler (Patch_ResampleCurveST).  When the edit layer is the lightmap layer
+//   (1) it also stamps the sample size into the patch (bDirty + size_of_struct_0x504C).
+//   Finally rebuilds the tessellated curveDef and bumps the version.  (The layer passed to
+//   Patch_TerrainTexProject/Patch_ResampleCurveST is the current edit layer, not a fixed
+//   lightmap layer.)
 static curvePatchDef_t *Patch_Lightmap_Texturing_Sub( patchMesh_t *def )
 {
-    float v4[2];
-    Select_SetTexture( v4 );
+    float sampleSize[2];
+    Select_SetTexture( sampleSize );
 
     const int layer = g_qeglobals.current_edit_layer;
     if ( ( def->type & PATCH_TERRAIN ) != 0 )
-        Patch_TerrainTexProject( def, layer, v4[0] );
+        Patch_TerrainTexProject( def, layer, sampleSize[0] );
     else
-        PMESH_02( def, layer, v4[0] );
+        Patch_ResampleCurveST( def, layer, sampleSize[0] );
 
     if ( layer == 1 )
     {
         def->bDirty = 1;
-        *(float *)&def->size_of_struct_0x504C = v4[0];   // 0x5048 stores the sample size
+        *(float *)&def->size_of_struct_0x504C = sampleSize[0];   // stores the sample size
     }
 
     if ( def->curveDef )
@@ -2937,7 +2754,7 @@ void Patch_KiwiCapAlign( patchMesh_t *p )
     if ( !p )
         return;
     // ROUND AS (crash fix, defense in depth): CAP's reference face comes from the
-    // SYMBIONT brush (Patch_GetAxisFace / PMESH_03 read p->pSymbiot) — a patch not
+    // SYMBIONT brush (Patch_GetAxisFace / Patch_CapReferenceFace read p->pSymbiot) — a patch not
     // yet handed to AddBrushForPatch has none, and the ported pickers deref it
     // unguarded (the user's AV: `b was nullptr`).  Callers must align AFTER
     // AddBrushForPatch; this guard turns a future ordering mistake into a console
@@ -2957,7 +2774,7 @@ void Patch_KiwiCapAlign( patchMesh_t *p )
 
 // ─── Patch_Naturalize (0x439920) — natural texturing at the editor default scale ──
 //   Thin wrapper: Patch_Naturalize2 at the current layer's default tex-repeat scale
-//   (random_texture_stuff[2100*layer+36]) + curveDef rebuild + ++version.  Used by the
+//   (random_texture_stuff[layer].sampleSize) + curveDef rebuild + ++version.  Used by the
 //   Redisperse ops below (re-lays texCoords after the control grid is redistributed).
 static void Patch_Naturalize( patchMesh_t *p )
 {
@@ -2990,8 +2807,8 @@ void Patch_DisperseColumns()
         {
             if ( def->width <= 1 )
                 continue;
-            // IDA: recip = (float)(1.0/(width-1)); step = recip * delta — a float
-            // reciprocal MULTIPLY, not a divide (float-exact; differs by 1 ULP).
+            // recip = (float)(1.0/(width-1)); step = recip * delta — a float
+            // reciprocal MULTIPLY, not a divide (they differ by 1 ULP).
             float recip = (float)( 1.0 / (double)( def->width - 1 ) );
             float step[3];
             for ( int k = 0; k < 3; ++k )
@@ -3000,20 +2817,20 @@ void Patch_DisperseColumns()
                 for ( int k = 0; k < 3; ++k )
                     def->ctrl[j][r].xyz[k] = def->ctrl[j - 1][r].xyz[k] + step[k];
         }
-        Patch_Naturalize( def );                 // once per patch (faithful to 0x4443A0)
+        Patch_Naturalize( def );                 // once per patch
     }
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
-    if ( PatchDialog_IsOpen() )               // 0x444533: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
 // ─── Patch_DisperseRows (0x444200) — Curve→Redisperse Rows (cmd 32888) ────────
 //   The row analogue: redistribute each COLUMN's control points along the chord from
-//   row 0 to height-1.  NOTE the IDB calls Patch_Naturalize PER COLUMN (inside the
-//   column loop), not once — transcribed faithfully (the final state is identical, each
-//   call fully re-lays texCoords from the current geometry).
+//   row 0 to height-1.  NOTE Patch_Naturalize runs PER COLUMN (inside the column loop),
+//   not once, as in the binary (the final state is identical, each call fully re-lays
+//   texCoords from the current geometry).
 void Patch_DisperseRows()
 {
     Undo_ClearRedo();
@@ -3031,8 +2848,8 @@ void Patch_DisperseRows()
         {
             if ( def->height > 1 )
             {
-                // IDA: recip = (float)(1.0/(height-1)); step = recip * delta (float
-                // reciprocal multiply, not a divide — float-exact).
+                // recip = (float)(1.0/(height-1)); step = recip * delta (float
+                // reciprocal multiply, not a divide).
                 float recip = (float)( 1.0 / (double)( def->height - 1 ) );
                 float step[3];
                 for ( int k = 0; k < 3; ++k )
@@ -3041,13 +2858,13 @@ void Patch_DisperseRows()
                     for ( int k = 0; k < 3; ++k )
                         def->ctrl[c][j].xyz[k] = def->ctrl[c][j - 1].xyz[k] + step[k];
             }
-            Patch_Naturalize( def );             // per-column (faithful to 0x444200)
+            Patch_Naturalize( def );             // per-column
         }
     }
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
-    if ( PatchDialog_IsOpen() )               // 0x44437a: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -3056,11 +2873,10 @@ void Patch_DisperseRows()
 //     axis 0 (TextureX, 32899) mirrors across ROWS    (ctrl[c][j] <-> ctrl[c][h-1-j]);
 //     axis 1 (TextureY, 32903) mirrors across COLUMNS (ctrl[i][r] <-> ctrl[w-1-i][r]).
 //   xyz is untouched (texture-only flip); curveDef rebuilt + ++version per patch.  An
-//   involution — inverting the same axis twice restores the original st.  Derived from the
-//   IDB flat-float walk (ctrl@+56, texCoord@+12, st index 2*layer).  The IDB's per-element
+//   involution — inverting the same axis twice restores the original st.  The per-element
 //   IS_NAN guard asserts (5913/5914/5916/5917 columns, 5929/5930/5932/5933 rows; LEVEL 0,
-//   defensive-only — never fire for valid st) are transcribed faithfully, interleaved with
-//   the swap exactly as the binary: assert the source (a) before c=a, the saved temp before a=fTemp.
+//   defensive-only — never fire for valid st) are interleaved with the swap as in the
+//   binary: assert the source (a) before c=a, the saved temp before a=fTemp.
 void Patch_InvertTexture( char axis )
 {
     const int layer = g_qeglobals.current_edit_layer;
@@ -3080,15 +2896,9 @@ void Patch_InvertTexture( char axis )
                     float *a = &def->ctrl[i][r].texCoord.st[2 * layer];
                     float *c = &def->ctrl[def->width - 1 - i][r].texCoord.st[2 * layer];
                     float t0 = c[0], t1 = c[1];
-                    if ( ( *(unsigned int *)&a[0] & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5913, 0, "%s", "!IS_NAN(p->ctrl[col][row].qv.texCoord[g_qeglobals.activeTexCoord][0])" );
-                    if ( ( *(unsigned int *)&a[1] & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5914, 0, "%s", "!IS_NAN(p->ctrl[col][row].qv.texCoord[g_qeglobals.activeTexCoord][1])" );
+                    iassert( isfinite( a[0] ) && isfinite( a[1] ) );
                     c[0] = a[0]; c[1] = a[1];
-                    if ( ( *(unsigned int *)&t0 & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5916, 0, "%s", "!IS_NAN(fTemp[0])" );
-                    if ( ( *(unsigned int *)&t1 & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5917, 0, "%s", "!IS_NAN(fTemp[1])" );
+                    iassert( isfinite( t0 ) && isfinite( t1 ) );
                     a[0] = t0;   a[1] = t1;
                 }
         }
@@ -3100,15 +2910,9 @@ void Patch_InvertTexture( char axis )
                     float *a = &def->ctrl[col][j].texCoord.st[2 * layer];
                     float *c = &def->ctrl[col][def->height - 1 - j].texCoord.st[2 * layer];
                     float t0 = c[0], t1 = c[1];
-                    if ( ( *(unsigned int *)&a[0] & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5929, 0, "%s", "!IS_NAN(p->ctrl[col][row].qv.texCoord[g_qeglobals.activeTexCoord][0])" );
-                    if ( ( *(unsigned int *)&a[1] & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5930, 0, "%s", "!IS_NAN(p->ctrl[col][row].qv.texCoord[g_qeglobals.activeTexCoord][1])" );
+                    iassert( isfinite( a[0] ) && isfinite( a[1] ) );
                     c[0] = a[0]; c[1] = a[1];
-                    if ( ( *(unsigned int *)&t0 & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5932, 0, "%s", "!IS_NAN(fTemp[0])" );
-                    if ( ( *(unsigned int *)&t1 & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 5933, 0, "%s", "!IS_NAN(fTemp[1])" );
+                    iassert( isfinite( t0 ) && isfinite( t1 ) );
                     a[0] = t0;   a[1] = t1;
                 }
         }
@@ -3121,7 +2925,7 @@ void Patch_InvertTexture( char axis )
     }
     if ( did )
         g_nUpdateBits = -1;
-    if ( PatchDialog_IsOpen() )               // 0x446ac2: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
@@ -3129,7 +2933,7 @@ void Patch_InvertTexture( char axis )
 //   For each control point (in curve-point edit mode: only those in d_move_points[];
 //   otherwise all): xyz[k] = (xyz[k] - mid[k]) * scale[k] + mid[k].  Optionally rebuilds.
 //   Reached from Select_Scale's patch branch.  The trailing patch-inspector refresh
-//   (CWnd_PatchDialog, 0x4428b9) goes through the GUI shim (no-op headless).
+//   (CWnd_PatchDialog) goes through the GUI shim (no-op headless).
 void Patch_Scale( patchMesh_t *p, const float *mid, const float *scale, char doRebuild )
 {
     for ( int w = 0; w < p->width; ++w )
@@ -3148,23 +2952,17 @@ void Patch_Scale( patchMesh_t *p, const float *mid, const float *scale, char doR
         }
     if ( doRebuild )
         Patch_Rebuild( p, 1 );
-    if ( PatchDialog_IsOpen() )               // 0x4428b9: refresh patch inspector
+    if ( PatchDialog_IsOpen() )               // refresh patch inspector
         g_PatchDialog_GetPatchInfo();
 }
 
 // ─── Patch_Move (0x441dd0) — translate an ENTIRE patch by a world delta ─────────
 //   For every control point in the width×height grid: xyz[k] += move[k].  Unlike
 //   Patch_Scale this is unconditional (no curve-point filter) — it is the whole-patch
-//   translation reached from Brush_Move (the patch branch of MoveSelection), so dragging
-//   a selected patch routed here and FATAL-stubbed before this port.  The IDA strides are
-//   ctrl[col][row]: the outer (width) loop advances 320 vec_t / 0x500 (one row of 16
-//   drawVerts), the inner (height) loop advances 20 vec_t / 0x50 (one drawVert) — exactly
-//   the `drawVert_t ctrl[16][16]` layout (drawVert_t = 0x50, xyz @ +0), so the named
-//   member access below hits the same bytes the binary does.  After translating, free +
-//   rebuild the tessellated curveDef (verbatim brush.cpp:5341 / Patch_ShiftTexture regen)
-//   and bump version.  Tail: the patch-inspector refresh (CWnd_PatchDialog) is GUI-only and
-//   PARKED — g_PatchDialog_GetHwnd() is null headless, so the regenerated curveDef is
-//   returned (matching the established brush.cpp:980/1010 dialog guard).
+//   translation reached from Brush_Move (the patch branch of MoveSelection).  After
+//   translating, free + rebuild the tessellated curveDef (the brush.cpp:5341 /
+//   Patch_ShiftTexture regen) and bump version.  Tail: the patch-inspector refresh
+//   (CWnd_PatchDialog) is GUI-only (no-op headless); the regenerated curveDef is returned.
 curvePatchDef_t *Patch_Move( const float *move, patchMesh_t *p )
 {
     for ( int col = 0; col < p->width; ++col )
@@ -3180,8 +2978,8 @@ curvePatchDef_t *Patch_Move( const float *move, patchMesh_t *p )
     p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
     ++p->version;
 
-    // IDA: if (CWnd_PatchDialog.m_hWnd) return g_PatchDialog_GetPatchInfo(&CWnd_PatchDialog);
-    // The patch dialog is parked (GetHwnd() == null headless), so return the new curveDef.
+    // The binary returned the dialog refresh's result when the dialog was open; this always
+    // returns the new curveDef.
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
     return p->curveDef;
@@ -3198,9 +2996,8 @@ curvePatchDef_t *Patch_Move( const float *move, patchMesh_t *p )
 //        axis where the box actually grew (sq diff > 1e-6) negate vShift[i] when the drag
 //        pulled the LOW edge (vAmt[i] != vMove[i]); then Patch_Move(vShift, patch) to keep
 //        the dragged edge anchored.  If no axis grew, Patch_Move(vShift, patch) with the raw
-//        (positive) half-shift.  Returns 1 on success.  Was a FATAL stub — the patch branch of
-//        Drag_MoveSelection's box-edge resize crashed.
-//   Reached only from drag.cpp:798 (MoveSelection patch resize).  vAmt comes in @<eax>.
+//        (positive) half-shift.  Returns 1 on success.
+//   Reached only from drag.cpp:798 (MoveSelection patch resize).
 int Patch_DragScale( float *vAmt, void *patchDefV, float *vMove )
 {
     patchMesh_t *patch = (patchMesh_t *)patchDefV;
@@ -3228,7 +3025,7 @@ int Patch_DragScale( float *vAmt, void *patchDefV, float *vMove )
     for ( int i = 0; i < 3; ++i )
         vShift[i] = ( ( vMax[i] - vMin[i] ) - vTemp[i] ) * 0.5f;
 
-    // find the first axis that actually grew (squared diff above the IDB's 1e-6 epsilon).
+    // find the first axis that actually grew (squared diff above the 1e-6 epsilon).
     int grew = 3;
     for ( int i = 0; i < 3; ++i )
     {
@@ -3248,12 +3045,12 @@ int Patch_DragScale( float *vAmt, void *patchDefV, float *vMove )
 
 // ─── Patch_ShiftTexture (0x446170) — shift selected patch control-point texcoords ──
 //   Adds (s,t) to each control point's current-layer st (curve-point mode → only the ones
-//   in d_move_points[]; otherwise all).  A |shift| >= 1 is scaled down by 10 first (the
-//   IDB's coarse step → fine nudge), then curveDef is rebuilt.  Reached from
-//   Brush_ShiftTexture's patch branch.
+//   in d_move_points[]; otherwise all).  A |shift| >= 1 is scaled down by 10 first (coarse
+//   step → fine nudge), then curveDef is rebuilt.  Reached from Brush_ShiftTexture's patch
+//   branch.
 void Patch_ShiftTexture( patchMesh_t *p, float s, float t )
 {
-    // IDA: v9 = fabs(a2); if (v9 >= 1.0) a2 = a2 / 10.0  (double fabs + double divide).
+    // fabs( shift ) >= 1.0 → shift / 10.0 (double fabs + double divide).
     if ( fabs( (double)s ) >= 1.0 ) s = (float)( (double)s / 10.0 );
     if ( fabs( (double)t ) >= 1.0 ) t = (float)( (double)t / 10.0 );
     const int layer = g_qeglobals.current_edit_layer;
@@ -3269,11 +3066,9 @@ void Patch_ShiftTexture( patchMesh_t *p, float s, float t )
                     continue;
             }
             p->ctrl[w][h].texCoord.st[2 * layer]     += s;
-            if ( ( *(unsigned int *)&p->ctrl[w][h].texCoord.st[2 * layer] & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5793, 0, "%s", "!IS_NAN(p->ctrl[w][h].qv.texCoord[g_qeglobals.activeTexCoord][0])" );
+            iassert( isfinite( p->ctrl[w][h].texCoord.st[2 * layer] ) );
             p->ctrl[w][h].texCoord.st[2 * layer + 1] += t;
-            if ( ( *(unsigned int *)&p->ctrl[w][h].texCoord.st[2 * layer + 1] & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5795, 0, "%s", "!IS_NAN(p->ctrl[w][h].qv.texCoord[g_qeglobals.activeTexCoord][1])" );
+            iassert( isfinite( p->ctrl[w][h].texCoord.st[2 * layer + 1] ) );
         }
     if ( layer == 1 )
         p->bDirty = 0;
@@ -3287,10 +3082,7 @@ void Patch_ShiftTexture( patchMesh_t *p, float s, float t )
 //   Rotate each control point's current-layer st by `deg` degrees about the texel-space
 //   origin: sTex=st0*texW, tTex=st1*texH; (ns,nt)=rot(sTex,tTex); st0=ns/texW, st1=nt/texH.
 //   texW/texH come from the layer's layered material (512 default).  Curve-point mode → only
-//   the d_move_points[]; else all.  Reached from Brush_RotateTexture's patch branch — was a
-//   FATAL stub.  (The IDB also calls Patch_CalcBounds here — its output is vestigial; kept for
-//   the version bump.)  The IDB stores the angle to a FLOAT slot before cos/sin (float-precision
-//   rotation) and value-print-asserts texSize>0 (5698/5699) — both transcribed faithfully.
+//   the d_move_points[]; else all.  Reached from Brush_RotateTexture's patch branch.
 void Patch_RotateTexture( patchMesh_t *p, float deg )
 {
     const int layer = g_qeglobals.current_edit_layer;
@@ -3300,10 +3092,8 @@ void Patch_RotateTexture( patchMesh_t *p, float deg )
     {
         texW = (float)lm->width;
         texH = (float)lm->height;
-        if ( lm->width <= 0 )
-            Assert( PMESH_CPP, 5698, 0, "%s\n\t(texSize[0]) = %i", "(texSize[0] > 0)", lm->width );
-        if ( lm->height <= 0 )
-            Assert( PMESH_CPP, 5699, 0, "%s\n\t(texSize[1]) = %i", "(texSize[1] > 0)", lm->height );
+        vassert( lm->width > 0, "(texSize[0]) = %i", lm->width );
+        vassert( lm->height > 0, "(texSize[1]) = %i", lm->height );
     }
     else
     {
@@ -3311,11 +3101,8 @@ void Patch_RotateTexture( patchMesh_t *p, float deg )
         texH = 512.0f;
     }
 
-    float mins[3], maxs[3];
-    Patch_CalcBounds( mins, maxs, p, false );          // IDB call (output vestigial here)
-
-    // IDA: v13 (FLOAT slot) = deg*PI/180, then cos/sin(v13) — round the angle to float first.
-    // KIWI: true PI in double, exact at multiples of 90 (kiwi_angles.h) - cos( (float)(PI / 2) )
+    // KIWI: the binary's Patch_CalcBounds call here was output-unused (the version bump below
+    // stands).  Double angle, exact at multiples of 90 (kiwi_angles.h) - cos( (float)(PI / 2) )
     // is -4.4e-8, so four 90 degree turns did not give the texture coords back.
     double sd, cd;
     KiwiAng_SinCos( (double)deg, &sd, &cd );
@@ -3336,10 +3123,8 @@ void Patch_RotateTexture( patchMesh_t *p, float deg )
             float tTex = p->ctrl[w][h].texCoord.st[2 * layer + 1] * texH;
             float ns   = c * sTex - s * tTex;
             float nt   = sTex * s + tTex * c;
-            if ( ( *(unsigned int *)&ns & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5713, 0, "%s", "!IS_NAN(s)" );
-            if ( ( *(unsigned int *)&nt & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5714, 0, "%s", "!IS_NAN(t)" );
+            iassert( isfinite( ns ) );
+            iassert( isfinite( nt ) );
             p->ctrl[w][h].texCoord.st[2 * layer]     = ns / texW;
             p->ctrl[w][h].texCoord.st[2 * layer + 1] = nt / texH;
         }
@@ -3356,10 +3141,9 @@ void Patch_RotateTexture( patchMesh_t *p, float deg )
 //   Multiply each control point's current-layer st by (sx,sy) — st0*=sx, st1*=sy (a zero
 //   factor is treated as 1).  Curve-point mode → only the d_move_points[]; else all.  Then
 //   rebuild curveDef.  Layer 1 (lightmap) additionally: when sx==sy, scale the per-patch
-//   lightmap-scale accumulator (the mislabeled int field @0x5048, used as a float) by sx and
+//   lightmap-scale accumulator (the size_of_struct_0x504C field, used as a float) by sx and
 //   set bDirty; on a non-uniform scale clear bDirty.  Reached from Brush_ScaleTexture's patch
-//   branch.  The IDB types a1 drawVert_t* (misaligned hex-rays labels); the
-//   field offsets were decoded against the patchMesh_t layout.
+//   branch.
 void Patch_ScaleTexture( patchMesh_t *p, float sx, float sy )
 {
     if ( sx == 0.0f ) sx = 1.0f;
@@ -3377,19 +3161,17 @@ void Patch_ScaleTexture( patchMesh_t *p, float sx, float sy )
                     continue;
             }
             p->ctrl[w][h].texCoord.st[2 * layer]     *= sx;
-            if ( ( *(unsigned int *)&p->ctrl[w][h].texCoord.st[2 * layer] & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5761, 0, "%s", "!IS_NAN(p->ctrl[w][h].qv.texCoord[g_qeglobals.activeTexCoord][0])" );
+            iassert( isfinite( p->ctrl[w][h].texCoord.st[2 * layer] ) );
             p->ctrl[w][h].texCoord.st[2 * layer + 1] *= sy;
-            if ( ( *(unsigned int *)&p->ctrl[w][h].texCoord.st[2 * layer + 1] & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5763, 0, "%s", "!IS_NAN(p->ctrl[w][h].qv.texCoord[g_qeglobals.activeTexCoord][1])" );
+            iassert( isfinite( p->ctrl[w][h].texCoord.st[2 * layer + 1] ) );
         }
     if ( sx == sy )
     {
         if ( layer == 1 )
         {
             p->bDirty = 1;
-            // per-patch lightmap-scale accumulator @0x5048 (IDB a1[256].savedTexCoord.smoothing[1],
-            // a float aliased over the size_of_struct_0x504C field).
+            // per-patch lightmap-scale accumulator (a float aliased over the
+            // size_of_struct_0x504C field).
             *(float *)&p->size_of_struct_0x504C = sx * *(float *)&p->size_of_struct_0x504C;
         }
     }
@@ -3413,8 +3195,7 @@ void Patch_SetTextureInfo( texdef_sub_t *texDef )
         patch_t *patch = pb->patch;
         if ( !patch )
             continue;
-        if ( patch->def != pb->def->patch )
-            Assert( PMESH_CPP, 6193, 0, "%s", "b->patch->def == b->def->patch" );
+        iassert( patch->def == pb->def->patch );
         patchMesh_t *def = patch->def;
         if ( texDef->rotate != 0.0f )
             Patch_RotateTexture( def, texDef->rotate );
@@ -3426,13 +3207,11 @@ void Patch_SetTextureInfo( texdef_sub_t *texDef )
 }
 
 // ─── Patch_SetTexturing (0x446b60) — "Set..." texture layout across the selection ──
-//   Lay texcoords across each selected patch on the current layer.  mode (a3):
+//   Lay texcoords across each selected patch on the current layer.  mode:
 //     2 (or non-terrain): parametric GRID — s = col*sx/(w-1), t = -row*sy/(h-1).
 //     1: ARC-LENGTH — s/t follow the cumulative 3D edge length along width / height.
 //     0: NATURAL — like arc-length but measured in the two dominant world axes (chosen
 //        from the patch's bbox extents), giving a world-scaled projection.
-//   The IDB's flat &ctrl[0][0].texCoord.st[col*320 + row*20 + ...] indexing is just
-//   ctrl[col][row].texCoord.st[2*layer (+1)]; reads are ctrl[col][row].xyz.
 static float Patch_TexLen3( const float *a, const float *b )
 {
     const float dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
@@ -3462,8 +3241,7 @@ void Patch_SetTexturing( float sx, float sy, int mode )
         patch_t *patch = pb->patch;
         if ( !patch )
             continue;
-        if ( patch->def != pb->def->patch )
-            Assert( PMESH_CPP, 5991, 0, "%s", "b->patch->def == b->def->patch" );
+        iassert( patch->def == pb->def->patch );
         patchMesh_t *def = patch->def;
         const int W = def->width, H = def->height;
 
@@ -3472,14 +3250,12 @@ void Patch_SetTexturing( float sx, float sy, int mode )
             for ( int col = 0; col < W; ++col )
                 for ( int row = 0; row < H; ++row )
                 {
-                    // IDA computes col*sx/(W-1) UNCONDITIONALLY in double (a degenerate
+                    // col*sx/(W-1) is computed UNCONDITIONALLY in double (a degenerate
                     // 1-wide/tall patch divides by zero -> the IS_NAN asserts below catch it).
                     float s = (float)( (double)col *   sx   / (double)( W - 1 ) );
                     float t = (float)( (double)row * ( -sy ) / (double)( H - 1 ) );
-                    if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 6003, 0, "%s", "!IS_NAN(s)" );
-                    if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 6004, 0, "%s", "!IS_NAN(t)" );
+                    iassert( isfinite( s ) );
+                    iassert( isfinite( t ) );
                     def->ctrl[col][row].texCoord.st[2 * layer]     = s;
                     def->ctrl[col][row].texCoord.st[2 * layer + 1] = t;
                 }
@@ -3510,8 +3286,7 @@ void Patch_SetTexturing( float sx, float sy, int mode )
                     cum += ( mode == 1 ) ? Patch_TexLen3( def->ctrl[col - 1][row].xyz, def->ctrl[col][row].xyz )
                                          : Patch_TexLen2( def->ctrl[col - 1][row].xyz, def->ctrl[col][row].xyz, ax0, ax1 );
                     float newS = sx / total * cum;
-                    if ( ( *(unsigned int *)&newS & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, ( mode == 1 ) ? 6036 : 6114, 0, "%s", "!IS_NAN(newTexCoord)" );
+                    iassert( isfinite( newS ) );
                     def->ctrl[col][row].texCoord.st[2 * layer] = newS;
                 }
             }
@@ -3530,8 +3305,7 @@ void Patch_SetTexturing( float sx, float sy, int mode )
                     cum += ( mode == 1 ) ? Patch_TexLen3( def->ctrl[col][row - 1].xyz, def->ctrl[col][row].xyz )
                                          : Patch_TexLen2( def->ctrl[col][row - 1].xyz, def->ctrl[col][row].xyz, ax0, ax1 );
                     float newT = ( -sy ) / total * cum;
-                    if ( ( *(unsigned int *)&newT & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, ( mode == 1 ) ? 6062 : 6142, 0, "%s", "!IS_NAN(newTexCoord)" );
+                    iassert( isfinite( newT ) );
                     def->ctrl[col][row].texCoord.st[2 * layer + 1] = newT;
                 }
             }
@@ -3551,27 +3325,22 @@ void Patch_SetTexturing( float sx, float sy, int mode )
 // ─── Patch_FitTexturing (0x447600) — "Fit" texture onto a patch ──────────────────
 //   Lay a single texture tile across the whole patch on the current layer: the s/t of
 //   every control point becomes its NORMALIZED grid position — s = col/(width-1) runs
-//   0→1 across columns, t = -row/(height-1) runs 0→-1 down rows (negative t, matching
-//   the IDB).  No curve-point gating (unlike Shift/Scale/Rotate) — every control point
-//   is set.  Then clear bDirty on the lightmap layer and free/rebuild curveDef + bump
-//   version.  Reached from Brush_FitTextureFaces (sub_47C950) when the brush owns a
-//   patch (the Surface Inspector "Fit" path) — was a FATAL tripwire.  The IDB walks the
-//   ctrl array as a flat float[] (v1+=10 per row → 2*v1 = +20 floats = one drawVert row
-//   stride; v6+=160 per column → +320 floats = 16-drawVert column stride); that resolves
-//   exactly to ctrl[col][row].texCoord.st[2*layer{,+1}].  The IDB returns the rebuilt
-//   curveDef but every caller ignores it, so this is void (cf. Patch_ScaleTexture).
+//   0→1 across columns, t = -row/(height-1) runs 0→-1 down rows (negative t).  No
+//   curve-point gating (unlike Shift/Scale/Rotate) — every control point is set.  Then
+//   clear bDirty on the lightmap layer and free/rebuild curveDef + bump version.  Reached
+//   from Brush_FitTextureFaces (0x47C950) when the brush owns a patch (the Surface
+//   Inspector "Fit" path).  The binary returns the rebuilt curveDef but every caller
+//   ignores it, so this is void (cf. Patch_ScaleTexture).
 void Patch_FitTexturing( patchMesh_t *p )
 {
     const int layer = g_qeglobals.current_edit_layer;
     for ( int col = 0; col < p->width; ++col )
         for ( int row = 0; row < p->height; ++row )
         {
-            float s = (float)(  (double)col / (double)( p->width  - 1 ) );  // IDA: double divide
+            float s = (float)(  (double)col / (double)( p->width  - 1 ) );  // double divide
             float t = (float)( -(double)row / (double)( p->height - 1 ) );
-            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 6171, 0, "%s", "!IS_NAN(s)" );
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 6172, 0, "%s", "!IS_NAN(t)" );
+            iassert( isfinite( s ) );
+            iassert( isfinite( t ) );
             p->ctrl[col][row].texCoord.st[2 * layer]     = s;
             p->ctrl[col][row].texCoord.st[2 * layer + 1] = t;
         }
@@ -3583,12 +3352,10 @@ void Patch_FitTexturing( patchMesh_t *p )
     ++p->version;
 }
 
-// ─── patch "undo snapshot" globals (IDB 0x231F558.. — a partial patchMesh_t image) ───
-//   Written by Patch_Save (0x446AE0) + Patch_ApplyMatrix; read back by Patch_Restore
-//   (0x446B20), Patch_BendHandleESC (0x447C00) and Patch_InsDelToggle (0x447E50) — the
-//   bend/insert-delete cancel paths, none ported yet.  Defined here (the patch home) so
-//   those functions can share them when they land.  ctrl image = 0x5000 bytes = the full
-//   16×16 control grid (256 drawVert_t × 80).
+// ─── patch "undo snapshot" globals (0x231F558.. — a partial patchMesh_t image) ───
+//   Written by Patch_ApplyMatrix and Patch_InsDelToggle; the binary read them back
+//   in Patch_Restore (0x446B20) / Patch_BendHandleESC (0x447C00) - the cancel paths, neither
+//   ported.  ctrl image = 0x5000 bytes = the full 16×16 control grid (256 drawVert_t × 80).
 int        patchSave_width;                 // 0x231F558
 int        patchSave_height;                // 0x231F55C
 int        patchSave_type;                  // 0x231F568
@@ -3599,10 +3366,9 @@ drawVert_t patchSave_ctrl[16][16];          // 0x231F590  (0x5000 bytes)
 //   patch).  Snapshot
 //   the current grid into patchSave_*, then push every control point's xyz through
 //   OrientationPosToWorldPos (rel = xyz - origin; xyz = origin + axisᵀ·rel) so it rotates/
-//   reflects about orient->origin.  In curve-point or bend mode only the d_move_points[] are
+//   reflects about orient->origin.  In curve-point mode only the d_move_points[] are
 //   moved; otherwise every control point.  `snap` rounds each coord to the nearest half-unit
 //   (floor(0.5 + 2·c)·0.5).  Finally Patch_Rebuild(p,1) rebuilds the bbox + curveDef (++version).
-//   IDB indexes ctrl[0][16*col+row] (flat) = ctrl[col][row].
 void Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap )
 {
     patchSave_width  = p->width;
@@ -3613,7 +3379,7 @@ void Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap )
     for ( int col = 0; col < p->width; ++col )
         for ( int row = 0; row < p->height; ++row )
         {
-            if ( g_qeglobals.d_select_mode == sel_curvepoint || g_bPatchBendMode )
+            if ( g_qeglobals.d_select_mode == sel_curvepoint )   // (the binary: or bend mode)
             {
                 bool selected = false;
                 for ( int m = 0; m < g_qeglobals.d_num_move_points; ++m )
@@ -3641,47 +3407,38 @@ void Patch_ApplyMatrix( const orientation_t *orient, patchMesh_t *p, char snap )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  PATCH CONTROL-POINT INTERACTIVE EDIT (bend/drag) - the patch sibling of the shipped
+//  PATCH CONTROL-POINT INTERACTIVE EDIT (bend/drag) - the patch sibling of the
 //  VERTEX/EDGE editing (select.cpp SelectVertexByRay/Select_Edge + MoveSelection).  Flow:
 //    1. enter curve-point mode (Selection->Drag Vertices on a pure-patch selection ->
-//       OnSelectionDragVertices -> Patch_EditPatch 0x441fd0) - fills g_qeglobals.d_points[]
+//       OnSelectionDragVertices -> Patch_EditPatch) - fills g_qeglobals.d_points[]
 //       with every selected patch's control-point world positions + sets sel_curvepoint.
 //    2. click a control point (XY_MouseDown -> Drag_Begin -> Drag_Setup ->
-//       SelectCurvePointByRay -> Patch_ClickControlPoint 0x43cc00) - picks the nearest
+//       SelectCurvePointByRay -> Patch_ClickControlPoint) - picks the nearest
 //       d_points handle and pushes its drawVert_t* onto g_qeglobals.d_move_points[].
 //    3. drag (Drag_MouseMoved -> MoveSelection sel_curvepoint branch ->
-//       Patch_UpdateSelected 0x43ed10 / _0 0x43d800) - adds the snapped world delta to each
+//       Patch_UpdateSelected / _0) - adds the snapped world delta to each
 //       selected control point, rebuilds d_points, re-tessellates via Patch_Rebuild.
-//  KISAK: the texture-lock texCoord-FOLLOW recompute (the PMESH_13/PMESH_12 chain that
-//  re-projects per-control S/T as the surface bends when m_bTextureLock is OFF) is not
-//  ported - behaviour equals texture-lock ON.  Zero round-trip impact: the .map serializes
-//  control points, and texCoords are recomputed on parse anyway.
+//  With m_bTextureLock OFF each dragged control point's S/T follow the move so the texture
+//  stays put in world space (Patch_TexFollow).
 // ════════════════════════════════════════════════════════════════════════════
 
 #include "prefs.h"     // g_PrefsDlg (m_bTextureLock / g_bPatchWeld / patch_drill_down)
 #include "mainfrm.h"   // CMainFrame / CXYWnd (g_pParentWnd->m_pActiveXY->m_nViewType)
 #include "xywnd.h"     // xywndState_t / Ed_ActiveXY (U-GLOBALS)
 
-// patch_t (the patch INSTANCE node; .def @0, .selected @6) is the shared struct in qe3.h.
+// patch_t (the patch INSTANCE node) is the shared struct in qe3.h.
 
-// Forward decls (used before definition within this block).
-void sub_43ECB0();   // Patch_FinishCurveDrag — drag-END hook (keeps the IDB sub_ name
-                     // already extern'd across drag/select/mainfrm.cpp)
 
-// drag/mode globals (defined in drag.cpp / mainfrm.cpp); g_bXYViewIsLastPatchClick
-// (IDB byte_25D5A6A) was a xywnd.cpp static — promoted to a shared global here (its
-// primary reader is Patch_ClickControlPoint) so the click path can see the
-// "second click in the same view" flag XY_MouseDown sets before Drag_Begin.
-char         g_bXYViewIsLastPatchClick = 0;     // byte_25D5A6A (def here; extern in xywnd.cpp)
+// drag/mode globals (defined in drag.cpp / mainfrm.cpp); g_bXYViewIsLastPatchClick is
+// defined here (its primary reader is Patch_ClickControlPoint) so the click path can see
+// the "second click in the same view" flag XY_MouseDown sets before Drag_Begin.
+char         g_bXYViewIsLastPatchClick = 0;     // 0x25D5A6A (def here; extern in xywnd.cpp)
 extern int   g_nPatchClickedView;               // 0x73B108 (engine_stubs.cpp)
-extern camera_s   *Ed_Camera();                 // camwnd.cpp — THE editor camera (never NULL)
-extern void  CMainFrame_UpdatePatchToolbarButtons();        // select.cpp (no-op, no toolbar)
-extern void  Undo_End();                                    // undo.cpp 0x45EA20
 
 // ── Patch_FindMovePoint (0x43c2c0) ────────────────────────────────────────────
 // Index of `pt` (a vec3 — a control point's xyz, OR a d_points[] slot reinterpreted)
-// in g_qeglobals.d_move_points[] by exact xyz match (epsilon 9.5e-07/axis, the binary's
-// 0x358637C0).  brush.cpp has a file-static twin (Patch_FindSelectedMovePoint) for the
+// in g_qeglobals.d_move_points[] by exact xyz match (epsilon 9.5e-07/axis).  brush.cpp
+// has a file-static twin (Patch_FindSelectedMovePoint) for the
 // marker overlay; this is the select-path copy.
 static int Patch_FindMovePoint( const float *pt )
 {
@@ -3709,7 +3466,7 @@ static int Patch_FindMovePoint( const float *pt )
 // points share xyz but are DISTINCT pointers, so the weld sweep must queue each one
 // (an xyz match via Patch_FindMovePoint would skip every coincident point after the first
 // and defeat the weld).  Patch_FindMovePoint (xyz) remains correct only for
-// Patch_RemoveMovePoint (which the binary likewise drives by xyz at 0x43c2c0).
+// Patch_RemoveMovePoint (which the binary likewise drives by xyz).
 static int Patch_FindMovePointByPtr( const drawVert_t *cp )
 {
     for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
@@ -3718,12 +3475,11 @@ static int Patch_FindMovePointByPtr( const drawVert_t *cp )
     return -1;
 }
 
-// ── Patch_LocateCtrlPoint (sub_43CE60 0x43ce60) ───────────────────────────────
+// ── Patch_LocateCtrlPoint (0x43ce60) ───────────────────────────────
 // Given a control-point pointer (a drawVert_t* inside some selected patch's ctrl grid),
 // find which selected patch owns it and decode its (row,col).  Returns 1 + fills
 // out* on success, 0 if the pointer is not inside any selected patch's 16×16 ctrl grid.
-// (The binary returns row in *a3, col in *a4 — note row = idx%16, col = idx/16, where
-// idx = (ptr - &ctrl[0][0]) / 80.)
+// (row = idx%16, col = idx/16, where idx is the drawVert_t index from &ctrl[0][0].)
 static int Patch_LocateCtrlPoint( const void *cp, patchMesh_t **outDef, int *outRow, int *outCol )
 {
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -3735,7 +3491,8 @@ static int Patch_LocateCtrlPoint( const void *cp, patchMesh_t **outDef, int *out
         const char *last = (const char *)&def->ctrl[15][15];
         if ( (const char *)cp >= base && (const char *)cp <= last )
         {
-            int idx = (int)( (const char *)cp - (const char *)def - 56 ) / 80;
+            // KIWI: from &ctrl[0][0]; the binary's `- 56` is x86's ctrl offset.
+            int idx = (int)( ( (const char *)cp - base ) / sizeof( drawVert_t ) );
             *outRow = idx % 16;
             *outCol = idx / 16;
             *outDef = def;
@@ -3745,12 +3502,12 @@ static int Patch_LocateCtrlPoint( const void *cp, patchMesh_t **outDef, int *out
     return 0;
 }
 
-// ── Patch_AppendMovePoint (sub_43C3E0 0x43c3e0) ───────────────────────────────
+// ── Patch_AppendMovePoint (0x43c3e0) ───────────────────────────────
 // Append a control point (drawVert_t*) to g_qeglobals.d_move_points[].  If a move-point
 // belonging to the SAME owning brush is already queued AND more than one brush is
 // selected, insert at the FRONT instead (so one patch's points group at the head — the
 // drill-down weld ordering).  `def->pSymbiot` holds the symbiont brush_t* (== a
-// selbrush_t.def — confirmed via AddBrushForPatch: `p->pSymbiot = Brush_Alloc(...)`).
+// selbrush_t.def — see AddBrushForPatch).
 static void Patch_AppendMovePoint( patchMesh_t *def, drawVert_t *cp )
 {
     if ( g_qeglobals.d_num_move_points
@@ -3768,7 +3525,7 @@ static void Patch_AppendMovePoint( patchMesh_t *def, drawVert_t *cp )
     }
 }
 
-// ── Patch_RemoveMovePoint (sub_43C320 0x43c320) ───────────────────────────────
+// ── Patch_RemoveMovePoint (0x43c320) ───────────────────────────────
 // Remove the move-point whose xyz matches `pt` (a d_points slot) from d_move_points[]
 // (repeatedly — there can be coincident duplicates from a weld).  The de-select-on-
 // reclick path.
@@ -3784,7 +3541,7 @@ static void Patch_RemoveMovePoint( const float *pt )
     }
 }
 
-// ── Patch_SelectCtrlPoint (AddPoint 0x43c440) ─────────────────────────────────
+// ── Patch_SelectCtrlPoint (0x43c440) ─────────────────────────────────
 // Queue control point `cp` (a drawVert_t* in patch `def`'s ctrl grid) as a drag
 // move-point (Patch_AppendMovePoint), then — when the weld/drill-down prefs are on
 // (g_bPatchWeld / patch_drill_down, both default 1) and `processWeld` is set — sweep
@@ -3794,9 +3551,9 @@ static void Patch_RemoveMovePoint( const float *pt )
 static void Patch_SelectCtrlPoint( patchMesh_t *def, drawVert_t *cp, char processWeld )
 {
     // The clicked view's two on-screen axes (the depth axis is excluded for drill-down).
-    int nViewType = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS (never NULL — no shell fallback)
-    int axisA = ( nViewType == 0 );               // IDB v24 = (m_nViewType==0) — first screen axis index
-    int axisB = ( nViewType != 2 ) + 1;           // IDB v29 = (m_nViewType!=2)+1 — second screen axis index
+    int nViewType = Ed_ActiveXY()->m_nViewType;   // never NULL — no shell fallback
+    int axisA = ( nViewType == 0 );               // first screen axis index
+    int axisB = ( nViewType != 2 ) + 1;           // second screen axis index
 
     Patch_AppendMovePoint( def, cp );
 
@@ -3825,7 +3582,7 @@ static void Patch_SelectCtrlPoint( patchMesh_t *def, drawVert_t *cp, char proces
                     if ( d0 * d0 <= 1.00000011e-06f && d1 * d1 <= 1.00000011e-06f
                          && d2 * d2 <= 1.00000011e-06f )
                     {
-                        // dedup by POINTER (the binary): cp itself is already queued, every
+                        // dedup by POINTER: cp itself is already queued, every
                         // distinct coincident seam point gets appended so the weld moves as one.
                         if ( Patch_FindMovePointByPtr( other ) < 0 )
                             Patch_AppendMovePoint( p, other );
@@ -3842,7 +3599,7 @@ static void Patch_SelectCtrlPoint( patchMesh_t *def, drawVert_t *cp, char proces
                     float db = (float)fabs( cp->xyz[axisB] - other->xyz[axisB] );
                     if ( db > 0.001f )
                         continue;
-                    if ( Patch_FindMovePointByPtr( other ) < 0 )      // dedup by POINTER (binary)
+                    if ( Patch_FindMovePointByPtr( other ) < 0 )      // dedup by POINTER
                         Patch_AppendMovePoint( p, other );
                 }
             }
@@ -3850,7 +3607,7 @@ static void Patch_SelectCtrlPoint( patchMesh_t *def, drawVert_t *cp, char proces
     }
 }
 
-// ── Patch_ColumnAllSelected (sub_43C380 0x43c380) ─────────────────────────────
+// ── Patch_ColumnAllSelected (0x43c380) ─────────────────────────────
 // 1 iff every (non-marked, turned_edge bit1 clear) control point in column `col` of
 // patch `def` is already queued in d_move_points[].  Drives the click-toggle between
 // column-select and row-select.
@@ -3863,7 +3620,7 @@ static char Patch_ColumnAllSelected( patchMesh_t *def, int col )
         drawVert_t *cp = &def->ctrl[col][row];
         if ( ( cp->turned_edge & 2 ) == 0 )
         {
-            if ( Patch_FindMovePointByPtr( cp ) < 0 )      // binary: pointer equality, not xyz
+            if ( Patch_FindMovePointByPtr( cp ) < 0 )      // pointer equality, not xyz
                 return 0;
         }
     }
@@ -3897,7 +3654,7 @@ static void Patch_SelectRow( patchMesh_t *def, int row, char bMulti )
     }
 }
 
-// ── Patch_ShiftCtrlSelectByDelta (sub_43C820 0x43C820) ────────────────────────────
+// ── Patch_ShiftCtrlSelectByDelta (0x43C820) ────────────────────────────
 // Shift the selected control points of one patch DEF by grid-neighbour delta (dCol,dRow):
 // for every cell (col,row) whose NEIGHBOUR (col+dCol, row+dRow) is currently a picked
 // move-point (and this cell is not turned-edge-masked, turned_edge & 2), select THIS cell
@@ -3906,8 +3663,7 @@ static void Patch_SelectRow( patchMesh_t *def, int row, char bMulti )
 //   dCol<0            : col high→low, row low→high
 //   dCol>=0 & dRow>=0 : col low→high, row low→high
 //   dCol>=0 & dRow<0  : col low→high, row high→low
-// Bounds-checks the neighbour against [0,width)×[0,height).  NOTE `ctrl[i][j].turned_edge`
-// is the `[eax+esi+84h]&2` byte test decoded to the drawVert flag at ctrl offset 0x4C.
+// Bounds-checks the neighbour against [0,width)×[0,height).
 static void Patch_ShiftCtrlSelectByDelta( patchMesh_t *def, int dCol, int dRow, char bAdd )
 {
     const int w = def->width;
@@ -3956,12 +3712,12 @@ static void Patch_ShiftCtrlSelectByDelta( patchMesh_t *def, int dCol, int dRow, 
     g_nUpdateBits = -1;
 }
 
-// ── PMESH_10 (0x43CB80) — move the patch-vertex selection by a grid delta ─────────────
+// ── Patch_KeyMoveSelection (0x43CB80) — move the patch-vertex selection by a grid delta ─────────────
 // Called by the camera fly keys (Left/Right/Forward/Back).  Only acts in vertex/curve-
 // point select mode: for every selected patch, shift its picked control points by
 // (dCol,dRow) and return 1 (handled) — so the caller leaves the camera alone.  Returns 0
 // (not handled) otherwise, letting the camera move.
-char PMESH_10( char bAdd, int dCol, int dRow )
+char Patch_KeyMoveSelection( char bAdd, int dCol, int dRow )
 {
     if ( g_qeglobals.d_select_mode != sel_vertex && g_qeglobals.d_select_mode != sel_curvepoint )
         return 0;
@@ -3979,13 +3735,13 @@ char PMESH_10( char bAdd, int dCol, int dRow )
     return handled;
 }
 
-// ── Patch_ClickControlPoint (PMESH_11 0x43cc00) ───────────────────────────────
+// ── Patch_ClickControlPoint (0x43cc00) ────────────────────────────────────────
 // `cp` = the clicked d_points[] slot (a vec3*).  Find the control point in the
 // selected patches whose xyz matches it, then apply the modifier action.  The two
-// flags follow the binary's PMESH_11(a2,a3) call from SelectCurvePointByRay:
-//   bMultiAppend (a2 = buttons & MK_CONTROL/8) → APPEND to the selection (don't clear).
-//   bColRowSelect(a3 = buttons & MK_SHIFT/4)   → select a whole COLUMN, or a ROW once
-//                                                the column is fully selected.
+// flags come from SelectCurvePointByRay:
+//   bMultiAppend  (buttons & MK_CONTROL/8) → APPEND to the selection (don't clear).
+//   bColRowSelect (buttons & MK_SHIFT/4)   → select a whole COLUMN, or a ROW once
+//                                            the column is fully selected.
 //   plain (neither)  → first click in a fresh view records the "same-view" flag and
 //                      returns; a repeat click on an already-selected point de-selects
 //                      it, else it becomes the sole selection.
@@ -3994,7 +3750,7 @@ char PMESH_10( char bAdd, int dCol, int dRow )
 static void Patch_ClickControlPoint( const float *cp, char bMultiAppend, char bColRowSelect )
 {
     // First plain click in a fresh view just arms the "same-view" flag (so the NEXT
-    // click in the same view can de-select).  byte_25D5A6A is set by XY_MouseDown.
+    // click in the same view can de-select).  g_bXYViewIsLastPatchClick is set by XY_MouseDown.
     if ( !g_bXYViewIsLastPatchClick && !bMultiAppend && !bColRowSelect )
     {
         g_bXYViewIsLastPatchClick = 1;
@@ -4005,8 +3761,7 @@ static void Patch_ClickControlPoint( const float *cp, char bMultiAppend, char bC
     {
         if ( !b->patch )
             continue;
-        if ( b->patch->def != b->def->patch )
-            Assert( PMESH_CPP, 2257, 0, "%s", "pb->patch->def == pb->def->patch" );
+        iassert( b->patch->def == b->def->patch );
 
         patchMesh_t *def = b->def->patch;
         for ( int col = 0; col < def->width; ++col )
@@ -4040,23 +3795,23 @@ static void Patch_ClickControlPoint( const float *cp, char bMultiAppend, char bC
                     continue;
                 }
 
-                int existing = Patch_FindMovePointByPtr( here );   // binary: pointer equality (v9-19 != d_move_points[v13])
+                int existing = Patch_FindMovePointByPtr( here );   // pointer equality
                 if ( existing < 0 )
                 {
                     // not yet selected
-                    if ( bColRowSelect )                       // a3 → column select
+                    if ( bColRowSelect )                       // column select
                     {
                         Patch_SelectColumn( def, col, bMultiAppend );
                         return;
                     }
-                    if ( !bMultiAppend )                       // !a2 → replace selection
+                    if ( !bMultiAppend )                       // replace selection
                         g_qeglobals.d_num_move_points = 0;
                     if ( ( here->turned_edge & 2 ) == 0 )
                         Patch_SelectCtrlPoint( def, here, 1 );
                     return;
                 }
                 // already selected
-                if ( bColRowSelect )                           // a3 → column→row toggle
+                if ( bColRowSelect )                           // column→row toggle
                 {
                     if ( Patch_ColumnAllSelected( def, col ) )
                     {
@@ -4078,7 +3833,7 @@ static void Patch_ClickControlPoint( const float *cp, char bMultiAppend, char bC
 
 // ── SelectCurvePointByRay (0x495150) — port lives in select.cpp (sibling of
 //    SelectVertexByRay); it calls Patch_ClickControlPoint via this bridge.  The
-//    args are the two PMESH_11 flags: bMultiAppend=(buttons&8), bColRowSelect=(buttons&4). ──
+//    args are the two Patch_ClickControlPoint flags: bMultiAppend=(buttons&8), bColRowSelect=(buttons&4). ──
 extern "C" void Patch_ClickControlPoint_C( const float *cp, char bMultiAppend, char bColRowSelect )
 {
     Patch_ClickControlPoint( cp, bMultiAppend, bColRowSelect );
@@ -4100,7 +3855,7 @@ void Patch_EditPatch()
     {
         if ( !b->patch )
             continue;
-        iassert( b->patch->def == b->def->patch );  // 4351 — #expr byte-matches embedded string
+        iassert( b->patch->def == b->def->patch );  // 4351
 
         patchMesh_t *def = b->def->patch;
         for ( int col = 0; col < def->width; ++col )
@@ -4122,19 +3877,157 @@ void Patch_EditPatch()
     g_qeglobals.d_select_mode = sel_curvepoint;
     if ( prev == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prev == sel_addpoint )
-        sub_43ECB0();
+}
+
+// ── Patch texture follow ─────────────────────────────────────────────────────────────────
+//  Texture lock OFF: a moved control point's three S/T pairs are re-solved so the texture
+//  stays put in world space.  Each triangle around the point gives the S/T gradient over its
+//  plane (solved from the drag-start savedTexCoord); the gradients of the triangles that use
+//  the point are summed, each channel's sum clamped to length 0.25 (the binary's guard against
+//  a degenerate quad), and  st = saved + ( sum . delta ) / triangleCount.
+//  KIWI: shared by the classic curve-point drag and the G vertex move (kiwi_transform.cpp);
+//  the gradients accumulate in double.
+extern void Ed_Normal_Calc( const float *normal, float *xv, float *yv );            // texturevecs.cpp 0x459A60
+extern char Ed_Patch_AffineInverse( const float *xs, const float *ys, double *inv );  // brush.cpp 0x43CEE0
+int         PlaneFromPoints_Real( float *out, const float *A, const float *B, const float *C );   // below
+
+// 0x43d240 + 0x43cff0: add one triangle's gradients to grad (per layer 8 values: s gradient,
+// s constant, t gradient, t constant).  false (nothing added) for a degenerate triangle.
+static bool Patch_TexFollow_TriGradient( const patchMesh_t *p, int r0, int c0, int r1, int c1,
+                                         int r2, int c2, double grad[24] )
+{
+    const drawVert_t *v[3] = { &p->ctrl[c0][r0], &p->ctrl[c1][r1], &p->ctrl[c2][r2] };
+    float plane[4];
+    if ( !PlaneFromPoints_Real( plane, v[1]->xyz, v[0]->xyz, v[2]->xyz ) )
+        return false;
+    float xv[3], yv[3];
+    Ed_Normal_Calc( plane, xv, yv );
+
+    float xs[3], ys[3];
+    for ( int i = 0; i < 3; ++i )
+    {
+        xs[i] = v[i]->xyz[0] * xv[0] + v[i]->xyz[1] * xv[1] + v[i]->xyz[2] * xv[2];
+        ys[i] = v[i]->xyz[0] * yv[0] + v[i]->xyz[1] * yv[1] + v[i]->xyz[2] * yv[2];
+    }
+    double inv[9];
+    if ( !Ed_Patch_AffineInverse( xs, ys, inv ) )
+        return false;
+
+    for ( int k = 0; k < 6; ++k )               // layer = k / 2, s or t = k % 2
+    {
+        double val[3];
+        for ( int i = 0; i < 3; ++i )
+            val[i] = ( (const float *)&v[i]->savedTexCoord )[k];
+        const double a = inv[0] * val[0] + inv[1] * val[1] + inv[2] * val[2];   // per unit along xv
+        const double b = inv[3] * val[0] + inv[4] * val[1] + inv[5] * val[2];   // per unit along yv
+        double *g = &grad[4 * k];
+        g[0] += a * xv[0] + b * yv[0];
+        g[1] += a * xv[1] + b * yv[1];
+        g[2] += a * xv[2] + b * yv[2];
+        g[3] += inv[6] * val[0] + inv[7] * val[1] + inv[8] * val[2];
+    }
+    return true;
+}
+
+// 0x43d3d0: add the triangles of quad (colSq..colSq+1, rowSq..rowSq+1) that use control point
+// (col,row); returns how many.  A terrain quad splits along its corner's turned_edge bit.
+static int Patch_TexFollow_QuadGradient( const patchMesh_t *p, int colSq, int rowSq, int col, int row,
+                                         double grad[24] )
+{
+    iassert( row == rowSq || row == rowSq + 1 );   // PMESH.CPP:2458
+    iassert( col == colSq || col == colSq + 1 );   // PMESH.CPP:2459
+    if ( rowSq < 0 || rowSq + 1 >= p->height || colSq < 0 || colSq + 1 >= p->width )
+        return 0;
+
+    int n = 0;
+    if ( p->type == PATCH_TERRAIN && ( p->ctrl[colSq][rowSq].turned_edge & 1 ) )
+    {
+        if ( !( row == rowSq + 1 && col == colSq ) )
+            n += Patch_TexFollow_TriGradient( p, rowSq, colSq, rowSq + 1, colSq + 1, rowSq, colSq + 1, grad );
+        if ( !( row == rowSq && col == colSq + 1 ) )
+            n += Patch_TexFollow_TriGradient( p, rowSq + 1, colSq + 1, rowSq, colSq, rowSq + 1, colSq, grad );
+    }
+    else
+    {
+        if ( !( row == rowSq + 1 && col == colSq + 1 ) )
+            n += Patch_TexFollow_TriGradient( p, rowSq, colSq, rowSq + 1, colSq, rowSq, colSq + 1, grad );
+        if ( !( row == rowSq && col == colSq ) )
+            n += Patch_TexFollow_TriGradient( p, rowSq, colSq + 1, rowSq + 1, colSq, rowSq + 1, colSq + 1, grad );
+    }
+    return n;
+}
+
+// 0x43d520: the S/T of control point (col,row) once it has moved `delta` from where its
+// savedTexCoord was taken.  false = no usable triangle (leave the S/T as they are).
+bool Patch_TexFollow( const patchMesh_t *p, int col, int row, const float *delta, float outST[6] )
+{
+    double grad[24] = {};
+    const int n = Patch_TexFollow_QuadGradient( p, col - 1, row - 1, col, row, grad )
+                + Patch_TexFollow_QuadGradient( p, col,     row - 1, col, row, grad )
+                + Patch_TexFollow_QuadGradient( p, col - 1, row,     col, row, grad )
+                + Patch_TexFollow_QuadGradient( p, col,     row,     col, row, grad );
+    if ( n <= 0 )
+        return false;
+
+    const float *saved = (const float *)&p->ctrl[col][row].savedTexCoord;
+    for ( int k = 0; k < 6; ++k )
+    {
+        double *g = &grad[4 * k];
+        const double len = sqrt( g[0] * g[0] + g[1] * g[1] + g[2] * g[2] );
+        if ( len > 0.25 )
+        {
+            const double s = 0.25 / len;
+            g[0] *= s;
+            g[1] *= s;
+            g[2] *= s;
+        }
+        const double v = ( g[0] * delta[0] + g[1] * delta[1] + g[2] * delta[2] ) / n + saved[k];
+        iassert( isfinite( v ) );   // PMESH.CPP:2528 !IS_NAN(newVal)
+        outST[k] = (float)v;
+    }
+    return true;
 }
 
 // ── Patch_UpdateSelected_0 (0x43d800) — APPLY the drag delta + re-tessellate ──
 // Add the world delta `move` to every selected control point, rebuild d_points[] from
 // the new control positions, and re-tessellate each selected patch (Patch_Rebuild →
-// Patch_GenericMesh2) so the curve re-bends live.  The texture-lock texCoord-FOLLOW
-// recompute (the `!m_bTextureLock` block: PMESH_13/PMESH_12 re-project per-control S/T)
-// is DEFERRED (see the scope note above) — geometry only.
-static void Patch_UpdateSelected_0( const float *move )
+// Patch_GenericMesh2) so the curve re-bends live.  `total` is the move since the press
+// (Drag_MouseMoved's drag_vec), which the texture follow measures from.
+static void Patch_UpdateSelected_0( const float *move, const float *total )
 {
-    // [DEFERRED] texture-lock-off texCoord follow (PMESH_13 chain) — material epic.
+    // (0) texture lock OFF: every point's new S/T first, then written.  KIWI: solved on the drag-start geometry (the moved points put
+    //     back by the move so far, then restored bit for bit), so a long drag lands where one
+    //     step would - the binary solved on the pre-step geometry and overshot - and the
+    //     classic drag agrees with G.
+    if ( !g_PrefsDlg->m_bTextureLock )
+    {
+        static float s_followST[4096][6];
+        static bool  s_followOk[4096];
+        static float s_followXyz[4096][3];
+        const int n = g_qeglobals.d_num_move_points;
+        iassert( n <= 4096 );   // PMESH.CPP:2593
+        const float sofar[3] = { total[0] - move[0], total[1] - move[1], total[2] - move[2] };
+        for ( int i = 0; i < n; ++i )
+        {
+            float *xyz = g_qeglobals.d_move_points[i]->xyz;
+            memcpy( s_followXyz[i], xyz, sizeof( s_followXyz[i] ) );
+            xyz[0] -= sofar[0];
+            xyz[1] -= sofar[1];
+            xyz[2] -= sofar[2];
+        }
+        for ( int i = 0; i < n; ++i )
+        {
+            patchMesh_t *def;
+            int row, col;
+            s_followOk[i] = Patch_LocateCtrlPoint( g_qeglobals.d_move_points[i], &def, &row, &col )
+                         && Patch_TexFollow( def, col, row, total, s_followST[i] );
+        }
+        for ( int i = n - 1; i >= 0; --i )     // reverse: a listed-twice point ends on its first copy
+            memcpy( g_qeglobals.d_move_points[i]->xyz, s_followXyz[i], sizeof( s_followXyz[i] ) );
+        for ( int i = 0; i < n; ++i )
+            if ( s_followOk[i] )
+                memcpy( &g_qeglobals.d_move_points[i]->texCoord, s_followST[i], sizeof( s_followST[i] ) );
+    }
 
     // (1) translate every queued control point by the snapped world delta.
     for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
@@ -4150,8 +4043,7 @@ static void Patch_UpdateSelected_0( const float *move )
     {
         if ( !b->patch )
             continue;
-        if ( b->patch->def != b->def->patch )
-            Assert( PMESH_CPP, 2613, 0, "%s", "pb->patch->def == pb->def->patch" );
+        iassert( b->patch->def == b->def->patch );
 
         patchMesh_t *def = b->def->patch;
         g_qeglobals.d_numpoints = 0;
@@ -4173,56 +4065,46 @@ static void Patch_UpdateSelected_0( const float *move )
 }
 
 // ── Patch_UpdateSelected (0x43ed10) — the dispatcher MoveSelection calls ───────
-// In paint mode 1 ("Drag Up/Down") with the AdvPatchEditDlg active (sub_401D50() &&
-// sub_401DB0()==1) the drag does a SOFT-SELECTION height push (sub_43DD00 with the Z
-// delta); otherwise it is a standard control-point translate (Patch_UpdateSelected_0).
-// `move` is the snapped world delta (a float[3]); the binary passes it in ESI.
-extern int sub_401D50();              // patchdialog.cpp — "is terrain-paint mode active?"
-extern int sub_401DB0();              // patchdialog.cpp — checked mode radio index
-void       sub_43DD00( float amount );   // forward (soft-sel height drag dispatch, below)
-void Patch_UpdateSelected( float *move )
+// A standard control-point translate (Patch_UpdateSelected_0).  KIWI: the binary's paint-mode-1
+// soft-selection height push went with the AdvPatchEditDlg paint path.
+// `move` is the snapped world delta (a float[3]); `total` (the move since the press) is for
+// the texture follow.
+void Patch_UpdateSelected( float *move, const float *total )
 {
-    if ( sub_401D50() && sub_401DB0() == 1 )
-        sub_43DD00( ( (const float *)(intptr_t)move )[2] );   // soft-sel: push Z by the drag delta
-    else
-        Patch_UpdateSelected_0( (const float *)(intptr_t)move );
+    Patch_UpdateSelected_0( move, total );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  PMESH_56 / PMESH_57 (0x44cfb0 / 0x44d0c0) — the SurfaceInspector multi-layer
-//  patch-texturing GET / SET pair (the patch analogue of SetTexMods/SurfaceDlg_Wnd02).
-//  No longer dead code: the #2 material-epic unit ports + wires their callers
-//  (SetTexMods→PostDoSurface02→PMESH_56, SurfaceDlg_Wnd02→PostDoSurface02_Patch→PMESH_57,
-//  Patch_RedispersePreDrag→PMESH_56).  Every per-control-point offset below was traced
-//  from the disasm (NOT hex-rays, which manges the drawVert pointer walk into [esi±N]).
+//  Patch_SaveLayerMtl (0x44cfb0) — the SurfaceInspector's patch-texturing GET.  KIWI: its SET
+//  (Patch_RestoreLayerMtl 0x44d0c0) went with the MFC inspector's revert; what remains is the
+//  drag-start savedTexCoord snapshot the texture follow (Patch_TexFollow) reads - taken by
+//  Patch_RedispersePreDrag and the G vertex move.
 //
-//  Layout facts (IDB-verified, qe3.h): patchMesh_t.texture/lightmap/smoothing are three
-//  contiguous 8-byte patchMesh_material {lyrMtl,radMtl} at +0x18/+0x20/+0x28 → indexable
-//  as (&p->texture)[layer].  The "live/working" material slot is pad_0x0030(+0x30) +
-//  mat_unk(+0x34) = one more {lyrMtl,radMtl} pair.  bDirty(+0x5043), xx21(+0x5044) is a
-//  byte shadow.  Each drawVert_t ctrl point: texCoord(+0xC) live, savedTexCoord(+0x34)
-//  snapshot — both pmesh_texcoord{st,lightmap,smoothing} = 3 layers × vec2.
+//  Layout facts (qe3.h): patchMesh_t.texture/lightmap/smoothing are three contiguous
+//  patchMesh_material {lyrMtl,radMtl} → indexable as (&p->texture)[layer].  The
+//  "live/working" material slot is workingMaterial = one more {lyrMtl,radMtl} pair.
+//  xx21 is a byte shadow of bDirty.  Each drawVert_t ctrl point: texCoord live,
+//  savedTexCoord snapshot — both pmesh_texcoord{st,lightmap,smoothing} = 3 layers × vec2.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// PMESH_56 (0x44cfb0) — patch "GET": pull the CURRENT layer's material pointers into the
-// live working slot, then SNAPSHOT every control point's live texCoord (all 3 layers) into
-// its savedTexCoord.  Mirrors SetTexMods' per-face mtldef[current]→mtldef[3] save.
-//   * live{lyrMtl,radMtl}(+0x30/+0x34) ← (&p->texture)[current_edit_layer]   (disasm 44cfbf)
-//   * xx21(+0x5044) ← bDirty(+0x5043)                                         (disasm 44cfca)
-//   * per ctrl point: savedTexCoord[0..2] ← texCoord[0..2]  (24 bytes)        (disasm 44d006)
-static void PMESH_56( patchMesh_t *p )
+// Patch "GET": pull the CURRENT layer's material pointers into the live working slot, then
+// SNAPSHOT every control point's live texCoord (all 3 layers) into its savedTexCoord.
+//   * live{lyrMtl,radMtl} ← (&p->texture)[current_edit_layer]
+//   * xx21 ← bDirty
+//   * per ctrl point: savedTexCoord[0..2] ← texCoord[0..2]  (24 bytes)
+void Patch_SaveLayerMtl( patchMesh_t *p )
 {
     const int layer = g_qeglobals.current_edit_layer;
 
     // Working material slot ← current layer's material pair.  (&p->texture)[layer] is the
-    // layer's {lyrMtl,radMtl}; the live pair lives at +0x30/+0x34 (pad_0x0030 + mat_unk).
+    // layer's {lyrMtl,radMtl}; the live pair is workingMaterial.
     patchMesh_material *live = &p->workingMaterial;
     *live = ( &p->texture )[layer];
     p->xx21 = p->bDirty;
 
-    for ( int row = 0; row < p->height; ++row )          // [ebx+4] = height (outer)
+    for ( int row = 0; row < p->height; ++row )          // height is the outer loop
     {
-        for ( int col = 0; col < p->width; ++col )       // [ebx]   = width
+        for ( int col = 0; col < p->width; ++col )
         {
             drawVert_t *v = &p->ctrl[col][row];
             // Snapshot all three layer texCoords (st/lightmap/smoothing = 3 × vec2).
@@ -4231,56 +4113,16 @@ static void PMESH_56( patchMesh_t *p )
                 float *dst = &( (float *)&v->savedTexCoord )[2 * l];
                 dst[0] = ( (float *)&v->texCoord )[2 * l + 0];
                 dst[1] = ( (float *)&v->texCoord )[2 * l + 1];
-                if ( ( *(unsigned int *)&dst[0] & 0x7F800000 ) == 0x7F800000 )
-                    Assert( PMESH_CPP, 9059, 0, "%s", "!IS_NAN(p->ctrl[col][row].savedTexCoord[textureLayer][0])" );
-                if ( ( *(unsigned int *)&dst[1] & 0x7F800000 ) == 0x7F800000 )
-                    Assert( PMESH_CPP, 9060, 0, "%s", "!IS_NAN(p->ctrl[col][row].savedTexCoord[textureLayer][1])" );
+                iassert( isfinite( dst[0] ) );
+                iassert( isfinite( dst[1] ) );
             }
         }
     }
 }
 
-// PMESH_57 (0x44d0c0) — patch "SET": push the live working material pair BACK onto the
-// current layer, restore each control point's CURRENT-layer texCoord from its snapshot,
-// then Patch_Rebuild.  Mirrors SurfaceDlg_Wnd02's per-face mtldef[3]→mtldef[current] apply.
-//   * (&p->texture)[current_edit_layer] ← live{lyrMtl,radMtl}(+0x30/+0x34)    (disasm 44d0cf)
-//   * bDirty(+0x5043) ← xx21(+0x5044)                                         (disasm 44d0e2)
-//   * per ctrl point: texCoord[current] ← savedTexCoord[current] (current layer only) (44d18e)
-//   * Patch_Rebuild(p, 1)                                                     (disasm 44d1d4)
-static void PMESH_57( patchMesh_t *p )
-{
-    const int layer = g_qeglobals.current_edit_layer;
-
-    const patchMesh_material *live = &p->workingMaterial;
-    ( &p->texture )[layer] = *live;
-    p->bDirty = (p->xx21 & 0xFF) != 0;
-
-    for ( int row = 0; row < p->height; ++row )          // [esi+4] = height
-    {
-        for ( int col = 0; col < p->width; ++col )       // [esi]   = width
-        {
-            drawVert_t *v = &p->ctrl[col][row];
-            float sx = ( (float *)&v->savedTexCoord )[2 * layer + 0];
-            float sy = ( (float *)&v->savedTexCoord )[2 * layer + 1];
-            if ( ( *(unsigned int *)&sx & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 9078, 0, "%s", "!IS_NAN(p->ctrl[col][row].savedTexCoord[g_qeglobals.activeTexCoord][0])" );
-            if ( ( *(unsigned int *)&sy & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 9079, 0, "%s", "!IS_NAN(p->ctrl[col][row].savedTexCoord[g_qeglobals.activeTexCoord][1])" );
-            ( (float *)&v->texCoord )[2 * layer + 0] = sx;
-            ( (float *)&v->texCoord )[2 * layer + 1] = sy;
-        }
-    }
-    Patch_Rebuild( p, 1 );
-}
-
-// PostDoSurface02 / PostDoSurface02_Patch reach PMESH_56/57 through a brush_t.patch
-// pointer; expose thin externs to surfacedlg.cpp (where the SurfaceInspector lives).
-void PMESH_56_extern( patchMesh_t *p ) { PMESH_56( p ); }
-void PMESH_57_extern( patchMesh_t *p ) { PMESH_57( p ); }
-
-// ── Patch_RedispersePreDrag (sub_43D7A0 0x43d7a0) — drag-START hook (NOW LIVE) ──
+// ── Patch_RedispersePreDrag (0x43d7a0) — drag-START hook ──
 // Snapshot every touched patch's live texCoords into savedTexCoord before the drag begins
-// (PMESH_56), so the curve-drag edits work off a clean baseline.  Dedupes consecutive
+// (Patch_SaveLayerMtl), so the curve-drag edits work off a clean baseline.  Dedupes consecutive
 // ctrl points belonging to the same patch (the binary's `if (def != last)` guard).
 void Patch_RedispersePreDrag()
 {
@@ -4292,28 +4134,27 @@ void Patch_RedispersePreDrag()
         {
             if ( def != last )
             {
-                PMESH_56( def );
+                Patch_SaveLayerMtl( def );
                 last = def;
             }
         }
     }
 }
 
-// ── PMESH_18 (0x43ec10) — paint/drag undo-id stamp ────────────────────────────
+// ── Patch_PaintFinish (0x43ec10) — paint/drag undo-id stamp ───────────────────
 //  After a paint or soft-sel drag, for every touched patch brush in the list (paint-dirty
 //  flag xx22b set): clear the flag and stamp the current undo record's id onto the brush def
 //  (ownerPrev) + its entity (epairEdits) — the same idiom as Undo_LinkBrush, so the stroke
-//  participates correctly in undo/redo grouping.
-extern undo_s *g_lastundo;            // undo.cpp (0x23F162C) — also externed below for PMESH_16
-static void PMESH_18( selbrush_t *list )
+//  participates correctly in undo/redo grouping.  Also the KIWI Terrain Sculpt / Decals
+//  stroke release (kiwi_terrain.cpp, kiwi_decal.cpp).
+void Patch_PaintFinish( selbrush_t *list )
 {
     for ( selbrush_t *i = list->next; i != list; i = i->next )
     {
         patch_t *patch = i->patch;
         if ( !patch )
             continue;
-        if ( patch->def != i->def->patch )
-            Assert( PMESH_CPP, 3137, 0, "%s", "b->patch->def == b->def->patch" );
+        iassert( patch->def == i->def->patch );
         if ( !patch->def->xx22b )
             continue;
         patch->def->xx22b = 0;
@@ -4327,37 +4168,21 @@ static void PMESH_18( selbrush_t *list )
     }
 }
 
-// ── sub_43ECB0 (0x43ecb0) — Patch_FinishCurveDrag, the drag-END hook ──────────
-// After a "Grab Value" (mode 5) drag, switch the tool to Flatten (sub_401E10(2)); stamp the
-// painted patches' undo ids (PMESH_18, the active/unselected list too when checkbox 1432 is
-// set); then close the undo record Drag_Setup opened.
-extern void AdvPatchEdit_SetMode( int mode );   // patchdialog.cpp — sub_401E10 (select mode radio)
-extern int  CurvEditDlg_OnSomeSetting();        // patchdialog.cpp — checkbox 1432
-void sub_43ECB0()
-{
-    if ( sub_401DB0() == 5 )
-        AdvPatchEdit_SetMode( 2 );               // Grab Value -> Flatten
-    if ( CurvEditDlg_OnSomeSetting() )
-        PMESH_18( &active_brushes );
-    PMESH_18( &selected_brushes );
-    Undo_End();
-}
-
-// ── PMESH_37 (Patch_FlipTexture, 0x445e30) — flip a patch's S or T texcoords ───
+// ── Patch_FlipTexture (0x445e30) — flip a patch's S or T texcoords ───
 //  The patch branch of Brush_FlipTexture (Select_FlipTexture, select.cpp).  axis=0
 //  flips S, axis=1 flips T.  For each control point — every one outside curve-point
 //  mode, only the SELECTED move-points inside it — replaces the current edit layer's
 //  st[axis] with 1-st[axis].  Then (layer 1 only) clears bDirty and rebuilds the
 //  tessellated curveDef.  Touches editor texCoord state only; never serialized.
-curvePatchDef_t *PMESH_37( patchMesh_t *a1, int axis )
+curvePatchDef_t *Patch_FlipTexture( patchMesh_t *p, int axis )
 {
     const int layer = g_qeglobals.current_edit_layer;
 
-    for ( int col = 0; col < a1->width; ++col )
+    for ( int col = 0; col < p->width; ++col )
     {
-        for ( int row = 0; row < a1->height; ++row )
+        for ( int row = 0; row < p->height; ++row )
         {
-            drawVert_t *cp = &a1->ctrl[col][row];
+            drawVert_t *cp = &p->ctrl[col][row];
 
             // In curve-point mode only flip control points that are queued as move-points.
             if ( g_qeglobals.d_select_mode == sel_curvepoint )
@@ -4372,50 +4197,44 @@ curvePatchDef_t *PMESH_37( patchMesh_t *a1, int axis )
 
             float *st = (float *)&cp->texCoord;
             float  nv = 1.0f - st[2 * layer + axis];
-            if ( ( *(unsigned int *)&nv & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 5736, 0, "%s", "!IS_NAN(newTexCoord)" );
+            iassert( isfinite( nv ) );
             st[2 * layer + axis] = nv;
         }
     }
 
     if ( layer == 1 )
-        a1->bDirty = 0;
-    if ( a1->curveDef )
-        free( a1->curveDef );
-    curvePatchDef_t *result = Patch_GenericMesh2( a1, layer, 0, 0 );
-    ++a1->version;
-    a1->curveDef = result;
+        p->bDirty = 0;
+    if ( p->curveDef )
+        free( p->curveDef );
+    curvePatchDef_t *result = Patch_GenericMesh2( p, layer, 0, 0 );
+    ++p->version;
+    p->curveDef = result;
     return result;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 //  TERRAIN-EDGE-TURN PICKER GROUP - the "cycle edge direction" (terrain quad-diagonal
 //  turn) tool, reached from drag.cpp's sel_cycle_edge_direction_quad mode:
-//  XY_MouseDown -> Patch_TurnEdge -> PMESH_51 (the ray-vs-curve-edge picker), which needs
+//  XY_MouseDown -> Patch_TurnEdge -> Patch_RayTest (the ray-vs-curve-edge picker), which needs
 //  the tessellated curveDef.  For a PATCH_TERRAIN patch the curveDef render mesh IS the
 //  control grid (1:1 copy in Patch_GenericMesh2's terrain branch), so verts[col+row*width]
 //  aligns with ctrl[col][row].  Nothing here is serialized.
 // ════════════════════════════════════════════════════════════════════════════
 
-extern int     Sys_Printf( const char *fmt, ... );      // 0x499E90
-extern undo_s *g_lastundo;                               // undo.cpp 0x23F162C
-extern void    Undo_AddBrush( entity_brush_s *pBrushInst );   // 0x45E680
-extern void    Undo_AddEntity( entity_s *entity );                      // 0x45E8B0
-
 // ── PlaneFromPoints_Real (0x4a9950) ───────────────────────────────────────────
 //  out[0..2] = normalized normal of triangle (A,B,C) about pivot B = (C-B)×(A-B);
 //  out[3] = dot(normal, B).  Returns 0 if the triangle is degenerate (both the
-//  primary and the alternate-pivot cross collapse), 1 otherwise.  Faithful to the
-//  binary including the area-vs-length² degeneracy guard (epsilon 1.00000011e-06).
-// non-static: also called by the model ray-pick (sub_48CE60) in select.cpp.
+//  primary and the alternate-pivot cross collapse), 1 otherwise.  Includes the
+//  area-vs-length² degeneracy guard (epsilon 1.00000011e-06).
+// non-static: also called by the model ray-pick (Model_RayTest) in select.cpp.
 int PlaneFromPoints_Real( float *out, const float *A, const float *B, const float *C )
 {
     float e1[3], e2[3];
-    e1[0] = A[0] - B[0]; e1[1] = A[1] - B[1]; e1[2] = A[2] - B[2];   // v24 = A-B
-    e2[0] = C[0] - B[0]; e2[1] = C[1] - B[1]; e2[2] = C[2] - B[2];   // v21 = C-B
+    e1[0] = A[0] - B[0]; e1[1] = A[1] - B[1]; e1[2] = A[2] - B[2];   // A-B
+    e2[0] = C[0] - B[0]; e2[1] = C[1] - B[1]; e2[2] = C[2] - B[2];   // C-B
     Vec3Cross( e2, e1, out );                                       // out = (C-B)×(A-B)
 
-    float lenSq = out[0]*out[0] + out[1]*out[1] + out[2]*out[2];    // v12
+    float lenSq = out[0]*out[0] + out[1]*out[1] + out[2]*out[2];
     if ( lenSq < 2.0f )
     {
         if ( lenSq == 0.0f )
@@ -4426,8 +4245,8 @@ int PlaneFromPoints_Real( float *out, const float *A, const float *B, const floa
         {
             // alternate pivot A: normal = (C-A)×(B-A)
             float f1[3], f2[3];
-            f1[0] = C[0] - A[0]; f1[1] = C[1] - A[1]; f1[2] = C[2] - A[2];   // v24
-            f2[0] = B[0] - A[0]; f2[1] = B[1] - A[1]; f2[2] = B[2] - A[2];   // v21
+            f1[0] = C[0] - A[0]; f1[1] = C[1] - A[1]; f1[2] = C[2] - A[2];
+            f2[0] = B[0] - A[0]; f2[1] = B[1] - A[1]; f2[2] = B[2] - A[2];
             Vec3Cross( f2, f1, out );
             float m1 = f1[0]*f1[0] + f1[1]*f1[1] + f1[2]*f1[2];
             float m2 = f2[0]*f2[0] + f2[1]*f2[1] + f2[2]*f2[2];
@@ -4441,39 +4260,39 @@ int PlaneFromPoints_Real( float *out, const float *A, const float *B, const floa
     return 1;
 }
 
-// ── PMESH_RaySegPick (sub_44AB10, 0x44ab10) — ray-vs-triangle pick ────────────
+// ── Ray_TriangleHit (0x44ab10) — ray-vs-triangle pick ────────────
 //  Möller–Trumbore intersection of ray (origin `org`, direction `dir`) against the
 //  triangle (base, vA, vB).  edge1 = vA-base, edge2 = vB-base.  On a hit returns 1
 //  and writes the ray parameter to *outT; *outU/*outV (when non-null) receive the
 //  barycentric coords.  Two-sided (sign tracks the winding).  Determinant epsilon
-//  1e-4 verbatim from the binary.
-// non-static: also called by the model ray-pick (sub_48CE60) in select.cpp.
-char PMESH_RaySegPick( const float *vB, const float *vA, const float *dir,
+//  1e-4, as in the binary.
+// non-static: also called by the model ray-pick (Model_RayTest) in select.cpp.
+char Ray_TriangleHit( const float *vB, const float *vA, const float *dir,
                               const float *base, const float *org,
                               float *outT, float *outU, float *outV )
 {
     float edge1[3], edge2[3], pvec[3], tvec[3], qvec[3];
-    edge1[0] = vA[0] - base[0]; edge1[1] = vA[1] - base[1]; edge1[2] = vA[2] - base[2];   // v20
-    edge2[0] = vB[0] - base[0]; edge2[1] = vB[1] - base[1]; edge2[2] = vB[2] - base[2];   // v13
-    Vec3Cross( dir, edge2, pvec );                                                        // v14
+    edge1[0] = vA[0] - base[0]; edge1[1] = vA[1] - base[1]; edge1[2] = vA[2] - base[2];
+    edge2[0] = vB[0] - base[0]; edge2[1] = vB[1] - base[1]; edge2[2] = vB[2] - base[2];
+    Vec3Cross( dir, edge2, pvec );
 
-    float det = edge1[0]*pvec[0] + edge1[1]*pvec[1] + edge1[2]*pvec[2];   // v26
+    float det = edge1[0]*pvec[0] + edge1[1]*pvec[1] + edge1[2]*pvec[2];
     float sign;
     if ( det >= 0.0001 )       sign = 1.0f;
     else if ( det > -0.0001 )  return 0;
     else { sign = -1.0f; det = -det; }
 
-    tvec[0] = org[0] - base[0]; tvec[1] = org[1] - base[1]; tvec[2] = org[2] - base[2];   // v17
-    float u = ( pvec[0]*tvec[0] + pvec[1]*tvec[1] + pvec[2]*tvec[2] ) * sign;             // v24
+    tvec[0] = org[0] - base[0]; tvec[1] = org[1] - base[1]; tvec[2] = org[2] - base[2];
+    float u = ( pvec[0]*tvec[0] + pvec[1]*tvec[1] + pvec[2]*tvec[2] ) * sign;
     if ( u < 0.0f || u > det )
         return 0;
 
-    Vec3Cross( tvec, edge1, qvec );                                                      // v14 (reused)
-    float v = ( dir[0]*qvec[0] + dir[1]*qvec[1] + dir[2]*qvec[2] ) * sign;               // v23
+    Vec3Cross( tvec, edge1, qvec );
+    float v = ( dir[0]*qvec[0] + dir[1]*qvec[1] + dir[2]*qvec[2] ) * sign;
     if ( v < 0.0f || det < u + v )
         return 0;
 
-    float t = ( edge2[0]*qvec[0] + edge2[1]*qvec[1] + edge2[2]*qvec[2] ) * sign / det;   // v11
+    float t = ( edge2[0]*qvec[0] + edge2[1]*qvec[1] + edge2[2]*qvec[2] ) * sign / det;
     *outT = t;
     if ( outU ) *outU = u / det;
     if ( outV ) *outV = v / det;
@@ -4481,7 +4300,7 @@ char PMESH_RaySegPick( const float *vB, const float *vA, const float *dir,
 }
 
 // barycentric blend of three curveVerts' RGBA bytes: base*w + A*u + B*v (w=1-u-v).
-static void PMESH_BlendCornerColor( const curveVert_t *base, const curveVert_t *A,
+static void CurveVert_BlendColor( const curveVert_t *base, const curveVert_t *A,
                                     const curveVert_t *B, float u, float v, float *outRGBA )
 {
     double w = 1.0 - u - v;
@@ -4492,19 +4311,19 @@ static void PMESH_BlendCornerColor( const curveVert_t *base, const curveVert_t *
         outRGBA[k] = (float)( (double)ca[k] * u + (double)cc[k] * v + (double)cb[k] * w );
 }
 
-// ── PMESH_51 (0x44acc0) — ray-vs-curve-edge picker ────────────────────────────
+// ── Patch_RayTest (0x44acc0) — ray-vs-curve-edge picker ────────────────────────────
 //  Walk the tessellated curveDef grid, split each quad into two triangles along the
 //  cell diagonal (turned for PATCH_TERRAIN cells with turned_edge&1), and ray-test
 //  each.  Returns the nearest hit (dist > 2.0): *outDist = parameter, *outCol/*outRow
 //  = the cell, *outColor (4 bytes, when non-null) = the barycentric vertex colour,
 //  *outPlane (vec4, when non-null) = the hit triangle's plane.
-// non-static: also called by the per-brush ray trace (sub_48D240) in select.cpp.
-char PMESH_51( const float *org, const float *dir, patch_t *pm,
+// non-static: also called by the per-brush ray trace (Brush_TraceTest) in select.cpp.
+char Patch_RayTest( const float *org, const float *dir, patch_t *pm,
                       float *outDist, int *outCol, int *outRow,
                       byte *outColor, float *outPlane )
 {
-    iassert( pm );          // 8042 — #pm byte-matches the embedded "pm"
-    iassert( pm->def );     // 8043 — #pm->def byte-matches the embedded "pm->def"
+    iassert( pm );          // 8042
+    iassert( pm->def );     // 8043
 
     curvePatchDef_t *cd = pm->def->curveDef;
     if ( !cd )
@@ -4512,10 +4331,10 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
 
     const int   width  = cd->width;
     const int   isTerr = ( pm->def->type & PATCH_TERRAIN ) != 0;
-    float       best   = 3.4028235e38f;   // v81
-    char        found  = 0;               // v89
-    int         bestCol = 0, bestRow = 0; // v75 / HIDWORD(v74)
-    float       color[4] = { 0, 0, 0, 0 };// v70..v73
+    float       best   = 3.4028235e38f;
+    char        found  = 0;
+    int         bestCol = 0, bestRow = 0;
+    float       color[4] = { 0, 0, 0, 0 };
 
     for ( int row = 0; row < cd->height - 1; ++row )
     {
@@ -4523,27 +4342,27 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
         {
             const int idx = col + row * width;
             curveVert_t *verts = cd->verts;
-            curveVert_t *base, *vA, *vB2, *v17;   // v15 / r / v84 / v17
+            curveVert_t *base, *vA, *vB2, *vDiag;   // vDiag = the far end of the cell diagonal
 
             if ( isTerr && ( pm->def->ctrl[col][row].turned_edge & 1 ) )
             {
-                base = &verts[idx];              // v15 = TL
-                vA   = &verts[idx + 1];          // r   = TR
-                v17  = &verts[idx + width + 1];  // v17 = BR  (turned diagonal TL–BR)
-                vB2  = &verts[idx + width];      // v84 = BL
+                base  = &verts[idx];              // TL
+                vA    = &verts[idx + 1];          // TR
+                vDiag = &verts[idx + width + 1];  // BR  (turned diagonal TL–BR)
+                vB2   = &verts[idx + width];      // BL
             }
             else
             {
-                vA   = &verts[idx];              // r   = TL
-                base = &verts[idx + width];      // v15 = BL
-                v17  = &verts[idx + 1];          // v17 = TR  (diagonal BL–TR)
-                vB2  = &verts[idx + width + 1];  // v84 = BR
+                vA    = &verts[idx];              // TL
+                base  = &verts[idx + width];      // BL
+                vDiag = &verts[idx + 1];          // TR  (diagonal BL–TR)
+                vB2   = &verts[idx + width + 1];  // BR
             }
 
-            // Triangle #1: (base, vA, v17), tested both windings (swap A/B and u/v).
+            // Triangle #1: (base, vA, vDiag), tested both windings (swap A/B and u/v).
             float dist, bu, bv;
-            if ( PMESH_RaySegPick( v17->xyz, vA->xyz, dir, base->xyz, org, &dist, &bu, &bv )
-              || PMESH_RaySegPick( vA->xyz, v17->xyz, dir, base->xyz, org, &dist, &bv, &bu ) )
+            if ( Ray_TriangleHit( vDiag->xyz, vA->xyz, dir, base->xyz, org, &dist, &bu, &bv )
+              || Ray_TriangleHit( vA->xyz, vDiag->xyz, dir, base->xyz, org, &dist, &bv, &bu ) )
             {
                 if ( dist > 2.0f )
                 {
@@ -4553,20 +4372,20 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
                         if ( outPlane )
                         {
                             float pl[4];
-                            PlaneFromPoints_Real( pl, base->xyz, vA->xyz, v17->xyz );
+                            PlaneFromPoints_Real( pl, base->xyz, vA->xyz, vDiag->xyz );
                             outPlane[0] = pl[0]; outPlane[1] = pl[1]; outPlane[2] = pl[2];
                         }
                         best = dist;
                         bestCol = col;
                         bestRow = row;
-                        PMESH_BlendCornerColor( base, vA, v17, bu, bv, color );
+                        CurveVert_BlendColor( base, vA, vDiag, bu, bv, color );
                     }
                 }
             }
 
-            // Triangle #2: (base, v17, vB2), tested both windings.
-            if ( PMESH_RaySegPick( vB2->xyz, v17->xyz, dir, base->xyz, org, &dist, &bu, &bv )
-              || PMESH_RaySegPick( v17->xyz, vB2->xyz, dir, base->xyz, org, &dist, &bv, &bu ) )
+            // Triangle #2: (base, vDiag, vB2), tested both windings.
+            if ( Ray_TriangleHit( vB2->xyz, vDiag->xyz, dir, base->xyz, org, &dist, &bu, &bv )
+              || Ray_TriangleHit( vDiag->xyz, vB2->xyz, dir, base->xyz, org, &dist, &bv, &bu ) )
             {
                 if ( dist > 2.0f )
                 {
@@ -4576,13 +4395,13 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
                         if ( outPlane )
                         {
                             float pl[4];
-                            PlaneFromPoints_Real( pl, base->xyz, v17->xyz, vB2->xyz );
+                            PlaneFromPoints_Real( pl, base->xyz, vDiag->xyz, vB2->xyz );
                             outPlane[0] = pl[0]; outPlane[1] = pl[1]; outPlane[2] = pl[2];
                         }
                         best = dist;
                         bestCol = col;
                         bestRow = row;
-                        PMESH_BlendCornerColor( base, v17, vB2, bu, bv, color );
+                        CurveVert_BlendColor( base, vDiag, vB2, bu, bv, color );
                     }
                 }
             }
@@ -4597,771 +4416,22 @@ char PMESH_51( const float *org, const float *dir, patch_t *pm,
     if ( outRow ) *outRow = bestRow;
     if ( outColor )
     {
-        // inline fistp ROUNDS (0x44B153..0x44B19D; the binary adds 2^-30 first).
-        // KIWI (2026-10-05, fistp audit): lrint - the (int) cast truncated (a picked colour
-        // came out 1 low whenever its fraction was >= .5).
-        outColor[0] = (byte)lrint( color[0] + 9.313225746154785e-10 );
-        outColor[1] = (byte)lrint( color[1] + 9.313225746154785e-10 );
-        outColor[2] = (byte)lrint( color[2] + 9.313225746154785e-10 );
-        outColor[3] = (byte)lrint( color[3] + 9.313225746154785e-10 );
+        // KIWI: fistp rounds (0x44B153..0x44B19D); the (int) cast truncated a picked colour.
+        outColor[0] = (byte)KiwiRound_Fistp( color[0] );
+        outColor[1] = (byte)KiwiRound_Fistp( color[1] );
+        outColor[2] = (byte)KiwiRound_Fistp( color[2] );
+        outColor[3] = (byte)KiwiRound_Fistp( color[3] );
     }
     return found;
 }
 
-// ── sub_43DD50 (0x43DD50) — terrain-paint cursor pick ─────────────────────────
-//  Ray-pick the NEAREST terrain patch (across selected + active patches, honouring
-//  FilterBrush + brushFlags&0x20) and report the hit's blended vertex colour (4 bytes
-//  into `colorOut`, when non-null) and the hit world position (`origin_out`).  Reuses
-//  PMESH_51's outColor branch (the barycentric colour at the hit).  Returns 1 on a hit.
-//  The terrain-paint geometry core under sub_43E6F0 (the AdvPatchEditDlg paint drag,
-//  still parked on its dialog); ported + gated standalone so the pick is verified now.
-extern char FilterBrush( selbrush_t *b, int updateFilters );    // filters.cpp 0x46A1F0
-extern selbrush_t active_brushes;                               // map.cpp   0x23F189C
+// KIWI: the AdvPatchEditDlg terrain-paint core that sat here (Patch_PaintPick, the paint-mode
+// callbacks and 4D value noise, the CurvEditDlg slot table, the cursor-ring clip, the stroke /
+// soft-drag apply) went with the paint path; Terrain Sculpt (kiwi_terrain.cpp) replaced it.
 
-char sub_43DD50( const float *dir, byte *colorOut,
-                 const float *cam_origin, float *origin_out )
-{
-    float best = 3.4028235e38f;             // i — nearest hit parameter
-    byte cell[4];                   // a7 — the picked vertex colour
-
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-    {
-        if ( b->patch && !FilterBrush( b, 0 ) && ( b->brushFlags & 0x20 ) == 0 )
-        {
-            float dist;
-            if ( PMESH_51( cam_origin, dir, b->patch, &dist, nullptr, nullptr, cell, nullptr )
-              && dist < best )
-            {
-                best = dist;
-                if ( colorOut )
-                { colorOut[0]=cell[0]; colorOut[1]=cell[1]; colorOut[2]=cell[2]; colorOut[3]=cell[3]; }
-            }
-        }
-    }
-    for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
-    {
-        if ( b->patch && !FilterBrush( b, 0 ) && ( b->brushFlags & 0x20 ) == 0 )
-        {
-            float dist;
-            if ( PMESH_51( cam_origin, dir, b->patch, &dist, nullptr, nullptr, cell, nullptr )
-              && dist < best )
-            {
-                best = dist;
-                if ( colorOut )
-                { colorOut[0]=cell[0]; colorOut[1]=cell[1]; colorOut[2]=cell[2]; colorOut[3]=cell[3]; }
-            }
-        }
-    }
-
-    if ( best == 3.4028235e38f )
-        return 0;
-    origin_out[0] = dir[0] * best + cam_origin[0];
-    origin_out[1] = dir[1] * best + cam_origin[1];
-    origin_out[2] = dir[2] * best + cam_origin[2];
-    return 1;
-}
-
-// ── sub_43DB60 (0x43DB60) — terrain-paint brush falloff weight ────────────────
-//  The per-control-point weight of a paint stroke: the 2D (XY) distance from the
-//  paint centre to the control point selects `strength` inside innerR, 0 beyond
-//  outerR, and a smoothstep blend  w = 1 - t*t*(3-2t)  (t = (d-innerR)/(outerR-innerR))
-//  in the annulus.  Pure geometry — the dialog-independent leaf of the PMESH_16 apply
-//  chain; gated directly (RunPaintFalloffTest).
-float sub_43DB60( const float *center, const float *pt, float innerR, float outerR, float strength )
-{
-    const float dx = pt[0] - center[0];
-    const float dy = pt[1] - center[1];
-    const float d2 = dx * dx + dy * dy;
-    if ( d2 <= innerR * innerR )
-        return strength;
-    if ( outerR * outerR <= d2 )
-        return 0.0f;
-    const float d = sqrtf( d2 );
-    const float t = ( d - innerR ) / ( outerR - innerR );
-    const float w = 1.0f - t * t * ( 3.0f - ( t + t ) );
-    return w * strength;
-}
-
-// ── Terrain-paint per-channel mode callbacks (sub_43E550..) ───────────────────
-//  PMESH_16 invokes one of these per affected control point per channel:
-//    callback(ctrl, channel, currentValue, scaledStrength, falloffWeight) -> newValue.
-//  `channel` is 0=height, 1=B, 2=G, 3=R, 4=alpha (the PMESH_16 a5(ctrl,N,..) order).
-//  g_paintChannelVal[5] (IDB flt_231F534) holds the target value (set-toward modes) or
-//  the running weighted sum (average modes); g_paintChannelWt[5] (IDB flt_231F520) holds
-//  the average's weight accumulator.  Both are seeded by sub_43E6F0 (the paint drag,
-//  dialog-gated).  These are the dialog-independent leaf math of the apply chain.
-float g_paintChannelVal[5] = { 0, 0, 0, 0, 0 };   // 0x231F534 (flt_231F534[0..4])
-float g_paintChannelWt[5]  = { 0, 0, 0, 0, 0 };   // 0x231F520 (flt_231F520[0..4])
-
-// sub_43E550 (0x43E550) — RAISE/LOWER: add the (signed) scaled-strength*weight to the value.
-float sub_43E550( float * /*ctrl*/, int /*channel*/, float cur, float strength, float weight )
-{
-    return strength * weight + cur;
-}
-
-// sub_43E570 (0x43E570) — SET-TOWARD-TARGET ("paint"): lerp the value toward the target
-//  channel (g_paintChannelVal) by t = clamp(strength*weight, 0, 1).
-float sub_43E570( float * /*ctrl*/, int channel, float cur, float strength, float weight )
-{
-    float t = strength * weight;
-    if ( t < 0.0f ) t = 0.0f;
-    else if ( t > 1.0f ) t = 1.0f;
-    return ( 1.0f - t ) * cur + g_paintChannelVal[channel] * t;
-}
-
-// sub_43E5D0 (0x43E5D0) — AVERAGE GATHER: accumulate the weighted value + weight into the
-//  per-channel accumulators (a later pass divides to get the mean); returns the value
-//  unchanged (the gather pass does not modify the grid).
-float sub_43E5D0( float * /*ctrl*/, int channel, float cur, float /*strength*/, float weight )
-{
-    g_paintChannelVal[channel] = cur * weight + g_paintChannelVal[channel];
-    g_paintChannelWt[channel]  = weight + g_paintChannelWt[channel];
-    return cur;
-}
-
-// sub_43E610 (0x43E610) — AVERAGE APPLY: identical blend to sub_43E570, but g_paintChannelVal
-//  now holds the gathered MEAN (computed between the gather and apply passes).
-float sub_43E610( float * /*ctrl*/, int channel, float cur, float strength, float weight )
-{
-    float t = strength * weight;
-    if ( t < 0.0f ) t = 0.0f;
-    else if ( t > 1.0f ) t = 1.0f;
-    return ( 1.0f - t ) * cur + g_paintChannelVal[channel] * t;
-}
-
-// ── 4D lattice value noise (sub_4B75E0) + its baked perm/value tables ──────────
-//  The noise paint mode samples this.  The two 256-entry tables are STATIC baked
-//  constants in the original binary's .data — there is NO runtime RNG initialiser
-//  (the long-"unlocatable init" was simply precomputed constant data).  Extracted
-//  verbatim from the image: dword_24BA260 (permutation) and flt_24BA660 (value
-//  table, stored here as raw IEEE-754 bit patterns so the port is bit-exact).
-extern float grid_sizes[];                                       // engine_stubs (0x6DDE5C)
-
-static const int kNoisePerm[256] = {            // 0x24BA260
-    170,175, 33,114, 14,215, 18,117, 51, 24,128,166,122, 22,236, 91,
-     95,166,207,242,192, 58,114, 69, 62,111,224, 80,195,187,254,230,
-     42, 57,188,148,  0,148,109,154,108, 26, 61, 10, 49,225,195,  5,
-    215, 26,181, 22,236,124,196,178,109,209,137,212, 70,162,158,185,
-    251,  6,210,187,108,142,127, 84,186, 83,253, 55, 76, 31, 59,140,
-    242,192,110, 80, 46,112,236,206,149,103, 27, 67, 87,129,142,146,
-    226, 18, 49, 40,168,207,164,247,  5,221,174,144, 65,250,211,100,
-    183,209,  7, 33, 26, 97,134, 44,220,140,198, 62,173,195,141, 37,
-     38,216, 39,159,139,226,187, 83,178, 83,190,246,  6, 30,137,128,
-    172,  9, 15,141,201, 24,179,221,233, 26, 55,232,127, 83,218,165,
-    141, 81,132, 97,108,209, 36,189,169,207, 28,205, 18,181,219, 81,
-    216,163,149, 22,209,225, 15,116,227,107,157,228,131,155, 50,196,
-     95,249,150, 50, 32, 38,188,  7, 79,237, 54,246, 92,104,201,202,
-    193, 87, 38,191, 72,134,186,  4,111, 91,167, 84,240,133,213,180,
-     97,201, 43, 83,255,237,226,130,139,197,250,213, 90,100,209, 93,
-    110, 98,210, 10,196, 81, 83, 31,181, 67,131,218,124,125,128, 40 };
-
-static const unsigned int kNoiseValBits[256] = {    // 0x24BA660 (float bit patterns)
-    0xbf6f9fdf,0x3f200340,0xbf03b707,0xbf6e63dd,0x3f394373,0xbd9d113a,0x3ee84dd1,0xbec30d86,
-    0x3f3bc378,0x3e9f253e,0xbeaa4555,0xbf24e34a,0xbf48bb91,0x3dc05181,0x3f35f76c,0xbc2c8159,
-    0x3f240348,0xbf4c8b99,0x3e898d13,0xbeb9a573,0xbeb6256c,0xbede4dbd,0xbedb05b6,0xbe2b7957,
-    0x3dcf119e,0x3f428b85,0xbf67f3d0,0xbe6039c0,0xbf0e871d,0x3f602fc0,0x3efc85f9,0xbe05790b,
-    0x3e6ca9d9,0x3f28bb51,0xbe412982,0x3ed925b2,0x3f792ff2,0x3f6473c9,0xbda9b153,0xbe912d22,
-    0x3e4a7995,0xbf791bf2,0x3e4ef99e,0xbf46d38e,0xbe6ab9d5,0xbf6effde,0xbef2d5e6,0x3e089911,
-    0xbf080310,0x3f32f766,0x3ed25da5,0xbf6513ca,0x3f4c2398,0xbea37547,0x3efa5df5,0xbf398f73,
-    0x3d807101,0xbf083b10,0xbf4df79c,0x3f03f308,0x3f30e762,0x3dccf19a,0xbe91e524,0x3f70f7e2,
-    0x3f4c9b99,0x3eaa8555,0x3e35596b,0xbea93d52,0x3c7981f3,0xbf7a8ff5,0x3dce119c,0x3f535ba7,
-    0xbee74dcf,0xbe7ed9fe,0x3db89171,0x3f4d5f9b,0xbefb45f7,0x3f392772,0x3f47cf90,0x3f443b88,
-    0xbf04e30a,0xbde9f1d4,0xbf77b7ef,0x3ed615ac,0x3ead355a,0xbf2ee35e,0xbf1f4f3f,0x3f7f3ffe,
-    0xbf2e5f5d,0x3f5b8fb7,0x3f36fb6e,0xbeeae5d6,0x3eafad5f,0x3f7ebbfd,0x3e81e504,0x3eca1594,
-    0xbed4ada9,0x3f7e97fd,0x3f362b6c,0xbd0f211e,0x3e94bd29,0x3e90c522,0x3f421384,0x3f3b4377,
-    0x3f59ffb4,0xbf6b4bd7,0x3f35df6c,0x3f00ab01,0x3dfb91f7,0x3e92f526,0xbf05670b,0x3f6c8bd9,
-    0xbbcf019e,0x3f1bdb38,0x3f431b86,0xbf437b87,0xbf4aab95,0x3f7263e5,0x3efc15f8,0xbf377b6f,
-    0x3edf2dbe,0x3cdc41b9,0xbef045e1,0xbe6cd9da,0x3f174f2f,0xbf377f6f,0xbec6358c,0xbe7099e1,
-    0x3ecec59e,0x3f7db7fb,0x3f0b3716,0xbf076b0f,0xbf426385,0xbeb38567,0x3f24b749,0x3e60a9c1,
-    0xbf5377a7,0x3f1d333a,0x3ee23dc4,0xbe87dd10,0x3e9b1536,0xbca14143,0xbec00d80,0x3f241b48,
-    0xbf2d335a,0xbe917d23,0xbf45638b,0x3e6179c3,0xbf26ab4d,0x3d316163,0xbf69cbd4,0xbf14b329,
-    0x3f7af3f6,0xbf6d3bda,0x3f05bb0b,0xbf645fc9,0x3f204741,0xbea00d40,0x3e97e530,0xbed335a6,
-    0x3d96112c,0xbea8bd51,0xbe4a2994,0xbf27034e,0xbf315f63,0xbf67fbd0,0xbefaa5f5,0xbf6cf3da,
-    0x3f14f72a,0x3f72bbe5,0x3f29d354,0x3f6897d1,0xbe84b509,0xbf795ff3,0x3e63b9c7,0x3f73e7e8,
-    0x3f495f93,0xbf720be4,0xbf7027e0,0xbf786ff1,0xbe98c532,0xbf6bcbd8,0xbf15c72c,0xbe9ee53e,
-    0xbef695ed,0xbf67cbd0,0xbedcedba,0x3ef02de0,0x3f23c748,0xbd8f311e,0xbe43b987,0xbf1a4f35,
-    0x3ed185a3,0xbf1ea33d,0xbec42d88,0xbe7af9f6,0xbd8cb119,0xbed285a5,0x3de7d1d0,0x3da7714f,
-    0x3e112922,0xbea35d47,0xbe7c09f8,0xbf10c722,0xbf5f3bbe,0xbeb5056a,0xbf398773,0xbdd891b1,
-    0x3f331366,0xbf070b0e,0xbde1b1c3,0x3ea64d4d,0x3e5499a9,0xbef27de5,0x3f3b1376,0xbf1eb33d,
-    0xbec44d89,0x3e40c982,0xbee765cf,0xbe7369e7,0xbe34d96a,0x3f3beb78,0x3f27474f,0xbe8a8d15,
-    0x3e69a9d3,0xbf081f10,0x3decb1d9,0xbe16792d,0xbee415c8,0xbf64a3c9,0x3e5279a5,0xbf7933f2,
-    0xbda3f148,0xbf170f2e,0xbf6863d1,0xbe8e0d1c,0x3e1fb93f,0xbf6f7fdf,0xbe5999b3,0x3f003300,
-    0x3ec1d584,0x3f5147a3,0x3eaedd5e,0xbe6fa9df,0xbe442988,0xbe111922,0xbf36436d,0x3f468f8d,
-    0xbe226945,0xbf0c4719,0x3eae155c,0xbdd151a3,0x3ebcad79,0xbe36696d,0x3eab2556,0x3df3f1e8 };
-
-// sub_4B75E0 (0x4B75E0) — quadrilinear value noise over a 4D integer lattice.  Two w-layers
-//  (the do/while runs twice with the low byte of the w-index advancing) are interpolated by
-//  the w-fraction.  Lattice cell origin = round(c - 0.49999999907) = floor(c): the binary's
-//  fistp ROUNDS (0x4B75F8 / 0x4B7613 / 0x4B762E / 0x4B7649, no fldcw).  All perm indexing wraps
-//  mod 256.
-// KIWI (2026-10-05, fistp audit): the port truncated, so half of every cell took the cell below
-// (fraction 1..1.5): the Noise brush extrapolated and stepped at each half-lattice point.
-float Radiant_ValueNoise4D( float a1, float a2, float a3, float a4 )
-{
-    const int   *P = kNoisePerm;
-    const float *G = (const float *)kNoiseValBits;
-
-    int ix = (int)lrint( a1 - 0.4999999990686774 );  float fx = a1 - (double)ix;   // v30/v27
-    int iy = (int)lrint( a2 - 0.4999999990686774 );  float fy = a2 - (double)iy;   // v31/v28
-    int iz = (int)lrint( a3 - 0.4999999990686774 );  float fz = a3 - (double)iz;   // v29/v34
-    int iw = (int)lrint( a4 - 0.4999999990686774 );  float fw = a4 - (double)iw;   // v33/v25
-
-    byte bx = (byte)ix;        // v5
-    byte by = (byte)iy;        // v4
-    float fy0 = fy, fy1 = 1.0f - fy;             // v7 / v8
-    float fx0 = fx, fx1 = 1.0f - fx;             // v9 / v10
-
-    float out[3];
-    int wcur = iw;                               // v33 (low byte advances per layer)
-    int i = 0;                                   // v6
-    do
-    {
-        byte v11 = (byte)( bx + P[(byte)( by + P[(byte)( P[(byte)wcur] + iz )] )] );
-        float v22 = G[ P[v11] ];
-        byte v12 = (byte)( bx + P[(byte)( by + P[(byte)( P[(byte)wcur] + iz )] + 1 )] );
-        float v23 = G[ P[(byte)( v11 + 1 )] ];
-        int   v13 = P[(byte)( v12 + 1 )];
-        float v24 = G[ P[v12] ];
-        by = (byte)iy;
-        byte v15 = (byte)( iy + P[(byte)( P[(byte)wcur] + iz + 1 )] );
-        byte v16 = (byte)( bx + P[v15] );
-        byte v17 = (byte)( bx + P[(byte)( v15 + 1 )] );
-        float v35 = G[ P[(byte)( v17 + 1 )] ] * fx0 + G[ P[v17] ] * fx1;
-        float v18 = v35 * fy0;
-        wcur = ( wcur & ~0xFF ) | (byte)( wcur + 1 );   // LOBYTE(v33) = v33 + 1
-        ++i;
-        float v36 = G[ P[(byte)( v16 + 1 )] ] * fx0 + G[ P[v16] ] * fx1;
-        float v37 = v18 + v36 * fy1;
-        float v19 = v37 * fz;
-        float v38 = G[ v13 ] * fx0 + v24 * fx1;
-        float v20 = v38 * fy0;
-        float v39 = v23 * fx0 + v22 * fx1;
-        float v40 = v20 + v39 * fy1;
-        out[i] = v19 + v40 * ( 1.0f - fz );      // out[1] (layer w), out[2] (layer w+1)
-    }
-    while ( i < 2 );
-
-    return fw * out[2] + ( 1.0f - fw ) * out[1];
-}
-
-// sub_43E670 (0x43E670) — NOISE: add 4D value noise (scaled by strength*weight) to the value.
-//  The 4th noise coord is the per-channel w-offset g_paintChannelWt[channel], which sub_43E6F0
-//  seeds to a per-stroke counter so successive strokes sample different noise slices.
-float sub_43E670( float *ctrl, int channel, float cur, float strength, float weight )
-{
-    float s  = grid_sizes[g_qeglobals.d_gridsize] * 32.0f;
-    float nx = ctrl[0] / s, ny = ctrl[1] / s, nz = ctrl[2] / s;
-    return Radiant_ValueNoise4D( nx, ny, nz, g_paintChannelWt[channel] ) * strength * weight + cur;
-}
-
-// ── CurvEditDlg paint-parameter control table + getters (sub_401BB0/401C00/401C50) ──
-//  The terrain-paint brush params (inner radius / outer radius / amplitude) are a SLIDER +
-//  buddy-EDIT pair each, mirrored into this 3-entry table (IDB dword_73C6A0, 32-byte entries).
-//  Ground-truthed layout + baked defaults/ranges/steps (read from the image):
-//      slot 0: trackbar 1424 / edit 1428  value 16  range [0,1024] step 16   (inner radius)
-//      slot 1: trackbar 1425 / edit 1429  value 64  range [0,1024] step 16   (outer radius)
-//      slot 2: trackbar 1426 / edit 1430  value  8  range [0,  16] step  1   (amplitude exp)
-//  PMESH_16 reads the value through the 3 getters; sub_4010D0 (CurveEdit_SnapStore) clamps a
-//  new value to [min,max], snaps it to the step grid, and moves the slider + buddy edit.
-struct curveEditCtrl_t           // 32 bytes (IDB dword_73C6A0[3] stride = 8 ints)
-{
-    int   id;                    // +0   trackbar id (1424/1425/1426)
-    int   editId;                // +4   buddy-edit id (1428/1429/1430)  (IDB unk04)
-    float value;                 // +8   the control's current value
-    float minVal;                // +12  range minimum
-    float maxVal;                // +16  range maximum
-    float step;                  // +20  snap increment (and slider unit)
-    void *hTrackbar;             // +24  the slider HWND  (IDB dword_73C6B8)
-    void *hEdit;                 // +28  the buddy-edit HWND (IDB dword_73C6BC)
-};
-curveEditCtrl_t g_curveEditCtrls[3] = { { 0 }, { 0 }, { 0 } };   // 0x73C6A0
-
-static float CurveEdit_GetCtrlValue( int wantId )   // the shared dword_73C6A0 lookup
-{
-    for ( int i = 0; i < 3; ++i )
-        if ( g_curveEditCtrls[i].id == wantId )
-            return g_curveEditCtrls[i].value;
-    return 0.0f;                  // not found in the first 3 entries (binary returns 0.0)
-}
-
-float sub_401BB0() { return CurveEdit_GetCtrlValue( 1424 ); }                       // inner radius
-float sub_401C00() { return CurveEdit_GetCtrlValue( 1425 ); }                       // outer radius
-float sub_401C50() { return (float)pow( 2.0, (double)CurveEdit_GetCtrlValue( 1426 ) - 8.0 ); } // strength = 2^(v-8)
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  TERRAIN-PAINT CURSOR RING OVERLAY (Cam_Draw tail) — sub_43ED50 / PMESH_19_Radius /
-//  PMESH_20_Radius_2.  Draws the inner+outer brush-radius rings around the cursor world
-//  position in the 3D camera view, clipped to the patch surface (lines) and the selected
-//  patch control points (falloff-coloured dots).  Ported 1:1 from the IDB; the dense
-//  inline-x87 clip (sub_43ED50) is transcribed op-by-op from the disassembly.
-//    DrawAdvancedTerrainEditCircle 0x441240 (camwnd.cpp) builds the two 16-segment rings,
-//    loops active(+selected) patches calling PMESH_19_Radius (lines) + PMESH_20_Radius_2
-//    (points).  ring color = {0,1,1,1} cyan; point ramp = {1,1,0,1}→{1,0.25,0.25,1}.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── sub_43ED50 (0x43ED50) — clip ONE triangle (a1,a2,a3 = curveVert xyz, XY plane) against
-//    the 16-segment ring polygon `ring` and append the intersection as 3D line segments to
-//    `outVerts` (running count `count`, color `color`).  Returns the new running count.
-//    The emitted endpoints are nudged by (-0.125 * camera.vpn) so the ring floats slightly
-//    in front of the surface (avoids z-fighting).  TRANSCRIBED OP-BY-OP from the disasm:
-//    the hex-rays `*((float*)&v72+1)` reads are decompiler double-high-half artifacts over
-//    physically-distinct stack floats (var_64 / var_8) — resolved here to real locals.
-static int sub_43ED50( const float *a1, const float *a2, const float *a3,
-                       const float *ring, const unsigned int *color, int count,
-                       GfxPointVertex *outVerts )
-{
-    // Triangle edge line-equations in XY (edge0:a1->a2, edge1:a2->a3, edge2:a3->a1).  The
-    // signed distance of a point P to edge k is  ek_x*P.y + ek_y*P.x - ck  (the binary's
-    // `eN[1]*y + eN[0]*x - cN` form; outside == distance > 0).
-    const float e0y = a2[1] - a1[1];              // var_58
-    const float e0x = a1[0] - a2[0];              // var_54
-    const float c0  = a1[0] * e0y + e0x * a1[1];  // var_50
-    const float e1y = a3[1] - a2[1];              // var_4C
-    const float e1x = a2[0] - a3[0];              // var_48
-    const float c1  = a2[0] * e1y + e1x * a2[1];  // var_44
-    const float e2y = a1[1] - a3[1];              // var_40
-    const float e2x = a3[0] - a1[0];              // var_3C
-    const float c2  = a3[0] * e2y + e2x * a3[1];  // var_38
-
-    // edge-k coefficients packed so dist(P,k) = ex[k]*P.y + ey[k]*P.x - ec[k].
-    const float ex[3] = { e0x, e1x, e2x };
-    const float ey[3] = { e0y, e1y, e2y };
-    const float ec[3] = { c0,  c1,  c2  };
-
-    // Signed distances of the LAST ring vertex (ring[15] = ring[45..47]) against each edge —
-    // the "previous" distances for the first segment's cull test.
-    float pd0 = ring[46] * e0x + ring[45] * e0y - c0;  // var_74
-    float pd1 = ring[46] * e1x + ring[45] * e1y - c1;  // var_70
-    float pd2 = ring[46] * e2x + ring[45] * e2y - c2;  // var_6C
-
-    // Plane-fit (computed lazily, once, on the first emitting segment) for projecting the
-    // ring-edge clip points back onto the triangle's plane in Z.
-    bool  needPlane = true;                   // var_1
-    float nx = 0.0f, ny = 0.0f, nz0 = 0.0f;   // var_30 / var_28 / var_60 (z = nx*x + ny*y + nz0)
-    float vnudge[3] = { 0.0f, 0.0f, 0.0f };   // var_90/8C/88 = -0.125 * camera.vpn
-
-    float thresh = 0.0f;                       // v16/v18 — the carried "outside" barrier (=0)
-    const float *cur = ring;                   // &ring[seg] (the "current" ring vertex x,y,z)
-
-    for ( int seg = 0; seg < 16; ++seg )       // var_2C: 16 ring vertices/segments
-    {
-        const float vx = cur[0];               // ring[seg].x
-        const float vy = cur[1];               // ring[seg].y
-        const float vz = cur[2];               // ring[seg].z
-
-        // current ring vertex's distances to the 3 edges (var_80/7C/78, ping-pong slots).
-        // 0x43EE64: same crossed-coefficient half-plane form as pd0..pd2.
-        const float dc0 = e0x * vy + e0y * vx - c0;
-        const float dc1 = e1x * vy + e1y * vx - c1;
-        const float dc2 = e2x * vy + e2y * vx - c2;
-
-        // Cull: if BOTH this vertex and the previous one are outside the SAME edge (distance
-        // > thresh), the ring segment can't cross the triangle interior -> nothing to emit.
-        if ( ( thresh < dc0 && thresh < pd0 )
-          || ( thresh < dc1 && thresh < pd1 )
-          || ( thresh < dc2 && thresh < pd2 ) )
-        {
-            pd0 = dc0; pd1 = dc1; pd2 = dc2;
-            cur += 3;
-            continue;                          // LABEL_27 (thresh carried unchanged)
-        }
-
-        // Clip the ring EDGE (A = previous ring vertex, B = this ring vertex) against the
-        // 3 triangle half-planes (Sutherland-Hodgman), carrying the clipped span across edges.
-        // The previous of segment 0 wraps to vertex 15 (binary's var_C = 0xB4 = ring[45] byte).
-        const float *prevR = ( seg == 0 ) ? ( ring + 45 ) : ( cur - 3 );
-        float Ax = prevR[0], Ay = prevR[1], Az = prevR[2];   // v88/89/90
-        float Bx = vx,        By = vy,        Bz = vz;        // v91/92/93
-        float t = thresh;                      // v18 — per-span barrier (resets to 0 on a clip)
-        bool  dropSpan = false;
-        for ( int k = 0; k < 3; ++k )
-        {
-            const float dA = ex[k] * Ay + ey[k] * Ax - ec[k];   // var_64 (A vs edge k)
-            const float dB = ex[k] * By + ey[k] * Bx - ec[k];   // var_8  (B vs edge k)
-            if ( dA > t && dB > t )            // span entirely outside this edge -> drop
-            {
-                dropSpan = true;
-                break;
-            }
-            if ( dA > t )                      // A outside, B inside -> clip A to the edge
-            {
-                const float u = dB - dA;
-                Ax = ( Ax * dB - Bx * dA ) / u;
-                Ay = ( Ay * dB - By * dA ) / u;
-                Az = ( Az * dB - Bz * dA ) / u;
-                t = 0.0f;
-            }
-            else if ( dB > t )                 // B outside, A inside -> clip B to the edge
-            {
-                const float u = dB - dA;
-                Bx = ( Ax * dB - Bx * dA ) / u;
-                By = ( Ay * dB - By * dA ) / u;
-                Bz = ( Az * dB - Bz * dA ) / u;
-                t = 0.0f;
-            }
-            // both inside -> keep A,B and t unchanged
-        }
-
-        if ( dropSpan )
-        {
-            pd0 = dc0; pd1 = dc1; pd2 = dc2;
-            thresh = t;                        // carry the inner-loop barrier (v18) to v16
-            cur += 3;
-            continue;                          // LABEL_27 via 43F1EB (v18 = inner t)
-        }
-
-        // Plane fit (computed once, on the first span that survives clipping): solve the
-        // triangle plane Z = nx*x + ny*y + nz0 and the -0.125*vpn float-out nudge.
-        if ( needPlane )
-        {
-            needPlane = false;
-            const float det = ( a3[0] - a2[0] ) * a1[1]
-                            + ( a2[1] - a3[1] ) * a1[0]
-                            + a2[0] * a3[1] - a3[0] * a2[1];      // 2*signed-area
-            if ( det != 0.0f )
-            {
-                const float *vpn = Ed_Camera()->vpn;   // U-GLOBALS: was m_pCamWnd->camera.vpn
-                nx = ( ( a3[2] - a2[2] ) * a1[1] + ( a2[1] - a3[1] ) * a1[2]
-                     + a2[2] * a3[1] - a2[1] * a3[2] ) / det;     // var_30
-                ny = ( ( a2[2] - a3[2] ) * a1[0] + a1[2] * ( a3[0] - a2[0] )
-                     + a2[0] * a3[2] - a3[0] * a2[2] ) / det;     // var_28
-                nz0 = a1[2] - a1[0] * nx - ny * a1[1];            // var_60
-                vnudge[0] = vpn[0] * -0.125f;                     // var_90
-                vnudge[1] = vpn[1] * -0.125f;                     // var_8C
-                vnudge[2] = -0.125f * vpn[2];                     // var_88
-            }
-            else
-            {
-                pd0 = dc0; pd1 = dc1; pd2 = dc2;
-                thresh = t;                                        // binary falls through to LABEL_27
-                cur += 3;
-                continue;
-            }
-        }
-
-        // Emit the clipped span as a depth-nudged 3D line.
-        float p0[3], p1[3];
-        p0[0] = Ax + vnudge[0];
-        p0[1] = Ay + vnudge[1];
-        p0[2] = ( ny * Ay + nx * Ax + nz0 ) + vnudge[2];
-        p1[0] = Bx + vnudge[0];
-        p1[1] = By + vnudge[1];
-        p1[2] = ( nz0 + nx * Bx + ny * By ) + vnudge[2];
-        count = R_Add3DLine( outVerts, (const orientation_t *)world_orient_matrix,
-                             p0, p1, color, 1, count, 1362 );
-
-        pd0 = dc0; pd1 = dc1; pd2 = dc2;
-        thresh = 0.0f;                          // post-emit: v18 = 0 (43f1db fldz)
-        cur += 3;
-    }
-    return count;
-}
-
-// ── PMESH_19_Radius (0x43F230) — emit the inner+outer ring LINE segments for ONE patch ──
-//   AABB-cull the cursor circle against the patch's bbox, then per tessellated curveDef quad
-//   (turned-edge aware) clip the two rings against the two surface triangles via sub_43ED50.
-//     patch  = patchMesh_t* (the patch DEF)
-//     cursor = float[3] cursor world pos (XY used)
-//     innerR / outerR = ring radii (innerR < outerR)
-//     innerRing / outerRing = the two 16-vertex ring arrays (3 floats each)
-//     color  = packed GfxColor; count = running R_Add3DLine vertex count; outVerts = batch
-//   Returns the new running count.
-int PMESH_19_Radius( patchMesh_t *patch, const float *cursor, float innerR, float outerR,
-                     const float *innerRing, const float *outerRing,
-                     const unsigned int *color, int count, GfxPointVertex *outVerts )
-{
-    curvePatchDef_t *cdef = patch->curveDef;          // *(patch+20536)
-    const float innerR2 = innerR * innerR;
-    const float outerR2 = outerR * outerR;
-    if ( outerR <= (double)innerR )
-        Assert( PMESH_CPP, 3348, 0, "%s", "radius1 < radius2" );
-
-    // AABB early-out: nearest-point distance² from the cursor XY to the patch's symbiont
-    // brush bbox (pSymbiot is the brush_t DEF — mins@0x20 / maxs@0x2C).
-    brush_t *sym = (brush_t *)patch->pSymbiot;        // *(patch+20540)
-    float d2 = 0.0f;
-    if ( cursor[0] < (double)sym->mins[0] )      { float d = sym->mins[0] - cursor[0]; d2 += d * d; }
-    else if ( cursor[0] > (double)sym->maxs[0] ) { float d = sym->maxs[0] - cursor[0]; d2 += d * d; }
-    if ( cursor[1] < (double)sym->mins[1] )      { float d = sym->mins[1] - cursor[1]; d2 += d * d; }
-    else if ( cursor[1] > (double)sym->maxs[1] ) { float d = sym->maxs[1] - cursor[1]; d2 += d * d; }
-    if ( innerR2 < (double)d2 && outerR2 < (double)d2 )
-        return count;                                  // both rings miss the patch bbox
-
-    if ( cdef->height - 1 <= 0 )
-        return count;
-
-    // turned_edge flags live in the patchMesh CONTROL grid (ctrl[*][*].turned_edge @ +132);
-    // the binary indexes ctrl[j][i].turned_edge (col by row-stride 1280, row by col-stride 80).
-    //
-    // KIWI-UX (ROUND AQ, ITEM 1) — the crash fix.  The binary walks that flag as a raw
-    // pointer: `*(patch + 132 + 80*row + 1280*col)`, where 1280 == sizeof(drawVert_t[16])
-    // == ONE ROW of the 16x16 CONTROL grid `ctrl[16][16]` @ patchMesh_t+0x38 (drawVert_t is
-    // 80 bytes; +132 == ctrl[0][0].turned_edge).  That walk is in bounds only while the
-    // TESSELLATED dims (cdef->width/height, what this loop iterates) are <= the control
-    // dims — which holds for a terrain SHEET, stored unsubdivided, and for nothing else.
-    // A patch CYLINDER tessellates to far more columns than 16, so col >= 16 read
-    // 1280*col bytes past ctrl — past the end of patchMesh_t (20556 B) entirely — and the
-    // read AV'd (`turnRow` a garbage pointer) the moment a cylinder was in the selection
-    // with the advanced terrain-edit ring live.  Index the grid as the typed array it is,
-    // and consult turned_edge only for a TERRAIN patch whose control indices are actually
-    // in range; every other patch takes the untorn diagonal — exactly the rule
-    // Patch_Fill_BuildFrontIndices (0x43FB70) already applies to the same flag, so the
-    // ring clips against the same triangulation the patch is drawn with.
-    const bool isTerrain = ( (int)patch->type == PATCH_TERRAIN );   // 0x43FB70's own predicate
-
-    for ( int i = 0; i < cdef->height - 1; ++i )       // v41 (outer)
-    {
-        const int width = cdef->width;                 // *cdef (reloaded each row)
-        if ( width - 1 <= 0 )
-            continue;
-        const bool rowInCtrl = isTerrain && ( i < 16 );
-        for ( int j = 0; j < width - 1; ++j )          // v43 (inner)
-        {
-            const int   base    = j + i * width;       // v18
-            const int   nextRow = base + width;         // v19
-            const int   turned  = ( rowInCtrl && j < 16 )
-                                  ? patch->ctrl[j][i].turned_edge   // ctrl[col][row]
-                                  : 0;
-
-            // The 4 quad corners (curveVert xyz, 44-byte stride).
-            const float *vB  = (const float *)( (char *)cdef->verts + 44 * base );        // base
-            const float *vB1 = (const float *)( (char *)cdef->verts + 44 * ( base + 1 ) );// base+1
-            const float *vN  = (const float *)( (char *)cdef->verts + 44 * nextRow );     // nextRow
-            const float *vN1 = (const float *)( (char *)cdef->verts + 44 * ( nextRow + 1 ) ); // nextRow+1
-
-            // Split the quad into 2 triangles; the diagonal flips when turned&1 (binary's
-            // sub_43ED50(v24,v25,v22) + sub_43ED50(v35,v36,v22) per branch).
-            const float *triA0, *triA1, *triA2;        // first triangle (call 1)
-            const float *triB0, *triB1, *triB2;        // second triangle (call 2)
-            if ( ( turned & 1 ) != 0 )
-            {
-                triA0 = vB1; triA1 = vN1; triA2 = vB;  // (base+1, nextRow+1, base)
-                triB0 = vN1; triB1 = vN;  triB2 = vB;  // (nextRow+1, nextRow, base)
-            }
-            else
-            {
-                triA0 = vB;  triA1 = vB1; triA2 = vN;  // (base, base+1, nextRow)
-                triB0 = vB1; triB1 = vN1; triB2 = vN;  // (base+1, nextRow+1, nextRow)
-            }
-
-            // max corner XY-distance² from the cursor — the binary tests the 4 verts of the
-            // FIRST triangle's corner set (v24,v25,v22,v36): v24=triA0, v25=triA1, v22=triA2,
-            // v36=triB1.  (Together they span all 4 distinct quad corners.)
-            float maxD = 0.0f;
-            { float dx = triA0[0] - cursor[0], dy = triA0[1] - cursor[1]; float d = dy*dy + dx*dx; if ( d > 0.0f )  maxD = d; }
-            { float dx = triA1[0] - cursor[0], dy = triA1[1] - cursor[1]; float d = dy*dy + dx*dx; if ( d > maxD ) maxD = d; }
-            { float dx = triA2[0] - cursor[0], dy = triA2[1] - cursor[1]; float d = dy*dy + dx*dx; if ( d > maxD ) maxD = d; }
-            { float dx = triB1[0] - cursor[0], dy = triB1[1] - cursor[1]; float d = dy*dy + dx*dx; if ( d > maxD ) maxD = d; }
-
-            // INNER ring clips both triangles; OUTER ring clips both — each only when reached.
-            if ( innerR2 < (double)maxD )
-            {
-                count = sub_43ED50( triA0, triA1, triA2, innerRing, color, count, outVerts );
-                count = sub_43ED50( triB0, triB1, triB2, innerRing, color, count, outVerts );
-            }
-            if ( outerR2 < (double)maxD )
-            {
-                count = sub_43ED50( triA0, triA1, triA2, outerRing, color, count, outVerts );
-                count = sub_43ED50( triB0, triB1, triB2, outerRing, color, count, outVerts );
-            }
-        }
-    }
-    return count;
-}
-
-// ── PMESH_20_Radius_2 (0x43F580) — emit falloff-coloured POINT markers at the SELECTED
-//   patch's CONTROL points within [innerR,outerR] XY-distance of the cursor.  Colour lerps
-//   the ramp {1,1,0,1}(yellow) -> {1,0.25,0.25,1}(red) by the smoothstep falloff weight.
-//     count  = running R_AddPointCmd_W point count (flushed at 1361)
-//     patch  = patchMesh_t*; cursor = float[3]; innerR/outerR = radii; outVerts = batch
-//   Returns the new running count.
-int PMESH_20_Radius_2( int count, patchMesh_t *patch, const float *cursor,
-                       float innerR, float outerR, GfxPointVertex *outVerts )
-{
-    // yellow -> red falloff ramp (IDB flt_6E0410 = {{1,1,0,1},{1,0.25,0.25,1}}; modelled as a
-    // real const table, NOT the binary's magic-address 0x6E0410 deref).  A 3rd entry mirrors
-    // the binary reading ramp[ri+1] when ri==1 (w==1): there frac==0 so its value is unused;
-    // the extra row keeps the indexed read in-bounds (binary read benign trailing data).
-    static const float s_ramp[3][4] = { { 1.0f, 1.0f, 0.0f, 1.0f },
-                                        { 1.0f, 0.25f, 0.25f, 1.0f },
-                                        { 1.0f, 0.25f, 0.25f, 1.0f } };
-
-    const float innerR2 = innerR * innerR;
-    const float outerR2 = outerR * outerR;
-    if ( outerR <= (double)innerR )
-        Assert( PMESH_CPP, 3434, 0, "%s", "radius1 < radius2" );
-
-    // AABB early-out vs the patch symbiont brush bbox (same as PMESH_19).
-    brush_t *sym = (brush_t *)patch->pSymbiot;        // patch[5135] = patch+20540
-    float d2 = 0.0f;
-    if ( cursor[0] < (double)sym->mins[0] )      { float d = sym->mins[0] - cursor[0]; d2 += d * d; }
-    else if ( cursor[0] > (double)sym->maxs[0] ) { float d = sym->maxs[0] - cursor[0]; d2 += d * d; }
-    if ( cursor[1] < (double)sym->mins[1] )      { float d = sym->mins[1] - cursor[1]; d2 += d * d; }
-    else if ( cursor[1] > (double)sym->maxs[1] ) { float d = sym->maxs[1] - cursor[1]; d2 += d * d; }
-    if ( innerR2 < (double)d2 && outerR2 < (double)d2 )
-        return count;
-
-    if ( patch->width <= 0 )
-        return count;
-
-    for ( int col = 0; col < patch->width; ++col )     // v30, *a2 = width
-    {
-        for ( int row = 0; row < patch->height; ++row )// i, v7[1] = height
-        {
-            drawVert_t *cp = &patch->ctrl[col][row];   // a2+16 base, 80-byte stride
-            // KIWI-UX: a marked point (turned_edge & 2) is EXCLUDED from painting
-            // (PMESH_16 skips it), so the preview must not colour it either — a dot
-            // that highlights what the stroke cannot touch is a lie about its reach.
-            if ( ( cp->turned_edge & 2 ) != 0 )
-                continue;
-            const float dx = cp->xyz[0] - cursor[0];
-            const float dy = cp->xyz[1] - cursor[1];
-            const float dist2 = dy * dy + dx * dx;
-            if ( outerR2 <= (double)dist2 )
-                continue;                               // beyond the outer ring -> skip
-
-            // weight: 1.0 inside the inner ring, smoothstep 1->0 across inner..outer.
-            float w;
-            if ( innerR2 < (double)dist2 )
-            {
-                const float d = (float)sqrt( (double)dist2 );
-                const float ti = ( d - innerR ) / ( outerR - innerR );
-                w = 1.0f - ti * ti * ( 3.0f - ( ti + ti ) );   // smoothstep falloff
-            }
-            else
-            {
-                w = 1.0f;
-            }
-
-            // lerp ramp[ri] -> ramp[ri+1] by the fractional part of w (binary: v17 = (int)w*16
-            // = ramp byte index; frac = w - (int)w).  ri==0 for w<1 (yellow->red across the
-            // falloff); ri==1 only at w==1 (frac==0 -> exactly red, ramp[1]).
-            const int   ri = (int)w;                    // 0 unless w==1.0 -> 1 (then frac=0)
-            const float frac = w - (float)ri;           // v36
-            float rgba[4];
-            rgba[0] = ( s_ramp[ri + 1][0] - s_ramp[ri][0] ) * frac + s_ramp[ri][0];
-            rgba[1] = ( s_ramp[ri + 1][1] - s_ramp[ri][1] ) * frac + s_ramp[ri][1];
-            rgba[2] = ( s_ramp[ri + 1][2] - s_ramp[ri][2] ) * frac + s_ramp[ri][2];
-            rgba[3] = frac * ( s_ramp[ri + 1][3] - s_ramp[ri][3] ) + s_ramp[ri][3];
-            GfxColor packed;
-            Byte4PackPixelColor( rgba, &packed );
-
-            GfxPointVertex *out = &outVerts[count];
-            // KEEP_VERBOSE: inlined OrientationPosToWorldPos (q_shared.cpp:1599; the port
-            // carrier is draw.cpp) — the binary constant-folded its identity orientation,
-            // so there is no orient to route a call through.
-            if ( (const float *)cp->xyz == (const float *)out )   // pos != out self-overlap guard
-                Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\universal\\q_shared.cpp",
-                        1599, 0, "%s", "pos != out" );
-
-            // identity transform (the binary's `x*0 + ctrl + ...` zero-matrix passthrough).
-            out->xyz[0] = cp->xyz[1] * 0.0f + cp->xyz[0] + 0.0f + cp->xyz[2] * 0.0f;
-            out->xyz[1] = cp->xyz[0] * 0.0f + 0.0f + cp->xyz[1] + cp->xyz[2] * 0.0f;
-            out->xyz[2] = 0.0f * cp->xyz[1] + cp->xyz[0] * 0.0f + 0.0f + cp->xyz[2];
-            *(GfxColor *)out->color = packed;
-            ++count;
-            if ( count == 1362 )                        // a1 == 1361 then ++ -> flush
-            {
-                R_AddPointCmd_W( (short)count, 6, outVerts );
-                count = 0;
-            }
-        }
-    }
-    return count;
-}
-
-
-// sub_4010D0 core — bind a slot's id/range/step/default, and clamp+snap a value to the grid.
-//  (Win32-free: the slider/edit HWND moves live in the dialog, which calls these.)
-void CurveEdit_BindData( int slot, int trackbarId, int editId, float defVal, float mn, float mx, float step )
-{
-    if ( slot < 0 || slot >= 3 ) return;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    c->id = trackbarId; c->editId = editId; c->minVal = mn; c->maxVal = mx; c->step = step; c->value = defVal;
-}
-// Clamp to [min,max] then snap to the step grid (matches sub_4010D0); store + return the value.
-float CurveEdit_SnapStore( int slot, float value )
-{
-    if ( slot < 0 || slot >= 3 ) return value;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    if ( c->step <= 0.0f ) { c->value = value; return value; }     // unbound (e.g. gate seed) — no snap
-    if ( value < c->minVal ) value = c->minVal;
-    if ( value > c->maxVal ) value = c->maxVal;
-    int idx = (int)floorf( ( value - c->minVal ) / c->step + 0.5f );
-    c->value = (float)idx * c->step + c->minVal;
-    return c->value;
-}
-int   CurveEdit_Slots()                 { return 3; }
-int   CurveEdit_TrackbarId( int slot )  { return ( slot >= 0 && slot < 3 ) ? g_curveEditCtrls[slot].id : 0; }
-int   CurveEdit_EditId( int slot )      { return ( slot >= 0 && slot < 3 ) ? g_curveEditCtrls[slot].editId : 0; }
-float CurveEdit_Value( int slot )       { return ( slot >= 0 && slot < 3 ) ? g_curveEditCtrls[slot].value : 0.0f; }
-float CurveEdit_Min( int slot )         { return ( slot >= 0 && slot < 3 ) ? g_curveEditCtrls[slot].minVal : 0.0f; }
-float CurveEdit_Step( int slot )        { return ( slot >= 0 && slot < 3 ) ? g_curveEditCtrls[slot].step : 1.0f; }
-int   CurveEdit_StepCount( int slot )                          // slider range = [0, (max-min)/step]
-{
-    if ( slot < 0 || slot >= 3 ) return 0;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    return ( c->step > 0.0f ) ? (int)( ( c->maxVal - c->minVal ) / c->step + 0.5f ) : 0;
-}
-int   CurveEdit_StepIndex( int slot )                          // slider thumb pos for the current value
-{
-    if ( slot < 0 || slot >= 3 ) return 0;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    return ( c->step > 0.0f ) ? (int)floorf( ( c->value - c->minVal ) / c->step + 0.5f ) : 0;
-}
-void  CurveEdit_SetHwnds( int slot, void *hTrackbar, void *hEdit )
-{
-    if ( slot >= 0 && slot < 3 ) { g_curveEditCtrls[slot].hTrackbar = hTrackbar; g_curveEditCtrls[slot].hEdit = hEdit; }
-}
-float CurveEdit_SetFromStep( int slot, int pos )               // slider moved -> value = min + pos*step
-{
-    if ( slot < 0 || slot >= 3 ) return 0.0f;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    c->value = c->minVal + (float)pos * c->step;
-    return c->value;
-}
-// Value shown in the buddy edit (sub_401000): amplitude (id 1426) shows 2^(v-8), others raw.
-float CurveEdit_DisplayValue( int slot )
-{
-    if ( slot < 0 || slot >= 3 ) return 0.0f;
-    return ( g_curveEditCtrls[slot].id == 1426 ) ? sub_401C50() : g_curveEditCtrls[slot].value;
-}
-// Convert a typed edit value to the stored value (sub_401CF0): amplitude types the amplitude,
-// stored as the exponent log2(amp)+8; others store as-typed.
-float CurveEdit_InputToValue( int slot, float typed )
-{
-    if ( slot >= 0 && slot < 3 && g_curveEditCtrls[slot].id == 1426 )
-        return (float)( log( (double)typed ) / log( 2.0 ) + 8.0 );
-    return typed;
-}
-// sub_4015C0's slider-range edits (IDC_SURF_DLG_TBOX_INNER/OUTER_RAD_2 = 1482/1483): set the
-//  inner/outer slider's max range, step = max/64 (so the slider keeps 64 positions); re-snap
-//  the current value into the new grid.  (flt_73C6B0/B4 = slot0 max/step, flt_73C6D0/D4 slot1.)
-void CurveEdit_SetRange( int slot, float maxVal )
-{
-    if ( slot < 0 || slot >= 3 ) return;
-    curveEditCtrl_t *c = &g_curveEditCtrls[slot];
-    c->maxVal = maxVal;
-    c->step   = maxVal * 0.015625f;            // /64
-    CurveEdit_SnapStore( slot, c->value );     // re-grid the existing value
-}
-
-// ── PMESH_16 (0x43DED0) — apply one paint stroke to a patch's control grid ────
-//  The terrain-paint apply core: for every control point within the brush, blend the
-//  selected channels (height + RGBA) toward the stroke using the smoothstep falloff
-//  weight (sub_43DB60).  channelMask bits: 1=height, 8=R, 4=G, 2=B, 0x10=A (callback
-//  channel indices 0/3/2/1/4).  center = the stroke's world XY; cellInfo = the source
-//  value (raw for height, *0.0625 for colour); cb = the mode callback (raise/set/avg).
-//  Radii + strength come from the CurvEditDlg getters; the dialog drives those (later piece).
-typedef float (*PaintCallback)( float *cp, int channel, float cur, float strength, float weight );
-
-extern int       Sys_Printf( const char *fmt, ... );           // win_qe3.cpp
-extern void      Undo_AddBrush( entity_brush_s *pBrushInst );  // undo.cpp (0x45E680)
-extern void      Undo_AddEntity( entity_s *entity );                  // undo.cpp (0x45E8B0)
-extern undo_s   *g_lastundo;                                   // undo.cpp (0x23F162C)
-
-// sub_4A56B0 (0x4A56B0) — squared distance from a point to an AABB (0 when inside).
-static float sub_4A56B0( const float *center, const float *mins, const float *maxs )
+// PointToBoundsDistSq (0x4A56B0) — squared distance from a point to an AABB (0 when inside).
+// Also camwnd.cpp's light-region shadow-caster gather.
+float PointToBoundsDistSq( const float *center, const float *mins, const float *maxs )
 {
     float d2 = 0.0f;
     for ( int i = 0; i < 3; ++i )
@@ -5374,9 +4444,10 @@ static float sub_4A56B0( const float *center, const float *mins, const float *ma
     return d2;
 }
 
-// sub_45E770 (0x45E770) — register a painted patch with the current undo record
+// Undo_AddPaintedBrush (0x45E770) — register a painted patch with the current undo record
 //  (add the owning entity too when it is fixed-size), so a paint stroke is undoable.
-static void sub_45E770( entity_brush_s *pBrushInst )
+//  (Terrain Sculpt's Patch_PaintMarkUndo, below.)
+static void Undo_AddPaintedBrush( entity_brush_s *pBrushInst )
 {
     if ( !g_lastundo )
     {
@@ -5392,195 +4463,8 @@ static void sub_45E770( entity_brush_s *pBrushInst )
     Undo_AddBrush( pBrushInst );
 }
 
-// Per-colour-byte apply: blend, clamp to [0,255], round (the binary's fistp + 2^-30 guard).
-static byte PMESH_16_PaintByte( PaintCallback cb, float *cp, int channel,
-                                         byte cur, float cellInfo, float weight )
-{
-    float v = cb( cp, channel, (float)cur, cellInfo * 0.0625f, weight );   // dbl_6F4520 = 0.0625
-    if ( v < 0.0f )        v = 0.0f;                                       // dbl_6F40B8 = 0
-    else if ( v > 255.0f ) v = 255.0f;                                     // dbl_6F4190 / flt_6F4720 = 255
-    // dbl_6F4220 = 2^-30 added in DOUBLE, then fistp: a float add lost it, so 126.5 rounded
-    // to even (126) where the binary gives 127 (KIWI).
-    return (byte)lrint( (double)v + 9.313225746154785e-10 );
-}
-
-void PMESH_16( selbrush_t *b, char channelMask, float *center, float cellInfo, PaintCallback cb )
-{
-    const float strength = sub_401C50();              // v44
-    if ( strength == 0.0f )
-        return;
-    const float innerR = sub_401BB0();                // v35
-    const float outerR = sub_401C00();                // v43
-    if ( outerR * outerR < sub_4A56B0( center, b->def->mins, b->def->maxs ) )
-        return;                                       // stroke doesn't reach this brush's bbox
-    if ( FilterBrush( b, 0 ) || ( b->brushFlags & 0x20 ) != 0 )
-        return;
-
-    iassert( b->patch->def == b->def->patch );
-    patchMesh_t *def = b->patch->def;
-    if ( def->width <= 0 )
-        return;
-
-    char anyChanged = 0;
-    for ( int col = 0; col < def->width; ++col )
-    {
-        for ( int row = 0; row < def->height; ++row )
-        {
-            drawVert_t *cp = &def->ctrl[col][row];
-            if ( ( cp->turned_edge & 2 ) != 0 )       // ctrl+76 & 2: point excluded from paint
-                continue;
-            const float w = sub_43DB60( center, cp->xyz, innerR, outerR, strength );
-            if ( w == 0.0f )
-                continue;
-
-            anyChanged = 1;
-            if ( !def->xx22b )                        // first touched point -> mark dirty + undo
-            {
-                def->xx22b = 1;
-                sub_45E770( def->pSymbiot );
-            }
-
-            if ( channelMask & 1 )                    // HEIGHT (xyz[2], channel 0; raw cellInfo)
-                cp->xyz[2] = cb( cp->xyz, 0, cp->xyz[2], cellInfo, w );
-            if ( channelMask & 8 )                    // R (ctrl+48, channel 3)
-                cp->vert_color.r = PMESH_16_PaintByte( cb, cp->xyz, 3, cp->vert_color.r, cellInfo, w );
-            if ( channelMask & 4 )                    // G (ctrl+49, channel 2)
-                cp->vert_color.g = PMESH_16_PaintByte( cb, cp->xyz, 2, cp->vert_color.g, cellInfo, w );
-            if ( channelMask & 2 )                    // B (ctrl+50, channel 1)
-                cp->vert_color.b = PMESH_16_PaintByte( cb, cp->xyz, 1, cp->vert_color.b, cellInfo, w );
-            if ( channelMask & 0x10 )                 // A (ctrl+51, channel 4)
-                cp->vert_color.a = PMESH_16_PaintByte( cb, cp->xyz, 4, cp->vert_color.a, cellInfo, w );
-        }
-    }
-    if ( anyChanged )
-        Patch_Rebuild( def, 1 );
-}
-
-// ── sub_43E4B0 (0x43E4B0) — apply the stroke to every patch in a brush list ────
-void sub_43E4B0( PaintCallback cb, selbrush_t *brushlist, char channelMask, float *center, float cellInfo )
-{
-    for ( selbrush_t *i = brushlist->next; i != brushlist; i = i->next )
-        if ( i->patch )
-            PMESH_16( i, channelMask, center, cellInfo, cb );
-}
-
-// ── sub_43E4F0 (0x43E4F0) — dispatch a paint stroke to the selection (and, when the
-//    CurvEditDlg "apply to unselected patches too" box is checked, the active list too) ──
-extern int CurvEditDlg_OnSomeSetting();   // patchdialog.cpp — checkbox 1432 (dword_25D6570)
-void sub_43E4F0( PaintCallback cb, float *center, char channelMask, float cellInfo )
-{
-    if ( CurvEditDlg_OnSomeSetting() )
-        sub_43E4B0( cb, &active_brushes, channelMask, center, cellInfo );
-    sub_43E4B0( cb, &selected_brushes, channelMask, center, cellInfo );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Soft-selection HEIGHT DRAG (paint mode 1 "Drag Up/Down"): drag terrain control
-//  points up/down; nearby points follow with a smoothstep falloff over the brush radii.
-// ═══════════════════════════════════════════════════════════════════════════════
-// sub_43DA20 (0x43DA20) — soft-selection falloff weight for a control point at `pos` (XY):
-//  amplitude if within the inner radius of ANY drag move-point; 0 if the nearest move-point
-//  is beyond the outer radius; else amplitude * smoothstep(1 -> 0) across inner..outer.
-static float sub_43DA20( const float *pos )
-{
-    const float amp = sub_401C50();
-    if ( amp == 0.0f )
-        return 0.0f;
-    const float innerR = sub_401BB0();
-    const float outerR = sub_401C00();
-    const float inner2 = innerR * innerR;
-    float nearest2 = 3.4028235e38f;                       // FLT_MAX
-    for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
-    {
-        const float *mp = g_qeglobals.d_move_points[i]->xyz;
-        const float dx = pos[0] - mp[0];
-        const float dy = pos[1] - mp[1];
-        const float d2 = dx * dx + dy * dy;
-        if ( d2 <= inner2 )
-            return amp;                                    // inside inner radius -> full weight
-        if ( d2 < nearest2 )
-            nearest2 = d2;
-    }
-    if ( outerR * outerR <= nearest2 )                     // nearest move-point beyond outer -> 0
-        return 0.0f;
-    const float d = sqrtf( nearest2 );
-    const float t = ( d - innerR ) / ( outerR - innerR );
-    return ( 1.0f - t * t * ( 3.0f - ( t + t ) ) ) * amp;  // smoothstep * amplitude
-}
-
-// sub_43DC10 (0x43DC10) — apply a soft-selection height drag to one patch: add weight*amount
-//  to every control point's Z (skipping turned_edge&2 points), then rebuild.
-static void sub_43DC10( patchMesh_t *def, float amount )
-{
-    for ( int col = 0; col < def->width; ++col )
-    {
-        for ( int row = 0; row < def->height; ++row )
-        {
-            drawVert_t *cp = &def->ctrl[col][row];
-            if ( ( cp->turned_edge & 2 ) != 0 )
-                continue;
-            const float w = sub_43DA20( cp->xyz );
-            if ( w != 0.0f )
-                cp->xyz[2] += w * amount;
-        }
-    }
-    Patch_Rebuild( def, 1 );
-}
-
-// PMESH_15 (0x43DCA0) — apply the soft-sel height drag to every patch in a brush list.
-//  (Iterates the display list via ->next / ->patch, exactly like sub_43E4B0 — the IDB's
-//  ->onext / ->mins[0] are struct-typing artifacts over the same offsets +4 / +0x20.)
-static void PMESH_15( selbrush_t *list, float amount )
-{
-    for ( selbrush_t *i = list->next; i != list; i = i->next )
-        if ( i->patch )
-        {
-            if ( i->patch->def != i->def->patch )
-                Assert( PMESH_CPP, 2747, 0, "%s", "b->patch->def == b->def->patch" );
-            sub_43DC10( i->patch->def, amount );
-        }
-}
-
-// sub_43DD00 (0x43DD00) — soft-sel height drag dispatch: the active (unselected) patches
-//  too when the dialog's "apply to unselected" box (1432) is checked, then the selection.
-void sub_43DD00( float amount )
-{
-    if ( CurvEditDlg_OnSomeSetting() )
-        PMESH_15( &active_brushes, amount );
-    PMESH_15( &selected_brushes, amount );
-}
-
-// Seed a CurvEditDlg control-table slot so the getters (sub_401BB0/401C00/401C50)
-// return real radii/strength; CAdvPatchEditDlg pushes edit-box changes through here.
-void CurveEdit_SetCtrl( int slot, int id, float value )
-{
-    if ( slot >= 0 && slot < 3 ) { g_curveEditCtrls[slot].id = id; g_curveEditCtrls[slot].value = value; }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  AdvPatchEditDlg / CurvEditDlg — terrain-paint dialog + apply chain: SHIPPED.
-//  ───────────────────────────────────────────────────────────────────────────────
-//  The dialog (binary 0x25D6098, PE resource 0xbb "Advanced Patch Editing Options")
-//  is fully built in patchdialog.cpp; the apply chain + all leaf math live above and
-//  in patchdialog.cpp.  Wiring (all ported):
-//   • params: trackbars 1424/1425/1426 + buddy edits 1428/1429/1430 + max-range edits
-//     1482/1483 -> g_curveEditCtrls (CurveEdit_BindData/SnapStore); getters sub_401BB0
-//     (inner), sub_401C00 (outer), sub_401C50 (strength = 2^(value-8)).
-//   • 7 mode RADIOs (sub_401DB0): 1435 raise(0) / 1439 drag-up-down(1, soft-sel height
-//     drag via Patch_UpdateSelected->sub_43DD00) / 1437 flatten(2) / 1436 smooth(3) /
-//     1438 NOISE(4, sub_43E670 + Radiant_ValueNoise4D) / 1468 grab-value(5) / 1440 off(6).
-//   • channel CHECKs 1469..1474 -> the PMESH_16 mask (built in sub_43E6F0).
-//   • Colour... 1460 / Alpha... 1464 + owner-draw swatches 1462/1466 -> dword_25D65A4 /
-//     byte_25D65A8; height edit 1467 (OnHeightText); soft-sel checkboxes 1431/1432.
-//  sub_43E6F0 (paint drag) + Patch_UpdateSelected (soft-sel drag) are wired into the
-//  drag path.  Gates: paintfalloff + paintapply + softseldrag.  The brush-radius circle
-//  overlay (DrawAdvancedTerrainEditCircle 0x441240, camwnd.cpp) + its clip helpers
-//  PMESH_19_Radius / PatchRing_ClipTriangleToRing (sub_43ED50) / PMESH_20_Radius_2 (above)
-//  are now PORTED and wired into the Cam_Draw tail.  Gate: terraincircle.
-// ═══════════════════════════════════════════════════════════════════════════════
-
 // ── Patch_TurnEdge (0x44b4c0) — flip a terrain quad's diagonal ────────────────
-//  Ray-pick the nearest terrain edge across all selected patches (PMESH_51), then
+//  Ray-pick the nearest terrain edge across all selected patches (Patch_RayTest), then
 //  toggle that cell's turned_edge diagonal and rebuild.  Undo-bracketed.  `org`/`dir`
 //  arrive as int-cast float* ray endpoints (drag.cpp's trace_start / trace_dir).
 void Patch_TurnEdge( float *org, float *dir )
@@ -5588,9 +4472,9 @@ void Patch_TurnEdge( float *org, float *dir )
     const float *rayOrg = (const float *)(intptr_t)org;
     const float *rayDir = (const float *)(intptr_t)dir;
 
-    float        best = 3.4028235e38f;   // v15
-    patchMesh_t *hitDef = nullptr;       // def
-    int          hitCol = 0, hitRow = 0; // v3 / v14
+    float        best = 3.4028235e38f;
+    patchMesh_t *hitDef = nullptr;
+    int          hitCol = 0, hitRow = 0;
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -5602,7 +4486,7 @@ void Patch_TurnEdge( float *org, float *dir )
 
         float dist;
         int   col, row;
-        if ( PMESH_51( rayOrg, rayDir, patch, &dist, &col, &row, nullptr, nullptr ) )
+        if ( Patch_RayTest( rayOrg, rayDir, patch, &dist, &col, &row, nullptr, nullptr ) )
         {
             if ( dist < best )
             {
@@ -5655,57 +4539,35 @@ void Patch_TurnEdge( float *org, float *dir )
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  PATCH BEND MODE - the Curve->Bend interactive editing mode: pick a rotation axis (a
-//  whole row/column), pick the "normal" portion of the patch that bends, set the rotate
-//  origin, then drag to bend.
-//  The bend-state INFO DIALOG (ShowInfoDialog / off_25D5BF0, the "select rotation
-//  axis..." prompt) shipped with patchdialog.cpp (IDD_INFORMATION, PE resource 150), so
-//  its calls are live.  Mode state, axis selection and the rotate origin are set
-//  identically to the binary.
+//  PATCH REDISPERSE (ins/del) MODE.  KIWI: the classic Curve->Bend mode (Patch_BendToggle /
+//  _HandleTAB / _HandleEnter / Patch_SelectBendAxis / _SelectBendNormal /
+//  Patch_SetBendRotateOrigin, 0x4478e0..0x447d30, and its drag / 2D-view arms) is gone - it had
+//  no key, menu or palette row and its prompts went nowhere; G on control points and Terrain
+//  Sculpt edit patches.  Recover from git: `git show HEAD:src/radiant/pmesh.cpp`.
 // ════════════════════════════════════════════════════════════════════════════
-
-extern signed int QE_SingleBrush();                         // qe3.cpp 0x48C8B0
-extern float      g_vBendOrigin[3];                         // drag.cpp 0x231F548
-extern float      g_vRotateOrigin[3];                       // drag.cpp 0x23F1658
 
 // patchdialog.cpp — the modeless "Information" state prompt (0x40BE90) + its messages.
 extern void        ShowInfoDialog( const char *msg );
 extern void        HideInfoDialog();
-extern const char *g_pBendStateMsg[4];                      // 0x73B114
 extern const char *g_pInsDelStateMsg;                       // 0x73B128
 
-// Bend-mode state (IDB globals; defined here — pmesh is the patch home).
-int  g_nPatchBendState = 0;     // 0x73B10C  bend state machine (0 = BEND_SELECT_ROTATION)
-char g_bPatchAxisOnRow = 0;     // 0x739B0D  rotation axis runs along a ROW (else a column)
-char g_bPatchLowerEdge = 0;     // 0x739B0E  the "lower" side of the axis is the bend normal
-int  g_nPatchAxisIndex = 0;     // 0x25D5B0C row/column index of the rotation axis
+// Redisperse-mode state (defined here — pmesh is the patch home).
+char g_bPatchAxisOnRow = 0;     // 0x739B0D  the axis runs along a ROW (else a column)
+int  g_nPatchAxisIndex = 0;     // 0x25D5B0C row/column index of the axis
 int  g_nPatchInsertState = 0;   // 0x73B110  redisperse (ins/del) mode state machine
 
-// ── Patch_Save (0x446ae0) — snapshot a patch for the bend/ins-del CANCEL path ──
-//  Copies width/height/type and the full 16×16 control grid into the patchSave_* image
-//  (read back by Patch_Restore / Patch_BendHandleESC on Escape).
-void Patch_Save( patchMesh_t *p )
-{
-    patchSave_width  = p->width;
-    patchSave_height = p->height;
-    patchSave_type   = p->type;
-    memcpy( patchSave_ctrl, p->ctrl, 0x5000u );
-}
 
 // ── Patch_InsDelToggle (0x447e50) — enter/leave the "redisperse control points" mode ──
 //  Toggle OFF: clear g_qeglobals_redispersePatchVerts, refresh the patch toolbar.
 //  Toggle ON: requires a single selected patch; snapshots it (patchSave_*) for the CANCEL
 //  path, arms the redisperse state machine (insert-state 0, axis = row 0), and shows the
-//  ins/del info prompt.  The info DIALOG (off_25D5BF0 hide / ShowInfoDialog show) is
-//  DEFERRED — same parked MFC-dialog layer as the bend-state prompt above.  Reached from
-//  OnPatchRedisperse (toolbar 32872) and the Curve menu.
+//  ins/del info prompt.  Reached from OnPatchRedisperse (toolbar 32872) and the Curve menu.
 void Patch_InsDelToggle()
 {
-    extern int g_qeglobals_redispersePatchVerts;            // engine_stubs.cpp (0x25D5A6B)
     if ( g_qeglobals_redispersePatchVerts )
     {
         g_qeglobals_redispersePatchVerts = 0;
-        HideInfoDialog();                                 // 0x447e71
+        HideInfoDialog();
         CMainFrame_UpdatePatchToolbarButtons();
     }
     else
@@ -5724,7 +4586,7 @@ void Patch_InsDelToggle()
             g_nPatchInsertState = 0;
             g_bPatchAxisOnRow   = 1;
             g_nPatchAxisIndex   = 0;
-            ShowInfoDialog( g_pInsDelStateMsg );          // 0x447f01
+            ShowInfoDialog( g_pInsDelStateMsg );
         }
         else
         {
@@ -5733,106 +4595,11 @@ void Patch_InsDelToggle()
     }
 }
 
-// ── Patch_BendHandleTAB (0x447980) — TAB inside BEND mode ─────────────────────
-//  Cycles whatever the current bend state is asking for.  Shift reverses the step.
-//    state 0 (pick rotation axis) : step the axis index by +/-2, wrapping across the
-//                                   row<->column boundary (matching the binary's
-//                                   `4*!shift - 2` step and its wrap targets).
-//    state 1 (pick bend origin)   : step g_nBendOriginIndex by +/-1 with wrap, then
-//                                   re-read g_vBendOrigin from the picked control point.
-//    state 2                      : toggle g_bPatchLowerEdge.
-//  The control-point index arithmetic is the binary's verbatim: 5*(a + 16*b) floats,
-//  i.e. the flat float offset of ctrl[b][a].xyz within the 16x16 x 80-byte grid.
-int g_nBendOriginIndex = 0;     // 0x25D5B08 — index of the picked bend-origin ctrl point
-void Patch_BendToggle();        // below (0x4478E0)
-void Patch_InsDelToggle();      // below (0x447E50)
-void Patch_BendHandleTAB()
-{
-    if ( !g_bPatchBendMode )
-        return;
-
-    patch_t *patch;
-    patchMesh_t *def;
-    if ( !QE_SingleBrush()
-         || ( patch = selected_brushes.next->patch ) == nullptr
-         || ( def = patch->def ) == nullptr )
-    {
-        Patch_BendToggle();
-        Sys_Printf( "No patch to bend!" );
-        return;
-    }
-    if ( ( def->type & 0x40 ) != 0 )
-    {
-        Sys_Printf( "Patch_BendHandleTAB: Bending of terrain curves not implemented\n" );
-        return;
-    }
-
-    const bool shift = ( GetKeyState( VK_SHIFT ) < 0 );
-
-    if ( g_nPatchBendState == 0 )
-    {
-        const int idx = 4 * ( shift ? 0 : 1 ) - 2 + g_nPatchAxisIndex;   // +2 / -2
-        g_nPatchAxisIndex = idx;
-        if ( g_bPatchAxisOnRow )
-        {
-            const bool wrap = shift ? ( idx <= 0 ) : ( idx >= def->height );
-            if ( wrap )
-            {
-                g_bPatchAxisOnRow = 0;
-                g_nPatchAxisIndex = shift ? ( def->width - 1 ) : 1;
-            }
-        }
-        else
-        {
-            const bool wrap = shift ? ( idx <= 0 ) : ( idx >= def->width );
-            if ( wrap )
-            {
-                g_bPatchAxisOnRow = 1;
-                g_nPatchAxisIndex = shift ? ( def->height - 1 ) : 1;
-            }
-        }
-        g_nUpdateBits = -1;
-        return;
-    }
-
-    if ( g_nPatchBendState == 1 )
-    {
-        int idx = 2 * ( shift ? 0 : 1 ) - 1 + g_nBendOriginIndex;        // +1 / -1
-        g_nBendOriginIndex = idx;
-        // idb: v6 = 5*(a + 16*b); v7 = 4*v6; ctrl[0][0].xyz[v7] — i.e. the flat control
-        // point (a + 16*b) == ctrl[b][a] (80-byte drawVert_t stride).
-        const drawVert_t *cp;
-        if ( g_bPatchAxisOnRow )
-        {
-            if ( shift ) { if ( idx < 0 )                 g_nBendOriginIndex = idx = def->width - 1; }
-            else         { if ( idx > def->width - 1 )    g_nBendOriginIndex = idx = 0; }
-            cp = &def->ctrl[idx][g_nPatchAxisIndex];
-        }
-        else
-        {
-            if ( shift ) { if ( idx < 0 )                 g_nBendOriginIndex = idx = def->height - 1; }
-            else         { if ( idx > def->height - 1 )   g_nBendOriginIndex = idx = 0; }
-            cp = &def->ctrl[g_nPatchAxisIndex][idx];
-        }
-        const float *xyz = cp->xyz;
-        g_vBendOrigin[0] = xyz[0];
-        g_vBendOrigin[1] = xyz[1];
-        g_nUpdateBits = -1;
-        g_vBendOrigin[2] = xyz[2];
-        return;
-    }
-
-    if ( g_nPatchBendState == 2 )
-        g_bPatchLowerEdge ^= 1;
-    g_nUpdateBits = -1;
-}
-
 // ── Patch_InsDelHandleTAB (0x447f40) — TAB inside REDISPERSE (ins/del) mode ────
 //  Not in redisperse mode -> the TAB simply toggles the mode on.  Otherwise step the
 //  axis index by +2 and wrap across the row<->column boundary at height-1 / width-1.
 void Patch_InsDelHandleTAB()
 {
-    extern int g_qeglobals_redispersePatchVerts;            // engine_stubs.cpp (0x25D5A6B)
     if ( !g_qeglobals_redispersePatchVerts )
     {
         Patch_InsDelToggle();
@@ -5845,7 +4612,8 @@ void Patch_InsDelHandleTAB()
          || ( patch = selected_brushes.next->patch ) == nullptr
          || ( def = patch->def ) == nullptr )
     {
-        Patch_BendToggle();                 // idb: yes, BendToggle (not InsDelToggle)
+        // The binary also ran Patch_BendToggle here, which only printed "Must bend a single
+        // patch" with no single patch selected (KIWI: bend mode is gone).
         Sys_Printf( "No patch to bend!" );
         return;
     }
@@ -5864,198 +4632,29 @@ void Patch_InsDelHandleTAB()
     g_nUpdateBits = -1;
 }
 
-// ── Patch_SetBendRotateOrigin (0x447c70) ──────────────────────────────────────
-//  Zero the depth-axis component of g_vBendOrigin for the active 2D view, then copy
-//  it into g_vRotateOrigin.  Returns the depth-axis index.
-static int Patch_SetBendRotateOrigin()
-{
-    int axis = Ed_ActiveXY()->m_nViewType;   // U-GLOBALS: was g_pParentWnd->m_pActiveXY
-    if ( axis != 2 )
-        axis = ( axis != 0 );
-    g_vBendOrigin[axis]   = 0.0f;
-    g_vRotateOrigin[0]    = g_vBendOrigin[0];
-    g_vRotateOrigin[1]    = g_vBendOrigin[1];
-    g_vRotateOrigin[2]    = g_vBendOrigin[2];
-    return axis;
-}
-
-// ── Patch_BendToggle (0x4478e0) — enter/leave bend mode ───────────────────────
-//  Toggling OFF clears the mode and refreshes the toolbar.  Toggling ON requires a
-//  single selected non-terrain patch; it snapshots the patch (Patch_Save) for cancel,
-//  sets the initial axis (row 1) and prompts for the rotation axis.
-void Patch_BendToggle()
-{
-    if ( g_bPatchBendMode )
-    {
-        g_bPatchBendMode = 0;
-        HideInfoDialog();                                 // 0x447909
-        CMainFrame_UpdatePatchToolbarButtons();
-        return;
-    }
-
-    patch_t *patch;
-    patchMesh_t *def;
-    if ( QE_SingleBrush()
-         && ( patch = selected_brushes.next->patch ) != nullptr
-         && ( def = patch->def ) != nullptr )
-    {
-        if ( ( def->type & 0x40 ) != 0 )
-        {
-            Sys_Printf( "Patch_BendToggle: Bending of terrain curves not implemented\n" );
-        }
-        else
-        {
-            Patch_Save( def );
-            g_bPatchBendMode  = 1;
-            g_nPatchBendState = 0;      // BEND_SELECT_ROTATION
-            g_bPatchAxisOnRow = 1;
-            g_nPatchAxisIndex = 1;
-            ShowInfoDialog( g_pBendStateMsg[0] );   // 0x447979 (BEND_SELECT_ROTATION)
-        }
-    }
-    else
-    {
-        Sys_Printf( "Must bend a single patch\n" );
-    }
-}
-
-// ── Patch_BendHandleEnter (0x447b70) — ENTER advances the bend state machine ──
-//  0 (pick bend axis) → 1 (pick rotation axis/origin) → 2 (pick which side) → 3 (drag),
-//  showing the prompt for the NEW state each step; ENTER at state 3 accepts and leaves
-//  bend mode.  Entering state 1 zeroes the origin and calls TAB once to seed the first
-//  candidate; entering state 2 arms g_bPatchLowerEdge.
-//  Was unwired (CMainFrame::OnClipSelected's bend arm was inert), so bend mode could
-//  never progress past its first state — restored 2026-07-31 with ShowInfoDialog.
-void Patch_BendHandleEnter()
-{
-    if ( !g_bPatchBendMode )
-        return;
-    if ( g_nPatchBendState >= 3 )      // 0x447b7e: last state — ENTER accepts the bend
-    {
-        Patch_BendToggle();
-        g_nUpdateBits = -1;
-        return;
-    }
-    g_nPatchBendState = g_nPatchBendState + 1;
-    ShowInfoDialog( g_pBendStateMsg[g_nPatchBendState] );
-    if ( g_nPatchBendState == 1 )
-    {
-        g_nBendOriginIndex = 0;
-        g_vBendOrigin[0] = g_vBendOrigin[1] = g_vBendOrigin[2] = 0.0f;
-        Patch_BendHandleTAB();         // seed the first rotation-axis candidate
-    }
-    else if ( g_nPatchBendState == 2 )
-    {
-        g_bPatchLowerEdge = 1;
-    }
-    g_nUpdateBits = -1;
-}
-
 // ── Patch_Deselect (0x442610) — leave every patch-edit mode ───────────────────
 //  Called from Select_Deselect.  Resets the edit mode to sel_brush (closing the point
 //  edit that owned the old mode: quad-cycle refreshes the toolbar, addpoint finishes the
 //  curve drag), clears the per-instance selected flag on every selected patch, and drops
-//  bend / redisperse mode if either is armed.
+//  redisperse mode if it is armed (the binary also dropped bend mode).
 void Patch_Deselect()
 {
-    extern int g_qeglobals_redispersePatchVerts;     // engine_stubs.cpp (0x25d5a6b)
-
     const select_t prevMode = g_qeglobals.d_select_mode;
     g_qeglobals.d_select_mode = sel_brush;
     if ( prevMode == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prevMode == sel_addpoint )
-        sub_43ECB0();                                // Patch_FinishCurveDrag
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         if ( b->patch )
             b->patch->selected = 0;
 
-    if ( g_bPatchBendMode )
-        Patch_BendToggle();
     if ( g_qeglobals_redispersePatchVerts )
         Patch_InsDelToggle();
 }
 
-// ── Patch_SelectBendAxis (0x447cc0) — choose the rotation axis (a whole row/col) ─
-void Patch_SelectBendAxis()
-{
-    patch_t *patch;
-    patchMesh_t *def;
-    if ( QE_SingleBrush()
-         && ( patch = selected_brushes.next->patch ) != nullptr
-         && ( def = patch->def ) != nullptr )
-    {
-        if ( ( def->type & 0x40 ) != 0 )
-        {
-            Sys_Printf( "Patch_SelectBendAxis: Bending of terrain curves not implemented\n" );
-        }
-        else
-        {
-            if ( g_bPatchAxisOnRow )
-                Patch_SelectRow( def, g_nPatchAxisIndex, 0 );
-            else
-                Patch_SelectColumn( def, g_nPatchAxisIndex, 0 );
-            Patch_SetBendRotateOrigin();
-        }
-    }
-    else
-    {
-        Patch_BendToggle();
-    }
-}
-
-// ── Patch_SelectBendNormal (0x447d30) — choose the bending half of the patch ───
-//  Selects every row/column on the chosen side of the axis (lower edge = indices below
-//  the axis; upper edge = indices above), accumulating into the move-point list.
-void Patch_SelectBendNormal()
-{
-    patch_t *patch;
-    patchMesh_t *def;
-    if ( QE_SingleBrush()
-         && ( patch = selected_brushes.next->patch ) != nullptr
-         && ( def = patch->def ) != nullptr )
-    {
-        if ( ( def->type & 0x40 ) != 0 )
-        {
-            Sys_Printf( "Patch_SelectBendNormal: Bending of terrain curves not implemented\n" );
-        }
-        else
-        {
-            g_qeglobals.d_num_move_points = 0;
-            if ( g_bPatchAxisOnRow )
-            {
-                if ( g_bPatchLowerEdge )
-                    for ( int i = 0; i < g_nPatchAxisIndex; ++i )
-                        Patch_SelectRow( def, i, 1 );
-                else
-                    for ( int j = def->height - 1; j > g_nPatchAxisIndex; --j )
-                        Patch_SelectRow( def, j, 1 );
-            }
-            else if ( g_bPatchLowerEdge )
-            {
-                for ( int k = 0; k < g_nPatchAxisIndex; ++k )
-                    Patch_SelectColumn( def, k, 1 );
-            }
-            else
-            {
-                for ( int m = def->width - 1; m > g_nPatchAxisIndex; --m )
-                    Patch_SelectColumn( def, m, 1 );
-            }
-            Patch_SetBendRotateOrigin();
-        }
-    }
-    else
-    {
-        Patch_BendToggle();
-    }
-}
-
 // ════════════════════════════════════════════════════════════════════════════
-//  TERRAIN PAINT - the Curve->Paint terrain-height tool's start hook.  Patch_Paint clears
-//  each patch's "painting-active" flag (xx22b @0x5042) so the drag can re-mark touched
-//  cells; Patch_Paint_Start opens the undo bracket and paints the selection (+ the active
-//  list when checkbox 1432 answers, CurvEditDlg_OnSomeSetting).
+//  TERRAIN PAINT undo marking.  Patch_Paint clears each patch's "painting-active" flag
+//  (xx22b) so a stroke can re-mark touched cells (Terrain Sculpt / Decals).
 // ════════════════════════════════════════════════════════════════════════════
 
 // ── Patch_Paint (0x43eb70) — clear the paint-active flag on every patch in a list ─
@@ -6066,24 +4665,10 @@ void Patch_Paint( selbrush_t *list )
         patch_t *patch = b->patch;
         if ( patch )
         {
-            iassert( b->patch->def == b->def->patch );  // 3109 — #expr byte-matches embedded string
+            iassert( b->patch->def == b->def->patch );  // 3109
             patch->def->xx22b = 0;
         }
     }
-}
-
-// ── Patch_Paint_Start (0x43ebc0) — begin a terrain-paint stroke ───────────────
-//  Opens an undo bracket (closed later by the drag-end hook), clears the paint-active flag
-//  on the selection (and the active/unselected list too when the dialog's checkbox 1432
-//  answers — CurvEditDlg_OnSomeSetting).  Returns 1.
-int Patch_Paint_Start()
-{
-    Undo_ClearRedo();
-    Undo_GeneralStart( "patch painting" );
-    if ( CurvEditDlg_OnSomeSetting() )
-        Patch_Paint( &active_brushes );
-    Patch_Paint( &selected_brushes );
-    return 1;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -6099,7 +4684,7 @@ int Patch_Paint_Start()
 
 extern int Vec3_MajorAxis( const float *dir );   // linearmapping.cpp 0x4A45D0 — dominant-axis index
 
-// ── Curve_LerpVert (sub_433750) — linear-interpolate one curveVert (a→b by t) ─
+// ── Curve_LerpVert (0x433750) — linear-interpolate one curveVert (a→b by t) ─
 static void Curve_LerpVert( curveVert_t *dst, const curveVert_t *a, const curveVert_t *b, float t )
 {
     const float *fa = (const float *)a;
@@ -6121,12 +4706,12 @@ static void Curve_LerpVert( curveVert_t *dst, const curveVert_t *a, const curveV
     Vec3Normalize_R( &fd[7] );
 }
 
-// ── Curve_AdaptiveSubdivide (sub_4338E0) — arc-length adaptive re-subdivision ──
+// ── Curve_AdaptiveSubdivide (0x4338E0) — arc-length adaptive re-subdivision ──
 //  Subdivide each column gap (then each row gap) by max-edge-length / sampleSize,
 //  capped so the result never exceeds the 512×512 scratch.  Fills colMap/rowMap with,
 //  for each refined index, the original control index it came from (so the resampler can
-//  map control points → refined positions).  Ported at the algorithm level (clean 2-D
-//  indexing into s_curveScratch); numerically identical to the binary's byte-shuffling.
+//  map control points → refined positions).  Clean 2-D indexing into s_curveScratch;
+//  numerically identical to the binary's byte-shuffling.
 static curvePatchDef_t *Curve_AdaptiveSubdivide( const curvePatchDef_t *in, float sampleSize,
                                                  int *colCounts, int *rowCounts,
                                                  int *colMap, int *rowMap )
@@ -6232,7 +4817,7 @@ static curvePatchDef_t *Curve_AdaptiveSubdivide( const curvePatchDef_t *in, floa
     return out;
 }
 
-// ── Curve_FitPlane (sub_432690) — is the tessellated mesh planar (±1)? ─────────
+// ── Curve_FitPlane (0x432690) — is the tessellated mesh planar (±1)? ─────────
 //  Sum the per-cell triangle normals + corner positions; if the summed normal is
 //  non-degenerate AND every vertex lies within ±1 of the fitted plane, return 1 + the
 //  plane (normal in out[0..2], dist in out[3]).  Else 0.
@@ -6240,9 +4825,9 @@ static int Curve_FitPlane( const curvePatchDef_t *cd, float *out )
 {
     const int w = cd->width;
     const curveVert_t *V = cd->verts;
-    float nrm[3] = { 0, 0, 0 };          // v50/v51/v52 summed normal
-    float pos[3] = { 0, 0, 0 };          // v47/v48/v49 summed corner
-    int   count  = 0;                    // v54
+    float nrm[3] = { 0, 0, 0 };          // summed normal
+    float pos[3] = { 0, 0, 0 };          // summed corner
+    int   count  = 0;
 
     for ( int row = 0; row < cd->height - 1; ++row )
     {
@@ -6297,7 +4882,7 @@ static int Curve_FitPlane( const curvePatchDef_t *cd, float *out )
     return 1;
 }
 
-// ── Patch_PlanarTexProject (sub_4392e0) — project S/T onto a fitted plane ──────
+// ── Patch_PlanarTexProject (0x4392e0) — project S/T onto a fitted plane ──────
 static curvePatchDef_t *Patch_PlanarTexProject( patchMesh_t *p, int layer, float sampleSize,
                                                 const float *planeNormal )
 {
@@ -6312,7 +4897,7 @@ static curvePatchDef_t *Patch_PlanarTexProject( patchMesh_t *p, int layer, float
     return p->curveDef;
 }
 
-// ── Patch_TerrainTexProject (sub_439350) — project a terrain patch's S/T onto the
+// ── Patch_TerrainTexProject (0x439350) — project a terrain patch's S/T onto the
 //    dominant axis (no adaptive subdivision — terrain is its own control grid) ────
 static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, float sampleSize )
 {
@@ -6327,24 +4912,24 @@ static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, floa
         for ( int i = 0; i < cd->width - 1; ++i )
         {
             int pt = i + y * cd->width;
-            const float *base, *eA, *eB, *eC;     // v12, v10, v11, v13
+            const float *base, *eA, *eB, *eC;
             if ( p->ctrl[i][y].turned_edge & 1 )
             {
-                base = V[pt + cd->width + 1].xyz;  // (i+1,y+1)  v12
-                eA   = V[pt + cd->width].xyz;      // (i,  y+1)  v10
-                eB   = V[pt].xyz;                  // (i,  y)    v11
-                eC   = V[pt + 1].xyz;              // (i+1,y)    v13
+                base = V[pt + cd->width + 1].xyz;  // (i+1,y+1)
+                eA   = V[pt + cd->width].xyz;      // (i,  y+1)
+                eB   = V[pt].xyz;                  // (i,  y)
+                eC   = V[pt + 1].xyz;              // (i+1,y)
             }
             else
             {
-                base = V[pt + 1].xyz;              // (i+1,y)    v12
-                eA   = V[pt + cd->width + 1].xyz;  // (i+1,y+1)  v10
-                eB   = V[pt + cd->width].xyz;      // (i,  y+1)  v11
-                eC   = V[pt].xyz;                  // (i,  y)    v13
+                base = V[pt + 1].xyz;              // (i+1,y)
+                eA   = V[pt + cd->width + 1].xyz;  // (i+1,y+1)
+                eB   = V[pt + cd->width].xyz;      // (i,  y+1)
+                eC   = V[pt].xyz;                  // (i,  y)
             }
-            float a[3] = { eA[0] - base[0], eA[1] - base[1], eA[2] - base[2] };   // v21
-            float b[3] = { eB[0] - base[0], eB[1] - base[1], eB[2] - base[2] };   // vec_a
-            float c[3] = { eC[0] - base[0], eC[1] - base[1], eC[2] - base[2] };   // v26
+            float a[3] = { eA[0] - base[0], eA[1] - base[1], eA[2] - base[2] };
+            float b[3] = { eB[0] - base[0], eB[1] - base[1], eB[2] - base[2] };
+            float c[3] = { eC[0] - base[0], eC[1] - base[1], eC[2] - base[2] };
             float cr[3];
             Vec3Cross( b, a, cr );
             summed[0] += cr[0]; summed[1] += cr[1]; summed[2] += cr[2];
@@ -6367,15 +4952,15 @@ static curvePatchDef_t *Patch_TerrainTexProject( patchMesh_t *p, int layer, floa
     return p->curveDef;
 }
 
-// ── PMESH_02 (0x439580) — the curve (non-terrain) sample-size resampler ───────
+// ── Patch_ResampleCurveST (0x439580) — the curve (non-terrain) sample-size resampler ───────
 //  Build the tessellated mesh (with col/row index maps), adaptively re-subdivide it, and
 //  EITHER project onto the fitted plane (planar) OR spread each control point's S/T to the
 //  normalized position (refinedIndex+0.5)/512 of its mapped refined vertex.
-static void PMESH_02( patchMesh_t *p, int layer, float sampleSize )
+static void Patch_ResampleCurveST( patchMesh_t *p, int layer, float sampleSize )
 {
-    // IDA: the layer arrives in ecx (a __usercall arg) — NOT g_qeglobals.current_edit_layer.
-    // sub_442B00 passes 1 (the lightmap layer); the parked Patch_Rebuild/BrushToMesh refinement
-    // callers would pass their own layer.
+    // The layer is the caller's — NOT g_qeglobals.current_edit_layer.  Patch_SetSampleSize
+    // passes 1 (the lightmap layer); the Patch_Rebuild/BrushToMesh refinement callers pass
+    // their own layer.
     static int colCounts[512], rowCounts[512], colMap[512], rowMap[512];
 
     curvePatchDef_t *base = Patch_GenericMesh2( p, layer,
@@ -6400,8 +4985,7 @@ static void PMESH_02( patchMesh_t *p, int layer, float sampleSize )
         if ( rw >= 2 )
             for ( ; j < rw - 1; ++j ) if ( colMap[j] >= col ) break;
         float s = (float)( ( (double)j + 0.5 ) * 0.001953125 );   // (j+0.5)/512
-        if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-            Assert( PMESH_CPP, 927, 0, "%s", "!IS_NAN(s)" );
+        iassert( isfinite( s ) );
 
         for ( int row = 0; row < p->height; ++row )
         {
@@ -6409,8 +4993,7 @@ static void PMESH_02( patchMesh_t *p, int layer, float sampleSize )
             if ( rh >= 2 )
                 for ( ; k < rh - 1; ++k ) if ( rowMap[k] >= row ) break;
             float t = (float)( ( (double)k + 0.5 ) * 0.001953125 );
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 929, 0, "%s", "!IS_NAN(t)" );
+            iassert( isfinite( t ) );
 
             float *st = &p->ctrl[col][row].texCoord.st[2 * layer];
             st[0] = s;
@@ -6420,22 +5003,22 @@ static void PMESH_02( patchMesh_t *p, int layer, float sampleSize )
     free( refined );
 }
 
-// ── sub_442B00 (0x442b00) — set a patch's texture SAMPLE SIZE ──────────────────
-//  Reached from Brush_SetSampleSize (sub_477080) when a selected brush owns a patch —
+// ── Patch_SetSampleSize (0x442b00) — set a patch's texture SAMPLE SIZE ──────────────────
+//  Reached from Brush_SetAllFacesSampleSize (0x477080) when a selected brush owns a patch —
 //  the Surface Inspector "sample size" field with a patch selected.  Re-sample the patch
 //  texCoords at the new density (terrain → dominant-axis projection; curves → adaptive
 //  spread / planar projection), store the size + mark bDirty, and (layer 1) rebuild the
 //  render curveDef.
-void sub_442B00( patchMesh_t *p, int sampleSize )
+void Patch_SetSampleSize( patchMesh_t *p, int sampleSize )
 {
     const float sz = (float)sampleSize;
 
-    // IDA hardcodes layer 1 (the lightmap) for BOTH branches (push 1 / mov ecx,1) — the resample
-    // always targets layer 1; only the curveDef REBUILD below is gated on current_edit_layer==1.
+    // Layer 1 (the lightmap) is hardcoded for BOTH branches — the resample always targets
+    // layer 1; only the curveDef REBUILD below is gated on current_edit_layer==1.
     if ( ( p->type & PATCH_TERRAIN ) != 0 )
         Patch_TerrainTexProject( p, 1, sz );
     else
-        PMESH_02( p, 1, sz );
+        Patch_ResampleCurveST( p, 1, sz );
 
     p->bDirty = 1;
     *(float *)&p->size_of_struct_0x504C = sz;
@@ -6455,8 +5038,7 @@ void sub_442B00( patchMesh_t *p, int sampleSize )
 // `decrease` (negative coarsens, positive refines), rebuilding curveDef until its
 // vertex count actually changes or it clamps at subDivType 1.  When refining, only
 // acts on patches whose tessellated grid already exceeds the control grid.  Called
-// from CMainFrame::OnOverBrightShift{Up,Down}.  (IDA is __usercall with decrease in
-// ebx; normalised to __cdecl here.)
+// from CMainFrame::OnOverBrightShift{Up,Down}.
 // ─────────────────────────────────────────────────────────────────────────────
 void Patch_Subdivide( int decrease )
 {
@@ -6508,46 +5090,30 @@ void Patch_Subdivide( int decrease )
 
 // ════════════════════════════════════════════════════════════════════════════
 //  VERT-SNAP COLLECTOR SUBSYSTEM (the V-key mixed patch+brush vert-edit entry).
-//  The 0x442xxx cluster (PMESH.CPP per the assert strings), reached via the V key
-//  (cmd 33005, CMainFrame::OnSelectionDragVertices third arm) with a mixed patch+brush
-//  selection.  Clears the patch_verts_array01 vert pool, then walks the selected brush
+//  Reached via the V key (cmd 33005, CMainFrame::OnSelectionDragVertices third arm) with
+//  a mixed patch+brush selection.  Clears the patch_verts_array01 vert pool, then walks the selected brush
 //  list and, for each brush/patch/prefab/misc_model whose vert-snap PREF is enabled,
 //  collects its world-space vertices into patch_verts_array01 (dedup'd within 0.1u).
 //  That pool is the snap target the subsequent curve-point drag snaps to.  All three
 //  vert-snap prefs (m_bVertSnapModel/Brush/Prefab) DEFAULT OFF.
 //
-//  STORAGE LAYOUT (the IDB-base arithmetic, decoded byte-exact):
-//    The binary stores each collected vert as a vec3 into a flat float array whose
-//    base is &g_qeglobals.unkown_pmesh_float1 (abs 0x2603A30): element N is at
-//    [3*N+0/1/2].  The dedup scan (sub_43C240) reads from g_qeglobals.
-//    patch_verts_array01 (abs 0x2603A38 = unkown_pmesh_float1 + 8 bytes = +2 floats)
-//    with per-candidate offsets x=ptr-8, y=ptr-4, z=ptr — i.e. element i's x lands at
-//    patch_verts_array01 + 12*i - 8 == unkown_pmesh_float1 + 12*i.  So the store base
-//    and the read base address the SAME vec3 array, 12-byte stride; the two qeglobals
-//    members (unkown_pmesh_float1 @0x10070, patch_verts_array01 @0x10078) deliberately
-//    overlap with the 8-byte (unkown_pmesh_float1 + pad_01) header offset between them.
-//    Both views resolve to VertSnapPool() below — byte-identical to the binary.
+//  STORAGE LAYOUT:
+//    Each collected vert is a vec3 in a flat float array whose base is
+//    &g_qeglobals.unkown_pmesh_float1: element N is at [3*N+0/1/2].  The binary's dedup
+//    scan reads through g_qeglobals.patch_verts_array01 (2 floats past that base) with
+//    offsets -8/-4/0, so the store and the read address the SAME vec3 array, 12-byte
+//    stride (the two qeglobals members deliberately overlap).  Both views resolve to
+//    VertSnapPool() below.
 // ════════════════════════════════════════════════════════════════════════════
 
-// brush.cpp (0x478780) — load/realize the brush's model + copy the orientation matrix
-// into the entity instance; returns true if the brush carries a (misc_)model.
-extern bool      Model_SetModel( entity_brush_s *b, const float *orientMatrix );
-// entity.cpp (0x482A70) — orParent ∘ ent's own orientation → orOut.
-extern void      Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
-// CMainFrame_UpdatePatchToolbarButtons() already extern'd above (select.cpp).
-// entity.cpp (0x6DE290) — world-space identity orientation (origin 0, axis = I).
-extern float     world_orient_matrix[4][3];
-
-// The single flat vec3 vert pool both the collectors (store) and sub_43C240 (read)
-// address.  Base = &g_qeglobals.unkown_pmesh_float1 (the store base in the disasm:
-//   fstp dword ptr [eax*4 + 0x2603A30]  with eax = 3*count).
+// The single flat vec3 vert pool both the collectors (store) and VertSnap_FindDup (read)
+// address.  Base = &g_qeglobals.unkown_pmesh_float1.
 static inline float *VertSnapPool() { return (float *)&g_qeglobals.unkown_pmesh_float1; }
 
-// ── sub_43C240 (0x43c240) — dedup scan ───────────────────────────────────────
+// ── VertSnap_FindDup (0x43c240) — dedup scan ───────────────────────────────────────
 //  Returns the index of the first pooled vert within sqrt(0.01)=0.1u of `cand`,
-//  else -1.  The binary reads from patch_verts_array01 (= VertSnapPool()+2 floats)
-//  with offsets -8/-4/0; that resolves to VertSnapPool()[3*i + 0/1/2] (see the
-//  layout note above).  count<=0 → -1 (faithful: the loop's pre-test).
+//  else -1.  Reads VertSnapPool()[3*i + 0/1/2] (see the layout note above).
+//  count<=0 → -1 (the loop's pre-test).
 static signed int VertSnap_FindDup( const float *cand )
 {
     if ( g_qeglobals.patch_verts_array01_count <= 0 )
@@ -6560,7 +5126,7 @@ static signed int VertSnap_FindDup( const float *cand )
         float dx = pool[3 * i + 0] - cand[0];
         float dy = pool[3 * i + 1] - cand[1];
         float dz = pool[3 * i + 2] - cand[2];
-        if ( dx * dx + dy * dy + dz * dz < 0.01 )   // IDA: compare vs double 0.01
+        if ( dx * dx + dy * dy + dz * dz < 0.01 )   // compare vs double 0.01
             return i;
         if ( i + 1 >= g_qeglobals.patch_verts_array01_count )
             return -1;
@@ -6581,10 +5147,9 @@ static inline bool VertSnap_Store( const float *p )
     return ( ++g_qeglobals.patch_verts_array01_count == 0x4000 );
 }
 
-// ── sub_442520 (0x442520) — brush winding vert collector ──────────────────────
+// ── VertSnap_CollectBrush (0x442520) — brush winding vert collector ──────────────────────
 //  For each face of the brush DEF, world-transform (through `orient`) each winding
-//  point and dedup-store it into the pool.  Face stride 232 (face_t), winding @+0xE0
-//  (face_t.w), points start at winding+4 with 12-byte stride (winding_t.p[]).
+//  point and dedup-store it into the pool.
 static void VertSnap_CollectBrush( const orientation_t *orient, selbrush_t *b )
 {
     brush_t *def = b->def;
@@ -6608,17 +5173,15 @@ static void VertSnap_CollectBrush( const orientation_t *orient, selbrush_t *b )
     }
 }
 
-// ── PMESH_31 (0x4422b0) — patch control-grid vert collector ───────────────────
+// ── VertSnap_CollectPatch (0x4422b0) — patch control-grid vert collector ───────────────────
 //  Walk a patch's width×height control grid, world-transform each control point and
-//  dedup-store it.  ctrl is drawVert_t[16][16] @ patchMesh_t+0x38 (row stride 1280,
-//  point stride 80, xyz @+0).  The binary INLINES OrientationPosToWorldPos (and its
-//  q_shared.cpp:1599 `pos != out` assert); we call the real function, which carries
-//  that same assert — behaviour-identical.  Preserves the PMESH.CPP:4427
-//  `b->patch->def == b->def->patch` instance/def-consistency assert.
+//  dedup-store it.  The binary INLINES OrientationPosToWorldPos (and its
+//  q_shared.cpp:1599 `pos != out` assert); the real function carries that same assert.
+//  Keeps the PMESH.CPP:4427 `b->patch->def == b->def->patch` instance/def-consistency
+//  assert.
 static void VertSnap_CollectPatch( selbrush_t *b, const orientation_t *orient )
 {
-    if ( b->patch->def != b->def->patch )
-        Assert( PMESH_CPP, 4427, 0, "%s", "b->patch->def == b->def->patch" );
+    iassert( b->patch->def == b->def->patch );
 
     patchMesh_t *def = b->patch->def;
     for ( int row = 0; row < def->width; ++row )
@@ -6633,13 +5196,10 @@ static void VertSnap_CollectPatch( selbrush_t *b, const orientation_t *orient )
     }
 }
 
-// ── sub_442410 (0x442410) — misc_model XModel vert collector ──────────────────
-//  Extract the misc_model's LOD-0 geometry (Editor_ExtractXModelGeo = IDB sub_4FEBB0,
-//  now ported in gfx_d3d/r_xsurface.cpp), then world-transform each INDEXED vertex
-//  through `orient` and dedup-store it into the snap pool (IDB: sub_4FEBB0 → per-index
-//  OrientationPosToWorldPos → sub_43C240 dedup → store).  XModel handle chain matches the
-//  binary: b->owner->def->modelClass->model->handle (entity_s.def@0x08 / modelClass@0x64 /
-//  entitymodel_t.model@0x160 / models_t.handle@+4).
+// ── VertSnap_CollectModel (0x442410) — misc_model XModel vert collector ──────────────────
+//  Extract the misc_model's LOD-0 geometry (Editor_ExtractXModelGeo, gfx_d3d/r_xsurface.cpp),
+//  then world-transform each INDEXED vertex through `orient` and dedup-store it into the
+//  snap pool.  XModel handle chain: b->owner->def->modelClass->model->handle.
 struct XModel;
 extern int __cdecl Editor_ExtractXModelGeo( XModel *model, float *verts, int vertLimit,
                                             uint16_t *indices, int indexLimit );  // gfx_d3d/r_xsurface.cpp (0x4FEBB0)
@@ -6650,9 +5210,8 @@ static void VertSnap_CollectModel( selbrush_t *b, const orientation_t *orient )
     modelnode_t   *model = mc->model;
     XModel        *xmodel = (XModel *)(intptr_t)model->handle;
 
-    // IDB stack buffers v6[196612] (16384 vec3 positions) + v10[65538] (65536 indices);
-    // a function-local static here (editor is single-threaded + non-reentrant, like DrawGeo's
-    // s_lineVerts) avoids a ~327 KB stack frame.
+    // 16384 vec3 positions + 65536 indices: a function-local static (editor is
+    // single-threaded + non-reentrant, like DrawGeo's s_lineVerts) avoids a ~327 KB stack frame.
     static float    s_modelVerts[0x4000 * 3];   // 16384 positions
     static uint16_t s_modelIndices[0x10000];    // 65536 indices
 
@@ -6674,16 +5233,15 @@ static void VertSnap_CollectModel( selbrush_t *b, const orientation_t *orient )
 //        - prefab (classtype & 0x10) + m_bVertSnapPrefab → recurse into the prefab's
 //          active_brushlist with the composed orientation;
 //        - else if Model_SetModel && eclass=="misc_model" + m_bVertSnapModel →
-//          collect the model's verts (VertSnap_CollectModel, deferred no-op).
+//          collect the model's verts (VertSnap_CollectModel).
 //    * non-fixedsize (brush/patch) + m_bVertSnapBrush:
 //        - patch brush: collect its control grid (VertSnap_CollectPatch) — but ONLY
 //          when this is NOT the top-level selected list (listHead != &selected_brushes),
 //          i.e. only patches reached via a prefab recursion are snapped to (a selected
 //          patch is the one being EDITED, not a snap target);
 //        - solid brush: collect its winding verts (VertSnap_CollectBrush).
-//  Stops once the pool reaches 0x4000.  The IDB signature is __usercall with an `eax`
-//  return that is merely the loop's scratch entity pointer; normalised to a clean
-//  void(listHead, orient) here (the return value is never consumed by the caller).
+//  Stops once the pool reaches 0x4000.  Returns nothing (the binary's return value, a
+//  scratch entity pointer, is never consumed by the caller).
 static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *orient )
 {
     selbrush_t *next = listHead->next;
@@ -6692,7 +5250,7 @@ static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *or
 
     while ( g_qeglobals.patch_verts_array01_count < 0x4000 )
     {
-        selbrush_t   *cur = next;                          // the IDB carries cur (v7) + next
+        selbrush_t   *cur = next;
         entity_s_def *ownerDef = (entity_s_def *)cur->owner->def;
         eclass_t     *eclass   = ownerDef->eclass;
 
@@ -6704,7 +5262,7 @@ static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *or
                 {
                     orientation_t composed;
                     Entity_GetOrientation( ownerDef, orient, &composed );
-                    // &prefab->active_brushlist (selbrush_t sentinel @ prefab_s+0x0C).
+                    // &prefab->active_brushlist (the selbrush_t sentinel).
                     selbrush_t *prefabList =
                         &((prefab_s *)cur->owner->prefab)->brushes;
                     VertSnapTo_ModelBrushPrefab( prefabList, &composed );
@@ -6746,13 +5304,12 @@ static void VertSnapTo_ModelBrushPrefab( selbrush_t *listHead, orientation_t *or
     }
 }
 
-// ── Terrain_Edit (0x442100) — MISNAMED in the IDB (it is NOT a terrain editor) ─
+// ── Terrain_Edit (0x442100) — MISNAMED (it is NOT a terrain editor) ─
 //  The V-key vert-edit entry for a MIXED patch+brush selection (the third arm of
 //  CMainFrame::OnSelectionDragVertices, cmd 33005).  Clears the point/move-point/vert
 //  pools, runs the vert-snap collector over the selection (through the identity world
 //  orientation), switches to curve-point edit mode, and runs the mode-transition tail
-//  (sel_cycle_edge_direction_quad → refresh patch toolbar; sel_addpoint → finish the
-//  curve drag).  Was a FATAL stub in engine_stubs.cpp — now real.
+//  (sel_cycle_edge_direction_quad → refresh patch toolbar).
 void Terrain_Edit()
 {
     g_qeglobals.d_numpoints              = 0;
@@ -6767,62 +5324,48 @@ void Terrain_Edit()
     g_qeglobals.d_select_mode = sel_curvepoint;
     if ( prevMode == sel_cycle_edge_direction_quad )
         CMainFrame_UpdatePatchToolbarButtons();
-    else if ( prevMode == sel_addpoint )
-        sub_43ECB0();                                      // Patch_FinishCurveDrag (0x43ecb0)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  0x441AD0  PMESH_29_Winding — patch shadow-caster winding submit (the patch
+//  0x441AD0  Patch_DrawSubmitFaceWindings — patch shadow-caster winding submit (the patch
 //  analogue of Brush_DrawSubmitFaceWindings).  Realizes the patch material; if it
 //  isn't a shadow-casting drawn material it returns.  Then walks the patch's
 //  triangulated index list, building per-triangle (or per-coplanar-quad) world
-//  windings and feeding them to the light-region CSG (sub_4DAA70).
-//
-//  Faithful to disasm 0x441AD0.  The patch instance/def fields are accessed at the
-//  binary's raw offsets (the kisak patch instance/def structs are opaque here):
-//    inst+0  = def (patchMesh_t*)      inst+4  = version (u16)
-//    inst+12 = indexCount              inst+16 = indices (u16[])
-//    inst+24 = mtldef (MaterialDef)    def+0x5040 = def version (u16)
-//    def+0x5038 → [+0xC] = vertex array base (stride 0x2C = 44, xyz at +0)
+//  windings and feeding them to the light-region CSG (Region_AddWindingFace).
+//  The vertex array is def->curveDef->verts (stride 44, xyz at +0).
 // ═════════════════════════════════════════════════════════════════════════════
 #include "primarylights_region.h"
-extern void   MaterialDef_02( MaterialDef *m, int (*cb)( qtexture_s * ) );  // 0x431520
 extern int    MaterialDef_06( qtexture_s *radMtl );                         // 0x4318A0
-extern int    dword_181F51C;                                               // realize-state
-extern int    g_windingAlloc;
 extern void   Com_PrintMessage( const char *fmt, ... );
-extern void   Assert( const char *file, int line, int type, const char *fmt, ... );
-extern float  Vec3Normalize_R( float *v );
 extern bool   Material_CastsStencilShadow( Material *m );                   // 0x4FEE90
-extern void   OrientationPosToWorldPos( float *out, const float *pos, const orientation_t *orient ); // 0x4BA430
 
-// sub_40A4A0 (0x40A4A0) — vec3 dot.
+// Patch_Vec3Dot (0x40A4A0) — vec3 dot.
 static float Patch_Vec3Dot( const float *a, const float *b )
 {
     return (float)( a[1] * b[1] + a[0] * b[0] + a[2] * b[2] );
 }
 
-// sub_441930 (0x441930) — edge-clip plane: plane normal = cross(faceNormal, a1-a3),
-// normalized; plane.dist = normal·a3.  (a1/a3 = two edge verts, a2 = face plane.)
-static void Patch_EdgePlane( const float *a1, const float *a2, const float *a3, float *out )
+// Patch_EdgePlane (0x441930) — edge-clip plane: plane normal = cross(faceNormal, edgeA-edgeB),
+// normalized; plane.dist = normal·edgeB.
+static void Patch_EdgePlane( const float *edgeA, const float *faceNormal, const float *edgeB, float *out )
 {
     float edge[3];
-    edge[0] = a1[0] - a3[0];
-    edge[1] = a1[1] - a3[1];
-    edge[2] = a1[2] - a3[2];
-    Vec3Cross( a2, edge, out );
+    edge[0] = edgeA[0] - edgeB[0];
+    edge[1] = edgeA[1] - edgeB[1];
+    edge[2] = edgeA[2] - edgeB[2];
+    Vec3Cross( faceNormal, edge, out );
     Vec3Normalize_R( out );
-    out[3] = out[1] * a3[1] + a3[0] * out[0] + out[2] * a3[2];
+    out[3] = out[1] * edgeB[1] + edgeB[0] * out[0] + out[2] * edgeB[2];
 }
 
-// sub_441990 (0x441990) — true if the two triangles {p0,p1,p2} and {p2,p3,p0} of a
-// patch quad are coplanar AND convex enough to emit as a single quad.  a1 points at
-// { float *p[6]; float *refOrient; } (the var_38.. block from PMESH_29).
+// Patch_QuadIsConvex (0x441990) — true if the two triangles {p0,p1,p2} and {p2,p3,p0} of a
+// patch quad are coplanar AND convex enough to emit as a single quad.  `q` holds the six
+// corner pointers from Patch_DrawSubmitFaceWindings.
 struct PatchQuad { const float *p0, *p1, *p2, *p3, *p4, *p5; };
 static char Patch_QuadIsConvex( const PatchQuad *q )
 {
-    // disasm: requires p2 (a1+8) == p3 (a1+12) and p1 (a1+4) == p4 (a1+16) (degenerate
-    // shared edges), then plane test of the four corners against a reference.
+    // requires p2 == p3 and p1 == p4 (degenerate shared edges), then plane test of the
+    // four corners against a reference.
     if ( q->p2 != q->p3 )
         return 0;
     if ( q->p1 != q->p4 )
@@ -6848,10 +5391,10 @@ static char Patch_QuadIsConvex( const PatchQuad *q )
     return 1;
 }
 
-void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *desc, rface_t **outList )
+void Patch_DrawSubmitFaceWindings( patch_t *patchInst, const orientation_t *orient, float *desc, rface_t **outList )
 {
-    patch_t *pm = (patch_t *)(intptr_t)patchInst;             // the binary's local `pm`
-    MaterialDef *md = (MaterialDef *)&pm->def->texture;       // def+24 = mtldef
+    patch_t *pm = (patch_t *)(intptr_t)patchInst;
+    MaterialDef *md = (MaterialDef *)&pm->def->texture;
 
     dword_181F51C = 0x2000;
     MaterialDef_02( md, MaterialDef_06 );
@@ -6863,7 +5406,7 @@ void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *d
     else
     {
         // not drawn → must be a stencil-shadow layered material to submit at all
-        // (the binary inlines MaterialDef_10_LayeredMatHandle here; it carries MaterialDef.cpp:246)
+        // (MaterialDef_10_LayeredMatHandle carries the MaterialDef.cpp:246 assert)
         extern bool MaterialDef_10_LayeredMatHandle( MaterialDef *mtlDef );
         if ( !MaterialDef_10_LayeredMatHandle( md ) )
             return;
@@ -6892,13 +5435,13 @@ void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *d
             PatchQuad q = { p0, p1, p2, p3, p4, p5 };
             if ( Patch_QuadIsConvex( &q ) )
             {
-                // quad winding = {i0, i1, i5, i2} (disasm: w[3]=var_30=i2; i2==i3 here).
+                // quad winding = {i0, i1, i5, i2} (i2==i3 here).
                 w->numpoints = 4;
                 OrientationPosToWorldPos( w->p[0], q.p0, orient );
                 OrientationPosToWorldPos( w->p[1], q.p1, orient );
                 OrientationPosToWorldPos( w->p[2], q.p5, orient );
                 OrientationPosToWorldPos( w->p[3], q.p2, orient );
-                sub_4DAA70( w, outList, desc, exterior );
+                Region_AddWindingFace( w, outList, desc, exterior );
             }
             else
             {
@@ -6906,11 +5449,11 @@ void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *d
                 OrientationPosToWorldPos( w->p[0], q.p0, orient );
                 OrientationPosToWorldPos( w->p[1], q.p1, orient );
                 OrientationPosToWorldPos( w->p[2], q.p2, orient );
-                sub_4DAA70( w, outList, desc, exterior );
+                Region_AddWindingFace( w, outList, desc, exterior );
                 OrientationPosToWorldPos( w->p[0], q.p3, orient );
                 OrientationPosToWorldPos( w->p[1], q.p4, orient );
                 OrientationPosToWorldPos( w->p[2], q.p5, orient );
-                sub_4DAA70( w, outList, desc, exterior );
+                Region_AddWindingFace( w, outList, desc, exterior );
             }
             indexIter += 6;
             if ( indexIter + 6 > pm->indexCount )
@@ -6931,7 +5474,7 @@ void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *d
         OrientationPosToWorldPos( w->p[0], t0, orient );
         OrientationPosToWorldPos( w->p[1], t1, orient );
         OrientationPosToWorldPos( w->p[2], t2, orient );
-        sub_4DAA70( w, outList, desc, exterior );
+        Region_AddWindingFace( w, outList, desc, exterior );
     }
 
     --g_windingAlloc;
@@ -6943,8 +5486,7 @@ void PMESH_29_Winding( patch_t *patchInst, const orientation_t *orient, float *d
 //  marquee in the 3D camera view while a patch point-edit mode is active (sel_area),
 //  Drag_MouseUp builds a 4-plane view frustum from the drag rect
 //  (Camera_GetRectSelection3D, camwnd.cpp 0x403c10) and hands it to these two collectors,
-//  which add every control point inside the frustum to the move-point sets.  Both live in
-//  PMESH.CPP (assert strings).
+//  which add every control point inside the frustum to the move-point sets.
 //
 //  Frustum plane layout (32-byte stride, written by Camera_GetRectSelection3D):
 //    normal.x @0, normal.y @4, normal.z @8, dist (DOUBLE) @16, type(int) = -1 @24.
@@ -6962,36 +5504,34 @@ struct edFrustumPlane_t          // the 32-byte plane Camera_GetRectSelection3D 
 };
 static_assert( sizeof(edFrustumPlane_t) == 32, "edFrustumPlane_t" );
 
-extern int Patch_FindSelectedArrayPoint( const float *pt );   // brush.cpp (sub_43C1C0 0x43c1c0)
+extern int Patch_FindSelectedArrayPoint( const float *pt );   // brush.cpp (0x43c1c0)
 
-// Is `xyz` inside all 4 frustum planes?  (binary's inner v7-counter loop.)
-//   The binary accumulates the dot in the x87 stack and rounds it to a float32 ONCE
-//   (`fstp dword [var_1C]`), then compares that float against the DOUBLE plane dist
-//   (`fcomp qword [a1+16]`).  Match the single-rounding: accumulate in double, snap to
-//   float, then compare against the double dist.  (A per-operation float accumulation
-//   would round 3× and could flip a 1-ULP boundary case (truncation-vs-rounding).)
+// Is `xyz` inside all 4 frustum planes?
+//   The dot is rounded to a float32 ONCE, then compared against the DOUBLE plane dist:
+//   accumulate in double, snap to float, then compare against the double dist.  (A
+//   per-operation float accumulation would round 3× and could flip a 1-ULP boundary case.)
 static bool Ed_PointInFrustum4( const edFrustumPlane_t *planes, const float *xyz )
 {
     int n = 0;
     for ( ; n < 4; ++n )
     {
-        float v13 = (float)( (double)planes[n].normal[0] * xyz[0]
+        float dot = (float)( (double)planes[n].normal[0] * xyz[0]
                            + (double)planes[n].normal[1] * xyz[1]
                            + (double)planes[n].normal[2] * xyz[2] );
-        if ( (double)v13 >= planes[n].dist )
+        if ( (double)dot >= planes[n].dist )
             break;
     }
     return n == 4;
 }
 
-// ── Terrain_SelectAreaPoints_sub (0x4481c0) ───────────────────────────────────
+// ── Terrain_SelectAreaPointsPass (0x4481c0) ───────────────────────────────────
 //  One pass over every selected PATCH's 16×16 control grid; for each control point
 //  inside the frustum, either toggle the lock flag (turned_edge bit1, when the
-//  lock/unlock prefs are active), or add/remove it from d_move_points[].  `a2` is
-//  the "second pass" flag (0 = add to a fresh set / remove-on-deselect; the caller
+//  lock/unlock prefs are active), or add/remove it from d_move_points[].  `removePass`
+//  is the "second pass" flag (0 = add to a fresh set / remove-on-deselect; the caller
 //  Terrain_SelectAreaPoints runs pass 0 first and pass 1 only if pass 0 added none).
 //  Returns 1 iff this pass touched a point.
-static int Terrain_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2 )
+static int Terrain_SelectAreaPointsPass( const edFrustumPlane_t *planes, char removePass )
 {
     byte touched = 0;
 
@@ -7001,8 +5541,7 @@ static int Terrain_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2
         if ( !patch )
             continue;
 
-        if ( b->patch->def != b->def->patch )
-            Assert( PMESH_CPP, 6659, 0, "%s", "b->patch->def == b->def->patch" );
+        iassert( b->patch->def == b->def->patch );
 
         // grid: outer = ctrl[col][..] (width), inner = ctrl[col][row] (height).
         for ( int col = 0; col < patch->width; ++col )
@@ -7013,12 +5552,10 @@ static int Terrain_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2
                 if ( !Ed_PointInFrustum4( planes, cp->xyz ) )
                     continue;
 
-                if ( a2 )
+                if ( removePass )
                 {
                     // pass 1: REMOVE this control point from d_move_points[] (by ptr).
-                    if ( g_qeglobals.bLockPatchVerts || g_qeglobals.bUnlockPatchVerts )
-                        Assert( PMESH_CPP, 6675, 0, "%s",
-                                "!g_qeglobals.bLockPatchVerts && !g_qeglobals.bUnlockPatchVerts" );
+                    iassert( !g_qeglobals.bLockPatchVerts && !g_qeglobals.bUnlockPatchVerts );
                     int idx = 0;
                     int n = g_qeglobals.d_num_move_points;
                     for ( ; idx < n; ++idx )
@@ -7094,18 +5631,18 @@ void Terrain_SelectAreaPoints( const void *planes, char select )
         doSecondPass = 0;
     }
     g_nPatchClickedView = -1;
-    int r = Terrain_SelectAreaPoints_sub( (const edFrustumPlane_t *)planes, 0 );
+    int r = Terrain_SelectAreaPointsPass( (const edFrustumPlane_t *)planes, 0 );
     if ( !r && doSecondPass )
-        Terrain_SelectAreaPoints_sub( (const edFrustumPlane_t *)planes, 1 );
+        Terrain_SelectAreaPointsPass( (const edFrustumPlane_t *)planes, 1 );
 }
 
-// ── Patch_SelectAreaPoints_sub (0x4484c0) ─────────────────────────────────────
+// ── Patch_SelectAreaPointsPass (0x4484c0) ─────────────────────────────────────
 //  Pass over the DISPLAYED candidate-point list (patch_verts_array01: vec3's at
 //  &unkown_pmesh_float1, count patch_verts_array01_count) — the curve-edit feedback
 //  set built during the patch curve drag.  Each point inside the frustum is added to
 //  (pass 0) or removed from (pass 1) the SELECTED set patch_verts_array02 (vec3's at
 //  &unkown_pmesh_float2, count patch_verts_array02_count).  Returns 1 iff pass 0 added.
-static int Patch_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2 )
+static int Patch_SelectAreaPointsPass( const edFrustumPlane_t *planes, char removePass )
 {
     byte added = 0;
 
@@ -7123,11 +5660,9 @@ static int Patch_SelectAreaPoints_sub( const edFrustumPlane_t *planes, char a2 )
         if ( !Ed_PointInFrustum4( planes, pt ) )
             continue;
 
-        if ( a2 )
+        if ( removePass )
         {
-            if ( g_qeglobals.bLockPatchVerts || g_qeglobals.bUnlockPatchVerts )
-                Assert( PMESH_CPP, 6754, 0, "%s",
-                        "!g_qeglobals.bLockPatchVerts && !g_qeglobals.bUnlockPatchVerts" );
+            iassert( !g_qeglobals.bLockPatchVerts && !g_qeglobals.bUnlockPatchVerts );
             int idx = Patch_FindSelectedArrayPoint( pt );
             if ( idx >= 0 )
             {
@@ -7162,15 +5697,15 @@ void Patch_SelectAreaPoints( const void *planes, char select )
         doSecondPass = 0;
     }
     g_nPatchClickedView = -1;
-    int r = Patch_SelectAreaPoints_sub( (const edFrustumPlane_t *)planes, 0 );
+    int r = Patch_SelectAreaPointsPass( (const edFrustumPlane_t *)planes, 0 );
     if ( !r && doSecondPass )
-        Patch_SelectAreaPoints_sub( (const edFrustumPlane_t *)planes, 1 );
+        Patch_SelectAreaPointsPass( (const edFrustumPlane_t *)planes, 1 );
 }
 
 // ── Splay_Vec2Normalize (editor Vec2Normalize 0x4A4750) — normalize a 2D vector in
 // place, return its length.  A length of 0 (or non-positive) leaves the vector
-// untouched (divides by 1).  NOTE the hex-rays `-v3 >= 0.0` is `v3 <= 0.0`.  (Named to
-// avoid clashing with the engine's com_math Vec2Normalize(vec2r).)
+// untouched (divides by 1).  (Named to avoid clashing with the engine's com_math
+// Vec2Normalize(vec2r).)
 static double Splay_Vec2Normalize( float *v )
 {
     double len = sqrt( (double)( v[0] * v[0] + v[1] * v[1] ) );
@@ -7188,8 +5723,7 @@ static double Splay_Vec2Normalize( float *v )
 // XY) bbox centre, then pushes each point to a fixed radius (Prefs→SplayDistance) along
 // its direction from the centre.  Requires ONLY patches selected (no faces, all selected
 // brushes are patches) and 2..1025 move-points picked.  Rebuilds every selected patch.
-// Faithful to the binary; NOTE the scratch `v15[]` copy of pre-splay xyz is written but
-// never read back (dead in the decompile) — preserved as a plain local pass here.
+// (The binary's scratch copy of the pre-splay xyz is never read back; it is omitted.)
 
 void DoSplay()
 {
@@ -7258,30 +5792,18 @@ void DoSplay()
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  PATCH/CURVE OPERATION CLUSTER (Cap / Thicken / Weld / Split), transcribed op-by-op
-//  from the CoD4Radiant decompilation + disassembly.
-//  ctrl grid convention (VERIFIED): patchMesh_t.ctrl[16][16] with p->ctrl[col][row] ==
-//  p+56 + col*1280 + row*80 (drawVert_t is 80 bytes).  The IDA `def->ctrl[a][b]` == col a,
-//  row b - direct 1:1 transcription.
+//  PATCH/CURVE OPERATION CLUSTER (Cap / Thicken / Weld / Split).
+//  ctrl grid convention: patchMesh_t.ctrl[16][16] is p->ctrl[col][row].
 // ═════════════════════════════════════════════════════════════════════════════
 
 // externs the cluster needs (all ported elsewhere; declared here for locality)
 #define selected_brushes_next ( selected_brushes.next )   // IDB 0x23F1868 == selected_brushes.next
-extern eclass_t    *Eclass_ForName( int hasBrushes, const char *name );      // eclass.cpp
-extern entity_s    *Entity_Create( eclass_t *eclass );                       // entity.cpp
-extern void         SetKeyValue( entity_s_def *e, const char *key, const char *value );// entity.cpp
 extern void         Undo_SetIdForEntity( entity_s_def *ent );                // undo.cpp 0x45E9E0
-extern void         Undo_AddEntity_W( entity_s *e );                         // 0x45E990
-extern void         Entity_Free( char *owner );                             // entity.cpp 0x485750 (a1=char*)
-extern void         Brush_Free( selbrush_t *b );                            // brush.cpp 0x475BA0
-extern void         Select_Deselect( int bDeselectFaces );                  // select.cpp 0x48E800
-extern void         Brush_RemoveFromList( selbrush_t *b );                  // brush.cpp
-extern entity_s    *world_entity;                                           // 0x25D5B30 (map.cpp)
 extern void        *zero;                                                   // empty-string sentinel (engine_stubs.cpp)
 
 // VectorCompare (0x44D810) — vec3 approx-equality (epsilon^2 = 1e-6).  Small helper,
 // inlined here (not otherwise ported).
-static int PMESH_VectorCompare( const float *a, const float *b )
+static int Vec3NearEqual( const float *a, const float *b )
 {
     for ( int k = 0; k < 3; ++k )
     {
@@ -7292,9 +5814,9 @@ static int PMESH_VectorCompare( const float *a, const float *b )
     return 1;
 }
 
-// sub_483B40 (0x483B40) — is `classname` a weld-mergeable container (worldspawn /
+// 0x483B40 — is `classname` a weld-mergeable container (worldspawn /
 // func_group / func_cullgroup)?  Inlined here (its only radiant caller is WeldMesh).
-static char PMESH_IsWeldContainer( const char *classname )
+static char Classname_IsWeldContainer( const char *classname )
 {
     static const char *names[3] = { "worldspawn", "func_group", "func_cullgroup" };
     for ( int i = 0; i < 3; ++i )
@@ -7305,32 +5827,31 @@ static char PMESH_IsWeldContainer( const char *classname )
 
 // Region_BoundsMidpoint (0x409F20) — midpoint of two vec3 (static in brush.cpp;
 // re-inlined here for the CapSpecial endcap).
-static void PMESH_Midpoint( const float *a, const float *b, float *out )
+static void Vec3Midpoint( const float *a, const float *b, float *out )
 {
     out[0] = ( a[0] + b[0] ) * 0.5f;
     out[1] = ( a[1] + b[1] ) * 0.5f;
     out[2] = ( a[2] + b[2] ) * 0.5f;
 }
 
-// The Curve→Cap "special cap" dialog (sub_40A8A0 = CCapDialog, IDD 0xA1) — headless: the
+// The Curve→Cap "special cap" dialog (CCapDialog 0x40A8A0, IDD 0xA1) — headless: the
 // port never pops it; Patch_CapCurrent handles the no-edge-matched case as a no-op.
 
-// ── Patch_CapFillGrid (sub_439BA0, 0x439BA0) — replicate one row's xyz down every ─
-//   row of the cap grid.  a2 = the just-created cap patchMesh_t, a1 = a source vec3
-//   (the picked edge point).  For every control point (col, row) of the cap: xyz = a1.
-static void Patch_CapFillGrid( const float *a1, patchMesh_t *a2 )   // args: a1@ecx, a2@edi
+// ── Patch_CapFillGrid (0x439BA0) — replicate one row's xyz down every ─
+//   row of the cap grid.  p = the just-created cap patchMesh_t, xyz = a source vec3
+//   (the picked edge point).  For every control point (col, row) of the cap: xyz.
+static void Patch_CapFillGrid( const float *xyz, patchMesh_t *p )
 {
-    for ( int col = 0; col < a2->width; ++col )
-        for ( int row = 0; row < a2->height; ++row )
+    for ( int col = 0; col < p->width; ++col )
+        for ( int row = 0; row < p->height; ++row )
         {
-            a2->ctrl[col][row].xyz[0] = a1[0];
-            a2->ctrl[col][row].xyz[1] = a1[1];
-            a2->ctrl[col][row].xyz[2] = a1[2];
+            p->ctrl[col][row].xyz[0] = xyz[0];
+            p->ctrl[col][row].xyz[1] = xyz[1];
+            p->ctrl[col][row].xyz[2] = xyz[2];
         }
 }
 
-// cap perimeter / interior index tables (IDB s_capPerimeter3x3 etc.).  Each entry is
-// a {col,row} pair.  The 3x3 form is used for a source edge of length <= 9, the 5x5
+// cap perimeter / interior index tables.  Each entry is a {col,row} pair.  The 3x3 form is used for a source edge of length <= 9, the 5x5
 // form for length > 9 (a longer edge needs a finer cap).
 static const int s_capPerimeter3x3[8][2] =
 { {0,0},{1,0},{2,0},{2,1},{2,2},{1,2},{0,2},{0,1} };
@@ -7350,18 +5871,17 @@ static const int s_capInterior5x5[9][2] =
 //   to Patch_CapTexture).  Returns the new symbiont brush instance (or 0).
 static selbrush_t *Patch_Cap( patchMesh_t *pm, char bByColumn, char bFirst )
 {
-    selbrush_t *b;
-    char        bIs3x3;                       // var_AD: 1 = 3x3 cap, 0 = 5x5 cap
-    if ( pm->width > 9 )
-    {
-        b      = Patch_GenericMesh( 5, 5, 2, 0, 0 );
-        bIs3x3 = 0;
-    }
-    else
-    {
-        b      = Patch_GenericMesh( 3, 3, 2, 0, 0 );
-        bIs3x3 = 1;
-    }
+    // srcCount = number of edge control points; edgeIdx = the fixed index of the edge (a row
+    // when walking the columns, a column when walking the rows).
+    // KIWI: the cap size follows the edge's own length - the binary picked it from the width
+    // whatever the edge (> 9 -> 5x5) and walked srcCount entries of the 8-entry 3x3 ring
+    // table (a closed 9-wide edge read one past it; a 10+ edge along the rows read further
+    // and wrote stray cells).  And edgeIdx's last-edge index comes from the OTHER axis, as in
+    // the binary (the port had them swapped, so a far-edge cap read the wrong row/column).
+    const int srcCount = bByColumn ? pm->width : pm->height;
+    const int edgeIdx  = bFirst ? 0 : ( bByColumn ? pm->height : pm->width ) - 1;
+    const char bIs3x3  = ( srcCount <= 9 );   // 1 = 3x3 cap, 0 = 5x5 cap
+    selbrush_t *b = bIs3x3 ? Patch_GenericMesh( 3, 3, 2, 0, 0 ) : Patch_GenericMesh( 5, 5, 2, 0, 0 );
     if ( !b )
     {
         Sys_Printf( "Unable to cap. You may need to ungroup the patch.\n" );
@@ -7375,28 +5895,19 @@ static selbrush_t *Patch_Cap( patchMesh_t *pm, char bByColumn, char bFirst )
     float mins[3] = { 131072.0f, 131072.0f, 131072.0f };
     float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
 
-    // srcCount = number of edge control points; edgeIdx = the fixed index of the edge.
-    int srcCount = bByColumn ? pm->width : pm->height;
-    int edgeIdx;
-    if ( bFirst )
-        edgeIdx = 0;
-    else
-        edgeIdx = ( bByColumn ? pm->width : pm->height ) - 1;
-
-    // seed the whole cap grid with the first edge point (source's [edgeIdx][edgeIdx]
-    // corner — the IDB adds `20*edgeIdx` DWORDs = 80*edgeIdx bytes to pm, then reads
-    // ctrl[0][edgeIdx] at +0x38).  Then fills the ring.
-    // v7 base = &pm->ctrl[0][edgeIdx] (walk +0x40 to skip to xyz below).
-    drawVert_t *edgeBase = &pm->ctrl[0][edgeIdx];
+    // seed the whole cap grid with the edge's first point, then fill the ring (the binary
+    // seeded with ctrl[0][edgeIdx] for both walks - off the edge when walking the rows; KIWI
+    // seeds with the edge's own first point, which ring slots past srcCount then repeat).
+    const drawVert_t *edgeBase = bByColumn ? &pm->ctrl[0][edgeIdx] : &pm->ctrl[edgeIdx][0];
     Patch_CapFillGrid( edgeBase->xyz, def );
 
     // ── perimeter ring: map each source-edge control point onto the cap ring ──
-    for ( int i = 0; i < srcCount; ++i )
+    // (bounded by the ring: a closed edge's last point repeats its first)
+    const int ringSize = bIs3x3 ? 8 : 16;
+    for ( int i = 0; i < srcCount && i < ringSize; ++i )
     {
         // src point: bByColumn → walk down the columns (ctrl[i][edgeIdx]);
         //            else       → walk along the row (ctrl[edgeIdx][i]).
-        //   edgeBase = &pm->ctrl[0][edgeIdx]; esi advances +0x40 then +0x500 per i
-        //   (=1280 bytes = one column), so src = &pm->ctrl[i][edgeIdx].xyz.
         const float *src = bByColumn
                          ? pm->ctrl[i][edgeIdx].xyz
                          : pm->ctrl[edgeIdx][i].xyz;
@@ -7435,7 +5946,7 @@ static selbrush_t *Patch_Cap( patchMesh_t *pm, char bByColumn, char bFirst )
     }
 
     // ── if bFirst, vertical-flip the cap grid (mirror each column's rows) so the ──
-    //   winding faces outward (0x439f15 loop; identical to patchInvert2's swap).
+    //   winding faces outward (identical to patchInvert2's swap).
     if ( bFirst )
     {
         for ( int col = 0; col < def->width; ++col )
@@ -7480,17 +5991,14 @@ static selbrush_t *Patch_CapSpecial( patchMesh_t *pm, int nType, char bFirst )
 
     int edgeIdx = bFirst ? 0 : ( pm->height - 1 );
 
-    // src[col] = &pm->ctrl[col][edgeIdx].xyz : the IDB indexes `&pm->width + 20*edgeIdx`
-    // (= pm + 80*edgeIdx bytes) as a float array, where [14]=ctrl[0][edgeIdx].x,
-    // [334]=ctrl[1], [654]=ctrl[2], [974]=ctrl[3], [1294]=ctrl[4] (320 floats/column).
+    // src[col] = &pm->ctrl[col][edgeIdx].xyz
     #define SRC(col) ( pm->ctrl[(col)][edgeIdx].xyz )
 
-    // Patch_CalcBounds(v36, v29, pm, 0) — v29 is a scratch mins used by nType 1.
     float capMins[3], capMaxs[3];
     Patch_CalcBounds( capMins, capMaxs, pm, false );
     float mid[3];
 
-    char bFlipMatch;   // v10: whether this shape's grid needs the vertical flip
+    char bFlipMatch;   // whether this shape's grid needs the vertical flip
     if ( nType == 2 )
     {
         def->ctrl[0][0].xyz[0] = SRC(0)[0]; def->ctrl[0][0].xyz[1] = SRC(0)[1]; def->ctrl[0][0].xyz[2] = SRC(0)[2];
@@ -7523,8 +6031,8 @@ static selbrush_t *Patch_CapSpecial( patchMesh_t *pm, int nType, char bFirst )
     }
     else if ( nType == 1 )
     {
-        // endcap: interior column midpoint via Region_BoundsMidpoint(SRC(4), SRC(0), &v29).
-        PMESH_Midpoint( SRC(4), SRC(0), mid );
+        // endcap: interior column midpoint via Region_BoundsMidpoint(SRC(4), SRC(0)).
+        Vec3Midpoint( SRC(4), SRC(0), mid );
         def->ctrl[0][0].xyz[0] = SRC(0)[0]; def->ctrl[0][0].xyz[1] = SRC(0)[1]; def->ctrl[0][0].xyz[2] = SRC(0)[2];
         def->ctrl[1][0].xyz[0] = mid[0];    def->ctrl[1][0].xyz[1] = mid[1];    def->ctrl[1][0].xyz[2] = mid[2];
         def->ctrl[2][0].xyz[0] = SRC(4)[0]; def->ctrl[2][0].xyz[1] = SRC(4)[1]; def->ctrl[2][0].xyz[2] = SRC(4)[2];
@@ -7553,7 +6061,7 @@ static selbrush_t *Patch_CapSpecial( patchMesh_t *pm, int nType, char bFirst )
         def->ctrl[2][2].xyz[0] = SRC(2)[0]; def->ctrl[2][2].xyz[1] = SRC(2)[1]; def->ctrl[2][2].xyz[2] = SRC(2)[2];
         def->ctrl[3][2].xyz[0] = SRC(3)[0]; def->ctrl[3][2].xyz[1] = SRC(3)[1]; def->ctrl[3][2].xyz[2] = SRC(3)[2];
         def->ctrl[4][2].xyz[0] = SRC(3)[0]; def->ctrl[4][2].xyz[1] = SRC(3)[1]; def->ctrl[4][2].xyz[2] = SRC(3)[2];
-        bFlipMatch = 1;   // nType==3 falls through to v10=1 (the shared else block set v10=1)
+        bFlipMatch = 1;   // nType==3 takes the shared else block's flip flag (1)
     }
     #undef SRC
 
@@ -7581,7 +6089,7 @@ static selbrush_t *Patch_CapSpecial( patchMesh_t *pm, int nType, char bFirst )
     return b;
 }
 
-// UI-independent action behind CCapDialog's OK button (Patch_CapCurrent 0x43abaf-0x43abf3).
+// UI-independent action behind CCapDialog's OK button (inside Patch_CapCurrent in the binary).
 int Cap_Apply( patchMesh_t *def, int nType, selbrush_t **caps )
 {
     selbrush_t *c0 = Patch_CapSpecial( def, nType, 0 );
@@ -7591,19 +6099,76 @@ int Cap_Apply( patchMesh_t *def, int nType, selbrush_t **caps )
     return 2;
 }
 
-// ── CCapDialog (sub_40A8A0, IDD 0xA1 = 161) — the "special cap" type picker ──────
+// ── CCapDialog (0x40A8A0, IDD 0xA1 = 161) — the "special cap" type picker ──────
 //   Radio dialog popped by Patch_CapCurrent when the patch has no closed seam edge.
-//   The binary's DoDataExchange (0x40A900) is one DDX_Radio(pDX, 1285, m_nType@+0x74)
+//   Its DoDataExchange (0x40A900) is one DDX_Radio(pDX, 1285, m_nType)
 //   over the 4-button group {1285 Bevel, 1287 Endcap, 1289 Inverted Bevel, 1291
-//   Inverted Endcap} → index 0..3.  No OnInitDialog / OnOK overrides (default MFC).
-//   Hand-built like CDialogThick / CPatchDensityDlg.
-// U-GUARD-2: MFC-only (a straggler U-GUARD-DIALOGS missed in this TU).  Cap_Apply above is
-// the COMMON core, ready for the ImGui replacement.
+//   Inverted Endcap} → index 0..3.  KIWI: imgui_panel_cap.cpp is that dialog, over
+//   Cap_Commit below.
+
+// The closed edges of a patch - opposite control-grid edges that coincide (a closed loop:
+// cap it) - as (bByColumn, bLast) pairs in the binary's order.  Returns the count.
+static int Patch_CapSeams( patchMesh_t *def, int seams[4][2] )
+{
+    int n = 0;
+    //  1) ctrl[0][0]        vs ctrl[width-1][0]   (column 0 vs last column, row 0)
+    if ( Vec3NearEqual( def->ctrl[0][0].xyz, def->ctrl[def->width - 1][0].xyz ) )
+        { seams[n][0] = 1; seams[n][1] = 0; ++n; }
+    //  2) ctrl[0][height-1] vs ctrl[width-1][height-1]
+    if ( Vec3NearEqual( def->ctrl[0][def->height - 1].xyz,
+                        def->ctrl[def->width - 1][def->height - 1].xyz ) )
+        { seams[n][0] = 1; seams[n][1] = 1; ++n; }
+    //  3) ctrl[0][0]        vs ctrl[0][height-1]  (row 0 vs last row, column 0)
+    if ( Vec3NearEqual( def->ctrl[0][0].xyz, def->ctrl[0][def->height - 1].xyz ) )
+        { seams[n][0] = 0; seams[n][1] = 0; ++n; }
+    //  4) ctrl[width-1][0]  vs ctrl[width-1][height-1]
+    if ( Vec3NearEqual( def->ctrl[def->width - 1][0].xyz,
+                        def->ctrl[def->width - 1][def->height - 1].xyz ) )
+        { seams[n][0] = 0; seams[n][1] = 1; ++n; }
+    return n;
+}
+
+// The shared tail of both cap paths: select the caps and, for a world patch, group them
+// into a "patchCapped" func_group (the Patch_CapCurrent tail).
+static void Patch_CapFinish( selbrush_t *sel, selbrush_t **caps, int n )
+{
+    if ( n <= 0 )
+        return;
+    for ( int i = n - 1; i >= 0; --i )
+        if ( caps[i] )
+            Select_Brush( caps[i], 1, 1, 0 );
+
+    if ( (entity_s *)sel->owner == world_entity )
+    {
+        eclass_t *ec = Eclass_ForName( 0, "func_group" );
+        if ( ec )
+        {
+            entity_s *ent = Entity_Create( ec );
+            SetKeyValue( (entity_s_def *)ent->def, "type", "patchCapped" );
+            Undo_SetIdForEntity( (entity_s_def *)ent->def );
+        }
+    }
+}
+
+// KIWI: Curve > Cap's pre-check - -1 when the selection is not one patch (printed), else the
+// number of closed edges.  Cmd_OnCurveCap opens its undo bracket only when there is
+// something to auto-cap; an open patch (0) goes to the type prompt, which brackets its commit.
+int Patch_CapCountSeams()
+{
+    if ( !( QE_SingleBrush() && selected_brushes_next->patch ) )
+    {
+        Sys_Printf( "Cannot cap multiple selection. Please select a single patch.\n" );
+        return -1;
+    }
+    int seams[4][2];
+    return Patch_CapSeams( selected_brushes_next->patch->def, seams );
+}
 
 // ── Patch_CapCurrent (0x43AA20) — Curve→Cap: cap the single selected patch ──────
-//   Auto-cap all four "closed" edges (VectorCompare tests the seam), each becoming a
-//   cap brush via Patch_Cap.  If none matched (open patch), pop the special-cap dialog
-//   (headless: skipped) and build two special caps.  Groups the caps into a func_group.
+//   Auto-cap every "closed" edge, each becoming a cap brush via Patch_Cap, and group the
+//   caps into a func_group.  The binary popped CCapDialog when no edge was closed (open
+//   patch) and built two special caps from it - KIWI: that is the ImGui prompt
+//   (imgui_panel_cap.cpp -> Cap_Commit), opened by Cmd_OnCurveCap instead.
 void Patch_CapCurrent()
 {
     if ( !( QE_SingleBrush() && selected_brushes_next->patch ) )
@@ -7613,74 +6178,52 @@ void Patch_CapCurrent()
     }
 
     selbrush_t   *sel = selected_brushes_next;
-    int           n   = 0;
-    entity_brush_s *pCap = (entity_brush_s *)sel;
     iassert( sel->patch->def == sel->def->patch );
     patchMesh_t  *def = sel->patch->def;
     selbrush_t   *caps[4] = { 0, 0, 0, 0 };
-
-    // The four seam tests mirror the IDB's raw-offset VectorCompare calls; they check
-    // whether opposite edges of the control grid coincide (a closed loop → cap it).
-    //  1) ctrl[0][0]        vs ctrl[width-1][0]   (column 0 vs last column, row 0)
-    if ( PMESH_VectorCompare( def->ctrl[0][0].xyz,
-                             def->ctrl[def->width - 1][0].xyz ) )
+    int           seams[4][2];
+    const int     count = Patch_CapSeams( def, seams );
+    int           n = 0;
+    for ( int s = 0; s < count; ++s )
     {
-        selbrush_t *c = Patch_Cap( def, 1, 0 );
+        selbrush_t *c = Patch_Cap( def, seams[s][0], seams[s][1] );
         if ( c ) caps[n++] = c;
     }
-    //  2) ctrl[0][height-1] vs ctrl[width-1][height-1]
-    if ( PMESH_VectorCompare( def->ctrl[0][def->height - 1].xyz,
-                             def->ctrl[def->width - 1][def->height - 1].xyz ) )
-    {
-        selbrush_t *c = Patch_Cap( def, 1, 1 );
-        if ( c ) caps[n++] = c;
-    }
-    //  3) ctrl[0][0]        vs ctrl[0][height-1]  (row 0 vs last row, column 0)
-    if ( PMESH_VectorCompare( def->ctrl[0][0].xyz,
-                             def->ctrl[0][def->height - 1].xyz ) )
-    {
-        selbrush_t *c = Patch_Cap( def, 0, 0 );
-        if ( c ) caps[n++] = c;
-    }
-    //  4) ctrl[width-1][0]  vs ctrl[width-1][height-1]
-    if ( PMESH_VectorCompare( def->ctrl[def->width - 1][0].xyz,
-                             def->ctrl[def->width - 1][def->height - 1].xyz ) )
-    {
-        selbrush_t *c = Patch_Cap( def, 0, 1 );
-        if ( c ) caps[n++] = c;
-    }
+    Patch_CapFinish( sel, caps, n );
+}
 
-    if ( n == 0 )
+// KIWI: the open-patch cap - CCapDialog's OK (Patch_CapCurrent 0x43abaf-0x43abf3), from the
+// ImGui prompt.  Re-checks the selection (it can change while the prompt is up) and brackets
+// the COMMIT, so Cancel leaves no undo record (the Sides_Commit pattern).  The Endcap types
+// (1, 3) read source columns 3 and 4 - on a patch under 5 columns wide the binary built a
+// garbage cap from stale control points; refused here.
+void Cap_Commit( int nType )
+{
+    if ( !( QE_SingleBrush() && selected_brushes_next->patch ) )
     {
-        // No closed edge → pop CCapDialog (sub_40A8A0, IDD 0xA1) to pick the special-cap
-        // shape, then build two Patch_CapSpecial brushes (bFirst 0 and 1) — verbatim from
-        // Patch_CapCurrent 0x43abaf-0x43abf3.
-        // NO-MFC: the special-cap type prompt is MFC-modal, so no cap is built — exactly a
-        // Cancel in the MFC shell (n stays 0, the func_group grouping below is skipped).
-        // Cap_Apply is the ready core for the ImGui prompt.
+        Sys_Printf( "Cap: select a single patch.\n" );
+        return;
     }
-
-    if ( n > 0 )
+    selbrush_t  *sel = selected_brushes_next;
+    patchMesh_t *def = sel->patch->def;
+    if ( ( nType == 1 || nType == 3 ) && def->width < 5 )
     {
-        for ( int i = n - 1; i >= 0; --i )
-            if ( caps[i] )
-                Select_Brush( caps[i], 1, 1, 0 );
-
-        if ( (entity_s *)pCap->owner == world_entity )
-        {
-            eclass_t *ec = Eclass_ForName( 0, "func_group" );
-            if ( ec )
-            {
-                entity_s *ent = Entity_Create( ec );
-                SetKeyValue( (entity_s_def *)ent->def, "type", "patchCapped" );
-                Undo_SetIdForEntity( (entity_s_def *)ent->def );
-            }
-        }
+        Sys_Printf( "Cap: an endcap needs a patch at least 5 columns wide.\n" );
+        return;
     }
+    Undo_ClearRedo();
+    Undo_GeneralStart( "curve cap" );
+    Undo_AddBrushList( &selected_brushes );
+    selbrush_t *caps[4] = { 0, 0, 0, 0 };
+    const int n = Cap_Apply( def, nType, caps );
+    Patch_CapFinish( sel, caps, n );
+    Undo_EndBrushList( &selected_brushes );
+    Undo_End();
+    g_nUpdateBits = -1;
 }
 
 // ── Patch_Thicken (0x448700) — Curve→Thicken: offset a copy along normals ──────
-//   a1 = thickness, bseam = build the connecting seam strip patches.  Duplicates the
+//   bseam = build the connecting seam strip patches.  Duplicates the
 //   selected patch, offsets every control point of the duplicate by (-thickness)*normal
 //   (mesh normals must be computed first), inverts it, and — when bseam — builds up to
 //   four 3-wide "seam" patches connecting the source edges to the offset copy.
@@ -7688,19 +6231,66 @@ void Patch_CapCurrent()
 extern patchMesh_t *Patch_Duplicate( patchMesh_t *from );
 static void patchInvert2( patchMesh_t *p );   // fwd (defined above; static)
 
-void Patch_Thicken( int a1, char bseam )
+// One Thicken seam strip: a 3-wide patch from the source's edge (column `edge` when
+// `alongHeight`, else row `edge`) to the offset copy's; `flip` turns it to face out.
+// KIWI: one helper for the four copies, and a strip Patch_GenericMesh refuses (it printed
+// why) is skipped - the binary dereferenced the NULL strip.
+static void Patch_ThickenSeam( patchMesh_t *src, patchMesh_t *dup, bool alongHeight, int edge,
+                               bool flip )
 {
-    int v73 = -a1;                                // negated thickness
+    const int n = alongHeight ? src->height : src->width;
+    selbrush_t *b = nullptr;
+    if ( alongHeight && n < 3 )
+        Sys_Printf( "Invalid patch width or height.\n" );
+    else
+        b = alongHeight ? Patch_GenericMesh( 3, n, 2, 0, 1 ) : Patch_GenericMesh( n, 3, 2, 0, 1 );
+    if ( !b )
+        return;
+    iassert( b->patch->def == b->def->patch );
+    patchMesh_t *def = b->patch->def;
+    def->type = (PATCH_TYPES)( def->type | PATCH_SEAM );
+    for ( int i = 0; i < n; ++i )
+    {
+        // strip index 0 = the source edge, 2 = the copy's edge, 1 = their midpoint
+        const drawVert_t &s = alongHeight ? src->ctrl[edge][i] : src->ctrl[i][edge];
+        const drawVert_t &d = alongHeight ? dup->ctrl[edge][i] : dup->ctrl[i][edge];
+        drawVert_t &v0 = alongHeight ? def->ctrl[0][i] : def->ctrl[i][0];
+        drawVert_t &v1 = alongHeight ? def->ctrl[1][i] : def->ctrl[i][1];
+        drawVert_t &v2 = alongHeight ? def->ctrl[2][i] : def->ctrl[i][2];
+        for ( int k = 0; k < 3; ++k )
+        {
+            v0.xyz[k] = s.xyz[k];
+            v2.xyz[k] = d.xyz[k];
+            v1.xyz[k] = ( v0.xyz[k] + v2.xyz[k] ) * 0.5f;
+        }
+    }
+    float smins[3], smaxs[3];
+    Patch_CalcBounds( smins, smaxs, def, true );
+    Brush_RebuildBrush( (brush_t *)def->pSymbiot, smins, smaxs );
+    Patch_Naturalize( def );
+    if ( flip )
+    {
+        patchInvert2( def );
+        if ( def->curveDef )
+            free( def->curveDef );
+        def->curveDef = Patch_GenericMesh2( def, g_qeglobals.current_edit_layer, 0, 0 );
+        ++def->version;
+    }
+    Select_Brush( b, 1, 1, 0 );
+}
+
+void Patch_Thicken( int thickness, char bseam )
+{
+    int negThick = -thickness;
     if ( !( QE_SingleBrush() && selected_brushes_next->patch
             && selected_brushes_next->patch->def ) )
     {
         Sys_Printf( "Cannot thicken multiple patches. Please select a single patch.\n" );
         return;
     }
-    patchMesh_t *pmesh = selected_brushes_next->patch->def;
-    patchMesh_t *v70   = pmesh;                    // original (survives the seam swaps)
+    patchMesh_t *src = selected_brushes_next->patch->def;
 
-    if ( ( pmesh->type & PATCH_TERRAIN ) != 0 )
+    if ( ( src->type & PATCH_TERRAIN ) != 0 )
     {
         Sys_Printf( "Thickening of terrain patches not yet implemented.  "
                     "Tell the coders if you need this feature.\n" );
@@ -7710,178 +6300,53 @@ void Patch_Thicken( int a1, char bseam )
     Undo_ClearRedo();
     Undo_GeneralStart( "Patch thicken" );
     Undo_AddBrushList( &selected_brushes );
-    Patch_MeshNormals( pmesh );
-    patchMesh_t *v4 = Patch_Duplicate( pmesh );    // the offset copy
-    patchMesh_t *v63 = v4;
+    Patch_MeshNormals( src );
+    patchMesh_t *dup = Patch_Duplicate( src );     // the offset copy
 
     // 1) offset every control point of the copy: dup.xyz = src.xyz + (-t)*src.normal
-    float t = (float)v73;
-    for ( int col = 0; col < pmesh->width; ++col )
-        for ( int row = 0; row < pmesh->height; ++row )
+    float t = (float)negThick;
+    for ( int col = 0; col < src->width; ++col )
+        for ( int row = 0; row < src->height; ++row )
         {
-            drawVert_t *s = &pmesh->ctrl[col][row];
-            drawVert_t *d = &v4->ctrl[col][row];
+            drawVert_t *s = &src->ctrl[col][row];
+            drawVert_t *d = &dup->ctrl[col][row];
             d->xyz[0] = s->normal[0] * t + s->xyz[0];
             d->xyz[1] = s->normal[1] * t + s->xyz[1];
             d->xyz[2] = s->normal[2] * t + s->xyz[2];
         }
 
-    Patch_Rebuild( v4, 1 );
-    v4->type = (PATCH_TYPES)( v4->type | PATCH_THICK );
-    selbrush_t *v13 = (selbrush_t *)Brush_AddToList( (brush_t *)v4->pSymbiot,
-                                                     selected_brushes_next->owner );
-    if ( v13->next || v13->prev )
+    Patch_Rebuild( dup, 1 );
+    dup->type = (PATCH_TYPES)( dup->type | PATCH_THICK );
+    selbrush_t *inst = (selbrush_t *)Brush_AddToList( (brush_t *)dup->pSymbiot,
+                                                      selected_brushes_next->owner );
+    if ( inst->next || inst->prev )
         Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-    Brush_AddToList2( v13 );
+    Brush_AddToList2( inst );
 
     if ( bseam )
     {
+        const int lastCol = src->width - 1, lastRow = src->height - 1;
         // Non-cylinder patches get four seam strips (two along height, two along width).
-        if ( ( pmesh->type & PATCH_CYLINDER ) == 0 )
+        if ( ( src->type & PATCH_CYLINDER ) == 0 )
         {
-            // ── seam A: 3 x height strip along column 0 (src col0 ↔ dup col0) ──
-            selbrush_t *bA;
-            if ( pmesh->height < 3 )
-            {
-                Sys_Printf( "Invalid patch width or height.\n" );
-                bA = 0;
-            }
-            else
-                bA = Patch_GenericMesh( 3, pmesh->height, 2, 0, 1 );
-            iassert( bA->patch->def == bA->def->patch );
-            patchMesh_t *def = bA->patch->def;
-            def->type = (PATCH_TYPES)( def->type | PATCH_SEAM );
-            for ( int row = 0; row < pmesh->height; ++row )
-            {
-                // col 0 = src col0; col 2 = dup col0; col 1 = midpoint.
-                def->ctrl[0][row].xyz[0] = pmesh->ctrl[0][row].xyz[0];
-                def->ctrl[0][row].xyz[1] = pmesh->ctrl[0][row].xyz[1];
-                def->ctrl[0][row].xyz[2] = pmesh->ctrl[0][row].xyz[2];
-                def->ctrl[2][row].xyz[0] = v4->ctrl[0][row].xyz[0];
-                def->ctrl[2][row].xyz[1] = v4->ctrl[0][row].xyz[1];
-                def->ctrl[2][row].xyz[2] = v4->ctrl[0][row].xyz[2];
-                def->ctrl[1][row].xyz[0] = ( def->ctrl[0][row].xyz[0] + def->ctrl[2][row].xyz[0] ) * 0.5f;
-                def->ctrl[1][row].xyz[1] = ( def->ctrl[0][row].xyz[1] + def->ctrl[2][row].xyz[1] ) * 0.5f;
-                def->ctrl[1][row].xyz[2] = ( def->ctrl[0][row].xyz[2] + def->ctrl[2][row].xyz[2] ) * 0.5f;
-            }
-            float smins[3], smaxs[3];
-            Patch_CalcBounds( smins, smaxs, def, true );
-            Brush_RebuildBrush( (brush_t *)def->pSymbiot, smins, smaxs );
-            Patch_Naturalize( def );
-            patchInvert2( def );
-            if ( def->curveDef )
-                free( def->curveDef );
-            def->curveDef = Patch_GenericMesh2( def, g_qeglobals.current_edit_layer, 0, 0 );
-            ++def->version;
-            Select_Brush( bA, 1, 1, 0 );
-
-            // ── seam B: 3 x height strip along last column (src colW ↔ dup colW) ──
-            int lastCol = v70->width - 1;
-            selbrush_t *bB;
-            if ( v70->height < 3 )
-            {
-                Sys_Printf( "Invalid patch width or height.\n" );
-                bB = 0;
-            }
-            else
-                bB = Patch_GenericMesh( 3, v70->height, 2, 0, 1 );
-            iassert( bB->patch->def == bB->def->patch );
-            patchMesh_t *def2 = bB->patch->def;
-            def2->type = (PATCH_TYPES)( def2->type | PATCH_SEAM );
-            for ( int row = 0; row < v70->height; ++row )
-            {
-                def2->ctrl[0][row].xyz[0] = v70->ctrl[lastCol][row].xyz[0];
-                def2->ctrl[0][row].xyz[1] = v70->ctrl[lastCol][row].xyz[1];
-                def2->ctrl[0][row].xyz[2] = v70->ctrl[lastCol][row].xyz[2];
-                def2->ctrl[2][row].xyz[0] = v63->ctrl[lastCol][row].xyz[0];
-                def2->ctrl[2][row].xyz[1] = v63->ctrl[lastCol][row].xyz[1];
-                def2->ctrl[2][row].xyz[2] = v63->ctrl[lastCol][row].xyz[2];
-                def2->ctrl[1][row].xyz[0] = ( def2->ctrl[0][row].xyz[0] + def2->ctrl[2][row].xyz[0] ) * 0.5f;
-                def2->ctrl[1][row].xyz[1] = ( def2->ctrl[0][row].xyz[1] + def2->ctrl[2][row].xyz[1] ) * 0.5f;
-                def2->ctrl[1][row].xyz[2] = ( def2->ctrl[0][row].xyz[2] + def2->ctrl[2][row].xyz[2] ) * 0.5f;
-            }
-            Patch_CalcBounds( smins, smaxs, def2, true );
-            Brush_RebuildBrush( (brush_t *)def2->pSymbiot, smins, smaxs );
-            Patch_Naturalize( def2 );
-            Select_Brush( bB, 1, 1, 0 );
-            pmesh = v70;
-            v4    = v63;
+            Patch_ThickenSeam( src, dup, true, 0, true );          // A: column 0
+            Patch_ThickenSeam( src, dup, true, lastCol, false );   // B: last column
         }
-
-        // ── seam C: width x 3 strip along row 0 (src row0 ↔ dup row0) ──
-        selbrush_t *bC = Patch_GenericMesh( pmesh->width, 3, 2, 0, 1 );
-        iassert( bC->patch->def == bC->def->patch );
-        patchMesh_t *def3 = bC->patch->def;
-        def3->type = (PATCH_TYPES)( def3->type | PATCH_SEAM );
-        for ( int col = 0; col < pmesh->width; ++col )
-        {
-            def3->ctrl[col][0].xyz[0] = pmesh->ctrl[col][0].xyz[0];
-            def3->ctrl[col][0].xyz[1] = pmesh->ctrl[col][0].xyz[1];
-            def3->ctrl[col][0].xyz[2] = pmesh->ctrl[col][0].xyz[2];
-            def3->ctrl[col][2].xyz[0] = v4->ctrl[col][0].xyz[0];
-            def3->ctrl[col][2].xyz[1] = v4->ctrl[col][0].xyz[1];
-            def3->ctrl[col][2].xyz[2] = v4->ctrl[col][0].xyz[2];
-            def3->ctrl[col][1].xyz[0] = ( def3->ctrl[col][0].xyz[0] + def3->ctrl[col][2].xyz[0] ) * 0.5f;
-            def3->ctrl[col][1].xyz[1] = ( def3->ctrl[col][0].xyz[1] + def3->ctrl[col][2].xyz[1] ) * 0.5f;
-            def3->ctrl[col][1].xyz[2] = ( def3->ctrl[col][0].xyz[2] + def3->ctrl[col][2].xyz[2] ) * 0.5f;
-        }
-        float smins[3], smaxs[3];
-        Patch_CalcBounds( smins, smaxs, def3, true );
-        Brush_RebuildBrush( (brush_t *)def3->pSymbiot, smins, smaxs );
-        Patch_Naturalize( def3 );
-        patchInvert2( def3 );
-        if ( def3->curveDef )
-            free( def3->curveDef );
-        def3->curveDef = Patch_GenericMesh2( def3, g_qeglobals.current_edit_layer, 0, 0 );
-        ++def3->version;
-        Select_Brush( bC, 1, 1, 0 );
-
-        // ── seam D: width x 3 strip along last row (src rowH ↔ dup rowH) ──
-        int lastRow = v70->height - 1;
-        selbrush_t *bD = Patch_GenericMesh( v70->width, 3, 2, 0, 1 );
-        iassert( bD->patch->def == bD->def->patch );
-        patchMesh_t *def4 = bD->patch->def;
-        def4->type = (PATCH_TYPES)( def4->type | PATCH_SEAM );
-        for ( int col = 0; col < v70->width; ++col )
-        {
-            def4->ctrl[col][0].xyz[0] = v70->ctrl[col][lastRow].xyz[0];
-            def4->ctrl[col][0].xyz[1] = v70->ctrl[col][lastRow].xyz[1];
-            def4->ctrl[col][0].xyz[2] = v70->ctrl[col][lastRow].xyz[2];
-            def4->ctrl[col][2].xyz[0] = v63->ctrl[col][lastRow].xyz[0];
-            def4->ctrl[col][2].xyz[1] = v63->ctrl[col][lastRow].xyz[1];
-            def4->ctrl[col][2].xyz[2] = v63->ctrl[col][lastRow].xyz[2];
-            def4->ctrl[col][1].xyz[0] = ( def4->ctrl[col][0].xyz[0] + def4->ctrl[col][2].xyz[0] ) * 0.5f;
-            def4->ctrl[col][1].xyz[1] = ( def4->ctrl[col][0].xyz[1] + def4->ctrl[col][2].xyz[1] ) * 0.5f;
-            def4->ctrl[col][1].xyz[2] = ( def4->ctrl[col][0].xyz[2] + def4->ctrl[col][2].xyz[2] ) * 0.5f;
-        }
-        Patch_CalcBounds( smins, smaxs, def4, true );
-        Brush_RebuildBrush( (brush_t *)def4->pSymbiot, smins, smaxs );
-        Patch_Naturalize( def4 );
-        Select_Brush( bD, 1, 1, 0 );
-        v4 = v63;
+        Patch_ThickenSeam( src, dup, false, 0, true );             // C: row 0
+        Patch_ThickenSeam( src, dup, false, lastRow, false );      // D: last row
     }
 
     // invert the offset copy so its faces point outward, rebuild its curveDef.
-    patchInvert2( v4 );
-    if ( v4->curveDef )
-        free( v4->curveDef );
-    v4->curveDef = Patch_GenericMesh2( v4, g_qeglobals.current_edit_layer, 0, 0 );
-    ++v4->version;
+    patchInvert2( dup );
+    if ( dup->curveDef )
+        free( dup->curveDef );
+    dup->curveDef = Patch_GenericMesh2( dup, g_qeglobals.current_edit_layer, 0, 0 );
+    ++dup->version;
 
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
 
-    // undo id-stamp tail (identical idiom to PMESH_18).
-    if ( g_lastundo && !g_lastundo->done )
-    {
-        for ( selbrush_t *i = selected_brushes_next; i != &selected_brushes; i = i->next )
-        {
-            i->def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
-            entity_s *owner = (entity_s *)(intptr_t)i->def->owner;
-            if ( *(int *)&owner->eclass->fixedsize )
-                owner->epairEdits = g_lastundo->id;
-        }
-    }
+    Undo_EndBrushList( &selected_brushes );
     Undo_End();
 }
 
@@ -7912,22 +6377,22 @@ static void patchInvert( patchMesh_t *p )
     }
 }
 
-// ── Patch_Weld_EdgeParams (sub_44C1A0, 0x44C1A0) — pick edge-walk start/step ────
-//   Given an edge selector (a5=byColumn, a6=atHigh, a7=reverse) fills the start
-//   (col=*result, row=*a4) and step (dcol=*a3, drow=*a8) to iterate over one edge of a
-//   patch grid `pm` (pm[0]=width, pm[1]=height).  Verbatim from the decompile.
-static void Patch_Weld_EdgeParams( int *outStartCol, const int *pm,
+// ── Patch_Weld_EdgeParams (0x44C1A0) — pick edge-walk start/step ────
+//   Given an edge selector (fixedCol, atEnd, reverse) fills the start (outStartCol,
+//   outStartRow) and step (outStepCol, outStepRow) to iterate over one edge of a patch
+//   grid `pm`.
+static void Patch_Weld_EdgeParams( int *outStartCol, const patchMesh_t *pm,
                                    int *outStepCol, int *outStartRow,
-                                   int a5, int a6, int a7, int *outStepRow )
+                                   int fixedCol, int atEnd, int reverse, int *outStepRow )
 {
-    if ( a5 )
+    if ( fixedCol )
     {
-        if ( a6 ) *outStartCol = pm[0] - 1;
-        else      *outStartCol = 0;
+        if ( atEnd ) *outStartCol = pm->width - 1;
+        else         *outStartCol = 0;
         *outStepCol = 0;
-        if ( a7 )
+        if ( reverse )
         {
-            *outStartRow = pm[1] - 1;
+            *outStartRow = pm->height - 1;
             *outStepRow  = -1;
         }
         else
@@ -7938,9 +6403,9 @@ static void Patch_Weld_EdgeParams( int *outStartCol, const int *pm,
     }
     else
     {
-        if ( a7 )
+        if ( reverse )
         {
-            *outStartCol = pm[0] - 1;
+            *outStartCol = pm->width - 1;
             *outStepCol  = -1;
         }
         else
@@ -7948,59 +6413,46 @@ static void Patch_Weld_EdgeParams( int *outStartCol, const int *pm,
             *outStartCol = 0;
             *outStepCol  = 1;
         }
-        if ( a6 ) *outStartRow = pm[1] - 1;
-        else      *outStartRow = 0;
+        if ( atEnd ) *outStartRow = pm->height - 1;
+        else         *outStartRow = 0;
         *outStepRow = 0;
     }
 }
 
-// ── PMESH_52_WeldStitch (0x44C280) — stitch pm1 onto pm0 along the matched edge ──
+// ── Patch_WeldStitch (0x44C280) — stitch pm1 onto pm0 along the matched edge ──
 //   pb0Inst = the surviving brush instance (its DEF's patch becomes the merged patch);
-//   pb1Inst the consumed one.  a3/a4/a5 carry the {byColumn, atHigh, reverse} state of
-//   each patch's matched edge (from Patch_Weld's search).  Transforms both grids into a
-//   canonical orientation (transpose/invert as needed), appends pm1's columns onto pm0,
-//   restores pm0's orientation, then frees pb1's brush (or its owning entity).
-static void PMESH_52_WeldStitch( selbrush_t *pb0Inst, selbrush_t *pb1Inst,
-                                 const int *a3, const int *a4, const int *a5 )
+//   pb1Inst the consumed one.  transpose/invert/flip carry the {fixedCol, atEnd, reverse}
+//   state of each patch's matched edge (from Patch_Weld's search).  Transforms both grids
+//   into a canonical orientation (transpose/invert as needed), appends pm1's columns onto
+//   pm0, restores pm0's orientation, then frees pb1's brush (or its owning entity).
+static void Patch_WeldStitch( selbrush_t *pb0Inst, selbrush_t *pb1Inst,
+                              const int *transpose, const int *invert, const int *flip )
 {
     iassert( pb1Inst->patch->def == pb1Inst->def->patch );
-    // the IDB reads a1 (pb0) as the brush_t DEF: **(a1+32) = def->patch->def == pm0,
-    // *(a1+20)+80 = def->def->patch — the same invariant.  Route through the def brush.
+    // pm0 is reached through pb0's def brush (the same patch->def == def->patch invariant).
     brush_t     *pb0Def = pb0Inst->def;
     patchMesh_t *pm0    = pb0Def->patch;
     patchMesh_t *pm1    = pb1Inst->patch->def;
 
-    int inv0 = 1 - a4[0];                           // v8 = 1 - a4[0]
-    if ( a3[0] != 1 )
+    int inv0 = 1 - invert[0];
+    if ( transpose[0] != 1 )
         Patch_TransposeGrid( pm0 );
     if ( inv0 != 1 )
         patchInvert( pm0 );
-    if ( a5[0] )
+    if ( flip[0] )
         patchInvert2( pm0 );
 
     char didTranspose1 = 0;
     char didInvert1     = 0;
-    if ( a3[1] != 1 ) { didTranspose1 = 1; Patch_TransposeGrid( pm1 ); }
-    if ( a4[1] != 1 ) { didInvert1    = 1; patchInvert( pm1 ); }
-    if ( a5[1] )      { didInvert1    = !didInvert1; patchInvert2( pm1 ); }
+    if ( transpose[1] != 1 ) { didTranspose1 = 1; Patch_TransposeGrid( pm1 ); }
+    if ( invert[1] != 1 )    { didInvert1    = 1; patchInvert( pm1 ); }
+    if ( flip[1] )           { didInvert1    = !didInvert1; patchInvert2( pm1 ); }
 
     iassert( pm0->height == pm1->height );
 
     // sanity: pm1's LAST column must coincide with pm0's FIRST column (shared edge).
     for ( int j = 0; j < pm0->height; ++j )
-    {
-        int miss = 0;
-        for ( int k = 0; k < 3; ++k )
-        {
-            float d = pm1->ctrl[pm1->width - 1][j].xyz[k] - pm0->ctrl[0][j].xyz[k];
-            if ( d * d > 0.00000100000011116208f )
-                break;
-            ++miss;
-        }
-        if ( miss < 3 )
-            Assert( PMESH_CPP, 8665, 0, "%s",
-                    "Vec3CompareEpsilon(pm1->ctrl[pm1->width - 1][j].qv.xyz, pm0->ctrl[0][j].qv.xyz)" );
-    }
+        iassert( Vec3NearEqual( pm1->ctrl[pm1->width - 1][j].xyz, pm0->ctrl[0][j].xyz ) );
 
     // append pm1's columns 1..width-1 after pm0's existing columns (col0 is the shared
     // edge).  First OR pm1 col0's turned_edge bit0 into pm0's LAST column edge bit.
@@ -8032,7 +6484,7 @@ static void PMESH_52_WeldStitch( selbrush_t *pb0Inst, selbrush_t *pb1Inst,
       && owner->brushes.ownerPrev == pb1Inst )
     {
         Undo_AddEntity_W( (entity_s *)owner->def );
-        Entity_Free( (char *)pb1Inst->owner );
+        Entity_Free( pb1Inst->owner );
     }
     else
     {
@@ -8040,49 +6492,47 @@ static void PMESH_52_WeldStitch( selbrush_t *pb0Inst, selbrush_t *pb1Inst,
     }
 }
 
-// ── Patch_Weld (0x44C590) — try to weld patch instance a1 onto a2 ─────────────
+// ── Patch_Weld (0x44C590) — try to weld patch instance pb0 onto pb1 ───────────
 //   Searches all 2x2x2 edge orientations of both patches for a coincident edge (same
 //   length + coincident control points).  If EXACTLY ONE edge pair matches (more than
 //   one → refuse), and the merged edge count fits in MAX_PATCH_WIDTH (16), stitches
-//   them via PMESH_52_WeldStitch.  Returns 1 on a successful weld, 0 otherwise.
-static char Patch_Weld( selbrush_t *a1, selbrush_t *a2 )
+//   them via Patch_WeldStitch.  Returns 1 on a successful weld, 0 otherwise.
+static char Patch_Weld( selbrush_t *pb0, selbrush_t *pb1 )
 {
-    if ( !a1 ) Assert( PMESH_CPP, 8701, 0, "%s", "pb0" );
-    if ( !a2 ) Assert( PMESH_CPP, 8702, 0, "%s", "pb1" );
-    if ( a1 == a2 ) Assert( PMESH_CPP, 8703, 0, "%s", "pb0 != pb1" );
-    if ( a1->patch->def != a1->def->patch )
-        Assert( PMESH_CPP, 8731, 0, "%s", "pb0->patch->def == pb0->def->patch" );
-    if ( a2->patch->def != a2->def->patch )
-        Assert( PMESH_CPP, 8732, 0, "%s", "pb1->patch->def == pb1->def->patch" );
+    iassert( pb0 );
+    iassert( pb1 );
+    iassert( pb0 != pb1 );
+    iassert( pb0->patch->def == pb0->def->patch );
+    iassert( pb1->patch->def == pb1->def->patch );
 
-    patchMesh_t *pm0 = a1->patch->def;              // def / v34
-    patchMesh_t *pm1 = a2->patch->def;              // v5  / v35
+    patchMesh_t *pm0 = pb0->patch->def;
+    patchMesh_t *pm1 = pb1->patch->def;
 
-    char foundMatch = 0;                            // v38
-    int  m16[2], m17[2], m18[2];                    // matched orientation params
+    char foundMatch = 0;
+    int  edgeCol[2], edgeEnd[2], edgeRev[2];        // matched edge of pm0 [0] / pm1 [1]
 
-    for ( int e0 = 0; e0 < 2; ++e0 )                // v30: byColumn of pm0's edge
+    for ( int e0 = 0; e0 < 2; ++e0 )                // byColumn of pm0's edge
     {
         int len0 = e0 ? pm0->height : pm0->width;   // height along e0's edge
-        for ( int e1 = 0; e1 < 2; ++e1 )            // v31: byColumn of pm1's edge
+        for ( int e1 = 0; e1 < 2; ++e1 )            // byColumn of pm1's edge
         {
             int len1 = e1 ? pm1->height : pm1->width;
             if ( len0 != len1 )
                 continue;
 
-            // try the two mirror orientations (v32) of pm0's edge and (v33) of pm1's.
-            for ( int f0 = 0; f0 < 2; ++f0 )        // v32
+            // try the two mirror orientations of pm0's edge and of pm1's.
+            for ( int f0 = 0; f0 < 2; ++f0 )
             {
                 int startCol0, stepCol0, startRow0, stepRow0;
-                Patch_Weld_EdgeParams( &startCol0, (int *)pm0, &stepCol0, &startRow0,
+                Patch_Weld_EdgeParams( &startCol0, pm0, &stepCol0, &startRow0,
                                        e0, f0, 0, &stepRow0 );
 
-                for ( int f1 = 0; f1 < 2; ++f1 )    // v33
+                for ( int f1 = 0; f1 < 2; ++f1 )
                 {
-                    for ( int rev = 0; rev < 2; ++rev )   // v27: reverse pm1's walk
+                    for ( int rev = 0; rev < 2; ++rev )   // reverse pm1's walk
                     {
                         int startCol1, stepCol1, startRow1, stepRow1;
-                        Patch_Weld_EdgeParams( &startCol1, (int *)pm1, &stepCol1, &startRow1,
+                        Patch_Weld_EdgeParams( &startCol1, pm1, &stepCol1, &startRow1,
                                                e1, f1, rev, &stepRow1 );
 
                         // walk both edges in lockstep, comparing each control point.
@@ -8092,15 +6542,7 @@ static char Patch_Weld( selbrush_t *a1, selbrush_t *a2 )
                         int i;
                         for ( i = 0; i < len0; ++i )
                         {
-                            int k;
-                            for ( k = 0; k < 3; ++k )
-                            {
-                                float d = pm0->ctrl[c0][r0].xyz[k]
-                                        - pm1->ctrl[c1][r1].xyz[k];
-                                if ( d * d > 0.00000100000011116208f )
-                                    break;
-                            }
-                            if ( k < 3 )
+                            if ( !Vec3NearEqual( pm0->ctrl[c0][r0].xyz, pm1->ctrl[c1][r1].xyz ) )
                                 break;              // this point differed → edge mismatch
                             c0 += stepCol0; r0 += stepRow0;
                             c1 += stepCol1; r1 += stepRow1;
@@ -8124,9 +6566,9 @@ static char Patch_Weld( selbrush_t *a1, selbrush_t *a2 )
                                         newEdge, 16 );
                             return 0;
                         }
-                        m16[0] = e0;  m16[1] = e1;
-                        m17[0] = f0;  m17[1] = f1;
-                        m18[0] = 0;   m18[1] = rev;
+                        edgeCol[0] = e0;  edgeCol[1] = e1;
+                        edgeEnd[0] = f0;  edgeEnd[1] = f1;
+                        edgeRev[0] = 0;   edgeRev[1] = rev;
                         foundMatch = 1;
                     }
                 }
@@ -8136,7 +6578,7 @@ static char Patch_Weld( selbrush_t *a1, selbrush_t *a2 )
 
     if ( !foundMatch )
         return 0;
-    PMESH_52_WeldStitch( a2, a1, m16, m17, m18 );
+    Patch_WeldStitch( pb1, pb0, edgeCol, edgeEnd, edgeRev );
     return 1;
 }
 
@@ -8147,18 +6589,18 @@ static char Patch_Weld( selbrush_t *a1, selbrush_t *a2 )
 
 char WeldMesh()
 {
-    entity_s *commonOwner = 0;                     // v11
-    char sawGroup = 0;                             // v13 (worldspawn-ish)
-    char sawEntity = 0;                            // v12 (non-worldspawn)
+    entity_s *commonOwner = 0;
+    char sawGroup = 0;                             // worldspawn-ish
+    char sawEntity = 0;                            // non-worldspawn
 
     // validate the selection: all patches, consistent ownership.
-    selbrush_t *v0 = selected_brushes_next;
-    if ( v0 != &selected_brushes )
+    selbrush_t *b = selected_brushes_next;
+    if ( b != &selected_brushes )
     {
-        while ( v0->patch )
+        while ( b->patch )
         {
             const char *value = (const char *)zero;
-            epair_t *epairs = ((entity_s *)v0->owner->def)->epairs;
+            epair_t *epairs = ((entity_s *)b->owner->def)->epairs;
             if ( epairs )
             {
                 while ( _stricmp( epairs->key, "classname" ) )
@@ -8169,7 +6611,7 @@ char WeldMesh()
                 value = epairs->value;
             }
         haveValue:
-            if ( PMESH_IsWeldContainer( value ) )             // worldspawn/func_group/func_cullgroup
+            if ( Classname_IsWeldContainer( value ) )             // worldspawn/func_group/func_cullgroup
             {
                 if ( sawEntity )
                     return 0;
@@ -8177,14 +6619,14 @@ char WeldMesh()
             }
             else
             {
-                if ( sawGroup || ( commonOwner && commonOwner != v0->owner ) )
+                if ( sawGroup || ( commonOwner && commonOwner != b->owner ) )
                     return 0;
                 sawEntity = 1;
             }
-            entity_s *o = v0->owner;
-            v0 = v0->next;
+            entity_s *o = b->owner;
+            b = b->next;
             commonOwner = o;
-            if ( v0 == &selected_brushes )
+            if ( b == &selected_brushes )
                 goto doWeld;
         }
         return 0;                                  // a non-patch was selected
@@ -8196,8 +6638,8 @@ doWeld:
     Undo_AddBrushList( &selected_brushes );
 
     // O(n^2) pairwise weld: for each i, try to weld a later `next` onto it.  On a
-    // successful weld the binary restarts the whole outer scan (goto LABEL_17), because
-    // the merged patch changed the list; we mirror that with a restart flag.
+    // successful weld the whole outer scan restarts, because the merged patch changed
+    // the list.
 restartWeld:
     for ( selbrush_t *i = selected_brushes_next; i != &selected_brushes; i = i->next )
     {
@@ -8210,22 +6652,13 @@ restartWeld:
         {
             next = next->next;
             if ( next == &selected_brushes )
-                goto nextI;                        // LABEL_23: this i had no match
+                goto nextI;                        // this i had no match
         }
         goto restartWeld;                          // welded → restart the outer scan
     nextI:;
     }
 
-    if ( g_lastundo && !g_lastundo->done )
-    {
-        for ( selbrush_t *j = selected_brushes_next; j != &selected_brushes; j = j->next )
-        {
-            j->def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
-            entity_s *owner = (entity_s *)(intptr_t)j->def->owner;
-            if ( *(int *)&owner->eclass->fixedsize )
-                owner->epairEdits = g_lastundo->id;
-        }
-    }
+    Undo_EndBrushList( &selected_brushes );
     Undo_End();
     if ( PatchDialog_IsOpen() )
         g_PatchDialog_GetPatchInfo();
@@ -8237,16 +6670,16 @@ restartWeld:
 //  SPLIT CLUSTER — Curve→Split (SplitPatch) splits a patch at a selected mid-edge.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// ── PMESH_08_Verts_RowCol_02 (0x43BFE0) — resolve the selected verts' row/col ──
-//   Scans g_qeglobals.d_move_points for control points that belong to `a1`, returns
+// ── Patch_SelectedRowOrCol (0x43BFE0) — resolve the selected verts' row/col ──
+//   Scans g_qeglobals.d_move_points for control points that belong to `patch`, returns
 //   their common column (*px) and row (*py) — one of which is a real index and the other
 //   -1 (the selection lies on a single row or a single column).  0 if the selection
 //   is empty, spans both axes, or none of the points belong to this patch.
-static char PMESH_08_Verts_RowCol_02( patchMesh_t *a1, int *px, int *py )
+static char Patch_SelectedRowOrCol( patchMesh_t *patch, int *px, int *py )
 {
-    if ( !a1 ) Assert( PMESH_CPP, 1935, 0, "%s", "patch" );
-    if ( !px ) Assert( PMESH_CPP, 1936, 0, "%s", "px" );
-    if ( !py ) Assert( PMESH_CPP, 1937, 0, "%s", "py" );
+    iassert( patch );
+    iassert( px );
+    iassert( py );
 
     *px = -1;
     *py = -1;
@@ -8258,13 +6691,13 @@ static char PMESH_08_Verts_RowCol_02( patchMesh_t *a1, int *px, int *py )
     {
         drawVert_t *dv = (drawVert_t *)g_qeglobals.d_move_points[idx];
         // in-grid test: dv within [&ctrl[0][0], &ctrl[15][15]].
-        if ( dv >= &a1->ctrl[0][0] && dv <= &a1->ctrl[15][15] )
+        if ( dv >= &patch->ctrl[0][0] && dv <= &patch->ctrl[15][15] )
         {
-            int flat = (int)( (char *)dv - (char *)a1 - 56 ) / 80;
+            // KIWI: pointer difference; the binary's `- 56` is x86's ctrl offset.
+            int flat = (int)( dv - &patch->ctrl[0][0] );
             int col  = flat / 16;
             int row  = flat % 16;
-            if ( dv != (drawVert_t *)( (char *)a1->ctrl + 80 * flat ) )
-                Assert( PMESH_CPP, 1951, 0, "%s", "pdv == &patch->ctrl[x][y]" );
+            iassert( dv == &patch->ctrl[col][row] );
             if ( have )
             {
                 if ( *px != col ) *px = -1;
@@ -8293,56 +6726,53 @@ static char PMESH_08_Verts_RowCol_02( patchMesh_t *a1, int *px, int *py )
     return 1;
 }
 
-// ── PMESH_53_Weld_MakeNew (0x44CA70) — split off a sub-patch at (col,row) ──────
-//   Copies the control-grid region from (col,row)..(width,height) of `a1` into a new
-//   patch (reusing a1's materials/type), adds a symbiont brush owned by owner, then
-//   trims a1 to end at the split (width=col+1 OR height=row+1).  Exactly one of
+// ── Patch_SplitAt (0x44CA70) — split off a sub-patch at (col,row) ──────
+//   Copies the control-grid region from (col,row)..(width,height) of `pm` into a new
+//   patch (reusing pm's materials/type), adds a symbiont brush owned by owner, then
+//   trims pm to end at the split (width=col+1 OR height=row+1).  Exactly one of
 //   col/row is nonzero (the other must be 0 — the split axis).
-static void PMESH_53_Weld_MakeNew( patchMesh_t *a1, int col, int row, entity_s *owner )
+static void Patch_SplitAt( patchMesh_t *pm, int col, int row, entity_s *owner )
 {
-    if ( col && row )
-        Assert( PMESH_CPP, 8876, 0, "%s", "col == 0 || row == 0" );
+    iassert( col == 0 || row == 0 );
 
     patchMesh_t *NewPatch = MakeNewPatch();
-    // copy the 3 material channels ({lyrMtl, radMtl} pairs) from a1.
-    NewPatch->texture   = a1->texture;
-    NewPatch->lightmap  = a1->lightmap;
-    NewPatch->smoothing = a1->smoothing;
+    // copy the 3 material channels ({lyrMtl, radMtl} pairs) from pm.
+    NewPatch->texture   = pm->texture;
+    NewPatch->lightmap  = pm->lightmap;
+    NewPatch->smoothing = pm->smoothing;
 
-    NewPatch->width               = a1->width  - col;
-    NewPatch->height              = a1->height - row;
-    NewPatch->contents            = a1->contents;
-    NewPatch->type                = a1->type;
-    NewPatch->subDivType          = a1->subDivType;
-    NewPatch->size_of_struct_0x504C = a1->size_of_struct_0x504C;
-    NewPatch->bDirty              = a1->bDirty;
+    NewPatch->width               = pm->width  - col;
+    NewPatch->height              = pm->height - row;
+    NewPatch->contents            = pm->contents;
+    NewPatch->type                = pm->type;
+    NewPatch->subDivType          = pm->subDivType;
+    NewPatch->size_of_struct_0x504C = pm->size_of_struct_0x504C;
+    NewPatch->bDirty              = pm->bDirty;
 
-    for ( int c = col; c < a1->width; ++c )
-        for ( int r = row; r < a1->height; ++r )
-            NewPatch->ctrl[c - col][r - row] = a1->ctrl[c][r];
+    for ( int c = col; c < pm->width; ++c )
+        for ( int r = row; r < pm->height; ++r )
+            NewPatch->ctrl[c - col][r - row] = pm->ctrl[c][r];
 
     brush_t *nb = AddBrushForPatch( NewPatch, (entity_s *)owner->def );
     Patch_Rebuild( NewPatch, 1 );
-    if ( nb->owner != (entity_s *)a1->pSymbiot->owner )
-        Assert( PMESH_CPP, 8895, 0, "%s", "pNewBrush->owner == pm->symbiot->owner" );
-    if ( nb->owner != (entity_s *)owner->def )
-        Assert( PMESH_CPP, 8896, 0, "%s", "pNewBrush->owner == owner->def" );
+    iassert( nb->owner == (entity_s *)pm->pSymbiot->owner );
+    iassert( nb->owner == (entity_s *)owner->def );
 
-    selbrush_t *v13 = (selbrush_t *)Brush_AddToList( nb, owner );
-    if ( v13->next || v13->prev )
+    selbrush_t *inst = (selbrush_t *)Brush_AddToList( nb, owner );
+    if ( inst->next || inst->prev )
         Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
-    Brush_AddToList2( v13 );
+    Brush_AddToList2( inst );
 
     if ( col )
-        a1->width = col + 1;
+        pm->width = col + 1;
     else
-        a1->height = row + 1;
-    Patch_Rebuild( a1, 1 );
+        pm->height = row + 1;
+    Patch_Rebuild( pm, 1 );
 }
 
 // ── SplitPatch (0x44CC60) — Curve→Split: split selected patches at a mid-edge ──
 //   For each selected patch with verts selected on a mid row/column (odd index for a
-//   non-terrain patch), split it into two patches at that seam (PMESH_53_Weld_MakeNew),
+//   non-terrain patch), split it into two patches at that seam (Patch_SplitAt),
 //   then restart the scan.  Reached via OnSplitPatch (cmd 33158).
 void SplitPatch()
 {
@@ -8357,11 +6787,10 @@ restartSplit:
         patch_t *patch = i->patch;
         if ( !patch )
             continue;
-        if ( patch->def != i->def->patch )
-            Assert( PMESH_CPP, 8929, 0, "%s", "pb->patch->def == pb->def->patch" );
+        iassert( patch->def == i->def->patch );
         patchMesh_t *def = i->patch->def;
         int selCol, selRow;
-        if ( !PMESH_08_Verts_RowCol_02( def, &selCol, &selRow ) )
+        if ( !Patch_SelectedRowOrCol( def, &selCol, &selRow ) )
             continue;
         if ( selCol < 0 )
         {
@@ -8370,7 +6799,7 @@ restartSplit:
             {
                 if ( ( def->type & 0x40 ) != 0 || ( selRow & 1 ) == 0 )
                 {
-                    PMESH_53_Weld_MakeNew( def, 0, selRow, (entity_s *)(intptr_t)i->owner );
+                    Patch_SplitAt( def, 0, selRow, (entity_s *)(intptr_t)i->owner );
                     didSplit = 1;
                     goto restartSplit;
                 }
@@ -8381,7 +6810,7 @@ restartSplit:
         {
             if ( ( def->type & 0x40 ) != 0 || ( selCol & 1 ) == 0 )
             {
-                PMESH_53_Weld_MakeNew( def, selCol, 0, (entity_s *)(intptr_t)i->owner );
+                Patch_SplitAt( def, selCol, 0, (entity_s *)(intptr_t)i->owner );
                 didSplit = 1;
                 goto restartSplit;
             }
@@ -8389,16 +6818,7 @@ restartSplit:
         }
     }
 
-    if ( g_lastundo && !g_lastundo->done )
-    {
-        for ( selbrush_t *j = selected_brushes_next; j != &selected_brushes; j = j->next )
-        {
-            j->def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
-            entity_s *owner = (entity_s *)(intptr_t)j->def->owner;
-            if ( *(int *)&owner->eclass->fixedsize )
-                owner->epairEdits = g_lastundo->id;
-        }
-    }
+    Undo_EndBrushList( &selected_brushes );
     Undo_End();
     if ( didSplit )
     {
@@ -8413,30 +6833,20 @@ restartSplit:
 // ═════════════════════════════════════════════════════════════════════════════
 
 // terrain single-row/col helpers already exist (Patch_TerrainInsert/RemoveRow/Column).
-// Deps declared elsewhere: PMESH_08_Verts_RowCol_02 (above), Patch_Rebuild, etc.
+// Deps declared elsewhere: Patch_SelectedRowOrCol (above), Patch_Rebuild, etc.
 
-extern texdef_sub_t *TexWnd_06_LayerCount( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
-extern float grid_sizes[];                                          // engine_stubs 0x6DDE5C
-extern selbrush_t active_brushes;                                   // 0x23F189C
+extern texdef_sub_t *MaterialDef_FindTexdef( MaterialDef *mtlDef, int layerHandle );   // brush.cpp 0x45D360
 #define active_brushes_next ( active_brushes.next )
-extern bool  HasKeyValuePair( entity_s_def *e, const char *key );          // entity.cpp
-extern char *ValueForKey2( const entity_s *e, const char *key );                       // entity.cpp
-extern bool  Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp
-extern void  DeleteKey( epair_t **head, const char *key );                 // entity.cpp
-extern void  Checkkey_Model( entity_s_def *e, const char *key );           // entity.cpp (Checkkey_Model_0)
-extern void  Checkkey_Color( entity_s_def *a1, const char *a2 );           // entity.cpp
-extern void  Undo_AddEntity( entity_s *entity );                                     // undo.cpp 0x45E8B0
-extern void  Undo_AddBrush( entity_brush_s *pBrushInst );                  // undo.cpp 0x45E680
 extern void  Brush_SnapToGrid( brush_t *b );                               // brush.cpp 0x4783D0
 
-// ── PMESH_08_Verts_RowCol (0x43BE70) — resolve a selected-vertex PAIR to a row/col ─
+// ── Patch_SelectedVertPair (0x43BE70) — resolve a selected-vertex PAIR to a row/col ─
 //   Finds the (up to two) selected control points that belong to `patch`; fills the
 //   pair struct pPair = {int x[2]; int y[2]} with their (col,row).  Returns 1 iff
 //   exactly two points were found on the same row OR the same column.
-static char PMESH_08_Verts_RowCol( patchMesh_t *patch, char *pPair )
+static char Patch_SelectedVertPair( patchMesh_t *patch, char *pPair )
 {
-    if ( !patch ) Assert( PMESH_CPP, 1887, 0, "%s", "patch" );
-    if ( !pPair ) Assert( PMESH_CPP, 1888, 0, "%s", "pPair" );
+    iassert( patch );
+    iassert( pPair );
 
     drawVert_t *found[2] = { 0, 0 };
     if ( g_qeglobals.d_num_move_points <= 0 )
@@ -8467,12 +6877,10 @@ static char PMESH_08_Verts_RowCol( patchMesh_t *patch, char *pPair )
         int flat = (int)( offset / sizeof(drawVert_t) );
         pair[i]     = flat / 16;            // x[i] = col
         pair[i + 2] = flat % 16;            // y[i] = row
-        if ( found[i] != &patch->ctrl[pair[i]][pair[i + 2]] )
-        {
-            Assert( PMESH_CPP, 1914, 0, "%s",
-                    "pdvFound[i] == &patch->ctrl[pPair->x[i]][pPair->y[i]]" );
+        const bool exact = found[i] == &patch->ctrl[pair[i]][pair[i + 2]];
+        iassert( exact );
+        if ( !exact )
             return 0;
-        }
     }
     if ( pair[0] == pair[1] || pair[2] == pair[3] )   // same col OR same row
         return 1;
@@ -8480,99 +6888,97 @@ static char PMESH_08_Verts_RowCol( patchMesh_t *patch, char *pPair )
     return 0;
 }
 
-// ── Patch_TerrainExtrudeColumn (sub_442DE0, 0x442DE0) — extrapolate a new column ─
-//   Extends a terrain patch by ONE column at (col a2), mirroring the edge:
+// ── Patch_TerrainExtrudeColumn (0x442DE0) — extrapolate a new column ─
+//   Extends a terrain patch by ONE column at `col`, mirroring the edge:
 //   new = 2*edge - inner.  Adds each new control point to the d_points overlay so it can
-//   be picked.  a1 = patchMesh_t (a1[0]=width, a1[1]=height).  Verbatim from the disasm
-//   (float stride 20 = one row (80B), 320 = one column (1280B)).
-static void Patch_TerrainExtrudeColumn( patchMesh_t *a1, int a2 )
+//   be picked.
+static void Patch_TerrainExtrudeColumn( patchMesh_t *p, int col )
 {
-    int width = a1->width;
+    int width = p->width;
     if ( width + 1 > 16 )
         return;
 
-    if ( (double)width * 0.5 < (double)a2 || a2 == width - 1 )
+    if ( (double)width * 0.5 < (double)col || col == width - 1 )
     {
         // extrude at the HIGH edge: new column at `width` = 2*col[width-1] - col[width-2].
-        for ( int row = 0; row < a1->height; ++row )
+        for ( int row = 0; row < p->height; ++row )
         {
-            a1->ctrl[width][row] = a1->ctrl[width - 1][row];  // copy header/materials
+            p->ctrl[width][row] = p->ctrl[width - 1][row];  // copy header/materials
             for ( int k = 0; k < 3; ++k )
-                a1->ctrl[width][row].xyz[k] =
-                    a1->ctrl[width - 1][row].xyz[k] - a1->ctrl[width - 2][row].xyz[k]
-                  + a1->ctrl[width - 1][row].xyz[k];
+                p->ctrl[width][row].xyz[k] =
+                    p->ctrl[width - 1][row].xyz[k] - p->ctrl[width - 2][row].xyz[k]
+                  + p->ctrl[width - 1][row].xyz[k];
             for ( int k = 0; k < 3; ++k )
-                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = a1->ctrl[width][row].xyz[k];
+                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = p->ctrl[width][row].xyz[k];
             if ( g_qeglobals.d_numpoints < 2047 )
                 ++g_qeglobals.d_numpoints;
         }
-        ++a1->width;
+        ++p->width;
     }
     else
     {
         // extrude at the LOW edge: shift all columns right, new column 0 = 2*col0-col1.
         for ( int c = width; c > 0; --c )
-            for ( int row = 0; row < a1->height; ++row )
-                a1->ctrl[c][row] = a1->ctrl[c - 1][row];
-        for ( int row = 0; row < a1->height; ++row )
+            for ( int row = 0; row < p->height; ++row )
+                p->ctrl[c][row] = p->ctrl[c - 1][row];
+        for ( int row = 0; row < p->height; ++row )
         {
             for ( int k = 0; k < 3; ++k )
-                a1->ctrl[0][row].xyz[k] =
-                    a1->ctrl[1][row].xyz[k] - a1->ctrl[2][row].xyz[k]
-                  + a1->ctrl[1][row].xyz[k];
+                p->ctrl[0][row].xyz[k] =
+                    p->ctrl[1][row].xyz[k] - p->ctrl[2][row].xyz[k]
+                  + p->ctrl[1][row].xyz[k];
             for ( int k = 0; k < 3; ++k )
-                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = a1->ctrl[0][row].xyz[k];
+                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = p->ctrl[0][row].xyz[k];
             if ( g_qeglobals.d_numpoints < 2047 )
                 ++g_qeglobals.d_numpoints;
         }
-        ++a1->width;
+        ++p->width;
     }
 }
 
-// ── Patch_TerrainExtrudeRow (sub_443040, 0x443040) — extrapolate a new row ──────
-//   Extends a terrain patch by ONE row at (row a2), mirroring the edge: new = 2*edge -
-//   inner.  a1[0]=width, a1[1]=height.  (float stride 20 = row, 320 = column.)
-static void Patch_TerrainExtrudeRow( patchMesh_t *a1, int a2 )
+// ── Patch_TerrainExtrudeRow (0x443040) — extrapolate a new row ──────
+//   Extends a terrain patch by ONE row at `row`, mirroring the edge: new = 2*edge - inner.
+static void Patch_TerrainExtrudeRow( patchMesh_t *p, int row )
 {
-    int height = a1->height;
+    int height = p->height;
     if ( height + 1 > 16 )
         return;
 
-    if ( (double)height * 0.5 < (double)a2 || a2 == height - 1 )
+    if ( (double)height * 0.5 < (double)row || row == height - 1 )
     {
         // extrude at the HIGH edge: new row at `height` = 2*row[height-1] - row[height-2].
-        for ( int col = 0; col < a1->width; ++col )
+        for ( int col = 0; col < p->width; ++col )
         {
-            a1->ctrl[col][height] = a1->ctrl[col][height - 1];
+            p->ctrl[col][height] = p->ctrl[col][height - 1];
             for ( int k = 0; k < 3; ++k )
-                a1->ctrl[col][height].xyz[k] =
-                    a1->ctrl[col][height - 1].xyz[k] - a1->ctrl[col][height - 2].xyz[k]
-                  + a1->ctrl[col][height - 1].xyz[k];
+                p->ctrl[col][height].xyz[k] =
+                    p->ctrl[col][height - 1].xyz[k] - p->ctrl[col][height - 2].xyz[k]
+                  + p->ctrl[col][height - 1].xyz[k];
             for ( int k = 0; k < 3; ++k )
-                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = a1->ctrl[col][height].xyz[k];
+                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = p->ctrl[col][height].xyz[k];
             if ( g_qeglobals.d_numpoints < 2047 )
                 ++g_qeglobals.d_numpoints;
         }
-        ++a1->height;
+        ++p->height;
     }
     else
     {
         // extrude at the LOW edge: shift all rows up, new row 0 = 2*row0 - row1.
         for ( int r = height; r > 0; --r )
-            for ( int col = 0; col < a1->width; ++col )
-                a1->ctrl[col][r] = a1->ctrl[col][r - 1];
-        for ( int col = 0; col < a1->width; ++col )
+            for ( int col = 0; col < p->width; ++col )
+                p->ctrl[col][r] = p->ctrl[col][r - 1];
+        for ( int col = 0; col < p->width; ++col )
         {
             for ( int k = 0; k < 3; ++k )
-                a1->ctrl[col][0].xyz[k] =
-                    a1->ctrl[col][1].xyz[k] - a1->ctrl[col][2].xyz[k]
-                  + a1->ctrl[col][1].xyz[k];
+                p->ctrl[col][0].xyz[k] =
+                    p->ctrl[col][1].xyz[k] - p->ctrl[col][2].xyz[k]
+                  + p->ctrl[col][1].xyz[k];
             for ( int k = 0; k < 3; ++k )
-                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = a1->ctrl[col][0].xyz[k];
+                g_qeglobals.d_points[g_qeglobals.d_numpoints][k] = p->ctrl[col][0].xyz[k];
             if ( g_qeglobals.d_numpoints < 2047 )
                 ++g_qeglobals.d_numpoints;
         }
-        ++a1->height;
+        ++p->height;
     }
 }
 
@@ -8582,21 +6988,20 @@ static void Patch_TerrainExtrudeRow( patchMesh_t *a1, int a2 )
 void ExtrudeTerrainRow()
 {
     char didEdit = 0;
-    selbrush_t *v0 = selected_brushes_next;
-    if ( v0 == &selected_brushes )
+    selbrush_t *b = selected_brushes_next;
+    if ( b == &selected_brushes )
         return;
     do
     {
-        patch_t *patch = v0->patch;
+        patch_t *patch = b->patch;
         if ( patch )
         {
-            if ( patch->def != v0->def->patch )
-                Assert( PMESH_CPP, 8435, 0, "%s", "b->patch->def == b->def->patch" );
-            patchMesh_t *def = v0->patch->def;
+            iassert( patch->def == b->def->patch );
+            patchMesh_t *def = b->patch->def;
             if ( ( def->type & PATCH_TERRAIN ) != 0 )
             {
                 int px, py;
-                if ( PMESH_08_Verts_RowCol_02( def, &px, &py ) )
+                if ( Patch_SelectedRowOrCol( def, &px, &py ) )
                 {
                     if ( px < 0 )
                         Patch_TerrainExtrudeRow( def, py );
@@ -8607,8 +7012,8 @@ void ExtrudeTerrainRow()
                 }
             }
         }
-        v0 = v0->next;
-    } while ( v0 != &selected_brushes );
+        b = b->next;
+    } while ( b != &selected_brushes );
 
     if ( didEdit )
     {
@@ -8621,28 +7026,27 @@ void ExtrudeTerrainRow()
 // ── RemoveTerrainRowCol (0x44BE10) — cmd 33154: remove a terrain row/column ─────
 //   For each selected terrain patch with a full row/column of verts selected, remove that
 //   row/column.  If NO patch is selected but a single-brush entity with a targetname is,
-//   the binary re-routes targets and deletes the entity (the "remove terrain entity"
-//   fallback) — that whole entity-delete sub-path is ported verbatim below.
+//   its targets are re-routed and the entity is deleted (the "remove terrain entity"
+//   fallback, below).
 void RemoveTerrainRowCol()
 {
     char didEdit = 0;
-    selbrush_t *v0 = selected_brushes_next;
-    selbrush_t *next = v0;
-    if ( v0 == &selected_brushes )
+    selbrush_t *b = selected_brushes_next;
+    selbrush_t *next = b;
+    if ( b == &selected_brushes )
         return;
 
     while ( 1 )
     {
-        patch_t *patch = v0->patch;
+        patch_t *patch = b->patch;
         if ( patch )
         {
-            if ( patch->def != v0->def->patch )
-                Assert( PMESH_CPP, 8538, 0, "%s", "b->patch->def == b->def->patch" );
-            patchMesh_t *def = v0->patch->def;
+            iassert( patch->def == b->def->patch );
+            patchMesh_t *def = b->patch->def;
             if ( ( def->type & PATCH_TERRAIN ) != 0 )
             {
                 int px, py;
-                if ( PMESH_08_Verts_RowCol_02( def, &px, &py ) )
+                if ( Patch_SelectedRowOrCol( def, &px, &py ) )
                 {
                     if ( px < 0 )
                         Patch_TerrainRemoveRow( def, py );
@@ -8650,17 +7054,17 @@ void RemoveTerrainRowCol()
                         Patch_TerrainRemoveColumn( def, px );
                     didEdit = 1;
                     Patch_Rebuild( def, 1 );
-                    v0 = next;
+                    b = next;
                 }
             }
         }
         else if ( selected_brushes_next->next == &selected_brushes
-               && HasKeyValuePair( (entity_s_def *)v0->owner->def, "targetname" ) )
+               && HasKeyValuePair( (entity_s_def *)b->owner->def, "targetname" ) )
         {
             // No patch: a single-brush entity with a targetname → delete it (re-routing
-            // its target chain).  Faithful port of the 0x44BF36.. entity-delete fallback.
+            // its target chain).
             const char *value;
-            epair_t *epairs = ((entity_s *)v0->owner->def)->epairs;
+            epair_t *epairs = ((entity_s *)b->owner->def)->epairs;
             if ( epairs )
             {
                 while ( _stricmp( epairs->key, "targetname" ) )
@@ -8673,8 +7077,8 @@ void RemoveTerrainRowCol()
             else
                 value = (const char *)zero;
         haveTargetname:;
-            entity_s_def *entDef = (entity_s_def *)v0->owner->def;
-            void *newTargetName = 0;                 // IDB `i` (holds the ValueForKey2 result)
+            entity_s_def *entDef = (entity_s_def *)b->owner->def;
+            void *newTargetName = 0;                 // holds the ValueForKey2 result
             if ( HasKeyValuePair( entDef, "target" ) )
             {
                 // this entity has a "target": push its target onto everything that
@@ -8725,16 +7129,7 @@ void RemoveTerrainRowCol()
                     Sys_Printf( "Undo_AddEntity: no last undo.\n" );
             }
             Select_Delete();
-            if ( g_lastundo && !g_lastundo->done )
-            {
-                for ( selbrush_t *m = selected_brushes_next; m != &selected_brushes; m = m->next )
-                {
-                    m->def->ownerPrev = (entity_s *)(intptr_t)g_lastundo->id;
-                    entity_s *o = (entity_s *)(intptr_t)m->def->owner;
-                    if ( *(int *)&o->eclass->fixedsize )
-                        o->epairEdits = g_lastundo->id;
-                }
-            }
+            Undo_EndBrushList( &selected_brushes );
             Undo_End();
             if ( PatchDialog_IsOpen() )
                 g_PatchDialog_GetPatchInfo();
@@ -8752,10 +7147,10 @@ void RemoveTerrainRowCol()
             g_nUpdateBits = -1;
             return;
         }
-        next = v0->next;
+        next = b->next;
         if ( next == &selected_brushes )
             break;
-        v0 = v0->next;
+        b = b->next;
     }
 
     if ( !didEdit )
@@ -8767,31 +7162,29 @@ void RemoveTerrainRowCol()
 
 // ── Patch_InsertRemoveFromVertPair (0x44BB90) — insert a terrain row/col at a pair ─
 //   From a selected pair of ADJACENT terrain verts (same row/col, adjacent index),
-//   insert a new row or column between them.  Parked in the IDB port comment as
-//   sel_vertex-dependent; the vertex-pair path (PMESH_08_Verts_RowCol) is now ported.
+//   insert a new row or column between them (via Patch_SelectedVertPair).
 void Patch_InsertRemoveFromVertPair()
 {
     char didEdit = 0;
-    selbrush_t *v0 = selected_brushes_next;
-    selbrush_t *next = v0;
-    if ( v0 == &selected_brushes )
+    selbrush_t *b = selected_brushes_next;
+    selbrush_t *next = b;
+    if ( b == &selected_brushes )
         return;
 
     patchMesh_t *def = 0;
     int pair[4] = { 0, 0, 0, 0 };       // {x0, x1, y0, y1}
     while ( 1 )
     {
-        patch_t *patch = v0->patch;
+        patch_t *patch = b->patch;
         if ( patch )
         {
-            if ( patch->def != v0->def->patch )
-                Assert( PMESH_CPP, 8379, 0, "%s", "b->patch->def == b->def->patch" );
-            def = v0->patch->def;
+            iassert( patch->def == b->def->patch );
+            def = b->patch->def;
             if ( ( def->type & PATCH_TERRAIN ) != 0
-              && PMESH_08_Verts_RowCol( def, (char *)pair ) )
+              && Patch_SelectedVertPair( def, (char *)pair ) )
                 break;                  // found a valid pair → do the insert below
         }
-        next = v0->next;
+        next = b->next;
         if ( next == &selected_brushes )
         {
             if ( didEdit )
@@ -8802,7 +7195,7 @@ void Patch_InsertRemoveFromVertPair()
             }
             return;
         }
-        v0 = v0->next;
+        b = b->next;
     }
 
     // pair {x0,x1,y0,y1}: insert between the two adjacent verts.
@@ -8818,8 +7211,7 @@ void Patch_InsertRemoveFromVertPair()
     }
     else                               // differ in column → insert a COLUMN
     {
-        if ( y0 != y1 )
-            Assert( PMESH_CPP, 8397, 0, "%s", "pair.y[0] == pair.y[1]" );
+        iassert( y0 == y1 );
         if ( x0 == x1 + 1 )
             Patch_TerrainInsertColumn( def, x0 );
         else if ( x1 == x0 + 1 )
@@ -8838,22 +7230,20 @@ void Patch_InsertRemoveFromVertPair()
     g_nUpdateBits = -1;
 }
 
-// ── PMESH_58 (0x44D1F0) — Face→Terrain: convert one brush face to a terrain patch ─
-//   a1 = the face_t*, a2 = the owning brush instance (selbrush_t*).  Builds a 2-row
+// ── Face_ToTerrainPatch (0x44D1F0) — Face→Terrain: convert one brush face to a terrain patch ─
+//   ownerInst = the owning brush instance (selbrush_t*).  Builds a 2-row
 //   terrain patch of width (winding->numpoints+1)/2 from the face's winding, projecting
 //   each control point's texcoords through the face's 3 layer texture matrices.  Returns
 //   the new brush instance (linked into active_brushes), or 0 if the strip would exceed
-//   MAX_PATCH_WIDTH.  Reached via OnFaceToTerrain (cmd 36102).  Transcribed from disasm.
-extern void Face_MoveTexture( const float *surfDef, const float *normal, float *outVecs,
-                              const float *uvBase, float rotate, float crossterm );  // brush.cpp 0x45A1C0
-brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
+//   MAX_PATCH_WIDTH.  Reached via OnFaceToTerrain (cmd 36102).
+brush_t *Face_ToTerrainPatch( face_t *face, selbrush_t *ownerInst )
 {
     // build the 3 layer texture-projection matrices (8 floats each) from the face's
     // mtldef + plane normal (the same call Face_BuildLayerGeom uses).
     float mats[24];                             // 3 layers * 8 floats
     for ( int L = 0; L < 3; ++L )
     {
-        float *td = (float *)TexWnd_06_LayerCount( &face->mtldef[L], 0 );
+        float *td = (float *)MaterialDef_FindTexdef( &face->mtldef[L], 0 );
         Face_MoveTexture( (float *)td, face->plane.normal,
                           (float *)&mats[8 * L], (float *)( td + 2 ), td[4], td[5] );
     }
@@ -8871,7 +7261,7 @@ brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
 
     // Row 0: walk winding points backward from the last (index numpoints-1); each maps to
     // ctrl[col][0].  Row 1: continue backward into ctrl[col][1] (cols width-1..0).
-    int backIdx = numpoints - 1;                // var_C
+    int backIdx = numpoints - 1;
 
     for ( int col = 0; col < NewPatch->width; ++col )
     {
@@ -8885,17 +7275,15 @@ brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
             const float *m = &mats[8 * L];
             float s = pt[1] * m[1] + pt[0] * m[0] + pt[2] * m[2] + m[3];
             float t = pt[1] * m[5] + pt[0] * m[4] + pt[2] * m[6] + m[7];
-            if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 9122, 0, "%s", "!IS_NAN(texCoord[0])" );
-            if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                Assert( PMESH_CPP, 9123, 0, "%s", "!IS_NAN(texCoord[1])" );
+            iassert( isfinite( s ) );
+            iassert( isfinite( t ) );
             cp->texCoord.st[2 * L]     = s;
             cp->texCoord.st[2 * L + 1] = t;
         }
         cp->normal[0]           = face->plane.normal[0];
         cp->normal[1]           = face->plane.normal[1];
         cp->normal[2]           = face->plane.normal[2];
-        *(int *)&cp->vert_color = *(int *)&face->plane.dist;   // IDB a1+228 (dword after normal)
+        *(int *)&cp->vert_color = face->packedColor;   // KIWI: face+0xE4 per IDA; was plane.dist's bits
         --backIdx;
     }
 
@@ -8913,17 +7301,15 @@ brush_t *PMESH_58( face_t *face, selbrush_t *ownerInst )
                 const float *m = &mats[8 * L];
                 float s = pt[1] * m[1] + pt[0] * m[0] + pt[2] * m[2] + m[3];
                 float t = pt[1] * m[5] + pt[0] * m[4] + pt[2] * m[6] + m[7];
-                if ( ( *(unsigned int *)&s & 0x7F800000 ) == 0x7F800000 )
-                    Assert( PMESH_CPP, 9140, 0, "%s", "!IS_NAN(texCoord[0])" );
-                if ( ( *(unsigned int *)&t & 0x7F800000 ) == 0x7F800000 )
-                    Assert( PMESH_CPP, 9141, 0, "%s", "!IS_NAN(texCoord[1])" );
+                iassert( isfinite( s ) );
+                iassert( isfinite( t ) );
                 cp->texCoord.st[2 * L]     = s;
                 cp->texCoord.st[2 * L + 1] = t;
             }
             cp->normal[0]           = face->plane.normal[0];
             cp->normal[1]           = face->plane.normal[1];
             cp->normal[2]           = face->plane.normal[2];
-            *(int *)&cp->vert_color = *(int *)&face->plane.dist;
+            *(int *)&cp->vert_color = face->packedColor;
             if ( backIdx > 0 )
                 --backIdx;
         }
@@ -8968,7 +7354,7 @@ extern edTrace_t *Trace_AllDirectionsIfFailed( float *cam_origin, edTrace_t *tra
 // ── Patch_RedistributeVerts (0x449930) — "drop vertices" (Shift+Alt+Ctrl+D) ────
 //  For every PICKED control point, trace straight down (0,0,-1) against contents 4608
 //  and, on a hit, move the point onto the hit.  Requires vertex/curve-point mode and a
-//  single selected patch.  Verbatim (the IDB's v15[17] is edTrace_t.dist at +0x44).
+//  single selected patch.
 void Patch_RedistributeVerts()
 {
     if ( g_qeglobals.d_select_mode != sel_vertex && g_qeglobals.d_select_mode != sel_curvepoint )
@@ -9015,14 +7401,14 @@ static bool Patch_PointIsPicked( const drawVert_t *cp )
     return false;
 }
 
-// ── sub_4497C0 / sub_449650 — the two redisperse line passes ──────────────────
+// ── the two redisperse line passes ──────────────────
 //  Each walks ONE line of the 16x16 control grid, finds the FIRST and SECOND picked
 //  points on it, then linearly interpolates every picked point in between (skipping any
 //  whose turned_edge bit 1 is set).  The interpolation parameter is
 //  (index - first) / (second - first), which for points outside [first,second] simply
-//  extrapolates — reproduced verbatim (the binary does not clamp).
-//    sub_4497C0(col, def) walks ctrl[r][col] for r in [0, width)
-//    sub_449650(def, row) walks ctrl[row][c] for c in [0, height)
+//  extrapolates (the binary does not clamp).
+//    Patch_RedispColumn(def, col) walks ctrl[r][col] for r in [0, width)
+//    Patch_RedispRow(def, row)    walks ctrl[row][c] for c in [0, height)
 static void Patch_RedispColumn( patchMesh_t *def, int col )          // 0x4497C0
 {
     bool haveFirst = false, haveSecond = false;
@@ -9156,12 +7542,9 @@ void DoRedistPatchPts()
 //  direction the binary tests.  The undo record is opened lazily, once per patch, on the
 //  first flip; the tail stamps the undo id onto the patch's brush def + owning entity
 //  (the inlined single-brush Undo_EndBrushList).  Prints the "Autofliped" tally.
-//  sub_44B1B0 (which takes two drawVert_t BY VALUE) is just the xyz distance.
-extern void Undo_AddBrush( entity_brush_s *pBrushInst );   // undo.cpp 0x45E680
-extern void Undo_AddEntity( entity_s *entity );                      // undo.cpp 0x45E8B0
-extern undo_s *g_lastundo;                                 // undo.cpp 0x23F162C
+//  Patch_CtrlDist (the binary's takes two drawVert_t BY VALUE) is just the xyz distance.
 
-static float Patch_CtrlDist( const drawVert_t *a, const drawVert_t *b )   // sub_44B1B0
+static float Patch_CtrlDist( const drawVert_t *a, const drawVert_t *b )   // 0x44B1B0
 {
     const float dx = a->xyz[0] - b->xyz[0];
     const float dy = a->xyz[1] - b->xyz[1];
@@ -9233,7 +7616,7 @@ void DoTurnTerrainEdges()
             Patch_Rebuild( def, 1 );
         }
 
-        // Inlined single-brush Undo_EndBrushList tail (0x44B4xx).
+        // Inlined single-brush Undo_EndBrushList tail.
         entity_brush_s *sym = def->pSymbiot;
         if ( g_lastundo && !g_lastundo->done )
         {
@@ -9256,12 +7639,12 @@ void DoTurnTerrainEdges()
 //   each selected patch (and Brush_SnapToGrid the non-patch brushes).
 void Patch_SnapVertToGrid()
 {
-    selbrush_t *v0 = selected_brushes_next;
+    selbrush_t *b = selected_brushes_next;
 
     // fast path: verts picked + all-patch selection → snap only the picked points.
-    if ( g_qeglobals.d_num_move_points > 0 && v0 != &selected_brushes )
+    if ( g_qeglobals.d_num_move_points > 0 && b != &selected_brushes )
     {
-        selbrush_t *scan = v0;
+        selbrush_t *scan = b;
         while ( scan->patch )
         {
             scan = scan->next;
@@ -9277,13 +7660,12 @@ void Patch_SnapVertToGrid()
                             p[k] = (float)floor( p[k] / grid_sizes[g_qeglobals.d_gridsize] + 0.5 )
                                  * grid_sizes[g_qeglobals.d_gridsize];
                     }
-                    for ( selbrush_t *b = selected_brushes_next; b != &selected_brushes; b = b->next )
+                    for ( selbrush_t *sb = selected_brushes_next; sb != &selected_brushes; sb = sb->next )
                     {
-                        if ( b->patch )
+                        if ( sb->patch )
                         {
-                            if ( b->patch->def != b->def->patch )
-                                Assert( PMESH_CPP, 7079, 0, "%s", "b->patch->def == b->def->patch" );
-                            Patch_Rebuild( b->patch->def, 1 );
+                            iassert( sb->patch->def == sb->def->patch );
+                            Patch_Rebuild( sb->patch->def, 1 );
                         }
                     }
                     g_nUpdateBits = -1;
@@ -9301,12 +7683,11 @@ void Patch_SnapVertToGrid()
         return;
     while ( 1 )
     {
-        patch_t *patch = v0->patch;
+        patch_t *patch = b->patch;
         if ( patch )
         {
-            if ( patch->def != v0->def->patch )
-                Assert( PMESH_CPP, 7096, 0, "%s", "b->patch->def == b->def->patch" );
-            patchMesh_t *def = v0->patch->def;
+            iassert( patch->def == b->def->patch );
+            patchMesh_t *def = b->patch->def;
             for ( int col = 0; col < def->width; ++col )
                 for ( int row = 0; row < def->height; ++row )
                 {
@@ -9318,58 +7699,56 @@ void Patch_SnapVertToGrid()
             Patch_Rebuild( def, 1 );
         }
         else
-            Brush_SnapToGrid( v0->def );
-        next = v0->next;
+            Brush_SnapToGrid( b->def );
+        next = b->next;
         if ( next == &selected_brushes )
             break;
-        v0 = v0->next;
+        b = b->next;
     }
 }
 
-// ── PMESH_07_Width (0x43B950) — Curve→Terrain: tessellate a patch into terrain ─
-//   Tessellates the patch `a1` (Patch_GenericMesh2), then splits the tessellated grid
-//   into 16x16 (or remainder) blocks, building a terrain patch for each block that copies
-//   the tessellated verts' xyz / per-layer ST / normal / colour.  Returns the last created
-//   brush instance.  Reached via OnCurveToTerrain (cmd 35041).  Verbatim from the
-//   decompile (three per-layer tessellations v43[0]/v43[1]/v44 supply the 3 ST channels).
-selbrush_t *PMESH_07_Width( selbrush_t *a1 )
+// ── Patch_CurveToTerrain (0x43B950) — Curve→Terrain: tessellate a patch into terrain ─
+//   Tessellates the patch instance `inst` (Patch_GenericMesh2), then splits the tessellated
+//   grid into 16x16 (or remainder) blocks, building a terrain patch for each block that
+//   copies the tessellated verts' xyz / per-layer ST / normal / colour.  Returns the last
+//   created brush instance.  Reached via OnCurveToTerrain (cmd 35041).  Three per-layer
+//   tessellations supply the 3 ST channels.
+extern void Undo_KiwiMarkCreated( brush_t *def );   // undo.cpp (KIWI tail)
+selbrush_t *Patch_CurveToTerrain( selbrush_t *inst )
 {
-    patchMesh_t *def = a1->patch->def;
+    patchMesh_t *def = inst->patch->def;
     if ( def->curveDef )
         free( def->curveDef );
     def->curveDef = Patch_GenericMesh2( def, g_qeglobals.current_edit_layer, 0, 0 );
 
-    // per-layer tessellations: v43[0]=layer0, v43[1]=layer1, layer2 via v44 (built with 0).
+    // per-layer tessellations: layer 0, layer 1, and layer 2 built as layer 0 (the binary's).
     curvePatchDef_t *layerMesh[3];
     for ( int i = 0; i < 3; ++i )
         layerMesh[i] = ( i == 2 ) ? Patch_GenericMesh2( def, 0, 0, 0 )
                                   : Patch_GenericMesh2( def, i, 0, 0 );
 
-    // KIWI (2026-10-05, fistp audit): the binary ROUNDS (fistp 0x43B9F5 / 0x43BA28, no fldcw),
-    // so x + 0.49999999907 is ceil(x).  The truncating cast gave one block too few whenever
-    // (W-1) % 15 is 1..7 (W 17..23): the last block came out 17..23 wide - past ctrl[16][16].
-    int numPatchesX = (int)lrint( (double)(float)( (double)( def->curveDef->width  - 1 ) / 15.0 ) + 0.4999999990686774 );
-    int numPatchesY = (int)lrint( (double)(float)( (double)( def->curveDef->height - 1 ) / 15.0 ) + 0.4999999990686774 );
-    if ( numPatchesX < 1 ) Assert( PMESH_CPP, 1791, 0, "%s", "numPatchesX >= 1" );
-    if ( numPatchesY < 1 ) Assert( PMESH_CPP, 1792, 0, "%s", "numPatchesY >= 1" );
+    // KIWI: ceil (fistp 0x43B9F5); the truncating cast gave one block too few for W 17..23,
+    // so the last block came out 17..23 wide - past ctrl[16][16].
+    int numPatchesX = (int)KiwiCeil_Fistp( (float)( (double)( def->curveDef->width  - 1 ) / 15.0 ) );
+    int numPatchesY = (int)KiwiCeil_Fistp( (float)( (double)( def->curveDef->height - 1 ) / 15.0 ) );
+    iassert( numPatchesX >= 1 );
+    iassert( numPatchesY >= 1 );
 
     selbrush_t *lastInst = 0;
     int baseX = 0;
     for ( int px = 0; px < numPatchesX; ++px )
     {
         int baseY = 0;
-        int lastWidth = 16;                     // v30 advances by NewPatch->width-1
+        int lastWidth = 16;                     // baseX advances by the column block's width-1
         for ( int py = 0; py < numPatchesY; ++py )
         {
             patchMesh_t *NewPatch = MakeNewPatch();
             NewPatch->width  = ( px >= numPatchesX - 1 ) ? ( def->curveDef->width  - baseX ) : 16;
-            if ( px >= numPatchesX - 1 && ( NewPatch->width  < 2 || NewPatch->width  > 16 ) )
-                Assert( PMESH_CPP, 1811, 0, "p->width not in [2, MAX_PATCH_WIDTH]\n\t%i not in [%i, %i]",
-                        NewPatch->width, 2, 16 );
+            vassert( px < numPatchesX - 1 || ( NewPatch->width >= 2 && NewPatch->width <= 16 ),
+                     "p->width %i not in [2, MAX_PATCH_WIDTH]", NewPatch->width );
             NewPatch->height = ( py >= numPatchesY - 1 ) ? ( def->curveDef->height - baseY ) : 16;
-            if ( py >= numPatchesY - 1 && ( NewPatch->height < 2 || NewPatch->height > 16 ) )
-                Assert( PMESH_CPP, 1821, 0, "p->height not in [2, MAX_PATCH_HEIGHT]\n\t%i not in [%i, %i]",
-                        NewPatch->height, 2, 16 );
+            vassert( py < numPatchesY - 1 || ( NewPatch->height >= 2 && NewPatch->height <= 16 ),
+                     "p->height %i not in [2, MAX_PATCH_HEIGHT]", NewPatch->height );
             NewPatch->type = PATCH_TERRAIN;
 
             for ( int row = 0; row < NewPatch->height; ++row )
@@ -9378,13 +7757,7 @@ selbrush_t *PMESH_07_Width( selbrush_t *a1 )
                 {
                     int vert = baseX + col + ( baseY + row ) * def->curveDef->width;
                     curveVert_t *cv = &def->curveDef->verts[vert];
-                    if ( ( *(unsigned int *)&cv->xyz[0] & 0x7F800000 ) == 0x7F800000
-                      || ( *(unsigned int *)&cv->xyz[1] & 0x7F800000 ) == 0x7F800000
-                      || ( *(unsigned int *)&cv->xyz[2] & 0x7F800000 ) == 0x7F800000 )
-                        Assert( PMESH_CPP, 1831, 0, "%s",
-                                "!IS_NAN((pDef->mesh->verts[vert].xyz)[0]) && "
-                                "!IS_NAN((pDef->mesh->verts[vert].xyz)[1]) && "
-                                "!IS_NAN((pDef->mesh->verts[vert].xyz)[2])" );
+                    iassert( isfinite( cv->xyz[0] ) && isfinite( cv->xyz[1] ) && isfinite( cv->xyz[2] ) );
                     drawVert_t *cp = &NewPatch->ctrl[col][row];
                     cp->xyz[0] = cv->xyz[0];
                     cp->xyz[1] = cv->xyz[1];
@@ -9392,10 +7765,8 @@ selbrush_t *PMESH_07_Width( selbrush_t *a1 )
                     for ( int L = 0; L < 3; ++L )
                     {
                         curveVert_t *lv = &layerMesh[L]->verts[vert];  // per-layer ST source
-                        if ( ( *(unsigned int *)&lv->st[0] & 0x7F800000 ) == 0x7F800000 )
-                            Assert( PMESH_CPP, 1836, 0, "%s", "!IS_NAN(mesh[layerIndex]->verts[vert].st[0])" );
-                        if ( ( *(unsigned int *)&lv->st[1] & 0x7F800000 ) == 0x7F800000 )
-                            Assert( PMESH_CPP, 1837, 0, "%s", "!IS_NAN(mesh[layerIndex]->verts[vert].st[1])" );
+                        iassert( isfinite( lv->st[0] ) );
+                        iassert( isfinite( lv->st[1] ) );
                         cp->texCoord.st[2 * L]     = lv->st[0];
                         cp->texCoord.st[2 * L + 1] = lv->st[1];
                     }
@@ -9417,26 +7788,27 @@ selbrush_t *PMESH_07_Width( selbrush_t *a1 )
             NewPatch->curveDef = Patch_GenericMesh2( NewPatch, g_qeglobals.current_edit_layer, 0, 0 );
             ++NewPatch->version;
 
-            brush_t *nb = AddBrushForPatch( NewPatch, (entity_s *)a1->owner->def );
-            selbrush_t *inst = (selbrush_t *)Brush_AddToList( nb, a1->owner );
-            lastInst = inst;
-            if ( inst->next || inst->prev )
+            brush_t *nb = AddBrushForPatch( NewPatch, (entity_s *)inst->owner->def );
+            Undo_KiwiMarkCreated( nb );   // KIWI: else undo left the blocks (binary links them unstamped)
+            selbrush_t *newInst = (selbrush_t *)Brush_AddToList( nb, inst->owner );
+            lastInst = newInst;
+            if ( newInst->next || newInst->prev )
                 Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
             if ( &active_brushes == &selected_brushes )
             {
-                Brush_AddToList2( inst );
+                Brush_AddToList2( newInst );
             }
             else
             {
-                inst->next = active_brushes_next;
-                active_brushes_next->prev = inst;
-                active_brushes_next = inst;
-                inst->prev = &active_brushes;
+                newInst->next = active_brushes_next;
+                active_brushes_next->prev = newInst;
+                active_brushes_next = newInst;
+                newInst->prev = &active_brushes;
             }
             baseY += NewPatch->height - 1;
             lastWidth = NewPatch->width;
         }
-        baseX += lastWidth - 1;   // IDB: v30 += NewPatch->width - 1
+        baseX += lastWidth - 1;
     }
 
     for ( int j = 0; j < 3; ++j )
@@ -9445,9 +7817,8 @@ selbrush_t *PMESH_07_Width( selbrush_t *a1 )
 }
 
 // ── Patch_GetTextureName (0x448670) — the current-layer material name of the ──────
-//   single selected patch (UNIT C leftover; feeds Select_SetTexture_2 patch-mode name).
+//   single selected patch (feeds Select_SetTexture_2's patch-mode name).
 //   Returns the empty-string sentinel when the selection isn't a patch.
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );   // materialdef.cpp 0x431640
 LayerMaterialDef *Patch_GetTextureName()
 {
     patch_t *patch = selected_brushes_next->patch;
@@ -9460,13 +7831,12 @@ LayerMaterialDef *Patch_GetTextureName()
 // ═════════════════════════════════════════════════════════════════════════════
 //  ConnectVertices (0x44A920) — Selection→Connect in curve-point mode: weld/snap
 //  the selected patch control vertices.  Wired from CMainFrame::OnSelectionConnect's
-//  sel_curvepoint arm.  Ported VERBATIM from the CoD4Radiant decompilation + disasm.
+//  sel_curvepoint arm.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // The "reference" vertex list is a vec3[] view over three contiguous qeglobals fields:
-//   unkown_pmesh_float2 (x0, 0x40074), unkown_pmesh_float3 (y0, 0x40078), then
-//   patch_verts_array02[] (z0 + the rest, 0x4007C).  Element[i] = base + 12*i as 3 floats;
-//   count = patch_verts_array02_count.  (The IDB reads it via those raw offsets.)
+//   unkown_pmesh_float2 (x0), unkown_pmesh_float3 (y0), then patch_verts_array02[]
+//   (z0 + the rest).  Element[i] = base + 12*i as 3 floats; count = patch_verts_array02_count.
 static inline float *PatchVerts02Elem( int i )
 {
     return (float *)( (char *)&g_qeglobals.unkown_pmesh_float2 + 12 * i );
@@ -9490,16 +7860,16 @@ static void Patch_ConnectVerts()
         return;
     }
 
-    // v15/v13/v14 form a scratch save buffer (v12[..]) the binary writes but never reads;
-    // the observable effect is only the snap.  Kept as behaviour, buffer omitted.
+    // The binary also fills a scratch save buffer it never reads; the observable effect is
+    // only the snap, so the buffer is omitted.
     float tol   = (float)( g_PrefsDlg->tolerant_weld * g_PrefsDlg->tolerant_weld );
     int   merged = 0;
     if ( g_qeglobals.d_num_move_points > 0 )
     {
         for ( int i = 0; i < g_qeglobals.d_num_move_points; ++i )
         {
-            float bestDistSq = tol + 1.0f;   // v17 = tol + 1.0 (nothing found yet)
-            int   best       = -1;           // v5
+            float bestDistSq = tol + 1.0f;   // nothing found yet
+            int   best       = -1;
             for ( int j = 0; j < g_qeglobals.patch_verts_array02_count; ++j )
             {
                 drawVert_t *mp = g_qeglobals.d_move_points[i];
@@ -9591,8 +7961,8 @@ static void Patch_ConnectVerts_02()
 // ── Patch_ConnectVerts_03 (0x449EF0) — tolerant weld AMONG the selected move-points ─
 //   (no reference list): every pair (outer i > inner j) within tolerant_weld² is welded
 //   by moving the outer point onto the inner.  Requires an all-patch, no-face selection.
-//   The IDB's inner loop is a 4× unroll over d_move_points[]; the ~48KB v18[] buffer is a
-//   write-only undo snapshot (observed once — never read back), so it is omitted.
+//   The binary's ~48KB write-only undo snapshot buffer is never read back, so it is
+//   omitted.
 static void Patch_ConnectVerts_03()
 {
     if ( g_SelectedFaces.GetSize() > 0 )
@@ -9625,10 +7995,10 @@ static void Patch_ConnectVerts_03()
             float tol    = (float)( g_PrefsDlg->tolerant_weld * g_PrefsDlg->tolerant_weld );
             int   merged = 0;
             // outer index i runs high→low over d_move_points; each is welded against every
-            // lower-index point j.  (Binary: for(i=N-1; i>0; --i) for(j=i-1; j>=0; --j).)
+            // lower-index point j.
             for ( int i = g_qeglobals.d_num_move_points - 1; i > 0; --i )
             {
-                float *outer = g_qeglobals.d_move_points[i]->xyz;   // *(float**)&d_move_points[i]
+                float *outer = g_qeglobals.d_move_points[i]->xyz;
                 for ( int j = i - 1; j >= 0; --j )
                 {
                     float *inner = g_qeglobals.d_move_points[j]->xyz;
@@ -9638,7 +8008,7 @@ static void Patch_ConnectVerts_03()
                     if ( d2 <= tol )
                     {
                         ++merged;
-                        // save old outer to the (unused) buffer, then outer ← inner
+                        // outer ← inner
                         outer[0] = inner[0];
                         outer[1] = inner[1];
                         outer[2] = inner[2];
@@ -9706,8 +8076,6 @@ void ConnectVertices()
         }
         // snap each selected move point (1..N-1) to move_points[0] on the axes NOT locked
         // in g_nScaleHow (a set bit locks that axis; g_nScaleHow==0 snaps all three).
-        // (The binary splits this into a while-body for g_nScaleHow!=0 and a tail for
-        // ==0, but both reduce to the same per-axis rule: snap axis a iff bit a is clear.)
         drawVert_t *pt0 = g_qeglobals.d_move_points[0];
         for ( int i = 1; i < g_qeglobals.d_num_move_points; ++i )
         {
@@ -9746,25 +8114,22 @@ void ConnectVertices()
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  FILLED / TEXTURED PATCH SURFACE - the camera/world patch draw.  The binary routes 3D
-//  camera world patches (DrawBrush 0x47b070, draw_meth2 != 29) to DrawPatches (0x4414e0),
-//  whose DEFAULT arm (patch_wireframe OFF) draws the patch FILLED per-layer through the
-//  same surf cache the models use:
-//    DrawPatches -> PMESH_27_CheckVersion (0x440670) -> PMESH_26_CheckFace (0x4405f0)
-//                -> Editor_AddMeshCmd (r_ed_scene.cpp)
-//  gated by PMESH_25_PatchVersion (0x4405a0) -> Patch_BuildInstanceVisuals (0x440240),
+//  FILLED / TEXTURED PATCH SURFACE - the camera/world patch draw.  3D camera world
+//  patches (DrawBrush 0x47b070, draw_meth2 != 29) route to DrawPatches, whose DEFAULT arm
+//  (patch_wireframe OFF) draws the patch FILLED per-layer through the same surf cache the
+//  models use:
+//    DrawPatches -> Patch_Fill_Emit -> Editor_AddMeshCmd (r_ed_scene.cpp)
+//  gated by Patch_Fill_SyncVersion -> Patch_BuildInstanceVisuals,
 //  which builds the patch INSTANCE per-layer visuals (the patch analogue of the brush
 //  Visuals_InitFaceVis / Face_BuildLayerGeom -> Editor_VB_Upload flow).
-//  PMESH_23 computes per-vertex TANGENT/BINORMAL via sub_4BAF60 (TangentSpace_Calc,
+//  Patch_Fill_BuildVisuals computes per-vertex TANGENT/BINORMAL (TangentSpace_Calc,
 //  universal/tangentspace.cpp) before Editor_VB_Upload; those vectors are render-visible
-//  for normal/specular techniques, so keep them faithful rather than uploading zeroes.
+//  for normal/specular techniques, so they are computed rather than uploaded as zeroes.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // ── deps (all ported elsewhere) ──────────────────────────────────────────────
 extern int          MaterialDef_11( MaterialDef *m );                              // materialdef.cpp — layer count
 extern Material    *MaterialDef_14( unsigned int visIndex, MaterialDef *m );        // materialdef.cpp 0x431C60
-extern void         OrientationDirToWorldDir( float *out, const orientation_t *orient, const float *dir ); // draw.cpp 0x4BA4B0
-extern float        Vec3Normalize_R( float *v );                                   // 0x40A5E0
 extern void         PerpendicularVector( const float *src, float *dst );             // 0x4A5340
 extern char         Material_GetConstantValue( Material *mtl, const char *name, float *out ); // materialdef 0x51AD50
 extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
@@ -9788,13 +8153,13 @@ static float Patch_TangentAngle( const float *a, const float *b )
 {
     const float dot = Patch_TangentDot( a, b );
     if ( dot <= -1.0f )
-        return -3.1415927f;
+        return -(float)KIWI_PI;   // KIWI: KIWI_PI
     if ( dot >= 1.0f )
-        return 3.1415927f;
+        return (float)KIWI_PI;
     return (float)acos( dot );
 }
 
-// sub_4BAC40: derive one triangle's tangent/binormal candidates from xyz+st.
+// Patch_TangentBasisForTri (0x4BAC40): derive one triangle's tangent/binormal candidates from xyz+st.
 static void Patch_TangentBasisForTri( const float *st0, const float *xyz0,
                                       const float *st1, const float *xyz1,
                                       const float *st2, const float *xyz2,
@@ -9830,7 +8195,7 @@ static void Patch_TangentBasisForTri( const float *st0, const float *xyz0,
     Vec3Normalize_R( outBinormal );
 }
 
-// sub_4BAE90: angle weights for a triangle's three vertices.
+// Patch_TangentTriWeights (0x4BAE90): angle weights for a triangle's three vertices.
 static void Patch_TangentTriWeights( const float *xyz, int i0, int i1, int i2, float *outWeights )
 {
     const float *p0 = xyz + 3 * i0;
@@ -9848,7 +8213,7 @@ static void Patch_TangentTriWeights( const float *xyz, int i0, int i1, int i2, f
     outWeights[2] = Patch_TangentAngle( v20, v12 );
 }
 
-// TangentSpace_Calc 0x4BAF60, specialized to PMESH_23's contiguous scratch arrays.
+// TangentSpace_Calc 0x4BAF60, specialized to Patch_Fill_BuildVisuals's contiguous scratch arrays.
 static void Patch_TangentSpaceCalc( int vertCount, const uint16_t *indices, int indexCount,
                                     float *xyz, float *normal, float *st,
                                     float *tangent, float *binormal )
@@ -9916,40 +8281,39 @@ static void Patch_TangentSpaceCalc( int vertCount, const uint16_t *indices, int 
     }
 }
 
-// ── sub_43FB70 — build the FRONT-face triangle indices for the tessellated grid ──
+// ── Patch_Fill_BuildFrontIndices (0x43FB70) — build the FRONT-face triangle indices for the tessellated grid ──
 // Two triangles per quad cell over the (width-1)x(height-1) grid; for a TERRAIN patch
 // (type==64) the quad's split diagonal honours ctrl[col][row].turned_edge&1.  Returns the
-// index count written.  (a1 = patchMesh_t DEF; out = uint16_t* index buffer.)
+// index count written.  (def = the patchMesh_t DEF; out = uint16_t* index buffer.)
 static int Patch_Fill_BuildFrontIndices( patchMesh_t *def, uint16_t *out )
 {
     curvePatchDef_t *mesh = def->curveDef;
     if ( !mesh ) return 0;
-    const int mw = mesh->width;          // *(_DWORD *)v2
-    const int mh = mesh->height;         // *(_DWORD *)(v2+4)
+    const int mw = mesh->width;
+    const int mh = mesh->height;
     const bool terrain = ( (int)def->type == 64 );
-    int idx = 0;                         // running index-write count (v13)
+    int idx = 0;                         // running index-write count
     // rows: 0..mh-2 ; cols: 0..mw-2
     for ( int row = 0; row + 1 < mh; ++row )
     {
         for ( int col = 0; col + 1 < mw; ++col )
         {
-            const int base = row * mw + col;              // v5 + v6 * mw  (v6=row, v5=col)
+            const int base = row * mw + col;
             const int v00 = base;                         // (row,   col)
             const int v01 = base + 1;                     // (row,   col+1)
             const int v10 = base + mw;                    // (row+1, col)
             const int v11 = base + mw + 1;                // (row+1, col+1)
-            // IDA 0x43fb9f starts at ctrl[0][0].turned_edge, advances +80 per row
-            // and +1280 per column, so the flag is ctrl[col][row].
+            // the turned flag is ctrl[col][row].
             const bool turned = terrain && ( def->ctrl[col][row].turned_edge & 1 );
             if ( turned )
             {
-                // 0x43fbee: {v00, v11, v01} , {v11, v00, v10}
+                // {v00, v11, v01} , {v11, v00, v10}
                 out[idx+0] = (uint16_t)v00; out[idx+1] = (uint16_t)v11; out[idx+2] = (uint16_t)v01;
                 out[idx+3] = (uint16_t)v11; out[idx+4] = (uint16_t)v00; out[idx+5] = (uint16_t)v10;
             }
             else
             {
-                // 0x43fc4e: {v00, v10, v01} , {v01, v10, v11}
+                // {v00, v10, v01} , {v01, v10, v11}
                 out[idx+0] = (uint16_t)v00; out[idx+1] = (uint16_t)v10; out[idx+2] = (uint16_t)v01;
                 out[idx+3] = (uint16_t)v01; out[idx+4] = (uint16_t)v10; out[idx+5] = (uint16_t)v11;
             }
@@ -9959,34 +8323,34 @@ static int Patch_Fill_BuildFrontIndices( patchMesh_t *def, uint16_t *out )
     return idx;
 }
 
-// ── PMESH_24 (0x4401a0) — allocate + fill the front indices, then the back (reverse) ──
+// ── Patch_Fill_BuildIndices (0x4401a0) — allocate + fill the front indices, then the back (reverse) ──
 static void Patch_Fill_BuildIndices( patch_t *inst )
 {
     curvePatchDef_t *mesh = inst->def->curveDef;
     const int mw = mesh->width, mh = mesh->height;
-    const int indexCount = ( mh - 1 ) * ( 6 * mw - 6 );   // 0x4401b7
+    const int indexCount = ( mh - 1 ) * ( 6 * mw - 6 );
     inst->indexCount = indexCount;
     if ( indexCount <= 0 ) { inst->indicesFront = inst->indicesBack = nullptr; return; }
-    // ONE alloc for both faces: front[indexCount] then back[indexCount] (IDB &v2[2*indexCount]).
+    // ONE alloc for both faces: front[indexCount] then back[indexCount].
     uint16_t *buf = (uint16_t *)operator new( (size_t)( 4 * indexCount ) );  // 2*indexCount uint16 each face
     inst->indicesFront = buf;
     inst->indicesBack  = buf + indexCount;
     int written = Patch_Fill_BuildFrontIndices( inst->def, buf );
-    iassert( written == indexCount );                    // 0x4401f1 "indexCount == pm->indexCount"
-    // back face = front reversed (0x440216 loop: back[i] = front[indexCount-i-1]).
+    iassert( written == indexCount );                    // "indexCount == pm->indexCount"
+    // back face = front reversed (back[i] = front[indexCount-i-1]).
     for ( int i = 0; i < indexCount; ++i )
         inst->indicesBack[i] = inst->indicesFront[indexCount - i - 1];
 }
 
-// ── PMESH_23_ColorTint (0x43fd40) — build per-vertex world geometry + upload per layer ──
+// ── Patch_Fill_BuildVisuals (0x43fd40) — build per-vertex world geometry + upload per layer ──
 static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient, MaterialDef *mtldef )
 {
     curvePatchDef_t *mesh = inst->def->curveDef;
-    const int vertCount = mesh->width * mesh->height;    // v4
+    const int vertCount = mesh->width * mesh->height;
     inst->vertCount = vertCount;
     curveVert_t *src = mesh->verts;
 
-    // Scratch per-vertex arrays (freed at the end — the binary's operator new / j__free_0).
+    // Scratch per-vertex arrays (freed at the end).
     float *xyz    = (float *)operator new( (size_t)( 12 * vertCount ) );  // 3 floats
     float *normal = (float *)operator new( (size_t)( 12 * vertCount ) );
     float *st     = (float *)operator new( (size_t)( 8  * vertCount ) );  // 2 floats
@@ -9994,7 +8358,7 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
     float *binormal = (float *)operator new( (size_t)( 12 * vertCount ) );
     unsigned int *color = (unsigned int *)operator new( (size_t)( 4 * vertCount ) );
 
-    // colorTint (material constant "colorTint"; default white) — 0x43fec8.
+    // colorTint (material constant "colorTint"; default white).
     Material *m0 = MaterialDef_14( 0, mtldef );
     iassert( m0 );                                       // MaterialDef.cpp:336
     float tint[4];
@@ -10003,35 +8367,35 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
     GfxColor tintC;
     Byte4PackPixelColor( tint, &tintC );
 
-    // Lightmap-alpha mode flag: (layeredMaterial->unk_flags2 & 0x70) == 96  (0x43ff10).
+    // Lightmap-alpha mode flag: (layeredMaterial->unk_flags2 & 0x70) == 96.
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( mtldef );
     const bool lightmapAlpha = lm && ( ( lm->unk_flags2 & 0x70 ) == 96 );
 
     for ( int i = 0; i < vertCount; ++i )
     {
         curveVert_t *cv = &src[i];
-        // position (world) + normal (world); degenerate normal -> +Z (0x43ff88).
+        // position (world) + normal (world); degenerate normal -> +Z.
         OrientationPosToWorldPos( &xyz[3*i], cv->xyz, orient );
         OrientationDirToWorldDir( &normal[3*i], orient, cv->normal );
         if ( Vec3Normalize_R( &normal[3*i] ) < 0.001f )
         { normal[3*i+0] = 0.0f; normal[3*i+1] = 0.0f; normal[3*i+2] = 1.0f; }
-        // texcoords (curveVert.st @ +12/+16).
+        // texcoords (curveVert.st).
         st[2*i+0] = cv->st[0];
         st[2*i+1] = cv->st[1];
         // per-vertex colour, BGRA byte order (Byte4PackPixelColor: array[0]=B, [1]=G, [2]=R, [3]=A).
-        // alpha byte = curveVert.vert_color.a (cv @ +43 = 0x28+3).
+        // alpha byte = curveVert.vert_color.a.
         const unsigned a = ( (const byte *)&cv->vert_color )[3];
         byte B, G, R, A;
         if ( !lightmapAlpha )
         {
-            // 0x440048: colour bytes = colorTint verbatim; alpha byte from the vert.
+            // colour bytes = colorTint verbatim; alpha byte from the vert.
             B = tintC.array[0]; G = tintC.array[1]; R = tintC.array[2]; A = (byte)a;
         }
         else
         {
-            // 0x43ffea: lightmap-alpha mode multiplies RGB by vertex alpha; final alpha byte = 0xFF.
+            // lightmap-alpha mode multiplies RGB by vertex alpha; final alpha byte = 0xFF.
             auto mul255 = []( unsigned c, unsigned aa ) -> byte {
-                unsigned t = c * aa + 127;               // +127 rounding (IDB 2155905153*x>>32>>7 == x/255)
+                unsigned t = c * aa + 127;               // +127 rounding
                 return (byte)( t / 255 );
             };
             B = mul255( tintC.array[0], a );
@@ -10042,11 +8406,11 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
         color[i] = (unsigned)B | ( (unsigned)G << 8 ) | ( (unsigned)R << 16 ) | ( (unsigned)A << 24 );
     }
 
-    iassert( inst->indicesFront );                       // 0x4400b5 PMESH.CPP:3670
+    iassert( inst->indicesFront );                       // PMESH.CPP:3670
     Patch_TangentSpaceCalc( vertCount, inst->indicesFront, inst->indexCount,
-                            xyz, normal, st, tangent, binormal ); // 0x4400e4
+                            xyz, normal, st, tangent, binormal );
 
-    // Upload one VB run per layer + record {material, vertHandle} (0x4400f6 loop).
+    // Upload one VB run per layer + record {material, vertHandle}.
     // Runs past the material def's own layer count are KIWI texture layers: their
     // material is the layer's alpha-blend twin and their vertex alpha is the weight
     // channel (kiwi_terrain.cpp rewrites `color` per run).
@@ -10075,11 +8439,10 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
     operator delete( xyz );
 }
 
-// ── PMESH_21_Indices (0x43f8c0) — FREE the current instance visuals (before rebuild) ──
+// ── Patch_Fill_FreeVisuals (0x43f8c0) — FREE the current instance visuals (before rebuild) ──
 static void Patch_Fill_FreeVisuals( patch_t *inst )
 {
-    if ( !inst )
-        Assert( PMESH_CPP, 3491, 0, "%s", "pm" );
+    iassert( inst );
     if ( inst->visArray )
     {
         for ( int i = 0; i < inst->visCount; ++i )
@@ -10087,12 +8450,9 @@ static void Patch_Fill_FreeVisuals( patch_t *inst )
         operator delete( inst->visArray );
         // indicesBack == indicesFront + indexCount (ONE allocation, back half in the same
         // block); the binary checks it as a byte offset of 2*indexCount (uint16 indices).
-        const bool contiguous = ( inst->indicesBack == inst->indicesFront + inst->indexCount );
+        iassert( inst->indicesBack == inst->indicesFront + inst->indexCount );
         inst->visArray = nullptr;
         inst->visCount = 0;
-        if ( !contiguous )
-            Assert( PMESH_CPP, 3509, 0, "%s",
-                    "pm->indices[PM_BACK_FACE] == pm->indices[PM_FRONT_FACE] + pm->indexCount" );
         if ( inst->indicesFront )
             operator delete( inst->indicesFront );       // one alloc (front, back = front+indexCount)
         inst->indicesFront = nullptr;
@@ -10102,11 +8462,11 @@ static void Patch_Fill_FreeVisuals( patch_t *inst )
     }
     else
     {
-        if ( inst->visCount )     Assert( PMESH_CPP, 3495, 0, "%s", "!pm->visCount" );
-        if ( inst->indicesFront ) Assert( PMESH_CPP, 3496, 0, "%s", "!pm->indices[PM_FRONT_FACE]" );
-        if ( inst->indicesBack )  Assert( PMESH_CPP, 3497, 0, "%s", "!pm->indices[PM_BACK_FACE]" );
-        if ( inst->indexCount )   Assert( PMESH_CPP, 3498, 0, "%s", "!pm->indexCount" );
-        if ( inst->vertCount )    Assert( PMESH_CPP, 3499, 0, "%s", "!pm->vertCount" );
+        iassert( !inst->visCount );
+        iassert( !inst->indicesFront );
+        iassert( !inst->indicesBack );
+        iassert( !inst->indexCount );
+        iassert( !inst->vertCount );
     }
 }
 
@@ -10115,29 +8475,28 @@ static void Patch_Fill_FreeVisuals( patch_t *inst )
 //  mesh/instance/index buffers and leaves symbiot->patch dangling at a freed patchMesh_t.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ── PMESH_22_Indices (0x43FA20) — free the instance's index/vis buffers and ARM the
-//  rebuild (version = def->version - 1).  DELIBERATE TWIN of PMESH_21_Indices
-//  (0x43f8c0 = Patch_Fill_FreeVisuals above): verified in disasm (0x43faff–0x43fb5e)
-//  that this one has NO R_Ed_FreeVertices loop — it does not hand vertices back to the
-//  renderer — and, unlike PMESH_21, it ends by resetting the instance version.  Do NOT
-//  "unify" these two; the asymmetry is the binary's (see the U1 conflated-twin lesson).
-void PMESH_22_Indices( patch_t *pm )
+// ── Patch_Fill_ResetVisuals (0x43FA20) — free the instance's index/vis buffers and ARM the
+//  rebuild (version = def->version - 1).  DELIBERATE TWIN of Patch_Fill_FreeVisuals
+//  above: this one has NO R_Ed_FreeVertices loop — it does not hand vertices back to the
+//  renderer — and, unlike Patch_Fill_FreeVisuals, it ends by resetting the instance version.  Do NOT
+//  "unify" these two; the asymmetry is the binary's.
+void Patch_Fill_ResetVisuals( patch_t *pm )
 {
     iassert( pm );   // pmesh.cpp:3520
-    if ( pm->visArray )                                     // 0x43fa44
+    if ( pm->visArray )
     {
-        free( pm->visArray );                               // 0x43fb00 (no R_Ed_FreeVertices loop)
-        bool contiguous = ( pm->indicesBack == pm->indicesFront + pm->indexCount );  // 0x43fb11
-        pm->visArray  = nullptr;                            // 0x43fb14
-        pm->visCount  = 0;                                  // 0x43fb17
+        free( pm->visArray );                               // (no R_Ed_FreeVertices loop)
+        bool contiguous = ( pm->indicesBack == pm->indicesFront + pm->indexCount );
+        pm->visArray  = nullptr;
+        pm->visCount  = 0;
         if ( !contiguous ) {}                               // (evaluated pre-clear above)
         iassert( pm->indices[PM_BACK_FACE] == pm->indices[PM_FRONT_FACE] + pm->indexCount );   // PMESH.CPP:3536
-        free( pm->indicesFront );                           // 0x43fb3d (one alloc: back = front + count)
-        pm->indicesFront = nullptr;                         // 0x43fb44
-        pm->indicesBack  = nullptr;                         // 0x43fb47
-        pm->indexCount   = 0;                               // 0x43fb4a
-        pm->vertCount    = 0;                               // 0x43fb4d
-        pm->version = (short)( pm->def->version - 1 );      // 0x43fb50/0x43fb5e — arm the rebuild
+        free( pm->indicesFront );                           // (one alloc: back = front + count)
+        pm->indicesFront = nullptr;
+        pm->indicesBack  = nullptr;
+        pm->indexCount   = 0;
+        pm->vertCount    = 0;
+        pm->version = (short)( pm->def->version - 1 );      // arm the rebuild
     }
     else
     {
@@ -10149,49 +8508,48 @@ void PMESH_22_Indices( patch_t *pm )
     }
 }
 
-// ── PMESH_33 (0x442760) — free a patch INSTANCE: release its visuals through
-//  PMESH_21_Indices (the R_Ed_FreeVertices variant — this path DOES return the GPU
+// ── Patch_FreeInstance (0x442760) — free a patch INSTANCE: release its visuals through
+//  Patch_Fill_FreeVisuals (the R_Ed_FreeVertices variant — this path DOES return the GPU
 //  vertices), free the instance, refresh the Patch Inspector.
-void PMESH_33( patch_t *p )
+void Patch_FreeInstance( patch_t *p )
 {
     iassert( p );   // pmesh.cpp:4549
     iassert( p->def );   // pmesh.cpp:4550
-    Patch_Fill_FreeVisuals( p );                            // 0x4427a7  PMESH_21_Indices
-    free( p );                                              // 0x4427ad
-    if ( PatchDialog_IsOpen() )                          // 0x4427bc  CWnd_PatchDialog.m_hWnd
-        g_PatchDialog_GetPatchInfo();                       // 0x4427c4
+    Patch_Fill_FreeVisuals( p );
+    free( p );
+    if ( PatchDialog_IsOpen() )
+        g_PatchDialog_GetPatchInfo();
 }
 
-// ── Patch_Delete / PMESH_32_Symbiot (0x4426A0) — free a patch DEF (patchMesh_t):
-//  break the symbiot back-pointer (brush_t.patch @0x50) so it can't dangle, free the
+// ── Patch_Delete (0x4426A0) — free a patch DEF (patchMesh_t):
+//  break the symbiot back-pointer (brush_t.patch) so it can't dangle, free the
 //  tessellated curveDef, free the def, refresh the Patch Inspector.  The three asserts
 //  are the binary's (symbiot present / back-pointer identity / refCount drained).
-void PMESH_32_Symbiot( patchMesh_t *patchDef )
+void Patch_Delete( patchMesh_t *patchDef )
 {
     patchMesh_t *p = (patchMesh_t *)(intptr_t)patchDef;
-    brush_t *symbiot = p->symbiot;                          // 0x503C
+    brush_t *symbiot = p->symbiot;
     iassert( p->symbiot );                // PMESH.CPP:4534
-    iassert( p->symbiot->patch == p );    // PMESH.CPP:4535 (brush_t.patch @0x50)
+    iassert( p->symbiot->patch == p );    // PMESH.CPP:4535
     vassert( (p->symbiot->refCount == 0), "(p->symbiot->refCount) = %i", p->symbiot->refCount );   // PMESH.CPP:4536
     if ( symbiot )
-        symbiot->patch = nullptr;                           // 0x442723 — kill the dangling back-ref
-    if ( p->curveDef )                                      // 0x44272a
-        free( p->curveDef );                                // 0x442735
-    free( p );                                              // 0x44273e
-    if ( PatchDialog_IsOpen() )                          // 0x44274d
-        g_PatchDialog_GetPatchInfo();                       // 0x442754
+        symbiot->patch = nullptr;                           // kill the dangling back-ref
+    if ( p->curveDef )
+        free( p->curveDef );
+    free( p );
+    if ( PatchDialog_IsOpen() )
+        g_PatchDialog_GetPatchInfo();
 }
 
 // ── Patch_BuildInstanceVisuals (0x440240) — free-then-rebuild the instance visuals ──
 // `orient` is the PLACEMENT orientation (prefab-content patches ride the composed prefabOrient;
-// top-level patches ride world_orient_matrix).  The binary threads it DrawPatches->PMESH_25->
-// here->PMESH_23 so each vertex is world-transformed (OrientationPosToWorldPos); hardcoding
+// top-level patches ride world_orient_matrix).  It is threaded DrawPatches->Patch_Fill_SyncVersion->
+// here->Patch_Fill_BuildVisuals so each vertex is world-transformed (OrientationPosToWorldPos); hardcoding
 // world_orient_matrix here builds every filled patch at its LOCAL coords.
 static void Patch_BuildInstanceVisuals( patch_t *inst, const orientation_t *orient )
 {
-    Patch_Fill_FreeVisuals( inst );                      // PMESH_21_Indices
-    // Current-edit-layer material def (patchMesh_t.texture + 8*layer; the IDB reads
-    // def + 8*current_edit_layer + 24 = &texture[layer]).
+    Patch_Fill_FreeVisuals( inst );
+    // Current-edit-layer material def (&texture[layer]).
     MaterialDef *mtldef = (MaterialDef *)( &inst->def->texture + g_qeglobals.current_edit_layer );
     // Prefab-content patches load with a DEGENERATE material (headless/prefab shim, layerCount 0);
     // realize it by name now that the renderer is up, else the filled draw has nothing to bind.
@@ -10208,18 +8566,18 @@ static void Patch_BuildInstanceVisuals( patch_t *inst, const orientation_t *orie
     inst->visArray = (patchVisuals_s *)operator new( (size_t)layerCount * sizeof(patchVisuals_s) );
     if ( !inst->visArray )
         Error( "Out of memory on patch visuals array" );
-    Patch_Fill_BuildIndices( inst );                     // PMESH_24
-    Patch_Fill_BuildVisuals( inst, orient, mtldef );     // PMESH_23 (world-transform each vertex by `orient`)
-    // sync the instance version to the def (0x4402b1: *(a1+4) = def->version).
+    Patch_Fill_BuildIndices( inst );
+    Patch_Fill_BuildVisuals( inst, orient, mtldef );     // world-transform each vertex by `orient`
+    // sync the instance version to the def.
     inst->version = inst->def->version;
 }
 
-// ── PMESH_25_PatchVersion (0x4405a0) — rebuild only when the def version advanced ──
-// `orient` = the PLACEMENT orientation (threaded from DrawPatches, a3).  Used only on rebuild;
-// version-gated exactly like the brush faceVis (sub_477D70) — a per-placement patch instance
+// ── Patch_Fill_SyncVersion (0x4405a0) — rebuild only when the def version advanced ──
+// `orient` = the PLACEMENT orientation (threaded from DrawPatches).  Used only on rebuild;
+// version-gated exactly like the brush faceVis (Brush_CheckBuildFaceVis) — a per-placement patch instance
 // builds once with its own placement orient, then the cache holds.
 // NOT static: the sun-preview PATCH shadow arm (Patch_AddShadowSilhouette 0x4418B0,
-// shadowvolume.cpp) drives it too, exactly as the binary does (0x4418fa).
+// shadowvolume.cpp) drives it too, as the binary does.
 void Patch_Fill_SyncVersion( patch_t *inst, const orientation_t *orient )
 {
     // Rebuild if no visuals yet OR the instance version != def version.
@@ -10410,12 +8768,12 @@ void KiwiPatchWeld_Run()
 
 extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );
 
-// ── PMESH_27_CheckVersion / PMESH_26_CheckFace (0x440670 / 0x4405f0) — the draw emit ──
+// ── Patch_Fill_Emit (0x440670 / 0x4405f0) — the draw emit ──
 // Emit the patch's tessellated mesh into the surf cache at `techType`.  `face` = PM_FRONT_FACE
 // or PM_BACK_FACE.  When `mtlOverride` is set, use it for ALL layers (the d_white patch_wireframe
 // under-fill); otherwise use each layer's real material (visArray[L].material).  Per-layer the
-// binary's DrawPatches draw gate is NOT here: DrawPatches gates once, before PMESH_27, with
-// MaterialDef_15_Drawflag_Multiply(drawFlags, patch material). PMESH_27 then emits every layer.
+// binary's DrawPatches draw gate is NOT here: DrawPatches gates once, before Patch_Fill_Emit, with
+// MaterialDef_15_Drawflag_Multiply(drawFlags, patch material). Patch_Fill_Emit then emits every layer.
 // Keep that shape: day_water_mud is translucent in D3D state but has toolFlags&0x70 == 0x20, so
 // the binary draws it in the first/skip-multiply world pass. A depth-write substitute would skip
 // it and the water strip would vanish.
@@ -10503,29 +8861,28 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     // Ensure the tessellated render mesh exists (built at load; safety net).
     if ( !inst->def->curveDef )
     {
-        extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *a3, int *a4 );
+        extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMap, int *rowMap );
         inst->def->curveDef = Patch_GenericMesh2( inst->def, g_qeglobals.current_edit_layer, 0, 0 );
         ++inst->def->version;
         if ( !inst->def->curveDef )
             return false;
     }
-    Patch_Fill_SyncVersion( inst, orient );              // PMESH_25 -> rebuild if stale (with placement orient)
+    Patch_Fill_SyncVersion( inst, orient );              // rebuild if stale (with placement orient)
     if ( !inst->visArray || inst->visCount <= 0 )
         return false;                                    // no realized layer -> wireframe fallback
 
-    // FAITHFUL DRAW GATE: IDA DrawPatches 0x4414e0 calls
-    //   PMESH_25_PatchVersion(pm, orient);
+    // DRAW GATE: after
+    //   Patch_Fill_SyncVersion(pm, orient);
     //   if (override || MaterialDef_15_Drawflag_Multiply(drawFlags, &patch->texture))
-    //       PMESH_27_CheckVersion(...)
-    // and PMESH_27 emits every layer. Do not substitute material depth-write here: CoD4 water
+    //       Patch_Fill_Emit(...)
+    // and Patch_Fill_Emit emits every layer. Do not substitute material depth-write here: CoD4 water
     // materials intentionally have depth-write off but toolFlags&0x70 != 0x70, so stock Radiant
     // draws them in the first world pass.
-    // 0x4414FA/0x4414FF — `mov eax,[edi] ; add eax,18h`: DrawPatches reads &def->texture
-    // FLAT (layer 0 ALWAYS), it does NOT index by current_edit_layer.  (Only the INSTANCE
-    // VISUAL build, Patch_BuildInstanceVisuals 0x440255, uses +8*current_edit_layer.)
-    // DrawPatchCameraFilled 0x4415D8 does the same flat read — they must agree, or the
-    // white selected-outline pass and the filled pass can disagree on the same patch when
-    // the edit layer is not 0.
+    // DrawPatches reads &def->texture FLAT (layer 0 ALWAYS), it does NOT index by
+    // current_edit_layer.  (Only the INSTANCE VISUAL build, Patch_BuildInstanceVisuals, uses
+    // the current_edit_layer slot.)  DrawPatchCameraFilled does the same flat read — they
+    // must agree, or the white selected-outline pass and the filled pass can disagree on the
+    // same patch when the edit layer is not 0.
     MaterialDef *mtldef = (MaterialDef *)&inst->def->texture;
     if ( !MaterialDef_15_Drawflag_Multiply( drawFlags, mtldef ) )
         return true;
@@ -10536,12 +8893,12 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
     const int patchWireframe = KiwiTerrain_HideWireframe() ? 0 : g_PrefsDlg->patch_wireframe;
     const bool drawFront = patchWireframe == 0 || ( patchWireframe == 2 && techType != TECHNIQUE_WIREFRAME_SHADED );
     if ( drawFront )
-        Patch_Fill_Emit( inst, nullptr, PM_FRONT_FACE, techType );          // 0x44153E
+        Patch_Fill_Emit( inst, nullptr, PM_FRONT_FACE, techType );
 
     if ( ( drawFlags & 1 ) != 0 )
     {
         if ( !drawFront )
-            Patch_Fill_Emit( inst, g_qeglobals.d_white, PM_FRONT_FACE, techType ); // 0x44155D
+            Patch_Fill_Emit( inst, g_qeglobals.d_white, PM_FRONT_FACE, techType );
     }
     else
     {
@@ -10553,19 +8910,19 @@ bool DrawPatches( patch_t *inst, const orientation_t *orient, int techType, int 
         // chunked map, visible only from underneath.
         if ( !KiwiTerrain_HideWireframe() )
             Patch_Fill_Emit( inst, nullptr, PM_BACK_FACE,
-                             TECHNIQUE_WIREFRAME_SHADED, -1 );             // 0x441572
+                             TECHNIQUE_WIREFRAME_SHADED, -1 );
         if ( patchWireframe )
         {
             extern void DrawPatchesWireframeGrid( patch_t *, GfxColor *,
                                                    const orientation_t *, char, int );
             GfxColor color;
             Byte4PackPixelColor( g_qeglobals.d_savedinfo.colors[23], &color );
-            DrawPatchesWireframeGrid( inst, &color, orient, 2, drawFlags ); // 0x4415A6
+            DrawPatchesWireframeGrid( inst, &color, orient, 2, drawFlags );
         }
     }
 
     extern void Patch_DrawControlPoints( patch_t *, const orientation_t * );
-    Patch_DrawControlPoints( inst, orient );                                // 0x4415B7
+    Patch_DrawControlPoints( inst, orient );
     return true;
 }
 
@@ -10578,12 +8935,12 @@ bool DrawPatchCameraFilled( patch_t *inst, const orientation_t *orient, int draw
 
     if ( inst && inst->def && inst->def->curveDef )
     {
-        Patch_Fill_SyncVersion( inst, orient );              // 0x4415D3
+        Patch_Fill_SyncVersion( inst, orient );
         if ( inst->visArray && inst->visCount > 0 )
         {
-            // 0x4415D8/0x4415DD — def + 0x18 == &def->texture, no layer index.
+            // &def->texture, no layer index.
             if ( MaterialDef_15_Drawflag_Multiply( drawFlags, (MaterialDef *)&inst->def->texture ) )
-            {                                                // 0x4415E8 jz -> nothing drawn
+            {                                                // else nothing drawn
                 front = Patch_Fill_Emit( inst, g_qeglobals.d_white, PM_FRONT_FACE,
                                          TECHNIQUE_WIREFRAME_SOLID );
                 back  = Patch_Fill_Emit( inst, g_qeglobals.d_white, PM_BACK_FACE,
@@ -10595,10 +8952,6 @@ bool DrawPatchCameraFilled( patch_t *inst, const orientation_t *orient, int draw
     return front || back;
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-//  RELOCATED HOME — this function's embedded Assert() calls name THIS file as
-//  their source (see the brush.cpp relocation protocol / line-uniqueness test).
-// ═════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════
 //  Patch_FindReplaceTexture  (0x449520) — patch (pmesh) face material swap.
 //  b = the patch brush DEF; replaceName / findName; flags.  When (flags&2)==0 the
@@ -10628,14 +8981,14 @@ char Patch_FindReplaceTexture( brush_t *b, const char *replaceName,
 // Brush_AddToList when a brush owns a patch.  The instance version word is seeded to
 // def->version-1 (the rebuild trigger, mirroring selbrush.version): without it a fresh
 // instance whose version happened to equal def->version would skip its first curveDef
-// rebuild.  refCount lives at def->symbiot(+0x501C) + 0x1c.
-patch_t *PMESH_55(patchMesh_t *def)
+// rebuild.
+patch_t *Patch_AllocInstance(patchMesh_t *def)
 {
     iassert( def );   // PMESH.CPP:9031
     iassert( def->symbiot );   // PMESH.CPP:9032
     vassert( (def->symbiot->refCount >= 0), "(def->symbiot->refCount) = %i", def->symbiot->refCount );   // PMESH.CPP:9033",
 
-    patch_t *p = (patch_t *)calloc( 1, sizeof( patch_t ) );   // = IDB new(0x20) + zero [1..7]
+    patch_t *p = (patch_t *)calloc( 1, sizeof( patch_t ) );
     if ( p )
     {
         p->def     = def;
@@ -10649,7 +9002,7 @@ patch_t *PMESH_55(patchMesh_t *def)
 //
 //  The LIGHTMAP-LAYER arm of Patch_KiwiFinishNewLike (:1542-1548), on its own.
 //  Same three statements, same constants, same order:
-//      terrain -> Patch_TerrainTexProject( p, 1, 16 )   else PMESH_02( p, 1, 16 )
+//      terrain -> Patch_TerrainTexProject( p, 1, 16 )   else Patch_ResampleCurveST( p, 1, 16 )
 //      size_of_struct_0x504C = 16      (what Patch_Write serialises, :1146)
 //      bDirty = 1                      (the gate that makes it serialise at all)
 //
@@ -10675,28 +9028,20 @@ void Patch_KiwiEnsureLmapCoords( patchMesh_t *p )
         return;
     const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
     *(float *)&p->size_of_struct_0x504C = 16.0f;
     p->bDirty = 1;
     ++p->version;
 }
 
 // ── KIWI Terrain Sculpt / Decals bridge (kiwi_terrain.cpp, kiwi_decal.cpp) ─────
-//  Non-static entry points over the two file-static halves of the ported paint undo
-//  chain, so the KIWI tools bracket a stroke exactly like the original Alt+LMB paint:
+//  The KIWI tools bracket a stroke exactly like the original Alt+LMB paint:
 //  Patch_Paint (clear xx22b) -> first touch: Patch_PaintMarkUndo -> release:
-//  Patch_PaintFinish (PMESH_18 tags the touched defs with the undo id).  Appended at
-//  the END of the file on purpose so no pmesh.cpp:NNN citation elsewhere shifts.
+//  Patch_PaintFinish (tags the touched defs with the undo id).
 void Patch_PaintMarkUndo( patchMesh_t *def )
 {
     if ( def && def->pSymbiot )
-        sub_45E770( def->pSymbiot );
-}
-
-void Patch_PaintFinish( selbrush_t *list )
-{
-    if ( list )
-        PMESH_18( list );
+        Undo_AddPaintedBrush( def->pSymbiot );
 }
 
 // ── KIWI Terrain Sculpt: texture + tessellate a freshly built control grid ─────────
@@ -10713,11 +9058,11 @@ void Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale )
     Patch_Naturalize2( p, 0, texScale, texScale );
     const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
-    else           PMESH_02( p, 1, 16.0f );
+    else           Patch_ResampleCurveST( p, 1, 16.0f );
     *(float *)&p->size_of_struct_0x504C = 16.0f;
     p->bDirty = 1;
     if ( terrain ) Patch_TerrainTexProject( p, 2, 0.25f );
-    else           PMESH_02( p, 2, 0.25f );
+    else           Patch_ResampleCurveST( p, 2, 0.25f );
     Patch_BuildCurveDef( p );
     ++p->version;
 }

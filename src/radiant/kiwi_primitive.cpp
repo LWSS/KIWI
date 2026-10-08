@@ -14,10 +14,12 @@
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
 #include "kiwi_extrude.h"
+#include "kiwi_fmt.h"
 #include "kiwi_lines.h"
 #include "kiwi_material.h"          // KiwiMtl_RealizePatch
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"          // Sel_* / KiwiSel_SetModeMask
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -31,34 +33,12 @@
 #include <string.h>
 #include <vector>
 
-// Ported entry points; signatures match their definitions.
-extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp
-extern int       g_nUpdateBits;                                         // 0x25D5A74 (mainfrm.cpp)
-// `planeptsSrc` is the ported definition's name; these callers pass material data.
-extern brush_t  *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls ); // brush.cpp:465 (0x4751e0)
-extern void      Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510 (0x475300)
-extern void      Brush_Free_R( brush_t *def );                          // brush.cpp:706 (0x475af0)
-extern void      Select_Deselect( int bAlsoFreeFaces );                 // select.cpp:1444 (0x48E800)
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4054
-// Auto-height is signed toward the camera; this accessor never returns NULL.
-extern camera_s *Ed_Camera();                                           // camwnd.cpp:161
-
 // Brush_MakeSided's first `int` really carries brush_t* (0x4731E0).
 extern void      Brush_MakeSided( brush_t *a1, unsigned int sides, int axis, char snap ); // brush.cpp:3405 (0x4731E0)
 extern void      Brush_MakeSidedCone( int sides );                      // brush.cpp:3653 (0x47BC10)
 extern void      Brush_MakeSidedSphere( int sides );                    // brush.cpp:3728 (0x47BE90)
 
-// xywnd.cpp:1563 forwarder; see kiwi_extrude.h.
-extern void      Ed_EnsureCurrentMaterial_Kiwi();
-// entity.cpp 0x25D5B30 - worldspawn.
-extern entity_s *world_entity;
-
 // Patch-cylinder entry points; signatures match their definitions.
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );        // brush.cpp:669  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                       // brush.cpp:927  0x4765A0
-extern patchMesh_t *MakeNewPatch();                                          // pmesh.cpp:136  0x437AC0
-extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
 extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558
 // radiant_registry.cpp:31 / :44.
 extern int          Radiant_ProfileGetInt( const char *section, const char *entry, int defVal );
@@ -98,8 +78,8 @@ namespace
     {
         for ( int i = 0; i < segs; ++i )
         {
-            const float a0 = phase + 6.283185307f * (float)i       / (float)segs;
-            const float a1 = phase + 6.283185307f * (float)( i + 1 ) / (float)segs;
+            const float a0 = phase + (float)( 2.0 * KIWI_PI ) * (float)i       / (float)segs;
+            const float a1 = phase + (float)( 2.0 * KIWI_PI ) * (float)( i + 1 ) / (float)segs;
             float p0[3], p1[3];
             for ( int k = 0; k < 3; ++k )
             {
@@ -762,7 +742,7 @@ namespace
                 EmitRing( hiW, m_plane.u, m_plane.v, m_radius, m_sides, 0.0f );
             for ( int i = 0; i < m_sides; ++i )
             {
-                const float a = 6.283185307f * (float)i / (float)m_sides;
+                const float a = (float)( 2.0 * KIWI_PI ) * (float)i / (float)m_sides;
                 float p[3], q[3];
                 for ( int k = 0; k < 3; ++k )
                 {
@@ -1731,15 +1711,15 @@ float KiwiPrim_PatchThickness()
 }
 void KiwiPrim_SetPatchThickness( float thickness )
 {
-    char text[32]; snprintf( text, sizeof(text), "%.9g", thickness );
-    Radiant_ProfileSetString( "KiwiUX", "CylinderWallThickness", text );
+    char text[48];
+    Radiant_ProfileSetString( "KiwiUX", "CylinderWallThickness", KiwiFmt_Exact( text, sizeof( text ), thickness, 0 ) );
 }
 
 void KiwiPrim_PatchControlPoint( float radius, int density, int col, float uv[2] )
 {
     const int spans = density + 3;
     if ( col == 2 * spans ) col = 0; // bit-identical seam
-    const float halfAngle = 3.14159265358979323846f / spans;
+    const float halfAngle = (float)KIWI_PI / spans;
     const float r = ( col & 1 ) ? radius / cosf( halfAngle ) : radius;
     uv[0] = r * cosf( halfAngle * col );
     uv[1] = r * sinf( halfAngle * col );

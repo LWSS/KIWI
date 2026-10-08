@@ -15,9 +15,8 @@
 #include <universal/com_math.h>    // transform helpers
 #include <universal/profile.h>     // PROF_SCOPED: the re-transform shows up in Tracy
 #include "kiwi_instcache.h"
+#include "kiwi_ported.h"
 #include "kiwi_shadowcache.h"    // sun-preview invalidation
-
-extern int Sys_Printf( const char *fmt, ... );
 
 extern void __cdecl SetupTransformUnitVec( const float4 *mtx, int ( *fixedMtx )[3] );
 extern PackedUnitVec __cdecl LocalTransformUnitVec( PackedUnitVec in, const int ( *fixedMtx )[3] );
@@ -259,6 +258,17 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
 
     if ( s_device != dx.device )
     {
+        // KIWI: R_ShutdownDirect3D releases the pages before the device goes, so this should
+        // only ever meet empty tables; live pages here belong to the old device.
+        static bool s_warnedDevice;
+        if ( s_pageCount && !s_warnedDevice )
+        {
+            s_warnedDevice = true;
+            Sys_Printf( "KIWI instance geometry cache: the D3D device changed under %d live vertex "
+                        "page(s); they are abandoned.\n", s_pageCount );
+        }
+        for ( int i = 0; i < s_idxBlkCount; ++i )
+            free( s_idxBlk[i] );                       // CPU blocks: not tied to the device
         IC_Forget();
         s_device = dx.device;
     }
@@ -413,6 +423,3 @@ void KiwiInstCache_Shutdown()
     s_device = nullptr;
 }
 
-int KiwiInstCache_ResidentSurfs()  { return s_okCount; }
-int KiwiInstCache_ResidentKB()     { return (int)( s_residentBytes / 1024u ); }
-int KiwiInstCache_BuiltThisFrame() { return s_builtThisFrame; }

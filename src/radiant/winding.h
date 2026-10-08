@@ -39,19 +39,7 @@ winding_t *Winding_BaseForPlane( vec3_t maxs, vec3_t mins, plane_t *plane );
 // Returns a new winding with points in reverse order.
 winding_t *Winding_Reverse( winding_t *w );
 
-// Removes point at index 'point' from the winding in-place.
-void Winding_RemovePoint( winding_t *w, int point );
-
-// Returns a new winding with 'point' inserted at position 'spot'.
-winding_t *Winding_InsertPoint( winding_t *w, vec3_t point, int spot );
-
 // ── Winding queries ────────────────────────────────────────────────────────────────
-// Returns true if fewer than 3 edges exceed EDGE_LENGTH (0.2 units).
-int Winding_IsTiny( winding_t *w );
-
-// Returns true if any vertex coordinate exceeds the world coordinate bounds.
-int Winding_IsHuge( winding_t *w );
-
 // Returns true if the planes of two windings are concave with respect to each other.
 int Winding_PlanesConcave( winding_t *w1, winding_t *w2,
                             vec3_t normal1, vec3_t normal2,
@@ -71,18 +59,5 @@ winding_t *Winding_TryMerge( winding_t *f1, winding_t *f2,
                                vec3_t planenormal, int keep );
 
 // ── Winding geometry ──────────────────────────────────────────────────────────────
-// Computes the best-fit plane normal and distance for a winding.
-void Winding_Plane( winding_t *w, vec3_t normal, double *dist );
-
 // Returns the total surface area of the winding.
 float Winding_Area( winding_t *w );
-
-// Computes the axis-aligned bounding box of the winding.
-void Winding_Bounds( winding_t *w, vec3_t mins, vec3_t maxs );
-
-// Returns true if 'point' lies inside the winding (on the plane).
-int Winding_PointInside( winding_t *w, plane_t *plane, vec3_t point, float epsilon );
-
-// Returns true if the line segment p1-p2 intersects the winding.
-int Winding_VectorIntersect( winding_t *w, plane_t *plane,
-                              vec3_t p1, vec3_t p2, float epsilon );

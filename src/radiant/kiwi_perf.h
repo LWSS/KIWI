@@ -26,7 +26,6 @@ enum kiwiPerfSlot_t
     KPERF_COUNT
 };
 
-bool KiwiPerf_Enabled();
 void KiwiPerf_Toggle();
 // Manual bracket; the scope below is the usual form.
 void KiwiPerf_Begin( kiwiPerfSlot_t slot );

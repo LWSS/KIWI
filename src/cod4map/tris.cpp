@@ -16,8 +16,6 @@ as triSoup entries.
 
 #include "fixedpoint.h"
 
-void (*g_lerpAuxDataCallback)(float *from, float *to, double frac, float *result) = &NullLerpAuxDataCallback;
-
 PFN_D3DXOptimizeFaces    pfn_D3DXOptimizeFaces;
 PFN_D3DXOptimizeVertices pfn_D3DXOptimizeVertices;
 
@@ -49,7 +47,6 @@ int D3DXOptimizeVertices(void* meshData, unsigned int faceCount, unsigned int ve
 }
 
 DrawVert_t       drawVertBuffer[MAX_MAP_VERTEXES];
-MatSortEntry_t   materialGroupSortTable[MAX_MAP_MATERIALS];
 PlatformEntry_t *g_targetPlatform = 0;
 TriRecord_t      triRecords[MAX_MAP_TRIANGLES];
 TriSurfProps_t  *g_windingHashBuckets[WINDING_HASH_BUCKETS];
@@ -92,18 +89,11 @@ double Vec2LengthSquared(const float *value)
   return lengthSquared;
 }
 
-/* CoD4 0x44C300.  This is the positive-side cell conversion paired with
-   the subtract-half helper at 0x42AC10. */
-int RoundPositiveFloatToInt(float value)
+/* CoD4 0x44C300: ceil(value) (fistp of value + 0.5 - 2^-30, so a fraction under 2^-30
+   still rounds down) - the max-side cell paired with fistp_sub's floor (0x42AC10). */
+int CeilFloatToInt(float value)
 {
   return fistp_add(value, FISTP_HALF_BIAS);
-}
-
-/* CoD4 0x44B610.  The native cast temporarily selects x87 truncate mode;
-   every clamped result is positive, so the ordinary integer cast matches. */
-unsigned char PackNormalBasisComponent(float value)
-{
-  return (unsigned char)(int)(I_fclamp(value, -1.0f, 1.0f) * 127.5 + 128.0);
 }
 
 /* CoD4 0x445FC0.  The warning aggregator deliberately uses the reversed
@@ -119,115 +109,6 @@ void ComputeLayeredGroupTriangleNormal(const float *point0, const float *point1,
   CrossProduct(edge21, edge10, outNormal);
   VecNormalize(outNormal);
 }
-
-char s_assertDisable_AdjustTriangleUVs_r;
-char s_assertDisable_AuxDataCopy;
-char s_assertDisable_BuildTriSoupAABBTree;
-char s_assertDisable_ClassifyTriVertsByAxis;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_ClipTriWinding;
-char s_assertDisable_CopyTriSurf;
-char s_assertDisable_CopyVerts;
-char s_assertDisable_CopyVerts;
-char s_assertDisable_CopyVerts;
-char s_assertDisable_EmitPatchSurface;
-char s_assertDisable_EmitPatchSurface;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSoupRecord;
-char s_assertDisable_EmitTriSurfForProps;
-char s_assertDisable_EmitTriSurfForProps;
-char s_assertDisable_EmitTriSurfForProps;
-char s_assertDisable_EmitTriSurface;
-char s_assertDisable_EmitTriSurface;
-char s_assertDisable_EmitTriSurface;
-char s_assertDisable_EmitTriSurface;
-char s_assertDisable_EmitTriSurface;
-char s_assertDisable_EmitTriSurfaceForDrawSurf;
-char s_assertDisable_EmitTriSurface_r;
-char s_assertDisable_EmitTriSurface_r;
-char s_assertDisable_EmitTriangleSoup;
-char s_assertDisable_EmitTriangleSoup;
-char s_assertDisable_FreeVerts;
-char s_assertDisable_GroupAdjacentTris;
-char s_assertDisable_GroupTriSurfsIntoSubgroups;
-char s_assertDisable_GroupTriangles;
-char s_assertDisable_GroupTriangles;
-char s_assertDisable_I_fclamp;
-char s_assertDisable_InsertTriSurfAfter;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_MergeTriGroups;
-char s_assertDisable_NullLerpAuxDataCallback;
-char s_assertDisable_PrependTriSurf;
-char s_assertDisable_SetTrisTransientMode;
-char s_assertDisable_SmoothVertexNormals;
-char s_assertDisable_SmoothVertexNormals;
-char s_assertDisable_SortTriIndices;
-char s_assertDisable_SortTriIndices;
-char s_assertDisable_SortTriIndices;
-char s_assertDisable_SplitSoupOnAxis;
-char s_assertDisable_SplitSoupOnAxis;
-char s_assertDisable_SplitSoupOnAxis;
-char s_assertDisable_SplitSoupOnAxis;
-char s_assertDisable_SplitSoupOnAxis;
-char s_assertDisable_SplitTrisByClassification;
-char s_assertDisable_TriangulateSurf;
-char s_assertDisable_TriangulateSurf;
-char s_assertDisable_TriangulateSurf;
-char s_assertDisable_TriangulateSurf;
-char s_assertDisable_TrisSnapNearbyVertices;
-char s_assertDisable_TrisSnapNearbyVertices;
-char s_assertDisable_TrisSnapWindingToVertices;
-char s_assertDisable_TrisSnapWindingToVertices;
-char s_assertDisable_TrisSnapWindingToVertices;
-char s_assertDisable_TrisSnapWindingToVertices;
-char s_assertDisable_Tris_CopyVertexToDrawVerts;
-char s_assertDisable_Tris_CopyVertexToDrawVerts;
-char s_assertDisable_Tris_CopyVertexToDrawVerts;
-char s_assertDisable_Tris_EmitTriangles;
-char s_assertDisable_Tris_EmitTriangles;
-char s_assertDisable_Tris_FindNextEntity;
-char s_assertDisable_Tris_FindWindings;
-char s_assertDisable_Tris_ReorderAddSurfaceVerts;
-char s_assertDisable_Tris_ReorderAddSurfaceVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderAndOptimizeVerts;
-char s_assertDisable_Tris_ReorderDrawVerts;
-char s_assertDisable_Tris_ReorderDrawVerts;
-char s_assertDisable_Tris_ReorderTriSurfaces;
-char s_assertDisable_Tris_ReorderTriSurfaces;
-char s_assertDisable_Tris_ReorderTriSurfaces;
-char s_assertDisable_Tris_ReorderTriSurfaces;
-char s_assertDisable_UnlinkAndFreeSurf;
-char s_assertDisable_ValidateTriSurfLmapCoords;
-char s_assertDisable_ValidateTriSurfLmapCoords;
 
 /*
    EmitDrawSurfaces in the native compiler runs the emitter twice: type 1
@@ -794,60 +675,30 @@ void SetTrisTransientMode(int mode, int preserveSurfaces)
 ================
 FreeVerts
 
-Frees a verts struct: releases the winding and auxData,
-then zeroes both pointers.
+Frees a verts struct: releases the winding,
+then zeroes the pointer.
 ================
 */
 void FreeVerts(WindingAuxPair_t *verts)
 {
   Assert(verts, s_assertDisable_FreeVerts);
   FreeWinding(verts->winding);
-  free(verts->auxData);
   verts->winding = NULL;
-  verts->auxData = NULL;
 }
 
 /*
 ================
 CopyVerts
 
-Copies a verts struct by duplicating the winding and
-allocating a new auxData buffer with memcpy.
+Copies a verts struct by duplicating the winding.
 ================
 */
-void CopyVerts(WindingAuxPair_t *from, int auxElemSize, WindingAuxPair_t *dest)
+void CopyVerts(WindingAuxPair_t *from, WindingAuxPair_t *dest)
 {
-  int copySize;
-
   Assert(from, s_assertDisable_CopyVerts);
   Assert(from->winding, s_assertDisable_CopyVerts);
-  Assert(from->auxData || !auxElemSize, s_assertDisable_CopyVerts);
 
   dest->winding = CopyWinding(from->winding);
-
-  if ( auxElemSize )
-  {
-    copySize = auxElemSize * dest->winding->numpoints;
-    dest->auxData = malloc(copySize);
-    memcpy(dest->auxData, from->auxData, copySize);
-  }
-  else
-  {
-    dest->auxData = NULL;
-  }
-}
-
-/*
-================
-NullLerpAuxDataCallback
-
-Default aux data lerp callback that always asserts.
-Must be replaced with a real callback before use.
-================
-*/
-void NullLerpAuxDataCallback(float *from, float *to, double frac, float *result)
-{
-  AssertFatal(g_assertsDisabled, s_assertDisable_NullLerpAuxDataCallback);
 }
 
 /*
@@ -922,7 +773,7 @@ void UnlinkAndFreeSurf(TriSurf_t *ts, TriSurf_t **listHead)
 ================
 FreeTriSurf
 
-Frees a triSurf and all its windings and auxData,
+Frees a triSurf, its windings and any coalescer fw,
 then decrements the global surface count.
 ================
 */
@@ -957,16 +808,15 @@ int FreeTriSurf(TriSurf_t *ts)
 
   if ( ts->winding )
     FreeWinding(ts->winding);
-  free(ts->auxData);
+  free(ts->fw);
 
   if ( trisTransientMode == 1 && ts->origWinding )
     FreeWinding(ts->origWinding);
 
-  /* free hole windings and aux data */
+  /* free hole windings */
   for ( i = 0; i < ts->holeCount; i++ )
   {
     FreeWinding(ts->holes[i].winding);
-    free(ts->holes[i].auxData);
   }
   if ( ts->holeCount )
     free(ts->holes);
@@ -1296,7 +1146,7 @@ char TriSurfPropsGroupable(TriSurfProps_t *s1, TriSurfProps_t *s2, int *testPoin
       || drawSurf1->material != drawSurf2->material
       || drawSurf1->reflectionProbeIndex != drawSurf2->reflectionProbeIndex
       || drawSurf1->lightmapIndex != drawSurf2->lightmapIndex
-      /* Native byte_52969C is initialized to one and has no writers, so
+      /* Native gates this on a global initialized to one with no writers, so
          0x43D550 always includes MapDrawSurf +52 in the key. */
       || drawSurf1->castsSunShadow != drawSurf2->castsSunShadow)
       return 0;
@@ -1415,22 +1265,6 @@ static bool TriangleContainsCoplanarPoint(const float *point, Winding_t *winding
   return distance <= epsilon;
 }
 
-/*
-================
-TriSurfGroupableCallback
-
-Callback wrapper that extracts triSurfs from entries
-and tests groupability.
-================
-*/
-char TriSurfGroupableCallback(intptr_t entry1, intptr_t entry2)
-{
-  TriSurf_t *ts1 = (TriSurf_t *)entry1;
-  TriSurf_t *ts2 = (TriSurf_t *)entry2;
-
-  return TriSurfPropsGroupableForWinding(ts1->props, ts2->props, ts2->winding);
-}
-
 /* CoD4 0x4422A0.  The merge API already passes transient triSurfs directly;
    retain this typed entry point instead of casting the generic list callback. */
 static int TriSurfCellGroupableCallback(TriSurf_t *ts1, TriSurf_t *ts2)
@@ -1518,107 +1352,6 @@ TriSurfProps_t *TrisLmap_CloneProps(TriSurf_t *surf, TriSurfProps_t *props)
   TrisPropsSidecar_Clone(props, clone);
   TrisLmap_CopyAssignmentForPropsClone(surf, props, surf, clone);
   return clone;
-}
-
-/*
-================
-EmitTriSurfaceForDrawSurf
-
-Emits a triSurf from a draw surface's properties.
-================
-*/
-TriSurfProps_t *EmitTriSurfaceForDrawSurf(DrawSurf_t *ds, float *texVecs, float *lmapVecs, float *plane, float smoothAngle, float *colorVecs)
-{
-  Assert(ds, s_assertDisable_EmitTriSurfaceForDrawSurf);
-
-  TriSurfProps_t *result = EmitTriSurface(texVecs, lmapVecs, colorVecs, plane, ds->shaderInfo, ds->lightStyle, ds->contentFlags, smoothAngle);
-  TrisPropsSidecar_SetMapDrawSurf(result, NativeMapDrawSurfFor(ds));
-  if ( ds->sideRef )
-    TrisPropsSidecar_Get(result)->smoothing = ds->sideRef->compileFlags;
-
-  return result;
-}
-
-/*
-================
-EmitShadowcasterTriSurface
-
-Loads the shadowcaster material, computes the plane
-from the winding, and emits a triSurf.
-================
-*/
-TriSurfProps_t *EmitShadowcasterTriSurface(double unusedFpu, Winding_t *winding)
-{
-  ShaderInfo_t *shadowMaterial;
-  float plane[4];
-
-  shadowMaterial = LoadMaterial("shadowcaster");
-  shadowMaterial->surfFlags_bit7 = 0;
-  PlaneFromWinding(winding->numpoints, winding->points[0], plane, &plane[3]);
-  return EmitTriSurface(g_shadowDummyVerts, g_shadowDummyVerts, g_shadowDummyVerts, plane, shadowMaterial, LIGHTSTYLE_NONE, 0, 0.0f);
-}
-
-/*
-================
-EmitTriSurface_r
-
-Recursively clips winding against BSP tree to place
-triSurf in the correct leaf.
-================
-*/
-int EmitTriSurface_r(Winding_t *winding, TriSurfProps_t *props, Node_t *node)
-{
-  float *nodePlane;
-  int windingSide, frontResult, backResult;
-  vec3_t negPlane;
-  Winding_t *w;
-
-  if ( node->cellnum != CELLNUM_UNKNOWN )
-    return node->cellnum;
-
-  Assert(node->planenum != PLANENUM_LEAF, s_assertDisable_EmitTriSurface_r);
-  nodePlane = MAP_PLANE(node->planenum)->normal;
-  windingSide = WindingPlaneSide(winding, nodePlane, nodePlane[3]);
-
-  switch ( windingSide )
-  {
-    case SIDE_ON:
-	
-      /* on the plane — choose side based on surface normal alignment */
-      if ( DotProduct210(props->plane, nodePlane) <= 0.0 )
-        return EmitTriSurface_r(winding, props, node->children[1]);
-      return EmitTriSurface_r(winding, props, node->children[0]);
-    case SIDE_FRONT:
-      return EmitTriSurface_r(winding, props, node->children[0]);
-    case SIDE_BACK:
-      return EmitTriSurface_r(winding, props, node->children[1]);
-  }
-
-  Assert(windingSide == SIDE_CROSS, s_assertDisable_EmitTriSurface_r);
-
-  /* SIDE_CROSS — clip winding and recurse both halves */
-  w = CopyWinding(winding);
-  ClipWindingByPlane(&w, nodePlane, nodePlane[3], ON_EPSILON);
-  frontResult = EmitTriSurface_r(w, props, node->children[0]);
-  FreeWinding(w);
-
-  if ( frontResult == CELLNUM_UNKNOWN )
-    return CELLNUM_UNKNOWN;
-
-  w = CopyWinding(winding);
-  VectorScale(nodePlane, -1, negPlane);
-  ClipWindingByPlane(&w, negPlane, -nodePlane[3], ON_EPSILON);
-  backResult = EmitTriSurface_r(w, props, node->children[1]);
-  FreeWinding(w);
-
-  if ( frontResult != backResult && backResult != CELLNUM_OPAQUE )
-  {
-    if ( frontResult == CELLNUM_OPAQUE )
-      return backResult;
-    return CELLNUM_UNKNOWN;
-  }
-
-  return frontResult;
 }
 
 /*
@@ -1975,9 +1708,8 @@ float *PickBestTriangle(float *normal, float *verts, int numVerts, float planeDi
   for ( i = 0; i < 3; i++ )
   {
     v = &verts[best[i] * VERT_STRIDE];
-    /* Native 0x4419B8/0x441A42/0x441AD5 computes a plane projection, but
-       each result is immediately overwritten by a raw VectorCopy at
-       0x4419CE/0x441A5B/0x441AEE.  The selected MeshVert positions are
+    /* Native computes a plane projection, but each result is immediately
+       overwritten by a raw VectorCopy.  The selected MeshVert positions are
        therefore the inputs to vector derivation. */
     VectorCopy(v, &outPositions[i * 3]);
     outTexCoords[i * 2]      = v[3];
@@ -2215,7 +1947,7 @@ bool TrisCheckLightmapCellMatch( int axis, TriSurf_t *ts1, TriSurf_t *ts2, float
 
   float max1 = MULF(inv, ts1->maxs[axis], -LMAP_CELL_EPSILON);
   float max2 = MULF(inv, ts2->maxs[axis], -LMAP_CELL_EPSILON);
-  return RoundPositiveFloatToInt(max1) == RoundPositiveFloatToInt(max2);
+  return CeilFloatToInt(max1) == CeilFloatToInt(max2);
 }
 
 /*
@@ -2315,7 +2047,7 @@ void TrisSetupTJunctionKDTree(void)
   for ( i = 0; i < cellCount; i++ )
     TJunc_ProcessBrushList(triSurfCellArray[i]);
 
-  TJunc_Init(0);
+  TJunc_Init();
   TJunc_MergeScratchInit();
   #define TJUNC_SNAP_TOLERANCE_INIT  0.15000001f
   #define TJUNC_SNAP_TOLERANCE_FINAL 0.1f
@@ -2558,7 +2290,7 @@ void TrisSnapWindingToVertices(int *indexMap)
       TriSurf_t *ts = *surfLinkPtr;
 
       Assert(ts->winding->numpoints <= MAX_SNAP_WINDING_VERTS, s_assertDisable_TrisSnapWindingToVertices);
-      numSnappedVerts = SnapAndMergeWinding(firstVertIndex, ts->winding->numpoints, indexMap, snappedWinding, (char *)ts->auxData, ts->auxElemSize);
+      numSnappedVerts = SnapAndMergeWinding(firstVertIndex, ts->winding->numpoints, indexMap, snappedWinding);
       ts->origWinding = AllocWinding(numSnappedVerts);
 
       { Winding_t *w = ts->winding;
@@ -3320,8 +3052,8 @@ int MergeTriGroups(TriRecord_t *triRecs, int triCount, int firstGroup, int secon
     void *temp = malloc(bufSize);
     memcpy(temp, &triRecs[groupB->firstTri], bufSize);
     /* The source and destination ranges overlap while rotating group B
-       beside group A.  Retail's CRT helper preserves the moved middle
-       range; C memcpy is undefined for this overlap. */
+       beside group A.  The CRT helper preserves the moved middle range;
+       C memcpy is undefined for this overlap. */
     memmove(&triRecs[firstEnd + secondCount], &triRecs[firstEnd], sizeof(TriRecord_t) * (groupB->firstTri - firstEnd));
     memcpy(&triRecs[firstEnd], temp, bufSize);
     free(temp); }
@@ -3347,7 +3079,6 @@ int MergeTriGroups(TriRecord_t *triRecs, int triCount, int firstGroup, int secon
 GroupAndMergeTriSubgroups
 
 Groups adjacent tris, then merges subgroups if >1 group.
-Originally a naked wrapper passing EDI/ESI/EAX registers.
 ================
 */
 int GroupAndMergeTriSubgroups(TriRecord_t *tris, int triCount, int *indexMap)
@@ -3416,8 +3147,6 @@ void ClipSideIntoTree_r(Winding_t *winding, float *side, TriRecord_t *sideData, 
 CanMergeVerts
 
 Checks if two vertices can be merged based on position, normal, UV, color, texvec.
-Originally __usercall (ECX=current_vertex, EDI=compare_vertex, EAX=compare_tri),
-now takes all params on stack. Caller (MergeDuplicateVerts) pushes the extra 3.
 ================
 */
 static const float k_mergeNormalThresh = MERGE_NORMAL_THRESHOLD;
@@ -3597,7 +3326,7 @@ char CanMergeVerts( BspDrawVert_t *cmp, BspDrawVert_t *cur, TriRecord_t *cmpTri,
 EmitDrawVert
 
 Emits a draw vertex to the global array, reorders fields.
-Original passes a1 in EBX register; now uses g_emitDrawVertCount static global.
+The destination soup comes from the static g_emitDrawVertCount.
 ================
 */
 static TriSoup_t *g_emitDrawVertCount;
@@ -3606,7 +3335,7 @@ static int g_emitTriRecordVertex;
 
 int EmitDrawVert( int a1_unused, DrawVert_t *src )
 {
-  /* a1 was set by caller into g_emitDrawVertCount */
+  /* set by the caller into g_emitDrawVertCount */
   TriSoup_t *emitHdr = g_emitDrawVertCount;
   BspDrawVert_t tmp;
   int destIdx;
@@ -3702,15 +3431,12 @@ bool MatchVertWithUVOffset( int *outUOffset, BspDrawVert_t *dvA, BspDrawVert_t *
       * (float)material->autoTexScaleH;
     return Vec2LengthSquared(scaledDelta) <= k_mergeUvThresh;
   }
-  /* x87 inlines RoundFloatToInt, keeping float-float subtraction at 53-bit.
-     Match by computing subtraction at double before rounding. */
+  /* The native subtraction keeps extended precision; match it by computing the
+     subtraction at double before rounding. */
 	
-  /* Original inlines: fld B; fsub A; fadd BIAS; fistp — subtraction at 80-bit,
-     no truncation to float before adding bias. Must NOT use RoundFloatToInt
-     which truncates to float via the function call.
-     Original: fld B; fsub A; fadd BIAS; fistp — 80-bit throughout.
-     xs_RoundToInt truncates to 64-bit double, causing 1-ULP rounding diffs.
-     Use fistp_add which matches the original's fistp pattern. */
+  /* The native rounds at 80-bit throughout, with no truncation to float before the
+     bias is added.  RoundFloatToInt truncates to float and xs_RoundToInt to a
+     64-bit double (1-ULP rounding diffs); fistp_add matches the native rounding. */
 }
 
 /* CoD4 0x446F30.
@@ -4373,7 +4099,7 @@ char GroupTriangles( TriSoup_t *ts )
   unsigned short *remap;
   int grp, groupId, tri, v, srcVert;
 
-  /* grpSoup MUST be contiguous — PartitionTriSoupRecursive reads via *(a1+4) etc. */
+  /* grpSoup MUST be contiguous — PartitionTriSoupRecursive reads it through a raw pointer at fixed offsets */
   struct {
     unsigned short materialSort[2];
     int firstVert;
@@ -4622,7 +4348,7 @@ char SplitSoupOnAxis( TriSoup_t *ts, int axis, float splitValue )
   bool shouldCopyVerts;
   char result;
 
-  /* subSoup MUST be contiguous — PartitionTriSoupRecursive reads via *(a1+4) etc. */
+  /* subSoup MUST be contiguous — PartitionTriSoupRecursive reads it through a raw pointer at fixed offsets */
   struct {
     unsigned short materialSort[2];
     int firstVert;
@@ -5098,32 +4824,6 @@ void BuildTriSoupAABBTree(BspAabbTreeEntry_t *treeBase)
 
 /*
 ================
-Tris_AddNoDrawShadowTris
-
-Adds shadow triangles for nodraw surfaces
-that cast shadows
-================
-*/
-int Tris_AddNoDrawShadowTris( int triCount, TriRecord_t *triData )
-{
-  int shadowType, i;
-
-  shadowType = ShouldCastShadow(triData->si);
-  if ( !shadowType )
-    return 0;
-
-  for ( i = 0; i < triCount; i++ )
-  {
-    AddShadowTri(shadowType,
-      DRAW_VERT(triData[i].vertIdx[0]).pos,
-      DRAW_VERT(triData[i].vertIdx[1]).pos,
-      DRAW_VERT(triData[i].vertIdx[2]).pos);
-  }
-  return shadowType;
-}
-
-/*
-================
 Tris_EmitTriangles
 
 Sorts triangles by material, groups adjacent tris,
@@ -5161,11 +4861,7 @@ void Tris_EmitTriangles(double unusedFpu, Tree_t *bspTree, int *indexMap)
      0x449BB0.  This is deliberately after normal smoothing: the combine
      pass uses the same index map as 0x43DF00 to identify connected triangle
      components while it promotes compatible material descriptors. */
-  /* The 104-byte direct-vertex carrier is only populated by the native
-     lightmap route.  Without it, promoting a descriptor would expose empty
-     layer/tangent slots in KIWI's donor-family output buffers. */
-  if (s_drawSurfaceContext->type == 0 && TrisLmap_NativeRouteEnabled()
-      && numTriangles > 1)
+  if (s_drawSurfaceContext->type == 0 && numTriangles > 1)
     CombineLayeredTriangleGroups(indexMap);
 
   /* Native 0x444D20 sorts the direct-triangle carrier again before either
@@ -5330,9 +5026,9 @@ int Tris_CopyVertexToDrawVerts(int srcIndex, int dstIndex)
   BspDrawVert_t *sv = &bspTriSoupData[srcIndex];
   BspDrawVert_t *dv;
 
-  Assert(Vec3IsNormalized(sv->normal)   || s_assertDisable_Tris_CopyVertexToDrawVerts, s_assertDisable_Tris_CopyVertexToDrawVerts);
-  Assert(Vec3IsNormalized(sv->tangent)  || s_assertDisable_Tris_CopyVertexToDrawVerts, s_assertDisable_Tris_CopyVertexToDrawVerts);
-  Assert(Vec3IsNormalized(sv->binormal) || s_assertDisable_Tris_CopyVertexToDrawVerts, s_assertDisable_Tris_CopyVertexToDrawVerts);
+  Assert(Vec3IsNormalized(sv->normal), s_assertDisable_Tris_CopyVertexToDrawVerts);
+  Assert(Vec3IsNormalized(sv->tangent), s_assertDisable_Tris_CopyVertexToDrawVerts);
+  Assert(Vec3IsNormalized(sv->binormal), s_assertDisable_Tris_CopyVertexToDrawVerts);
 
   /* copy vertex, swapping tangent/binormal field order */
   dv = &bspDrawVerts[dstIndex];
@@ -5348,7 +5044,7 @@ static unsigned char Tris_PackLayerBasisDot(float value)
 {
   if (value < -1.0f) value = -1.0f;
   else if (value > 1.0f) value = 1.0f;
-  return (unsigned char)(int)(value * 127.5 + 128.0);   /* KIWI: double, as PackNormalBasisComponent */
+  return (unsigned char)(int)(value * 127.5 + 128.0);   /* KIWI: double */
 }
 
 /* Native 0x44ACA0/0x44B4D0/0x44B560. */
@@ -5534,7 +5230,7 @@ int Tris_ReorderAndOptimizeVerts(TrisReorderEntry_t *reorderList, int reorderCou
   }
 
   /* D3DXOptimizeVertices returns the native old vertex index for each new
-     vertex slot.  CoD4 0x44A991 explicitly inverts that table before either
+     vertex slot.  The native explicitly inverts that table before either
      copying vertices or rewriting indices.  Using the D3DX table directly
      only works for identity or self-inverse remaps. */
   for ( i = 0; i < totalVerts; ++i )
@@ -5865,7 +5561,7 @@ static bool TrisMergeCandidateCompatible(const TriSurf_t *firstSurf,
       && !TrisMergePropsProjectedExtentExceeded(second, first, secondSurf->props);
 }
 
-int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windingArray, int count, int epsilon )
+int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windingArray, int count )
 {
   IntWinding_t *curWinding;
   IntWinding_t *splicedWinding;
@@ -5905,7 +5601,7 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
       edgeB = adjEdge; }
     }
 
-    /* 0x44BA4D selects the post-swap survivors from the surface array. */
+    /* select the post-swap survivors from the surface array */
     curSurf = (TriSurf_t *)surfArray[startIdx];
     otherSurf = (TriSurf_t *)surfArray[i];
     {
@@ -5914,7 +5610,7 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
       MapDrawSurf_t *curDrawSurf = curSidecar ? curSidecar->mapDrawSurf : NULL;
       MapDrawSurf_t *otherDrawSurf = otherSidecar ? otherSidecar->mapDrawSurf : NULL;
 
-      /* Native 0x44BA73 compares unsigned source MapDrawSurf byte +52. */
+      /* Native compares unsigned source MapDrawSurf byte +52. */
       if (curDrawSurf && otherDrawSurf
         && curDrawSurf->castsSunShadow < otherDrawSurf->castsSunShadow)
       {
@@ -5927,7 +5623,7 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
     if ( sharedCount == otherWinding->numpoints )
     {
       /* fully consumed — remove shared boundary */
-      RemoveSharedBoundaryPoints(curWinding, epsilon, edgeA, sharedCount);
+      RemoveSharedBoundaryPoints(curWinding, edgeA, sharedCount);
       FreeTriSurf((TriSurf_t *)surfArray[i]);
       FreeIntWinding(otherWinding);
       count--;
@@ -5937,7 +5633,7 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
     else
     {
       /* partial overlap — splice */
-      splicedWinding = SpliceWindingsAtSharedEdge(curWinding, otherWinding, epsilon, startIdx, i, edgeA, edgeB, sharedCount);
+      splicedWinding = SpliceWindingsAtSharedEdge(curWinding, otherWinding, startIdx, i, edgeA, edgeB, sharedCount);
       AddBoundsToBounds(otherSurf->mins, otherSurf->maxs, curSurf->mins, curSurf->maxs);
       FreeTriSurf((TriSurf_t *)surfArray[i]);
       FreeIntWinding(curWinding);
@@ -5953,39 +5649,6 @@ int TryMergeWindingPair( int startIdx, intptr_t *surfArray, IntWinding_t **windi
   }
 
   return count;
-}
-
-/*
-================
-ValidateTriSurfLmapCoords
-
-Validates lightmap UVs are within [0,1] range
-================
-*/
-void ValidateTriSurfLmapCoords(Winding_t *winding, TriSurfProps_t *material)
-{
-  #define LMAP_UV_EPSILON (0.01f / LIGHTMAP_SIZE)
-  #define LMAP_UV_MIN  (-LMAP_UV_EPSILON)
-  #define LMAP_UV_MAX  (1.0f + LMAP_UV_EPSILON)
-  float *pos, lmapU, lmapV;
-  int i;
-
-  if ( !winding || material->lmapIndex == LMAP_ALL_STYLES )
-    return;
-
-  Assert(material->lmapIndex < LMAP_ALL_STYLES, s_assertDisable_ValidateTriSurfLmapCoords);
-
-  for ( i = 0; i < winding->numpoints; i++ )
-  {
-    pos = winding->points[i];
-    lmapU = DotProduct102(pos, &material->lmapVecs[0]) + material->lmapVecs[3];
-    lmapV = DotProduct210(pos, &material->lmapVecs[4]) + material->lmapVecs[7];
-    Assert(lmapU >= LMAP_UV_MIN && lmapU <= LMAP_UV_MAX, s_assertDisable_ValidateTriSurfLmapCoords);
-    Assert(lmapV >= LMAP_UV_MIN && lmapV <= LMAP_UV_MAX, s_assertDisable_ValidateTriSurfLmapCoords);
-  }
-  #undef LMAP_UV_EPSILON
-  #undef LMAP_UV_MIN
-  #undef LMAP_UV_MAX
 }
 
 /* Native 0x451590.  Coalesced properties are a material set, so a composite
@@ -6204,52 +5867,16 @@ AllocTriSurf
 Allocates and initializes a TriSurf_t struct.
 ================
 */
-TriSurf_t *AllocTriSurf(Winding_t *winding, void *auxData, int flags, TriSurfProps_t *material)
+TriSurf_t *AllocTriSurf(Winding_t *winding, TriSurfProps_t *material)
 {
   TriSurf_t *ts;
 
   ts = malloc(sizeof(*ts));
   memset(ts, 0, sizeof(*ts));
-  ts->auxElemSize = flags;
   ts->winding = winding;
   ts->props = material;
-  ts->auxData = auxData;
   ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
-  return ts;
-}
-
-/*
-================
-CopyTriSurf
-
-Copies a triSurf including winding and aux data
-================
-*/
-TriSurf_t *CopyTriSurf( TriSurf_t *src )
-{
-  Winding_t *windingCopy;
-  void *auxCopy = NULL;
-  TriSurf_t *ts;
-
-  windingCopy = CopyWinding(src->winding);
-
-  /* copy aux data if present */
-  if ( src->auxElemSize )
-  {
-    int auxSize = src->auxElemSize * src->winding->numpoints;
-    auxCopy = malloc(auxSize);
-    memcpy(auxCopy, src->auxData, auxSize);
-  }
-
-  /* Native 0x43D140 delegates carrier construction to 0x43D0F0.  The aux
-     copy is KIWI's donor compatibility payload; it remains outside the
-     native 0x40 prefix. */
-  ts = AllocTriSurf(windingCopy, auxCopy, src->auxElemSize, src->props);
-  VectorCopy(src->mins, ts->mins);
-  VectorCopy(src->maxs, ts->maxs);
-  TrisLmap_CopyAssignmentsForSurface(src, ts);
-  Assert(!src->holeCount, s_assertDisable_CopyTriSurf);
   return ts;
 }
 
@@ -6260,7 +5887,7 @@ PrependTriSurf
 Prepends a new triSurf to the head of a linked list
 ================
 */
-TriSurf_t *PrependTriSurf( Winding_t *winding, void *auxData, int flags, TriSurfProps_t *material, TriSurf_t **listHead )
+TriSurf_t *PrependTriSurf( Winding_t *winding, TriSurfProps_t *material, TriSurf_t **listHead )
 {
   TriSurf_t *ts;
 
@@ -6268,9 +5895,7 @@ TriSurf_t *PrependTriSurf( Winding_t *winding, void *auxData, int flags, TriSurf
   ts = malloc(sizeof(*ts));
   memset(ts, 0, sizeof(*ts));
   ts->winding = winding;
-  ts->auxData = auxData;
   ts->props = material;
-  ts->auxElemSize = flags;
   ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
 
@@ -6288,10 +5913,11 @@ TriSurf_t *PrependTriSurf( Winding_t *winding, void *auxData, int flags, TriSurf
 ================
 InsertTriSurfAfter
 
-Inserts a new triSurf after a given node in the linked list
+Inserts a new triSurf after a given node in the linked list.
+fw is the coalescer's FixedWinding_t (or NULL); the surf owns it.
 ================
 */
-TriSurf_t *InsertTriSurfAfter( Winding_t *winding, void *auxData, int flags, TriSurfProps_t *material, TriSurf_t *tsAfter )
+TriSurf_t *InsertTriSurfAfter( Winding_t *winding, void *fw, TriSurfProps_t *material, TriSurf_t *tsAfter )
 {
   TriSurf_t *ts;
 
@@ -6299,9 +5925,8 @@ TriSurf_t *InsertTriSurfAfter( Winding_t *winding, void *auxData, int flags, Tri
   ts = malloc(sizeof(*ts));
   memset(ts, 0, sizeof(*ts));
   ts->winding = winding;
-  ts->auxData = auxData;
+  ts->fw = fw;
   ts->props = material;
-  ts->auxElemSize = flags;
   ts->allocSerial = g_triSurfSerial++;
   ++numTriSurfs;
 
@@ -6313,39 +5938,6 @@ TriSurf_t *InsertTriSurfAfter( Winding_t *winding, void *auxData, int flags, Tri
     ts->next->prev = ts;
 
   return ts;
-}
-
-/* CoD4 0x43D3B0.  This is the fixed-winding insertion path used by the
-   coalescer.  The KIWI auxData carrier owns a fixed-source copy, while the
-   converted floating winding occupies the native w slot. */
-static TriSurf_t *CopyAndInsertTriSurfAfter(const FixedWinding_t *fixedWinding,
-                                            TriSurfProps_t *props,
-                                            TriSurf_t *prev)
-{
-  FixedWinding_t *fixedCopy;
-  Winding_t *winding;
-  TriSurf_t *surf;
-  uint32_t i;
-
-  Assert(prev, s_assertDisable_InsertTriSurfAfter);
-  Assert(fixedWinding, s_assertDisable_InsertTriSurfAfter);
-
-  winding = AllocWinding(fixedWinding->ptCount);
-  winding->numpoints = fixedWinding->ptCount;
-  for ( i = 0; i < fixedWinding->ptCount; ++i )
-    FixedVec3ToFloat((FixedVec3_t *)&fixedWinding->points[i], winding->points[i]);
-
-  /* 0x43D3B0 gives AllocTriSurf an owned fixed-winding copy.  The KIWI
-     auxData carrier is released by FreeTriSurf, so retaining the caller's
-     borrowed source here would make this insertion path double-free it. */
-  fixedCopy = CopyFixedWinding(fixedWinding);
-  surf = AllocTriSurf(winding, fixedCopy, 0, props);
-  surf->prev = prev;
-  surf->next = prev->next;
-  prev->next = surf;
-  if ( surf->next )
-    surf->next->prev = surf;
-  return surf;
 }
 
 /*
@@ -6401,7 +5993,7 @@ void EmitPatchSurface( int *Block, TriSurfProps_t *material, Node_t *node )
 
   /* visible leaf — emit triSurf into this cell */
   Assert(node->cellnum >= 0, s_assertDisable_EmitPatchSurface);
-  PrependTriSurf((Winding_t *)Block, 0, 0, material, &triSurfCellArray[node->cellnum]);
+  PrependTriSurf((Winding_t *)Block, material, &triSurfCellArray[node->cellnum]);
 }
 
 /*
@@ -6592,7 +6184,7 @@ static unsigned char Tris_GetLayerVertexWeight(const TriSurfProps_t *props,
 }
 
 /* Native 0x44C0D0 -> 0x44C100.  It stores the four selected weights as
-   B,G,R,A rather than the regular RGBA packing used by sub_44C090. */
+   B,G,R,A rather than the regular RGBA packing used by 0x44C090. */
 static int Tris_PackLayerWeightsBGRA(const unsigned char *weights)
 {
   unsigned char packed[4];
@@ -6675,7 +6267,7 @@ static void Tris_SetLayeredRecordData(TriRecord_t *record,
   }
 }
 
-/* Retail 0x449BB0 / 0x44F250 (tris_combinelayers.cpp).  0x443FA0 greedily
+/* Native 0x449BB0 / 0x44F250 (tris_combinelayers.cpp).  0x443FA0 greedily
    constructs descriptors while walking a coalesce chain, then this post-pass
    promotes connected short-descriptor components into a compatible descriptor
    with one extra ordinary layer.  It never discards geometry. */
@@ -6822,28 +6414,6 @@ static bool Tris_SameLayerCombineDescriptorGroup(const TriRecord_t *left,
       && left->primaryLightIndex == right->primaryLightIndex;
 }
 
-/* 0x444C40's ordering for the fields represented by the expanded carrier.
-   Keep this local to 0x449BB0: later KIWI batching additionally needs its
-   donor cull-group key, which is not present in the native direct record. */
-static int Tris_CompareLayerCombineCarrier(const void *left, const void *right)
-{
-  const TriRecord_t *a = (const TriRecord_t *)left;
-  const TriRecord_t *b = (const TriRecord_t *)right;
-  int difference;
-
-  difference = a->drawOrder - b->drawOrder;
-  if (difference) return difference;
-  if (a->materialIdentity != b->materialIdentity)
-    return (a->materialIdentity > b->materialIdentity) ? 1 : -1;
-  difference = (int)a->reflectionProbeIndex - (int)b->reflectionProbeIndex;
-  if (difference) return difference;
-  difference = (int)a->primaryLightIndex - (int)b->primaryLightIndex;
-  if (difference) return difference;
-  difference = a->lightStyle - b->lightStyle;
-  if (difference) return difference;
-  return (int)a->castsSunShadow - (int)b->castsSunShadow;
-}
-
 /* 0x44FD20 on KIWI's expanded record.  The native source vertex stores its
    extra UVs inline; ours keeps the equivalent state on the triangle. */
 static void Tris_PromoteLayeredRecord(TriRecord_t *record,
@@ -6986,7 +6556,7 @@ static void Tris_RotateLayerCombineRecords(TriRecord_t *records, int from,
 
 /* 0x44F7E0's transfer loop.  It performs one chosen descriptor-pair merge;
    the caller then rebuilds the native descriptor-run and active-pair arrays,
-   exactly as 0x44F250 jumps back to LABEL_12 after a successful call. */
+   exactly as 0x44F250 restarts that rebuild after a successful call. */
 static bool Tris_MergeLayerCombineActivePair(TriRecord_t *records,
                                              LayerCombineDescriptorGroup_t *groups,
                                              int *groupCount,
@@ -7068,7 +6638,7 @@ static bool Tris_MergeLayerCombineActivePair(TriRecord_t *records,
     groups[pair.destinationGroup].recordCount += sourceCount;
     promoted = true;
 
-    /* This is the native `v21/v22` update following 0x44FFB0.  It preserves
+    /* The native scan-position update following 0x44FFB0.  It preserves
        the live scan positions after the records have been rotated. */
     if (sourceRecord >= destinationRecord)
     {
@@ -7395,14 +6965,6 @@ static int TriangulateSurfImpl(TriSurf_t *sourceSurf, Winding_t *windingData,
   return result;
 }
 
-int TriangulateSurf(TriSurf_t *ts, int vertIdx0, int vertIdx1, int vertIdx2, int drawOrder, int triFlags)
-{
-  Assert(ts, s_assertDisable_TriangulateSurf);
-  Assert(trisTransientMode == 1, s_assertDisable_TriangulateSurf);
-  return TriangulateSurfImpl(ts, ts->winding, ts->origWinding, ts->props,
-    vertIdx0, vertIdx1, vertIdx2, drawOrder, triFlags);
-}
-
 /* Native 0x4431E0 is the seven-argument callback consumed by 0x45B6F0.
    KIWI retains the donor split cell/cull-group fields, so project the native
    combined visibility-group index at this boundary. */
@@ -7426,77 +6988,6 @@ static void Tris_TriangulateNativeCallback(Winding_t *winding, Winding_t *origWi
   }
   TriangulateSurfImpl(sourceSurf, winding, origWinding, props, vertIdx0,
     vertIdx1, vertIdx2, drawOrder, cullGroupIdx);
-}
-
-/*
-================
-EmitTriSurfForProps
-
-Emits a triangle surface for the given material properties,
-handling BSP visibility and cell assignment
-================
-*/
-int EmitTriSurfForProps(Winding_t *winding, Tree_t *bspTree, TriSurfProps_t *material, int cellIndex)
-{
-  int numVerts, i;
-  double sumX, sumY, sumZ, invCount;
-  int visResult, result;
-
-  TriSurf_t surf_buf;
-
-  Assert(material, s_assertDisable_EmitTriSurfForProps);
-  Assert(!material->coalesceChain, s_assertDisable_EmitTriSurfForProps);
-
-  /* determine cell visibility */
-  if ( g_currentEntityIndex )
-  {
-    visResult = 0;
-  }
-  else if ( cellIndex < 0 )
-  {
-    visResult = EmitTriSurface_r(winding, material, bspTree->headnode);
-    if ( visResult == CELLNUM_UNKNOWN )
-    {
-      /* compute winding centroid for error message */
-      numVerts = winding->numpoints;
-      sumX = 0.0;
-      sumY = 0.0;
-      sumZ = 0.0;
-      for ( i = 0; i < numVerts; i++ )
-      {
-        sumX += winding->points[i][0];
-        sumY += winding->points[i][1];
-        sumZ += winding->points[i][2];
-      }
-      invCount = 1.0 / (double)numVerts;
-      Com_Error(
-        "unsplittable surface crosses a cell boundary (ref pos = %g %g %g, material = %s)\n",
-        sumX * invCount, sumY * invCount, sumZ * invCount,
-        material->si->name);
-    }
-  }
-  else
-  {
-    visResult = CELLNUM_UNKNOWN;
-  }
-
-  /* Use the native carrier instead of overlaying a recovered stack layout. */
-  Assert(!trisTransientMode, s_assertDisable_EmitTriSurfForProps);
-  trisTransientMode = 1;
-  memset(&surf_buf, 0, sizeof(TriSurf_t));
-  surf_buf.winding = CopyWinding(winding);
-  surf_buf.origWinding = CopyWinding(winding);
-  surf_buf.props = material;
-  ClearBounds(surf_buf.mins, surf_buf.maxs);
-  for (i = 0; i < winding->numpoints; ++i)
-    AddPointToBounds(winding->points[i], surf_buf.mins, surf_buf.maxs);
-
-  result = TesselateWinding(&surf_buf, visResult, cellIndex, TriangulateSurf);
-  FreeWinding(surf_buf.winding);
-  FreeWinding(surf_buf.origWinding);
-  free(surf_buf.auxData);
-  trisTransientMode = 0;
-  return result;
 }
 
 /*
@@ -7534,7 +7025,7 @@ void Tris_EmitWindingAsDrawSurf(
   if (!Block)
     return;
 
-  /* inlined EmitTriSurfaceForDrawSurf — original was __usercall (EAX=ds) */
+  /* inlined EmitTriSurfaceForDrawSurf */
   Assert(surf, s_assertDisable_EmitTriSurfaceForDrawSurf);
   emittedSurf = EmitTriSurface(texOutput, lmapOutput, colorVecs, plane, surf->shaderInfo, surf->lightStyle, surf->contentFlags, smoothAngle);
   TriSurfPropsSidecar_t *sidecar = TrisPropsSidecar_Get(emittedSurf);
@@ -7551,36 +7042,13 @@ void Tris_EmitWindingAsDrawSurf(
       EmitPatchSurface((int *)Block, emittedSurf, bspTree->headnode);
     }
     else {
-      PrependTriSurf(Block, 0, 0, emittedSurf, triSurfCellArray);
+      PrependTriSurf(Block, emittedSurf, triSurfCellArray);
     }
   }
   else
   {
-    PrependTriSurf(Block, 0, 0, emittedSurf, &triSurfCellArray[numBSPCells + cellIndex]);
+    PrependTriSurf(Block, emittedSurf, &triSurfCellArray[numBSPCells + cellIndex]);
   }
-}
-
-/*
-================
-AuxDataCopy
-
-Copies auxiliary data between buffers with overlap checking
-================
-*/
-int AuxDataCopy(int elemSize, char *srcBuf, int srcIndex, int copyCount, char *dstBuf, int dstIndex)
-{
-  unsigned int copyBytes;
-  char *srcPtr;
-  char *dstPtr;
-  int result;
-
-  copyBytes = copyCount * elemSize;
-  srcPtr = srcBuf + srcIndex * elemSize;
-  dstPtr = dstBuf + dstIndex * elemSize;
-  Assert(!(&srcPtr[copyCount * elemSize] > dstPtr && &dstPtr[copyBytes] > srcPtr), s_assertDisable_AuxDataCopy);
-  result = copyCount * elemSize;
-  memcpy(dstPtr, srcPtr, copyBytes);
-  return result;
 }
 
 /* 0x43F9E0/0x440F40.  Patch control vertices retain only their alpha after
@@ -7804,7 +7272,7 @@ int Tris_FindIndexedMeshWindings( DrawSurf_t *surf, int **windingList )
                                     &allVerts[surf->indexes[i + 5]],
                                     texVecs[0], lmapVecs[0], texInfo[0]) )
       {
-        /* [a,b,c] + [b,a,d] becomes [a,d,b,c] (0x44127c..0x4412bc). */
+        /* [a,b,c] + [b,a,d] becomes [a,d,b,c] */
         VectorCopy(w[0]->points[2], w[0]->points[3]);
         VectorCopy(w[0]->points[1], w[0]->points[2]);
         VectorCopy(w[1]->points[2], w[0]->points[1]);
@@ -7871,7 +7339,7 @@ void Tris_FindBrushWindings(int a1_unused, Tree_t *bspTree)
   uvDiff = DotProduct210(firstVert->pos, &texVecs[4]) + texVecs[7] - firstVert->st[1];
   texVecs[7] -= RoundFloatToInt(uvDiff);
 
-  /* Native 0x441713 uses MaterialInfo::gameFlags bit 1 to select the
+  /* Native uses MaterialInfo::gameFlags bit 1 to select the
      lightmap-vector derivation path.  lightStyle is assigned later by the
      lightmap allocator, so it cannot make this pre-allocation decision. */
   if ( surf->shaderInfo->gameFlags & 2 )
@@ -7889,7 +7357,7 @@ void Tris_FindBrushWindings(int a1_unused, Tree_t *bspTree)
     memset(lmapVecs, 0, sizeof(lmapVecs));
   }
 
-  /* 0x4417DD loads the material tint into the four constant color planes. */
+  /* the material tint loads into the four constant color planes. */
   memset(colorVecs, 0, sizeof(colorVecs));
   colorVecs[3] = (float)surf->shaderInfo->colorTint[0];
   colorVecs[7] = (float)surf->shaderInfo->colorTint[1];
@@ -8085,7 +7553,7 @@ Tris_SortWindingsComparatorPass
 Repeatedly merges winding pairs until no more merges occur
 ================
 */
-int Tris_SortWindingsComparatorPass( TriSurf_t **surfArray, IntWinding_t **windingArray, int count, int auxElemSize, TriSurf_t *baseSurf, IntWinding_t *baseWinding, int flags )
+int Tris_SortWindingsComparatorPass( TriSurf_t **surfArray, IntWinding_t **windingArray, int count, TriSurf_t *baseSurf, IntWinding_t *baseWinding, int flags )
 {
   int prev, i;
 
@@ -8094,7 +7562,7 @@ int Tris_SortWindingsComparatorPass( TriSurf_t **surfArray, IntWinding_t **windi
   {
     prev = count;
     for ( i = 0; i < count; i++ )
-      count = TryMergeWindingPair(i, (intptr_t *)surfArray, windingArray, count, auxElemSize);
+      count = TryMergeWindingPair(i, (intptr_t *)surfArray, windingArray, count);
   }
   while ( count != prev );
 
@@ -8109,26 +7577,9 @@ Clips a triangle winding by a plane into front and back
 halves, interpolating vertices at the split point
 ================
 */
-static float ClipTriWindingReferenceMaxDist(const Winding_t *winding, const float *normal, float dist)
-{
-  float maxDist = 0.0f;
-  int i;
-
-  for (i = 0; i < winding->numpoints; ++i)
-  {
-    float pointDist = DotProduct(winding->points[i], normal) - dist;
-    if (pointDist < 0.0f)
-      pointDist = -pointDist;
-    if (pointDist > maxDist)
-      maxDist = pointDist;
-  }
-  return maxDist;
-}
-
-WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_t *reference, int auxDataSize, float *normal, float dist, float epsilon, WindingAuxPair_t *frontOut, WindingAuxPair_t *backOut )
+WindingAuxPair_t *ClipTriWinding( WindingAuxPair_t *windingPair, Winding_t *reference, float *normal, float dist, float epsilon, WindingAuxPair_t *frontOut, WindingAuxPair_t *backOut )
 {
   Winding_t *w;
-  char *aux;
   int numPts;
   int maxPts;
   double dots[MAX_POINTS_ON_WINDING + 1];
@@ -8138,11 +7589,9 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
   float minDist, maxDist, referenceMaxDist;
   float smallEpsilon;
   Winding_t *f, *b;
-  void *fAux = NULL, *bAux = NULL;
 
   Assert(windingPair, s_assertDisable_ClipTriWinding);
   w = windingPair->winding;
-  aux = (char *)windingPair->auxData;
   Assert(w, s_assertDisable_ClipTriWinding);
   numPts = w->numpoints;
   maxPts = numPts + 4;
@@ -8150,33 +7599,32 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
   Assert(DotProduct(normal, normal) > 0.0f, s_assertDisable_ClipTriWinding);
   Assert(frontOut, s_assertDisable_ClipTriWinding);
   Assert(backOut, s_assertDisable_ClipTriWinding);
-  Assert(!auxDataSize || aux, s_assertDisable_ClipTriWinding);
 
-  frontOut->winding = frontOut->auxData = NULL;
-  backOut->winding = backOut->auxData = NULL;
+  frontOut->winding = NULL;
+  backOut->winding = NULL;
 
-  /* Native 0x43C889-0x43CA76: reference-winding-dependent tolerance
+  /* Native: reference-winding-dependent tolerance
      reduction prevents thin fragments from being split inconsistently. */
   smallEpsilon = epsilon * 0.01f;
   WindingPlaneDistExtent(w, normal, dist, &minDist, &maxDist);
   if (smallEpsilon >= maxDist)
   {
-    CopyVerts(windingPair, auxDataSize, backOut);
+    CopyVerts(windingPair, backOut);
     return backOut;
   }
   if (minDist >= -smallEpsilon)
   {
-    CopyVerts(windingPair, auxDataSize, frontOut);
+    CopyVerts(windingPair, frontOut);
     return frontOut;
   }
 
   Assert(reference, s_assertDisable_ClipTriWinding);
   if (epsilon > maxDist && minDist < -3.0f * maxDist)
   {
-    referenceMaxDist = ClipTriWindingReferenceMaxDist(reference, normal, dist);
+    referenceMaxDist = WindingPlaneMaxDist(reference, normal, dist);
     if (maxDist <= 0.25f * referenceMaxDist)
     {
-      CopyVerts(windingPair, auxDataSize, backOut);
+      CopyVerts(windingPair, backOut);
       return backOut;
     }
     if (epsilon > 0.25f * referenceMaxDist)
@@ -8184,10 +7632,10 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
   }
   if (minDist > -epsilon && maxDist > -3.0f * minDist)
   {
-    referenceMaxDist = ClipTriWindingReferenceMaxDist(reference, normal, dist);
+    referenceMaxDist = WindingPlaneMaxDist(reference, normal, dist);
     if (minDist >= -0.25f * referenceMaxDist)
     {
-      CopyVerts(windingPair, auxDataSize, frontOut);
+      CopyVerts(windingPair, frontOut);
       return frontOut;
     }
     if (epsilon > 0.25f * referenceMaxDist)
@@ -8222,11 +7670,9 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
   /* allocate output */
   f = AllocWinding(maxPts);
   b = AllocWinding(maxPts);
-  if ( auxDataSize ) { fAux = malloc(auxDataSize * maxPts); bAux = malloc(auxDataSize * maxPts); }
 
-  #define EMIT(wnd, auxBuf, pt, srcIdx) do { \
+  #define EMIT(wnd, pt) do { \
     VectorCopy(pt, (wnd)->points[(wnd)->numpoints]); \
-    if (auxDataSize) AuxDataCopy(auxDataSize, aux, srcIdx, 1, (char *)(auxBuf), (wnd)->numpoints); \
     (wnd)->numpoints++; \
   } while(0)
 
@@ -8236,8 +7682,8 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
     float *p = w->points[i];
 
     /* copy vertex to its side (ON goes to both) */
-    if ( sides[i] != SIDE_BACK )  EMIT(f, fAux, p, i);
-    if ( sides[i] != SIDE_FRONT ) EMIT(b, bAux, p, i);
+    if ( sides[i] != SIDE_BACK )  EMIT(f, p);
+    if ( sides[i] != SIDE_FRONT ) EMIT(b, p);
 
     /* interpolate at plane crossing */
     if ( sides[i] != SIDE_ON && sides[i + 1] != SIDE_ON && sides[i + 1] != sides[i] )
@@ -8253,21 +7699,6 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
 
       VectorCopy(split, f->points[f->numpoints]);
       VectorCopy(split, b->points[b->numpoints]);
-      if ( auxDataSize )
-      {
-        int nextIdx = (i + 1) % numPts;
-        double frac = dots[i] / dd;
-        g_lerpAuxDataCallback(
-            (float *)((char *)aux + i * auxDataSize),
-            (float *)((char *)aux + nextIdx * auxDataSize),
-            frac,
-            (float *)((char *)fAux + f->numpoints * auxDataSize));
-        g_lerpAuxDataCallback(
-            (float *)((char *)aux + i * auxDataSize),
-            (float *)((char *)aux + nextIdx * auxDataSize),
-            frac,
-            (float *)((char *)bAux + b->numpoints * auxDataSize));
-      }
       f->numpoints++;
       b->numpoints++;
     }
@@ -8280,27 +7711,9 @@ WindingAuxPair_t *ClipTriWindingWithAux( WindingAuxPair_t *windingPair, Winding_
   Assert(f->numpoints <= MAX_POINTS_ON_WINDING, s_assertDisable_ClipTriWinding);
   Assert(b->numpoints <= MAX_POINTS_ON_WINDING, s_assertDisable_ClipTriWinding);
 
-  frontOut->winding = f;  frontOut->auxData = fAux;
-  backOut->winding = b;   backOut->auxData = bAux;
+  frontOut->winding = f;
+  backOut->winding = b;
   return backOut;
-}
-
-/* Native 0x43C790 ABI.  CoD4 clips only geometry here; KIWI's legacy
-   auxiliary payload handling remains explicitly isolated in
-   ClipTriWindingWithAux above. */
-Winding_t **ClipTriWinding(Winding_t *in, Winding_t *reference, float *planeNormal, float planeDist, float epsilon,
-                           Winding_t **front, Winding_t **back)
-{
-  WindingAuxPair_t input;
-  WindingAuxPair_t frontOut;
-  WindingAuxPair_t backOut;
-
-  input.winding = in;
-  input.auxData = NULL;
-  ClipTriWindingWithAux(&input, reference, 0, planeNormal, planeDist, epsilon, &frontOut, &backOut);
-  *front = frontOut.winding;
-  *back = backOut.winding;
-  return back;
 }
 
 /*
@@ -8316,7 +7729,7 @@ void Tris_FixTJunctions( Tree_t *bspTree )
   int cellCount, i;
 
   #define MAX_BSP_MERGE_SURFS 0x40000
-  MergeSurfaces_Init(MAX_BSP_MERGE_SURFS, TriSurfCellGroupableCallback, (MergeCallback_t)1);
+  MergeSurfaces_Init(MAX_BSP_MERGE_SURFS, TriSurfCellGroupableCallback);
   SetTrisTransientMode(2, 0);
 
   if ( g_currentEntityIndex <= 0 )
@@ -8409,7 +7822,7 @@ static int Tris_SelectTriSurfSplitPlane(const Winding_t *winding, const TriSurfP
   if (excessU <= 0 && excessV <= 0)
     return 0;
 
-  /* 0x441E6A: ties select the first texture axis. */
+  /* ties select the first texture axis */
   textureAxis = excessU < excessV;
   VectorCopy(winding->points[0], mins);
   VectorCopy(winding->points[0], maxs);
@@ -8423,7 +7836,7 @@ static int Tris_SelectTriSurfSplitPlane(const Winding_t *winding, const TriSurfP
   midpoint = (mins[worldAxis] + maxs[worldAxis]) * 0.5f;
   worldSpan = (int)ceil(maxs[worldAxis]) - (int)floor(mins[worldAxis]);
 
-  /* 0x44C040 is 31 - bsr(value); 0x441F8B therefore selects the
+  /* 0x44C040 is 31 - bsr(value); the split therefore selects the
      half-highest power-of-two grid step. */
   if (worldSpan <= 1)
     Com_Error("Tris_SelectTriSurfSplitPlane: texture span exceeds limit on a surface too small to split; reduce texture scale");
@@ -8469,8 +7882,8 @@ static void Tris_SplitTriSurfs_r(TriSurf_t *surf, TriSurf_t **listHead)
     Com_Error("Tris_SplitTriSurfs_r: texture span exceeds limit but the split does not divide the surface; reduce texture scale");
   UnlinkAndFreeSurf(surf, listHead);
   FreeTriSurf(surf);
-  Tris_SplitTriSurfs_r(PrependTriSurf(front, NULL, 0, props, listHead), listHead);
-  Tris_SplitTriSurfs_r(PrependTriSurf(back, NULL, 0, props, listHead), listHead);
+  Tris_SplitTriSurfs_r(PrependTriSurf(front, props, listHead), listHead);
+  Tris_SplitTriSurfs_r(PrependTriSurf(back, props, listHead), listHead);
 }
 
 /* 0x441C30.  Cache next before recursion because splitting replaces the
@@ -8581,7 +7994,7 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
   RemoveInvalidTriSurfs();
   ForEachSurf(ValidateTriSurfLmapCoordsNative, NULL);
 
-  /* Native 0x43EAD3..0x43EAE0: coalescing/removal can replace the winding
+  /* Coalescing/removal can replace the winding
      bounds, so recompute them before the one-unit primary-light grid walk. */
   if ( !g_currentEntityIndex )
   {
@@ -8594,7 +8007,7 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
 
   if (g_currentEntityIndex)
   {
-    /* Native 0x43EAEC dispatches 0x442470 over the entity's active
+    /* Native dispatches 0x442470 over the entity's active
        tri-surfaces.  Confirm the coalesced leaf categories carried by those
        surfaces; the donor range helper touches unrelated later DrawSurfs. */
     TriSurf_t *surf;
@@ -8609,7 +8022,7 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
     Tris_PreprocessSunShadowPipeline();
   }
 
-  /* Native 0x43EB0C..0x43EB14.  This must precede concave merging so no
+  /* This must precede concave merging so no
      oversized texture-projected winding can reach lightmap grouping. */
   if ( !g_currentEntityIndex )
   {
@@ -8645,21 +8058,18 @@ void TriangulateEntity( Entity_t *entityData, Tree_t *bspTree )
     g_trisTimerStart = I_FloatTime();
   }
   ForEachSurf((void (*)(TriSurf_t *, bool))MergeHoles, (TriSurf_t *)g_largeBuf);
-  /* Native 0x43EB6D..0x43EB95: create mode-4 lmap carriers after all
+  /* Create mode-4 lmap carriers after all
      topology operations, assign them, then return to a preserved neutral
      state before the existing mode-1 snap/triangulate consumers. */
-  if (TrisLmap_NativeRouteEnabled())
+  if ( !g_currentEntityIndex )
   {
-    if ( !g_currentEntityIndex )
-    {
-      TrisTimerCheck(NULL);
-      printf("%s...\n", "building lightmap groups");
-      g_trisTimerStart = I_FloatTime();
-    }
-    SetTrisTransientMode(4, 0);
-    TrisLmap_BuildAndAssign();
-    SetTrisTransientMode(0, 1);
+    TrisTimerCheck(NULL);
+    printf("%s...\n", "building lightmap groups");
+    g_trisTimerStart = I_FloatTime();
   }
+  SetTrisTransientMode(4, 0);
+  TrisLmap_BuildAndAssign();
+  SetTrisTransientMode(0, 1);
   /* step 6: snap vertices */
   if ( !g_currentEntityIndex )
   {

@@ -8,20 +8,9 @@
 #include "qe3.h"
 #include "mainfrm.h"
 #include "radiant_ui_actions.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <cstring>
 
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
-// ── externs (per-TU, matching pmesh.cpp / undo.cpp) ───────────────────────────
-extern undo_s   *g_lastundo;                                   // 0x23F162C (undo.cpp)
-extern void      Undo_ClearRedo();
-extern void      Undo_GeneralStart( const char *operation );
-extern void      Undo_AddBrushList( selbrush_t *list );
-extern void      Undo_EndBrushList( selbrush_t *list );
-extern void      Undo_End();
-extern void      Patch_Rebuild( patchMesh_t *p, char doBounds );// 0x438D80 (pmesh.cpp)
-extern int       Sys_Printf( const char *fmt, ... );           // 0x499E90
-extern int       g_nUpdateBits;                                // 0x25D5A74 (engine_stubs.cpp)
 // selected_brushes sentinel + g_qeglobals are declared in qe3.h.
 
 // ═════════════════════════════════════════════════════════════════════════════

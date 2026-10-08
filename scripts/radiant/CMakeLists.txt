@@ -137,6 +137,12 @@ endif()
 # Warnings as Errors
 target_compile_options(${PROJECT_NAME} PRIVATE /we4700) # Uninit'd variable used in logic
 
+# KIWI: /W4 on the KIWI-authored editor sources (kiwi_*, imgui_*, radiant_main); ported files stay /W3.
+# The engine headers' nameless unions (4201), alignas padding (4324) and unused enum operators (4505) are muted.
+set(RADIANT_W4_SRCS ${RADIANT_SRCS})
+list(FILTER RADIANT_W4_SRCS INCLUDE REGEX "/radiant/(kiwi_[^/]*|imgui_[^/]*|radiant_main)\\.cpp$")
+set_property(SOURCE ${RADIANT_W4_SRCS} APPEND PROPERTY COMPILE_OPTIONS /W4 /wd4201 /wd4324 /wd4505)
+
 # Static MSVC runtime
 set_property(TARGET ${PROJECT_NAME} PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

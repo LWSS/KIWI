@@ -287,56 +287,6 @@ qboolean Sys_DirectoryHasContents(const char *dir)
 
 /*
 ================
-Sys_RemoveDir
-
-Recursively remove a directory and all its contents
-================
-*/
-qboolean Sys_RemoveDir(const char *path)
-{
-  char lastChar;
-  intptr_t findhandle;
-  bool failed;
-  char *fmt;
-  char fullpath[MAX_OS_PATH_SHORT];
-  struct _finddata_t finddata;
-  char hasTrailingSlash;
-
-  lastChar = path[strlen(path) - 1];
-  if ( lastChar == '\\' || lastChar == '/' )
-  {
-    hasTrailingSlash = 1;
-    Com_sprintf(fullpath, sizeof(fullpath), "%s*", path, finddata.name);
-  }
-  else
-  {
-    hasTrailingSlash = 0;
-    Com_sprintf(fullpath, sizeof(fullpath), "%s\\*", path, finddata.name);
-  }
-  findhandle = _findfirst(fullpath, &finddata);
-  if ( findhandle == -1 )
-    return _rmdir(path) != -1;
-  failed = 0;
-  do
-  {
-    if ( finddata.name[0] != '.' || finddata.name[1] && (finddata.name[1] != '.' || finddata.name[2]) )
-    {
-      fmt = "%s%s";
-      if ( !hasTrailingSlash )
-        fmt = "%s\\%s";
-      Com_sprintf(fullpath, sizeof(fullpath), fmt, path, finddata.name);
-      failed = (finddata.attrib & _A_SUBDIR) != 0 ? Sys_RemoveDir(fullpath) == 0 : remove(fullpath) == -1;
-      if ( failed )
-        break;
-    }
-  }
-  while ( _findnext(findhandle, &finddata) != -1 );
-  _findclose(findhandle);
-  return !failed && _rmdir(path) != -1;
-}
-
-/*
-================
 Sys_IsRenderThread
 
 Check if the current thread is the render thread

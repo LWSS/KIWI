@@ -6,14 +6,14 @@
 
 #include "stdafx.h"
 #include "kiwi_fmt.h"
+#include "kiwi_ported.h"
 #include "kiwi_units.h"
 #include "radiant_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118
+#include <float.h>      // _finite
 
 namespace
 {
@@ -21,6 +21,9 @@ namespace
 
     // Prevent near-zero divisors in grid emission, snapping, and unit conversion.
     const float KUNITS_MIN = 0.0001f;
+    // KIWI: the grid ladder's top rung (kiwi_command.cpp KGRID_MAX_INCHES); past it a snap is
+    // meaningless, and it keeps a typed huge value out of the profile.
+    const float KUNITS_GRID_MAX = 65536.0f;
 
     float s_perInch      = 1.0f;
     // The 1-inch default intentionally ignores persisted 10-inch values under the old key.
@@ -34,8 +37,15 @@ namespace
         std::string s = Radiant_ProfileGetString( KUX_SECTION, entry, "" );
         if ( s.empty() )
             return defVal;
-        const float v = (float)atof( s.c_str() );
-        return ( v >= KUNITS_MIN ) ? v : defVal;
+        // KIWI: the whole string must be a finite number (atof read "12abc" as 12 and "inf" as inf).
+        char *end = nullptr;
+        const double d = strtod( s.c_str(), &end );
+        while ( end && ( *end == ' ' || *end == '\t' || *end == '\r' || *end == '\n' ) )
+            ++end;
+        const float v = (float)d;
+        if ( end == s.c_str() || !end || *end || !_finite( v ) || !( v >= KUNITS_MIN ) )
+            return defVal;
+        return v;
     }
 
     void WriteFloat( const char *entry, float v )
@@ -65,10 +75,10 @@ float KiwiUnits_PerInch()
 void KiwiUnits_SetPerInch( float unitsPerInch )
 {
     Load();
-    // The negated comparison rejects NaN as well as values below the floor.
-    if ( !( unitsPerInch >= KUNITS_MIN ) )
+    // The negated comparison rejects NaN as well as values below the floor; _finite rejects inf.
+    if ( !( unitsPerInch >= KUNITS_MIN ) || !_finite( unitsPerInch ) )
     {
-        Sys_Printf( "Units: %g units/inch refused (minimum is %g) — still %g.\n",
+        Sys_Printf( "Units: %g units/inch refused (a finite value, minimum %g) — still %g.\n",
                     (double)unitsPerInch, (double)KUNITS_MIN, (double)s_perInch );
         return;
     }
@@ -146,13 +156,15 @@ float KiwiUnits_GridSpacingInches()
 void KiwiUnits_SetGridSpacingInches( float inches )
 {
     Load();
-    // The negated comparison also rejects NaN.
-    if ( !( inches >= KUNITS_MIN ) )
+    // The negated comparison also rejects NaN; _finite rejects inf.
+    if ( !( inches >= KUNITS_MIN ) || !_finite( inches ) )
     {
-        Sys_Printf( "Units: grid spacing %g in refused (minimum is %g) — still %g in.\n",
+        Sys_Printf( "Units: grid spacing %g in refused (a finite value, minimum %g) — still %g in.\n",
                     (double)inches, (double)KUNITS_MIN, (double)s_gridInches );
         return;
     }
+    if ( inches > KUNITS_GRID_MAX )
+        inches = KUNITS_GRID_MAX;
     if ( inches == s_gridInches )
         return;
     s_gridInches = inches;
@@ -162,4 +174,11 @@ void KiwiUnits_SetGridSpacingInches( float inches )
 float KiwiUnits_GridSpacingWorld()
 {
     return Units_FromDisplay( KiwiUnits_GridSpacingInches() );
+}
+
+// Test-only: re-read both values from the profile (the -kiwitest load-path check).
+void KiwiUnits_ReloadForTest()
+{
+    s_loaded = false;
+    Load();
 }

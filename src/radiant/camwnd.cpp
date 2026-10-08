@@ -2,9 +2,8 @@
 #error this file is only for Radiant!
 #endif
 // radiant/camwnd.cpp — the CCamWnd 3D perspective camera view (CoD4Radiant.exe).
-// KISAK: the world draw is IMMEDIATE-MODE (R_AddRenderCmdDrawTris) plus the editor
+// The world draw is IMMEDIATE-MODE (R_AddRenderCmdDrawTris) plus the editor
 // surf-cache passes; the binary routes everything through DrawGeneralWorld_/DrawGeo.
-// NOTE: 0x403d30 is CamWnd_DropModelsToPlane, NOT Cam_Draw (0x407dc0).
 
 #include "stdafx.h"
 #include <universal/surfaceflags.h>
@@ -32,6 +31,8 @@
 #include "kiwi_sunshadow.h"         // shared default-on sun-preview preference/status
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
 #include "kiwi_surfcache.h"         // the camera's pose-invariant draw list
+#include "kiwi_vec.h"               // KIWI_PI
+#include "kiwi_ported.h"            // KIWI: shared engine/editor externs
 extern int g_svNodesWalked;         // shadowvolume.cpp:28
 extern int g_svCastersDrawn;        // shadowvolume.cpp:29
 extern int g_svTrisFed;             // shadowvolume.cpp:30
@@ -44,74 +45,37 @@ extern int g_svBatchKB;             // shadowvolume.cpp:33
 #include <stdlib.h>
 #include <stdio.h>
 
-extern selbrush_t active_brushes;                              // map.cpp (0x23F189C)
-extern void       Radiant_FL_Log( const char *fmt, ... );      // mainfrm.cpp
-extern int        g_nUpdateBits;                               // 0x25D5A74 (mainfrm.cpp)
-extern int        g_edPrefabPrefabsWalked;                     // brush.cpp:7061
-extern int        g_edPrefabBrushesWalked;                     // brush.cpp:7062
-extern int        g_edPrefabBrushesDrawn;                      // brush.cpp:7064
 // Brush_Ray (0x475fe0) headless-safe distance wrapper — select.cpp.
 extern bool       Ed_BrushFloorRay( brush_t *def, const float *start,
                                      const float *dir, float *outDist );
 
-// R_AddRenderCmdDrawTris — r_rendercmds.cpp KISAK_RADIANT editor delta (P5.4).
-extern void __cdecl R_AddRenderCmdDrawTris(
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float (*xyzw)[4], const float (*normal)[3], float *color,
-    const float (*st)[2] );
-
 extern int  MaterialDef_11( MaterialDef *m );                 // materialdef.cpp — layer count
-extern float world_orient_matrix[4][3];                       // entity.cpp (identity orientation)
-extern char Byte4PackPixelColor( float *from, GfxColor *out );// 0x402ac0 (qe3/engine_stubs)
 extern void Draw_PatchSelectPoints();                         // brush.cpp (0x40c250) — sel-curve-point overlay
-extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                       int technique, GfxColor *col, char width, int drawFlags,
-                       const char *layerPrefix );             // brush.cpp (0x47afc0)
 // Face_BuildLayerGeom + EdLayerGeom are declared in qe3.h.
 extern void SunPrev_Setup();                                  // brush.cpp (Stage 2) — read worldspawn sun
 extern int  SunPrev_Active();                                 // brush.cpp — sun key present
 extern void SunPrev_FaceShade( const float *wn, float *out4 );// brush.cpp — per-face sun colour
-extern int  Sys_Printf( const char *fmt, ... );               // win_qe3.cpp — editor console (0x499e90)
 extern void KiwiCon_DrawSelectionOverlay();                   // KIWI: kiwi_construct.cpp — selection over the region fills
 
-extern entity_s *world_entity;   // entity.cpp 0x25D5B30 — worldspawn (carries the sun keys)
 // kisak's BSP sun-light parser/interpreter (r_bsp_load_obj.cpp) — the same pair the binary's
 // R_SunPrev_SetSunConstants feeds the worldspawn text to.  Not header-declared for the editor.
 extern "C++" char *__cdecl R_ParseSunLight( SunLightParseParams *params, char *text );
 extern void __cdecl R_InterpretSunLightParseParamsIntoLights( SunLightParseParams *sunParse, GfxLight *sunLight );
 
-// ─── camwndState_t — the 3D camera viewport's shell state (U-VP-CAM) ──────────────
+// ─── camwndState_t — the 3D camera viewport's state (U-VP-CAM) ──────────────
 // The camera view is a singleton (one window, one state block), so this is a file-scope
-// instance both shells drive: the MFC CCamWnd handlers near the bottom of this file and the
-// raw-Win32 WndProc twin after them read/write these SAME fields.  Every member below used
-// to be a CCamWnd member; mainfrm.h still declares those (this unit may not edit it) but
-// nothing reads them any more — U-GUARD deletes them with the class.
-//   camera        = CCamWnd::camera, THE editor camera.  Ed_Camera() below publishes it so
-//                   core TUs can stop reaching it through g_pParentWnd->m_pCamWnd (that
-//                   call-site sweep is its own unit; this one only provides the accessor).
+// instance the handlers at the bottom of this file read/write.  Every member below was a
+// CCamWnd member in the binary; the trailing field offsets are CCamWnd's.
+//   camera        = CCamWnd::camera, THE editor camera, published by Ed_Camera() below.
 //   width/height  = CCamWnd::m_nWidth / m_nHeight (client size, latched in OnCreate/OnSize).
-//   m_pt*         = POINT, not CPoint: the raw shell has no MFC types, CPoint IS a POINT, and
-//                   every use here is .x/.y only (CXYWnd already uses POINT for m_ptCursor).
-//   contextMenu   = CCamWnd::m_contextMenu's m_hMenu (IDB context_menu@+0x338).  CMenu is MFC,
-//                   but CMenu::Attach/DestroyMenu/AppendMenuA/TrackPopupMenu ARE the raw HMENU
-//                   calls Cam_ContextMenu makes, so the popup is shell-agnostic as a bare HMENU.
-//   The trailing IDB field offsets travelled with the members off the CCamWnd declaration.
+//   m_pt*         = POINT, not CPoint (CPoint IS a POINT; every use here is .x/.y only).
+//   contextMenu   = CCamWnd::m_contextMenu's m_hMenu (+0x338), a bare HMENU.
 //
-// U-GUARD, dead CCamWnd members after this unit (mainfrm.h ~line 33, not editable here):
-//   camera, m_nWidth, m_nHeight, m_nCambuttonstate, m_ptButton, cam_was_not_dragged,
-//   m_ptCursor, m_ptLastCursor, prob_some_cursor, x47, cursor_visible, light_preview_arr,
-//   light_preview_count, m_contextMenu, struct LightPreviewRec — all superseded by the fields here.
-//   m_ptCursor3 was ALREADY dead before this unit (declared, never read or written).
-//   m_bLooking / m_ptLook are inside mainfrm.h's own #if 0 (the disabled FPS-look camera).
-//
-// U-GUARD HAZARD (report item, deliberately NOT worked around here): CMainFrame::OnDynamicLighting
-// (mainfrm.cpp 0x429960, menu 32854) constructs a SECOND CCamWnd as a floating popup.  That
-// feature is DEAD — its hwnd is never registered with the renderer, so it draws nothing (the
-// binary behaves the same) — but with the state a singleton, WM_SIZE/WM_CREATE/mouse input on
-// that popup now writes the REAL camera's state instead of its own dead copy.  The fix belongs
-// with the command sweep that drops the dead menu entry, not to a gate invented in here.
-struct camLightPreviewRec_t   // == CCamWnd::LightPreviewRec, 56 B (IDB stride 14 dwords)
+// U-GUARD HAZARD: the binary's CMainFrame::OnDynamicLighting (0x429960, menu 32854) builds a
+// SECOND CCamWnd as a floating popup (dead there too: its hwnd is never registered with the
+// renderer).  With this state a singleton, that popup's WM_SIZE/WM_CREATE/mouse input would
+// write the REAL camera's state, so mainfrm.cpp makes 32854 a no-op.
+struct camLightPreviewRec_t   // == CCamWnd::LightPreviewRec, 56 B (the binary's 14-dword stride)
 {
     selbrush_t   *inst;
     selbrush_t   *arg2;
@@ -121,12 +85,12 @@ static_assert( sizeof(camLightPreviewRec_t) == (sizeof(void *) == 8 ? 64 : 56), 
 
 struct camwndState_t
 {
-    camera_s camera = {};                 // embedded camera state (IDB CCamWnd::camera)
+    camera_s camera = {};                 // embedded camera state (CCamWnd::camera)
     int      width  = 0;                  // m_nWidth  — client width  (px)
     int      height = 0;                  // m_nHeight — client height (px)
 
     // 3D-view mouse interaction state (CamWnd_DropModelsToPlane / Cam_MouseControl /
-    // Cam_MouseUp / Cam_MouseMoved — IDB 0x403d30 / 0x403950 / 0x404f70 / 0x404fc0).
+    // Cam_MouseUp / Cam_MouseMoved).
     unsigned int m_nCambuttonstate = 0;   // +0xd4  MK_ flags of the active press
     POINT  m_ptButton  = { 0, 0 };        // +0xd8  press point (flipped Y, client coords)
     bool   cam_was_not_dragged = false;   // +0xe0  set on a plain RMB press (no drag yet)
@@ -136,16 +100,15 @@ struct camwndState_t
     int    x47 = 0;                       // +0x12c accumulated cursor dy (texture rotate/shift snap)
     int    cursor_visible = 1;            // +0x130 cursor-shown flag; Cam_MouseUp restores it to 1
 
-    // light-region preview records (Regions_ForSelected 0x406F10 reads these): +0x134 / +0x2F4.
+    // light-region preview records (Regions_ForSelected reads these): +0x134 / +0x2F4.
     camLightPreviewRec_t light_preview_arr[8] = {};
     int                  light_preview_count = 0;
 
     HMENU  contextMenu = nullptr;     // +0x338 the RMB face-picker popup (CMenu::m_hMenu)
 
     // CCamWnd::CCamWnd == the binary's Cam_Init (0x402c40): CMainFrame::CreateQEChildren
-    // 0x4219cb spawns the camera at (0, 20, 46) with yaw 0 (look +X) and draw_mode 1
-    // (Cam_Draw 0x407dc0 maps mode 1 to TECHNIQUE_UNLIT).  Static init runs long before
-    // either shell creates the window, so both get the same start state.
+    // spawns the camera at (0, 20, 46) with yaw 0 (look +X) and draw_mode 1 (Cam_Draw maps
+    // mode 1 to TECHNIQUE_UNLIT).  Static init runs long before the window is created.
     camwndState_t()
     {
         camera.angles[1] = 0.0f;          // yaw → look +X
@@ -156,14 +119,9 @@ struct camwndState_t
     }
 } g_camwndState;
 
-// ─── Ed_Camera — THE editor camera, shell-agnostic (U-VP-CAM / U-GLOBALS) ─────────
-// The accessor the whole MFC-removal campaign hinges on.  Core TUs currently reach the camera
-// as `g_pParentWnd->m_pCamWnd->camera`, i.e. through CMainFrame (MFC); there is exactly ONE
-// camera, so &g_camwndState.camera is that same state with no window class in the path.  The
-// call-site sweep (entity.cpp / errorfile.cpp / map.cpp / mainfrm.cpp / pmesh.cpp / points.cpp /
-// select.cpp / texwnd.cpp / win_dlg.cpp / xywnd.cpp / z.cpp) is a LATER unit; this one only
-// publishes the accessor and uses it for the sites inside camwnd.cpp.  It never returns NULL,
-// so those sites' `if ( m_pCamWnd )` guards simply fall away when they are swept.
+// ─── Ed_Camera — THE editor camera (U-VP-CAM / U-GLOBALS) ─────────
+// There is exactly ONE camera, so every TU reaches it here, with no window class in the path.
+// It never returns NULL.
 camera_s *Ed_Camera()
 {
     return &g_camwndState.camera;
@@ -227,7 +185,7 @@ void CamWnd_BuildMatrix()
 
 // Cam_Draw's prologue: the R_SetupScene (0x506570) perspective projection + R_Ed_SetSceneParms
 // with axis = { vpn, -vright, vup }.  R_SetupProjection (0x4a78e0) is inlined.
-// KISAK: R_Ed_ProjectionWouldBeValid has no binary counterpart — it is a call-site guard around
+// R_Ed_ProjectionWouldBeValid has no binary counterpart — it is a call-site guard around
 // the shared r_state_utils.cpp:20 inverse-VP assert.  On far-from-origin maps (blackout at world
 // X ~ -175000) the float32 MatrixInverse44 loses the sign of the inverse-VP's m[3][3], so the
 // assert fires on a projection the forward render handles fine.  Returns false to drop just that
@@ -249,10 +207,10 @@ bool CamWnd_SetupScene()
     const int   h    = camera.height > 0 ? camera.height : 1;
     float tanY = tanf( DEG2RAD( fov ) * 0.5f ) * 0.75f;
     float tanX = tanY * (float)w / (float)h;
-    // R_SetupScene 0x506570: zNear = max(r_znear, 0.01).  0.01 is the CLAMP FLOOR, not the near
+    // R_SetupScene: zNear = max(r_znear, 0.01).  0.01 is the CLAMP FLOOR, not the near
     // plane — using it directly makes the depth range ~400x too coarse (coplanar tool faces Z-fight).
     float zNear = (float)Dvar_GetFloat( "r_znear" );                 // default 4.0
-    if ( 0.0099999998f - zNear >= 0.0f )                            // 0x5065b0: floor at 0.01
+    if ( 0.0099999998f - zNear >= 0.0f )                            // floor at 0.01
         zNear = 0.0099999998f;
 
     GfxMatrix proj;
@@ -426,7 +384,7 @@ static Material *FaceMaterial( const MaterialDef *md )
 // Per-face scratch (a brush face has at most MAX_POINTS_ON_WINDING verts; 64 is ample).
 static const int CAM_MAXFACEVERTS = 64;
 
-// camera.draw_mode -> MaterialTechniqueType, per Cam_Draw 0x407dc0.
+// camera.draw_mode -> MaterialTechniqueType, per Cam_Draw.
 // CASE_TEXTURE must stay OFF in g_useTechnique (r_material_load_obj.cpp): enabling slot 0x1B
 // makes Material_LoadTechniqueSet REQUIRE case_texture for every l_sm_* world techset, which
 // binds a code image kisak never sets up (R_LoadCaseTextures unported) — the whole techset load
@@ -441,7 +399,7 @@ static MaterialTechniqueType Cam_TechForDrawMode( int mode )
     case 2:  return TECHNIQUE_FAKELIGHT_NORMAL;   // textured + normal fake-light
     case 3:  return TECHNIQUE_FAKELIGHT_VIEW;     // textured + view fake-light
     case 4:  return TECHNIQUE_CASE_TEXTURE;       // case texture
-    default: return TECHNIQUE_UNLIT;              // IDA initializes tech_type=4 before the switch
+    default: return TECHNIQUE_UNLIT;              // the binary's tech_type=4 (UNLIT) default
     }
 }
 
@@ -1212,7 +1170,7 @@ void Cam_DrawWindingTinted( const float ( *pts )[3], int nv, const float *n,
     uint16_t indices[3 * CAM_MAXFACEVERTS];
 
     // Planar texcoord: project onto the two axes least aligned with the face normal,
-    // at a fixed 1/128-unit scale (faithful texdef projection = follow-up).
+    // at a fixed 1/128-unit scale (the real texdef projection = follow-up).
     float an[3] = { fabsf( n[0] ), fabsf( n[1] ), fabsf( n[2] ) };
     int ai, bi;                                  // the two projection axes
     if ( an[0] >= an[1] && an[0] >= an[2] ) { ai = 1; bi = 2; }      // normal ~X
@@ -1259,10 +1217,10 @@ static inline void Cam_DrawFace( const face_t *f, Material *mtl, MaterialTechniq
 }
 
 // ── editor surf-cache path ────────────────────────────────────────────────────
-// The faithful Cam_Draw draws the world through the editor surface cache
+// The binary's Cam_Draw draws the world through the editor surface cache
 // (Visuals_InitFaceVis 0x46F7A0 builds per-face GfxWorldVertex into the per-material D3D9 VB
 // pool; DrawGeo emits them; R_AddEditorSurfsCmd flushes one RC_DRAW_EDITOR_SKINNEDCACHED).
-// KISAK: the DEFAULT world draw is the immediate path; RADIANT_SURFCACHE selects the cached
+// Here the DEFAULT world draw is the immediate path; RADIANT_SURFCACHE selects the cached
 // one.  Both build geometry with brush.cpp Face_BuildLayerGeom, so they are bit-identical.
 extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
     const float *xyz, const float *tangent, const float *binormal,
@@ -1276,7 +1234,7 @@ extern int   Editor_PendingSurfCount();                          // r_ed_scene.c
 // The surf sort bucket — 100 * info.drawSurf.fields.primarySortKey.
 extern int __cdecl Editor_MaterialSortKey( Material *handle );   // r_ed_scene.cpp:190 (0x4FDBB0)
 
-// RADIANT_SURFCACHE — operator switch: faithful surf-cache world draw instead of immediate.
+// RADIANT_SURFCACHE — operator switch: the binary's surf-cache world draw instead of immediate.
 static bool Cam_SurfCacheEnabled()
 {
     static const bool s = ( getenv( "RADIANT_SURFCACHE" ) != nullptr );
@@ -1299,7 +1257,7 @@ static bool Cam_SunPrevEnabled()
 
 // Brush_MakeFaceVisuals (0x477C50) uploads each face's per-layer GfxWorldVertex run to the
 // editor surf-cache VB pool on every faceVis rebuild.
-// KISAK: the headless gates run with NO D3D device, where that upload would FatalError — gate
+// The headless gates run with NO D3D device, where that upload would FatalError — gate
 // the GPU half on the device, mirroring the R_Ed_SetSceneParms device gate.  brush.cpp externs.
 bool Radiant_FaceVisGpuReady()
 {
@@ -1333,7 +1291,7 @@ bool Radiant_FaceVisDeviceLost()
 // the worldspawn through a CMemFile (Entity_WriteSelected); we build the same epair text from
 // world_entity->epairs and feed the SAME parser pair, so the GfxLight is bit-identical.
 // Returns 1 (+ the directional sun dir, w=0) when "sundirection" is present, else 0.
-// ambientMulOut: the black-world multiply colour (sub_50C470) the full-screen quad resets the
+// ambientMulOut: the black-world multiply colour (0x50C470) the full-screen quad resets the
 // textured world to before the SUNLIGHT_PREVIEW pass adds the sun light.
 // `emit` = issue the 3 RC_SET_CUSTOM_CONSTANT commands (false = pre-compute values only).
 // Called only when the edit-epoch cache rebuilds; Cam_SunPrev_Main emits the same three
@@ -1380,7 +1338,7 @@ static int Cam_SunPrev_SetSunConstants( float sunDirOut[3], float ambientMulOut[
     R_ParseSunLight( &params, p );
     R_InterpretSunLightParseParamsIntoLights( &params, &light );
 
-    // The 3 sun code constants sunpre_*.hlsl reads (binary order/values, 0x406896+).
+    // The 3 sun code constants sunpre_*.hlsl reads (binary order/values).
     if ( emit )
     {
         R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_POSITION, light.dir[0],   light.dir[1],   light.dir[2],   0.0f );
@@ -1400,15 +1358,14 @@ static int Cam_SunPrev_SetSunConstants( float sunDirOut[3], float ambientMulOut[
 
     // 0x50C470  R_SunPrev_ComputeBlackWorldMultiplyColor — the colour the full-screen multiply
     // quad drops the textured world to before the SUNLIGHT_PREVIEW pass adds the sun light.
-    // All x87, so hex-rays shows only fragments; both branch tests are the `fnstsw ax / test
-    // ah,44h / jp` EQUALITY idiom (== 0), NOT a > test:
-    //   0x50c473  if ( ambientScale == 0 ) amb = {0,0,0}
-    //   0x50c48e  ColorNormalize(ambientColor, ambientColor)  [in place, RETURNS the max]
-    //   0x50c493  if ( returned max == 0 ) amb = {0,0,0}   <- the RETURN value, not the output
-    //             (ColorNormalize writes {1,1,1} to `out` when max==0, so testing `out` here
-    //              wrongly picks the scale branch for a worldspawn with no "_color")
-    //   0x50c4ce  k = (sunLight - ambientScale) * diffuseFraction
-    //   0x50c4f4  out[i] = diffuseColor[i]*k + amb[i]
+    // Both branch tests are EQUALITY (== 0), NOT a > test:
+    //   if ( ambientScale == 0 ) amb = {0,0,0}
+    //   ColorNormalize(ambientColor, ambientColor)  [in place, RETURNS the max]
+    //   if ( returned max == 0 ) amb = {0,0,0}   <- the RETURN value, not the output
+    //     (ColorNormalize writes {1,1,1} to `out` when max==0, so testing `out` here
+    //      wrongly picks the scale branch for a worldspawn with no "_color")
+    //   k = (sunLight - ambientScale) * diffuseFraction
+    //   out[i] = diffuseColor[i]*k + amb[i]
     if ( ambientMulOut )
     {
         float amb[3] = { 0.0f, 0.0f, 0.0f };
@@ -1477,18 +1434,6 @@ static const CamSunPreviewCache *Cam_SunPrev_CachedState()
 static bool Cam_MaterialColorChanged( const float a[4], const float b[4] );
 static void Cam_SetLastMaterialColor( float dst[4], const float src[4] );
 
-static void Cam_EmitEditorTint( const face_t *f, int layer, float lastMC[4] )
-{
-    const char *mn = f->mtldef[layer].radMtl ? f->mtldef[layer].radMtl->name : nullptr;
-    float ecol[4];
-    Cam_EditorMaterialColor( mn, ecol );
-    if ( Cam_MaterialColorChanged( ecol, lastMC ) )
-    {
-        R_AddCmdSetMaterialColor( ecol );
-        Cam_SetLastMaterialColor( lastMC, ecol );
-    }
-}
-
 // Surf-cache emit: per material layer build the real per-vertex geometry, upload it to the
 // editor VB pool, queue the cached draw.  The pool is per-frame scratch (re-uploaded every
 // Cam_Draw, flushed by R_AddEditorSurfsCmd), so no faceVis_s is persisted here.
@@ -1537,7 +1482,7 @@ static void Cam_SetLastMaterialColor( float dst[4], const float src[4] )
 }
 
 // The world fill's plain arm emits the same Editor_AddGeoFace surf DrawGeo emits, from the
-// persistent VB handle Brush_CheckBuildFaceVis (0x477d70) uploaded.  STILL IMMEDIATE, and must
+// persistent VB handle Brush_CheckBuildFaceVis uploaded.  STILL IMMEDIATE, and must
 // stay so: the sun approximation arm, the sky see-through film, the solid-tool arm, and any
 // face whose faceVis is not built.  RADIANT_WORLDGEO=0 restores the immediate arm.
 static bool Cam_WorldGeoResident()
@@ -1547,8 +1492,6 @@ static bool Cam_WorldGeoResident()
     return s;
 }
 
-// brush.cpp:205 — void sub_477D70( selbrush_t *b, const float *orient )  (Brush_CheckBuildFaceVis)
-extern void sub_477D70( selbrush_t *b, const float *orient );
 // brush.cpp:2499 — int g_edSunBakeVertColor  (the per-vertex sun bake gate)
 extern int  g_edSunBakeVertColor;
 
@@ -1724,7 +1667,7 @@ static bool Cam_DrawFaceResident( const CamSortFace &ent, MaterialTechniqueType 
 }
 
 
-// KISAK sun-preview APPROXIMATION (used when the faithful R_SunPrev_Main path is unavailable):
+// Sun-preview APPROXIMATION (used when the R_SunPrev_Main path is unavailable):
 // MATERIAL_COLOR = the face's directional-sun colour, then draw the textured face UNLIT (which
 // multiplies its colormap by MATERIAL_COLOR).  No shadows, no per-pixel lighting.
 // RC_SET_MATERIAL_COLOR is a CRITICAL command sharing a 0x2000-byte budget (~410 commands), so
@@ -1755,7 +1698,6 @@ static void Cam_DrawFaceSun( face_t *f, Material *mtl, MaterialTechniqueType tec
 }
 
 // ── g_SelectedFaces (select.cpp) — the Ctrl+Shift+LMB face-selection set ──────────
-extern float world_orient_matrix[4][3];              // 0x6DE290 (orientation_t, world space)
 
 // brush.cpp line-outline batcher (reused) + the deferred-line flush command.
 extern int DrawShadedWireframe( int cullMode, face_t *face, const orientation_t *orient,
@@ -1826,11 +1768,11 @@ static void Cam_DrawSelectedFaces()
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x408106  Cam_DrawSelectedFaceFill — Cam_Draw's SELECTED-FACE FILL pass, gated on
 // !dontDrawSelectedTint && g_SelectedFaces.GetSize() > 0.  Every picked face's winding is
-// batched (Face_AddWindingToTriBatch, 0x47b780) into ONE white-UNLIT triangle draw carrying
+// batched (Face_AddWindingToTriBatch) into ONE white-UNLIT triangle draw carrying
 // the flat d_savedinfo.colors[16] fill colour; the batcher auto-flushes at the caps.
-// MATERIAL_COLOR is neutral across the pass (0x4080f7 / 0x408115 R_SetMaterialColor(NULL))
+// MATERIAL_COLOR is neutral across the pass (R_SetMaterialColor(NULL))
 // so the per-vertex colour drives the fill.
-// KISAK: the batch buffers are function-static (the binary keeps ~100 KB of them in
+// The batch buffers are function-static (the binary keeps ~100 KB of them in
 // Cam_Draw's stack frame); sizes are the binary's exactly.
 // ─────────────────────────────────────────────────────────────────────────────
 extern void Face_AddWindingToTriBatch( face_t *face, const float *packedColor,
@@ -1841,15 +1783,15 @@ extern void Face_AddWindingToTriBatch( face_t *face, const float *packedColor,
 
 static void Cam_DrawSelectedFaceFill()
 {
-    const int count = g_SelectedFaces.GetSize();              // 0x408106
-    if ( count <= 0 )                                         // 0x40810c
+    const int count = g_SelectedFaces.GetSize();
+    if ( count <= 0 )
         return;
 
     static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    R_AddCmdSetMaterialColor( s_neutral );                    // 0x408115 R_SetMaterialColor(NULL)
+    R_AddCmdSetMaterialColor( s_neutral );                    // R_SetMaterialColor(NULL)
 
     GfxColor gfx_col;
-    Byte4PackPixelColor( g_qeglobals.d_savedinfo.colors[16], &gfx_col );   // 0x408129
+    Byte4PackPixelColor( g_qeglobals.d_savedinfo.colors[16], &gfx_col );
 
     static float          s_st[1362][2];
     static float          s_normal[1362][3];
@@ -1857,44 +1799,42 @@ static void Cam_DrawSelectedFaceFill()
     static float          s_color[1362];
     static ushort s_indices[2046];
 
-    int indexCount = 0;                                       // 0x408137
-    int vertCount  = 0;                                       // 0x40813d
+    int indexCount = 0;
+    int vertCount  = 0;
 
     for ( int i = 0; i < count; ++i )
     {
-        selface_t   selFace = g_SelectedFaces.GetAt( i );     // 0x408170/0x408177
+        selface_t   selFace = g_SelectedFaces.GetAt( i );
         selbrush_t *b       = selFace.brush;
         if ( !b || !b->def )
-            continue;                                         // KISAK guard (headless/stale pick)
+            continue;                                         // port guard (headless/stale pick)
         const int   idx     = selFace.index;
-        // 0x408186 — CamWnd.cpp:2627.
+        // CamWnd.cpp:2627
         iassert( selFace.face == &selFace.brush->faces[selFace.index] );
         brush_t *def = b->def;
         if ( (unsigned)idx >= (unsigned)def->faceCount )
-            continue;                                         // KISAK guard
+            continue;                                         // port guard
         // KIWI-UX (ROUND BN, ITEM 3): the UV editor owns this face's look while it is
         // in scope — the fill is the pass that hides the texture the user is moving.
         if ( KiwiUvEd_OverlaySuppressed( def, idx ) )
             continue;
         Face_AddWindingToTriBatch( &def->faces[idx], (const float *)&gfx_col,
                                    &indexCount, s_indices, &vertCount,
-                                   s_xyzw, s_normal, s_color, s_st );   // 0x4081eb
+                                   s_xyzw, s_normal, s_color, s_st );
     }
 
-    if ( indexCount != 0 && vertCount != 0 )                  // 0x408223
+    if ( indexCount != 0 && vertCount != 0 )
         R_AddRenderCmdDrawTris( g_qeglobals.d_white, TECHNIQUE_UNLIT,
                                 (short)indexCount, s_indices, (short)vertCount,
-                                s_xyzw, s_normal, s_color, s_st );       // 0x408253
+                                s_xyzw, s_normal, s_color, s_st );
 }
 
 // ── xmodel MESH draw ──────────────────────────────────────────────────────────
 // Cam_Draw reaches misc_model meshes through DrawBrush -> DrawModels -> SetupModelInst
 // (Entity_UpdateModelInst registers the xmodel in the editor model-inst buffer) + SkinModelInst
 // (builds GfxModelSkinnedSurfaces, queued as ED_SURF_MODEL surfs); R_AddEditorSurfsCmd flushes.
-extern bool  Model_SetModel( entity_brush_s *b, const float *orientMatrix );        // brush.cpp 0x478780
 extern void  SkinModelInst( int instanceHandle, Material *checkhandle, int techType,
                             const int *colorPtr, int drawFlags );          // r_ed_scene.cpp 0x4FE2E0
-extern void Radiant_FL_Log( const char *fmt, ... );                       // mainfrm.cpp
 
 // Editor model-load asset-drop recovery guard (engine_stubs.cpp).
 extern int     g_radiantAssetLoadGuard;
@@ -1913,11 +1853,10 @@ bool Editor_ModelsEnabled()
 
 // Per-entity model instance + skin under SEH, so a model whose load derefs a NULL handle is
 // skipped rather than crashing.  Returns 1 iff the entity has a renderable model/prefab
-// (Entity_HasRenderableModel 0x479610 = the binary's DrawBrush gate; a bare-prefab entity
+// (Entity_HasRenderableModel = the binary's DrawBrush gate; a bare-prefab entity
 // returns 1 with no modelInst and the caller draws the prefab CONTENTS).
 // Its own function because MSVC forbids setjmp and __try in one function (C2713).
-extern float world_orient_matrix[4][3];                                   // entity.cpp
-extern char  Entity_HasRenderableModel( brush_t_with_custom_def *b, const float *orient );  // brush.cpp 0x479610
+extern char  Entity_HasRenderableModel( selbrush_t *b, const float *orient );  // brush.cpp 0x479610
 // Non-zero only across the 2D view's UNSELECTED brush loop (XY_DrawBrushes, xywnd.cpp): the
 // per-entity tint travels as a flat MATERIAL_COLOR instead of a per-vertex stamp, because
 // the stamp forces a writable tempSkinBuf copy and that disqualifies the surface from the
@@ -1931,12 +1870,12 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
     int renderable = 0;
     __try
     {
-        if ( Entity_HasRenderableModel( (brush_t_with_custom_def *)b, (const float *)orient ) )
+        if ( Entity_HasRenderableModel( b, (const float *)orient ) )
         {
             renderable = 1;
             if ( b->owner->modelInst )
             {
-                // DrawModels 0x479735: SkinModelInst(inst, checkhandle, draw_meth2,
+                // DrawModels: SkinModelInst(inst, checkhandle, draw_meth2,
                 // draw_meth2 != 29 ? 0 : color, drawFlags) — the per-vert colour override
                 // only rides the WIREFRAME technique.
                 const int *colorPtr = ( meshTech != TECHNIQUE_WIREFRAME_SHADED ) ? nullptr : (const int *)col;
@@ -1960,10 +1899,10 @@ static int Cam_SkinModelSEH( selbrush_t *b, const orientation_t *orient, int mes
     return renderable;
 }
 
-// KISAK: install the ERR_DROP recovery frame, then instance + skin one entity's model.  A
+// Install the ERR_DROP recovery frame, then instance + skin one entity's model.  A
 // CoD4-format asset the CoD3-sized parser chokes on raises Com_Error(ERR_DROP) deep in the
 // load; engine_stubs.cpp longjmps back here and Model_SetModel's modelFailed flag stops that
-// model retrying.  The guarded entry DrawBrush (0x47b102) calls per fixedsize entity.
+// model retrying.  The guarded entry DrawBrush calls per fixedsize entity.
 int Editor_InstanceAndSkinModel( selbrush_t *b, const orientation_t *orient, int meshTech,
                                  GfxColor *col, int drawFlags )
 {
@@ -1989,9 +1928,10 @@ int Editor_InstanceAndSkinModel( selbrush_t *b, const orientation_t *orient, int
     return skinned;
 }
 
-// SunLightPreview_DrawBrushShadow's misc_model arm (0x47b2e1) drives a real model load on
+// SunLightPreview_DrawBrushShadow's misc_model arm drives a real model load on
 // entities the base pass may never have touched, so it needs the SAME bracket
-// Editor_InstanceAndSkinModel installs.  KISAK: the bracket only — the arm is binary code.
+// Editor_InstanceAndSkinModel installs.  Only the bracket is the port's — the arm is
+// binary code.
 extern char Radiant_ShadVol_ModelShadowArm( selbrush_t *sb, orientation_t *orient,
                                             const float *light );          // shadowvolume.cpp
 static int Cam_ShadowModelSEH( selbrush_t *b, orientation_t *orient, const float *light )
@@ -2022,23 +1962,16 @@ int Editor_ModelShadowGuarded( selbrush_t *b, orientation_t *orient, const float
 }
 
 // ── LIGHT-PREVIEW GLOW SPHERE ─────────────────────────────────────────────────
-// 0x4058e0  LightPreview_DrawLight2 — DrawLightsMain's (0x407180) fallback when the per-pixel
-// GPU light path (LightPreview_DrawLight 0x406fb0) is disabled or unavailable: a 32x16 UV-sphere
+// 0x4058e0  LightPreview_DrawLight2 — DrawLightsMain's fallback when the per-pixel
+// GPU light path (LightPreview_DrawLight) is disabled or unavailable: a 32x16 UV-sphere
 // of `radius` at the light origin, packed with the light colour, drawn additively through
 // R_AddRenderCmdDrawTris($additive, TECHNIQUE_UNLIT).
 // Colour per DrawLightsMain: _color (default white), saturated to the max component at the
 // selected preview intensity; command 36122 switches between the key and retail's 1e7 mode.
 // Topology is the binary's: 32 longitude x 16 latitude -> 15 rings of 32 (480) + 2 poles = 482,
-// quad-pairs per ring + two tri pole caps.  Rebuilt from intent, not transcribed (the IDB's
-// interleaved stack-array juggling is trap-dense); vertex count and index pattern are exact.
-extern selbrush_t selected_brushes;                                // map.cpp (0x23F1864)
-extern void  OrientationPosToWorldPos( float *out, const float *localPos,
-                                       const orientation_t *orient );   // brush.cpp (0x4BA430)
-extern float Entity_GetFloatValueForKey( const entity_s *e, const char *key );      // entity.cpp (0x4837C0)
+// quad-pairs per ring + two tri pole caps.  Rebuilt from intent; vertex count and index
+// pattern are exact.
 extern int   Entity_GetIntValueForKey( const entity_s *e, const char *key );        // entity.cpp (0x483820)
-extern int   Entity_GetVec3ForKey( entity_s_def *e, float *out,
-                                   const char *key );                    // entity.cpp (0x483860)
-extern char *ValueForKey2( const entity_s *e, const char *key );                    // entity.cpp (0x4825C0)
 extern void __cdecl R_SetLightShaderConstants( const float *origin, float radius,
                                                const float *color, const char *defName,
                                                const float *dir, float cosHalfFovInner,
@@ -2078,11 +2011,11 @@ static void Cam_BuildLightGlowSphere( const float center[3], float radius,
     for ( int r = 1; r <= ringCount; ++r )
     {
         // latitude angle θ = r * (2π / sideCount)  (binary: row*0.19634954 = row*2π/32)
-        const float theta = (float)r * ( 6.2831853f / (float)sideCount );
+        const float theta = (float)r * ( (float)( 2.0 * KIWI_PI ) / (float)sideCount );   // KIWI: KIWI_PI
         const float sinT = sinf( theta ), cosT = cosf( theta );
         for ( int c = 0; c < sideCount; ++c )
         {
-            const float phi = (float)c * ( 6.2831853f / (float)sideCount );
+            const float phi = (float)c * ( (float)( 2.0 * KIWI_PI ) / (float)sideCount );   // KIWI: KIWI_PI
             const float nx = cosf( phi ) * sinT;
             const float ny = sinf( phi ) * sinT;
             const float nz = cosT;
@@ -2158,7 +2091,7 @@ static bool Cam_LightPreview_CompilerSpotForDualBits(
     float *outCosOuter, float *outCosHalfFov );
 
 // 0x4065e0 LightPreview_SetLightTechnique. Entity_Light supplies the exact
-// spot/omni classification and cone values; sub_4FED50 is R_SetLightShaderConstants.
+// spot/omni classification and cone values.
 static int Cam_LightPreview_SetLightTechnique( const float *origin, float radius,
                                                 const float *color, entity_s_def *ent,
                                                 selbrush_t *scope,
@@ -2275,7 +2208,6 @@ static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
     }
     SunLightPreview_PolyOffsetShadows();
 
-    extern void R_SortMaterials();
     R_SortMaterials();
     for ( int i = 0; i < casterCount; ++i )
     {
@@ -2298,7 +2230,6 @@ static bool Cam_DrawLightsMain( selbrush_t *brush, selbrush_t *scope,
     entity_s_def *ent = (entity_s_def *)brush->owner->def;
     iassert( brush->owner->def == brush->def->owner );
 
-    extern char FilterBrush( selbrush_t *b, int updateFilters );
     if ( FilterBrush( brush, 0 ) )
         return false;
     const float radius = Entity_GetFloatValueForKey( ent, "radius" );
@@ -2357,7 +2288,7 @@ static void Cam_DrawLightPreviews( bool ambientBaseDone, Material *multiplyMater
         {
             camLightPreviewRec_t *rec = &cam->light_preview_arr[i];
             selbrush_t *brush = (selbrush_t *)(intptr_t)rec->inst;
-            // 0x406727: the signed-byte gate is brush+52, not preview-record+52.
+            // the signed-byte gate is the brush's (brush+52), not the preview record's.
             if ( brush->brushFlags & 0x80 )
             {
                 continue;
@@ -2387,15 +2318,12 @@ static void Cam_DrawLightPreviews( bool ambientBaseDone, Material *multiplyMater
     }
 }
 
-// Camera decorations drawn after the world pass: DrawTriggerRadius (0x407410) and
-// CamWnd_Tokens (0x4076C0), both on the immediate RC_DRAW_TRIANGLES (d_white, UNLIT) path.
-extern bool  HasKeyValuePair( entity_s_def *e, const char *key );                    // entity.cpp 0x4838B0
-extern char *ValueForKey2( const entity_s *e, const char *key );                                 // entity.cpp 0x4825C0
+// Camera decorations drawn after the world pass: DrawTriggerRadius and
+// CamWnd_Tokens, both on the immediate RC_DRAW_TRIANGLES (d_white, UNLIT) path.
 extern int   ScriptGroup_Unreachable( const char *a1 );                              // scriptgroup.cpp 0x451170
-extern char  FilterBrush( selbrush_t *b, int updateFilters );                        // filters.cpp 0x46A1F0
 extern void  Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );               // brush.cpp 0x46AE10
 
-// flt_73B098 — the 7 token colours (r/b/y/c/g/p/o), shared with brush.cpp.
+// The 7 token colours (r/b/y/c/g/p/o), shared with brush.cpp.
 static const float kCamTokenColors[7][4] = {
     { 1.0f, 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, 1.0f, 1.0f },
     { 1.0f, 1.0f, 0.0f, 1.0f }, { 0.0f, 1.0f, 1.0f, 1.0f },
@@ -2406,8 +2334,8 @@ static const float kCamTokenColors[7][4] = {
 // 0x405D00  Ed_DrawTriggerCylinder - a 32-sided trigger volume: top end-cap disc (verts
 // 0..31), bottom end-cap disc (32..63), side wall (64..95 top / 96..127 bottom); 128 verts,
 // 372 indices, UNLIT + per-vertex colour.  center[3] is the trigger base; topZ/botZ are ring
-// z-offsets above center.z.  Rebuilt from intent (the binary's 4-array stack juggling is
-// trap-dense); vertex roles, angle step 2pi/32 and both index loops are exact.
+// z-offsets above center.z.  Rebuilt from intent; vertex roles, angle step 2pi/32 and both
+// index loops are exact.
 static void Ed_DrawTriggerCylinder( const GfxColor *col, const float center[3],
                                     float radius, float topZ, float botZ )
 {
@@ -2420,7 +2348,7 @@ static void Ed_DrawTriggerCylinder( const GfxColor *col, const float center[3],
     const float fcol = *(const float *)&col->packed;
     const float zTop = center[2] + topZ;
     const float zBot = center[2] + botZ;
-    const float kStep = 6.2831853f / (float)sideCount;     // dbl_6F4500 = 2π/32
+    const float kStep = (float)( 2.0 * KIWI_PI ) / (float)sideCount;     // KIWI: KIWI_PI (dbl_6F4500 = 2π/32)
 
     for ( int i = 0; i < sideCount; ++i )
     {
@@ -2428,7 +2356,7 @@ static void Ed_DrawTriggerCylinder( const GfxColor *col, const float center[3],
         const float c = cosf( ang ), s = sinf( ang );
         const float rx = c * radius + center[0];
         const float ry = s * radius + center[1];
-        // group0 (0..31): top cap ring; normal (0,0,-1) (binary flt_6F40C4=-1).
+        // group0 (0..31): top cap ring; normal (0,0,-1).
         xyzw[i][0]=rx; xyzw[i][1]=ry; xyzw[i][2]=zTop; xyzw[i][3]=1.0f;
         normal[i][0]=0; normal[i][1]=0; normal[i][2]=-1.0f; color[i]=fcol;
         // group1 (32..63): bottom cap ring.
@@ -2451,7 +2379,7 @@ static void Ed_DrawTriggerCylinder( const GfxColor *col, const float center[3],
         ic += 6;
     }
     // index loop 2 (i=0..31): cylinder wall (v+64, v+96, n+96) + (n+96, n+64, v+64),
-    // where n=(i+1)%32 (binary masks with 0x8000001F → modulo-32 wraparound).
+    // where n=(i+1)%32.
     for ( int i = 0; i < sideCount; ++i )
     {
         const int n = ( i + 1 ) % sideCount;
@@ -2512,7 +2440,7 @@ static void Cam_DrawTriggerRadius( selbrush_t *b )
             height = 80.0f;
     }
 
-    // center = (origin.x, origin.y, eclass.mins[2] + origin.z)  [disasm: eclass+0x14 = mins.z]
+    // center = (origin.x, origin.y, eclass.mins[2] + origin.z)
     float center[3];
     center[0] = eDef->origin[0];
     center[1] = eDef->origin[1];
@@ -2539,9 +2467,9 @@ static void Cam_DrawTriggerRadius( selbrush_t *b )
 // ScriptColorTeamKey value of a selected trigger, colour each token via
 // ScriptGroup_Unreachable, move the ScriptColorKey-matching token to the front, then draw a
 // billboard per matching token on every gated entity.
-//   sub_46AAE0 (entity gate): HasKeyValuePair(ScriptColorTeamKey) && classname is one of
-//                             actor/node/info_volume.
-//   sub_46AA80 (token match): the entity's ScriptColorTeamKey value strstr-contains the token.
+//   Cam_Token_EntityGate (0x46AAE0): HasKeyValuePair(ScriptColorTeamKey) && classname is one
+//                                    of actor/node/info_volume.
+//   Cam_Token_Match (0x46AA80): the entity's ScriptColorTeamKey value strstr-contains the token.
 static bool Cam_Token_EntityGate( selbrush_t *b )
 {
     entity_s_def *e = (entity_s_def *)b->owner->def;
@@ -2570,21 +2498,18 @@ static void Cam_DrawTokens( const char *teamKeyValue )
 
     // parse the space-separated tokens; per-token colour from ScriptGroup_Unreachable.
     const int MAX_COLORENTREES = 32;
-    char  tokenStr[MAX_COLORENTREES][16];     // v38 (4-dword stride per token, +space)
-    float tokenCol[MAX_COLORENTREES][4];      // v28
+    char  tokenStr[MAX_COLORENTREES][16];     // 4-dword stride per token (+space)
+    float tokenCol[MAX_COLORENTREES][4];
     int   tokens = 0;
     for ( char *t = strtok( buf, " " ); t; t = strtok( nullptr, " " ) )
     {
         iassert( t[0] );
         if ( tokens >= MAX_COLORENTREES )
-        {
-            iassert( tokens < MAX_COLORENTREES );
-            break;
-        }
+            break;   // KIWI: the first 32 draw (the binary asserted on map data here)
         _snprintf( tokenStr[tokens], sizeof( tokenStr[tokens] ), "%s ", t );
         tokenStr[tokens][sizeof( tokenStr[tokens] ) - 1] = 0;   // _snprintf may not null-terminate
         // ScriptGroup_Unreachable returns 0..6 (r/b/y/c/g/p/o) or -1 (no match; the binary
-        // would index flt_73B098[-1]). Guard the never-valid case (defensive divergence).
+        // would read colour [-1]). Guard the never-valid case (defensive divergence).
         int ci = ScriptGroup_Unreachable( t );
         if ( ci < 0 || ci > 6 )
             continue;
@@ -2594,15 +2519,13 @@ static void Cam_DrawTokens( const char *teamKeyValue )
         ++tokens;
     }
     if ( tokens <= 0 )
-    {
-        iassert( tokens > 0 );
-        return;
-    }
+        return;   // KIWI: map data with no colour token - was an assert
 
     // reorder: bring the token whose text contains the ScriptColorKey to the front (the
     // binary swaps the first match into slot [i]==[last]; here move-to-front of slot 0).
+    // KIWI: the last slot is tested too - the swap form's bound skipped it
     const char *colorKey = g_PrefsDlg->ScriptColorKey.c_str();
-    for ( int i = 0; i + 1 < tokens; ++i )
+    for ( int i = 0; i < tokens; ++i )
     {
         if ( strstr( tokenStr[i], colorKey ) )
         {
@@ -2624,7 +2547,6 @@ static void Cam_DrawTokens( const char *teamKeyValue )
     }
 
     // for every active + selected gated entity, draw a billboard per matching token.
-    extern selbrush_t selected_brushes;
     for ( int pass = 0; pass < 2; ++pass )
     {
         selbrush_t *head = pass ? &selected_brushes : &active_brushes;
@@ -2647,179 +2569,13 @@ static void Cam_DrawTokens( const char *teamKeyValue )
 static void CameraCalcRayDir( int y, float *dir, int x );
 void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes );
 
-// 0x441240  DrawAdvancedTerrainEditCircle - the terrain-paint brush-radius cursor ring in the
-// 3D view: a 16-segment inner+outer ring around the cursor world pos, radii from sub_401BB0 /
-// sub_401C00, cyan.  Clips both rings against the ACTIVE patches (only when CurvEditDlg's
-// "apply to active" box is set) and the SELECTED patches (PMESH_19_Radius -> 3D lines), then
-// emits falloff-coloured control-point dots for selected patches (PMESH_20_Radius_2 -> points).
-extern selbrush_t selected_brushes;                          // map.cpp (0x23F1864)
-extern float sub_401BB0();                                   // patchdialog/pmesh.cpp — inner radius
-extern float sub_401C00();                                   // patchdialog/pmesh.cpp — outer radius
-extern int   CurvEditDlg_OnSomeSetting();                    // patchdialog.cpp — "apply to active" (dword_25D6570)
+// KIWI: the binary's terrain-paint cursor ring (DrawAdvancedTerrainEditCircle, 0x441240) went
+// with the AdvPatchEditDlg paint path.
 extern void  R_AddCmd_Line3D( short count, char width, GfxPointVertex *verts );  // 0x4FD1A0
 extern void  R_AddCmd_Line3DNoDepth( short count, char width, GfxPointVertex *verts );
-extern GfxCmdDrawPoints *R_AddPointCmd_W( short pointCount, char size, const GfxPointVertex *verts ); // 0x4FD080
-extern int   PMESH_19_Radius( patchMesh_t *patch, const float *cursor, float innerR, float outerR,
-                              const float *innerRing, const float *outerRing,
-                              const unsigned int *color, int count, GfxPointVertex *outVerts ); // pmesh.cpp 0x43F230
-extern int   PMESH_20_Radius_2( int count, patchMesh_t *patch, const float *cursor,
-                                float innerR, float outerR, GfxPointVertex *outVerts );          // pmesh.cpp 0x43F580
 
-// KIWI-UX (ROUND AQ, ITEM 1; REWRITTEN ROUND AT, ITEM 1): which patches the paint ring is
-// drawn for.
-//
-// AQ's gate was `(int)def->type == PATCH_TERRAIN`, and it refused EVERYTHING the user
-// actually paints on.  PATCH_TERRAIN (0x40) is not "this patch is a terrain sheet" — it is
-// set by exactly three creation paths: Patch_ParseMesh's "mesh"/patchTerrainDef3 branch
-// (pmesh.cpp:1002), Create_Terrain, i.e. the Terrain dialog (pmesh.cpp:1810), and the
-// curve→terrain conversion (pmesh.cpp:9311).  Every OTHER patch — Patch_GenericMesh's
-// "simple patch mesh" (pmesh.cpp:1702 sets type 0), every patch KIWI's own verbs build
-// (loft / fillet / bevel), every patch pasted or cloned from those — has type 0, so the
-// `== PATCH_TERRAIN` test answered false for a perfectly ordinary flat sheet and the cyan
-// ring stopped rendering.  (mapinfo.cpp:78 tests the same field bitwise, `type & 0x40`;
-// even that spelling would have refused a type-0 sheet.)
-//
-// The gate was also narrower than the verb it visualises: the paint stroke itself —
-// sub_43E4B0 → PMESH_16 (pmesh.cpp:5404 / 5351) — tests only `if ( i->patch )` and edits
-// the control points of ANY patch.  A ring that refuses what the brush will paint is a lie
-// about the tool's reach.
-//
-// The crash AQ was really fixing is fixed elsewhere and stays fixed: PMESH_19_Radius's
-// turned_edge lookup is now a typed, index-checked ctrl[col][row] access (pmesh.cpp:5068-
-// 5075) that falls back to the untorn diagonal whenever the tessellated index leaves the
-// 16x16 control grid.  That guard — not this predicate — is what stopped round AG's patch
-// cylinder from AV'ing.  So this test can be about MEANING instead of memory safety:
-//
-//   * the control grid must be walkable — PMESH_20_Radius_2 (pmesh.cpp:5158) iterates
-//     ctrl[0..width)[0..height) directly, so width/height must be in [2,16];
-//   * there must be a tessellated mesh to clip the ring against (curveDef + verts);
-//   * CLOSED / WRAPPING families are refused: a cylinder wraps a full 360 degrees and a
-//     cone / hemisphere closes to a point or a pole, so there is no single sheet-like
-//     surface for a flat XY cursor ring to sit on and the tessellated columns wrap far
-//     past the control grid.  This is the case AQ was written for (the crash was a patch
-//     CYLINDER).
-//
-// BEVEL and ENDCAP are deliberately NOT in that list even though AQ's console line named
-// them: a bevel is a quarter turn and an endcap a half turn — both are OPEN sheets a ring
-// sits on perfectly well — and, decisively, KIWI's own swept surfaces stamp PATCH_BEVEL on
-// themselves (the loft's CURVE strips, kiwi_loft.cpp; the patch fillet's arc,
-// kiwi_patchfillet.cpp), so refusing that bit would refuse the geometry the user just
-// built with this editor's own verbs.
-//
-// Sheets — type 0 (Patch_GenericMesh / KIWI verbs), PATCH_TERRAIN (dialog / .map),
-// PATCH_TRIANGLE, PATCH_BEVEL / PATCH_ENDCAP — all pass.  ONE console line per editor run
-// when something is refused, so the refusal is never silent.
-static bool KiwiTerrainRing_PatchEligible( patchMesh_t *def )
-{
-    if ( !def )
-        return false;
-
-    // PMESH_20_Radius_2 walks ctrl[col][row] over the DECLARED control dims.
-    if ( def->width < 2 || def->width > 16 || def->height < 2 || def->height > 16 )
-        return false;
-
-    // PMESH_19_Radius clips the rings against the tessellated curveDef quads.
-    const curvePatchDef_t *cdef = def->curveDef;
-    if ( !cdef || !cdef->verts || cdef->width < 2 || cdef->height < 2 )
-        return false;
-
-    // Closed/wrapping families (Patch_BrushToMesh, pmesh.cpp:1293-1436).
-    const int closedKinds = PATCH_CYLINDER | PATCH_HEMISPHERE | PATCH_CONE;
-    if ( ( (int)def->type & closedKinds ) != 0 )
-    {
-        static bool s_toldOnce = false;
-        if ( !s_toldOnce )
-        {
-            s_toldOnce = true;
-            // Sys_Printf: camwnd.cpp:61 (extern, win_qe3.cpp:112 definition).
-            Sys_Printf( "Terrain edit: the paint ring is drawn on patch SHEETS; CLOSED patches "
-                        "(cylinder/cone/hemisphere) are skipped.\n" );
-        }
-        return false;
-    }
-    return true;
-}
-
-static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
-{
-    const float innerR = sub_401BB0();        // v19
-    const float outerR = sub_401C00();        // v20
-    const float ringZ  = a1[2] + 1.0;         // v23 (dbl_6F4098 = 1.0)
-
-    // 16-segment inner + outer rings (3 floats per vertex).
-    float innerRing[48];                       // v25 (a5) — radius innerR
-    float outerRing[48];                       // v24 (a6) — radius outerR
-    for ( int k = 0; k < 16; ++k )             // v21 angle index
-    {
-        const float ang  = (float)( (double)k * 0.3926990926265717 );   // k * (pi/8)
-        const float sinA = (float)sin( ang );  // v16/v22
-        const float cosA = (float)cos( ang );  // v17
-        innerRing[3 * k + 0] = cosA * innerR + a1[0];
-        innerRing[3 * k + 1] = sinA * innerR + a1[1];
-        innerRing[3 * k + 2] = ringZ;
-        outerRing[3 * k + 0] = cosA * outerR + a1[0];
-        outerRing[3 * k + 1] = sinA * outerR + a1[1];
-        outerRing[3 * k + 2] = ringZ;
-    }
-
-    static const float s_ringColor[4] = { 0.0f, 1.0f, 1.0f, 1.0f };  // flt_6DE1C0 cyan
-    GfxColor color;
-    Byte4PackPixelColor( const_cast<float *>( s_ringColor ), &color );
-
-    GfxPointVertex verts[1362];                // v26 — on-stack batch
-    int lineCount = 0;                         // v1
-
-    // ACTIVE patches: clipped only when the "apply to active" checkbox is set.
-    if ( CurvEditDlg_OnSomeSetting() )
-    {
-        for ( selbrush_t *i = active_brushes.next; i; i = i->next )
-        {
-            if ( i == &active_brushes )
-                break;
-            if ( i->patch && KiwiTerrainRing_PatchEligible( i->patch->def ) )   // KIWI-UX (AQ, ITEM 1)
-                lineCount = PMESH_19_Radius( i->patch->def, a1, innerR, outerR,
-                                             innerRing, outerRing,
-                                             (const unsigned int *)&color, lineCount, verts );
-        }
-    }
-    // SELECTED patches: always clipped (lines).
-    for ( selbrush_t *j = selected_brushes.next; j; j = j->next )
-    {
-        if ( j == &selected_brushes )
-            break;
-        if ( j->patch && KiwiTerrainRing_PatchEligible( j->patch->def ) )       // KIWI-UX (AQ, ITEM 1)
-            lineCount = PMESH_19_Radius( j->patch->def, a1, innerR, outerR,
-                                         innerRing, outerRing,
-                                         (const unsigned int *)&color, lineCount, verts );
-    }
-    // 0x441436: DEPTH-TESTED R_AddCmd_Line3D. The ring is kept off the surface by
-    // sub_43ED50's own -0.125*camera.vpn nudge toward the viewer, which is the
-    // binary's anti-z-fight mechanism — a no-depth emit is NOT how it stays visible.
-    if ( lineCount )
-        R_AddCmd_Line3D( (short)( lineCount / 2 ), 1, verts );
-
-    // SELECTED patches: falloff-coloured control-point dots.
-    int ptCount = 0;
-    if ( selected_brushes.next )
-    {
-        for ( selbrush_t *k = selected_brushes.next; k; k = k->next )
-        {
-            if ( k == &selected_brushes )
-                break;
-            if ( k->patch && KiwiTerrainRing_PatchEligible( k->patch->def ) )   // KIWI-UX (AQ, ITEM 1)
-                ptCount = PMESH_20_Radius_2( ptCount, k->patch->def, a1, innerR, outerR, verts );
-        }
-        if ( ptCount )
-            return R_AddPointCmd_W( (short)ptCount, 6, verts );
-    }
-    return (GfxCmdDrawPoints *)(intptr_t)ptCount;
-}
-
-// 0x406960  DrawBrush_SunPreview  — the sun-preview LIT re-add of one brush list.
-//   for ( i = head->[0]; i != head; i = i->[0] )
-//       if ( byte[i+0x26] )                      // selbrush_t::cullFlag
-//           Brush_GetColor2d(i,&col),
-//           DrawBrush(i, world_orient_matrix, -1, 0, 26, 0, 26, &col, 1, 0, "")
+// 0x406960  DrawBrush_SunPreview  — the sun-preview LIT re-add of one brush list: every brush
+// with cullFlag set is DrawBrush'd at technique 26 in its Brush_GetColor2d colour.
 // The retail call passes technique 26 in BOTH of DrawBrush's technique slots (draw_meth1 =
 // prefab-content/geo, draw_meth2 = xmodel mesh); the port's DrawBrush reduction carries one
 // `technique` filling both roles, so a single 26 is exact.
@@ -2829,27 +2585,24 @@ static GfxCmdDrawPoints *DrawAdvancedTerrainEditCircle( const float *a1 )
 // faceVis/prefab-content/patch/model surf-cache entries.
 static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 {
-    extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                           int technique, GfxColor *col, char width, int drawFlags,
-                           const char *layerPrefix );                       // brush.cpp 0x47afc0
     int drawn = 0;
     // The sun re-add walks the same prefab tree at technique 26, so it replays the shared
     // recording too.  `backward` because this walk runs through ->prev.
     const bool walkReplay = KiwiWalk_BeginReplay(
         head, (const orientation_t *)world_orient_matrix, /*backward*/ true );
-    // The re-add walks the list BACKWARD: 0x406965 `mov esi,[edi]` seeds from head->prev and
-    // 0x4069a9 `mov esi,[esi]` advances by prev (offset 0), unlike DrawGeneralWorld_'s +4 walk.
+    // The re-add walks the list BACKWARD (seeded from head->prev, advancing by prev), unlike
+    // DrawGeneralWorld_'s forward walk.
     for ( selbrush_t *b = head->prev; b && b != head; b = b->prev )
     {
-        if ( !b->cullFlag )                       // 0x406970: byte[i+0x26]
+        if ( !b->cullFlag )
             continue;
         GfxColor col;
-        Cam_BrushColor2d( b, &col );              // 0x40697c Brush_GetColor2d
+        Cam_BrushColor2d( b, &col );
         if ( walkReplay )
             KiwiWalk_TopLevel( b );
         DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
                    /*technique*/ TECHNIQUE_SUNLIGHT_PREVIEW, &col,
-                   /*width*/ 1, /*drawFlags*/ 0, /*layerPrefix*/ "" );      // 0x4069a1
+                   /*width*/ 1, /*drawFlags*/ 0, /*layerPrefix*/ "" );
         ++drawn;
     }
     if ( walkReplay )
@@ -2858,7 +2611,7 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 }
 
 // 0x4069C0  R_SunPrev_Main - the sun-light preview sequence, at the binary's own position
-// (Cam_Draw tail 0x408261, after the main / patch / selected-entity surf flushes):
+// (Cam_Draw tail, after the main / patch / selected-entity surf flushes):
 //   R_SunPrev_SetSunConstants(dir, ambientMul)
 //   SetProjection2D
 //   R_AddCmdDrawFullScreenColoredQuad(0,0,1,1, ambientMul, mat_white_multiply)
@@ -2882,7 +2635,6 @@ static int Cam_DrawBrushList_SunPreview( selbrush_t *head )
 // infinity (the visible artifact on open/alpha model meshes like foliage).
 static float Cam_SunPrev_ShadowExtrudeDistance()
 {
-    extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
     selbrush_t *heads[2] = { &active_brushes, &selected_brushes };
     float mins[3] = { 0.0f, 0.0f, 0.0f };
     float maxs[3] = { 0.0f, 0.0f, 0.0f };
@@ -2921,7 +2673,7 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     if ( !faithfulSun )
         return;
 
-    // 0x4069cf/0x4069d9 - R_SunPrev_Main's FIRST statement is R_SunPrev_SetSunConstants and the
+    // R_SunPrev_Main's FIRST statement is R_SunPrev_SetSunConstants and the
     // WHOLE sequence is gated on its non-zero return: no sun key means no quads, no volumes, no
     // re-add.  Setting the constants here rather than earlier matters — emitted before the world
     // draw they re-shade every material whose technique samples them, and additive blending can
@@ -2929,8 +2681,8 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     if ( !litHaveSun )
         return;
     {
-        // The same three RC_SET_CUSTOM_CONSTANT commands (0x406896/0x4068c3/0x4068f0) with the
-        // same values, emitted from what the edit-epoch cache's `emit=false` call computed.
+        // The same three RC_SET_CUSTOM_CONSTANT commands with the same values, emitted from
+        // what the edit-epoch cache's `emit=false` call computed.
         // The worldspawn sun round trip is not repeated for camera-only frames.
         R_AddCmdSetCustomShaderConstant( CONST_SRC_CODE_SUN_POSITION,
                                          litSunDir[0], litSunDir[1], litSunDir[2], 0.0f );
@@ -2947,12 +2699,12 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     };
     Byte4PackPixelColor( modelSunTint, &s_sunModelFallbackColor );
 
-    // 0x4069e3 sets sundir.w = 0 unconditionally, so the shadVol counts are always the
-    // directional 3 (`if (0.0 != v4) v1 = 6` can never fire).
+    // The binary sets sundir.w = 0 unconditionally, so the shadVol counts are always the
+    // directional 3 (its w != 0 -> 6 arm can never fire).
     float sun[4]        = { litSunDir[0], litSunDir[1], litSunDir[2], 0.0f };
     float ambientMul[3] = { litAmbientMul[0], litAmbientMul[1], litAmbientMul[2] };
 
-    // 0x4069eb..0x406a3a - the two full-screen quads framing the lit pass: black-world multiply
+    // The two full-screen quads framing the lit pass: black-world multiply
     // (mat_white_multiply * the worldspawn ambient, dropping the rasterised world to its
     // ambient/diffuse floor) then clear-stencil (zeroes dest alpha + stencil for the volumes).
     // SetProjection2D is for the quads; the 3D projection is restored immediately after.
@@ -2971,7 +2723,7 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
         R_AddCmdProjectionSet3D();
     }
 
-    // 0x406a4c..0x406a8e - the shadow volumes.  The binary ran frontCapIndices =
+    // The shadow volumes.  The binary ran frontCapIndices =
     // quadsPerEdge = 3: the directional (w==0) case, where every extruded vertex is the
     // same point at infinity, the back cap degenerates, and one front-cap tri per
     // silhouette tri is all that is kept.
@@ -2988,17 +2740,15 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
     extern void Radiant_ShadVol_BrushShadow( selbrush_t *listHead, const orientation_t *orient,
                                              const float *light );
     extern void SunLightPreview_PolyOffsetShadows();
-    extern float world_orient_matrix[4][3];                                 // entity.cpp 0x6DE290
-    extern selbrush_t selected_brushes;                                     // map.cpp 0x23F1864
-    if ( Radiant_ShadVol_Begin( 6, Cam_SunPrev_ShadowExtrudeDistance() ) )  // 0x406a4c/0x406a66 + KIWI finite extrusion
+    if ( Radiant_ShadVol_Begin( 6, Cam_SunPrev_ShadowExtrudeDistance() ) )  // KIWI finite extrusion
     {
         // The two BrushShadow calls cover the WHOLE map — a caster behind the camera can still
         // shadow what is in front of it.  Their tree traversal, material eligibility, and
         // XModel extraction all ride the shared edit-epoch caches.
         const orientation_t *worldOr = (const orientation_t *)world_orient_matrix;
-        Radiant_ShadVol_BrushShadow( &active_brushes,   worldOr, sun );     // 0x406a70
-        Radiant_ShadVol_BrushShadow( &selected_brushes, worldOr, sun );     // 0x406a86
-        SunLightPreview_PolyOffsetShadows();                                // 0x406a8e
+        Radiant_ShadVol_BrushShadow( &active_brushes,   worldOr, sun );
+        Radiant_ShadVol_BrushShadow( &selected_brushes, worldOr, sun );
+        SunLightPreview_PolyOffsetShadows();
 
         // Name the live cost and the cache boundary once.  Camera movement never changes the
         // shared edit epoch, so it rebuilds none of the cached caster inputs.
@@ -3014,22 +2764,21 @@ static void Cam_SunPrev_Main( bool faithfulSun, Material *sunMultiplyMat,
         }
     }
 
-    // The LIT re-add (0x406a93..0x406aac).  R_SortMaterials demarcates the flush so it carries
+    // The LIT re-add.  R_SortMaterials demarcates the flush so it carries
     // ONLY the tech-26 surfs; re-flushing an earlier pass would re-rasterise it on top of the
     // darkened frame.
     {
         // A SECOND FULL WORLD DRAW — DrawBrush over both lists at technique 26, so the prefab
         // walk, the layer-vis refresh and the model-surf queueing all run again.
-        extern void R_SortMaterials();                                      // r_ed_scene.cpp
-        R_SortMaterials();                                                  // 0x406a93
-        Cam_DrawBrushList_SunPreview( &selected_brushes );                   // 0x406a9d
-        Cam_DrawBrushList_SunPreview( &active_brushes );                     // 0x406aa7
-        R_AddEditorSurfsCmd();                                              // 0x406aac
+        R_SortMaterials();
+        Cam_DrawBrushList_SunPreview( &selected_brushes );
+        Cam_DrawBrushList_SunPreview( &active_brushes );
+        R_AddEditorSurfsCmd();
     }
 }
 
-// `hwnd` is only for the terrain-paint cursor ring at the tail (screen→client + client rect);
-// everything else draws from g_camwndState.  The MFC shell passes GetSafeHwnd().
+// 0x407dc0  Cam_Draw.  `hwnd` fed only the removed terrain-paint cursor ring (it is unused);
+// everything draws from g_camwndState.
 void CamWnd_Draw( HWND hwnd )
 {
     camwndState_t *cam    = &g_camwndState;
@@ -3058,9 +2807,6 @@ void CamWnd_Draw( HWND hwnd )
         KiwiPatchWeld_Run();
     }
 
-    g_edPrefabPrefabsWalked = g_edPrefabBrushesWalked = 0;
-    g_edPrefabBrushesDrawn = 0;
-
     g_svNodesWalked = g_svCastersDrawn = 0;
     g_svTrisFed     = g_svTrisKept     = 0;
     g_svBatches     = g_svBatchKB      = 0;
@@ -3085,12 +2831,12 @@ void CamWnd_Draw( HWND hwnd )
 
     const int layer = g_qeglobals.current_edit_layer;
 
-    // Two sun-preview paths: the FAITHFUL R_SunPrev_Main sequence (black-world multiply quad +
+    // Two sun-preview paths: the binary's R_SunPrev_Main sequence (black-world multiply quad +
     // clear-stencil quad + stencil shadow volumes + the cached SUNLIGHT_PREVIEW(26) lit draw),
     // or, when the "white_multiply" material is missing (without the black-world reset the lit
-    // pass would double-brighten), a KISAK APPROXIMATION: each world face flat-tinted by
+    // pass would double-brighten), a port APPROXIMATION: each world face flat-tinted by
     // suncolor*(ambient + diffuse*N.L) through MATERIAL_COLOR under UNLIT - directional shading
-    // with no shadows and no per-pixel lighting.  The faithful game-lighting path is the
+    // with no shadows and no per-pixel lighting.  The game-lighting path is the
     // persisted default; View -> Preview sun as well can disable it.
     const bool sunPrev = Cam_SunPrevEnabled();
     const CamSunPreviewCache *sunState = sunPrev ? Cam_SunPrev_CachedState() : nullptr;
@@ -3101,29 +2847,27 @@ void CamWnd_Draw( HWND hwnd )
     Material *sunMultiplyMat = ( sunActive || g_PrefsDlg->enable_light_preview )
                               ? Radiant_GetWhiteMultiplyMaterial() : nullptr;
     const bool faithfulSun   = sunActive && sunMultiplyMat != nullptr;
-    // On the faithful path the world loop draws TEXTURED (not the N.L tint): the multiply quad
-    // darkens that textured world and the cached lit pass then adds the sun on top.
+    // On the R_SunPrev_Main path the world loop draws TEXTURED (not the N.L tint): the multiply
+    // quad darkens that textured world and the cached lit pass then adds the sun on top.
     const bool sunApprox = sunActive && !faithfulSun;      // the per-face N.L MATERIAL_COLOR tint
     // Tell the shared geometry builder whether the per-vertex sun bake applies.
     // Face_BuildLayerGeom multiplies every cached face colour by suncolour*(ambient +
     // diffuse*N.L) when g_edSun.active.  That bake belongs to the APPROXIMATION path alone: on
-    // the faithful path it pre-darkens the world before the multiply quad, and the additive
-    // tech-26 re-add can never brighten it back.
+    // the R_SunPrev_Main path it pre-darkens the world before the multiply quad, and the
+    // additive tech-26 re-add can never brighten it back.
     {
         extern int g_edSunBakeVertColor;                   // brush.cpp
         const int bake = sunApprox ? 1 : 0;
         // The bake lives IN the built per-vertex colours, so a mode change leaves STALE baked
-        // verts in every realized face cache; force the display rebuild (sub_47D060 - the same
+        // verts in every realized face cache; force the display rebuild (BrushList_RebuildDisplay - the same
         // def-version bump + patch re-tess every layer change makes) on a transition.
         static int s_prevBake = -1;
         if ( bake != s_prevBake )
         {
             s_prevBake = bake;
-            extern void sub_47D060( selbrush_t *listHead );        // brush.cpp (0x47D060)
-            extern selbrush_t filtered_brushes;            // map.cpp display lists
-            sub_47D060( &active_brushes );
-            sub_47D060( &selected_brushes );
-            sub_47D060( &filtered_brushes );
+            BrushList_RebuildDisplay( &active_brushes );
+            BrushList_RebuildDisplay( &selected_brushes );
+            BrushList_RebuildDisplay( &filtered_brushes );
         }
         g_edSunBakeVertColor = bake;
     }
@@ -3132,7 +2876,7 @@ void CamWnd_Draw( HWND hwnd )
     float  s_litSunColor[3]  = { 1.0f, 1.0f, 1.0f };
     float  s_litAmbientMul[3]= { 0.0f, 0.0f, 0.0f };
     bool   s_litHaveSun      = false;
-    static bool s_camSunMsg  = false;   // one-shot faithful-vs-approximation console message
+    static bool s_camSunMsg  = false;   // one-shot console message naming the sun path
     if ( !s_camSunMsg )
     {
         s_camSunMsg = true;
@@ -3151,20 +2895,19 @@ void CamWnd_Draw( HWND hwnd )
         memcpy( s_litSunColor,   sunState->color,      sizeof(s_litSunColor) );
         memcpy( s_litAmbientMul, sunState->ambientMul, sizeof(s_litAmbientMul) );
         s_litHaveSun = true;
-        // NOTE: exactly THREE constants here (0x406896/0x4068c3/0x4068f0) - the binary never
+        // NOTE: exactly THREE constants here - the binary never
         // touches CONST_SRC_CODE_ENVMAP_PARMS on this path.
     }
     // World technique from camera.draw_mode; default draw_mode 1 -> TECHNIQUE_UNLIT.
     const MaterialTechniqueType worldTech = Cam_TechForDrawMode( camera.draw_mode );
 
-    // Cam_Draw 0x407fb0 tints SELECTED brushes (R_SetMaterialColor(colors[11]) + DrawBrush,
+    // Cam_Draw tints SELECTED brushes (R_SetMaterialColor(colors[11]) + DrawBrush,
     // gated on !dontDrawSelectedTint) and outlines them in white (the !dontDrawSelectedOutlines
     // tech-29 loop).  Both run as immediate-mode passes below.
     float lastMC[4] = { -1.0f, -1.0f, -1.0f, -1.0f };  // emit MATERIAL_COLOR only on change
     s_sunMCEmitted = 0;                                // reset the sun-preview critical-cmd budget
     // World fill = active_brushes ONLY, matching DrawGeneralWorld_: SELECTED brushes are drawn
     // separately by the red-tint pass below, so drawing them here too would z-fight that fill.
-    extern selbrush_t selected_brushes;
     // ═════════════════════════════════════════════════════════════════════════════
     //  KIWI-UX (ROUND S) — THE §17 GRID NOW DRAWS *BEFORE* THE WORLD.
     // ═════════════════════════════════════════════════════════════════════════════
@@ -3229,18 +2972,15 @@ void CamWnd_Draw( HWND hwnd )
         KiwiGrid_Draw();
     }
 
-    // 0x407ab9 - R_SortMaterials opens the world accumulation so the main R_AddEditorSurfsCmd
+    // R_SortMaterials opens the world accumulation so the main R_AddEditorSurfsCmd
     // flush is demarcated and the later selected/white flushes do not re-draw these surfs.
-    { extern void R_SortMaterials(); R_SortMaterials(); }
+    R_SortMaterials();
     // The GATHER half of DrawGeneralWorld_ -> R_AddEditorSurfsCmd: a face is APPENDED here and
     // DRAWN in the sorted loop below.  Function-static (no per-frame realloc); CamWnd_Draw is
     // not re-entrant, so one buffer is enough.
     static std::vector< CamSortFace > s_worldFaces;
     s_worldFaces.clear();
     selbrush_t *bhead = &active_brushes;
-    extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                           int technique, GfxColor *col, char width, int drawFlags,
-                           const char *layerPrefix );
     {
     PROF_SCOPED( "world gather" );
     for ( selbrush_t *b = bhead->next; b != bhead; b = b->next )
@@ -3248,7 +2988,7 @@ void CamWnd_Draw( HWND hwnd )
         brush_t *def = b->def;
         if ( !def )
             continue;
-        // 0x407af0 - DrawGeneralWorld_ gates every world brush on FilterBrush.  Load-bearing:
+        // DrawGeneralWorld_ gates every world brush on FilterBrush.  Load-bearing:
         // without it the map's own lightgrid_volume worldspawn brush renders as opaque teal
         // planes z-fighting the coplanar floor.
         if ( FilterBrush( b, 0 ) )
@@ -3267,7 +3007,7 @@ void CamWnd_Draw( HWND hwnd )
                        /*layerPrefix*/ "" );
             continue;
         }
-        // FIXEDSIZE POINT ENTITIES ARE NOT WORLD FACES.  DrawBrush 0x47b0bd routes any brush
+        // FIXEDSIZE POINT ENTITIES ARE NOT WORLD FACES.  DrawBrush routes any brush
         // whose eclass is fixedsize down DrawModels (model/prefab contents, no bbox) or, for a
         // model-less one, DrawGeo at the entity-local INVERSE orientation - never as filled
         // world faces at the world orientation.  The entity pass below handles them; drawing
@@ -3278,10 +3018,10 @@ void CamWnd_Draw( HWND hwnd )
             if ( ec && *(int *)&ec->fixedsize )
                 continue;
         }
-        // 0x47b07c — the per-instance faceVis sync DrawBrush runs for every brush it draws
+        // The per-instance faceVis sync DrawBrush runs for every brush it draws
         // (brush.cpp:7438).  VERSION-GATED: a compare and a return on an unedited brush.
         if ( Cam_WorldGeoResident() )
-            sub_477D70( b, (const float *)world_orient_matrix );
+            Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
         for ( int fi = 0; fi < def->faceCount; ++fi )
         {
             face_t   *f   = &def->faces[fi];
@@ -3297,7 +3037,7 @@ void CamWnd_Draw( HWND hwnd )
     }
     }
 
-    // R_AddEditorSurfsCmd's qsort (0x4FDA10), on the immediate stream.  Within one key the
+    // R_AddEditorSurfsCmd's qsort, on the immediate stream.  Within one key the
     // order is unchanged (Cam_SortFaceCompare's `seq` tie-break).
     {
         Cam_SortGatheredFaces( s_worldFaces );
@@ -3573,7 +3313,7 @@ void CamWnd_Draw( HWND hwnd )
                         Cam_DrawFace( f, flat, TECHNIQUE_UNLIT );
                     }
                 }
-                else                                            // world -> faithful + FAKELIGHT
+                else                                            // world -> real texdef + FAKELIGHT
                 {
                     // Resident geometry first: the face's vertices are already in a persistent
                     // editor VB, so draw them by NAME and only rebuild when there is no run.
@@ -3605,7 +3345,7 @@ void CamWnd_Draw( HWND hwnd )
         R_AddCmdSetMaterialColor( s_white );
     }
 
-    // 0x407fb0  SELECTED-BRUSH RED TINT: re-draw every selected convex brush tinted by
+    // SELECTED-BRUSH RED TINT: re-draw every selected convex brush tinted by
     // d_savedinfo.colors[11].  Only the COLOUR is gated on !dontDrawSelectedTint - the brushes
     // draw either way, so a selected brush is never invisible.  UNLIT is the technique that
     // honours MATERIAL_COLOR (FAKELIGHT's vertcol_shaded ignores it).  Lights go through
@@ -3617,9 +3357,9 @@ void CamWnd_Draw( HWND hwnd )
         // (0x4fc2c0's NULL = {0,0,0,0} is the neutral), so the "tint stands down" colour
         // {1,1,1,1} painted every UV-gathered face flat white.  Untinted = {0,0,0,0}.
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        // The second unsorted immediate loop, same fix as the world fill (0x4080e3 qsorts by
-        // material sort key).  The white/red tint bracket is per-FACE and emitted ON CHANGE:
-        // a sorted stream can interleave brushes, and RC_SET_MATERIAL_COLOR is CRITICAL.
+        // The second unsorted immediate loop, same fix as the world fill (the binary's flush
+        // qsorts by material sort key).  The white/red tint bracket is per-FACE and emitted ON
+        // CHANGE: a sorted stream can interleave brushes, and RC_SET_MATERIAL_COLOR is CRITICAL.
         const float *tintCol = g_qeglobals.dontDrawSelectedTint
                              ? s_neutral : g_qeglobals.d_savedinfo.colors[11];  // red {1,0.25,0.25}
         static std::vector< CamSortFace > s_selFaces;
@@ -3632,7 +3372,7 @@ void CamWnd_Draw( HWND hwnd )
             entity_s_def *eDef = b->owner ? (entity_s_def *)b->owner->def : nullptr;
             if ( eDef && eDef->eclass && ( eDef->eclass->classtype & 1 ) )   // CLASS_LIGHT → skip
                 continue;
-            // Fixedsize point entities are not world faces - same 0x47b0bd gate as the world
+            // Fixedsize point entities are not world faces - same DrawBrush gate as the world
             // fill.  The selected-entity pass below redraws them via DrawBrush -> DrawModels.
             if ( eDef && eDef->eclass && *(int *)&eDef->eclass->fixedsize )
                 continue;
@@ -3672,13 +3412,13 @@ void CamWnd_Draw( HWND hwnd )
 
     // ENTITY DRAW (ACTIVE list): bboxes + MODELS + PREFAB CONTENTS.  The world fill above only
     // draws convex WORLD faces, which fixedsize POINT entities do not have, so without this they
-    // are invisible in the 3D view.  KISAK: the binary sends every brush through
+    // are invisible in the 3D view.  The binary sends every brush through
     // DrawGeneralWorld_ -> DrawBrush at the camera technique; this pass keeps plain point
     // entities (info_*, triggers, path nodes, lights) as tech-29 wireframe bboxes but gives
     // MODEL/PREFAB classes (classtype & 0x18) the camera technique, so DrawModels renders the
     // xmodel mesh and the prefab contents textured.  Identity view orientation (DrawBrush
     // derives the entity inverse itself), viewType -1 so DrawShadedWireframe draws every edge.
-    // SELECTED entities get their own tinted pass after the main flush (0x40809d).
+    // SELECTED entities get their own tinted pass after the main flush.
     // How many surfs the world fill put in the open flush window before this pass.  Zero on a
     // prefab-authored map — which is when the window and the cached block coincide.
     const int  pendingBeforeEntity = Editor_PendingSurfCount();
@@ -3848,7 +3588,6 @@ void CamWnd_Draw( HWND hwnd )
         // full backend tess flush.  INSIDE the record bracket deliberately, so the GROUPED
         // bytes are what the surf cache captures.  Every other pass stays immediate.
         R_Ed_BeginLineBucket();
-        extern selbrush_t selected_brushes;
         // KIWI-UX (ROUND AV, ITEMS 1+2): publish draw_meth2 for this pass only.  `entTech`
         // below stays exactly as it was — it is draw_meth1, and it is what a model-LESS
         // point entity's placeholder bbox draws with, so leaving it at 29 keeps every
@@ -3879,9 +3618,9 @@ void CamWnd_Draw( HWND hwnd )
                 // through the surf-cache); plain point entities keep the wireframe bbox.
                 const int entTech = ( ec && ( ec->classtype & 0x18 /*CLASS_MODEL|CLASS_PREFAB*/ ) )
                                     ? (int)worldTech : TECHNIQUE_WIREFRAME_SHADED;
-                // KISAK drawFlags 0 = draw ALL layers in one pass.  The binary runs TWO passes,
-                // DrawGeneralWorld_(tech, 8=SKIP_MULTIPLY) @0x407f3b then (tech, 4=ONLY_MULTIPLY)
-                // @0x4082f3; this pass runs ONCE, so 8 would drop every additive/effect
+                // drawFlags 0 = draw ALL layers in one pass.  The binary runs TWO passes,
+                // DrawGeneralWorld_(tech, 8=SKIP_MULTIPLY) then (tech, 4=ONLY_MULTIPLY);
+                // this pass runs ONCE, so 8 would drop every additive/effect
                 // prefab-content layer.  drawFlags 0 short-circuits Editor_SurfFilter
                 // ((drawFlags&0xC)==0), letting all layers draw ordered by material sortKey.
                 if ( walkReplay )
@@ -3906,10 +3645,10 @@ void CamWnd_Draw( HWND hwnd )
     // to emit is EXACTLY the replayed block — the only case where its order is already sorted.
     const int pendingAfterEntity = Editor_PendingSurfCount();
 
-    // Curve-point candidate markers (binary DrawGeneralWorld_ → Draw_PatchSelectPoints at
-    // 0x407bb4): the GREEN UNSELECTED-candidates overlay, self-gated on sel_curvepoint/
+    // Curve-point candidate markers (binary DrawGeneralWorld_ → Draw_PatchSelectPoints):
+    // the GREEN UNSELECTED-candidates overlay, self-gated on sel_curvepoint/
     // sel_area.  The SELECTED set draws light blue via Draw_PatchSelectPointsSelected
-    // (0x40c360) from the DrawConnectionLinks position at the Cam_Draw tail.
+    // from the DrawConnectionLinks position at the Cam_Draw tail.
     Draw_PatchSelectPoints();
 
     // Flush the accumulated surf cache as one RC_DRAW_EDITOR_SKINNEDCACHED: ED_SURF_MESH
@@ -3920,8 +3659,8 @@ void CamWnd_Draw( HWND hwnd )
     // not MULTIPLY by MATERIAL_COLOR, it LERPS:
     //   result.rgb = lerp( sample(colorMap)*vColor, materialColor.rgb, materialColor.w )
     // so .w is a FLAT-COLOUR OVERRIDE factor - w==1 replaces the texture entirely.  The binary
-    // resets via R_SetMaterialColor(NULL) (0x4fc2c0's NULL arm = all zeros) at 0x4080f7 and
-    // 0x408115.  KISAK: the $line adaptation pushes eclass colours at w=1, so the reset here is
+    // resets via R_SetMaterialColor(NULL) (0x4fc2c0's NULL arm = all zeros).  The port's
+    // $line adaptation pushes eclass colours at w=1, so the reset here is
     // mandatory - and to zeros, NOT white.
     {
         static const float s_flushNeutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // binary R_SetMaterialColor(NULL)
@@ -3949,18 +3688,14 @@ void CamWnd_Draw( HWND hwnd )
     // SELECTED PATCH fill/wireframe.  Active patches are already in the main world range above;
     // this selected-only range carries the red tint and force-draw semantics.
     // DrawGeneralWorld_ -> DrawBrush routes patch brushes to the camera
-    // (viewType>2) tech-29 branch, sub_4415D0 - the FILLED per-material-layer patch draw
-    // (PMESH_25 instance rebuild + Editor_AddMeshCmd); DrawBrush may still pick
+    // (viewType>2) tech-29 branch, 0x4415D0 - the FILLED per-material-layer patch draw
+    // (Patch_Fill_SyncVersion instance rebuild + Editor_AddMeshCmd); DrawBrush may still pick
     // DrawPatchesWireframeGrid when the patch-wireframe pref is on.  Self-bracketed: opens with
     // R_SortMaterials and flushes its own surfs, so it neither discards nor re-flushes the main
     // pass's range.  It must NOT straddle the main accumulation - doing so discards every surf
     // the world fill queued and makes the main flush re-draw the patch range.
     {
         PROF_SCOPED( "selected patch pass" );
-        extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                               int technique, GfxColor *col, char width, int drawFlags,
-                               const char *layerPrefix );
-        extern selbrush_t selected_brushes;
         const orientation_t *orient = (const orientation_t *)world_orient_matrix;
 
         R_SortMaterials();
@@ -3970,7 +3705,7 @@ void CamWnd_Draw( HWND hwnd )
                 R_AddCmdSetMaterialColor( g_qeglobals.d_savedinfo.colors[11] );
             for ( selbrush_t *b = head->next; b && b != head; b = b->next )
             {
-                if ( !b->def || !b->patch )                     // instance field — see 0x47B018
+                if ( !b->def || !b->patch )                     // DrawBrush's instance-field test
                     continue;
                 // ── KIWI-UX (ROUND AF, ITEM 9): PATCHES OBEY FilterBrush TOO ────
                 // USER REPORT, verbatim: "When hiding selected objects, q3 curves
@@ -4015,36 +3750,31 @@ void CamWnd_Draw( HWND hwnd )
         R_AddEditorSurfsCmd();
     }
 
-    // 0x407fb0 -> 0x40809d  SELECTED-ENTITY textured + red tint: every selected non-light
+    // SELECTED-ENTITY textured + red tint: every selected non-light
     // non-patch brush drawn TEXTURED at tech_type, preceded by R_SetMaterialColor(colors[11])
-    // (0x407fb7, red {1,0.25,0.25,0.25}, gated on !dontDrawSelectedTint), then its OWN
-    // R_AddEditorSurfsCmd (0x4080e3) so only these surfs carry the tint.  vertcol_shaded LERPs,
+    // (red {1,0.25,0.25,0.25}, gated on !dontDrawSelectedTint), then its OWN
+    // R_AddEditorSurfsCmd so only these surfs carry the tint.  vertcol_shaded LERPs,
     // so the result is 0.75*texture + 0.25*red - the textured base under the white wireframe.
     {
-        extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                               int technique, GfxColor *col, char width, int drawFlags,
-                               const char *layerPrefix );                                // brush.cpp
-        extern selbrush_t selected_brushes;
-        extern void R_SortMaterials();                                                   // r_ed_scene.cpp
-        // 0x407fbf - R_SortMaterials advances sceneSurfCount_saved so the flush below carries
+        // R_SortMaterials advances sceneSurfCount_saved so the flush below carries
         // ONLY this pass's surfs.  Without it every flush re-draws from surf 0.  The binary
-        // calls it before EACH pass: 0x407ab9 world, 0x407fbf tint, 0x4084f0 white.
+        // calls it before EACH pass: world, tint, white.
         R_SortMaterials();
         // KIWI-UX (ROUND AV, ITEMS 1+2): same draw_meth2 publication as the active pass.
         // A SELECTED model must skin at the same technique its unselected neighbours do —
         // this is the textured base the white tech-29 outline pass then draws on top of.
         extern int g_drawBrushMeshTech;   // brush.cpp:6535
         g_drawBrushMeshTech = Cam_EntityMeshTech( worldTech );
-        // 0x407fb7: the red tint, or neutral when the pref is off (the model keeps its texture).
+        // The red tint, or neutral when the pref is off (the model keeps its texture).
         if ( !g_qeglobals.dontDrawSelectedTint )
             R_AddCmdSetMaterialColor( g_qeglobals.d_savedinfo.colors[11] );   // red {1,0.25,0.25,0.25}
         for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
         {
             brush_t *def = b->def;
-            // 0x408011 tests brushFlags & 0x100 (the misc_model CYCLE-PREVIEW flag; see the
-            // white-outline pass below for the provenance).  The port instead splits patches into
+            // The binary tests brushFlags & 0x100 here (the misc_model CYCLE-PREVIEW flag; see
+            // the white-outline pass below).  The port instead splits patches into
             // their own self-bracketed pass above, so they are skipped here by `b->patch`
-            // (the instance field — the binary's sole patch predicate, DrawBrush 0x47B018).
+            // (the instance field — the binary's sole patch predicate, in DrawBrush).
             if ( !def || b->patch )
                 continue;
             entity_s     *owner = b->owner;
@@ -4052,7 +3782,7 @@ void CamWnd_Draw( HWND hwnd )
             eclass_t     *ec    = eDef ? eDef->eclass : nullptr;
             if ( !ec || !*(int *)&ec->fixedsize )           // fixedsize point entities (models/prefabs)
                 continue;
-            if ( ec->classtype & 1 )                        // 0x408020: skip CLASS_LIGHT (DrawLightsMain)
+            if ( ec->classtype & 1 )                        // skip CLASS_LIGHT (DrawLightsMain)
                 continue;
             // KIWI-UX (ROUND AX, ITEM 2): the SELECTED twin of the gate on the active
             // pass above.  Needed because hidden and selected are not exclusive — the
@@ -4063,55 +3793,52 @@ void CamWnd_Draw( HWND hwnd )
                 continue;
             const int entTech = ( ec->classtype & 0x18 /*MODEL|PREFAB*/ ) ? (int)worldTech : TECHNIQUE_WIREFRAME_SHADED;
             GfxColor ecol; Cam_BrushColor2d( b, &ecol );     // decoration/bbox colour (col arg)
-            // 0x40809d: DrawBrush(b, world_orient, 0xFFFFFFFF, 0, tech_type, 0, tech_type, &col, w, 1, zero)
             DrawBrush( b, (orientation_t *)world_orient_matrix, /*viewType*/ -1,
                        entTech, &ecol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );
         }
         g_drawBrushMeshTech = -1;   // KIWI-UX (ROUND AV): before the tech-29 outline pass
-        // 0x4080e3: flush the selected surfs WHILE matColor is the red tint (separate from the
+        // Flush the selected surfs WHILE matColor is the red tint (separate from the
         // w=0 active flush above), then reset to neutral for the passes that follow.
         R_AddEditorSurfsCmd();
         static const float s_neutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        R_AddCmdSetMaterialColor( s_neutral );             // 0x4080f7: R_SetMaterialColor(NULL)
+        R_AddCmdSetMaterialColor( s_neutral );             // R_SetMaterialColor(NULL)
     }
 
-    // 0x4080ef — SELECTED-FACE FILL, immediately after the tinted flush and inside the same
-    // !dontDrawSelectedTint gate the binary uses (the whole 0x4080f7..0x408253 block).
+    // SELECTED-FACE FILL, immediately after the tinted flush and inside the same
+    // !dontDrawSelectedTint gate the binary uses.
     if ( !g_qeglobals.dontDrawSelectedTint )
         Cam_DrawSelectedFaceFill();
 
-    // 0x408261 - ActiveSunLightPreviewInit, i.e. AFTER the world (0x407f46), patch and
-    // selected-entity (0x4080e3) flushes and BEFORE the decoration/white-outline tail.  The
+    // ActiveSunLightPreviewInit, i.e. AFTER the world, patch and
+    // selected-entity flushes and BEFORE the decoration/white-outline tail.  The
     // position is load-bearing: the multiply quad can only darken ALREADY-RASTERISED pixels and
     // the depth-EQUAL re-add can only land on depths the base pass wrote.
     if ( g_PrefsDlg->enable_light_preview )
-        R_AddCmdProjectionSet2D(); // 0x4066ef: ActiveSunLightPreviewInit opens in 2D.
+        R_AddCmdProjectionSet2D(); // ActiveSunLightPreviewInit opens in 2D.
     Cam_SunPrev_Main( faithfulSun, sunMultiplyMat, s_litSunDir, s_litAmbientMul,
                       s_litSunColor, s_litHaveSun );
     // KIWI-UX: A completed sun pass already supplied the frame's ambient multiply.
     const bool ambientBaseDone = faithfulSun && s_litHaveSun;
     Cam_DrawLightPreviews( ambientBaseDone, sunMultiplyMat );
 
-    // 0x4082f8 — LIGHT-REGION HULL overlay, drawn right after the DrawLightsMain loop (and,
-    // in the binary, after the additive world pass at 0x4082f3 the port defers).  Draws the
+    // LIGHT-REGION HULL overlay, drawn right after the DrawLightsMain loop (and,
+    // in the binary, after the additive world pass the port defers).  Draws the
     // hulls View→"Show Regions For Selected" published into d_lightRegionHulls; empty (and
     // therefore a no-op) until that command runs.
     {
         extern void RegionLightRelated();              // 0x406ac0 (defined below)
-        extern void R_SortMaterials();                 // r_ed_scene.cpp
         RegionLightRelated();
-        R_SortMaterials();                             // 0x4082fd (pass demarcation)
+        R_SortMaterials();                             // pass demarcation
     }
 
     // TRIGGER-RADIUS volumes + SCRIPT-COLOUR TOKENS.  Cam_Draw draws these in its
-    // selected/active brush overlay loops after the surf flush: DrawTriggerRadius (0x40834E
-    // selected-loop non-light + 0x408448 active-loop trigger-class) and CamWnd_Tokens
-    // (0x4080DE, gated on sub_4560F0).  KISAK: one combined pass over both lists (they are
-    // display-only overlays), default-OFF behind RADIANT_DECOR.
+    // selected/active brush overlay loops after the surf flush: DrawTriggerRadius (selected-loop
+    // non-light + active-loop trigger-class) and CamWnd_Tokens (gated on 0x4560F0).  Here: one
+    // combined pass over both lists (they are display-only overlays), default-OFF behind
+    // RADIANT_DECOR.
     if ( Radiant_DecorEnabled() )
     {
 
-        extern selbrush_t selected_brushes;
         // DrawTriggerRadius — every trigger_radius/_disk entity (classtype & 0xC0), in
         // both lists (binary: selected-loop else-branch + active-loop trigger-class).
         for ( int pass = 0; pass < 2; ++pass )
@@ -4132,7 +3859,7 @@ void CamWnd_Draw( HWND hwnd )
             }
         }
 
-        // CamWnd_Tokens — sub_4560F0 gate, then the last selected script-trigger's
+        // CamWnd_Tokens — the 0x4560F0 gate, then the last selected script-trigger's
         // ScriptColorTeamKey value drives the token billboards.
         const bool tokensOn = strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), "token" ) != 0
             && strcmp( g_PrefsDlg->ScriptGroupKey.c_str(), g_PrefsDlg->ScriptColorTeamKey.c_str() ) == 0;
@@ -4153,8 +3880,8 @@ void CamWnd_Draw( HWND hwnd )
     //  pass.  They now run BEFORE the world — see the hook near the top of this
     //  function for the whole argument.  Nothing else moved.)
 
-    // 0x4084bd  SELECTED-BRUSH WHITE OUTLINE (!dontDrawSelectedOutlines), 1:1 with
-    // 0x4084c3..0x408535: R_AddClearCmd(6 = depth+stencil) -> DrawRegions -> pack colorWhite ->
+    // SELECTED-BRUSH WHITE OUTLINE (!dontDrawSelectedOutlines), as in the binary:
+    // R_AddClearCmd(6 = depth+stencil) -> DrawRegions -> pack colorWhite ->
     // each selected non-patch brush at WIREFRAME tech 29 through the SAME DrawBrush the world
     // pass uses -> ONE R_AddEditorSurfsCmd.  For a fixedsize MODEL/PREFAB that dispatches
     // SkinModelInst at draw_meth2==29, so the model's triangle MESH is queued as an
@@ -4163,30 +3890,26 @@ void CamWnd_Draw( HWND hwnd )
     if ( !g_qeglobals.dontDrawSelectedOutlines )
     {
 
-        // 0x4084d2 - clear DEPTH|STENCIL before the outline draws so the selected wireframe
+        // Clear DEPTH|STENCIL before the outline draws so the selected wireframe
         // passes the depth test against the coplanar geometry and shows THROUGH.  whichToClear=6
         // means the colour arg is unused.
         extern void R_AddCmdClearScreen( int whichToClear, const float *color, float depth, uint8_t stencil );
         R_AddCmdClearScreen( 6, colorWhite, 1.0f, 0 );
-        // KISAK: 0x4084d7 DrawRegions (the region-border line overlay) is not ported - it only
+        // DrawRegions (the region-border line overlay) is not ported - it only
         // draws while a region is active, and is unrelated to the model wireframe.
         // 0x4084f0 - demarcate this WHITE pass so its flush carries ONLY the tech-29 wireframe.
         // Re-flushing the earlier textured surfs after the depth clear re-draws the UNSELECTED
         // prefab's model over a cleared depth buffer.
-        extern void R_SortMaterials();                                             // r_ed_scene.cpp
         R_SortMaterials();
         GfxColor whiteCol;
-        Byte4PackPixelColor( const_cast<float *>( colorWhite ), &whiteCol );   // 0x4084e8
+        Byte4PackPixelColor( const_cast<float *>( colorWhite ), &whiteCol );
 
-        extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                               int technique, GfxColor *col, char width, int drawFlags,
-                               const char *layerPrefix );                      // brush.cpp 0x47afc0
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         {
             brush_t *def = b->def;
             if ( !def )
                 continue;
-            // 0x4084FC: bit 0x100 is the misc_model cycle-preview flag, not a patch test.
+            // Bit 0x100 is the misc_model cycle-preview flag, not a patch test.
             if ( ( b->brushFlags & 0x100 ) != 0 )
                 continue;
             // KIWI-UX (ROUND AX, ITEM 2): and the outline pass, which needs the gate MOST.
@@ -4222,11 +3945,11 @@ void CamWnd_Draw( HWND hwnd )
                 if ( b->patch && KiwiTerrain_HideWireframe() )
                     continue;
             }
-            // drawFlags=1 (force-draw) matches the binary's a10=1; viewType -1 = no 2D cull.
+            // drawFlags=1 (force-draw) as in the binary; viewType -1 = no 2D cull.
             DrawBrush( b, (const orientation_t *)world_orient_matrix, /*viewType*/ -1,
                        /*technique*/ TECHNIQUE_WIREFRAME_SHADED, &whiteCol, /*width*/ 1, /*drawFlags*/ 1, /*layerPrefix*/ "" );
         }
-        R_AddEditorSurfsCmd();                              // 0x408535 — flush the model wireframe surfs
+        R_AddEditorSurfsCmd();                              // flush the model wireframe surfs
     }
 
     // Selection overlay: highlight Ctrl+Shift+LMB-picked faces (TASK 2 / P5.7).
@@ -4238,14 +3961,14 @@ void CamWnd_Draw( HWND hwnd )
     extern void Ed_DrawVertexHandles();     // xywnd.cpp — DrawConnectionLinks handle prefix
     extern void Ed_DrawConnectionLines();   // xywnd.cpp (Lines_AddLinkTo + Lines_AddLinkToScript)
     extern void Draw_PatchSelectPointsSelected();  // brush.cpp (0x40c360) — SELECTED curve pts, light blue
-    Draw_PatchSelectPointsSelected();       // DrawConnectionLinks prefix 0x40ca0f — before the handles
+    Draw_PatchSelectPointsSelected();       // DrawConnectionLinks prefix — before the handles
     Ed_DrawVertexHandles();
     Ed_DrawConnectionLines();
 
-    // 0x408680  3D-marquee selection box: with a box-drag active in the 3D view (the drag
+    // 3D-marquee selection box: with a box-drag active in the 3D view (the drag
     // callback is Camera_GetRectSelection3D and d_select_mode is a marquee/point-rect mode),
     // project the four drag-rect corners to a fixed near depth and draw the translucent blue
-    // quad.  Verbatim: rect normalise, 4 CameraCalcRayDir corners, scale = 4.001/(ray.vpn),
+    // quad: rect normalise, 4 CameraCalcRayDir corners, scale = 4.001/(ray.vpn),
     // corner = ray*scale + camera.origin, w=1.
     extern void Ed_DrawSelectionBoxQuad( const float (*verts)[4] );           // xywnd.cpp 0x40CC50
     const select_t sm = g_qeglobals.d_select_mode;
@@ -4254,7 +3977,7 @@ void CamWnd_Draw( HWND hwnd )
         || sm == sel_areabrush_sub || sm == sel_areapoint_curve || sm == sel_areapoint
         || sm == sel_editpoint ) )
     {
-        // Normalise the drag rect: x_1/x_2 = press, y_1/y_2 = current (IDA's min/max swap).
+        // Normalise the drag rect: x_1/x_2 = press, y_1/y_2 = current (the binary's min/max swap).
         int a4, halfx_i, drag_y2, a1_i;
         if ( g_qeglobals.drag_selectionbox_x_1 >= g_qeglobals.drag_selectionbox_y_1 )
         { a4 = g_qeglobals.drag_selectionbox_y_1; halfx_i = g_qeglobals.drag_selectionbox_x_1; }
@@ -4268,7 +3991,7 @@ void CamWnd_Draw( HWND hwnd )
         const float depth = 4.000999927520752f;
         const float *o    = camera.origin;
         float rays[4][3];
-        // 4 corner rays in the IDA's exact order (drag_y2,a4)/(a1,a4)/(a1,halfx)/(drag_y2,halfx).
+        // 4 corner rays in the binary's order (drag_y2,a4)/(a1,a4)/(a1,halfx)/(drag_y2,halfx).
         CameraCalcRayDir( a4,      rays[0], drag_y2 );
         CameraCalcRayDir( a4,      rays[1], a1_i );
         CameraCalcRayDir( halfx_i, rays[2], a1_i );
@@ -4287,56 +4010,9 @@ void CamWnd_Draw( HWND hwnd )
         Ed_DrawSelectionBoxQuad( verts );
     }
 
-    // 0x408953-0x408aa5  terrain-paint brush-radius CURSOR RING, gated on cursor_visible AND
-    // the terrain-paint mode (sub_401D50 = AdvPatchEditDlg visible + a paint mode + outer>inner,
-    // the gate the binary inlines here).  Pick the terrain cell under the cursor, ring it.
-    extern int  sub_401D50();                                            // patchdialog.cpp 0x401D50
-    extern char sub_43DD50( const float *dir, byte *colorOut,
-                            const float *cam_origin, float *origin_out ); // pmesh.cpp 0x43DD50
-    // P5 RTT: the ring's cursor position must be in the CAMERA IMAGE's mousespace (the 3D
-    // viewport panel), NOT ScreenToClient on the hidden native camera child (that gave garbage
-    // coords → the ring never appeared). The shell records the image-relative cursor + size.
-    extern bool ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
-    int cpx, cpy, cph;
+    // KIWI: the binary's terrain-paint cursor ring (0x408953-0x408aa5) sat here; it went with
+    // the AdvPatchEditDlg paint path (Terrain Sculpt draws its own brush).
     (void)hwnd;
-    (void)cph;
-    if ( cam->cursor_visible && sub_401D50() && ImGuiShell_CameraPaintCursor( &cpx, &cpy, nullptr, &cph ) )
-    {
-        {
-            // ── KIWI-UX (ROUND AQ, ITEM 3): THE RING WAS OFFSET FROM THE CURSOR ──
-            // This site used to build the ray itself: `CameraCalcRayDir( cph - cpy, dir,
-            // cpx )` + `camera.origin`.  CameraCalcRayDir is deliberately byte-identical
-            // to the binary and is therefore PERSPECTIVE-ONLY — it diverges a ray from
-            // the eye — while KIWI's camera is ORTHOGRAPHIC by default (kiwi_camera.cpp
-            // KCAM_ORTHO_ENTRY, "default ON", and CamWnd_SetupScene really does swap the
-            // projection).  Under a parallel projection the correct mapping moves the
-            // ray's ORIGIN per pixel and keeps dir == vpn, so the eye-ray hit point was
-            // displaced laterally by the whole parallax: zero at the image centre and
-            // growing toward the edges — exactly the reported offset.  The flip was also
-            // one pixel off (`cph - cpy` where every other site uses `height - y - 1`).
-            // Both halves are already solved, once, in the canonical modern picker that
-            // hover/gizmo/box-select/snap all use, and it reads the SAME
-            // ImGuiShell_CameraPaintCursor mousespace, so the gate semantics are
-            // unchanged.  RADIANT_KNOWN_ISSUES listed this exact gap under "Ortho: two
-            // CLASSIC-profile paths still build perspective rays"; this closes the
-            // terrain-ring half of it.
-            ray_t ray;                                               // kiwi_pick.h:72
-            if ( Pick_RayFromImagePos( cpx, cpy, &ray ) )            // kiwi_pick.h:91
-            {
-            const float *dir = ray.dir;
-            float cursorWorld[3];                                    // mouse_origin (vec3)
-            if ( sub_43DD50( dir, nullptr, ray.origin, cursorWorld ) )
-            {
-                // The binary's terrain tail rides after the selected-outline prelude's
-                // R_AddClearCmd(6); the port's filled patch pass can leave depth under the
-                // cursor, so re-clear to preserve that overlay relationship.
-                extern void R_AddCmdClearScreen( int whichToClear, const float *color, float depth, uint8_t stencil );
-                R_AddCmdClearScreen( 6, colorWhite, 1.0f, 0 );
-                DrawAdvancedTerrainEditCircle( cursorWorld );
-            }
-            }
-        }
-    }
 
     // KIWI-UX (ROUND BM, ITEM 1b): …AND THE SECTION CLIP CLOSES HERE, before the
     // overlay block below.  Everything after this line is a TOOL — the hover
@@ -4502,32 +4178,28 @@ void CamWnd_Draw( HWND hwnd )
 
 }
 
-// CCamWnd MFC window (same skeleton as CXYWnd/CZWnd), rendering into d_hwndCamera, plus the
-// 3D mouse interaction: CamWnd_DropModelsToPlane (0x403d30), CameraCalcRayDir (0x403b30),
-// Camera_GetRectSelection3D (0x403c10), Cam_MouseControl (0x403950), Cam_MouseUp (0x404f70)
-// and the OnLButton handlers (0x403160/0x4031d0).  The alt+ctrl DROP-MODEL / duplicate /
+// The camera window's 3D mouse interaction: CamWnd_DropModelsToPlane, CameraCalcRayDir,
+// Camera_GetRectSelection3D, Cam_MouseControl, Cam_MouseUp and the OnLButton handlers (the
+// window itself is CamWnd_WndProc, at the bottom).  The alt+ctrl DROP-MODEL / duplicate /
 // curve-point-drag sub-paths (prefs-gated, off by default) are an unported TODO in the
 // dispatcher.
 extern void  Drag_Begin( void *pressFunc, unsigned int buttons, int viewz,
                          int px, int py, float *xvec, float *yvec,
                          float *trace_start, float *trace_dir );          // drag.cpp 0x47E890
 extern void  Drag_MouseUp( unsigned int buttons );                       // drag.cpp 0x4802A0
-extern void  Vec3Cross( const float *a, const float *b, float *out );    // 0x40A4D0
-extern float Vec3Normalize_R( float *v );                                // 0x40A5E0
 extern int   g_nPatchClickedView;                                        // 0x73B108
 extern char  g_bXYViewIsLastPatchClick;                                  // 0x25D5A6A
-// Cam_MouseMoved (0x404fc0) drag-select / texture rotate-shift dispatch deps:
+// Cam_MouseMoved drag-select / texture rotate-shift dispatch deps:
 extern void  Drag_MouseMoved( int x, int y, int buttons, float *origin, float *dir ); // drag.cpp 0x47FF30
 extern void  Brush_ShiftTexture( float ds, float dt );                   // select.cpp 0x491F20
 extern void  Brush_RotateTexture( int deg );                             // select.cpp 0x4929F0
-extern int   sub_401D50();                                               // patchdialog.cpp 0x401D50
 extern void  Sys_GetCursorPos( int *x, int *y );                         // win_qe3.cpp 0x499C90 (GetCursorPos wrapper)
 
 // 0x403b30  CameraCalcRayDir - screen (x,y) -> normalised world pick ray.
 static void CameraCalcRayDir( int y, float *dir, int x )
 {
     const camwndState_t *cam = &g_camwndState;
-    int    height = cam->camera.height;
+    int    height = cam->camera.height > 0 ? cam->camera.height : 1;   // KIWI: no inf ray on a 0-height cell
     double t      = tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 );
     float  s      = (float)( ( t * 0.75 + t * 0.75 ) / (double)height );
     float  yf     = (float)( (double)( y - height / 2 ) * s );
@@ -4640,8 +4312,7 @@ void Ed_CameraCalcRayOrigin( int x, int y, float *org )
 // 0x403c10  Camera_GetRectSelection3D - Drag_Begin's 3D marquee-frustum callback: 4 corner rays
 // + the camera origin -> 4 side planes, normal = cross(ray[i], ray[i-1]).
 // PLANE STRIDE IS 32 BYTES: normal{x,y,z}@0/4/8, dist as an 8-byte DOUBLE @16, type(int)=-1
-// @24.  The double matters - disasm 0x403d16 is `fstp qword ptr [esi-18h]` and
-// Patch_SelectAreaPoints_sub reads it back as *(double*)(plane+16).
+// @24.  The double matters - Patch_SelectAreaPointsPass reads it back as *(double*)(plane+16).
 void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes )
 {
     int xlo = ( x1 < x2 ) ? x1 : x2;
@@ -4658,60 +4329,56 @@ void Camera_GetRectSelection3D( int x1, int y1, int x2, int y2, float *outPlanes
     {
         float *plane = outPlanes + 8 * i;                 // 32-byte plane stride
         Vec3Cross( rays[i], rays[( i - 1 ) & 3], plane );
-        // dist (double @ +16): float dot widened to double, matching `fstp qword`.
+        // dist (double @ +16): the float dot widened to double.
         *(double *)( plane + 4 ) = (double)( plane[0]*o[0] + plane[1]*o[1] + plane[2]*o[2] );
         *(int *)( plane + 6 ) = -1;                       // type marker @ +24
     }
 }
 
-// 0x403950  Cam_MouseControl - RMB-hold cursor-joystick free-look / forward-back fly.
-// Reached one-shot from CamWnd_DropModelsToPlane (plain RMB, no Alt) and re-driven every idle
-// by CMainFrame::RoutineProcessing (its PostMessage(WM_TIMER) re-pokes OnIdle), hence
-// non-static.
 // ═════════════════════════════════════════════════════════════════════════════
 // 0x4248a0  CCamWnd::Scroll — the mouse-wheel camera DOLLY, driven by
-// CMainFrame::OnScroll (0x42b850) when the wheel is over the camera pane and the
-// CameraUseWheel pref is on.  Step = m_nMoveSpeed * 0.7 * amount * modifier, where the
-// modifier is Shift 0.1 / Alt 1.6 / neither 0.4, and holding Ctrl zeroes the PITCH so
-// the dolly stays horizontal.  Moves along -step * dir(pitch, yaw); OnScroll passes
-// amount = -1 for wheel-forward, +1 for wheel-back.
-// The IDB signature is __userpurge (edi = CMainFrame*, the camera reached through
-// frame->m_pCamWnd) — normalised to a plain cdecl free function here, and the `frame` argument
-// dropped with U-VP-CAM (it only ever served to reach the one camera; the MFC-shell
-// CCamWnd_Scroll( frame, amount ) forwarder at the bottom keeps mainfrm.cpp's call working).
+// CMainFrame::OnScroll (0x42b850; here Radiant_OnMouseWheel) when the wheel is over the
+// camera pane and the CameraUseWheel pref is on.  Step = m_nMoveSpeed * 0.7 * amount *
+// modifier, where the modifier is Shift 0.1 / Alt 1.6 / neither 0.4, and holding Ctrl
+// zeroes the PITCH so the dolly stays horizontal.  Moves along -step * dir(pitch, yaw);
+// OnScroll passes amount = -1 for wheel-forward, +1 for wheel-back.
 // ═════════════════════════════════════════════════════════════════════════════
 void CamWnd_Scroll( float amount )
 {
     camwndState_t *cam = &g_camwndState;
 
     float factor;
-    if ( GetKeyState( VK_SHIFT ) < 0 )                                   // 0x4248b4
-        factor = amount * 0.1f;                                          // 0x4248ca
-    else if ( GetKeyState( VK_MENU ) < 0 )                               // 0x4248d9
-        factor = amount * 1.6f;                                          // 0x4248f0
+    if ( GetKeyState( VK_SHIFT ) < 0 )
+        factor = amount * 0.1f;
+    else if ( GetKeyState( VK_MENU ) < 0 )
+        factor = amount * 1.6f;
     else
-        factor = amount * 0.4f;                                          // 0x42490d
+        factor = amount * 0.4f;
 
     const float dist = (float)( (double)g_PrefsDlg->m_nMoveSpeed * 0.699999988079071
-                                * (double)factor );                      // 0x424920
+                                * (double)factor );
 
-    const float yaw   = cam->camera.angles[1];                           // 0x42492b
-    // 0x424933 — Ctrl held pins the pitch to 0 (horizontal dolly); otherwise the
+    const float yaw   = cam->camera.angles[1];
+    // Ctrl held pins the pitch to 0 (horizontal dolly); otherwise the
     // NEGATED pitch is used.
     const float pitch = ( GetKeyState( VK_CONTROL ) < 0 ) ? 0.0f : -cam->camera.angles[0];
 
-    const double yawR   = (double)yaw   * 0.01745329238474369;           // 0x424956
-    const double pitchR = (double)pitch * 0.01745329238474369;           // 0x424981
+    // KIWI: true double deg->rad (the binary's was the float constant widened).
+    const double yawR   = (double)yaw   * KIWI_DEG2RAD;
+    const double pitchR = (double)pitch * KIWI_DEG2RAD;
     const float cy = (float)cos( yawR ),   sy = (float)sin( yawR );
     const float cp = (float)cos( pitchR ), sp = (float)sin( pitchR );
 
-    g_nUpdateBits |= 1u;                                                 // 0x4249a2
-    const float step = -dist;                                            // 0x4249c3
-    cam->camera.origin[0] += cp * cy * step;                             // 0x4249d7
-    cam->camera.origin[1] += cp * sy * step;                             // 0x4249e2
-    cam->camera.origin[2] += -sp * step;                                 // 0x4249eb
+    g_nUpdateBits |= 1u;
+    const float step = -dist;
+    cam->camera.origin[0] += cp * cy * step;
+    cam->camera.origin[1] += cp * sy * step;
+    cam->camera.origin[2] += -sp * step;
 }
 
+// 0x403950  Cam_MouseControl - RMB-hold cursor-joystick free-look / forward-back fly.
+// Reached one-shot from CamWnd_DropModelsToPlane (plain RMB, no Alt) and re-driven every idle
+// by Radiant_RoutineProcessing (mainfrm.cpp), hence non-static.
 void CamWnd_MouseControl( float dtime )
 {
     camwndState_t *cam = &g_camwndState;
@@ -4727,6 +4394,8 @@ void CamWnd_MouseControl( float dtime )
     }
     if ( g_PrefsDlg->camera_mode )
         return;
+    if ( cam->camera.width < 2 || cam->camera.height < 2 )
+        return;   // KIWI: a collapsed cell - the half-size divides below hit 0 (inf / NaN camera)
 
     float vert  = (float)( (double)( cam->m_ptButton.y - cam->camera.height / 2 ) / (double)( cam->camera.height / 2 ) );
     float horiz = (float)( (double)( cam->m_ptButton.x - cam->camera.width  / 2 ) / (double)( cam->camera.width  / 2 ) );
@@ -4756,12 +4425,12 @@ void CamWnd_MouseControl( float dtime )
 // XY_MouseDown): a selection-button combo opens a Drag_Begin pick/drag with the perspective
 // ray; plain RMB without Alt runs the free-look fly.  The alt+ctrl DROP-MODEL
 // (m_bDropModel/m_bOrientModel, off by default), curve-point-drag and alt+shift duplicate-drop
-// branches at 0x403da7..0x404a4c are unported; plain select never reaches them.
+// branches are unported; plain select never reaches them.
 void CamWnd_DropModelsToPlane( long x, long y, unsigned int nFlags )
 {
     camwndState_t *cam = &g_camwndState;
 
-    // 0x403d6b: m_ptCursor is the free-look pivot that Cam_PositionDrag / Cam_Rotate /
+    // m_ptCursor is the free-look pivot that Cam_PositionDrag / Cam_Rotate /
     // Cam_Rotate2 / Cam_PositionPan read and pin the cursor back to on each move.
     GetCursorPos( &cam->m_ptCursor );
     cam->m_nCambuttonstate = nFlags;
@@ -4854,17 +4523,18 @@ void CamWnd_CursorReconcile( bool legacyCamDragLive )
     do { r = ShowCursor( TRUE ); } while ( r < 0 );
 }
 
-// CCamWnd::OnDestroy (0x402f10) persists the window placement through this.
+// CCamWnd::OnDestroy persists the window placement through this.
 extern BOOL SaveRegistryInfo( const char *pszName, void *pvBuf, int lSize );   // win_qe3.cpp 0x499940
 
 // The binary's camera-control scheme: cursor-JOYSTICK fly + camera_mode view control + 3D LMB
 // drag-select + alt texture rotate/shift.
-//   OnRButtonDown 0x4032b0 / OnLButtonDown 0x403160 / OnMButtonDown 0x403220 -> the shared
+//   OnRButtonDown / OnLButtonDown / OnMButtonDown (0x403220) -> the shared
 //     dispatcher CamWnd_DropModelsToPlane (y flipped to a bottom-left origin).  Plain RMB (no
 //     Alt, camera_mode 0) runs Cam_MouseControl once, then the WM_TIMER/OnIdle pump re-drives.
-//   OnMouseMove 0x403100 -> Cam_MouseMoved 0x404fc0 (deduped on m_ptLastCursor).
-//   OnRButtonUp 0x403310 -> Cam_ContextMenu -> Cam_MouseUp + ReleaseCapture.
-//   The Cam_MouseControl pump lives in CMainFrame::RoutineProcessing (0x421a90).
+//   OnMouseMove -> Cam_MouseMoved (deduped on m_ptLastCursor).
+//   OnRButtonUp -> Cam_ContextMenu -> Cam_MouseUp + ReleaseCapture.
+//   The Cam_MouseControl pump is CMainFrame::RoutineProcessing (0x421a90; here
+//   Radiant_RoutineProcessing).
 
 // 0x4035f0  Cam_PositionDrag - camera_mode 1, RMB: yaw by cursor-dx, fly along the view forward
 // (vpn flattened to the XY plane) by cursor-dy.  Cursor re-centred + hidden.
@@ -4956,23 +4626,16 @@ void CamWnd_PositionPan()
 // 0x404fc0  Cam_MouseMoved - the central 3D-view mouse handler, button-mask gated: texture
 // ROTATE (Ctrl+RMB+Alt) / texture SHIFT (RMB+Alt) / camera_mode view control (RMB combos) /
 // 3D LMB drag-select / shift-ctrl LMB drop-to-plane.
-// The 4th arg is an INT y (bottom-left-origin client coord), NOT a float: hex-rays types it
-// `float y` from the __userpurge prototype and renders the int reads as LODWORD/SLODWORD, but
-// the disasm `fild [ebp+y]` everywhere proves it is an int.
+// `y` is an INT (bottom-left-origin client coord), NOT a float.
 extern "C" int ClampGridSize();                                          // drag.cpp (0x463a80)
-extern float   grid_sizes[];                                             // engine_stubs (0x6dde5c)
-static double Cam_MaxF( float a, float b ) { return ( a - b >= 0.0f ) ? a : b; } // sub_40A1D0 (max)
+static double Cam_MaxF( float a, float b ) { return ( a - b >= 0.0f ) ? a : b; } // 0x40A1D0 (max)
 void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
 {
     camwndState_t *cam = &g_camwndState;
 
     cam->m_nCambuttonstate = buttons;
     if ( !buttons )
-    {
-        if ( sub_401D50() )                      // terrain-paint mode active → just repaint
-            g_nUpdateBits |= W_CAMERA;
         return;
-    }
     if ( cam->m_ptButton.x != x || cam->m_ptButton.y != y )
         cam->cam_was_not_dragged = false;
     cam->m_ptButton.x = x;
@@ -4985,14 +4648,6 @@ void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
         if ( altDown )
         {
             // ── RMB+Alt → texture SHIFT (drag the texture in S/T by grid-snapped cursor delta) ──
-            if ( g_qeglobals.d_select_mode == sel_addpoint )
-            {
-                float dir[3];
-                CameraCalcRayDir( y, dir, x );
-                Drag_MouseMoved( x, y, 2, cam->camera.origin, dir );
-                g_nUpdateBits |= W_CAMERA;
-                return;
-            }
             int cx, cy;
             Sys_GetCursorPos( &cx, &cy );
             if ( cx == cam->m_ptCursor.x && cy == cam->m_ptCursor.y )
@@ -5030,7 +4685,7 @@ void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
         cam->x47             += pt.y - cam->m_ptCursor.y;
         int accX = cam->prob_some_cursor;
         int accY = cam->x47;
-        int step = (int)Cam_MaxF( 1.0f, grid_sizes[g_qeglobals.d_gridsize] );   // sub_40A1D0(1, gs)
+        int step = (int)Cam_MaxF( 1.0f, grid_sizes[g_qeglobals.d_gridsize] );
         int remX = accX % step;
         bool snap = ( accX != remX );
         if ( !snap && ( accY % step ) != accY )      // (accX snapped) OR (accY snapped)
@@ -5056,7 +4711,7 @@ void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
         return;
     }
 
-    // ── LABEL_27: camera_mode 1/2 view control, then the LMB drag-select / drop-to-plane ──
+    // ── camera_mode 1/2 view control, then the LMB drag-select / drop-to-plane ──
     if ( ( buttons & MK_RBUTTON ) != 0 && !altDown && g_PrefsDlg->camera_mode == 2 )
     {
         if ( buttons & MK_CONTROL ) CamWnd_PositionPan();
@@ -5125,238 +4780,10 @@ void CamWnd_MouseMoved( unsigned int buttons, int x, int y )
     g_qeglobals.toggle_unk04_mousedrag_state2 = 0;
 }
 
-// Cam_ContextMenu deps (select.cpp / material).
-extern void Test_Ray( float *start, float *dir, int contents,
-                      edTrace_t *t, int num_traces );                 // select.cpp 0x48D7C0
-extern void Select_Brush( selbrush_t *b, char some_overwrite,
-                          char bStatus, char center );                // select.cpp 0x48DCC0
-extern void Deselect_Brush( selbrush_t *b );                         // select.cpp 0x48DC60
-
-// The pick-ray hit list Cam_ContextMenu fills and the WM_COMMAND handlers read.  IDB
-// camera_trace @ 0x1808e00 is `edTrace_t camera_trace[20]`, 88-byte stride (the build loop
-// ends at &camera_trace[20] = byte_18094E0).
-#define CAM_TRACE_COUNT 20
-static edTrace_t camera_trace[CAM_TRACE_COUNT];
-
-// Popup command IDs (hardcoded in the binary's AppendMenuA / message map @ 0x6d50e0).
-#define ID_BRUSH_LAYER_BASE 0x8CA0   // 36000 — first per-face toggle entry (base + trace index)
-#define ID_BRUSH_LAYER_MAX  0x8CB3   // 36019 — last per-face entry (20 slots, base..base+19)
-#define ID_CAM_SELECT_ALL   0x8CB4
-#define ID_CAM_DESELECT_ALL 0x8CB5
-
-// 0x511070  handle -> display name (r_material.cpp:1484).
-static const char *Cam_MaterialHandleName( Material *handle )
-{
-    iassert( handle );   // r_material.cpp:1484
-    return Material_FromHandle( handle )->info.name;
-}
-
-// 0x404BA0  the sub_408CA0 (std::sort) comparator: order two hit faces by their base material's
-// sort layer DESCENDING; a face-less hit sorts last.  The layer is the 12-bit field at drawSurf
-// bits 29..40 (`>> 29 & 0xFFF`).  qsort wants a tri-state int, so derive it from two `<`.
-static int __cdecl Cam_TraceMtlLess( const edTrace_t *a, const edTrace_t *b )
-{
-    faceVis_s *fa = a->hit.face;
-    faceVis_s *fb = b->hit.face;
-    // less(a,b):
-    bool ab;
-    if ( !fa )                ab = false;
-    else if ( !fb )           ab = true;
-    else {
-        unsigned la = (unsigned)((Material_FromHandle( fa->visArray->mtlHandle )->info.drawSurf.packed >> 29) & 0xFFF);
-        unsigned lb = (unsigned)((Material_FromHandle( fb->visArray->mtlHandle )->info.drawSurf.packed >> 29) & 0xFFF);
-        ab = la > lb;
-    }
-    if ( ab ) return -1;
-    // less(b,a):
-    bool ba;
-    if ( !fb )                ba = false;
-    else if ( !fa )           ba = true;
-    else {
-        unsigned la = (unsigned)((Material_FromHandle( fa->visArray->mtlHandle )->info.drawSurf.packed >> 29) & 0xFFF);
-        unsigned lb = (unsigned)((Material_FromHandle( fb->visArray->mtlHandle )->info.drawSurf.packed >> 29) & 0xFFF);
-        ba = lb > la;
-    }
-    return ba ? 1 : 0;
-}
-
-// 0x404d40  Cam_ContextMenu - the RMB-release brush-face picker popup.  Fires only when
-// m_bRightClick && cam_was_not_dragged && no Alt/Ctrl held (Shift also blocks it outside
-// camera_mode 0), so a camera fly or drag never opens it.  Pick ray (up to 20 hits) sorted by
-// material layer, then one Select/Deselect toggle per face within 1 unit of the nearest hit,
-// a separator, and Select-all / Deselect-all.
-// U-VP-CAM: the popup is a bare HMENU in g_camwndState (CMenu::Attach/DestroyMenu/AppendMenuA/
-// TrackPopupMenu ARE these Win32 calls — CMenu::TrackPopupMenu is
-// ::TrackPopupMenu(m_hMenu, flags, x, y, 0, pWnd->m_hWnd, rect)), so `hwnd` replaces the CWnd*
-// owner the popup posts its WM_COMMAND to.  Both shells route those IDs to
-// CamWnd_OnContextMenu* (MFC through ON_COMMAND_RANGE, raw through WM_COMMAND in the WndProc).
-void CamWnd_ContextMenu( HWND hwnd, int x, int y )
-{
-    camwndState_t *cam = &g_camwndState;
-
-    if ( !g_PrefsDlg->m_bRightClick )                    // 0x404d4e
-        return;
-    if ( !cam->cam_was_not_dragged )                     // 0x404d5d — a drag happened; no menu
-        return;
-    // Alt or Ctrl held blocks the menu; Shift blocks it ONLY when camera_mode != 0 (in mode 0
-    // Shift is a modifier for the RMB drag combos).  Disasm 0x404d70-0x404da0: JS-exit on
-    // VK_MENU/VK_CONTROL, then `cmp camera_mode,0 / jz skip` around the VK_SHIFT test.
-    if ( GetKeyState( VK_MENU ) < 0 || GetKeyState( VK_CONTROL ) < 0 )                   // 0x404d74/0x404d84
-        return;
-    if ( g_PrefsDlg->camera_mode != 0 && GetKeyState( VK_SHIFT ) < 0 )                   // 0x404d90-0x404da0
-        return;
-
-    if ( cam->contextMenu )                              // 0x404db4 — rebuild each time
-        ::DestroyMenu( cam->contextMenu );
-    cam->contextMenu = ::CreatePopupMenu();                // 0x404dc1/0x404dca
-
-    float dir[3];
-    CameraCalcRayDir( y, dir, x );                       // 0x404ddc
-    Test_Ray( cam->camera.origin, dir, 0, camera_trace, CAM_TRACE_COUNT );   // 0x404df2
-
-    if ( !camera_trace[0].hit.brush )                        // 0x404e00 — nothing hit
-        return;
-
-    float nearDist = camera_trace[0].dist;               // 0x404e14
-    int   nSelected = 0;                                 // var_24 — hits already selected
-    int   nUnselected = 0;                               // var_28 — hits not yet selected
-
-    // std::sort the 20-slot list by material layer (descending). Face-less trailing slots go last.
-    qsort( camera_trace, CAM_TRACE_COUNT, sizeof( edTrace_t ), (int(__cdecl*)(const void*,const void*))Cam_TraceMtlLess );
-
-    for ( int i = 0; i < CAM_TRACE_COUNT; ++i )          // 0x404e31..0x404ed7
-    {
-        edTrace_t *tr = &camera_trace[i];
-        float d = fabsf( tr->dist - nearDist );          // 0x404e38..0x404e42
-        if ( d > 1.0f )                                  // 0x404e55 — beyond the near cluster
-        {
-            tr->hit.brush = nullptr;                         // 0x404e57 — drop it from the list
-            continue;
-        }
-        UINT flags;
-        if ( tr->selected )                              // 0x404e5f
-        {
-            ++nSelected;                                 // 0x404e65
-            flags = MF_CHECKED;                          // 8 — already-selected entries are checked
-        }
-        else
-        {
-            flags = MF_UNCHECKED;                        // 0
-            ++nUnselected;                               // 0x404e73
-        }
-        iassert( tr->hit.face->visCount == 1 );              // 0x404e7f (CamWnd.cpp:1108)
-        const char *name = Cam_MaterialHandleName( tr->hit.face->visArray->mtlHandle );   // 0x404ea8
-        ::AppendMenuA( cam->contextMenu, flags, ID_BRUSH_LAYER_BASE + i, name );        // 0x404ec3
-    }
-
-    ::AppendMenuA( cam->contextMenu, MF_SEPARATOR, 0, (LPCSTR)nullptr );    // 0x404ef3 — flag 0x800
-    // Select-all: enabled (flag 0) only when at least one hit is unselected, else grayed (flag 1).
-    ::AppendMenuA( cam->contextMenu, nUnselected ? MF_ENABLED : MF_GRAYED,
-                   ID_CAM_SELECT_ALL, "Select all" );                       // 0x404f0f/0x404f1a
-    // Deselect-all: enabled only when at least one hit is already selected, else grayed.
-    ::AppendMenuA( cam->contextMenu, nSelected ? MF_ENABLED : MF_GRAYED,
-                   ID_CAM_DESELECT_ALL, "Deselect all" );                   // 0x404f36/0x404f41
-
-    POINT pt;
-    GetCursorPos( &pt );                                  // 0x404f48
-    // P5 RTT: the child hwnd is hidden and a poor menu owner; repoint the owner to the visible
-    // main frame.  The popup's WM_COMMANDs are routed to CamWnd_OnContextMenu* by the frame.
-    (void)hwnd;
-    ::TrackPopupMenu( cam->contextMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, g_qeglobals.d_hwndMain, nullptr );   // 0x404f61
-}
-
-// 0x404c20  ON_COMMAND_RANGE(0x8CA0..0x8CB3): toggle select/deselect of camera_trace[i].hit.brush
-// and flip the cached selected flag so the next popup shows the new state.
-void CamWnd_OnContextMenuBrushLayer( unsigned int nID )
-{
-    // 0x404c35 (CamWnd.cpp:995): nID >= ID_BRUSH_LAYER_BASE && nID <= ID_BRUSH_LAYER_MAX
-    iassert( nID >= ID_BRUSH_LAYER_BASE && nID <= ID_BRUSH_LAYER_MAX );
-    int i = nID - ID_BRUSH_LAYER_BASE;                                   // 0x404c5b
-    iassert( camera_trace[i].hit.brush );                                    // 0x404c5e (CamWnd.cpp:999 g_traces[nID].hit.brush)
-    if ( camera_trace[i].selected )                                      // 0x404c85
-    {
-        Deselect_Brush( camera_trace[i].hit.brush );                        // 0x404cb5
-        camera_trace[i].selected = false;
-    }
-    else
-    {
-        Select_Brush( camera_trace[i].hit.brush, 0, 0, 0 );                 // 0x404c9a
-        camera_trace[i].selected = true;
-    }
-}
-
-// 0x404cd0  ON_COMMAND(0x8CB4): select every listed hit brush.
-void CamWnd_OnContextMenuSelectAll()
-{
-    for ( int i = 0; i < CAM_TRACE_COUNT; ++i )                         // 0x404cd8..0x404d06
-    {
-        if ( camera_trace[i].hit.brush && !camera_trace[i].selected )
-        {
-            Select_Brush( camera_trace[i].hit.brush, 0, 0, 0 );            // 0x404cf2
-            camera_trace[i].selected = true;
-        }
-    }
-}
-
-// 0x404d10  ON_COMMAND(0x8CB5): deselect every listed hit brush.
-void CamWnd_OnContextMenuDeselectAll()
-{
-    for ( int i = 0; i < CAM_TRACE_COUNT; ++i )                         // 0x404d12..0x404d34
-    {
-        if ( camera_trace[i].hit.brush && camera_trace[i].selected )
-        {
-            Deselect_Brush( camera_trace[i].hit.brush );                   // 0x404d23
-            camera_trace[i].selected = false;
-        }
-    }
-}
-
-// KISAK, no binary counterpart: frame the loaded map's brush bounds (the binary just spawns the
-// camera at the fixed ctor origin).  Sit back on -X, slightly above, aimed at the centre.
-void CamWnd_CenterOnMap()
-{
-    camwndState_t *cam = &g_camwndState;
-
-    float mins[3] = {  1e30f,  1e30f,  1e30f };
-    float maxs[3] = { -1e30f, -1e30f, -1e30f };
-    bool any = false;
-    for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
-    {
-        brush_t *def = b->def;
-        if ( !def ) continue;
-        for ( int i = 0; i < 3; ++i )
-        {
-            if ( def->mins[i] < mins[i] ) mins[i] = def->mins[i];
-            if ( def->maxs[i] > maxs[i] ) maxs[i] = def->maxs[i];
-        }
-        any = true;
-    }
-    if ( !any ) return;
-
-    float c[3]  = { 0.5f*(mins[0]+maxs[0]), 0.5f*(mins[1]+maxs[1]), 0.5f*(mins[2]+maxs[2]) };
-    float ext   = maxs[0]-mins[0];
-    if ( maxs[1]-mins[1] > ext ) ext = maxs[1]-mins[1];
-    if ( ext < 64.0f ) ext = 64.0f;
-
-    // The look angles must account for Cam_BuildMatrix negating pitch: AngleVectors(p) gives
-    // forward.z = -sin(p) with p = -camera.angles[0], so for L = normalize(centre-origin),
-    // angles[0] = deg(asin(L.z)) and angles[1] = deg(atan2(L.y, L.x)).
-    cam->camera.origin[0] = c[0] - ext * 1.05f;   // well back on -X
-    cam->camera.origin[1] = c[1] - ext * 0.10f;
-    cam->camera.origin[2] = c[2] + ext * 0.15f;   // only slightly above centre → near-horizontal
-
-    float L[3] = { c[0]-cam->camera.origin[0], c[1]-cam->camera.origin[1], c[2]-cam->camera.origin[2] };
-    float len  = sqrtf( L[0]*L[0] + L[1]*L[1] + L[2]*L[2] );
-    if ( len < 1e-4f ) len = 1.0f;
-    L[0]/=len; L[1]/=len; L[2]/=len;
-    cam->camera.angles[0] = RAD2DEG( asinf( L[2] ) );          // pitch (look up/down)
-    cam->camera.angles[1] = RAD2DEG( atan2f( L[1], L[0] ) );   // yaw
-    cam->camera.angles[2] = 0.0f;
-
-    Radiant_FL_Log( "cam fit: origin=(%g %g %g) angles=(%g %g) ext=%g",
-        cam->camera.origin[0], cam->camera.origin[1], cam->camera.origin[2],
-        cam->camera.angles[0], cam->camera.angles[1], ext );
-}
+// KIWI: Cam_ContextMenu (0x404d40), the RMB brush-face picker popup, is gone - the classic
+// context menu was removed (user directive) - and with it its pick list (camera_trace) and
+// the three WM_COMMAND handlers that read it (0x404c20 per-face toggle, 0x404cd0 select all,
+// 0x404d10 deselect all).
 
 // 0x4034E0  Cam_ChangeFloor - View->Up Floor / Down Floor: drop or raise the camera so its
 // "feet" (eye - 48) rest on the nearest brush surface above / below.  Casts a vertical ray DOWN
@@ -5365,10 +4792,10 @@ void CamWnd_CenterOnMap()
 //   hit distance t < current is ABOVE the feet, t > current is BELOW.
 //   up   (a2!=0): best starts 0,      keep the LARGEST t still < current; best==0 means none.
 //   down (a2==0): best starts 262144, keep the SMALLEST t still > current; 262144 means none.
-//   On a hit: origin.z += (current - best) and g_nUpdateBits |= 0x21.  0x21 is the raw
-//   immediate at 0x4035d1 = W_CAMERA|W_Z_OVERLAY: CMainFrame::UpdateWindows 0x427090 tests
-//   `bl & 28h` for the Z window and `bl & 10h` for the texture window, so W_Z_OVERLAY==0x20.
-// The comparison directions are read from the FPU status-word tests, not simplified.
+//   On a hit: origin.z += (current - best) and g_nUpdateBits |= 0x21.  0x21 is the binary's
+//   literal = W_CAMERA|W_Z_OVERLAY: UpdateWindows tests 0x28 for the Z window and 0x10 for
+//   the texture window, so W_Z_OVERLAY==0x20.
+// The comparison directions are the binary's, not simplified.
 void CamWnd_ChangeFloor( int a2 )
 {
     camwndState_t *cam = &g_camwndState;
@@ -5398,53 +4825,42 @@ void CamWnd_ChangeFloor( int a2 )
 
     if ( best != 0.0f && best != 262144.0f )
     {
-        g_nUpdateBits |= 0x21;   // W_CAMERA|W_Z_OVERLAY (raw `or g_nUpdateBits,21h`)
+        g_nUpdateBits |= 0x21;   // W_CAMERA|W_Z_OVERLAY
         cam->camera.origin[2] = current - best + cam->camera.origin[2];
     }
 }
 
-// Light-region "build regions for selected lights": CMainFrame::OnShowRegionsForSelected ->
-// Regions_ForSelected (0x406F10) -> sub_406E00 -> sub_406CE0 ->
-// { Brush_DrawSubmitFaceWindings / PMESH_29_Winding } -> the primarylights_region CSG -> the
+// Light-region "build regions for selected lights": OnShowRegionsForSelected (mainfrm.cpp) ->
+// Regions_ForSelected -> Region_ForOneLight -> Region_BuildForLight ->
+// { Brush_DrawSubmitFaceWindings / Patch_DrawSubmitFaceWindings } -> the primarylights_region CSG -> the
 // global region-hull array.
 // The `float *a3` the face submitters take points at the light descriptor
 // (lightDesc_t {int cls; float p[8]}): a3[1..3] = cone centre, a3[7] = radius, a3[8] =
 // cosHalfFov - i.e. a3 == (float*)&desc with cls reinterpreted at a3[0].
 #include "primarylights_region.h"
-extern char  *ValueForKey2( const entity_s *e, const char *key );                      // entity.cpp 0x4825C0
 extern int    Entity_GetIntValueForKey( const entity_s *e, const char *key );          // entity.cpp 0x483820
-extern bool   Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp
-extern void   Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut ); // entity.cpp
-extern char   FilterBrush( selbrush_t *b, int a2 );                        // filters.cpp 0x46A1F0
-extern entity_s entities;                                                   // entity.cpp 0x23F17A0
-extern int    g_windingAlloc;
-extern char  *va( const char *fmt, ... );
 extern void   Brush_DrawSubmitFaceWindings( selbrush_t *inst, const orientation_t *orient,
                                             float *a3, rface_t **outList ); // brush.cpp 0x47B380
 
-// d_lightRegionHulls (dword_1807E00 / dword_25D5A4C) - the global hull sink
+// d_lightRegionHulls - the global hull sink
 // RegionLightRelated consumes after the per-light preview loop.
 void *d_lightRegionHulls[1024];
 int   d_lightRegionHullCount = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x40c640  Region_DrawHull (sub_40C640) — draw ONE region hull winding as a flat
+// 0x40c640  Region_DrawHull — draw ONE region hull winding as a flat
 // DOUBLE-SIDED triangle fan in the white-UNLIT immediate path, flat-coloured with the
 // caller's packed colour.  The winding's best-fit plane normal is stamped on every vertex
 // and the UVs are zero.
-// HEX-RAYS NOTE (stack adjacency): the binary writes the UVs as `xyzw[2*v + 7166]` /
-// `[2*v + 7167]` — xyzw[] is float[7168] and the st[] buffer is the NEXT stack slot, so
-// those are st[v-1][0..1] = 0.0f (the §11 stack-adjacency artifact), not out-of-bounds
-// writes into xyzw.
 // The 0x400-point cap is the binary's (its buffers hold exactly 1024 verts).
 // ─────────────────────────────────────────────────────────────────────────────
 static void Region_DrawHull( const winding_t *w, const GfxColor *col )
 {
-    if ( (unsigned)w->numpoints > 0x400 )                     // 0x40c65b
+    if ( (unsigned)w->numpoints > 0x400 )
         return;
 
     float plane[4];
-    Region_WindingPlane( plane, w );                          // 0x40c674
+    Region_WindingPlane( plane, w );
 
     static float          s_xyzw[1024][4];
     static float          s_normal[1024][3];
@@ -5453,9 +4869,9 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
     static ushort s_indices[6132];
 
     const int n = w->numpoints;
-    for ( int i = 0; i < n; ++i )                             // 0x40c6d6
+    for ( int i = 0; i < n; ++i )
     {
-        s_color[i]     = *(const float *)&col->packed;        // 0x40c6c5 memset32
+        s_color[i]     = *(const float *)&col->packed;
         s_xyzw[i][0]   = w->p[i][0];
         s_xyzw[i][1]   = w->p[i][1];
         s_xyzw[i][2]   = w->p[i][2];
@@ -5463,11 +4879,11 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
         s_normal[i][0] = plane[0];
         s_normal[i][1] = plane[1];
         s_normal[i][2] = plane[2];
-        s_st[i][0]     = 0.0f;                                // 0x40c719 (see the note above)
-        s_st[i][1]     = 0.0f;                                // 0x40c720
+        s_st[i][0]     = 0.0f;
+        s_st[i][1]     = 0.0f;
     }
 
-    // 0x40c73b — DOUBLE-sided fan: (0, k-1, k) then the reversed (k, k-1, 0).
+    // DOUBLE-sided fan: (0, k-1, k) then the reversed (k, k-1, 0).
     int idx = 0;
     for ( int k = 2; k < n; ++k )
     {
@@ -5479,16 +4895,15 @@ static void Region_DrawHull( const winding_t *w, const GfxColor *col )
         s_indices[idx + 5] = 0;
         idx += 6;
     }
-    // 0x40c7ca — emitted even with idx == 0 (faithful; the backend no-ops on 0 indices).
+    // Emitted even with idx == 0, as the binary does (the backend no-ops on 0 indices).
     R_AddRenderCmdDrawTris( g_qeglobals.d_white, TECHNIQUE_UNLIT, (short)idx, s_indices,
                             (short)w->numpoints, s_xyzw, s_normal, s_color, s_st );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x406ac0  RegionLightRelated — Cam_Draw's light-REGION hull overlay (0x4082f8): every
+// 0x406ac0  RegionLightRelated — Cam_Draw's light-REGION hull overlay: every
 // hull produced by Regions_ForSelected drawn translucent orange {1, 0.75, 0, 0.25}.
-// This is the hull-draw CONSUMER the port's d_lightRegionHulls array previously lacked;
-// it is independent of the parked per-pixel light preview (LightPreview_DrawLight 0x406fb0).
+// It is independent of the per-pixel light preview (LightPreview_DrawLight).
 // ─────────────────────────────────────────────────────────────────────────────
 void RegionLightRelated()
 {
@@ -5496,48 +4911,36 @@ void RegionLightRelated()
     float    rgba[4];
     GfxColor col;
 
-    rgba[0] = 1.0f;    // 0x406ac9
-    rgba[1] = 0.75f;   // 0x406ad6 (flt_6F42EC)
-    rgba[2] = 0.0f;    // 0x406adf
-    rgba[3] = 0.25f;   // 0x406ae8 (flt_6F42F0)
-    Byte4PackPixelColor( rgba, &col );                        // 0x406aeb
+    rgba[0] = 1.0f;
+    rgba[1] = 0.75f;
+    rgba[2] = 0.0f;
+    rgba[3] = 0.25f;
+    Byte4PackPixelColor( rgba, &col );
 
-    for ( unsigned int i = 0; i < (unsigned int)d_lightRegionHullCount; ++i )   // 0x406af5
-        Region_DrawHull( (const winding_t *)d_lightRegionHulls[i], &col );      // 0x406b0b
+    for ( unsigned int i = 0; i < (unsigned int)d_lightRegionHullCount; ++i )
+        Region_DrawHull( (const winding_t *)d_lightRegionHulls[i], &col );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x406c00  Region_ClearHulls — free every published hull winding and reset the count.
-// Each hull IS a winding_t, so the shared winding-allocation counter drops by the hull
-// count (0x406c0b) — the port previously inlined the free loop in Regions_ForSelected and
-// leaked that accounting.
+// Each hull IS a winding_t, so the shared winding-allocation counter drops by the
+// hull count.
 // ─────────────────────────────────────────────────────────────────────────────
 void Region_ClearHulls()
 {
-    if ( !d_lightRegionHullCount )                            // 0x406c09
+    if ( !d_lightRegionHullCount )
         return;
-    g_windingAlloc -= d_lightRegionHullCount;                 // 0x406c0b
-    for ( int i = d_lightRegionHullCount; i > 0; )            // 0x406c11
-        free( d_lightRegionHulls[--i] );                      // 0x406c1c
-    d_lightRegionHullCount = 0;                               // 0x406c28
+    g_windingAlloc -= d_lightRegionHullCount;
+    for ( int i = d_lightRegionHullCount; i > 0; )
+        free( d_lightRegionHulls[--i] );
+    d_lightRegionHullCount = 0;
 }
 
-// sub_4A56B0 (0x4A56B0) — squared distance from a point to an AABB (0 when inside).
-static float Region_DistSqFromBox( const float *p, const float *mins, const float *maxs )
-{
-    float r = 0.0f, d;
-    d = maxs[0] - p[0];
-    if ( d <= 0.0f ) { d = p[0] - mins[0]; if ( d > 0.0f ) r += d * d; } else r += d * d;
-    d = maxs[1] - p[1];
-    if ( d <= 0.0f ) { d = p[1] - mins[1]; if ( d > 0.0f ) r += d * d; } else r += d * d;
-    d = maxs[2] - p[2];
-    if ( d > 0.0f )  return r + d * d;
-    d = p[2] - mins[2];
-    if ( d > 0.0f )  return r + d * d;
-    return r;
-}
+// KIWI: the local copy here measured to the box's FAR side (maxs - p first), dropping big
+// casters that reach into the light radius.  0x4A56B0 is mins - p, then p - maxs.
+extern float PointToBoundsDistSq( const float *p, const float *mins, const float *maxs );   // pmesh.cpp 0x4A56B0
 
-// sub_4852E0 (0x4852E0) — find the entity DEF whose "targetname" == name (top-level
+// 0x4852E0 — find the entity DEF whose "targetname" == name (top-level
 // search; the prefab-scoped branch is unused for editor light region builds).
 static entity_s_def *Region_FindTargetEntity( selbrush_t *scope, const char *name )
 {
@@ -5697,14 +5100,14 @@ static int Region_GatherShadowBrushes( const float *light, float radSq, selbrush
             Entity_GetOrientation( (entity_s_def *)owner->def, (orientation_t *)orient, &childOr );
             // recurse into the prefab's active brush list.  The prefab sentinel head is
             // the prefab's embedded brush-list; reached by the binary as
-            // &owner->prefab->active_brushlist (the v18->owner->prefab->active_brushlist).
+            // &owner->prefab->active_brushlist.
             selbrush_t *pfHead = &((prefab_s *)owner->prefab)->brushes;
             n += Region_GatherShadowBrushes( light, radSq, pfHead, &childOr, out + n, cap - n );
             if ( n == cap )
                 return n;
             continue;
         }
-        if ( radSq < Region_DistSqFromBox( light, b->def->mins, b->def->maxs ) )
+        if ( radSq < PointToBoundsDistSq( light, b->def->mins, b->def->maxs ) )
             continue;
         out[n].orient = *orient;
         out[n].brush = b;
@@ -5733,7 +5136,7 @@ static int __cdecl Cam_LightGatherCached( KiwiLightCasterRecord *out,
     return LightPreview_GatherShadowBrushes( out, origin, radius );
 }
 
-// 0x406CE0  sub_406CE0 — submit the shadow-caster faces, add the light cube, run the
+// 0x406CE0 — submit the shadow-caster faces, add the light cube, run the
 // merge driver, append the produced hulls to the global array.
 static void Region_BuildForLight( int cls, const float *coneCenter, const float *coneDir,
                                   float radius, float cosHalfFov, int casterCount, const KiwiLightCasterRecord *recs )
@@ -5751,10 +5154,10 @@ static void Region_BuildForLight( int cls, const float *coneCenter, const float 
     {
         Brush_DrawSubmitFaceWindings( recs[i].brush, &recs[i].orient, a3, &faceList );
     }
-    sub_4DAD20( &faceList, a3 );        // light-cube faces (reads a3[+28] = radius)
+    Region_AddBoundsFaces( &faceList, a3 );   // light-cube faces (reads a3[+28] = radius)
 
     void *hulls[35];
-    unsigned int count = (unsigned int)sub_4DD260( &faceList, &desc, hulls );
+    unsigned int count = (unsigned int)Region_BuildHulls( &faceList, &desc, hulls );
 
     Region_FreeList( faceList );
 
@@ -5769,7 +5172,7 @@ static void Region_BuildForLight( int cls, const float *coneCenter, const float 
     }
 }
 
-// 0x406E00  sub_406E00 — for one light brush, build its region if radius>0 & spawnflags&3.
+// 0x406E00 — for one light brush, build its region if radius>0 & spawnflags&3.
 static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
                                 const orientation_t *orient )
 {
@@ -5789,9 +5192,7 @@ static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
         return;
 
     KiwiLightCasterRecord *recs = (KiwiLightCasterRecord *)operator new(
-        0x8000u * sizeof(KiwiLightCasterRecord) );
-    if ( !recs )
-        return;
+        0x8000u * sizeof(KiwiLightCasterRecord) );   // throws on failure, never NULL
     int casterCount = LightPreview_GatherShadowBrushes( recs, coneCenter, radius );
 
     float dir[3], cosInner, cosOuter, cosHalfFov;
@@ -5799,15 +5200,13 @@ static void Region_ForOneLight( selbrush_t *inst, selbrush_t *scope,
                             &cosInner, &cosOuter, &cosHalfFov );
     Region_BuildForLight( cls, coneCenter, dir, radius, cosHalfFov, casterCount, recs );
 
-    free( recs );
+    operator delete( recs );   // KIWI: was free() on operator new memory
 }
 
 // 0x406200  CCamWnd_AddLightPreview - append { inst, arg2, orient } to the camera's
 // light_preview_arr[] (LightPreviewRec, 56-byte stride); no-op if `inst` is already present.
 // When the 8-slot ring is full it drops the OLDEST record first (FIFO shift, count=7).
-// U-VP-CAM: the binary's return value is the __userpurge `result` register, i.e. the cam pointer
-// itself — no caller reads it, so the free fn returns void and the MFC forwarder at the bottom
-// reproduces the old `(int)cam` return for mainfrm.cpp/brush.cpp's declared signature.
+// The binary returned the cam pointer, which no caller reads, so this returns void.
 void CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientation_t *orient )
 {
     camwndState_t *cam = &g_camwndState;
@@ -5818,7 +5217,7 @@ void CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientati
     {
         for ( int i = 0; i < count; ++i )
             if ( (selbrush_t *)(intptr_t)cam->light_preview_arr[i].inst == inst )
-                return;                      // already queued — no-op (binary returns `result`)
+                return;                      // already queued — no-op
     }
     // FIFO evict the oldest when the 8-slot ring is full.
     if ( cam->light_preview_count == 8 )
@@ -5834,8 +5233,8 @@ void CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientati
     ++cam->light_preview_count;
 }
 
-// Both `m_pCamWnd->light_preview_count = 0` call sites (mainfrm.cpp OnLightPreviewClearAll,
-// map.cpp Map_New) reach that member directly; this is the free-function form of that write.
+// The `light_preview_count = 0` write; callers: mainfrm.cpp Cmd_OnClearPreviewList, map.cpp
+// Prefab_NextLevel.
 void CamWnd_ClearLightPreviews()
 {
     g_camwndState.light_preview_count = 0;
@@ -5874,7 +5273,7 @@ void CamWnd_RegionsForSelected()
 {
     camwndState_t *cam = &g_camwndState;
 
-    Region_ClearHulls();          // 0x406f1f — sub_406C00
+    Region_ClearHulls();
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -5887,21 +5286,20 @@ void CamWnd_RegionsForSelected()
     {
         camLightPreviewRec_t *r = &cam->light_preview_arr[i];
         selbrush_t *brush = (selbrush_t *)(intptr_t)r->inst;
-        // 0x406f76: the signed-byte gate is brush+52, not preview-record+52.
+        // the signed-byte gate is the brush's (brush+52), not the preview record's.
         if ( (brush->brushFlags & 0x80) == 0 )
             Region_ForOneLight( brush, (selbrush_t *)(intptr_t)r->arg2, &r->orient );
     }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  Shell-agnostic camera-viewport handlers (U-VP-CAM).  Every afx_msg body lives here as a
-//  free function on plain args; the MFC CCamWnd handlers below are thin translations, and the
-//  raw-Win32 WndProc at the end of this file feeds the SAME functions with the SAME conventions
-//  MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD size).  The window's
-//  flipped-Y (rc.bottom - y - 1) and the capture/focus calls are part of the handler bodies, so
-//  both shells get them identically.
+//  Camera-viewport handlers (U-VP-CAM).  Every afx_msg body lives here as a free function on
+//  plain args; the raw-Win32 WndProc at the end of this file and the ImGui shell feed them with
+//  the conventions MFC used (client coords, the MK_* wParam flag word, LOWORD/HIWORD size).
+//  The flipped Y (height - y - 1) is part of the handler bodies; capture/focus belong to the
+//  shell.
 //
-//  Callers declare these themselves (mainfrm.h is not this unit's to edit):
+//  Callers declare these themselves:
 //      extern camera_s *Ed_Camera();                                   // THE editor camera
 //      extern void CamWnd_OnCreate( HWND hwnd );
 //      extern void CamWnd_OnSize( HWND hwnd, int cx, int cy );
@@ -5913,21 +5311,17 @@ void CamWnd_RegionsForSelected()
 //      extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y );
 //      extern void CamWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags, int x, int y );
 //      extern void CamWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y );
-//      extern void CamWnd_OnContextMenuBrushLayer( unsigned int nID );
-//      extern void CamWnd_OnContextMenuSelectAll();
-//      extern void CamWnd_OnContextMenuDeselectAll();
-//  ...plus the non-handler entry points other TUs already reach through m_pCamWnd:
-//      extern void CamWnd_BuildMatrix();                    // was CCamWnd::Cam_BuildMatrix
-//      extern void CamWnd_Draw( HWND hwnd );                // was CCamWnd::Cam_Draw
-//      extern void CamWnd_ChangeFloor( int a2 );            // was Cam_ChangeFloor( cam, a2 )
-//      extern void CamWnd_MouseControl( float dtime );      // was Cam_MouseControl( cam, dt )
+//  ...plus the non-handler entry points:
+//      extern void CamWnd_BuildMatrix();
+//      extern void CamWnd_Draw( HWND hwnd );
+//      extern void CamWnd_ChangeFloor( int a2 );
+//      extern void CamWnd_MouseControl( float dtime );
 //      extern void CamWnd_MouseMoved( unsigned int buttons, int x, int y );
-//      extern void CamWnd_Scroll( float amount );           // was CCamWnd_Scroll( frame, amt )
-//      extern void CamWnd_CenterOnMap();                    // was Cam_CenterOnMap( cam )
-//      extern void CamWnd_RegionsForSelected();             // was Regions_ForSelected( cam )
-//      extern void CamWnd_AddLightPreview( selbrush_t *inst, int arg2, const orientation_t *o );
+//      extern void CamWnd_Scroll( float amount );
+//      extern void CamWnd_RegionsForSelected();
+//      extern void CamWnd_AddLightPreview( selbrush_t *inst, selbrush_t *arg2, const orientation_t *o );
 //      extern int  CamWnd_RemoveLightPreview( selbrush_t *removed );
-//      extern void CamWnd_ClearLightPreviews();             // was light_preview_count = 0
+//      extern void CamWnd_ClearLightPreviews();
 // ═════════════════════════════════════════════════════════════════════════════
 
 // Latch the client size (CCamWnd::OnCreate tail, after the base-class create).
@@ -5981,10 +5375,9 @@ void CamWnd_Paint( HWND hwnd )
     g_camwndState.camera.width  = g_camwndState.width;
     g_camwndState.camera.height = g_camwndState.height;
 
-    // The floating Dynamic-Lighting popup (CMainFrame::OnDynamicLighting 0x429960) is a CCamWnd
-    // whose hwnd the renderer never registered (R_MAX_WINDOWS=5 is full at startup); like the
-    // binary it renders nothing.  Skip cleanly so R_SetupRendertarget_CheckDevice's invalid-hwnd
-    // assert never fires for that dead window.
+    // A window the renderer never registered (in the binary, the floating Dynamic-Lighting
+    // popup: R_MAX_WINDOWS=5 is full at startup) renders nothing.  Skip cleanly so
+    // R_SetupRendertarget_CheckDevice's invalid-hwnd assert never fires for it.
     if ( !R_IsRegisteredRenderWindow( (HWND__ *)hwnd ) )
         return;
     if ( !R_SetupRendertarget_CheckDevice( (HWND__ *)hwnd ) )
@@ -6029,10 +5422,8 @@ void CamWnd_RenderToRT( int w, int h )
         R_AddCmdSetMaterialColor( s_white );
     }
 
-    // CamWnd_Draw's hwnd is used ONLY for the terrain-paint cursor ring (ScreenToClient +
-    // GetClientRect at camwnd.cpp:2308/2246, gated on cursor_visible && sub_401D50()); it is not
-    // the render target.  Pass the live d_hwndCamera so that path still resolves during the shell
-    // transition.
+    // CamWnd_Draw's hwnd fed only the removed terrain-paint cursor ring; it is not the render
+    // target.
     CamWnd_Draw( g_qeglobals.d_hwndCamera );
 
     {
@@ -6051,22 +5442,21 @@ void CamWnd_RenderToRT( int w, int h )
 void CamWnd_OnDestroy( HWND hwnd )
 {
     WINDOWPLACEMENT wndpl;
-    wndpl.length = sizeof( wndpl );                          // 0x402f2a (44)
-    if ( ::GetWindowPlacement( hwnd, &wndpl ) )              // 0x402f31
-        SaveRegistryInfo( "Radiant::CameraWindowPlace", &wndpl, 0x2C );   // 0x402f47
+    wndpl.length = sizeof( wndpl );                          // 44
+    if ( ::GetWindowPlacement( hwnd, &wndpl ) )
+        SaveRegistryInfo( "Radiant::CameraWindowPlace", &wndpl, 0x2C );
 }
 
-// 0x402f60  CCamWnd::OnKeyDown - a thin forward to CMainFrame::OnKeyDown.  Camera movement in
-// the binary is purely the RMB cursor-joystick fly plus the command-map camera-nudge
-// WM_COMMANDs; there are NO built-in WASD/arrow fly keys.  (The disabled kisak WASD/arrow fly
-// this handler used to carry lives in the MFC block below, still #if 0.)
+// 0x402f60  CCamWnd::OnKeyDown - in the binary a thin forward to CMainFrame::OnKeyDown; a
+// no-op here.  Camera movement in the binary is purely the RMB cursor-joystick fly plus the
+// command-map camera-nudge WM_COMMANDs; there are NO built-in WASD/arrow fly keys.
 void CamWnd_OnKeyDown( unsigned int nChar, unsigned int nRepCnt, unsigned int nFlags )
 {
     (void)nChar; (void)nRepCnt; (void)nFlags;
 }
 
-// 0x403160  CCamWnd::OnLButtonDown.  The 3D pick uses a bottom-left origin (flip Y), faithful
-// to the binary.
+// 0x403160  CCamWnd::OnLButtonDown.  The 3D pick uses a bottom-left origin (flip Y), as in
+// the binary.
 void CamWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
 {
     (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture/focus.
@@ -6089,15 +5479,10 @@ void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y )
     CamWnd_DropModelsToPlane( x, g_camwndState.height - y - 1, nFlags );
 }
 
+// 0x403310  CCamWnd::OnRButtonUp (the binary: ContextMenu -> Cam_MouseUp -> ReleaseCapture).
 void CamWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags, int x, int y )
 {
     (void)hwnd;   // P5 RTT: hidden child — flip against viewport size state; shell owns capture.
-    // KISAK ORDER DEVIATION from 0x403310: the binary does ContextMenu -> Cam_MouseUp ->
-    // ReleaseCapture, popping the menu while the RMB-down SetCapture is STILL HELD.  In this
-    // build's Win32 runtime TrackPopupMenu with the mouse captured by our own window no-shows /
-    // instantly dismisses - the port's own 2D path (CXYWnd::OnRButtonUp) had to release first
-    // too.  Cam_MouseUp only resets button/cursor state and does NOT touch cam_was_not_dragged,
-    // so the menu's drag gate survives the reorder.
     Cam_MouseUp( nFlags );
     // P5 RTT: OS ReleaseCapture on the hidden child would steal the mouse from the ImGui host;
     // the shell owns drag-capture, so the release is dropped here.
@@ -6105,12 +5490,10 @@ void CamWnd_OnRButtonUp( HWND hwnd, unsigned int nFlags, int x, int y )
     // appears sometimes when right clicking on an object GONE."  This call was the popup's
     // last live trigger (the modern layer's replay is fenced off in kiwi_viewport.cpp, and
     // this arm is the one the LEGACY shell dispatch reached — imgui_shell.cpp VP_Up — which
-    // is exactly why it appeared only "sometimes").  CamWnd_ContextMenu and its WM_COMMAND
-    // handlers below are LEFT INTACT as ported reference; only the trigger is removed.
-    // Cam_MouseUp above still runs, so the cursor/drag teardown is unchanged.
+    // is exactly why it appeared only "sometimes").  KIWI: the popup builder itself is now
+    // deleted too.  Cam_MouseUp above still runs, so the cursor/drag teardown is unchanged.
     (void)x; (void)y;
-    // CamWnd_ContextMenu( hwnd, x, g_camwndState.height - y - 1 );  // no-drag right-click popup
-    // 0x403367: the binary does NOT chain to CWnd::OnRButtonUp (which would DefWindowProc ->
+    // The binary does NOT chain to CWnd::OnRButtonUp (which would DefWindowProc ->
     // WM_CONTEXTMENU); omit it to match.
 }
 
@@ -6126,46 +5509,34 @@ void CamWnd_OnMouseMove( HWND hwnd, unsigned int nFlags, int x, int y )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  MFC shell — CCamWnd.  Each handler is a translation layer only (extract point/flags, call
-//  the free fn, chain the base class where it used to); the non-handler methods and the
-//  cam-pointer free functions other TUs still call are thin forwarders onto g_camwndState.
-//  U-GUARD flips this whole block off globally; the #ifndef here is the same gate.
-//  (The TU still needs U-GLOBALS before it compiles with the flag ON — CamWnd_OnKeyDown and
-//  CamWnd_MouseControl's WM_TIMER poke reach the main frame through g_pParentWnd, a CMainFrame*.)
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ═════════════════════════════════════════════════════════════════════════════
-//  Raw-Win32 shell — the CCamWnd twin (U-VP-CAM).  Same free fns, same conventions:
-//    (ImGui first)  → ImGuiShell_HandleMessage, consumed → return 0 (the CCamWnd::WindowProc
-//                    override above, reproduced at the head of the WndProc)
+//  Raw-Win32 shell — the CCamWnd twin (U-VP-CAM), with the binary's MFC conventions:
+//    (ImGui first)  → ImGuiShell_HandleMessage, consumed → return 0
 //    WM_CREATE     → CamWnd_OnCreate                    (CCamWnd::OnCreate tail)
 //    WM_SIZE       → DefWindowProc, then CamWnd_OnSize   (MFC chains CWnd::OnSize FIRST)
 //                    cx/cy = LOWORD/HIWORD(lParam), as MFC's ON_WM_SIZE thunk extracts them
-//    WM_PAINT      → BeginPaint + CamWnd_Paint + EndPaint (CPaintDC's job in the MFC shell)
+//    WM_PAINT      → BeginPaint + CamWnd_Paint + EndPaint (CPaintDC's job in the binary)
 //    WM_ERASEBKGND → return 1                           (CCamWnd::OnEraseBkgnd returns TRUE)
 //    WM_DESTROY    → DefWindowProc, then CamWnd_OnDestroy (MFC chains CWnd::OnDestroy FIRST,
 //                    then saves the placement)
 //    WM_KEYDOWN    → CamWnd_OnKeyDown, return 0         (the handler does not call Default())
 //                    nRepCnt = LOWORD(lParam), nFlags = HIWORD(lParam), as MFC's thunk splits it
-//    WM_LBUTTONDOWN/WM_RBUTTONDOWN → CamWnd_On?ButtonDown, return 0 (those handlers do NOT
-//                    chain the base class — SetFocus + SetCapture happen inside them)
+//    WM_LBUTTONDOWN/WM_RBUTTONDOWN → CamWnd_On?ButtonDown, return 0 (the binary's handlers do
+//                    NOT chain the base class — SetFocus + SetCapture happen inside them)
 //    WM_LBUTTONUP  → CamWnd_OnLButtonUp, THEN DefWindowProc (the MFC handler tail-calls
 //                    CWnd::OnLButtonUp, which is Default() → DefWindowProc)
-//    WM_RBUTTONUP  → CamWnd_OnRButtonUp, return 0       (0x403367 deliberately does NOT chain:
-//                    DefWindowProc would post WM_CONTEXTMENU on top of our own popup)
+//    WM_RBUTTONUP  → CamWnd_OnRButtonUp, return 0       (the binary deliberately does NOT chain:
+//                    DefWindowProc would post WM_CONTEXTMENU on top of its own popup)
 //    WM_MOUSEMOVE  → CamWnd_OnMouseMove, return 0       (this handler does not chain either)
-//    WM_COMMAND    → the face-picker popup's IDs, i.e. the MFC ON_COMMAND_RANGE(0x8CA0..0x8CB3)
-//                    + ON_COMMAND(0x8CB4/0x8CB5) entries; TrackPopupMenu posts them to the owner
-//                    window, which is this HWND in both shells
+//    (KIWI: no WM_COMMAND entry - the face-picker popup that posted 0x8CA0..0x8CB5 is gone)
 //    x/y = (short)LOWORD/HIWORD(lParam) — client coords, exactly CPoint(lParam);
 //    nFlags = wParam — the MK_* word MFC passes as UINT nFlags.
 //  No wheel entry: CCamWnd's message map has none — the wheel dolly arrives at the MAIN FRAME
-//  (CMainFrame::OnScroll → CamWnd_Scroll), so the frame's shell owns it in both builds.
+//  (Radiant_OnMouseWheel → CamWnd_Scroll).
 //  No WM_CHAR entry either: the map has ON_WM_KEYDOWN only.
 //
-//  d_hwndCamera registration stays the CALLER's job in BOTH shells: mainfrm.cpp's
-//  CreateQEChildren sets g_qeglobals.d_hwndCamera from the new HWND (right after Create), and
-//  gfxwrapper.cpp's R_BeginRegistrationInternal later calls R_InitRendererForWindow on it.
+//  d_hwndCamera registration is the CALLER's job: radiant_main.cpp sets
+//  g_qeglobals.d_hwndCamera from CamWnd_CreateRaw's HWND, and gfxwrapper.cpp's
+//  R_BeginRegistrationInternal later calls R_InitRendererForWindow on it.
 // ═════════════════════════════════════════════════════════════════════════════
 
 static const char *const CAMWND_CLASS_NAME = "KIWICamWnd";
@@ -6230,36 +5601,12 @@ LRESULT CALLBACK CamWnd_WndProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_RBUTTONUP:
         CamWnd_OnRButtonUp( hwnd, (unsigned int)wParam,
                             (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
-        return 0;   // 0x403367 does NOT chain the base class
+        return 0;   // the binary does NOT chain the base class
 
     case WM_MOUSEMOVE:
         CamWnd_OnMouseMove( hwnd, (unsigned int)wParam,
                             (int)(short)LOWORD( lParam ), (int)(short)HIWORD( lParam ) );
         return 0;
-
-    case WM_COMMAND:
-    {
-        // The face-picker popup routes here (TrackPopupMenu's owner window).  Same three
-        // entries as the message map: the 0x8CA0..0x8CB3 per-face range, then select-all /
-        // deselect-all.  Menu commands arrive with HIWORD(wParam) == 0 and lParam == 0.
-        const unsigned int nID = (unsigned int)LOWORD( wParam );
-        if ( nID >= 0x8CA0 && nID <= 0x8CB3 )
-        {
-            CamWnd_OnContextMenuBrushLayer( nID );
-            return 0;
-        }
-        if ( nID == 0x8CB4 )
-        {
-            CamWnd_OnContextMenuSelectAll();
-            return 0;
-        }
-        if ( nID == 0x8CB5 )
-        {
-            CamWnd_OnContextMenuDeselectAll();
-            return 0;
-        }
-        break;
-    }
     }
     return DefWindowProcA( hwnd, msg, wParam, lParam );
 }

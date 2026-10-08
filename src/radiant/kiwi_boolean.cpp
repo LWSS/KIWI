@@ -17,6 +17,7 @@
 #include "kiwi_command.h"
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_split.h"
 #include "kiwi_vec.h"     // Dot3/Sub3/...
@@ -25,30 +26,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <vector>
-
-// Ported entry points.
-extern camera_s   *Ed_Camera();                                               // camwnd.cpp:161
-extern int         Sys_Printf( const char *fmt, ... );                        // win_qe3.cpp
-extern int         g_nUpdateBits;                                             // 0x25D5A74 (mainfrm.cpp)
-extern selbrush_t *Brush_AddToList( brush_t *def, entity_s *owner );          // brush.cpp:669  (0x475980)
-extern void        Brush_AddToList2( selbrush_t *b );                         // brush.cpp:927  (0x4765a0)
-extern void        Brush_Free( selbrush_t *b );                               // brush.cpp:1002  (0x475ba0)
-extern void        Select_Deselect( int bAlsoFreeFaces );                     // select.cpp:1444 (0x48E800)
-extern void        Select_Brush( selbrush_t *brush, char some_overwrite,
-                                 char bStatus, char center_grid_on_selection ); // select.cpp:884
-extern void        Radiant_ExecCommand( unsigned int cmdId );                 // mainfrm.cpp:4054
-// Difference tools are outside selected_brushes, so cover them explicitly.
-// Entities must precede their brushes in the undo record.
-extern void        Undo_AddBrush( entity_brush_s *pBrushInst );                // undo.cpp:494  (0x45e680)
-extern void        Undo_AddEntity( entity_s *entity );                                   // undo.cpp:601  (0x45e8a0)
-
-// Translucent fill entry points; R_AddCmdSetMaterialColor is in r_rendercmds.h.
-extern char        Byte4PackPixelColor( float *from, GfxColor *out );          // 0x402ac0
-extern void        __cdecl R_AddRenderCmdDrawTris(
-                       Material *material, MaterialTechniqueType techType, short indexCount,
-                       const uint16_t *indices, short vertexCount,
-                       const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-                       const float ( *st )[2] );                               // 0x4fd1c0
 
 namespace
 {
@@ -1067,7 +1044,6 @@ bool KiwiBool_CanBoolean()
 // Registration and lookup.
 void KiwiBool_RegisterCommands()
 {
-    extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
     Radiant_RegisterCommand( "KiwiBoolean", 0, 0, KIWI_CMD_BOOLEAN );
 }
 

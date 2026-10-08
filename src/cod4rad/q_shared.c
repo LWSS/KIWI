@@ -172,22 +172,6 @@ unsigned long long LongSwap64(long long ll)
     return Long64Swap(ll);
 }
 
-/*
-================
-FloatSwap64
-
-Byte-swap a 64-bit float (double).
-================
-*/
-double FloatSwap64(double d)
-{
-    long long bits;
-    memcpy(&bits, &d, sizeof(bits));
-    bits = (long long)Long64Swap(bits);
-    memcpy(&d, &bits, sizeof(d));
-    return d;
-}
-
 #define VA_BUFFER_SIZE        31999    /* g_vaBuffer payload length (index of terminator) */
 #define VA_CIRCULAR_BUF_SIZE  0x7D00   /* g_vaBuffer total length = VA_BUFFER_SIZE + 1 */
 

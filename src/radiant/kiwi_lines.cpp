@@ -8,14 +8,7 @@
 #include <gfx_d3d/r_rendercmds.h>   // R_AddCmd_Line3D, GfxPointVertex, GfxColor
 #include "kiwi_lines.h"
 #include "kiwi_camera.h"            // KiwiCam_Ortho
-
-// Ported entry points.
-extern int   R_Add3DLine( GfxPointVertex *verts, const orientation_t *orient,
-                          const float *p1, const float *p2, const unsigned int *color,
-                          char width, int vertCount, int maxVertCount );   // draw.cpp 0x40c110
-extern char  Byte4PackPixelColor( float *from, GfxColor *out );            // 0x402ac0
-extern float world_orient_matrix[4][3];                                    // entity.cpp 0x6DE290
-extern camera_s *Ed_Camera();                                              // camwnd.cpp
+#include "kiwi_ported.h"
 
 namespace
 {
@@ -67,15 +60,6 @@ void KiwiLines_Flush()
 int KiwiLines_Remaining()
 {
     return s_remaining;
-}
-
-// `.w = 1` selects the flat RGB override used by Ed_EmitLineBatch colour runs.
-void KiwiTris_FillFlatColor( const float rgba[4] )
-{
-    if ( !rgba )
-        return;
-    const float flat[4] = { rgba[0], rgba[1], rgba[2], 1.0f };
-    R_AddCmdSetMaterialColor( flat );
 }
 
 void KiwiTris_FillNeutral()

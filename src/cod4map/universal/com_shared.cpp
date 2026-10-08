@@ -6,9 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_Com_Memcpy;
-
-
 /*
 ================
 Com_Error

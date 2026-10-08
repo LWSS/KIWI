@@ -4,10 +4,9 @@
 
 #include "cod2rad64.h"
 
-/* The recovered MSVC 2005 powf experiment depends on a private lookup-table
- * header that was never included in this source bundle.  Keep the standalone
- * build reproducible with the CRT implementation; native Cod4Rad math-runtime
- * classification is tracked independently from compiler-owned lighting code. */
+/* powf is the CRT implementation, which keeps the standalone build
+ * reproducible; native Cod4Rad math-runtime classification is tracked
+ * independently from compiler-owned lighting code. */
 
 extern void memcpy_fast(void *dst, const void *src, int size);
 extern void BuildFinalLightmap_PerPixel(int lightmapIdx, int col, int row);
@@ -30,7 +29,6 @@ unsigned char g_lightmapOutput[MAX_RAD_LIGHTMAP_BYTES];
 
 void          *g_lightingSampleCallback;
 static void   *g_lightingThreadSampleCallback;
-void          *g_lightingPixelCallback;
 int            g_lightmapSize = 0;
 void          *g_lightingSamples;
 int            g_usefulSampleCount = 0;
@@ -284,63 +282,10 @@ void Lighting_InitSamples(void)
 
 /*
 ================
-Lighting_InitAntiBleed
-
-Allocate anti-bleed vars for empty samples.
-================
-*/
-void Lighting_InitAntiBleed(void)
-{
-    int antiBleedCount;
-    size_t allocSize;
-    char *antiBleedPool;
-    int antiBleedIndex;
-    int lmap, row, col;
-    long long sampleOffset = 0;
-
-    antiBleedCount = g_totalSampleCount - g_usefulSampleCount;
-    allocSize = (size_t)antiBleedCount * sizeof(SampleVars_t);
-
-    antiBleedPool = (char *)malloc(allocSize ? allocSize : 1);
-    if (!antiBleedPool)
-        ErrorMsg("Couldn't allocate %zu bytes to fix lightmap bleeding\n", allocSize);
-
-    memset(antiBleedPool, 0, allocSize);
-
-    antiBleedIndex = 0;
-
-    for (lmap = 0; lmap < g_lightmapSize; lmap++)
-    {
-        for (row = 0; row < 512; row++)
-        {
-            for (col = 0; col < 512; col++)
-            {
-                char *sampleSlot;
-
-                sampleSlot = (char *)g_lightingSamples + sampleOffset;
-
-                if (*(void **)sampleSlot == NULL)
-                {
-                    Assert(antiBleedIndex < g_totalSampleCount - g_usefulSampleCount, 0);
-
-                    *(void **)sampleSlot = antiBleedPool
-                        + (long long)antiBleedIndex * SAMPLE_VARS_SIZE;
-                    antiBleedIndex++;
-                }
-
-                sampleOffset += 32;
-            }
-        }
-    }
-
-    Assert(antiBleedIndex == g_totalSampleCount - g_usefulSampleCount, 0);
-}
-
-/*
-================
 InitBleeding
 
-Init anti-bleed, then start bilinear bleeding pass.
+Start the bilinear bleeding pass.  KIWI: cod2rad's anti-bleed sample-vars pass
+(Lighting_InitAntiBleed) is not in CoD4 and is gone.
 ================
 */
 void InitBleeding(int threadCount)
@@ -808,8 +753,8 @@ static void Lighting_BuildFinalScalarSamples(int lmapIndex, int col, int row,
     }
 }
 
-/* lighting.cpp 0x415270.  Unlike the old helper this operates in place and
- * does not add ambient; the native final producer adds ambient before gamma. */
+/* lighting.cpp 0x415270.  Operates in place and does not add ambient; the
+ * native final producer adds ambient before gamma. */
 static void Lighting_AdjustNativeContrast(float *colors, int sampleCount,
                                           int baseIndex)
 {
@@ -1426,23 +1371,6 @@ static void Lighting_SampleThreadCallback_Trampoline(int sampleIndex, int thread
 
 /*
 ================
-Lighting_PixelCallback_Trampoline
-
-Trampoline for per-pixel callback.
-================
-*/
-typedef void (*PixelCallbackFn)(void *pixel, int index, int a2);
-
-void Lighting_PixelCallback_Trampoline(int pixelIndex, int a2)
-{
-    void *pixel;
-
-    pixel = (char *)g_lightingSamples + ((long long)pixelIndex << 23);
-    ((PixelCallbackFn)g_lightingPixelCallback)(pixel, pixelIndex, a2);
-}
-
-/*
-================
 ForEachUsefulLightingSample
 
 Iterate all useful lighting samples.
@@ -1460,17 +1388,4 @@ void ForEachUsefulLightingSampleThreaded(void *callback, int threadCount)
     ForEachLightmapPixel(g_lightmapSize << 18,
                          (void *)Lighting_SampleThreadCallback_Trampoline,
                          threadCount);
-}
-
-/*
-================
-Lighting_ForEachPixel_Helper
-
-Iterate all lightmap pixels.
-================
-*/
-void Lighting_ForEachPixel_Helper(void *callback, int a2)
-{
-    g_lightingPixelCallback = callback;
-    ForEachLightmapPixel(g_lightmapSize, (void *)Lighting_PixelCallback_Trampoline, a2);
 }

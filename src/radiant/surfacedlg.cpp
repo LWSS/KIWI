@@ -6,42 +6,39 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include "mainfrm.h"
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 
 // ── selection state (select.cpp) ──────────────────────────────────────────────
-extern selbrush_t   selected_brushes;                 // engine_stubs (0x23F1864)
 #define SEL_FACE_COUNT() (g_SelectedFaces.GetSize())
 
 // ── texture edit core (select.cpp / materialdef.cpp / brush.cpp) ───────────────
-extern void         Brush_SetTexture( MaterialDef *a1, char a3 );           // 0x48F170
-extern void         Brush_SetTextureMapping( texdef_sub_t *a2 );            // 0x48F4F0 (select.cpp) — apply the current-layer texdef to the selection (Undo-bracketed)
+extern void         Brush_SetTexture( MaterialDef *material, char planarProject );   // 0x48F170
+extern void         Brush_SetTextureMapping( texdef_sub_t *texdef );        // 0x48F4F0 (select.cpp) — apply the current-layer texdef to the selection (Undo-bracketed)
 extern void         Brush_SetSampleSize( int size );                        // 0x48F800 (select.cpp) — apply sample size to the selection
-extern qtexture_s  *MaterialDef_GetLayeredMaterial( MaterialDef *m );       // 0x4314A0
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );             // 0x431640
-extern void         SetMaterial( const char *name, patchMesh_material *out );// 0x4315C0 (materialdef.cpp)
 extern void         TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef ); // 0x472DF0 (materialdef.cpp)
 extern void         Patch_SetTextureInfo( texdef_sub_t *texDef );           // 0x447760 (pmesh.cpp) — relative patch texdef transform
 namespace LayerMat { int GetCurrentLayer( MaterialDef *def ); }             // 0x431B30
 extern void         Material_SetMode( int iMode );                          // 0x45B910 (texwnd.cpp)
 
-// g_patch_texdef (IDB 0x23F15F8, patch_texdef_t = 44 B) — the current-texture-window TEMPLATE
+// g_patch_texdef (0x23F15F8, patch_texdef_t = 44 B) — the current-texture-window TEMPLATE
 // the dialog edits when nothing (or only patches) is selected, PLUS the shared sample-size the
 // readout shows / the apply reads back.  {MaterialDef def; int unk3; float sample_size}.
 struct patch_texdef_t
 {
-    MaterialDef mtlDef;       // 0x00 (36 B)  (binary name — assert strings)
+    MaterialDef mtlDef;       // 0x00 (36 B)  (name used by the assert strings)
     int         unk3;         // 0x24
     float       sample_size;  // 0x28
 };
 static_assert( sizeof( patch_texdef_t ) == (sizeof(void *) == 8 ? 56 : 44), "patch_texdef_t" );
-patch_texdef_t g_patch_texdef;      // IDB g_patch_texdef (0x23F15F8)
+patch_texdef_t g_patch_texdef;      // 0x23F15F8
 
 // Fit the texture to the selected face(s) (Brush_FitTexture 0x4939E0, select.cpp) —
 // scale/shift the texdef so the texture spans the face `x`×`y` times.  The "Fit"
 // button passes (1,1,0): one tiling across the face, computed bounds, no selection-wide.
-extern void         Brush_FitTexture( float x, float y, int a4 );           // 0x4939E0
+extern void         Brush_FitTexture( float x, float y, int acrossSelection );   // 0x4939E0
 
 // ── patch-texturing core (pmesh.cpp / select.cpp) — the Surface Inspector patch row ──
 extern void         Select_SetTexture( float *out );                        // 0x456D70 (layer sample size)
@@ -49,29 +46,11 @@ extern void         Patch_NaturalizeSelected( bool unk, bool cap, float x, float
 extern void         Patch_Lightmap_Texturing();                             // 0x448110
 extern void         Patch_SetTexturing( float sx, float sy, int mode );     // 0x446B60
 
-extern int          g_nUpdateBits;                    // engine_stubs (0x25D5A74)
+// KIWI: the multi-layer texmod transaction (SetTexMods 0x458270 snapshot into face mtldef[3] +
+// a template scratch, SurfaceDlg_Wnd02 0x4583F0 commit back, the pending-edits flag) is gone
+// with the MFC inspector; the ImGui inspector applies each edit live.
 
-// ── multi-layer texmod transaction (the #2 material epic cluster) ──────────────
-//  SetTexMods (0x458270) snapshots the current edit-layer's texdef into a scratch slot;
-//  SurfaceDlg_Wnd02 (0x4583F0) commits the (possibly edited) scratch back.  The scratch
-//  is a standalone MaterialDef-sized region (IDB unk_23F15D4 @ 0x23F15D4) for the
-//  current-texture TEMPLATE; per-face the scratch layer is the face's mtldef[3] (the
-//  unused 4th MaterialDef slot).  SurfaceInspector_some_boolean_is_up_to_date (0x23F15D2)
-//  is the "dialog edits are pending" dirty flag SetTexMods clears and the edit-commit sets.
-MaterialDef g_surfTexModScratch;            // IDB unk_23F15D4 (0x23F15D4) — template scratch
-char        g_surfTexModDirty = 0;          // IDB SurfaceInspector_some_boolean_is_up_to_date
-
-// PMESH_56/57 thin wrappers (pmesh.cpp) — patch GET/SET, reached via brush_t.patch.
-extern void  PMESH_56_extern( patchMesh_t *p );       // 0x44CFB0 (patch save)
-extern void  PMESH_57_extern( patchMesh_t *p );       // 0x44D0C0 (patch restore + Patch_Rebuild)
-
-#define SURFACEDLG_CPP "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\SurfaceDlg.cpp"
-
-// The radiant verbose Assert stub (engine_stubs.cpp): type 0 = log-to-stderr + CONTINUE.
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-extern int  Sys_Printf( const char *fmt, ... );       // win_qe3.cpp (status/console print)
-
-// ── surface-inspector globals (IDB surfDlgGlob.hwnd 0x23F1624 / the CSurfaceDlg instance) ──
+// ── surface-inspector globals (surfDlgGlob.hwnd 0x23F1624) ──
 //  surfDlgGlob.hwnd = the inspector HWND when open, 0 when closed (map.cpp reads it to know
 //  whether to refresh the inspector after a load).  g_bNewFace (0x23F15D0) gates the
 //  "edit the picked face" vs "edit the current-texture window" path (the binary derives
@@ -127,19 +106,16 @@ void Surf_MaterialWH( MaterialDef *md, int *w, int *h )
 }
 
 // ── Surface-inspector sample-size readouts ────────────────────────────────────
-//   Ported verbatim from IDA; feed the inspector's sample-size field + patch name.
-//   The IDB's SurfaceDlg_GetMaterialSize used the OLD flattened face_t (28-byte texdef
-//   slots); the corrected port face_t has 36-byte mtldef[] slots, so the per-layer step
-//   is `&face->mtldef[layer]` (matching Surf_ReadTexdef's proven idiom).
-extern int   QE_SingleBrush();                                  // qe3.cpp 0x48C8B0
-extern void  SetMaterial( const char *name, patchMesh_material *out ); // 0x4315C0
+//   Feed the inspector's sample-size field + patch name.  face_t has 36-byte mtldef[]
+//   slots, so the per-layer step is `&face->mtldef[layer]` (matching Surf_ReadTexdef).
+extern int   QE_SingleBrush_Check();                            // qe3.cpp (QE_SingleBrush 0x48C8B0, silent)
 extern LayerMaterialDef *Patch_GetTextureName();                // pmesh.cpp 0x448670 (below)
 
 // SurfaceDlg_GetMaterialSize (0x456F50) — the face's proportional texel scale
 // (size[0]/width) when the scale is isotropic (size[1]*width == height*size[0]), else 0.
 float SurfaceDlg_GetMaterialSize( face_t *f )
 {
-    if ( !f ) Assert( SURFACEDLG_CPP, 166, 0, "%s", "f" );
+    iassert( f );   // SurfaceDlg.cpp:166
     MaterialDef *md = &f->mtldef[ LayerMat::GetCurrentLayer( &f->mtldef[0] ) ];
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( &f->mtldef[0] );
     int width  = lm ? lm->width  : 512;
@@ -147,7 +123,7 @@ float SurfaceDlg_GetMaterialSize( face_t *f )
     float *size = md->mat_texDef.size;
     if ( size[1] * (float)width != (double)height * size[0] )
         return 0.0f;
-    if ( !width ) Assert( SURFACEDLG_CPP, 173, 0, "%s", "size[0]" );
+    iassert( width );   // SurfaceDlg.cpp:173
     return (float)( size[0] / (float)width );
 }
 
@@ -156,7 +132,7 @@ float SurfaceDlg_GetMaterialSize( face_t *f )
 // all its faces (0 if they disagree).
 float SurfaceDlg_GetMaterialSize_Patch( brush_t *b )
 {
-    if ( !b ) Assert( SURFACEDLG_CPP, 183, 0, "%s", "b" );
+    iassert( b );   // SurfaceDlg.cpp:183
     patchMesh_t *patch = b->patch;
     if ( patch )
     {
@@ -211,147 +187,11 @@ float GetBrushfaceSampleSize()
     return sz;
 }
 
-// Read the current selection's texdef (the picked face / current-texture template).
-// Returns false when there is no editable MaterialDef.  `out` floats: size0 size1
-// shift0 shift1 rotate (the .map order minus unk3/sample).
-bool Surf_ReadTexdef( float out[5], int *wOut, int *hOut )
-{
-    MaterialDef *md = Surf_TargetMaterialDef();
-    // "No editable MaterialDef" includes an UNINITIALIZED current-texture template: when the
-    // inspector is opened with nothing selected and no current texture yet, Surf_TargetMaterialDef
-    // returns &random_texture_stuff[layer].mtl with BOTH lyrMtl and radMtl null. MtlDef_IsValid
-    // (materialdef.cpp) requires EXACTLY ONE set, so LayerMat::GetCurrentLayer would trip its
-    // level-0 iassert (debug-break). Treat an invalid def as "not editable" → empty fields, no
-    // assert (the binary's GetCurrentLayer logs-and-returns-0 here; this is the cleaner equivalent).
-    if ( !md || ( ( md->lyrMtl != nullptr ) + ( md->radMtl != nullptr ) ) != 1 )
-        return false;
-    int layer = LayerMat::GetCurrentLayer( md );
-    texdef_sub_t *td = &md->mat_texDef + layer;
-    out[0] = td->size[0];  out[1] = td->size[1];
-    out[2] = td->shift[0]; out[3] = td->shift[1];
-    out[4] = td->rotate;
-    if ( wOut || hOut ) { int w, h; Surf_MaterialWH( md, &w, &h ); if ( wOut ) *wOut = w; if ( hOut ) *hOut = h; }
-    return true;
-}
-
-// Apply STORED texdef values (size in texels, shift in texels, rotate in degrees) to the
-// selected face(s).  This is the heart of the inspector: write the target MaterialDef's
-// texdef, then Brush_SetTexture (copies it onto every selected face + rebuilds windings /
-// faceVis / bumps version), then invalidate every view so the camera re-projects the
-// texture through Face_MoveTexture (Stage-1d faithful texcoords).  Headless-safe.
-void Surf_ApplyTexdefRaw( float size0, float size1, float shift0, float shift1, float rotate )
-{
-    MaterialDef *md = Surf_TargetMaterialDef();
-    if ( !md )
-        return;
-    int layer = LayerMat::GetCurrentLayer( md );
-    texdef_sub_t *td = &md->mat_texDef + layer;
-    td->size[0]  = ( size0 != 0.0f ) ? size0 : 0.25f;   // 0 size ⇒ Face_MoveTexture forces 128; keep sane
-    td->size[1]  = ( size1 != 0.0f ) ? size1 : 0.25f;
-    td->shift[0] = shift0;
-    td->shift[1] = shift1;
-    td->rotate   = rotate;
-
-    Brush_SetTexture( md, 0 );   // propagate to selected faces + rebuild geometry/version
-    g_nUpdateBits = -1;          // invalidate every view → camera re-projects (Face_MoveTexture)
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  MULTI-LAYER TEXMOD TRANSACTION (the #2 material epic) — SetTexMods / SurfaceDlg_Wnd02
-//  + the per-brush PostDoSurface02 / PostDoSurface02_Patch helpers.  Faithful ports of
-//  the IDB cluster (port 13343); every per-layer stride below was traced from the DISASM
-//  (hex-rays renders them as `planepts[3*layer+3]` / `pad_0x0088[8]` artifacts):
-//
-//   * the per-FACE scratch is face->mtldef[3] (the unused 4th MaterialDef slot):
-//       face + 0x90 = face + 0x24 + 3*0x24 = mtldef[3]  (disasm `add edi,90h` + rep movsd 0x24).
-//   * the per-FACE source/dest layer is face->mtldef[current_edit_layer]:
-//       face + (9*layer+9)*4 = face + 0x24 + layer*0x24 = mtldef[layer]
-//       (disasm `lea eax,[eax+eax*8+9]; lea ...,[face+eax*4]`).
-//   * the TEMPLATE scratch is g_surfTexModScratch (IDB unk_23F15D4); the template layer
-//       block is random_texture_stuff[layer] (stride 0x834 = 2100 B; disasm `imul esi,834h`).
-//   * MaterialDef = 0x24 = 36 bytes (the rep-movsd count is always 9 dwords).
-// ══════════════════════════════════════════════════════════════════════════════
-
-// Surf_PostDoSurface02 (0x47CA50) now lives in brush.cpp — assert brush.cpp:5481.
-extern void Surf_PostDoSurface02( brush_t *def );          // brush.cpp 0x47CA50
-
-// Surf_PostDoSurface02_Patch (0x47CAF0) now lives in brush.cpp — assert brush.cpp:5495.
-extern void Surf_PostDoSurface02_Patch( brush_t *def );    // brush.cpp 0x47CAF0
-
-// SurfaceInspector::SetTexMods (0x458270) — open / layer-switch SAVE pass.  Snapshot the
-// current-texture TEMPLATE into the scratch, then save every selected brush's faces (mtldef
-// [current]→mtldef[3]) and every selected FACE's current-layer texdef into its mtldef[3]
-// scratch.  Clears the dirty flag.  (qmemcpy direction: scratch ← live, verified from disasm.)
-void SurfaceInspector_SetTexMods()
-{
-    iassert( surfDlgGlob.hwnd );   // SurfaceDlg.cpp:683
-
-    // scratch ← random_texture_stuff[current_edit_layer].mtl  (rep movsd, dst=scratch)
-    g_surfTexModScratch = g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].mtl;
-
-    g_surfTexModDirty = 0;
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-        Surf_PostDoSurface02( b->def );
-
-    int count = SEL_FACE_COUNT();
-    for ( int i = 0; i < count; ++i )
-    {
-        selface_t  &selFace = g_SelectedFaces.GetAt( i );
-        selbrush_t *brush = selFace.brush;
-        int index = selFace.index;
-        iassert( selFace.face == &selFace.brush->faces[selFace.index] );    // SurfaceDlg.cpp:695
-        iassert( selFace.brush->version == selFace.brush->def->version );   // SurfaceDlg.cpp:696
-        face_t *f = &brush->def->faces[index];
-        // KEEP_VERBOSE: inlined per-face body of Surf_PostDoSurface02 (brush.cpp:5464 is
-        // its carrier iassert) — this loop walks g_SelectedFaces, not a brush, so no call.
-        if ( !f )
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\brush.cpp", 5464, 0, "%s", "f" );
-        f->mtldef[3] = f->mtldef[g_qeglobals.current_edit_layer];   // mtldef[3] ← mtldef[current]
-    }
-}
-
-// SurfaceDlg_Wnd02 (0x4583F0) — close / commit APPLY pass.  Restore the current-texture
-// TEMPLATE from the scratch (always), then — only if the dirty flag is set — commit every
-// selected brush's faces (mtldef[3]→mtldef[current], ++version, PMESH_57) and every selected
-// FACE's mtldef[3] back into its current-layer texdef (++version).  Mirror of SetTexMods.
-void SurfaceInspector_Wnd02()
-{
-    iassert( surfDlgGlob.hwnd );   // SurfaceDlg.cpp:708
-
-    bool wasDirty = ( g_surfTexModDirty != 0 );
-    // random_texture_stuff[current_edit_layer].mtl ← scratch  (rep movsd, src=scratch)
-    g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].mtl = g_surfTexModScratch;
-    if ( !wasDirty )
-        return;
-
-    g_surfTexModDirty = 0;
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-        Surf_PostDoSurface02_Patch( b->def );
-
-    int count = SEL_FACE_COUNT();
-    for ( int i = 0; i < count; ++i )
-    {
-        selface_t  &selFace = g_SelectedFaces.GetAt( i );
-        selbrush_t *brush = selFace.brush;
-        int index = selFace.index;
-        iassert( selFace.face == &selFace.brush->faces[selFace.index] );    // SurfaceDlg.cpp:722
-        iassert( selFace.brush->version == selFace.brush->def->version );   // SurfaceDlg.cpp:723
-        brush_t *def = brush->def;
-        face_t *f = &def->faces[index];
-        // KEEP_VERBOSE: inlined per-face body of Surf_PostDoSurface02_Patch (brush.cpp:5471
-        // is its carrier iassert) — this loop walks g_SelectedFaces, not a brush, so no call.
-        if ( !f )
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\brush.cpp", 5471, 0, "%s", "f" );
-        f->mtldef[g_qeglobals.current_edit_layer] = f->mtldef[3];   // mtldef[current] ← mtldef[3]
-        ++def->version;
-    }
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  CSurfaceDlg — the Surface Inspector, a modeless CDialog on IDD_SURFACE_INSPECTOR (116).
-//  1:1 with the binary (CDialog::Create(IDD_SURFACE_INSP) in DoSurface 0x4585d0); the RC
-//  template + control ids are the binary's (res/radiant.rc).  The data flow mirrors the
-//  CSurfaceDlg cluster exactly:
+//  Created by DoSurface (0x4585d0); the RC template + control ids are in res/radiant.rc.
+//  The data flow:
 //    * SurfaceInspector_GetMaterialDef (0x457950) — READ every edit control into the target
 //      texdef (stretch*width/height → texels for non-patch), update the "Repeats in" readouts,
 //      SetMaterial + TexMatToFakeTexCoords, set the dirty flag; returns the MaterialDef.
@@ -393,8 +233,7 @@ struct surfaceDlgState_t
 // texels; for a patch they are stored raw.  Sample size always lands in g_patch_texdef.sample_size.
 MaterialDef *SurfaceDlg_StateToTexdef( surfaceDlgState_t &st )
 {
-    // WHICH MaterialDef + patch-mode (Surf_TargetMaterialDef == SurfaceInspector_GetMaterialDef's
-    // target resolution; also sets m_bPatchMode for the patch/no-face-selection path).
+    // WHICH MaterialDef + patch-mode (also sets m_bPatchMode for the patch/no-face-selection path).
     bool onlyPatches = ( SEL_FACE_COUNT() <= 0 && selected_brushes.next != &selected_brushes );
     if ( onlyPatches )
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -403,7 +242,7 @@ MaterialDef *SurfaceDlg_StateToTexdef( surfaceDlgState_t &st )
     MaterialDef *md;
     if ( onlyPatches )
     {
-        // patch-only selection → the shared g_patch_texdef template (binary path).
+        // patch-only selection → the shared g_patch_texdef template.
         md = &g_patch_texdef.mtlDef;
         st.bPatchMode = 1;
     }
@@ -449,7 +288,6 @@ MaterialDef *SurfaceDlg_StateToTexdef( surfaceDlgState_t &st )
     g_patch_texdef.sample_size = st.sampleSize;
 
     TexMatToFakeTexCoords( md, td );
-    g_surfTexModDirty = 1;
     return md;
 }
 
@@ -460,7 +298,7 @@ MaterialDef *SurfaceDlg_StateToTexdef( surfaceDlgState_t &st )
 // shared g_patch_texdef.sample_size.  Also fills the "Repeats in" readouts (raw size).
 bool SurfaceDlg_Gather( surfaceDlgState_t &out )
 {
-    // Target + patch-mode (mirrors Select_SetTexture_2's target resolution).
+    // Target + patch-mode.
     bool onlyPatches = ( SEL_FACE_COUNT() <= 0 && selected_brushes.next != &selected_brushes );
     if ( onlyPatches )
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -472,7 +310,7 @@ bool SurfaceDlg_Gather( surfaceDlgState_t &out )
         // patch-only selection → the shared g_patch_texdef template.  Populate its material:
         // single selected patch → Patch_GetTextureName; else copy the current-texture template.
         MaterialDef *tmpl = &g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].mtl;
-        if ( QE_SingleBrush() )
+        if ( QE_SingleBrush_Check() == 2 )   // KIWI: silent; the panel re-gathers on every change
             SetMaterial( (const char *)Patch_GetTextureName(), (patchMesh_material *)&g_patch_texdef );
         else
         {
@@ -505,7 +343,7 @@ bool SurfaceDlg_Gather( surfaceDlgState_t &out )
 
     // Name: single selected patch → Patch_GetTextureName; else the MaterialDef name.
     const char *name;
-    if ( out.bPatchMode && QE_SingleBrush() )
+    if ( out.bPatchMode && QE_SingleBrush_Check() == 2 )
         name = (const char *)Patch_GetTextureName();
     else
         name = (const char *)Materialdef_GetName( md );
@@ -530,27 +368,23 @@ bool SurfaceDlg_Gather( surfaceDlgState_t &out )
 // shared g_patch_texdef.sample_size ("" when 0).  Also fills the "Repeats in" readouts (raw size).
 void Surf_RefreshFields()
 {
-    // NO-MFC: no-op — identical to the MFC shell with the inspector closed (the g_pSurfDlg
-    // gate below); imgui_panel_surface.cpp re-gathers through SurfaceDlg_Gather every frame.
+    // NO-MFC: no-op; imgui_panel_surface.cpp re-gathers through SurfaceDlg_Gather after its
+    // own actions and whenever Surf_UpdateInspector flags a change.
     return;
 }
 
 // SurfaceInspector::UpdateSurfaceDialog (0x458590) — the global "selection/texture changed"
 // refresh, called from Brush_AddToList2 / Brush_RemoveFromList / drag apply etc.
-// Binary body: if (surfDlgGlob.hwnd) { SurfaceInspector::SetTexMods(); Select_SetTexture_2(&g_dlgSurface); }
-// then if (g_pParentWnd && m_wndTextureBar.m_hWnd) CTextureBar::GetSurfaceAttributes(&bar).
-// Port names: SetTexMods → SurfaceInspector_SetTexMods; Select_SetTexture_2 → Surf_RefreshFields.
+// The binary also ran SetTexMods first and pushed to the texture bar afterwards.
+// KIWI: SetTexMods is gone (see the texmod note at the top).
 namespace SurfaceInspector
 {
     void UpdateSurfaceDialog()
     {
         if ( surfDlgGlob.hwnd )
-        {
-            SurfaceInspector_SetTexMods();          // 0x45859a  SurfaceInspector::SetTexMods
-            Surf_RefreshFields();                   // 0x4585a4  Select_SetTexture_2
-        }
-        // NO-MFC: texture-bar push skipped — CTextureBar is an MFC CWnd (texturebar.cpp);
-        // the ImGui texture-bar panel re-gathers, so there is nothing to push.
+            Surf_RefreshFields();
+        // NO-MFC: texture-bar push skipped — CTextureBar was an MFC CWnd (KIWI: deleted),
+        // so there is nothing to push.
     }
 }
 
@@ -590,13 +424,13 @@ void SurfaceDlg_Apply( surfaceDlgState_t &st )
 // case) steps the current-layer texdef of SurfaceInspector_GetMaterialDef's target: stretch
 // size[0]/size[1] ±8, shift[0]/shift[1] ±1, rotate ±45 (0..360 wrap), sample-size ±4 (min 4).
 // The patch path builds a relative texdef_sub_t and Patch_SetTextureInfo's it.  Then refresh +
-// Brush_SetTexture + clear the edit-dirty flag (binary xx9_1=0).
+// Brush_SetTexture + clear the edit-dirty flag.
 void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up )
 {
     if ( st.bPatchMode )
     {
         // patch path (Patch_SetTextureInfo relative transform).
-        SurfaceDlg_StateToTexdef( st );   // UpdateGPatchTexdef equivalent (commit current fields)
+        SurfaceDlg_StateToTexdef( st );   // commit current fields
         texdef_sub_t *pt = &g_patch_texdef.mtlDef.mat_texDef + LayerMat::GetCurrentLayer( &g_patch_texdef.mtlDef );
         texdef_sub_t rel; memset( &rel, 0, sizeof( rel ) );
         switch ( idFrom )
@@ -622,14 +456,13 @@ void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up )
         MaterialDef *md = &g_qeglobals.random_texture_stuff[g_qeglobals.current_edit_layer].mtl;
         Patch_SetTextureInfo( &rel );
         Surf_RefreshFields();
-        g_surfTexModDirty = 1;
         Brush_SetTexture( md, 0 );
         st.texdefDirty = 0;
         return;
     }
 
-    // brush / face path — the binary calls SurfaceInspector_GetMaterialDef (reads the current
-    // control values into the target texdef) FIRST, then steps that texdef by the delta.
+    // brush / face path — read the current control values into the target texdef FIRST,
+    // then step that texdef by the delta.
     MaterialDef *md = SurfaceDlg_StateToTexdef( st );
     if ( !md )
         return;
@@ -655,14 +488,12 @@ void SurfaceDlg_Spin( surfaceDlgState_t &st, int idFrom, bool up )
             Brush_SetSampleSize( (int)g_patch_texdef.sample_size );
             Surf_RefreshFields();
             st.sampleDirty = 0;
-            g_surfTexModDirty = 1;
             return;
         }
         default:
             break;
     }
     Surf_RefreshFields();
-    g_surfTexModDirty = 1;
     Brush_SetTexture( md, 0 );
     st.texdefDirty = 0;
 }
@@ -751,27 +582,30 @@ void SurfaceSet_Apply( float v5, float v6, int checked )
 }
 
 
-// DoSurface (0x4585d0) — open/show the inspector.  Toggling: closed → CDialog::Create(IDD 116);
-// open → bring to front + refresh.  Faithful to the binary (a modeless CDialog on IDD_SURFACE_INSP).
-void Surf_OpenInspector()
-{
-    // NO-MFC: no-op — imgui_panel_surface.cpp IS the inspector in this shell (it is opened
-    // from the panels menu, not from here), and it re-gathers instead of being populated.
-    return;
-}
+// The selection→inspector refresh hook (UpdateSurfaceDialog 0x458590) — refresh the edit
+// fields (Select_SetTexture_2) whenever the inspector is open and the selection / map / a live
+// texdef edit changes.  Called from CMainFrame::UpdateWindows (the invalidation broadcast) and
+// after a map load (map.cpp).
+bool g_surfInspStale;   // KIWI: consumed by ImGuiPanel_Surface_Draw
 
-// The selection→inspector refresh hook (UpdateSurfaceDialog 0x458590) — re-snapshot the
-// scratch (SetTexMods) + refresh the edit fields (Select_SetTexture_2) whenever the inspector
-// is open and the selection / map / a live texdef edit changes.  Called from
-// CMainFrame::UpdateWindows (the invalidation broadcast) and after a map load (map.cpp).
-// The SetTexMods re-baseline keeps the per-face mtldef[3] scratch in sync with each applied
-// edit, so the close-time SurfaceDlg_Wnd02 commit is a safe no-op in steady state.  A no-op
-// when the inspector is not up (so headless / selftest is unchanged).
 void Surf_UpdateInspector()
 {
-    // Only when the inspector is a live, visible window.  The IsWindow/IsWindowVisible guard is
-    // defensive: a proper close now destroys the dialog (clearing surfDlgGlob.hwnd/g_pSurfDlg), so this
-    // is a true no-op once closed — but never operate on a hidden/dead HWND.
-    // NO-MFC: no-op — surfDlgGlob.hwnd is never set without the MFC dialog, so this is the
-    // same "inspector not up" path the MFC shell takes; the panel re-gathers per frame.
+    // KIWI: flag the ImGui panel; it re-gathers on its next frame that has no typed,
+    // unapplied edit (a stale field set used to spin/apply onto the NEW selection)
+    g_surfInspStale = true;
+}
+
+// KIWI: silent twin of Surf_TargetMaterialDef's face asserts — false while the picked
+// face's brush is mid-rebuild, so a polling gather waits a frame instead of asserting
+bool SurfaceDlg_PickSettled()
+{
+    if ( !g_bNewFace || SEL_FACE_COUNT() <= 0 )
+        return true;
+    selface_t  &selFace = g_SelectedFaces.GetAt( 0 );
+    selbrush_t *b = selFace.brush;
+    if ( !b || !b->def )
+        return true;    // Surf_TargetMaterialDef falls back to the template
+    return (unsigned)selFace.index < (unsigned)b->faceCount
+        && selFace.face == &b->faces[selFace.index]
+        && b->version == b->def->version;
 }

@@ -8,6 +8,7 @@
 #include "prefs.h" // g_PrefsDlg / prefData_t (m_strLastProject, m_bLoadLast) — QE_LoadProject
 #include "mainfrm.h" // CMainFrame (g_pParentWnd->OkToDiscard) — DoMru
 #include "radiant_registry.h" // Radiant_IniPath — MRU persistence (kiwi_radiant.ini)
+#include "kiwi_ported.h" // KIWI: shared engine/editor externs
 #include <universal/q_parse.h>  // Com_BeginParseSession/EndParseSession/SetCSV/ParseExt/
                                 // SkipRestOfLine + parseInfo_t (Get_MaterialNames)
 #include <cstdlib>              // malloc / free / atol
@@ -16,10 +17,7 @@
 #include <string.h>             // _strlwr / _stricmp
 
 // ── engine deps used by Get_MaterialNames / Script_Link (T2.6) ───────────────
-extern void  Assert( const char *file, int line, int type, const char *fmt, ... );  // 0x49CEA0
-extern int   LoadFile( const char *filename, void **bufferptr );                     // 0x40ABD0
 extern void  Com_PrintMessage( const char *fmt, ... );                               // 0x40A960
-extern int   Sys_Printf( const char *fmt, ... );                                     // 0x499E90
 
 // Global editor state — 466144-byte struct, zero-initialized (BSS).
 // Defined here per plan §4 (home file = qe3.cpp). Declared extern in qe3.h.
@@ -27,13 +25,13 @@ qeglobals_t g_qeglobals;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x48b030  AllocMaterialString - heap-duplicate a C string (callers free() it).
-// IDB: Assert(str); n=strlen(str)+1; p=operator new(n); memcpy.  malloc is ABI-equivalent
-// here (same CRT heap); a null input returns null instead of asserting.
+// malloc is ABI-equivalent to the binary's operator new here (same CRT heap); a null input
+// returns null after the assert.
 // ─────────────────────────────────────────────────────────────────────────────
 char *AllocMaterialString( const char *src )
 {
-    iassert( src );   // qe3.cpp:56 (the binary's "str" head-check)
-    if ( !src ) return nullptr;   // defensive continue after the warn (binary would crash)
+    iassert( src );   // qe3.cpp:56
+    if ( !src ) return nullptr;   // the binary would crash on null
     size_t n = strlen( src ) + 1;
     char  *p = (char *)malloc( n );
     if ( p ) memcpy( p, src, n );
@@ -46,92 +44,95 @@ char *AllocMaterialString( const char *src )
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x45b010  TexFilter_LoadMenuFile( const char *txt@ecx, void *dest, int startId )
+// 0x45b010  TexFilter_LoadMenuFile( const char *txt, void *dest, int startId )
 // Read a text file line-by-line (fgets, 1024 cap), trim leading+trailing whitespace, skip
 // '//' and blank lines, and fill the menu-string table `dest` (filter_material_t {char*
 // name; int index}):  the index counter starts at 1 (entry [0] is the static {"all", 0});
 // a normal line becomes { strdup(line), id } and consumes an id; "<separator>" becomes
 // { 0, -1 } and does NOT; 256 strings is a fatal cap.  Returns the next free index (== the
-// entry count incl. [0]).  Caller FillTextureMenu.  Strings are malloc'd so
-// CTexWnd_Shutdown's free() pairs (the binary's static-CRT operator new is malloc).
+// entry count incl. [0]).  Caller FillTextureMenu.  Strings are malloc'd (the binary's
+// static-CRT operator new is malloc; they live for the process).
 // ─────────────────────────────────────────────────────────────────────────────
-struct RadiantFilterEntry { char *name; int index; };   // = IDB filter_material_t (8B)
+struct RadiantFilterEntry { char *name; int index; };   // filter_material_t (8B)
 static_assert( sizeof( RadiantFilterEntry ) == (sizeof(void *) == 8 ? 16 : 8), "filter_material_t must be 8 bytes (IDB)" );
 
 int TexFilter_LoadMenuFile( const char *txt, void *dest, int startId )
 {
     RadiantFilterEntry *entries = (RadiantFilterEntry *)dest;
-    int   id   = startId;                                // a2
-    int   i    = 1;                                      // v16 — entries start at index 1
-    char  line[1024];                                   // v17 (1023 + NUL) — fgets buffer
-    char  overflow = 0;                                  // v18 — line-too-long sentinel
+    int   id   = startId;
+    int   i    = 1;                                      // entries start at index 1
+    char  line[1024];                                   // 1023 + NUL — fgets buffer
+    char  overflow = 0;                                  // line-too-long sentinel
 
-    FILE *file = fopen( txt, "rb" );                     // 0x45b04d
-    if ( !file )                                         // 0x45b05a
-        Com_PrintMessage( "missing file '%s'\n", txt );  // 0x45b062 (falls through; fgets on NULL returns NULL)
+    FILE *file = fopen( txt, "rb" );
+    if ( !file )
+    {
+        Com_PrintMessage( "missing file '%s'\n", txt );
+        return i;   // KIWI: the binary fell into fgets( NULL ) - the CRT's invalid-parameter path
+    }
 
-    if ( !fgets( line, 1024, file ) )                   // 0x45b07b — empty/unreadable: nothing to read
-        return i;                                       // 0x45b087 (returns 1)
+    if ( !fgets( line, 1024, file ) )                   // empty/unreadable: nothing to read
+        return i;                                       // returns 1
 
     while ( 1 )
     {
-        if ( overflow )                                 // 0x45b0aa — the prior iteration overran the buffer
+        if ( overflow )                                 // the prior iteration overran the buffer
         {
-            fclose( file );                             // 0x45b0ad
-            Com_PrintMessage( "line longer than %i characters in '%s'\n", 4, txt ); // 0x45b0bd
+            fclose( file );
+            Com_PrintMessage( "line longer than %i characters in '%s'\n", 4, txt );
         }
 
-        // Trim leading whitespace → v6 (here `p`).                       0x45b0c5..0x45b0f2
+        // Trim leading whitespace.
         char *p = line;
         if ( isspace( (byte)line[0] ) )
         {
             do { ++p; } while ( isspace( (byte)*p ) );
         }
 
-        if ( strncmp( p, "//", 2 ) )                    // 0x45b0fc — not a comment line
+        if ( strncmp( p, "//", 2 ) )                    // not a comment line
         {
-            unsigned int len = (unsigned int)strlen( p ); // 0x45b10e (esi)
-            if ( len )                                  // 0x45b11c — skip empty lines
+            unsigned int len = (unsigned int)strlen( p );
+            if ( len )                                  // skip empty lines
             {
-                // Trim trailing whitespace.                              0x45b122..0x45b143
+                // Trim trailing whitespace.
                 char *end = &p[len - 1];
                 while ( isspace( (byte)*end ) )
                 {
                     --len;
                     --end;
-                    if ( !len )                         // 0x45b13e — line was all whitespace
+                    if ( !len )                         // line was all whitespace
                         goto next_line;
                 }
-                p[len] = 0;                             // 0x45b14d
+                p[len] = 0;
 
-                if ( i == 256 )                         // 0x45b15d — 256-string cap
+                if ( i == 256 )                         // 256-string cap
                 {
-                    fclose( file );                     // 0x45b166
-                    Com_PrintMessage( "%i string limit exceeded in '%s'\n", 256, txt ); // 0x45b17b
+                    fclose( file );
+                    Com_PrintMessage( "%i string limit exceeded in '%s'\n", 256, txt );
                 }
 
-                if ( !_stricmp( p, "<separator>" ) )    // 0x45b189
+                if ( !_stricmp( p, "<separator>" ) )
                 {
-                    entries[i].name  = 0;               // 0x45b19b
-                    entries[i].index = -1;              // 0x45b1a2
+                    entries[i].name  = 0;
+                    entries[i].index = -1;
                 }
                 else
                 {
-                    iassert( p );                       // 0x45b1ae dead-branch Assert("str") — p already used
-                    unsigned int n = (unsigned int)strlen( p ) + 1; // 0x45b1cc..0x45b1db
-                    char *copy = (char *)malloc( n );   // 0x45b1df operator new(n) (== malloc in static CRT)
-                    memcpy( copy, p, n );               // 0x45b1ec
-                    entries[i].index = id;              // 0x45b203
-                    entries[i].name  = copy;            // 0x45b20a
-                    ++id;                               // 0x45b207
+                    iassert( p );                       // dead branch (p is already dereferenced)
+                    unsigned int n = (unsigned int)strlen( p ) + 1;
+                    char *copy = (char *)malloc( n );   // operator new in the binary (== malloc in static CRT)
+                    memcpy( copy, p, n );
+                    entries[i].index = id;
+                    entries[i].name  = copy;
+                    ++id;
                 }
-                ++i;                                    // 0x45b212/0x45b215 (v16 = v10 + 1)
+                ++i;
             }
         }
 
 next_line:
-        if ( !fgets( line, 1024, file ) )               // 0x45b22e
-            return i;                                   // 0x45b241 — EOF: return the count
+        if ( !fgets( line, 1024, file ) )
+            return i;                                   // EOF: return the count
     }
 }
 
@@ -140,40 +141,36 @@ next_line:
 // script_linkTo list, strip that self-reference, write the cleaned list back and return 1;
 // otherwise return 0.  Script_Link uses it to detect "both already in the same group".
 // ─────────────────────────────────────────────────────────────────────────────
-extern char       *ValueForKey2( const entity_s *e, const char *key );                            // entity.cpp 0x4825C0
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
-extern char       *va( const char *fmt, ... );                                         // q_shared
 extern void       *zero;                                                                // empty-string sentinel (engine_stubs.cpp)
-extern entity_s    entities;                                                            // entity.cpp 0x23F17A0
 
 static char ScriptGroup_LinkTo( entity_s_def *e )
 {
-    // 0x48c20d: find e's "script_linkTo" epair; absent/empty → not a group, return 0.
+    // find e's "script_linkTo" epair; absent/empty → not a group, return 0.
     const char *linkTo = nullptr;
     for ( epair_t *ep = e->epairs; ep; ep = ep->next )
         if ( !_stricmp( ep->key, "script_linkTo" ) ) { linkTo = ep->value; break; }
     if ( !linkTo || !*linkTo )
         return 0;
 
-    // 0x48c261: e's own link id.
+    // e's own link id.
     char *linkName = ValueForKey2( e, "script_linkName" );
     if ( !linkName || !*linkName )
         return 0;
     int myId = atol( linkName );
 
     LinkList_t links;                          // Map_ParseLinkList parse buffer (qe3.h)
-    Map_ParseLinkList( &links, linkTo );       // 0x48c281
+    Map_ParseLinkList( &links, linkTo );
     int count = links.size;
     if ( count <= 0 )
         return 0;
 
-    // 0x48c29c: is myId present?  Not present → return 0 (no self-link to strip).
+    // is myId present?  Not present → return 0 (no self-link to strip).
     int idx = 0;
     while ( links.id[idx] != myId )
         if ( ++idx >= count )
             return 0;
 
-    // 0x48c2b8: rebuild the list with myId removed.
+    // rebuild the list with myId removed.
     int filtered[1024];
     int n = 0;
     for ( int i = 0; i < count; ++i )
@@ -181,14 +178,14 @@ static char ScriptGroup_LinkTo( entity_s_def *e )
             filtered[n++] = links.id[i];
 
     char buf[1028];
-    if ( n )                                   // 0x48c325: join remaining ids "%i" + " %i"...
+    if ( n )                                   // join remaining ids "%i" + " %i"...
     {
         sprintf( buf, "%i", filtered[0] );
         for ( int i = 1; i < n; ++i )
             strcat( buf, va( " %i", filtered[i] ) );
         SetKeyValue( e, "script_linkTo", buf );
     }
-    else                                       // 0x48c2f7: nothing left → clear to empty string
+    else                                       // nothing left → clear to empty string
     {
         SetKeyValue( e, "script_linkTo", (const char *)zero );
     }
@@ -196,28 +193,28 @@ static char ScriptGroup_LinkTo( entity_s_def *e )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x48bf10  Script_Link - __fastcall(entity_s_def *a@ecx, entity_s_def *b@edx).  Link `a`
-// to `b` for the scripting "link" feature (Selection->Link Selected, cmd 33211, whose
-// caller LinkSelected 0x48c7b0 lives in select.cpp).  If neither side is already a
+// 0x48bf10  Script_Link( entity_s_def *a, entity_s_def *b ) - link `a` to `b` for the
+// scripting "link" feature (Selection->Link Selected, cmd 33211, whose caller LinkSelected
+// 0x48c7b0 lives in select.cpp).  If neither side is already a
 // self-linked script group, give `b` a fresh script_linkName id (max-of-all + 1, or reuse
 // its existing one) and add that id to `a`'s script_linkTo list.
 // ─────────────────────────────────────────────────────────────────────────────
 void Script_Link( entity_s_def *a, entity_s_def *b )
 {
-    // 0x48bf3a: if either side is already a self-linked group, nothing to do.
+    // if either side is already a self-linked group, nothing to do.
     if ( ScriptGroup_LinkTo( a ) || ScriptGroup_LinkTo( b ) )
         return;
 
-    // 0x48bf61: assign / reuse b's script_linkName id.
+    // assign / reuse b's script_linkName id.
     int newId;
     char *bLinkName = ValueForKey2( b, "script_linkName" );
     if ( bLinkName && *bLinkName )
     {
-        newId = atol( bLinkName );             // 0x48bf7f: reuse existing id
+        newId = atol( bLinkName );             // reuse existing id
     }
     else
     {
-        // 0x48bf8a: scan ALL entities for the max script_linkName, +1.
+        // scan ALL entities for the max script_linkName, +1.
         newId = 0;
         for ( entity_s *ent = entities.next; ent != &entities; ent = ent->next )
         {
@@ -232,52 +229,52 @@ void Script_Link( entity_s_def *a, entity_s_def *b )
                         if ( id > newId )
                             newId = id;
                     }
-                    break;                     // 0x48bfc5: only the first match per entity
+                    break;                     // only the first match per entity
                 }
             }
         }
-        ++newId;                               // 0x48c00a
+        ++newId;
     }
 
     char idStr[1028];
-    sprintf( idStr, "%i", newId );             // 0x48c023
-    SetKeyValue( b, "script_linkName", idStr ); // 0x48c038
+    sprintf( idStr, "%i", newId );
+    SetKeyValue( b, "script_linkName", idStr );
 
-    // 0x48c03d: fetch b's (now-set) script_linkName value (used by the LABEL_24 fallback).
+    // fetch b's (now-set) script_linkName value (used when a has no linkTo list).
     const char *bNameVal = (const char *)zero;
     for ( epair_t *ep = b->epairs; ep; ep = ep->next )
         if ( !_stricmp( ep->key, "script_linkName" ) ) { bNameVal = ep->value; break; }
 
-    // 0x48c067: fetch a's existing script_linkTo list.
+    // fetch a's existing script_linkTo list.
     const char *aLinkTo = nullptr;
     for ( epair_t *ep = a->epairs; ep; ep = ep->next )
         if ( !_stricmp( ep->key, "script_linkTo" ) ) { aLinkTo = ep->value; break; }
 
     if ( aLinkTo && *aLinkTo )
     {
-        // 0x48c0c9: parse a's list, add newId if not already present.
+        // parse a's list, add newId if not already present.
         LinkList_t links;
         Map_ParseLinkList( &links, aLinkTo );
-        if ( links.overflowed )                        // 0x48c0d8
+        if ( links.overflowed )
             Sys_Printf( "Exceeded maximum links\n" );
 
-        bool present = false;                          // 0x48c0f1
+        bool present = false;
         for ( int i = 0; i < links.size; ++i )
             if ( links.id[i] == newId ) { present = true; break; }
         if ( !present )
-            links.id[links.size++] = newId;            // 0x48c116
+            links.id[links.size++] = newId;
 
-        iassert( links.size > 0 );                     // qe3.cpp:567 (0x48c134)
+        iassert( links.size > 0 );                     // qe3.cpp:567
 
         char buf[1028];
-        sprintf( buf, "%i", links.id[0] );             // 0x48c167
+        sprintf( buf, "%i", links.id[0] );
         for ( int i = 1; i < links.size; ++i )
             strcat( buf, va( " %i", links.id[i] ) );
-        SetKeyValue( a, "script_linkTo", buf );        // 0x48c1e6
+        SetKeyValue( a, "script_linkTo", buf );
     }
     else
     {
-        // 0x48c08b (LABEL_24): a had no linkTo list → set it to b's linkName value.
+        // a had no linkTo list → set it to b's linkName value.
         SetKeyValue( a, "script_linkTo", bNameVal );
     }
 }
@@ -287,13 +284,12 @@ void Script_Link( entity_s_def *a, entity_s_def *b )
 // (convex brushes) vs g_numentities (fixed-size entity brushes), and refresh the status
 // bar when either count changed.
 // ─────────────────────────────────────────────────────────────────────────────
-int g_numbrushes  = 0;     // IDB 0x240A0E4
-int g_numentities = 0;     // IDB 0x240A0E0
+int g_numbrushes  = 0;     // 0x240A0E4
+int g_numentities = 0;     // 0x240A0E0
 static int s_lastbrushcount  = 0;
 static int s_lastentitycount = 0;
 static int s_didonce         = 0;
 
-extern selbrush_t active_brushes;      // map.cpp (0x23F189C)
 extern void       Sys_UpdateStatusBar( void );   // win_qe3.cpp
 extern unsigned   KiwiWalkCache_StructEpoch();   // kiwi_walkcache.h
 
@@ -324,7 +320,7 @@ void QE_CountBrushesAndUpdateStatusBar( void )
 
     for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
     {
-        // KISAK: the binary gates on b->faces - the per-instance faceVis cache, which is
+        // The binary gates on b->faces - the per-instance faceVis cache, which is
         // built LAZILY by the draw pass (Brush_MakeFaceVisuals), so an undrawn brush is not
         // counted.  Gate on b->def instead: the same answer once anything has been drawn,
         // and still correct headless (the selftest host never draws).
@@ -351,12 +347,11 @@ void QE_CountBrushesAndUpdateStatusBar( void )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  0x48C8B0  QE_SingleBrush — gate for ops that require exactly one non-fixed-size
-//  brush selected (Region Set Brush / Set Tall Brush, etc.). Faithful to the IDB;
-//  the eclass null-guard is a belt-and-suspenders add (the binary derefs directly).
+//  brush selected (Region Set Brush / Set Tall Brush, etc.). The eclass null-guard is
+//  an addition (the binary derefs directly).
 // ═════════════════════════════════════════════════════════════════════════════
-extern int Sys_Printf( const char *fmt, ... );
 
-// Silent predicate half (KISAK, consolidation): the same two tests with no console
+// Silent predicate half: the same two tests with no console
 // output — for polling callers (the ImGui panels re-gather per frame; Sys_Printf here
 // EM_REPLACESELs the console edit and would flood it). QE_SingleBrush keeps the
 // binary's printing behavior by calling this and printing on the failing arm.
@@ -367,7 +362,7 @@ int QE_SingleBrush_Check()
          selected_brushes.next->next != &selected_brushes )
         return 0;
     // eclass is on the entity DEF, not the 0x54-byte instance: read it via the
-    // instance's def (IDB QE_SingleBrush 0x48C8B0). Reading
+    // instance's def. Reading
     // selected_brushes.next->owner->eclass directly walks past the instance and can
     // fault on freed adjacent heap (the delete-path UAF class).
     if ( !selected_brushes.next->owner )
@@ -398,32 +393,28 @@ signed int QE_SingleBrush()
 // ═════════════════════════════════════════════════════════════════════════════
 //  PROJECT (.prj) SUBSYSTEM - QE_LoadProject + Project_Write + the project dialogs'
 //  shared cores.  A .prj is a single entity block of epairs: basepath / mapspath /
-//  entitypath / autosave / game / basegame / layeredmaterials.  QE_LoadProject (0x48bab0)
+//  entitypath / autosave / game / basegame / layeredmaterials.  QE_LoadProject
 //  parses it into g_qeglobals.d_project_entity, resolves the search-path keys to full
 //  paths, registers fs_basepath/basegame/game, then re-inits renderer + textures +
 //  eclasses + layered materials and starts a new map.
-//  KISAK: CMainFrame::OnCreate owns the renderer/eclass/texture bring-up in this port, so
+//  CMainFrame::OnCreate owns the renderer/eclass/texture bring-up in this port, so
 //  QE_LoadProject is split - QE_LoadProject_ParseFile is the parse/resolve/dvar half and
 //  the re-init TAIL stays the caller's responsibility.  OnCreate calls the parse half early
 //  so the project entity and the .prj fs_basepath drive its init.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// engine / editor deps (all ported)
+// engine / editor deps
 extern int    LoadFileNoCrash( const char *filename, void **bufferptr );   // cmdlib.cpp 0x40AC60
 extern void   Com_BeginParseSession( const char *name );                   // q_parse
-extern entity_s *ParseEntity( const char **text, int version, char a2, char a3 ); // entity.cpp 0x483E70
-extern void   SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp 0x483690
-extern char  *ValueForKey2( const entity_s *e, const char *key );                      // entity.cpp 0x4825C0
+extern entity_s *ParseEntity( const char **text, int version, char rawOnly, char keepFileLayers ); // entity.cpp 0x483E70
 extern void   Prefab_LevelBack();                                          // errorfile.cpp 0x489D50
 extern void   Map_LoadFromFile( const char *path );                        // map.cpp 0x486680
 // Com_Error / ERR_FATAL come from qcommon.h (via qe3.h → r_material.h).
 
-// The current project-file path (binary global dword_25D65AC, a CString set via str_set in
-// QE_LoadProject and read by Project_Write / OnFileNewproject).  str_set is a no-op stub in
-// this port, so store the path in a real heap buffer instead (same lifetime: overwritten on
-// each project load, freed by the CRT at exit — matching the binary's single persistent
-// CString).
-static char *s_currentProjectPath = nullptr;   // == dword_25D65AC
+// The current project-file path (read by Project_Write / OnFileNewproject).  str_set is a
+// no-op stub in this port, so it is kept in a real heap buffer (same lifetime as the binary's single persistent CString: overwritten
+// on each project load, freed by the CRT at exit).
+static char *s_currentProjectPath = nullptr;
 static void Project_SetCurrentPath( const char *path )
 {
     char *old = s_currentProjectPath;
@@ -435,16 +426,9 @@ const char *Project_GetCurrentPath()          // (helper for the dialog cores be
 {
     return s_currentProjectPath ? s_currentProjectPath : "";
 }
-// Public wrapper so the New-Project handler (mainfrm.cpp) can seed the path before the
-// Project Settings dialog's OK writes the .prj to it (binary get_m_strStatus(&dword_25D65AC)).
-void Project_SetCurrentPathPublic( const char *path )
-{
-    Project_SetCurrentPath( path );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x484460  Project_WriteQuotedString - quote a string into the .prj, backslash-escaping
-// '\' and '"' (the same writer as MapFile_WriteEntity's epair path at 0x484712).
+// '\' and '"' (the same writer as MapFile_WriteEntity's epair path).
 static void Project_WriteQuotedString( const char *s, FILE *f )
 {
     if ( !s ) s = "";
@@ -482,12 +466,11 @@ signed int Project_Write( const char *path )
     return 1;
 }
 
-// The 4 project search-path keys resolved to full paths in QE_LoadProject; order is the
-// IDB pointer array off_739DB4 verbatim.
+// The 4 project search-path keys resolved to full paths in QE_LoadProject (binary order).
 static const char *const s_projectPathKeys[4] = { "basepath", "autosave", "mapspath", "layeredmaterials" };
 
 // FS dvar registration (binary FS_RegisterDvars 0x40b650) from the resolved .prj values.
-// KISAK: only OVERRIDE when the .prj supplies a non-empty value - kisak's own
+// Only OVERRIDE when the .prj supplies a non-empty value - kisak's own
 // FS_RegisterDvars already seeds fs_basepath from the exe-relative install heuristic, and
 // the stock cod4.prj leaves game/basegame empty.
 static void Project_RegisterFsDvar( const char *name, const char *value )
@@ -498,39 +481,32 @@ static void Project_RegisterFsDvar( const char *name, const char *value )
     if ( v )
         Dvar_SetString( (dvar_s *)v, (char *)value );
     else
-        Dvar_RegisterString( name, value, 0x4000 /*FS_RegisterDvars 0x40b650 flag*/, "External Dvar" );
+        Dvar_RegisterString( name, value, 0x4000 /*FS_RegisterDvars flag*/, "External Dvar" );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x48bab0  QE_LoadProject_ParseFile - the PARSE + epair-resolve + FS-dvar half of
 // QE_LoadProject.  Loads the .prj, parses it into g_qeglobals.d_project_entity (the FULL
 // epair set), resolves the 4 search-path keys to full paths, sets m_strLastProject, and
-// registers fs_basepath/basegame/game.  Returns 1, or 0 if the file is missing (the
-// binary's LoadFileNoCrash == -1 branch).
+// registers fs_basepath/basegame/game.  Returns 1, or 0 if the file is missing.
 signed int QE_LoadProject_ParseFile( const char *path )
 {
     void *buf = nullptr;
     Sys_Printf( "QE_LoadProject (%s)\n", path ? path : "(null)" );
     if ( LoadFileNoCrash( path, &buf ) == -1 )
-        return 0;                                // .prj absent — faithful: return failure
+        return 0;                                // .prj absent — return failure
 
-    // Remember the project-file path (binary: str_set(&dword_25D65AC, path, strlen)).
+    // Remember the project-file path.
     Project_SetCurrentPath( path );
 
-    // Parse the single { "key" "value" ... } block into the project entity.  The binary
-    // calls ParseEntity(4, 1, 1): version=4, a2=1 (return the raw epair-only entity — no
-    // eclass/bbox), a3=1.  The text pointer is the loaded buffer.
+    // Parse the single { "key" "value" ... } block into the project entity.
+    // ParseEntity(4, 1, 1): version=4, rawOnly=1 (the epair-only entity — no
+    // eclass/bbox), keepFileLayers=1.  The text pointer is the loaded buffer.
     Com_BeginParseSession( path );
     const char *text = (const char *)buf;
     g_qeglobals.d_project_entity = ParseEntity( &text, 4, 1, 1 );
 
-    // Com_EndParseSession (binary decrements parseInfoNum inline, asserting non-empty).
-    {
-        ParseThreadInfo *pi = Com_GetParseThreadInfo();
-        if ( !pi->parseInfoNum )
-            Com_Error( ERR_FATAL, "Com_EndParseSession: session underflow" );
-        --pi->parseInfoNum;
-    }
+    Com_EndParseSession();
     free( buf );
 
     if ( !g_qeglobals.d_project_entity )
@@ -539,11 +515,11 @@ signed int QE_LoadProject_ParseFile( const char *path )
         return 0;
     }
 
-    // m_strLastProject = path (binary: get_m_strStatus(&g_PrefsDlg->m_strLastProject, path)).
+    // m_strLastProject = path.
     if ( g_PrefsDlg )
         g_PrefsDlg->m_strLastProject = path;
 
-    // Resolve the 4 search-path keys to full paths (binary 0x48BB9F loop): each value that
+    // Resolve the 4 search-path keys to full paths: each value that
     // is present and does NOT already start with '\' or '/' (i.e. is relative) is expanded
     // via GetFullPathNameA against the CWD and written back with SetKeyValue.  A missing
     // key resolves the empty string ("").
@@ -554,7 +530,7 @@ signed int QE_LoadProject_ParseFile( const char *path )
         {
             if ( !_stricmp( ep->key, s_projectPathKeys[i] ) ) { value = ep->value; break; }
         }
-        // Absolute paths (leading '\' or '/') are left as-is (binary skips GetFullPathName).
+        // Absolute paths (leading '\' or '/') are left as-is (no GetFullPathName).
         if ( *value == '\\' || *value == '/' )
             continue;
         char full[1028];
@@ -562,7 +538,7 @@ signed int QE_LoadProject_ParseFile( const char *path )
             SetKeyValue( (entity_s_def *)g_qeglobals.d_project_entity, s_projectPathKeys[i], full );
     }
 
-    // FS_RegisterDvars(basepath, basegame, game) @0x48bce5.  KISAK: the .prj `basepath`
+    // FS_RegisterDvars(basepath, basegame, game).  The .prj `basepath`
     // override of fs_basepath is REMOVED — together with the registry LastProject tier
     // (mainfrm.cpp Radiant_LoadProjectAtStartup) it let a project file silently redirect
     // ALL game-data loads to a remote directory, which was error-prone.  fs_basepath is
@@ -581,15 +557,14 @@ signed int QE_LoadProject_ParseFile( const char *path )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  MRU (recent-files) subsystem — the classic Q3Radiant/MFC MRU menu.  All functions
-//  transcribed verbatim from the CoD4Radiant disasm.  The MRU menu is stored in
-//  g_qeglobals.d_lpMruMenu (an LPMRUMENU, see qe3.h).
-//    CreateMruMenuDefault 0x48A150 — GlobalAlloc + seed defaults (created in OnCreate).
-//    MRU_NewItem          0x48A2C0 — insert/promote a file to the top of the list.
-//    MRU_InsertItem       0x48A400 — rebuild the File-menu recent-files items.
-//    DelMenuItem          0x48A3A0 — remove a stale item (open-failed) from the list.
-//    SaveMruInReg/LoadMruInReg 0x48A750/0x48A870 — persist to/from the registry.
-//    DoMru                0x4994B0 — the recent-file-click handler (open the item).
+//  MRU (recent-files) subsystem — the classic Q3Radiant/MFC MRU menu.  The MRU menu is
+//  stored in g_qeglobals.d_lpMruMenu (an LPMRUMENU, see qe3.h).
+//    CreateMruMenuDefault — GlobalAlloc + seed defaults (created in OnCreate).
+//    MRU_NewItem          — insert/promote a file to the top of the list.
+//    MRU_InsertItem       — rebuild the File-menu recent-files items.
+//    DelMenuItem          — remove a stale item (open-failed) from the list.
+//    SaveMruInReg/LoadMruInReg — persist to/from the registry.
+//    DoMru                — the recent-file-click handler (open the item).
 //  Registry: HKCU\Software\iw\CoD4Radiant\MRU, values File1..File9.
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -599,13 +574,13 @@ LPMRUMENU *CreateMruMenuDefault()
     HGLOBAL h = GlobalAlloc( GHND, sizeof( LPMRUMENU ) );      // 0x42 = GMEM_MOVEABLE|GMEM_ZEROINIT
     LPMRUMENU *mru = (LPMRUMENU *)GlobalLock( h );
     mru->wNbItemFill     = 0;
-    mru->wNbLruMenu      = 9;      // v1[2]
-    mru->wNbLruShow      = 6;      // v1[1]
-    mru->wIdMru          = 8000;   // v1[4]
-    mru->wMaxSizeLruItem = 128;    // v1[3]
+    mru->wNbLruMenu      = 9;
+    mru->wNbLruShow      = 6;
+    mru->wIdMru          = 8000;
+    mru->wMaxSizeLruItem = 128;
     HGLOBAL h2 = GlobalAlloc( GHND, 0x480u );                 // 9 * 128 = 1152
     void *store = GlobalLock( h2 );
-    mru->lpMRU = (char *)store;                               // *((_DWORD*)v1 + 3)
+    mru->lpMRU = (char *)store;
     if ( store )
         return mru;
     GlobalUnlock( GlobalHandle( mru ) );
@@ -689,10 +664,10 @@ static signed int DelMenuItem( ushort nID, LPMRUMENU *mru )
     return 1;
 }
 
-// ── 0x48A750  SaveMruInReg — persist the MRU list (File1..File9).  KISAK: was
-// HKCU\...\MRU in the binary; ALL registry usage removed on request — now the [MRU]
+// ── 0x48A750  SaveMruInReg — persist the MRU list (File1..File9).  The binary used
+// HKCU\...\MRU; all registry usage is removed — now the [MRU]
 // section of kiwi_radiant.ini beside the exe (radiant_registry.h Radiant_IniPath).
-// The function names keep their binary-anchored spelling ("InReg") for greppability.
+// The function names keep the binary's spelling ("InReg") for greppability.
 void SaveMruInReg( LPMRUMENU *mru )
 {
     HGLOBAL h = GlobalAlloc( GHND, mru->wMaxSizeLruItem + 20 );
@@ -719,7 +694,7 @@ void SaveMruInReg( LPMRUMENU *mru )
     GlobalFree( GlobalHandle( buf ) );
 }
 
-// ── 0x48A870  LoadMruInReg — read the MRU list back (see SaveMruInReg's KISAK note) ──
+// ── 0x48A870  LoadMruInReg — read the MRU list back (see SaveMruInReg) ──
 void LoadMruInReg( LPMRUMENU *mru )
 {
     HGLOBAL h = GlobalAlloc( GHND, mru->wMaxSizeLruItem + 20 );
@@ -751,12 +726,11 @@ extern void Pointfile_Clear();                             // points.cpp
 extern void Radiant_OpenMap( const char *path );           // mainfrm.cpp (KIWI)
 BOOL DoMru( short nID, HWND hWnd )
 {
-    // Unsaved-changes / inside-prefab guard (binary inlines HasUnsavedChangesOrInsidePrefab
-    // + layered-material CRC check + ConfirmModified; the port consolidates that exact test
-    // in CMainFrame::OkToDiscard).
-    // NO-MFC: the same guard, now that U-CMD-2 lifted it out of CMainFrame.  The
-    // g_pParentWnd liveness half has no analog (the prompt is a MessageBoxA over
-    // ::GetActiveWindow(), not a frame method), so it drops out.
+    // Unsaved-changes / inside-prefab guard (the binary inlines
+    // HasUnsavedChangesOrInsidePrefab + layered-material CRC check + ConfirmModified;
+    // Radiant_OkToDiscard consolidates that test).  The g_pParentWnd liveness half has no
+    // analog (the prompt is a MessageBoxA over ::GetActiveWindow(), not a frame method),
+    // so it drops out.
     extern bool Radiant_OkToDiscard();        // mainfrm.cpp (was CMainFrame::OkToDiscard)
     if ( !Radiant_OkToDiscard() )
         return 0;
@@ -772,7 +746,7 @@ BOOL DoMru( short nID, HWND hWnd )
     }
 
     OFSTRUCT reopen;
-    HFILE hf = OpenFile( fileName, &reopen, OF_EXIST );      // 0x4000 = OF_EXIST
+    HFILE hf = OpenFile( fileName, &reopen, OF_EXIST );
     BOOL ok = ( hf != HFILE_ERROR );
     if ( hf == HFILE_ERROR )
     {
@@ -797,9 +771,8 @@ BOOL DoMru( short nID, HWND hWnd )
 //  RELOCATED HOME — this function's embedded Assert() calls name THIS file as
 //  their source (see the brush.cpp relocation protocol / line-uniqueness test).
 // ═════════════════════════════════════════════════════════════════════════════
-// ── sub_48BE20 — parse SPACE-delimited int list (Map_ParseLinkList) ───────────────────────────────
-// 0x48be20 Map_ParseLinkList. __usercall(buf@ebx, linkTo).  Parses linkTo (script_linkTo /
-// script_linkName) as a SPACE-delimited int list with DEDUP, capped at 30 entries.
+// 0x48be20  Map_ParseLinkList - parse linkTo (script_linkTo / script_linkName) as a
+// SPACE-delimited int list with DEDUP, capped at 30 entries.
 // Layout: buf[0..count-1]=values, buf[count]=-1 terminator, buf[1024]=count (byte 0x1000),
 // byte buf+0x1004 = overflow flag (cleared each call, set when the 30-cap is hit).  Parses
 // in place; cross-file Assert qe3.cpp:446.  Caller buf must be int[1026]+ so buf+0x1004 is
@@ -807,8 +780,8 @@ BOOL DoMru( short nID, HWND hWnd )
 void Map_ParseLinkList( LinkList_t *buf, const char *linkTo )
 {
     int  count = 0;
-    bool atBoundary = true;                          // v7: at a token start
-    buf->overflowed = false;                         // (IDA 0x48be31)
+    bool atBoundary = true;                          // at a token start
+    buf->overflowed = false;
     size_t i   = 0;
     size_t len = strlen( linkTo );
     if ( len )
@@ -824,14 +797,14 @@ void Map_ParseLinkList( LinkList_t *buf, const char *linkTo )
             else if ( atBoundary )
             {
                 int  value = atol( p );
-                bool dup   = false;                  // dedup scan buf[0..count-1] (IDA 0x48be9a)
+                bool dup   = false;                  // dedup scan buf[0..count-1]
                 for ( int k = 0; k < count; ++k )
                     if ( buf->id[k] == value ) { dup = true; break; }
                 if ( !dup )
                 {
                     buf->id[count++] = value;
                     atBoundary   = false;
-                    if ( count >= 30 )               // overflow (IDA cmp esi,1Eh)
+                    if ( count >= 30 )               // overflow
                     {
                         buf->overflowed = true;
                         break;
@@ -839,7 +812,7 @@ void Map_ParseLinkList( LinkList_t *buf, const char *linkTo )
                 }
             }
             ++i;
-            len = strlen( linkTo );                      // IDA recomputes strlen each pass
+            len = strlen( linkTo );                      // recomputed each pass
             if ( i >= len )
                 break;
         }

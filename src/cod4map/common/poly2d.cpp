@@ -5,15 +5,6 @@
 #define POLY2D_BUFFER_VERTS (MAX_VERTS_PER_POLY + 4)
 #define POLY2D_BUFFER_FLOATS (POLY2D_BUFFER_VERTS * 2)
 
-static char s_assertDisable_SplitPoly2D_coords;
-static char s_assertDisable_SplitPoly2D_vertCount;
-static char s_assertDisable_SplitPoly2D_axis;
-static char s_assertDisable_SplitPoly2D_coordsFront;
-static char s_assertDisable_SplitPoly2D_frontCountOut;
-static char s_assertDisable_SplitPoly2D_coordsBack;
-static char s_assertDisable_SplitPoly2D_backCountOut;
-static char s_assertDisable_SplitPoly2D_frontBackDistinct;
-
 /* Native 0x42AC30. */
 static float Poly2DAreaAndCentroid(const float *coords, int vertCount, float *centroid)
 {

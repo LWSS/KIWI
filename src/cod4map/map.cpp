@@ -6,14 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_AdjustBrushesForOrigin;
-char s_assertDisable_AdjustBrushesForOrigin;
-char s_assertDisable_LoadPrefab;
-char s_assertDisable_LoadPrefab;
-char s_assertDisable_CreateNewFloatPlane;
-char s_assertDisable_ParseRawBrush;
-char s_assertDisable_ProcessScriptVehicles;
-
 #define MAX_MAP_INFOS 32768
 
 typedef struct MapInfo_s
@@ -1098,9 +1090,11 @@ KiwiSnapNearAxialSides
 
 KIWI (2026-10-05, precision): SnapPlaneNormal squares a normal within 1e-7 of an axis - any
 tilt under ~3.4e-4 rad - but FindFloatPlane kept dist, pivoting the face about the WORLD
-origin (10 units at 29000 out).  Each such side pivots about the brush's centre projected
-onto its own plane instead, and every later side on the SAME tilted plane (one wall split
-into brushes) reuses that first squared plane, so neighbours stay one plane.
+origin (10 units at 29000 out).  Each such side pivots about the centre of its brush's
+polytope (the windings of the unsquared planes - plane points need not lie on the brush)
+projected onto its own plane, and every later side on the SAME tilted plane, facing either
+way (a wall split into brushes, a box stacked on another), reuses that first squared plane
+or its back, so neighbours stay one plane.
 ================
 */
 typedef struct
@@ -1113,14 +1107,49 @@ typedef struct
 static kiwiSnappedPlane_t *s_kiwiSnapped;
 static int                 s_kiwiSnappedCount, s_kiwiSnappedMax;
 
+/* The mean of the brush's polytope corners: each side's base winding clipped to the back of
+   every other plane.  0 when no side keeps a winding (a degenerate brush). */
+static int KiwiBrushPolytopeCentre(float (*planes)[4], int count, double *centre)
+{
+  int i, j, k, n = 0;
+
+  centre[0] = centre[1] = centre[2] = 0.0;
+  for ( i = 0; i < count; ++i )
+  {
+    Winding_t *w = BaseWindingForPlane(planes[i], planes[i][3]);
+    for ( j = 0; j < count && w; ++j )
+    {
+      float back[3];
+      if ( j == i )
+        continue;
+      back[0] = -planes[j][0]; back[1] = -planes[j][1]; back[2] = -planes[j][2];
+      ClipWindingByPlane(&w, back, -planes[j][3], 0.01f);   /* keeps the brush side */
+    }
+    if ( !w )
+      continue;
+    for ( k = 0; k < w->numpoints; ++k, ++n )
+    {
+      centre[0] += w->points[k][0];
+      centre[1] += w->points[k][1];
+      centre[2] += w->points[k][2];
+    }
+    FreeWinding(w);
+  }
+  if ( !n )
+    return 0;
+  centre[0] /= n; centre[1] /= n; centre[2] /= n;
+  return 1;
+}
+
 static void KiwiSnapNearAxialSides(Brush_t *bb, const int *sides, float (*orig)[4], int count,
-                                   const double *sum, int sumCount)
+                                   float (*all)[4], int allCount, const double *sum, int sumCount)
 {
   double centre[3];
   int i, j, k;
 
-  for ( k = 0; k < 3; ++k )
-    centre[k] = sumCount ? sum[k] / sumCount : 0.0;
+  if ( !KiwiBrushPolytopeCentre(all, allCount, centre) )
+    for ( k = 0; k < 3; ++k )
+      centre[k] = sumCount ? sum[k] / sumCount : 0.0;     /* fall back to the plane points */
   for ( i = 0; i < count; ++i )
   {
     const float *n = orig[i];
@@ -1135,11 +1164,12 @@ static void KiwiSnapNearAxialSides(Brush_t *bb, const int *sides, float (*orig)[
     for ( j = 0; j < s_kiwiSnappedCount && planenum < 0; ++j )
     {
       const kiwiSnappedPlane_t *s = &s_kiwiSnapped[j];
-      const Plane_t *p = &mapplanes[s->planenum];
-      if ( !VectorCompare((float *)p->normal, snapped) || DotProduct(s->normal, n) < 1.0 - 1.0e-8
+      const double facing = DotProduct(s->normal, n);
+      const int    use    = facing > 0.0 ? s->planenum : (s->planenum ^ 1);   /* or its back */
+      if ( fabs(facing) < 1.0 - 1.0e-8 || !VectorCompare((float *)mapplanes[use].normal, snapped)
         || fabs(DotProduct(s->normal, q) - s->dist) > 0.01 )
         continue;                                          /* not the same tilted plane */
-      planenum = s->planenum;
+      planenum = use;
     }
     if ( planenum < 0 )
     {
@@ -1172,6 +1202,7 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
   /* KIWI: near-axial sides, resolved once the brush's plane points are all known */
   static int   kiwiSide[MAX_BUILD_SIDES];
   static float kiwiOrig[MAX_BUILD_SIDES][4];
+  static float kiwiAll[MAX_BUILD_SIDES][4];   /* every side's unsquared plane (the polytope) */
   int          kiwiDeferred, kiwiCount;
   double       kiwiSum[3];
 
@@ -1237,6 +1268,7 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
         kiwiSum[0] += world[0]; kiwiSum[1] += world[1]; kiwiSum[2] += world[2];
         ++kiwiCount;
       }
+      Vector4Copy(transformedPlane, kiwiAll[bb->numSides - 1]);
       VectorCopy(transformedPlane, snapped);
       if ( SnapPlaneNormal(snapped) && !VectorCompare(snapped, transformedPlane) )
       {
@@ -1272,7 +1304,7 @@ char *ParseRawBrush(char **parsePtr, float *transformMtx, float brushScale, cons
     side->toolFlags = toolFlags | side->shaderInfo->toolFlagsWord;
   }
   if ( kiwiDeferred )
-    KiwiSnapNearAxialSides(bb, kiwiSide, kiwiOrig, kiwiDeferred, kiwiSum, kiwiCount);
+    KiwiSnapNearAxialSides(bb, kiwiSide, kiwiOrig, kiwiDeferred, kiwiAll, bb->numSides, kiwiSum, kiwiCount);
   return result;
 }
 
@@ -1348,7 +1380,7 @@ static void ComputeEntityOrigin(Entity_t *ent)
   Brush_t *brush;
   Patch_t *patch;
   float mins[3], maxs[3], origin[3];
-  char originText[32];
+  char originText[64];
   int vertex, vertexCount;
 
   Assert(ent, s_assertDisable_AdjustBrushesForOrigin);
@@ -1367,9 +1399,11 @@ static void ComputeEntityOrigin(Entity_t *ent)
     for (vertex = 0; vertex < vertexCount; ++vertex)
       AddPointToBounds(patch->vertexData[vertex].pos, mins, maxs);
   }
+  /* KIWI: the exact bounds centre - the entity's pivot; a whole-unit rounding swung a
+     script door with a half-unit centre about a point 0.5 off. */
   for (vertex = 0; vertex < 3; ++vertex)
-    origin[vertex] = floorf((mins[vertex] + maxs[vertex]) * 0.5f + 0.5f);
-  sprintf(originText, "%.0f %.0f %.0f", origin[0], origin[1], origin[2]);
+    origin[vertex] = (mins[vertex] + maxs[vertex]) * 0.5f;
+  sprintf(originText, "%.9g %.9g %.9g", origin[0], origin[1], origin[2]);
   SetKeyValue(ent, "origin", originText);
   VectorCopy(origin, ent->origin);
 }
@@ -1558,6 +1592,12 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
   }
   else
   {
+    /* Native 0x41CFFE asserts a point entity carries "origin" (map.cpp:1538).
+       KIWI: a warning - it is the map's data, and the entity lands at 0 0 0. */
+    if ( !EPairList_HasKey(g_currentEntity->epairs, "origin")
+      && strcmp(val, "worldspawn") && strcmp(val, "func_group") )
+      Com_Printf("WARNING: Map %s, entity %i (%s) has no \"origin\" - it is placed at 0 0 0\n",
+                 mapName, g_parseEntityCount - 1, val);
     GetVectorForKey(g_currentEntity, "origin", originAndMatrix);
     GetVectorForKey(g_currentEntity, "angles", entityAngles);
     // KIWI (2026-10-05, load/save gauntlet): a misc_model is placed by the game's rule

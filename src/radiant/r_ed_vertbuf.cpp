@@ -40,8 +40,6 @@
 #define ED_VERTBUF_POOL_GRANULARITY   256       // alloc rounding granularity
 #define ED_VERTBUF_MAX_VERTEX_BUFFERS 256
 
-extern char *va(const char *format, ...);
-extern void Assert(const char *file, int line, int type, const char *fmt, ...); // 0x49cea0
 void FatalError(int code, const char *fmt, ...);                                // 0x49a9e0
 
 // ── pool node structs (file-local; the IDB keeps them anonymous) ──────────────
@@ -363,7 +361,7 @@ static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, i
     HRESULT hr = vb->Lock(offset, sizeof(GfxWorldVertex) * vertCount, (void **)&out, D3DLOCK_NOOVERWRITE);
     if (hr < 0) {
         ++g_disableRendering;
-        FatalError(0, "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_vertbuf.cpp (%i) vb->Lock( offset, vertCount * sizeof( GfxWorldVertex ), &lockedBuf, 0x00001000L ) failed: %s\n", 205, R_ErrorDescription(hr));
+        FatalError(0, "r_ed_vertbuf: vb->Lock( %i verts, NOOVERWRITE ) failed: %s\n", vertCount, R_ErrorDescription(hr));
     }
 
     for (int i = 0; i < vertCount; ++i) {
@@ -399,7 +397,7 @@ static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, i
     hr = vb->Unlock();
     if (hr < 0) {
         ++g_disableRendering;
-        FatalError(0, "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_vertbuf.cpp (%i) vb->Unlock() failed: %s\n", 219, R_ErrorDescription(hr));
+        FatalError(0, "r_ed_vertbuf: vb->Unlock() failed: %s\n", R_ErrorDescription(hr));
     }
 }
 
@@ -487,9 +485,7 @@ static bool R_Ed_VB_FreeSlot_Coalesce(edVbPool *pool, int vertCount, uint16_t fi
         {
             if (mergedSlot)                                  // 0x51ca1f — bridge: mergedSlot starts at the gap
             {
-                // KEEP_VERBOSE: string reads ev.s.firstIndex (the binary's union view).
-                if (mergedSlot->firstIndex != firstIndex)    // 0x51ca8f
-                    Assert("C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\src\\gfx_d3d\\r_ed_vertbuf.cpp", 444, 1, "%s", "mergedSlot->firstIndex == ev.s.firstIndex");
+                iassert(mergedSlot->firstIndex == firstIndex);   // r_ed_vertbuf.cpp:444 (0x51ca8f)
                 mergedSlot->lastIndex = (uint16_t)(slot->lastIndex + vertCount);  // 0x51cabf
                 *pslot = slot->next;                         // 0x51cac6 — unlink `slot`
                 free(slot);
@@ -555,37 +551,5 @@ char R_Ed_FreeVertices(Material *handle, int vertCount, int vertHandle)
     return R_Ed_FreeVertices_Inner(matVertBuf, vertCount, vertHandle);   // 0x51cbf3
 }
 
-// engine_stubs.cpp / brush.cpp call this through the unported-name alias `sub_51CB70`.
-char sub_51CB70(Material *handle, int vertCount, int vertHandle)
-{
-    return R_Ed_FreeVertices(handle, vertCount, vertHandle);
-}
-
-// 0x51CC00  editorVB_freeBuffers — tear down every per-material record, the unused
-// scratch pool, and release all D3D9 vertex buffers.  Called on shutdown / reopt.
-void editorVB_freeBuffers()
-{
-    KiwiSurfCache_InvalidateAll( "editorVB_freeBuffers" );   // see Editor_VB_ReleaseForReset
-    KiwiEdScene_ReleaseMeshRunIB();
-
-    edMatVertBuf *m = editorGlobals_matVertBufs;
-    while (m) {
-        edMatVertBuf *next = m->next;
-        Editor_VB_FreePoolList(m->pools);
-        free(m);
-        m = next;
-    }
-    editorGlobals_matVertBufs = 0;
-
-    iassert( editorGlobals.unusedVertBuf.next == NULL );   // r_ed_vertbuf.cpp:519
-    Editor_VB_FreePoolList(editorGlobals.unusedVertBuf.pools);
-    editorGlobals.unusedVertBuf.pools = 0;
-
-    while (editorGlobals.vbCount) {
-        uint16_t idx = --editorGlobals.vbCount;
-        iassert( editorGlobals.vb[editorGlobals.vbCount] );   // r_ed_vertbuf.cpp:526
-        editorGlobals.vb[idx]->Release();
-        // 0x51cccb only Releases — it does NOT null vb[idx] (the slot is dead once vbCount
-        // is decremented).
-    }
-}
+// KIWI: editorVB_freeBuffers (0x51CC00, CTexWnd_Shutdown's / the lost-device teardown) is gone -
+// Editor_VB_ReleaseForReset is the one release path (shutdown and device reset).

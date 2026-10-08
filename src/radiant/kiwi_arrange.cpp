@@ -8,14 +8,13 @@
 #include "qe3.h"
 
 #include "kiwi_arrange.h"
+#include "kiwi_ported.h"
 #include "kiwi_region.h"        // KREG_JOIN_DIST / KREG_MIN_AREA / KREG_MAX_LOOP + SignedArea
 
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <vector>
-
-extern int Sys_Printf( const char *fmt, ... );
 
 namespace
 {

@@ -7,6 +7,7 @@
 #include "stdafx.h"
 #include "qe3.h"
 #include <gfx_d3d/r_material.h>   // Material_CastsStencilShadow (0x4FEE90)
+#include "kiwi_ported.h"          // KIWI: shared engine/editor externs
 #include <map>
 #include <string>
 #include <cmath>
@@ -17,38 +18,29 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // LayerMaterialDef — the lyrMtl target (= the 84-byte layered-material library
-// entry, padded to the IDB's 120-byte in-memory type).  CORRECTION vs the IDB
-// auto-type: offset 0 is the NAME string (Materialdef_GetName returns (char*)lyrMtl),
-// NOT a qtexture_s* — the binary's LayeredMaterials_GetMaterial name-compares the
-// entry as a string starting at offset 0.
+// entry, padded to the 120-byte in-memory type).  Offset 0 is the NAME string
+// (Materialdef_GetName returns (char*)lyrMtl), NOT a qtexture_s* —
+// LayeredMaterials_GetMaterial name-compares the entry as a string starting at offset 0.
 struct LayerMaterialDef
 {
     char  name[64];        // 0x00  material name (Materialdef_GetName reads this)
     int   _pad_40;         // 0x40
     int   layerCount;      // 0x44
-    int   activeLayer;     // 0x48  (binary name — MaterialDef.cpp:321 string; was current_layer)
+    int   activeLayer;     // 0x48  (name from the MaterialDef.cpp:321 string)
     struct { int vis; qtexture_s *radMtl; } layers[5];   // 0x4C  interleaved {vis@+0, radMtl@+4}
     int   _tail_74;        // 0x74
 };
 static_assert(sizeof(LayerMaterialDef) == (sizeof(void *) == 8 ? 168 : 120), "LayerMaterialDef must be 120 bytes (IDB)");
 static_assert(offsetof(LayerMaterialDef, layers) == (sizeof(void *) == 8 ? 80 : 0x4C), "LayerMaterialDef.layers");
 
-// MaterialDef realize-state (defined in engine_stubs.cpp). MaterialDef_05..09 AND
-// per-texture flag bits into it; MaterialDef_02 walks the layers feeding them.
-extern int dword_181F51C;
-
-// Assert is not declared in the shared headers (matches filters.cpp's pattern).
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
-
 // gfx_d3d/r_material.cpp — looks up a material constant (e.g. "colorTint") by name
-// and copies its vec4 literal into the out vector (IDB 0x51AD50).  Pointer-only here
+// and copies its vec4 literal into the out vector (0x51AD50).  Pointer-only here
 // (Material is forward-declared in qe3.h), so a forward decl is enough.
 extern char __cdecl Material_GetConstantValue( Material *material, const char *name, float *outValue );
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MtlDef_IsValid — the invariant asserted throughout: exactly one of lyrMtl/radMtl.
 // (patchMesh_material overload below: same leading {lyrMtl,radMtl} pair.)
-// (Inlined as the assert condition in the binary; factored here for clarity.)
 // ─────────────────────────────────────────────────────────────────────────────
 static inline bool MtlDef_IsValid( const MaterialDef *m )
 {
@@ -87,14 +79,13 @@ static LayerMaterialDef *MakeDegenerateLayerMtl( const char *name )
 
 // 0x4315C0  SetMaterial — assign a named material to a MaterialDef channel.
 //
-// KISAK: without a renderer, preserve names in zero-layer handles instead of registering
-// render materials; GUI operation uses the binary dispatch below.
+// Without a renderer, names are preserved in zero-layer handles instead of registering
+// render materials; GUI operation uses the dispatch below.
 extern bool g_radiantFirstLightRendererReady;                 // mainfrm.cpp
 extern void *LayeredMaterials_GetMaterial( const char *name );     // layeredmaterials.cpp 0x4172f0
-extern qtexture_s *Texture_GetHandle( const char *name );     // texwnd.cpp 0x45a8e0
 
 // ── Prefab-load material gate (prefab-load-on-open) ──────────────────────────────
-// KISAK: prefab parsing also uses zero-layer handles because the shared engine's water
+// Prefab parsing also uses zero-layer handles because the shared engine's water
 // material layout differs from CoD4. The counter supports nested prefab loads.
 int g_radiantLoadingPrefab = 0;                               // bracketed by Eclass_RealizeModel
 
@@ -158,16 +149,16 @@ bool Materialdef_Realize( MaterialDef *md )
 // 0x431640  Materialdef_GetName — the material name (lyrMtl@0 or radMtl->name).
 LayerMaterialDef *Materialdef_GetName( MaterialDef *mtlDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x43165d test esi,esi + invariant (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->lyrMtl )
         return mtlDef->lyrMtl;                             // (char*)lyrMtl == name
-    return (LayerMaterialDef *)mtlDef->radMtl->name;       // radMtl->name
+    return (LayerMaterialDef *)mtlDef->radMtl->name;
 }
 
 // 0x4314A0  MaterialDef_GetLayeredMaterial — the renderable texture/layer handle.
 qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x4314a3 test esi,esi + invariant (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->radMtl )
         return mtlDef->radMtl;
     iassert( mtlDef->lyrMtl );   // MaterialDef.cpp:30
@@ -180,13 +171,13 @@ qtexture_s *MaterialDef_GetLayeredMaterial( MaterialDef *mtlDef )
 // (radMtl path: once on the texture; lyrMtl path: once per layer).
 void MaterialDef_02( MaterialDef *mtlDef, int (*cb)( qtexture_s * ) )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431523 test esi,esi + invariant (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->radMtl )
     {
         cb( mtlDef->radMtl );
         return;
     }
-    iassert( mtlDef->lyrMtl );                             // 0x431571 (level 0)
+    iassert( mtlDef->lyrMtl );
     // layers[] live at 0x4C, 8-byte stride {vis, radMtl}.
     for ( int i = 0; i < mtlDef->lyrMtl->layerCount; ++i )
     {
@@ -197,7 +188,7 @@ void MaterialDef_02( MaterialDef *mtlDef, int (*cb)( qtexture_s * ) )
 // 0x431740  MaterialDef_04 / 0x431AB0 MaterialDef_11 — layer count (radMtl → 1).
 int MaterialDef_04( MaterialDef *mtlDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x43175d (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->lyrMtl )
         return mtlDef->lyrMtl->layerCount;
     iassert( mtlDef->radMtl );   // MaterialDef.cpp:113
@@ -205,7 +196,7 @@ int MaterialDef_04( MaterialDef *mtlDef )
 }
 int MaterialDef_11( MaterialDef *mtlDef )   // 0x431AB0 — identical to MaterialDef_04
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431acd (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->lyrMtl )
         return mtlDef->lyrMtl->layerCount;
     iassert( mtlDef->radMtl );   // MaterialDef.cpp:264
@@ -216,31 +207,31 @@ int MaterialDef_11( MaterialDef *mtlDef )   // 0x431AB0 — identical to Materia
 // Each ANDs a per-texture flag from the qtexture handle into dword_181F51C.
 int MaterialDef_05( qtexture_s *radMtl )   // tex_num   @0x10
 {
-    iassert( radMtl );                                     // 0x431849 (level 0)
+    iassert( radMtl );
     dword_181F51C &= radMtl->tex_num_or_localefilter;
     return dword_181F51C;
 }
 int MaterialDef_06( qtexture_s *radMtl )   // low word of unk_flags2 @0x0C
 {
-    iassert( radMtl );                                     // 0x4318a9 (level 0)
+    iassert( radMtl );
     dword_181F51C = (ushort)( (ushort)radMtl->unk_flags2 & dword_181F51C );
     return dword_181F51C;
 }
 int MaterialDef_07( qtexture_s *radMtl )   // unk1 byte @0x09
 {
-    iassert( radMtl );                                     // 0x431919 (level 0)
+    iassert( radMtl );
     dword_181F51C = (byte)( (byte)radMtl->unk1 & dword_181F51C );
     return dword_181F51C;
 }
 int MaterialDef_08( qtexture_s *radMtl )   // in_use @0x20
 {
-    iassert( radMtl );                                     // 0x431999 (level 0)
+    iassert( radMtl );
     dword_181F51C &= radMtl->in_use;
     return dword_181F51C;
 }
 int MaterialDef_09( qtexture_s *radMtl )   // color_filter @0x1C
 {
-    iassert( radMtl );                                     // 0x431a09 (level 0)
+    iassert( radMtl );
     dword_181F51C &= radMtl->color_or_surfacetype_filter;
     return dword_181F51C;
 }
@@ -250,7 +241,7 @@ namespace LayerMat
 {
     int GetCurrentLayer( MaterialDef *mtlDef )
     {
-        iassert( MtlDef_IsValid( mtlDef ) );               // 0x431b4d (level 0)
+        iassert( MtlDef_IsValid( mtlDef ) );
         if ( mtlDef->lyrMtl )
             return mtlDef->lyrMtl->activeLayer;
         iassert( mtlDef->radMtl );   // MaterialDef.cpp:276
@@ -261,7 +252,7 @@ namespace LayerMat
 // 0x431BA0  MaterialDef_13 — per-layer vis value (radMtl → 0 for visIndex 0).
 int MaterialDef_13( int visIndex, MaterialDef *mtlDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431bbd (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->lyrMtl )
     {
         bcassert( (unsigned)visIndex, (unsigned)mtlDef->lyrMtl->layerCount );   // MaterialDef.cpp:287
@@ -275,7 +266,7 @@ int MaterialDef_13( int visIndex, MaterialDef *mtlDef )
 // 0x431C60  MaterialDef_14 — the Material* handle for a layer (radMtl → radMtl->next).
 Material *MaterialDef_14( unsigned int visIndex, MaterialDef *mtlDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431c7d (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     if ( mtlDef->lyrMtl )
     {
         bcassert( visIndex, (unsigned)mtlDef->lyrMtl->layerCount );             // MaterialDef.cpp:303
@@ -283,22 +274,8 @@ Material *MaterialDef_14( unsigned int visIndex, MaterialDef *mtlDef )
         return mtlDef->lyrMtl->layers[visIndex].radMtl->handle;
     }
     iassert( mtlDef->radMtl );   // MaterialDef.cpp:308
-    iassert( visIndex == 0 );                                // 0x431d1d (level 0)
+    iassert( visIndex == 0 );
     iassert( mtlDef->radMtl->handle );   // MaterialDef.cpp:310
-    return mtlDef->radMtl->handle;
-}
-
-// 0x431D70  MaterialDef_GetActiveLayerHandle (sub_431D70) — handle of the active layer.
-Material *MaterialDef_GetActiveLayerHandle( MaterialDef *mtlDef )
-{
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x431d90 (level 0)
-    if ( mtlDef->lyrMtl )
-    {
-        iassert( mtlDef->lyrMtl->layers[mtlDef->lyrMtl->activeLayer].radMtl->handle );   // MaterialDef.cpp:321
-        return mtlDef->lyrMtl->layers[mtlDef->lyrMtl->activeLayer].radMtl->handle;
-    }
-    iassert( mtlDef->radMtl );   // MaterialDef.cpp:325
-    iassert( mtlDef->radMtl->handle );   // MaterialDef.cpp:326
     return mtlDef->radMtl->handle;
 }
 
@@ -317,36 +294,22 @@ bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m )
 // render handle cast a stencil shadow?  Resolves the renderable layer/texture handle
 // (MaterialDef_GetLayeredMaterial → qtexture_s), then forwards its registered Material*
 // (lm->next @ offset 0) to Material_CastsStencilShadow (0x4FEE90, gfx_d3d/r_material.cpp).
-// surfaceFlags is now carried on the KISAK_RADIANT-widened Material (populated in
-// Material_LoadRaw from the on-disk MaterialInfoRaw.surfaceFlags), so the gate is
-// byte-faithful to the IW3 56-byte MaterialInfo without disturbing SP/MP.
-// Callers: Brush_DrawSubmitFaceWindings (0x47b380, brush.cpp P5.4 TODO, unported) and
-// pmesh.cpp's stencil-shadow submit path (where the binary inlines this fn).
+// surfaceFlags is carried on the KISAK_RADIANT-widened Material (populated in
+// Material_LoadRaw from the on-disk MaterialInfoRaw.surfaceFlags).
+// Callers: Brush_DrawSubmitFaceWindings (brush.cpp) and pmesh.cpp's stencil-shadow
+// submit path (where the binary inlines this fn).
 bool MaterialDef_10_LayeredMatHandle( MaterialDef *mtlDef )
 {
-    qtexture_s *radMtl = MaterialDef_GetLayeredMaterial( mtlDef );   // 0x431a61
-    if ( !radMtl )                                                   // 0x431a6a
+    qtexture_s *radMtl = MaterialDef_GetLayeredMaterial( mtlDef );
+    if ( !radMtl )
         return false;
     iassert( radMtl->handle );   // MaterialDef.cpp:246
-    return Material_CastsStencilShadow( radMtl->handle );            // 0x431a96
-}
-
-// 0x431E40  MaterialDef_SetColorTint (sub_431E40) — reads the active
-// layer's resolved Material handle (MaterialDef_14) and copies its "colorTint" vec4
-// constant into out via Material_GetConstantValue (0x51AD50).  The third arg is a
-// float[4] OUT vector (disasm push order: out, "colorTint", mtl → cdecl reverses).
-// No callers in the binary; ported for completeness.  Returns 1 if the constant was
-// found, 0 otherwise (Material_GetConstantValue's return).
-char MaterialDef_SetColorTint( MaterialDef *mtlDef, unsigned int visIndex, float *out )
-{
-    Material *mtl = MaterialDef_14( visIndex, mtlDef );
-    iassert( mtl );   // materialdef.cpp:336
-    return Material_GetConstantValue( mtl, "colorTint", out );
+    return Material_CastsStencilShadow( radMtl->handle );
 }
 
 // 0x472C00  Init_MaterialLayer — seed each layer's mat_texDef from the material
-// dimensions and a sample size.  a2 carries the sample-size FLOAT bit-pattern
-// The binary reinterprets the pointer-sized argument as a float.
+// dimensions and a sample size.  a2 is the sample size (the binary passes the float's
+// bits in a pointer-sized argument).
 int Init_MaterialLayer( MaterialDef *a1, float a2 )
 {
     qtexture_s *lm = MaterialDef_GetLayeredMaterial( a1 );
@@ -375,7 +338,7 @@ int Init_MaterialLayer( MaterialDef *a1, float a2 )
 // shift, fold rotate into [-45,45), abs sizes).  No-op for any other material.
 void TexMatToFakeTexCoords( MaterialDef *mtlDef, texdef_sub_t *texDef )
 {
-    iassert( MtlDef_IsValid( mtlDef ) );                   // 0x472e1a test eax,eax + invariant (level 0)
+    iassert( MtlDef_IsValid( mtlDef ) );
     const char *name = mtlDef->lyrMtl ? (const char *)mtlDef->lyrMtl
                                       : mtlDef->radMtl->name;
     if ( !strcmp( name, "lightmap_gray" ) )

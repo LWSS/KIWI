@@ -6,27 +6,20 @@
 #include "stdafx.h"
 #include "winding.h"
 #include "primarylights_region.h"        // rface_t (defined here), lightDesc_t, public API
-#include <universal/com_math.h>          // Vec3Cross, Vec3Normalize_R, Vec3NormalizeTo, PerpendicularVector
+#include <universal/com_math.h>          // Vec3Cross, Vec3NormalizeTo, PerpendicularVector
 #include <universal/com_convexhull.h>    // Com_ConvexHull, Com_ConvexHullIndices
 #include <universal/assertive.h>         // iassert / vassert (USE_ASSERTS → MyAssertHandler)
+#include "kiwi_ported.h"                 // KIWI: shared engine/editor externs
 #include <math.h>
 
 // ─── engine helpers ──────────────────────────────────────────────────────────
 // In the radiant build Com_PrintMessage is the cmdlib varargs console printer.
 extern void Com_PrintMessage( const char *fmt, ... );
 
-// Vec3Normalize_R (0x40A5E0) — in-place normalize returning the pre-normalize length
-// (engine_stubs.cpp; no header).  Vec3Cross / Vec3NormalizeTo / PerpendicularVector
-// come from com_math.h.
-extern float Vec3Normalize_R( float *v );
-
 static inline void PLR_OutOfMem( const char *msg ) { Com_PrintMessage( "%s", msg ); }
 
-// winding alloc counter (dword_24CE4FC) — winding.cpp's g_windingAlloc.
-extern int g_windingAlloc;
-
-// Region_ReverseWinding (0x4D7DC0) — fresh winding with reversed point order.  brush.cpp
-// has a file-static copy (edwind::); ported locally here (15-line shared polylib fn).
+// 0x4D7DC0 Region_ReverseWinding — fresh winding with reversed point order.  brush.cpp
+// has a file-static copy (edwind::); this is a local copy of the shared polylib fn.
 static winding_t *Region_ReverseWinding( const winding_t *w )
 {
     int n = w->numpoints;
@@ -55,7 +48,7 @@ struct rface_t
     float    plane[4];    // +0x00 normal.xyz + dist
     float    dir[3];      // +0x10 cone axis
     float    cosHalfFov;  // +0x1C
-    int      exterior;    // +0x20 (a4)
+    int      exterior;    // +0x20
     winding_t *w;         // +0x24
     float    pad;         // +0x28
     rface_t *next;        // +0x2C
@@ -63,18 +56,13 @@ struct rface_t
 static_assert( sizeof(rface_t) == (sizeof(void *) == 8 ? 64 : 0x30), "rface_t (primarylights region node) != 0x30" );
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  s_kdopNormals (unk_6DD214 / unk_6DD218 / flt_6DD258) — the 26-direction k-DOP
-//  axis table: 6 axial, 12 edge-diagonal (±1/√2), 8 corner (±1/√3).  Read exactly
-//  from the IDB.  sub_4DAD20 walks 26 dirs starting at unk_6DD218 (== &table[-? ];
-//  see below) and clips against the 20 diagonal dirs from flt_6DD258.
+//  The 26-direction k-DOP axis table: 6 axial, 12 edge-diagonal (±1/√2), 8 corner
+//  (±1/√3).  Region_AddBoundsFaces walks all 26 dirs and clips against the 20 diagonal ones.
 // ═════════════════════════════════════════════════════════════════════════════
 static const float SQRT2_INV = 0.70710677f;   // 0x3F3504F3
 static const float SQRT3_INV = 0.5773502588272095f;
 
-// unk_6DD218: the 26 k-DOP directions sub_4DAD20 iterates (it dereferences v3-2..v3,
-// stepping +3 each loop for 26 iters → 26 vec3 starting two floats BEFORE the named
-// label, i.e. the table actually begins at a vec3 boundary).  IDA's unk_6DD218 dump
-// (26 vec3) is the authoritative sequence:
+// The 26 k-DOP directions Region_AddBoundsFaces iterates, in the binary's order:
 static const float s_kdopDirs[26][3] =
 {
     {  0.0f,  0.0f, -1.0f }, {  0.0f,  0.0f,  1.0f }, {  0.0f, -1.0f,  0.0f },
@@ -91,21 +79,19 @@ static const float s_kdopDirs[26][3] =
     {  SQRT3_INV, -SQRT3_INV, -SQRT3_INV }, { -SQRT3_INV,  SQRT3_INV,  SQRT3_INV },
 };
 
-// flt_6DD258: the 20 diagonal directions sub_4DAD20 clips each base box plane against
+// The 20 diagonal directions Region_AddBoundsFaces clips each base box plane against
 // (= s_kdopDirs[6..25], the non-axial subset).
 static const float (* const s_kdopDiag)[3] = &s_kdopDirs[6];   // 20 entries
 
-// s_kdopNormals (unk_6DD214): used by sub_4DCE20 — 13 antipodal pairs (the same table,
-// one float EARLIER: starts at the {0,0,-1}/{0,0,1} pair as 13 *pairs* of normals, read
-// with stride 6 floats).  Same data as s_kdopDirs flattened; sub_4DCE20 reads it as
-// 13 entries with a +6-float stride and verifies each pair is antipodal.
+// s_kdopNormals: used by Kdop_SeedBaseAxes — 13 antipodal pairs, the same data as
+// s_kdopDirs flattened and read with a stride of 6 floats; each pair is verified antipodal.
 static const float *s_kdopNormalsFlat = &s_kdopDirs[0][0];
 
-// ─── d_lightRegionHulls global sink (dword_1807E00 / dword_25D5A4C) lives in
-//     camwnd.cpp (sub_406C50 fills it; the parked GPU light draw consumes it). ───
+// ─── d_lightRegionHulls global sink lives in camwnd.cpp (which fills it; the parked
+//     GPU light draw consumes it). ───
 
 // =============================================================================
-//  Winding_Plane (sub_4D6EF0) — winding best-fit plane: normal in out[0..2],
+//  0x4D6EF0 Region_WindingPlane — winding best-fit plane: normal in out[0..2],
 //  dist in out[3]; returns 0.5 * sum-of-cross-magnitudes (the winding area).
 //  (common\polylib.cpp inline; not the editor winding.cpp Winding_Plane.)
 // =============================================================================
@@ -116,17 +102,17 @@ float Region_WindingPlane( float *out, const winding_t *w )
     out[2] = 0.0f;
     for ( int i = 2; i < w->numpoints; i++ )
     {
-        float v10[3], v9[3], v8[3];
-        v10[0] = w->p[i - 1][0] - w->p[0][0];
-        v10[1] = w->p[i - 1][1] - w->p[0][1];
-        v10[2] = w->p[i - 1][2] - w->p[0][2];
-        v9[0]  = w->p[i][0] - w->p[0][0];
-        v9[1]  = w->p[i][1] - w->p[0][1];
-        v9[2]  = w->p[i][2] - w->p[0][2];
-        Vec3Cross( v9, v10, v8 );
-        out[0] += v8[0];
-        out[1] += v8[1];
-        out[2] += v8[2];
+        float prevEdge[3], curEdge[3], cross[3];
+        prevEdge[0] = w->p[i - 1][0] - w->p[0][0];
+        prevEdge[1] = w->p[i - 1][1] - w->p[0][1];
+        prevEdge[2] = w->p[i - 1][2] - w->p[0][2];
+        curEdge[0]  = w->p[i][0] - w->p[0][0];
+        curEdge[1]  = w->p[i][1] - w->p[0][1];
+        curEdge[2]  = w->p[i][2] - w->p[0][2];
+        Vec3Cross( curEdge, prevEdge, cross );
+        out[0] += cross[0];
+        out[1] += cross[1];
+        out[2] += cross[2];
     }
     float area = Vec3Normalize_R( out ) * 0.5f;
     out[3] = w->p[0][0] * out[0] + w->p[0][1] * out[1] + w->p[0][2] * out[2];
@@ -134,24 +120,20 @@ float Region_WindingPlane( float *out, const winding_t *w )
 }
 
 // =============================================================================
-//  Winding_Clip_real_ (0x4D83B0, common\polylib.cpp:~700) — destructive in-place
-//  ClipWindingEpsilon keeping the BACK side (dist <= epsilon).  *a1 is freed and
-//  replaced with the clipped winding (or NULL if the whole winding is in front).
-//  Faithful transcription of the disasm (SIDE arrays + edge interpolation, with the
-//  axial-plane snap-to-dist optimisation for unit normals).
+//  0x4D83B0 Winding_Clip_real_ (common\polylib.cpp:~700) — destructive in-place
+//  ClipWindingEpsilon.  Keeps the FRONT side (dist > epsilon) plus ON points; drops the
+//  BACK side (dist <= -epsilon).  *inout is freed+replaced with the clipped winding, set
+//  to NULL when nothing is in front, or left unchanged when nothing is in back.  Unit
+//  axial normals snap the interpolated coordinate to +-dist.
 // =============================================================================
-// Keeps the FRONT side (dist > epsilon) plus ON points; drops the BACK side
-// (dist <= -epsilon).  *inout is freed+replaced with the clipped winding, set to
-// NULL when nothing is in front, or left unchanged when nothing is in back.
-// (Disasm 0x4D83B0: side 0=FRONT/d>eps, 1=BACK/d<=-eps, 2=ON; counts[0]=front etc.)
 void Winding_Clip_real_( winding_t **inout, const float *normal, float dist, float epsilon )
 {
     winding_t *in = *inout;
     unsigned int np = in->numpoints;
 
-    float dists[1028];   // var_2048..
-    int   sides[1029];   // var_1038..
-    int   counts[3] = { 0, 0, 0 };   // var_14(front)/var_10(back)/var_C(on)
+    float dists[1028];
+    int   sides[1029];
+    int   counts[3] = { 0, 0, 0 };   // front / back / on
 
     unsigned int i;
     for ( i = 0; i < np; i++ )
@@ -224,7 +206,9 @@ void Winding_Clip_real_( winding_t **inout, const float *normal, float dist, flo
     }
 
     if ( (unsigned int)f->numpoints > maxpts )
+    {
         vassert( (unsigned int)f->numpoints <= maxpts, "%i, %i", f->numpoints, maxpts );  // polylib.cpp:760
+    }
     if ( f->numpoints > 0x400 )
         Com_PrintMessage( "ClipWinding: MAX_POINTS_ON_WINDING" );
 
@@ -237,7 +221,7 @@ void Winding_Clip_real_( winding_t **inout, const float *normal, float dist, flo
 static void Region_FitFaceCone( rface_t *face );
 
 // =============================================================================
-//  sub_4DA360 - cone-projection kernel.  Projects each of the `count` normalized
+//  0x4DA360 Region_ConeProject - cone-projection kernel.  Projects each of the `count` normalized
 //  per-point directions (the dirs[] array, vec3 stride) onto test axis `testDir`,
 //  tracking min (*outMin) and max (*outMax).  If the min beats the running best
 //  (face->cosHalfFov), records testDir's negation as the new cone axis & cosine.
@@ -257,15 +241,15 @@ static char Region_ConeProject( const float *testDir, float *outMin, rface_t *fa
     }
     if ( *outMin <= face->cosHalfFov )
         return 0;
-    face->cosHalfFov = *outMin;          // face[7]
-    face->dir[0] = -testDir[0];          // face[4..6]
+    face->cosHalfFov = *outMin;
+    face->dir[0] = -testDir[0];
     face->dir[1] = -testDir[1];
     face->dir[2] = -testDir[2];
     return 1;
 }
 
 // =============================================================================
-//  sub_4DA550 - compute the bounding cone (dir + cosHalfFov) for a region face's
+//  0x4DA550 Region_FitFaceCone - compute the bounding cone (dir + cosHalfFov) for a region face's
 //  winding.  Builds per-point unit directions from the face plane, seeds the cone
 //  with the centroid then the (negated) plane normal, then iteratively re-centers
 //  (minimal cone) until convergence (<=10000 iters).
@@ -274,11 +258,15 @@ static void Region_FitFaceCone( rface_t *face )
 {
     winding_t *w = face->w;
     if ( !w )
+    {
         vassert( w, "%s", "face->w" );                 // primarylights_region.cpp:162
+    }
     if ( (unsigned int)w->numpoints > 0x400 )
+    {
         vassert( (unsigned int)w->numpoints <= 0x400, "%i, %i", w->numpoints, 1024 );  // :163
+    }
 
-    float dirs[1024][3];                                // v20/v21 (~1024 vec3)
+    float dirs[1024][3];
     float centroid[3] = { 0.0f, 0.0f, 0.0f };
     if ( w->numpoints != 0 )
     {
@@ -298,7 +286,9 @@ static void Region_FitFaceCone( rface_t *face )
     Region_ConeProject( testDir, &cosMin, face, &dirs[0][0], w->numpoints, &cosMax );
 
     if ( face->cosHalfFov <= -1.0f )
+    {
         vassert( face->cosHalfFov > -1.0f, "%g, %g", face->cosHalfFov, -1.0 );          // :176
+    }
 
     if ( face->cosHalfFov < 0.9800000190734863f )
     {
@@ -308,14 +298,18 @@ static void Region_FitFaceCone( rface_t *face )
         testDir[2] = -face->plane[2];
         Region_ConeProject( testDir, &cosMin, face, &dirs[0][0], w->numpoints, &cosMax );
         if ( cosMin <= 0.0f )
+        {
             vassert( cosMin > 0.0f, "(cosHalfFovMin) = %g", cosMin );                   // :182
+        }
 
         if ( face->cosHalfFov < 0.9800000190734863f )
         {
             for ( int iter = 0; ; ++iter )
             {
                 if ( (unsigned int)( iter + 1 ) >= 0x2710 )
+                {
                     vassert( iter < 10000, "%s", "iterations < 10000" );                // :191
+                }
 
                 float prevCos = face->cosHalfFov;
                 float band = cosMin + ( cosMax - cosMin ) * 0.03125f;
@@ -337,27 +331,32 @@ static void Region_FitFaceCone( rface_t *face )
                 Vec3NormalizeTo( acc, testDir );
 
                 if ( testDir[0] == face->dir[0] && testDir[1] == face->dir[1] && testDir[2] == face->dir[2] )
+                {
                     vassert( !( testDir[0] == face->dir[0] && testDir[1] == face->dir[1] && testDir[2] == face->dir[2] ),
                              "%s", "!Vec3Compare( face->dir, testDir )" );               // :204
+                }
 
                 if ( !Region_ConeProject( testDir, &cosMin, face, &dirs[0][0], w->numpoints, &cosMax )
                      || prevCos + 0.00009999999747378752f > face->cosHalfFov )
                     break;
             }
             if ( face->cosHalfFov <= 0.0f )
+            {
                 vassert( face->cosHalfFov > 0.0f, "%g, %g", face->cosHalfFov, 0.0 );     // :212
+            }
         }
     }
 }
 
 // =============================================================================
-//  sub_4DAA70 - build a region face from a world-space winding `w`, link it onto
-//  *outList.  Translates the winding relative to the light position a3 (a3[1..3] =
-//  light origin, a3[7] = radius), computes its plane, optionally reverses it
-//  (front-facing dropped only when `exterior`), clips it back to the light sphere
-//  by each edge's tangent plane, then allocates the rface node + fits its cone.
+//  Region_AddWindingFace (0x4DAA70) - build a region face from a world-space winding `w`,
+//  link it onto *outList.  Translates the winding relative to the light position (the
+//  light descriptor viewed as floats: light[1..3] = origin, light[7] = radius), computes
+//  its plane, optionally reverses it (front-facing dropped only when `exterior`), clips it
+//  back to the light sphere by each edge's tangent plane, then allocates the rface node +
+//  fits its cone.
 // =============================================================================
-void sub_4DAA70( const winding_t *w, rface_t **outList, const float *a3, int exterior )
+void Region_AddWindingFace( const winding_t *w, rface_t **outList, const float *light, int exterior )
 {
     ++g_windingAlloc;
     winding_t *lw = (winding_t *)malloc( 12 * w->numpoints + 4 );
@@ -366,9 +365,9 @@ void sub_4DAA70( const winding_t *w, rface_t **outList, const float *a3, int ext
     lw->numpoints = w->numpoints;
     for ( unsigned int i = 0; i < (unsigned int)w->numpoints; i++ )
     {
-        lw->p[i][0] = w->p[i][0] - a3[1];
-        lw->p[i][1] = w->p[i][1] - a3[2];
-        lw->p[i][2] = w->p[i][2] - a3[3];
+        lw->p[i][0] = w->p[i][0] - light[1];
+        lw->p[i][1] = w->p[i][1] - light[2];
+        lw->p[i][2] = w->p[i][2] - light[3];
     }
 
     float plane[4];
@@ -403,20 +402,20 @@ void sub_4DAA70( const winding_t *w, rface_t **outList, const float *a3, int ext
     }
 
     // Clip the (light-relative) winding back to the light sphere along each edge's
-    // tangent plane.  v12 walks the ORIGINAL world winding `w` (disasm a1+3); the
-    // tangent normal is the world light->vertex direction (light origin - w vertex).
+    // tangent plane.  The loop walks the ORIGINAL world winding `w`; the tangent
+    // normal is the world light->vertex direction (light origin - w vertex).
     for ( int i = 0; i < w->numpoints; i++ )
     {
-        float dx = a3[1] - w->p[i][0];
-        float dy = a3[2] - w->p[i][1];
-        float dz = a3[3] - w->p[i][2];
+        float dx = light[1] - w->p[i][0];
+        float dy = light[2] - w->p[i][1];
+        float dz = light[3] - w->p[i][2];
         float distSq = dy * dy + dx * dx + dz * dz;
-        float radSq  = a3[7] * a3[7];
+        float radSq  = light[7] * light[7];
         if ( radSq < distSq )
         {
             float invLen = 1.0f / sqrtf( distSq );
             float n[3] = { invLen * dx, dy * invLen, invLen * dz };
-            Winding_Clip_real_( &lw, n, -a3[7], 0.1f );
+            Winding_Clip_real_( &lw, n, -light[7], 0.1f );
             if ( !lw )
                 break;
         }
@@ -431,24 +430,24 @@ void sub_4DAA70( const winding_t *w, rface_t **outList, const float *a3, int ext
         face->plane[1] = plane[1];
         face->plane[2] = plane[2];
         face->plane[3] = plane[3];
-        face->exterior = exterior;                     // +0x20
-        face->pad      = 0.0f;                          // +0x28
-        face->w        = lw;                            // +0x24
-        face->next     = *outList;                      // +0x2C
+        face->exterior = exterior;
+        face->pad      = 0.0f;
+        face->w        = lw;
+        face->next     = *outList;
         *outList       = face;
         Region_FitFaceCone( face );
     }
 }
 
 // =============================================================================
-//  sub_4DAD20 — add the light's bounding-cube exterior faces.  For each of the 26
-//  k-DOP directions, build the box face winding (Winding_BaseForPlane over the
-//  [-r,r]^3 cube), clip it against the 20 diagonal k-DOP planes, then link it as an
-//  exterior region face (exterior=1).  a2 = the region descriptor; *(a2+28) = radius.
+//  Region_AddBoundsFaces (0x4DAD20) — add the light's bounding-cube exterior faces.  For
+//  each of the 26 k-DOP directions, build the box face winding (Winding_BaseForPlane over
+//  the [-r,r]^3 cube), clip it against the 20 diagonal k-DOP planes, then link it as an
+//  exterior region face (exterior=1).  desc = the region descriptor; *(desc+28) = radius.
 // =============================================================================
-void sub_4DAD20( rface_t **outList, const float *desc )
+void Region_AddBoundsFaces( rface_t **outList, const float *desc )
 {
-    float radius = *(const float *)( (const char *)desc + 28 );   // a2+28
+    float radius = *(const float *)( (const char *)desc + 28 );
     float boxMin[3] = { -radius, -radius, -radius };
     float boxMax[3] = {  radius,  radius,  radius };
 
@@ -465,39 +464,41 @@ void sub_4DAD20( rface_t **outList, const float *desc )
         pl.dist = planeDist;
         winding_t *wnd = Winding_BaseForPlane( boxMax, boxMin, &pl );
 
-        // Clip against the 20 diagonal k-DOP planes (flt_6DD258 = s_kdopDirs[6..25]),
-        // each at dist -radius.  Disasm: the diagonal index v5 runs 6..25 and is skipped
-        // when it equals the current face's k-DOP index v17(=d): if (v5 != v17) clip.
+        // Clip against the 20 diagonal k-DOP planes (s_kdopDirs[6..25]), each at dist -radius.
         for ( int k = 0; k < 20; k++ )
         {
             if ( ( 6 + k ) != d )      // skip the plane equal to this face's own
             {
                 if ( !wnd )
+                {
                     vassert( wnd, "%s", "w" );   // primarylights_region.cpp:305
+                }
                 Winding_Clip_real_( &wnd, s_kdopDiag[k], -radius, 0.1f );
             }
         }
         if ( !wnd )
+        {
             vassert( wnd, "%s", "w" );           // primarylights_region.cpp:308
+        }
 
         rface_t *face = (rface_t *)operator new( sizeof( rface_t ) );
         if ( !face )
             Com_PrintMessage( "Out of memory" );
-        face->w        = wnd;          // +9
-        face->pad      = 0.0f;         // +10
-        face->exterior = 1;            // +8
+        face->w        = wnd;
+        face->pad      = 0.0f;
+        face->exterior = 1;
         face->plane[0] = dir[0];
         face->plane[1] = dir[1];
         face->plane[2] = dir[2];
         face->plane[3] = planeDist;
-        face->next     = *outList;     // +11
+        face->next     = *outList;
         *outList       = face;
         Region_FitFaceCone( face );
     }
 }
 
 // =============================================================================
-//  sub_4DA240 — free a region-face list (free each node's winding @+0x24 and node).
+//  0x4DA240 Region_FreeList — free a region-face list (each node's winding and the node).
 // =============================================================================
 void Region_FreeList( rface_t *list )
 {
@@ -516,7 +517,7 @@ void Region_FreeList( rface_t *list )
 }
 
 // =============================================================================
-//  sub_4DA280 — deep-copy a region-face list (clone each 48-byte node + winding).
+//  0x4DA280 Region_CopyList — deep-copy a region-face list (clone each 48-byte node + winding).
 //  Returns the head of the copied list.
 // =============================================================================
 static rface_t *Region_CopyList( rface_t *src )
@@ -548,35 +549,37 @@ static rface_t *Region_CopyList( rface_t *src )
 }
 
 // =============================================================================
-//  sub_40A020 — cos(acos(a)+acos(b)) = a*b - sqrt((1-a^2)(1-b^2)).  The cone
+//  0x40A020 Region_CosSum — cos(acos(a)+acos(b)) = a*b - sqrt((1-a^2)(1-b^2)).  The cone
 //  half-angle sum used to test whether two cones can overlap.
 // =============================================================================
-static float Region_CosSum( float a1, float a2 )
+static float Region_CosSum( float cosA, float cosB )
 {
-    float v4 = 1.0f - a2 * a2;
-    float v5 = 1.0f - a1 * a1;
-    float v6 = v4 * v5;
-    float v7 = sqrtf( v6 );
-    return (float)( a2 * a1 - v7 );
+    float sinB2   = 1.0f - cosB * cosB;
+    float sinA2   = 1.0f - cosA * cosA;
+    float sinAB2  = sinB2 * sinA2;
+    float sinAB   = sqrtf( sinAB2 );
+    return (float)( cosB * cosA - sinAB );
 }
 
 // =============================================================================
-//  sub_4D7E40 (common\polylib.cpp:~530) — Winding_SplitEpsilon: classify/split a
-//  winding by a plane.  Returns 0=front, 1=back, 2=on, 3=split; on split *front /
-//  *back receive freshly-allocated windings (caller owns).  a2=dist, a3=epsilon.
+//  0x4D7E40 Region_SplitWinding (common\polylib.cpp:~530) — Winding_SplitEpsilon: classify/
+//  split a winding by a plane.  Returns 0=front, 1=back, 2=on, 3=split; on split *front /
+//  *back receive freshly-allocated windings (caller owns).
 // =============================================================================
 static int Region_SplitWinding( const winding_t *in, const float *normal, float dist,
                                 float epsilon, winding_t **front, winding_t **back )
 {
-    if ( !in )       vassert( in, "%s", "in" );                                      // :534
-    if ( !normal )   vassert( normal, "%s", "normal" );                              // :535
+    if ( !in )       { vassert( in, "%s", "in" ); }                                  // :534
+    if ( !normal )   { vassert( normal, "%s", "normal" ); }                          // :535
     {
         float lensq = normal[1] * normal[1] + normal[0] * normal[0] + normal[2] * normal[2];
         if ( lensq <= 0.0f )
+        {
             vassert( lensq > 0.0f, "%s", "Vec3LengthSq( normal ) > 0" );             // :536
+        }
     }
-    if ( !front )    vassert( front, "%s", "front" );                                // :537
-    if ( !back )     vassert( back, "%s", "back" );                                  // :538
+    if ( !front )    { vassert( front, "%s", "front" ); }                            // :537
+    if ( !back )     { vassert( back, "%s", "back" ); }                              // :538
 
     unsigned int np = in->numpoints;
     float dists[1028];
@@ -595,7 +598,7 @@ static int Region_SplitWinding( const winding_t *in, const float *normal, float 
     sides[i] = sides[0];
     dists[i] = dists[0];
 
-    // disasm: front==0 -> (back!=0 ? 1 : 2); else back==0 -> 0; else split(3).
+    // front==0 -> (back!=0 ? 1 : 2); else back==0 -> 0; else split(3).
     if ( counts[0] == 0 )                       // no front
         return 2 - ( counts[1] != 0 ? 1 : 0 );  // all-back(1) or all-on(2)
     if ( counts[1] == 0 )                       // no back (front!=0)
@@ -612,8 +615,10 @@ static int Region_SplitWinding( const winding_t *in, const float *normal, float 
         else if ( normal[j] != 0.0f )  { exactAxial = 0; break; }
     }
     if ( exactAxial && axialAxis < 0 )
+    {
         vassert( !exactAxial || ( axialAxis >= 0 && axialAxis < 3 ),
                  "(axialPlaneAxis) = %i", axialAxis );                               // :590
+    }
 
     unsigned int maxpts = np + 4;
     ++g_windingAlloc;
@@ -659,10 +664,10 @@ static int Region_SplitWinding( const winding_t *in, const float *normal, float 
         float *ob = b->p[b->numpoints++]; ob[0]=mid[0]; ob[1]=mid[1]; ob[2]=mid[2];
     }
 
-    if ( (unsigned int)f->numpoints > maxpts )  vassert( (unsigned int)f->numpoints <= maxpts, "%i, %i", f->numpoints, maxpts );  // :638
-    if ( (unsigned int)b->numpoints > maxpts )  vassert( (unsigned int)b->numpoints <= maxpts, "%i, %i", b->numpoints, maxpts );  // :639
-    if ( f->numpoints > 0x400 )  vassert( f->numpoints <= 1024, "(f->ptCount) = %i", f->numpoints );  // :640
-    if ( b->numpoints > 0x400 )  vassert( b->numpoints <= 1024, "(b->ptCount) = %i", b->numpoints );  // :641
+    if ( (unsigned int)f->numpoints > maxpts )  { vassert( (unsigned int)f->numpoints <= maxpts, "%i, %i", f->numpoints, maxpts ); }  // :638
+    if ( (unsigned int)b->numpoints > maxpts )  { vassert( (unsigned int)b->numpoints <= maxpts, "%i, %i", b->numpoints, maxpts ); }  // :639
+    if ( f->numpoints > 0x400 )  { vassert( f->numpoints <= 1024, "(f->ptCount) = %i", f->numpoints ); }  // :640
+    if ( b->numpoints > 0x400 )  { vassert( b->numpoints <= 1024, "(b->ptCount) = %i", b->numpoints ); }  // :641
 
     *back  = b;
     *front = f;
@@ -670,13 +675,13 @@ static int Region_SplitWinding( const winding_t *in, const float *normal, float 
 }
 
 // =============================================================================
-//  sub_4D9450 (common\polylib.cpp:~1114) — minimum edge clearance of a winding
-//  along a reference axis (a2); used to reject near-degenerate split pieces.
+//  0x4D9450 Region_MinEdgeClearance (common\polylib.cpp:~1114) — minimum edge clearance of a winding
+//  along a reference axis; used to reject near-degenerate split pieces.
 // =============================================================================
-static float Region_MinEdgeClearance( const winding_t *w, const float *a2 )
+static float Region_MinEdgeClearance( const winding_t *w, const float *axis )
 {
-    if ( !w )          vassert( w, "%s", "w" );                       // :1114
-    if ( w->numpoints < 3 ) vassert( w->numpoints >= 3, "%s", "w->ptCount >= 3" );  // :1115
+    if ( !w )          { vassert( w, "%s", "w" ); }                   // :1114
+    if ( w->numpoints < 3 ) { vassert( w->numpoints >= 3, "%s", "w->ptCount >= 3" ); }  // :1115
 
     unsigned int n = w->numpoints;
     float best = 3.4028235e38f;
@@ -688,7 +693,7 @@ static float Region_MinEdgeClearance( const winding_t *w, const float *a2 )
         edge[1] = w->p[i][1] - w->p[prev][1];
         edge[2] = w->p[i][2] - w->p[prev][2];
         float en[3];
-        Vec3Cross( edge, a2, en );
+        Vec3Cross( edge, axis, en );
         float edgeLen = Vec3Normalize_R( en );
         float base = w->p[prev][0] * en[0] + w->p[prev][1] * en[1] + w->p[prev][2] * en[2];
         float run = -3.4028235e38f;
@@ -697,7 +702,9 @@ static float Region_MinEdgeClearance( const winding_t *w, const float *a2 )
         {
             float d = w->p[j][0] * en[0] + w->p[j][1] * en[1] + w->p[j][2] * en[2] - base;
             if ( d < -0.1f && edgeLen >= 1.0f )
+            {
                 vassert( d >= -0.1f || edgeLen < 1.0f, "(dist) = %g", d );   // :1130
+            }
             if ( run > d )
                 break;
             run = d;
@@ -713,7 +720,7 @@ static float Region_MinEdgeClearance( const winding_t *w, const float *a2 )
 }
 
 // =============================================================================
-//  sub_4DBAC0 — clip every winding in a region face-list by `plane` (back side),
+//  0x4DBAC0 Region_ClipListByPlane — clip every winding in a region face-list by `plane` (back side),
 //  dropping faces that clip away entirely.  plane = float[4] {n[3],dist}.
 // =============================================================================
 static void Region_ClipListByPlane( rface_t **list, const float *plane )
@@ -741,17 +748,17 @@ static void Region_ClipListByPlane( rface_t **list, const float *plane )
 }
 
 // =============================================================================
-//  sub_4DB800 — clip a region face-list by ONE cone-edge plane derived from the
-//  caster cone (a1=axis, a2=sinHalfFov, a3=cosHalfFov).  Returns the &next slot to
-//  advance.  Drops faces fully outside the cone.  (Internal to sub_4DBA60.)
+//  0x4DB800 Region_ClipListByConeEdge — clip a region face-list by ONE cone-edge plane derived from the
+//  caster cone.  Returns the &next slot to advance.  Drops faces fully outside the
+//  cone.  (Internal to Region_ClipListByCone.)
 // =============================================================================
-static rface_t **Region_ClipListByConeEdge( const float *a1, float a2, float a3, rface_t **slot )
+static rface_t **Region_ClipListByConeEdge( const float *axis, float sinHalf, float cosHalf, rface_t **slot )
 {
     rface_t *node = *slot;
-    float axisDot = node->dir[0] * a1[0] + node->dir[1] * a1[1] + node->dir[2] * a1[2];
-    if ( Region_CosSum( node->cosHalfFov, a3 ) <= axisDot )
+    float axisDot = node->dir[0] * axis[0] + node->dir[1] * axis[1] + node->dir[2] * axis[2];
+    if ( Region_CosSum( node->cosHalfFov, cosHalf ) <= axisDot )
     {
-        if ( Region_CosSum( node->cosHalfFov, axisDot ) > a3 )
+        if ( Region_CosSum( node->cosHalfFov, axisDot ) > cosHalf )
             return &node->next;
 
         winding_t *clip = Winding_Clone( node->w );
@@ -761,20 +768,20 @@ static rface_t **Region_ClipListByConeEdge( const float *a1, float a2, float a3,
             for ( int i = 0; i < wn; i++ )
             {
                 const float *p = node->w->p[i];
-                float t = p[0] * a1[0] + p[1] * a1[1] + p[2] * a1[2];
+                float t = p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2];
                 float pn = -t;
-                float vx = a1[0] * pn + p[0];
-                float vy = a1[1] * pn + p[1];
-                float vz = pn * a1[2] + p[2];
+                float vx = axis[0] * pn + p[0];
+                float vy = axis[1] * pn + p[1];
+                float vz = pn * axis[2] + p[2];
                 float len = sqrtf( vx * vx + vy * vy + vz * vz );
-                float k = len * a3 + t * a2;
+                float k = len * cosHalf + t * sinHalf;
                 if ( k > 0.0f )
                 {
-                    float invLen = -a3 / len;
+                    float invLen = -cosHalf / len;
                     float n[3];
-                    n[0] = a1[0] * ( -a2 ) + invLen * vx;
-                    n[1] = a1[1] * ( -a2 ) + vy * invLen;
-                    n[2] = invLen * vz + ( -a2 ) * a1[2];
+                    n[0] = axis[0] * ( -sinHalf ) + invLen * vx;
+                    n[1] = axis[1] * ( -sinHalf ) + vy * invLen;
+                    n[2] = invLen * vz + ( -sinHalf ) * axis[2];
                     Winding_Clip_real_( &clip, n, 0.0f, 0.1f );
                     if ( !clip )
                         break;
@@ -805,22 +812,22 @@ static rface_t **Region_ClipListByConeEdge( const float *a1, float a2, float a3,
 }
 
 // =============================================================================
-//  sub_4DBA60 — clip a region face-list by the caster cone (axis a1, cos a3).
+//  0x4DBA60 Region_ClipListByCone — clip a region face-list by the caster cone (axis, cos of the half angle).
 // =============================================================================
-static void Region_ClipListByCone( const float *a1, rface_t **list, float a3 )
+static void Region_ClipListByCone( const float *axis, rface_t **list, float cosHalf )
 {
-    float a2 = sqrtf( 1.0f - a3 * a3 );    // sinHalfFov
+    float sinHalf = sqrtf( 1.0f - cosHalf * cosHalf );
     rface_t **slot = list;
     while ( *slot )
-        slot = Region_ClipListByConeEdge( a1, a2, a3, slot );
+        slot = Region_ClipListByConeEdge( axis, sinHalf, cosHalf, slot );
 }
 
-// lightDesc_t (the descriptor from sub_406CE0) is defined in primarylights_region.h.
+// lightDesc_t (the light descriptor) is defined in primarylights_region.h.
 static_assert( sizeof(lightDesc_t) == 36, "lightDesc_t (v19+v20[8]) != 36" );
 
 // =============================================================================
-//  sub_4DBB40 — clip a region face-list by the LIGHT's cone/plane.  a2 = the light
-//  descriptor.  cosHalfFov<0 → clip by a plane; else clip by the cone.
+//  0x4DBB40 Region_ClipByCaster — clip a region face-list by the LIGHT's cone/plane
+//  (d = the light descriptor).  cosHalfFov<0 → clip by a plane; else clip by the cone.
 // =============================================================================
 static void Region_ClipByCaster( rface_t **list, const lightDesc_t *d )
 {
@@ -832,7 +839,7 @@ static void Region_ClipByCaster( rface_t **list, const lightDesc_t *d )
             pl[0] = d->p[3];
             pl[1] = d->p[4];
             pl[2] = d->p[5];
-            pl[3] = d->p[6] * d->p[7];     // *(a2+28) * *(a2+32)
+            pl[3] = d->p[6] * d->p[7];
             Region_ClipListByPlane( list, pl );
         }
         else
@@ -843,9 +850,8 @@ static void Region_ClipByCaster( rface_t **list, const lightDesc_t *d )
 }
 
 // =============================================================================
-//  sub_4DBBB0 — clip a face-list by ALL of a region face's edge planes (the back-
-//  facing silhouette planes of the caster winding) plus its own plane.  a1 = caster
-//  rface; a2 = the list to clip.
+//  0x4DBBB0 Region_ClipByCasterEdges — clip a face-list by ALL of a region face's edge
+//  planes (the back-facing silhouette planes of the caster winding) plus its own plane.
 // =============================================================================
 static void Region_ClipByCasterEdges( const rface_t *caster, rface_t **list )
 {
@@ -858,7 +864,7 @@ static void Region_ClipByCasterEdges( const rface_t *caster, rface_t **list )
 
     const winding_t *w = caster->w;
     int n = w->numpoints;
-    int prev = 12 * ( n - 1 );   // byte offset of last point (v5)
+    int prev = 12 * ( n - 1 );   // byte offset of last point
     for ( int i = 0; i < n; i++ )
     {
         const float *cur  = (const float *)( (const char *)w->p[0] + 12 * i );
@@ -874,58 +880,61 @@ static void Region_ClipByCasterEdges( const rface_t *caster, rface_t **list )
 }
 
 // =============================================================================
-//  sub_4DB000 — split ONE region face (*slot) against a caster region face, in the
-//  convex-decomposition merge.  caster (ecx) is the other region's face; *slot is the
-//  current face being processed.  If the caster's cone can't overlap, returns the
-//  &next slot to advance.  Otherwise splits *slot's winding by the caster plane and
-//  each caster-winding silhouette edge plane, emits the resulting convex sub-region
-//  pieces (prepended via *slot), frees the original node, and returns &original->next.
-//  Faithful to disasm 0x4DB000 (the var_8 "have pieces" flag, the var_1038[] piece
-//  array, the SIDE_BACK vs SIDE_CROSS split branches, the min-edge-clearance reject).
+//  0x4DB000 Region_SplitFaceByCaster — split ONE region face (*slot) against a caster
+//  region face, in the convex-decomposition merge.  caster is the other region's face;
+//  *slot is the current face being processed.  If the caster's cone can't overlap,
+//  returns the &next slot to advance.  Otherwise splits *slot's winding by the caster
+//  plane and each caster-winding silhouette edge plane, emits the resulting convex
+//  sub-region pieces (prepended via *slot), frees the original node, and returns
+//  &original->next.  A piece is rejected when its min edge clearance is too small.
 // =============================================================================
 static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
 {
-    rface_t *region = *slot;                       // edi
+    rface_t *region = *slot;
 
     float dot = caster->dir[0] * region->dir[0]
               + caster->dir[1] * region->dir[1]
-              + caster->dir[2] * region->dir[2];   // var_4
+              + caster->dir[2] * region->dir[2];
     if ( dot < Region_CosSum( caster->cosHalfFov, region->cosHalfFov ) - 0.001000000047497451f )
         return &region->next;                       // cones disjoint → keep, advance
 
-    winding_t *frontW = 0;                           // var_4 (after split)
-    winding_t *backW  = 0;                           // var_1C
+    winding_t *frontW = 0;
+    winding_t *backW  = 0;
     int side = Region_SplitWinding( region->w, caster->dir, region->plane[3], 0.0099999998f,
                                     &frontW, &backW );
     if ( side == 0 || side == 2 )
         return &region->next;
 
-    // pieces[] accumulates the back/cross sub-windings (var_1038[]).
+    // pieces[] accumulates the back/cross sub-windings.
     winding_t *pieces[1024];
-    int        pieceCount;                            // esi / var_8
-    winding_t *carryWinding;                          // var_10
+    int        pieceCount;
+    winding_t *carryWinding;
 
     if ( side == 1 )                                  // SIDE_BACK: whole region behind caster
     {
-        carryWinding = region->w;                     // [edi+24]
+        carryWinding = region->w;
         pieceCount   = 0;
     }
     else                                              // SIDE_CROSS (3): split produced front+back
     {
         if ( side != 3 )
+        {
             vassert( side == 3, "%s", "side == SIDE_CROSS" );   // :412
-        pieces[0]    = frontW;                        // var_1038[0] = front piece
-        carryWinding = backW;                         // var_10 = back winding
-        pieceCount   = 1;                             // esi = 1
+        }
+        pieces[0]    = frontW;                        // front piece
+        carryWinding = backW;                         // back winding
+        pieceCount   = 1;
     }
 
-    const winding_t *cw = caster->w;                  // var_18 (ebx = caster->w)
+    const winding_t *cw = caster->w;
     if ( (unsigned int)cw->numpoints > 0x400 )
+    {
         vassert( (unsigned int)cw->numpoints <= 0x400, "%i, %i", cw->numpoints, 1024 );  // :419
+    }
 
-    // For each caster-winding edge, build the silhouette plane (light at origin →
-    // edge × edge×... actually the cross of consecutive caster verts) and split the
-    // carry winding; pieces that fall behind become new sub-regions.
+    // For each caster-winding edge, build the silhouette plane (light at origin → the
+    // cross of consecutive caster verts) and split the carry winding; pieces that fall
+    // behind become new sub-regions.
     int n = cw->numpoints;
     if ( n != 0 )
     {
@@ -935,11 +944,11 @@ static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
             const float *cur  = (const float *)( (const char *)cw->p[0] + 12 * i );
             const float *back = (const float *)( (const char *)cw->p[0] + prev );
             float en[3];
-            Vec3Cross( cur, back, en );               // Vec3Cross(curVert, prevVert, en)
+            Vec3Cross( cur, back, en );
             if ( Vec3Normalize_R( en ) != 0.0f )
             {
-                winding_t *frontPiece = 0;            // var_C target / var_1038[pieceCount]
-                winding_t *backPiece  = 0;            // var_1C
+                winding_t *frontPiece = 0;
+                winding_t *backPiece  = 0;
                 int s2 = Region_SplitWinding( carryWinding, en, 0.0f, 0.0099999998f,
                                               &frontPiece, &backPiece );
                 if ( s2 != 1 )                        // not all-back
@@ -961,12 +970,12 @@ static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
                         return &region->next;
                     }
                     // cross: keep the front piece as a sub-region if it has clearance
-                    winding_t *fp = frontPiece;       // *var_C = [front]
-                    carryWinding  = backPiece;         // var_10 = back
-                    // a2 = `edi` (the region face ptr) → reads region->plane normal.
+                    winding_t *fp = frontPiece;
+                    carryWinding  = backPiece;
+                    // clearance is measured along the region face's plane normal.
                     if ( Region_MinEdgeClearance( fp, region->plane ) >= 0.020009998f )
                     {
-                        pieces[pieceCount++] = fp;     // ++var_8, advance var_C
+                        pieces[pieceCount++] = fp;
                     }
                     else
                     {
@@ -985,9 +994,9 @@ static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
         free( carryWinding );
     }
 
-    // Re-link: replace `region` with `pieceCount` new sub-region nodes (cloning
-    // region's plane/cone-seed via sub_4DA550), then free `region`.
-    *slot = region->next;                              // unlink region (edi+0x2C)
+    // Re-link: replace `region` with `pieceCount` new sub-region nodes (copying
+    // region's plane and refitting the cone via Region_FitFaceCone), then free `region`.
+    *slot = region->next;                              // unlink region
     rface_t **outSlot = slot;
     for ( int p = pieceCount; p > 0; )
     {
@@ -997,9 +1006,9 @@ static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
             Com_PrintMessage( "Out of memory" );
         node->next     = *outSlot;
         *outSlot       = node;
-        node->w        = pieces[p];                    // [ebx+24] = var_1038[esi]
-        outSlot        = &node->next;                  // arg_0 = &node->next
-        node->pad      = region->pad;                   // [ebx+28] = [edi+28]
+        node->w        = pieces[p];
+        outSlot        = &node->next;
+        node->pad      = region->pad;
         node->plane[0] = region->plane[0];
         node->plane[1] = region->plane[1];
         node->plane[2] = region->plane[2];
@@ -1017,18 +1026,18 @@ static rface_t **Region_SplitFaceByCaster( rface_t **slot, rface_t *caster )
 }
 
 // =============================================================================
-//  sub_4DAEC0 — merge-sort a region face-list by cosHalfFov ascending (so the
-//  tightest cones are processed first).  Recursive (split-by-pairs, merge).
-//  Returns the &next slot of the last node.  Linked via +0x2C.
+//  0x4DAEC0 Region_SortByCone — merge-sort a region face-list by cosHalfFov ascending (so
+//  the tightest cones are processed first).  Recursive (split-by-pairs, merge).
+//  Returns the &next slot of the last node.
 // =============================================================================
-static rface_t **Region_SortByCone( rface_t **a1 )
+static rface_t **Region_SortByCone( rface_t **list )
 {
-    rface_t *head = *a1;
+    rface_t *head = *list;
     if ( !head )
-        return a1;
+        return list;
 
-    // split into two alternating sublists v16 / v17
-    rface_t *lists[2] = { 0, 0 };                     // v16, v17
+    // split into two alternating sublists
+    rface_t *lists[2] = { 0, 0 };
     int      which = 0;
     rface_t *cur = head;
     while ( cur )
@@ -1048,10 +1057,10 @@ static rface_t **Region_SortByCone( rface_t **a1 )
             Region_SortByCone( &lists[1] );
     }
 
-    // merge the two sorted sublists by ascending cosHalfFov (+0x1C)
+    // merge the two sorted sublists by ascending cosHalfFov
     rface_t *m0 = lists[0];
     rface_t *m1 = lists[1];
-    rface_t **link = a1;
+    rface_t **link = list;
     int sel = ( m1 ? m1->cosHalfFov : 3.4e38f ) <= ( m0 ? m0->cosHalfFov : 3.4e38f ) ? 1 : 0;
     rface_t *src[2] = { m0, m1 };
     while ( 1 )
@@ -1071,41 +1080,41 @@ static rface_t **Region_SortByCone( rface_t **a1 )
 }
 
 // =============================================================================
-//  sub_4DB3C0 — when a region face-list has >1 face (partial occluder), collapse
-//  it to a SINGLE convex occluder winding: project every vertex of every face onto
-//  the face's best 2D plane, convex-hull them (in 64-vtx batches via Com_ConvexHull),
-//  un-project back to 3D, recompute the plane, drop the extra faces, and (if the new
-//  winding faces away) reverse it.  Returns a1 (the now-single-face region head).
-//  Faithful to disasm 0x4DB3C0 (Polylib_PickProjectionAxes + 64-batch convex hull).
+//  0x4DB3C0 Region_BuildOccluderHull — when a region face-list has >1 face (partial
+//  occluder), collapse it to a SINGLE convex occluder winding: project every vertex of
+//  every face onto the face's best 2D plane, convex-hull them (in 64-vtx batches via
+//  Com_ConvexHull), un-project back to 3D, recompute the plane, drop the extra faces,
+//  and (if the new winding faces away) reverse it.  Returns region (the now-single-face
+//  region head).
 // =============================================================================
-static rface_t *Region_BuildOccluderHull( rface_t *a1 )
+static rface_t *Region_BuildOccluderHull( rface_t *region )
 {
-    if ( !a1 || !a1->next )
-        return a1;
+    if ( !region || !region->next )
+        return region;
 
     int axis0, axis1;
-    Polylib_PickProjectionAxes( a1->plane, &axis0, &axis1 );
+    Polylib_PickProjectionAxes( region->plane, &axis0, &axis1 );
 
-    // batch buffers: two 64-vertex 2D point pools that ping-pong (v34/v35 = 512 bytes
-    // each, 64 * [2 floats]); v1 selects the active pool, v41 the scratch pool.
+    // batch buffers: two 64-vertex 2D point pools that ping-pong (512 bytes each,
+    // 64 * [2 floats]); activePool / scratchPool swap after each batch hull.
     float pool[2][64][2];
-    int   activePool = 0;     // v1
-    int   scratchPool = 1;    // v41
-    unsigned int v2 = 0;      // count in the active batch
+    int   activePool = 0;
+    int   scratchPool = 1;
+    unsigned int batchCount = 0;   // count in the active batch
 
     // accumulate the 2D projection of every face vertex, hulling at 64.
-    for ( rface_t *f = a1; f; f = f->next )
+    for ( rface_t *f = region; f; f = f->next )
     {
         const winding_t *w = f->w;
         for ( int i = 0; i < w->numpoints; i++ )
         {
-            pool[activePool][v2][0] = w->p[i][axis0];
-            pool[activePool][v2][1] = w->p[i][axis1];
-            v2++;
-            if ( v2 == 64 )
+            pool[activePool][batchCount][0] = w->p[i][axis0];
+            pool[activePool][batchCount][1] = w->p[i][axis1];
+            batchCount++;
+            if ( batchCount == 64 )
             {
-                v2 = Com_ConvexHull( pool[activePool], 64, pool[scratchPool] );
-                if ( v2 == 64 )
+                batchCount = Com_ConvexHull( pool[activePool], 64, pool[scratchPool] );
+                if ( batchCount == 64 )
                     Com_PrintMessage( "Too many vertices on convex hull of partially occluded primary light portal" );
                 // ping-pong: the hull is now in scratchPool; make it the active pool.
                 int t = activePool; activePool = scratchPool; scratchPool = t;
@@ -1113,7 +1122,7 @@ static rface_t *Region_BuildOccluderHull( rface_t *a1 )
         }
     }
 
-    unsigned int hullCount = Com_ConvexHull( pool[activePool], v2, pool[scratchPool] );
+    unsigned int hullCount = Com_ConvexHull( pool[activePool], batchCount, pool[scratchPool] );
     const float (*hull)[2] = pool[scratchPool];
 
     ++g_windingAlloc;
@@ -1123,7 +1132,7 @@ static rface_t *Region_BuildOccluderHull( rface_t *a1 )
     out->numpoints = (int)hullCount;
 
     int axis2 = 3 - axis0 - axis1;
-    float planeDist = a1->plane[3];
+    float planeDist = region->plane[3];
     for ( unsigned int i = 0; i < hullCount; i++ )
     {
         // un-project: recover the axis2 coordinate from the plane equation.
@@ -1131,47 +1140,45 @@ static rface_t *Region_BuildOccluderHull( rface_t *a1 )
         float c1 = hull[i][1];   // projected axis1
         out->p[i][axis0] = c0;
         out->p[i][axis1] = c1;
-        out->p[i][axis2] = ( planeDist - ( c0 * a1->plane[axis0] + c1 * a1->plane[axis1] ) ) / a1->plane[axis2];
+        out->p[i][axis2] = ( planeDist - ( c0 * region->plane[axis0] + c1 * region->plane[axis1] ) ) / region->plane[axis2];
     }
 
     float plane[4];
     if ( Region_WindingPlane( plane, out ) == 0.0f )
     {
-        Region_FreeList( a1 );
+        Region_FreeList( region );
         --g_windingAlloc;
         free( out );
         return 0;
     }
 
-    // drop the extra faces (keep only a1), free the old winding, install the hull.
-    Region_FreeList( a1->next );
-    a1->next = 0;
+    // drop the extra faces (keep only the head), free the old winding, install the hull.
+    Region_FreeList( region->next );
+    region->next = 0;
     --g_windingAlloc;
-    free( a1->w );
+    free( region->w );
 
-    float facing = a1->plane[0] * plane[0] + a1->plane[1] * plane[1] + a1->plane[2] * plane[2];
+    float facing = region->plane[0] * plane[0] + region->plane[1] * plane[1] + region->plane[2] * plane[2];
     if ( facing < 0.0f )
     {
         winding_t *rev = Region_ReverseWinding( out );
         --g_windingAlloc;
-        a1->w = rev;
+        region->w = rev;
         free( out );
-        return a1;
+        return region;
     }
-    a1->w = out;
-    return a1;
+    region->w = out;
+    return region;
 }
 
 // =============================================================================
-//  sub_4DCFE0 chain (k-DOP hull build) — forward decl; defined in part 7.
+//  Region_BuildKDOP chain (k-DOP hull build) — forward decl; defined below.
 // =============================================================================
 struct GfxLightRegionHull;   // opaque (matches r_primarylights GfxLightRegionHull)
 static void  Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, void *outHullKdop, rface_t *occluder );
 static void *Region_FinalizeHull( const void *kdopScratch );
 
-// helper: decompose a freshly-copied region list against EVERY face of `against`,
-// matching the disasm idiom  `for(r=against;r;r=r->next){ s=&list; if(list) do
-// s=SplitFaceByCaster(s,r); while(*s); }`.
+// helper: decompose a freshly-copied region list against EVERY face of `against`.
 static void Region_DecomposeAgainst( rface_t **list, rface_t *against )
 {
     for ( rface_t *r = against; r; r = r->next )
@@ -1183,59 +1190,59 @@ static void Region_DecomposeAgainst( rface_t **list, rface_t *against )
 }
 
 // =============================================================================
-//  sub_4DD260 — the merge driver.  Decompose `*a1` (one light's region face-list)
-//  into convex sub-regions, build a k-DOP hull for each, append each finished
-//  GfxLightRegionHull* to a3[], return the count.  a2 = the light descriptor.
-//  Faithful to disasm 0x4DD260 (the SortByCone pre-pass, the copy/decompose/
-//  clip-by-light-cone/k-DOP for the whole region, then per-non-exterior-face the
-//  occluder-hull sub-regions).
+//  Region_BuildHulls (0x4DD260) — the merge driver.  Decompose `*faceList` (one light's
+//  region face-list) into convex sub-regions, build a k-DOP hull for each, append each
+//  finished GfxLightRegionHull* to outHulls[], return the count.  desc = the light
+//  descriptor.  Phases: the SortByCone pre-pass; copy/decompose/clip-by-light-cone/k-DOP
+//  for the whole region; then, per non-exterior face, the occluder-hull sub-regions.
 // =============================================================================
-int sub_4DD260( rface_t **a1, const lightDesc_t *a2, void **a3 )
+int Region_BuildHulls( rface_t **faceList, const lightDesc_t *desc, void **outHulls )
 {
-    if ( *a1 && (*a1)->next )
-        Region_SortByCone( a1 );                    // sub_4DAEC0
+    if ( *faceList && (*faceList)->next )
+        Region_SortByCone( faceList );
 
     // whole-region pass: copy, decompose against itself, clip by the light cone.
-    rface_t *copy = Region_CopyList( *a1 );          // v23[0]
-    Region_DecomposeAgainst( &copy, *a1 );
-    Region_ClipByCaster( &copy, a2 );                // sub_4DBB40
+    rface_t *copy = Region_CopyList( *faceList );
+    Region_DecomposeAgainst( &copy, *faceList );
+    Region_ClipByCaster( &copy, desc );
 
-    byte kdop[0x16C];                        // v19 scratch hull (sub_4DCFE0 out)
-    int count = 0;                                    // v22
-    Region_BuildKDOP( copy, a2, kdop, 0 );           // sub_4DCFE0(.., a2, v19, 0)
-    Region_FreeList( copy );                          // sub_4DA240
+    byte kdop[0x16C];                        // scratch hull
+    int count = 0;
+    bool capped = false;
+    Region_BuildKDOP( copy, desc, kdop, 0 );
+    Region_FreeList( copy );
     if ( *(int *)kdop )
     {
-        a3[0] = Region_FinalizeHull( kdop );          // sub_4DD170
+        outHulls[0] = Region_FinalizeHull( kdop );
         count = 1;
     }
 
     // per-face occluder pass: pull each non-exterior face out, build its occluder
     // hull from the decomposed region, then k-DOP the region clipped by it.
-    rface_t **slot = a1;                              // v20 / v8
-    while ( *a1 )
+    rface_t **slot = faceList;
+    while ( *faceList )
     {
-        rface_t *node = *slot;                         // v9
-        if ( node->exterior )                          // *(v9+32) != 0 → boundary, keep
+        rface_t *node = *slot;
+        if ( node->exterior )                          // boundary face, keep
         {
             slot = &node->next;
         }
         else
         {
-            rface_t *one = node;                        // v21
+            rface_t *one = node;
             *slot = node->next;                         // unlink
             one->next = 0;
 
-            Region_DecomposeAgainst( &one, *a1 );      // decompose v21 against the rest
-            Region_ClipByCaster( &one, a2 );           // sub_4DBB40(&v21, a2)
-            rface_t *occ = Region_BuildOccluderHull( one );  // sub_4DB3C0(v21)
+            Region_DecomposeAgainst( &one, *faceList );  // decompose it against the rest
+            Region_ClipByCaster( &one, desc );
+            rface_t *occ = Region_BuildOccluderHull( one );
             if ( occ )
             {
-                rface_t *dec = Region_CopyList( *a1 ); // v23[0] = copy of remaining region
-                Region_DecomposeAgainst( &dec, *a1 );
-                Region_ClipByCasterEdges( occ, &dec ); // sub_4DBBB0(occ, v23)
+                rface_t *dec = Region_CopyList( *faceList ); // copy of the remaining region
+                Region_DecomposeAgainst( &dec, *faceList );
+                Region_ClipByCasterEdges( occ, &dec );
                 byte kdop2[0x16C];
-                Region_BuildKDOP( dec, a2, kdop2, occ );    // sub_4DCFE0(.., occ)
+                Region_BuildKDOP( dec, desc, kdop2, occ );
                 Region_FreeList( dec );
 
                 winding_t *ow = occ->w;                 // free the occluder hull
@@ -1248,11 +1255,21 @@ int sub_4DD260( rface_t **a1, const lightDesc_t *a2, void **a3 )
 
                 if ( *(int *)kdop2 )
                 {
+                    // KIWI: stop at the 32 the message names - the binary printed it and kept
+                    // writing past the caller's hulls[35].  The origin is p[0..2] (the float
+                    // view's a3[1..3] had carried over).
                     if ( count == 32 )
-                        Com_PrintMessage( "More than %i convex regions affected by primary light at %g %g %g\n",
-                                          32, a2->p[1], a2->p[2], a2->p[3] );
-                    a3[count] = Region_FinalizeHull( kdop2 );
-                    count++;
+                    {
+                        if ( !capped )
+                            Com_PrintMessage( "More than %i convex regions affected by primary light at %g %g %g\n",
+                                              32, desc->p[0], desc->p[1], desc->p[2] );
+                        capped = true;
+                    }
+                    else
+                    {
+                        outHulls[count] = Region_FinalizeHull( kdop2 );
+                        count++;
+                    }
                 }
             }
         }
@@ -1272,11 +1289,11 @@ int sub_4DD260( rface_t **a1, const lightDesc_t *a2, void **a3 )
 struct kdopAxis_t { float dir[3]; float mid; float half; };
 static_assert( sizeof(kdopAxis_t) == 20, "kdopAxis_t" );
 
-// the scratch GfxLightRegionHull the builder fills (v19): { int axisCount; kdopAxis_t[] }.
+// the scratch GfxLightRegionHull the builder fills: { int axisCount; kdopAxis_t[] }.
 struct kdopScratch_t { int axisCount; kdopAxis_t axes[1024]; };
 
 // =============================================================================
-//  sub_4DCA70 — add `dir` to the candidate axis list unless a near-parallel axis is
+//  0x4DCA70 Kdop_AddAxis — add `dir` to the candidate axis list unless a near-parallel axis is
 //  already present (|dot| > 0.98).  Returns the new axis count.
 // =============================================================================
 static unsigned int Kdop_AddAxis( kdopAxis_t *axes, const float *dir, unsigned int count )
@@ -1295,31 +1312,34 @@ static unsigned int Kdop_AddAxis( kdopAxis_t *axes, const float *dir, unsigned i
 }
 
 // =============================================================================
-//  sub_4DCE20 — seed the 13 base k-DOP axis pairs (s_kdopNormals).  Each pair is
+//  0x4DCE20 Kdop_SeedBaseAxes — seed the 13 base k-DOP axis pairs (s_kdopNormals).  Each pair is
 //  antipodal (asserted); only the first of each pair is stored as a candidate axis.
 //  Returns 13.
 // =============================================================================
 static int Kdop_SeedBaseAxes( kdopAxis_t *axes )
 {
-    const float *v2 = s_kdopNormalsFlat;        // unk_6DD214
+    const float *pair = s_kdopNormalsFlat;
     for ( int i = 0; i < 13; i++ )
     {
-        // verify the pair (v2, v2+3) is antipodal
-        float dot = v2[3] * v2[0] + v2[2] * v2[-1] + v2[4] * v2[1];
-        // (the disasm reads v2[-1..4] for the dot of the pair; only an assert)
+        // verify the pair (pair, pair+3) is antipodal.  KIWI: Vec3Dot( pair, pair + 3 ) - the
+        // disasm's pointer sits one float into the table, so its pair[-1..4] is pair[0..5]
+        // here (pair[-1] read before the table on the first pair).
+        float dot = pair[0] * pair[3] + pair[1] * pair[4] + pair[2] * pair[5];
         if ( dot > -0.9999899864196777f )
+        {
             vassert( dot <= -0.99999f,
                      "%s", "Vec3Dot( s_kdopNormals[kdopIter], s_kdopNormals[kdopIter + 1] ) <= -0.99999f" );  // :1101
-        axes[i].dir[0] = v2[0];
-        axes[i].dir[1] = v2[1];
-        axes[i].dir[2] = v2[2];
-        v2 += 6;
+        }
+        axes[i].dir[0] = pair[0];
+        axes[i].dir[1] = pair[1];
+        axes[i].dir[2] = pair[2];
+        pair += 6;
     }
     return 13;
 }
 
 // =============================================================================
-//  sub_4DCB10 — add the occluder's plane + per-edge silhouette axes as candidates.
+//  0x4DCB10 Kdop_AddOccluderAxes — add the occluder's plane + per-edge silhouette axes as candidates.
 // =============================================================================
 static unsigned int Kdop_AddOccluderAxes( kdopAxis_t *axes, unsigned int count, const rface_t *occ )
 {
@@ -1342,14 +1362,14 @@ static unsigned int Kdop_AddOccluderAxes( kdopAxis_t *axes, unsigned int count, 
 }
 
 // =============================================================================
-//  sub_4DCBC0 — add cone-derived candidate axes for the region's first face cone:
-//  the cone axis itself plus 8 directions sampled around the cone rim.
+//  0x4DCBC0 Kdop_AddConeAxes — add cone-derived candidate axes for the light cone (the seed
+//  face Region_BuildKDOP builds): the cone axis itself plus 8 directions sampled around the rim.
 // =============================================================================
 static unsigned int Kdop_AddConeAxes( unsigned int count, kdopAxis_t *axes, const rface_t *face )
 {
-    if ( face->exterior == 3 )                  // *(a3)==3 (no cone) → nothing to add
+    if ( face->exterior == 3 )                  // class 3 (no cone) → nothing to add
         return count;
-    const float *axis = face->dir;              // a3+16
+    const float *axis = face->dir;
     unsigned int c = Kdop_AddAxis( axes, axis, count );
     if ( face->cosHalfFov >= 0.1000000014901161f )
     {
@@ -1386,7 +1406,7 @@ static unsigned int Kdop_AddConeAxes( unsigned int count, kdopAxis_t *axes, cons
 }
 
 // =============================================================================
-//  sub_4DCEB0 — collect candidate axes for the region: base 13 + each region face
+//  0x4DCEB0 Kdop_CollectAxes — collect candidate axes for the region: base 13 + each region face
 //  plane + (occluder edges | cone rim).  Returns the candidate count.
 // =============================================================================
 static unsigned int Kdop_CollectAxes( const rface_t *regionFaces, const rface_t *occ,
@@ -1406,8 +1426,8 @@ static unsigned int Kdop_CollectAxes( const rface_t *regionFaces, const rface_t 
 }
 
 // =============================================================================
-//  sub_4DBC70 — compute the k-DOP slab [min,max] of (occluder + region faces) along
-//  `axis`.  Returns the last region face processed.
+//  0x4DBC70 Kdop_AxisExtent — compute the k-DOP slab [min,max] of (occluder + region
+//  faces) along `axis` into *outMin / *outMax.
 // =============================================================================
 static void Kdop_AxisExtent( const rface_t *occ, const float *axis, const rface_t *regionFaces,
                              float *outMin, float *outMax )
@@ -1444,23 +1464,22 @@ static void Kdop_AxisExtent( const rface_t *occ, const float *axis, const rface_
 }
 
 // =============================================================================
-//  sub_4DC010 — for a triple of candidate axes (i,j,k) compute the box defined by
-//  their slabs around the test axis `axis` (a5).  Writes 8 corner points (24 floats)
+//  0x4DC010 Kdop_CornerBox — for a triple of candidate axes (i,j,k) compute the box defined by
+//  their slabs around the test axis `axis`.  Writes 8 corner points (24 floats)
 //  into out and returns 1 if the three axes are non-degenerate (|det| >= 0.001).
 // =============================================================================
 static int Kdop_CornerBox( const kdopAxis_t *axes, int ia, int ib, int axisIdx, float *out, int ic )
 {
-    // Re-diffed byte-exact against sub_4DC010 (2026-07-01). The binary uses three axes:
-    //   P (v11) = axes[a5] = the INNER-loop axis i  (port: axes[ia])
-    //   Q (v7)  = axes[a3] = the MIDDLE-loop axis j (port: axes[ib])
-    //   R (v10) = axes[a2] = the OUTER-loop axis k  (port: axes[axisIdx]/[ic])
+    // Three axes:
+    //   P = axes[ia]      the INNER-loop axis i
+    //   Q = axes[ib]      the MIDDLE-loop axis j
+    //   R = axes[axisIdx] the OUTER-loop axis k
     // The determinant is the scalar triple product P·(Q×R); the corner points are the
-    // inverse-matrix rows dotted with the slab-distance corners (Q,P,R each lo/hi).  The
-    // prior port had the det/cofactor layout wrong (it did NOT equal P·(Q×R)); fixed here.
-    const kdopAxis_t *P = &axes[ia];        // v11 (a5, inner i)
-    const kdopAxis_t *Q = &axes[ib];        // v7  (a3, middle j)
-    const kdopAxis_t *R = &axes[axisIdx];   // v10 (a2, outer k)
-    (void)ic;                               // caller passes k again; unused (a5 is ia)
+    // inverse-matrix rows dotted with the slab-distance corners (Q,P,R each lo/hi).
+    const kdopAxis_t *P = &axes[ia];
+    const kdopAxis_t *Q = &axes[ib];
+    const kdopAxis_t *R = &axes[axisIdx];
+    (void)ic;                               // caller passes k again; unused
 
     float det = ( Q->dir[1] * R->dir[2] - Q->dir[2] * R->dir[1] ) * P->dir[0]
               + ( P->dir[2] * R->dir[1] - P->dir[1] * R->dir[2] ) * Q->dir[0]
@@ -1469,25 +1488,23 @@ static int Kdop_CornerBox( const kdopAxis_t *axes, int ia, int ib, int axisIdx, 
         return 0;
     float inv = 1.0f / det;
 
-    // inverse-matrix rows (Cramer), transcribed op-for-op from 0x4dc093-0x4dc113.
-    float v15 = ( Q->dir[1] * R->dir[2] - Q->dir[2] * R->dir[1] ) * inv;
-    float v16 = ( P->dir[2] * R->dir[1] - P->dir[1] * R->dir[2] ) * inv;
-    float v17 = ( P->dir[1] * Q->dir[2] - P->dir[2] * Q->dir[1] ) * inv;
-    float v18 = ( R->dir[0] * Q->dir[2] - Q->dir[0] * R->dir[2] ) * inv;
-    float v20 = ( P->dir[0] * R->dir[2] - R->dir[0] * P->dir[2] ) * inv;
-    float v21 = ( P->dir[2] * Q->dir[0] - Q->dir[2] * P->dir[0] ) * inv;
-    float v22 = ( Q->dir[0] * R->dir[1] - R->dir[0] * Q->dir[1] ) * inv;
-    float v23 = ( P->dir[1] * R->dir[0] - P->dir[0] * R->dir[1] ) * inv;
-    float v19 = inv * ( Q->dir[1] * P->dir[0] - P->dir[1] * Q->dir[0] );
+    // inverse-matrix rows (Cramer).  invXP = the X row's P coefficient, etc.
+    float invXP = ( Q->dir[1] * R->dir[2] - Q->dir[2] * R->dir[1] ) * inv;
+    float invXQ = ( P->dir[2] * R->dir[1] - P->dir[1] * R->dir[2] ) * inv;
+    float invXR = ( P->dir[1] * Q->dir[2] - P->dir[2] * Q->dir[1] ) * inv;
+    float invYP = ( R->dir[0] * Q->dir[2] - Q->dir[0] * R->dir[2] ) * inv;
+    float invYQ = ( P->dir[0] * R->dir[2] - R->dir[0] * P->dir[2] ) * inv;
+    float invYR = ( P->dir[2] * Q->dir[0] - Q->dir[2] * P->dir[0] ) * inv;
+    float invZP = ( Q->dir[0] * R->dir[1] - R->dir[0] * Q->dir[1] ) * inv;
+    float invZQ = ( P->dir[1] * R->dir[0] - P->dir[0] * R->dir[1] ) * inv;
+    float invZR = inv * ( Q->dir[1] * P->dir[0] - P->dir[1] * Q->dir[0] );
 
     // slab distances: lo = mid - half, hi = mid + half (per axis).
-    float Plo = P->mid - P->half, Phi = P->mid + P->half;   // v25 / v27
-    float Qlo = Q->mid - Q->half, Qhi = Q->mid + Q->half;   // v24 / v26
-    float Rlo = R->mid - R->half, Rhi = R->mid + R->half;   // v28 / v29
+    float Plo = P->mid - P->half, Phi = P->mid + P->half;
+    float Qlo = Q->mid - Q->half, Qhi = Q->mid + Q->half;
+    float Rlo = R->mid - R->half, Rhi = R->mid + R->half;
 
-    // 8 corners, ordered R(lo,hi) outer, Q(lo,hi) middle, P(lo,hi) inner — exactly the
-    // a4[0..23] store order of the binary.  Each: X=Q*v16+P*v15+R*v17, Y=Q*v20+P*v18+R*v21,
-    // Z=Q*v23+P*v22+R*v19.
+    // 8 corners, ordered R(lo,hi) outer, Q(lo,hi) middle, P(lo,hi) inner.
     const float Qd[2] = { Qlo, Qhi };
     const float Pd[2] = { Plo, Phi };
     const float Rd[2] = { Rlo, Rhi };
@@ -1497,16 +1514,16 @@ static int Kdop_CornerBox( const kdopAxis_t *axes, int ia, int ib, int axisIdx, 
             for ( int pp = 0; pp < 2; ++pp )
             {
                 float q = Qd[qq], p = Pd[pp], r = Rd[rr];
-                out[3*n+0] = q * v16 + p * v15 + r * v17;
-                out[3*n+1] = q * v20 + p * v18 + r * v21;
-                out[3*n+2] = q * v23 + p * v22 + r * v19;
+                out[3*n+0] = q * invXQ + p * invXP + r * invXR;
+                out[3*n+1] = q * invYQ + p * invYP + r * invYR;
+                out[3*n+2] = q * invZQ + p * invZP + r * invZR;
                 ++n;
             }
     return 1;
 }
 
 // =============================================================================
-//  sub_4DC400 — true if `pt` is inside ALL `count` candidate slabs (|pt·dir - mid|
+//  0x4DC400 Kdop_PointInside — true if `pt` is inside ALL `count` candidate slabs (|pt·dir - mid|
 //  <= half + 0.001 for each axis).
 // =============================================================================
 static char Kdop_PointInside( const kdopAxis_t *axes, const float *pt, unsigned int count )
@@ -1521,7 +1538,7 @@ static char Kdop_PointInside( const kdopAxis_t *axes, const float *pt, unsigned 
 }
 
 // =============================================================================
-//  sub_4DC480 — enumerate every k-DOP vertex (intersection of 3 slabs that lies
+//  0x4DC480 Kdop_EnumPoints — enumerate every k-DOP vertex (intersection of 3 slabs that lies
 //  inside all slabs) into hullPoints[] (24-byte records: {xyz, flagA, flagB, flagC}).
 //  Returns the point count.
 // =============================================================================
@@ -1558,7 +1575,7 @@ static unsigned int Kdop_EnumPoints( const kdopAxis_t *axes, unsigned int count,
 }
 
 // =============================================================================
-//  sub_4DC5D0 — collect all hull points touching candidate axis `axisVal` into a
+//  0x4DC5D0 Kdop_FacePoints — collect all hull points touching candidate axis `axisVal` into a
 //  per-face point list (12-byte xyz records).  Returns the count.
 // =============================================================================
 static unsigned int Kdop_FacePoints( unsigned int count, const kdopPoint_t *pts, vec3_t *out, int axisVal )
@@ -1579,8 +1596,8 @@ static unsigned int Kdop_FacePoints( unsigned int count, const kdopPoint_t *pts,
 }
 
 // =============================================================================
-//  sub_4DC650 — build a convex face winding from `count` 3D points lying on a face
-//  plane, recursively hull-merging in 64-point batches.  a1 = the face normal.
+//  0x4DC650 Kdop_FaceWinding — build a convex face winding from `count` 3D points lying
+//  on a face plane (normal = the face normal), recursively hull-merging in 64-point batches.
 // =============================================================================
 static winding_t *Kdop_FaceWinding( const float *normal, vec3_t *pts, unsigned int count )
 {
@@ -1593,12 +1610,18 @@ static winding_t *Kdop_FaceWinding( const float *normal, vec3_t *pts, unsigned i
         if ( !w0 ) return w1;
         if ( !w1 ) return w0;
         if ( (unsigned int)w0->numpoints > half )
+        {
             vassert( (unsigned int)w0->numpoints <= half, "%i, %i", w0->numpoints, half );  // :913
+        }
         if ( (unsigned int)w1->numpoints > rest )
+        {
             vassert( (unsigned int)w1->numpoints <= rest, "%i, %i", w1->numpoints, rest );  // :914
+        }
         unsigned int merged = w0->numpoints + w1->numpoints;
         if ( merged > 0x40 )
+        {
             vassert( merged <= 0x40, "%i, %i", merged, 64 );                                 // :915
+        }
         memcpy( pts, w0->p, 12 * w0->numpoints );
         memcpy( (char *)pts + 12 * w0->numpoints, w1->p, 12 * w1->numpoints );
         count = w0->numpoints + w1->numpoints;
@@ -1610,18 +1633,18 @@ static winding_t *Kdop_FaceWinding( const float *normal, vec3_t *pts, unsigned i
 }
 
 // =============================================================================
-//  sub_4DC7A0 — build the per-face windings of the k-DOP from its candidate axes,
+//  0x4DC7A0 Kdop_BuildFaces — build the per-face windings of the k-DOP from its candidate axes,
 //  writing each non-empty face winding* into out[].  Returns the face count.
 // =============================================================================
 static int Kdop_BuildFaces( unsigned int axisCount, const kdopAxis_t *axes, winding_t **out )
 {
-    static kdopPoint_t hullPts[5440];   // v16 (130560 bytes)
+    static kdopPoint_t hullPts[5440];
     unsigned int total = Kdop_EnumPoints( axes, axisCount, hullPts );
     unsigned int faces = 2 * axisCount;
     int outCount = 0;
     for ( unsigned int f = 0; f < faces; f++ )
     {
-        static vec3_t facePts[136];     // v17 (1636 bytes ~ 136 vec3)
+        static vec3_t facePts[136];
         unsigned int n = Kdop_FacePoints( total, hullPts, facePts, (int)f );
         if ( n >= 3 )
         {
@@ -1649,7 +1672,7 @@ static int Kdop_BuildFaces( unsigned int axisCount, const kdopAxis_t *axes, wind
 }
 
 // =============================================================================
-//  sub_4DC870 — signed volume of a k-DOP (sum of plane·area over its faces / 3).
+//  0x4DC870 Kdop_Volume — signed volume of a k-DOP (sum of plane·area over its faces / 3).
 // =============================================================================
 static float Kdop_Volume( winding_t **faces, unsigned int faceCount )
 {
@@ -1680,11 +1703,11 @@ static float Kdop_Volume( winding_t **faces, unsigned int faceCount )
 }
 
 // =============================================================================
-//  sub_4DCA10 — volume of the k-DOP described by the first `count` candidate axes.
+//  0x4DCA10 Kdop_VolumeForAxes — volume of the k-DOP described by the first `count` candidate axes.
 // =============================================================================
 static float Kdop_VolumeForAxes( unsigned int axisCount, const kdopAxis_t *axes )
 {
-    static winding_t *faces[35];   // v5[35]
+    static winding_t *faces[35];
     int fc = Kdop_BuildFaces( axisCount, axes, faces );
     float v = Kdop_Volume( faces, fc );
     if ( fc )
@@ -1697,9 +1720,9 @@ static float Kdop_VolumeForAxes( unsigned int axisCount, const kdopAxis_t *axes 
 }
 
 // =============================================================================
-//  sub_4DCF40 — pick the candidate axis (from a remaining pool) whose addition most
-//  reduces the running k-DOP volume.  a1 = the growing hull {axisCount, axes}, a2 =
-//  the candidate pool, a3 = pool size.  Returns the chosen pool index.
+//  0x4DCF40 Kdop_PickBestAxis — pick the candidate axis (from a remaining pool) whose
+//  addition most reduces the running k-DOP volume (hull = the growing {axisCount, axes}).
+//  Returns the chosen pool index.
 // =============================================================================
 static unsigned int Kdop_PickBestAxis( kdopScratch_t *hull, const kdopAxis_t *pool, unsigned int poolSize )
 {
@@ -1721,8 +1744,8 @@ static unsigned int Kdop_PickBestAxis( kdopScratch_t *hull, const kdopAxis_t *po
 }
 
 // =============================================================================
-//  sub_4DCFE0 (Region_BuildKDOP) — build the k-DOP scratch hull for a convex region.
-//  Collect candidate axes, compute each axis slab, install the 13 base axes, then
+//  0x4DCFE0 Region_BuildKDOP — build the k-DOP scratch hull for a convex region.
+//  Collect candidate axes, compute each axis slab, install the 9 base axes, then
 //  greedily add the best extra axes (up to 17 total) by volume reduction.
 // =============================================================================
 static void Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, void *outHull, rface_t *occ )
@@ -1736,10 +1759,9 @@ static void Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, voi
         return;
     }
 
-    static kdopAxis_t cand[1024];   // v21 (the candidate axis pool)
-    // cone face for Kdop_AddConeAxes: the binary passes the descriptor a3; we reuse
-    // the region's first face's cone where there is no occluder.  (Disasm: sub_4DCBC0
-    // reads a3+0/+16/+32 = the LIGHT descriptor's class/dir/cosHalfFov.)
+    static kdopAxis_t cand[1024];   // the candidate axis pool
+    // cone face for Kdop_AddConeAxes: built from the LIGHT descriptor's class / dir /
+    // cosHalfFov.
     rface_t coneSeed;
     coneSeed.exterior   = desc->cls;
     coneSeed.dir[0]     = desc->p[3];
@@ -1749,7 +1771,9 @@ static void Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, voi
     unsigned int axisCount = Kdop_CollectAxes( regionFaces, occ, &coneSeed, cand );
 
     if ( axisCount < 9 )
+    {
         vassert( axisCount >= 9, "%s", "axisCount >= HULL_KDOP_AXIS_COUNT" );    // :1179
+    }
 
     // compute each candidate's [min,max] slab → mid + halfExtent.
     for ( unsigned int i = 0; i < axisCount; i++ )
@@ -1769,8 +1793,7 @@ static void Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, voi
         return;
 
     // remaining pool = cand[9..axisCount); greedily add the best until target reached
-    // or no axis helps.  (The disasm packs the pool in-place; we shift the chosen one
-    // to the hull and remove it from the pool.)
+    // or no axis helps.  (The chosen axis moves to the hull and leaves the pool.)
     unsigned int poolSize = axisCount - 9;
     static kdopAxis_t pool[1024];
     memcpy( pool, &cand[9], poolSize * sizeof( kdopAxis_t ) );
@@ -1785,7 +1808,7 @@ static void Region_BuildKDOP( rface_t *regionFaces, const lightDesc_t *desc, voi
 }
 
 // =============================================================================
-//  sub_4DD170 (Region_FinalizeHull) — pack the scratch k-DOP into the final
+//  0x4DD170 Region_FinalizeHull — pack the scratch k-DOP into the final
 //  GfxLightRegionHull: 3 axial slabs (kept as-is) + (axisCount-3) diagonal slabs
 //  (mid/half divided by 1/√2 = scaled by √2).  Layout matches r_primarylights'
 //  GfxLightRegionHull / R_CullBoxFromLightRegionHull.
@@ -1794,7 +1817,7 @@ static void *Region_FinalizeHull( const void *scratch )
 {
     const kdopScratch_t *s = (const kdopScratch_t *)scratch;
     int axisCount = s->axisCount;
-    // out size = 20*axisCount - 104 (the binary's malloc(20*N - 104)).
+    // out size = 20*axisCount - 104.
     float *out = (float *)malloc( 20 * axisCount - 104 );
     if ( !out )
         Com_PrintMessage( "Out of memory" );

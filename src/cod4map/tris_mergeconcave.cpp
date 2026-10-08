@@ -11,7 +11,6 @@ concave windings produce fewer triangles than individual convex windings.
 
 #include "cod4map.h"
 
-MergeCallback_t   mergeCallbackFn;
 TriSurf_t       **mergeSurfArray;
 TriSurf_t       **mergeVisGroupListHead;
 TriSurf_t        *mergeCurrentSurf;
@@ -23,105 +22,21 @@ int      mergeTraversalStamp;
 void    *mergeVertMap;
 int      mergeVertMapCount;
 
-char s_assertDisable_AddWindingWithoutOverlap_r;
-char s_assertDisable_AddWindingWithoutOverlap_r;
-char s_assertDisable_AddWindingWithoutOverlap_r;
-char s_assertDisable_AllocIntWinding;
-char s_assertDisable_AllocIntWinding;
-char s_assertDisable_BuildIndexList;
-char s_assertDisable_CollapseCollinearVerts;
-char s_assertDisable_CollapseCollinearVerts;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindBestBridgeEdge;
-char s_assertDisable_FindHoles;
-char s_assertDisable_FindHoles;
-char s_assertDisable_FindHoles;
-char s_assertDisable_FindHoles;
-char s_assertDisable_FindHoles;
-char s_assertDisable_FreeIntWinding;
-char s_assertDisable_FreeMergeVertMap;
-char s_assertDisable_InitVertMap;
-char s_assertDisable_InitVertMap;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_InsertHole;
-char s_assertDisable_IntWindingToWinding;
-char s_assertDisable_IsValidHole;
-char s_assertDisable_MergeCheckGroupCallback;
-char s_assertDisable_MergeConcave_AddSurf;
-char s_assertDisable_MergeConcave_FindMergeGroup;
-char s_assertDisable_MergeConcave_FindMergeGroup;
-char s_assertDisable_MergeConcave_FindMergeGroup;
-char s_assertDisable_MergeConcave_PropagateGroup;
-char s_assertDisable_MergeConcave_PropagateGroup;
-char s_assertDisable_MergeConcave_PropagateGroup;
-char s_assertDisable_MergeGroupSurfaces;
-char s_assertDisable_MergeHoles;
-char s_assertDisable_MergeHoles;
-char s_assertDisable_MergeHoles;
-char s_assertDisable_MergeMarkGroupCallback;
-char s_assertDisable_MergeSurfaces_Init;
-char s_assertDisable_MergeSurfaces_Init;
-char s_assertDisable_MergeSurfaces_Shutdown;
-char s_assertDisable_MergeVisGroupList;
-char s_assertDisable_MergeVisGroupList;
-char s_assertDisable_MergeVisGroupList;
-char s_assertDisable_FindNotchSpan;
-char s_assertDisable_TryPlugNotch;
-char s_assertDisable_TryPlugNotch;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_MergeWindingsAtBridge;
-char s_assertDisable_RemoveDuplicateIndices;
-char s_assertDisable_RemoveDuplicateIndices;
-char s_assertDisable_RemoveSharedBoundaryPoints;
-char s_assertDisable_RemoveSharedBoundaryPoints;
-char s_assertDisable_SpliceWindingsAtSharedEdge;
-char s_assertDisable_SpliceWindingsAtSharedEdge;
-char s_assertDisable_SpliceWindingsAtSharedEdge;
-
-
 /*
 ================
 AllocIntWinding
 
-Allocates COD4's count-plus-index winding.  The optional auxiliary buffer is
-only retained for KIWI's shadow-caster compatibility callback route.
+Allocates COD4's count-plus-index winding.
 ================
 */
-IntWinding_t *AllocIntWinding(int ptCount, int auxElemSize)
+IntWinding_t *AllocIntWinding(int ptCount)
 {
   IntWinding_t *w;
 
   Assert(ptCount > 0, s_assertDisable_AllocIntWinding);
-  Assert(auxElemSize >= 0, s_assertDisable_AllocIntWinding);
   w = calloc(1, sizeof(IntWinding_t) + sizeof(int) * ptCount);
   if ( !w )
     Com_Error("Out of memory on %i-point integer winding", ptCount);
-  if ( auxElemSize )
-  {
-    w->auxData = malloc(auxElemSize * ptCount);
-    if ( !w->auxData )
-      Com_Error("Out of memory on %i bytes of aux data for %i-point integer winding", auxElemSize * ptCount, ptCount);
-  }
   return w;
 }
 
@@ -129,14 +44,12 @@ IntWinding_t *AllocIntWinding(int ptCount, int auxElemSize)
 ================
 FreeIntWinding
 
-Frees the compact index winding and, only for the legacy shadow callback
-route, its separately owned compatibility sidecar.
+Frees the compact index winding.
 ================
 */
 void FreeIntWinding(IntWinding_t *w)
 {
   Assert(w, s_assertDisable_FreeIntWinding);
-  free(w->auxData);
   free(w);
 }
 
@@ -164,12 +77,6 @@ Winding_t *IntWindingToWinding( IntWinding_t *iw, Winding_t **outWinding )
     VectorCopy(src, w->points[i]);
   }
   *outWinding = w;
-
-  /* The native path has no index-winding auxiliary payload.  Preserve the
-     existing shadow-only sidecar transfer when that optional route supplied
-     one, without making normal concave merging depend on it. */
-  outWinding[1] = (Winding_t *)iw->auxData;
-  iw->auxData = NULL;
   return w;
 }
 
@@ -223,7 +130,7 @@ Recursively clips a winding against existing surfaces and adds
 the non-overlapping remainder as new surfaces.
 ================
 */
-signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfCount, WindingAuxPair_t *windingPair, int windingBase, TriSurfProps_t *props)
+signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfCount, WindingAuxPair_t *windingPair, TriSurfProps_t *props)
 {
   TriSurf_t *surfTs;
   Winding_t *ow;
@@ -240,7 +147,7 @@ signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfC
     surfTs = mergeSurfArray[surfIdx];
     ow = surfTs->winding;
     surfNormal = surfTs->props->plane;
-    if ( CheckWindingSeparationBoth(ow, curWinding.winding, surfNormal, ON_EPSILON) || ow->numpoints <= 0 )
+    if ( CheckWindingSeparationBandsBoth(ow, curWinding.winding, surfNormal, ON_EPSILON) || ow->numpoints <= 0 )
       continue;
 
     /* clip curWinding against each edge of the overlapping winding */
@@ -256,12 +163,12 @@ signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfC
       /* Native ClipTriWinding's first output is recursively emitted; its second
          output remains the current winding while the obstacle's next edge is
          applied.  Keep the established local roles rather than their names. */
-      ClipTriWindingWithAux(&curWinding, ow, windingBase, clipNormal, clipDist, ON_EPSILON, &backPiece, &frontPiece);
+      ClipTriWinding(&curWinding, ow, clipNormal, clipDist, ON_EPSILON, &backPiece, &frontPiece);
 
       if ( frontPiece.winding )
       {
         if ( backPiece.winding )
-          surfCount = AddWindingWithoutOverlap_r(startIdx + 1, surfCount, prevSurfCount, &backPiece, windingBase, props);
+          surfCount = AddWindingWithoutOverlap_r(startIdx + 1, surfCount, prevSurfCount, &backPiece, props);
         FreeVerts(&curWinding);
         curWinding = frontPiece;
         if ( e == ow->numpoints )
@@ -292,11 +199,10 @@ signed int AddWindingWithoutOverlap_r(int startIdx, int surfCount, int prevSurfC
     if ( mergeSurfCount >= mergeSurfCapacity )
       Com_Error("more than %i windings\n", mergeSurfCapacity);
     mergeSurfArray[mergeSurfCount] = mergeSurfArray[surfCount];
-    mergeSurfArray[surfCount] = AllocTriSurf(curWinding.winding, curWinding.auxData, windingBase, props);
+    mergeSurfArray[surfCount] = AllocTriSurf(curWinding.winding, props);
     mergeSurfCount++;
   }
   mergeSurfArray[surfCount]->winding = curWinding.winding;
-  mergeSurfArray[surfCount]->auxData = curWinding.auxData;
   AssertFatal(mergeSurfArray[surfCount]->props == props, s_assertDisable_AddWindingWithoutOverlap_r);
 
   return surfCount + 1;
@@ -355,13 +261,12 @@ void RemoveOverlappingWindings( int mode )
   for ( i = start; i < (int)mergeSurfCount; i = next )
   {
     ts = mergeSurfArray[i];
-    next = AddWindingWithoutOverlap_r( start, i, i, (WindingAuxPair_t *)&ts->winding, ts->auxElemSize, ts->props );
+    next = AddWindingWithoutOverlap_r( start, i, i, (WindingAuxPair_t *)&ts->winding, ts->props );
 
     if ( next == i )
     {
       /* surface was fully overlapped — free and swap-remove */
       ts->winding = 0;
-      ts->auxData = 0;
       FreeTriSurf( ts );
       --mergeSurfCount;
       mergeSurfArray[i] = mergeSurfArray[mergeSurfCount];
@@ -448,31 +353,6 @@ int FindSharedEdge(IntWinding_t *windingA, IntWinding_t *windingB, int *outStart
 
 /*
 ================
-WindingArrayShift
-
-Shifts winding array elements in place.
-================
-*/
-void *WindingArrayShift(int elemSize, intptr_t arrayBase, int destIdx, int shiftAmount, int arrayLen)
-{
-  /* KIWI FIX: memmove - an in-place shift overlaps, which memcpy leaves undefined */
-  return memmove((void *)(arrayBase + destIdx * elemSize), (const void *)(arrayBase + elemSize * (destIdx + shiftAmount)), elemSize * (arrayLen - destIdx));
-}
-
-/*
-================
-MergeConcave_ResetSurfCount
-
-Resets mergeGlob.surfCount to zero.
-================
-*/
-void MergeConcave_ResetSurfCount()
-{
-  mergeSurfCount = 0;
-}
-
-/*
-================
 MergeConcave_AddSurf
 
 Adds a surface to the mergeGlob.surfs array.
@@ -487,18 +367,6 @@ size_t MergeConcave_AddSurf( TriSurf_t *ts, TriSurf_t **listHead )
   UnlinkAndFreeSurf(ts, listHead);
   mergeSurfArray[mergeSurfCount] = ts;
   return ++mergeSurfCount;
-}
-
-/*
-================
-MergeConcave_GetSurfCount
-
-Returns mergeGlob.surfCount.
-================
-*/
-size_t MergeConcave_GetSurfCount()
-{
-  return mergeSurfCount;
 }
 
 /*
@@ -559,60 +427,6 @@ size_t MergeConcave_FindMergeGroup(TriSurf_t *seedSurf)
 
 /*
 ================
-MergeMarkGroupCallback
-
-Grid tree callback that copies a groupable surface into the merge group.
-================
-*/
-void MergeMarkGroupCallback( TriSurf_t *ts )
-{
-  Assert(GetTrisTransientMode() == 2, s_assertDisable_MergeMarkGroupCallback);
-
-  /* skip already-visited surfaces (origWinding used as traversal stamp) */
-  if ( (intptr_t)ts->origWinding == mergeTraversalStamp )
-    return;
-  ts->origWinding = (void *)(intptr_t)mergeTraversalStamp;
-
-  if ( !mergeGroupableCallback( mergeCurrentSurf, ts ) )
-    return;
-
-  if ( mergeSurfCount == mergeSurfCapacity )
-    Com_Error( "more than %i windings\n", mergeSurfCapacity );
-
-  mergeSurfArray[mergeSurfCount] = CopyTriSurf( ts );
-  mergeSurfCount++;
-}
-
-/*
-================
-MergeConcave_PropagateGroup
-
-Propagates a merge group via grid tree flood-fill with copy.
-================
-*/
-size_t MergeConcave_PropagateGroup(TriSurf_t *seedSurf)
-{
-  int i;
-  size_t result;
-
-  Assert(mergeGroupableCallback, s_assertDisable_MergeConcave_PropagateGroup);
-  Assert(mergeSurfArray, s_assertDisable_MergeConcave_PropagateGroup);
-  ++mergeTraversalStamp;
-  mergeSurfCount = 0;
-  for ( i = -1; ; seedSurf = mergeSurfArray[i] )
-  {
-    mergeCurrentSurf = seedSurf;
-    AssertFatal(seedSurf != NULL, s_assertDisable_MergeConcave_PropagateGroup);
-    GridTree_ForEach(mergeCurrentSurf->mins, mergeCurrentSurf->maxs, MergeMarkGroupCallback);
-    result = mergeSurfCount;
-    if ( ++i == mergeSurfCount )
-      break;
-  }
-  return result;
-}
-
-/*
-================
 MergeConcave_BuildGridTree
 
 Builds a grid tree from a surface linked list.
@@ -646,14 +460,13 @@ MergeSurfaces_Init
 Initializes the merge system with callbacks and surface array.
 ================
 */
-void *MergeSurfaces_Init(int maxSurfs, int (*groupableCallback)(TriSurf_t *, TriSurf_t *), MergeCallback_t mergeCallback)
+void *MergeSurfaces_Init(int maxSurfs, int (*groupableCallback)(TriSurf_t *, TriSurf_t *))
 {
   void *result;
 
   Assert(!mergeGroupableCallback, s_assertDisable_MergeSurfaces_Init);
   Assert(!mergeSurfArray, s_assertDisable_MergeSurfaces_Init);
   mergeGroupableCallback = groupableCallback;
-  mergeCallbackFn = mergeCallback;
   mergeSurfCapacity = maxSurfs;
   TJunc_MergeScratchInit();
   result = malloc(sizeof(TriSurf_t *) * maxSurfs);
@@ -833,44 +646,31 @@ Copies an arc of vertices from a source winding pair to a
 destination winding pair, handling wrap-around when start > end
 ================
 */
-int WindingCopyArc(int startIdx, WindingAuxPair_t *srcPair, WindingAuxPair_t *dstPair, int endIdx, int auxElemSize)
+int WindingCopyArc(int startIdx, WindingAuxPair_t *srcPair, WindingAuxPair_t *dstPair, int endIdx)
 {
   Winding_t *dstW;
   Winding_t *srcW;
   int result;
   int newCount;
-  char *srcAux;
-  char *dstAux;
   int arcLen;
   int wrapLen;
 
   dstW = dstPair->winding;
   srcW = srcPair->winding;
-  srcAux = (char *)srcPair->auxData;
-  dstAux = (char *)dstPair->auxData;
   if ( startIdx > endIdx )
   {
     wrapLen = srcW->numpoints - startIdx;
     memcpy(dstW->points[dstW->numpoints], srcW->points[startIdx], sizeof(vec3_t) * wrapLen);
-    if ( auxElemSize )
-      AuxDataCopy(auxElemSize, srcAux, startIdx, wrapLen, dstAux, dstW->numpoints);
     result = endIdx + 1;
     newCount = wrapLen + dstW->numpoints;
     dstW->numpoints = newCount;
     memcpy(dstW->points[newCount], srcW->points[0], sizeof(vec3_t) * (endIdx + 1));
-    if ( auxElemSize )
-    {
-      AuxDataCopy(auxElemSize, srcAux, 0, result, dstAux, dstW->numpoints);
-      result = endIdx + 1;
-    }
     dstW->numpoints += result;
   }
   else
   {
     arcLen = endIdx - startIdx + 1;
     memcpy(dstW->points[dstW->numpoints], srcW->points[startIdx], sizeof(vec3_t) * arcLen);
-    if ( auxElemSize )
-      AuxDataCopy(auxElemSize, srcAux, startIdx, arcLen, dstAux, dstW->numpoints);
     result = arcLen + dstW->numpoints;
     dstW->numpoints = result;
   }
@@ -885,7 +685,7 @@ Allocates a new winding and copies an arc of points
 from the source winding into it
 ================
 */
-Winding_t *AllocWindingForArc(int extraDataSize, WindingAuxPair_t *outPair,
+Winding_t *AllocWindingForArc(WindingAuxPair_t *outPair,
                               WindingAuxPair_t *srcPair, int startIdx, int endIdx)
 {
   int arcLen;
@@ -894,14 +694,9 @@ Winding_t *AllocWindingForArc(int extraDataSize, WindingAuxPair_t *outPair,
   if ( endIdx - startIdx < 0 )
     arcLen += srcPair->winding->numpoints;
   outPair->winding = AllocWinding(arcLen);
-  if ( extraDataSize )
-    outPair->auxData = malloc(extraDataSize * arcLen);
-  else
-    outPair->auxData = 0;
   outPair->winding->numpoints = 0;
   WindingCopyArc(startIdx, srcPair, outPair,
-                 (srcPair->winding->numpoints + endIdx - 1) % srcPair->winding->numpoints,
-                 extraDataSize);
+                 (srcPair->winding->numpoints + endIdx - 1) % srcPair->winding->numpoints);
   return outPair->winding;
 }
 
@@ -979,7 +774,7 @@ arcs from both windings into the destination winding
 ================
 */
 Winding_t *MergeWindingsAtBridge(WindingAuxPair_t *vertsInner, WindingAuxPair_t *vertsOuter,
-                                 int bridgeInner, int bridgeOuter, int auxElemSize,
+                                 int bridgeInner, int bridgeOuter,
                                  WindingAuxPair_t *verts)
 {
   int numPtsOuter;
@@ -1014,11 +809,11 @@ Winding_t *MergeWindingsAtBridge(WindingAuxPair_t *vertsInner, WindingAuxPair_t 
     bridgeMatch = 0;
   }
   verts->winding->numpoints = 0;
-  WindingCopyArc((bridgeInner + 1) % numPtsInner, vertsInner, verts, (adjustedInner + bridgeInner) % numPtsInner, auxElemSize);
-  WindingCopyArc(bridgeOuter, vertsOuter, verts, (numPtsOuter + bridgeOuter - 1) % numPtsOuter, auxElemSize);
-  WindingCopyArc(bridgeOuter, vertsOuter, verts, bridgeOuter, auxElemSize);
+  WindingCopyArc((bridgeInner + 1) % numPtsInner, vertsInner, verts, (adjustedInner + bridgeInner) % numPtsInner);
+  WindingCopyArc(bridgeOuter, vertsOuter, verts, (numPtsOuter + bridgeOuter - 1) % numPtsOuter);
+  WindingCopyArc(bridgeOuter, vertsOuter, verts, bridgeOuter);
   if ( !bridgeMatch )
-    WindingCopyArc(bridgeInner, vertsInner, verts, bridgeInner, auxElemSize);
+    WindingCopyArc(bridgeInner, vertsInner, verts, bridgeInner);
   return verts->winding;
 }
 
@@ -1113,8 +908,7 @@ inserts the resulting hole windings into a sorted array by area
 ================
 */
 int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
-               WindingAuxPair_t *holes, float *holeArea, int holeCount,
-               int auxElemSize, int a8)
+               WindingAuxPair_t *holes, float *holeArea, int holeCount)
 {
   #define MAX_HOLES 3276
   int startDiag0, endDiag0, startDiag1, endDiag1;
@@ -1139,15 +933,15 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
       return holeCount;
     }
 
-    AllocWindingForArc(auxElemSize, &pairs[0], verts, endDiag0, startDiag0);
-    AllocWindingForArc(auxElemSize, &pairs[1], verts, startDiag1, endDiag1);
+    AllocWindingForArc(&pairs[0], verts, endDiag0, startDiag0);
+    AllocWindingForArc(&pairs[1], verts, startDiag1, endDiag1);
     FreeVerts(verts);
 
     for ( i = 0; i < 2; i++ )
     {
       double subArea = WindingSignedArea(pairs[i].winding, plane);
       if ( subArea < 0.0 )
-        holeCount = InsertHole(&pairs[i], (float)subArea, plane, holes, holeArea, holeCount, auxElemSize, a8);
+        holeCount = InsertHole(&pairs[i], (float)subArea, plane, holes, holeArea, holeCount);
       else
         FreeVerts(&pairs[i]);
     }
@@ -1156,7 +950,7 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
 
   /* no diagonal — insert this hole sorted by area (descending by magnitude) */
   /* CoD4 0x458780 reduces every eligible concave hole through the
-     opaque-brush tree; its final parameter is unused. */
+     opaque-brush tree.  KIWI: its unused final param is dropped. */
   if (!HoleAreaSkipsVisibilityReduction(verts->winding, -area))
   {
     Winding_t *reversed = ReverseWinding(verts->winding);
@@ -1185,19 +979,9 @@ int InsertHole(WindingAuxPair_t *verts, float area, float *plane,
             || HoleAreaSkipsVisibilityReduction(visible, visibleArea))
         {
           Winding_t *reduced = ReverseWinding(visible);
-          void *reducedAux = NULL;
 
-          /* The only compatibility auxiliary route through concave merging
-             is the shadow-caster SmAuxVert carrier.  Reprojecting the
-             retained hull vertices reconstructs its original/projected
-             pairs after native's geometry-only visibility reduction. */
-          if (auxElemSize == sizeof(SmAuxVert_t))
-            reducedAux = SM_AllocProjectedPoints(reduced);
-          else if (auxElemSize)
-            Com_Error("InsertHole: unsupported auxiliary vertex size %i", auxElemSize);
           FreeVerts(verts);
           verts->winding = reduced;
-          verts->auxData = reducedAux;
           FreeWinding(visible);
           area = -visibleArea;
         }
@@ -1242,7 +1026,7 @@ diagonals and collecting the resulting sub-windings
 ================
 */
 int FindHoles(WindingAuxPair_t *verts, float *plane, WindingAuxPair_t *holes,
-              float *holeArea, int auxElemSize, int extraParam)
+              float *holeArea)
 {
   WindingAuxPair_t *src = verts;
   WindingAuxPair_t pairs[2];
@@ -1275,10 +1059,9 @@ int FindHoles(WindingAuxPair_t *verts, float *plane, WindingAuxPair_t *holes,
     }
 
     /* CoD4 0x458230 calls the common 0x458710 arc allocator for both
-       diagonal pieces.  Keeping that route also keeps the sidecar carrier
-       synchronized with the native winding operation. */
-    AllocWindingForArc(auxElemSize, &pairs[0], src, start0, end0);
-    AllocWindingForArc(auxElemSize, &pairs[1], src, s1, e1);
+       diagonal pieces. */
+    AllocWindingForArc(&pairs[0], src, start0, end0);
+    AllocWindingForArc(&pairs[1], src, s1, e1);
 
     areas[0] = (float)WindingSignedArea(pairs[0].winding, plane);
     areas[1] = (float)WindingSignedArea(pairs[1].winding, plane);
@@ -1301,91 +1084,16 @@ int FindHoles(WindingAuxPair_t *verts, float *plane, WindingAuxPair_t *holes,
       AssertFatalMsg(areas[outerIdx] > -areas[innerIdx], s_assertDisable_FindHoles,
              "%s\n\t%s", "subArea[outerIndex] > -subArea[innerIndex]", va("%g > %g", areas[outerIdx], -areas[innerIdx]));
 
-      holeCount = InsertHole(&pairs[innerIdx], areas[innerIdx], plane, holes, holeArea, holeCount, auxElemSize, extraParam);
+      holeCount = InsertHole(&pairs[innerIdx], areas[innerIdx], plane, holes, holeArea, holeCount);
     }
 
     /* replace source winding with the outer sub-winding */
     FreeVerts(src);
     src->winding = pairs[outerIdx].winding;
-    src->auxData = pairs[outerIdx].auxData;
 
     if ( !FindWindingDiagonal(src->winding, &end0, &start0, &start1, &end1) )
       return holeCount;
   }
-}
-
-/*
-================
-WindingInsideBSP
-
-Recursively tests whether a winding is contained within
-the solid space of a BSP tree
-================
-*/
-char WindingInsideBSP(int *w, float *plane, Node_t *node)
-{
-  #define COPLANAR_DOT  0.99900001f
-  #define COPLANAR_DIST 0.001f
-  float *splitPlane;
-  double dot;
-
-  if ( !w )
-    return 0;
-
-  /* leaf node — free winding and return whether cell is non-opaque */
-  if ( node->cellnum != CELLNUM_UNKNOWN )
-  {
-    FreeWinding((Winding_t *)w);
-    return node->cellnum != CELLNUM_OPAQUE;
-  }
-
-  splitPlane = MAP_PLANE(node->planenum)->normal;
-  dot = DotProduct210(splitPlane, plane);
-
-  /* coplanar with split plane — recurse into back child only */
-  if ( dot > COPLANAR_DOT && fabs(plane[3] - splitPlane[3]) < COPLANAR_DIST )
-    return WindingInsideBSP(w, plane, node->children[0]);
-
-  /* coplanar with flipped split plane — recurse into front child only */
-  if ( dot < -COPLANAR_DOT && fabs(splitPlane[3] + plane[3]) < COPLANAR_DIST )
-    return WindingInsideBSP(w, plane, node->children[1]);
-
-  /* split the winding and check both sides */
-  { Winding_t *backW, *frontW;
-  char result;
-  ClipWindingEpsilon((Winding_t *)w, splitPlane, splitPlane[3], ON_EPSILON, &backW, &frontW, 0);
-  result = WindingInsideBSP((int *)backW, plane, node->children[0]);
-  if ( !result )
-    result = WindingInsideBSP((int *)frontW, plane, node->children[1]);
-  FreeWinding((Winding_t *)w);
-  return result;
-  }
-  #undef COPLANAR_DOT
-  #undef COPLANAR_DIST
-}
-
-/*
-================
-IsValidHole
-
-Validates a hole by checking area threshold and
-testing BSP containment
-================
-*/
-bool IsValidHole(Tree_t *bspHead, Winding_t *w, float area, float *plane)
-{
-  #define MIN_HOLE_AREA     0.0625
-  #define AREA_PER_VERTEX   64.000999
-
-  Assert(w, s_assertDisable_IsValidHole);
-  if ( area < MIN_HOLE_AREA )
-    return 0;
-  if ( !bspHead || (double)w->numpoints * AREA_PER_VERTEX < area )
-    return 1;
-  return WindingInsideBSP((int *)ReverseWinding(w), plane, bspHead->headnode) != 0;
-
-  #undef MIN_HOLE_AREA
-  #undef AREA_PER_VERTEX
 }
 
 /*
@@ -1396,7 +1104,7 @@ Collects holes from a surface winding by finding self-touching diagonals.
 CoD4's per-hole opaque-brush visibility reduction happens in InsertHole.
 ================
 */
-void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
+void CollectHoles(TriSurf_t *ts, Tree_t *bspHead)
 {
   #define MAX_HOLE_BUF 3276
   WindingAuxPair_t *src = (WindingAuxPair_t *)&ts->winding;
@@ -1413,9 +1121,8 @@ void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
   if ( ts->winding->numpoints <= 8 )
     return;
 
-  CopyVerts(src, ts->auxElemSize, &copyPair);
-  totalHoles = FindHoles(&copyPair, ts->props->plane, holesBuf, areasBuf,
-                         ts->auxElemSize, auxElemSize);
+  CopyVerts(src, &copyPair);
+  totalHoles = FindHoles(&copyPair, ts->props->plane, holesBuf, areasBuf);
   Assert(totalHoles >= 0, s_assertDisable_FindHoles);
 
   if ( totalHoles > 0 )
@@ -1432,7 +1139,6 @@ void CollectHoles(TriSurf_t *ts, Tree_t *bspHead, int auxElemSize)
      winding above the eight-point gate, even when FindHoles found none. */
   FreeVerts(src);
   src->winding = copyPair.winding;
-  src->auxData = copyPair.auxData;
   #undef MAX_HOLE_BUF
 }
 
@@ -1449,7 +1155,6 @@ void MergeHoles( TriSurf_t *ts )
   WindingAuxPair_t *holes;
   WindingAuxPair_t basePair, holePair, mergedPair;
   Winding_t *mergedW, *baseW;
-  void *mergedAux, *baseAux;
   int totalPts, bridgeInner, bridgeOuter, best, i;
   float bestDistSq;
 
@@ -1465,15 +1170,9 @@ void MergeHoles( TriSurf_t *ts )
   mergedW = AllocWinding( totalPts );
   AssertFatal( mergedW->numpoints == 0, s_assertDisable_MergeHoles );
 
-  mergedAux = ts->auxElemSize ? malloc( totalPts * ts->auxElemSize ) : 0;
-  if ( ts->auxElemSize && !mergedAux )
-    Com_Error("MergeHoles: out of memory for auxiliary vertices");
   baseW = ts->winding;
-  baseAux = ts->auxData;
   basePair.winding = baseW;
-  basePair.auxData = baseAux;
   mergedPair.winding = mergedW;
-  mergedPair.auxData = mergedAux;
 
   /* repeatedly find nearest hole, bridge it into the base winding */
   while ( ts->holeCount )
@@ -1505,12 +1204,10 @@ void MergeHoles( TriSurf_t *ts )
     /* merge chosen hole into base, output into mergedW */
     holePair = ts->holes[best];
     MergeWindingsAtBridge(&holePair, &basePair, bridgeInner, bridgeOuter,
-                          ts->auxElemSize, &mergedPair);
+                          &mergedPair);
 
     FreeWinding( baseW );
     FreeWinding( ts->holes[best].winding );
-    free( baseAux );
-    free( ts->holes[best].auxData );
 
     /* swap-remove the merged hole */
     ts->holeCount--;
@@ -1521,25 +1218,12 @@ void MergeHoles( TriSurf_t *ts )
 
     /* copy merged result as new base for next iteration */
     baseW = CopyWinding( mergedW );
-    if ( ts->auxElemSize )
-    {
-      baseAux = malloc( ts->auxElemSize * mergedW->numpoints );
-      if ( !baseAux )
-        Com_Error("MergeHoles: out of memory for auxiliary vertices");
-      memcpy( baseAux, mergedAux, ts->auxElemSize * mergedW->numpoints );
-    }
-    else
-    {
-      baseAux = NULL;
-    }
     basePair.winding = baseW;
-    basePair.auxData = baseAux;
   }
 
   free( ts->holes );
   ts->winding = mergedW;
   ts->holes = 0;
-  ts->auxData = mergedAux;
 }
 
 /*
@@ -1551,7 +1235,7 @@ distance 2 apart) and removes the spike vertex pair.
 Restarts the full scan after each removal.
 ================
 */
-int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemSize)
+int RemoveDuplicateIndices(int numPts, int *indices)
 {
   int n = numPts;
 
@@ -1592,8 +1276,6 @@ int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemS
       {
         /* wrap case: spike spans end/start — remove first 2 elements */
         memmove(indices, &indices[2], sizeof(int) * n);
-        if ( auxElemSize )
-          memmove(auxData, &auxData[auxElemSize * 2], auxElemSize * n);
       }
       else
       {
@@ -1602,8 +1284,6 @@ int RemoveDuplicateIndices(int numPts, int *indices, char *auxData, int auxElemS
         Assert(n + 2 - cur > 0, s_assertDisable_RemoveDuplicateIndices);
         Assert(im2 < cur, s_assertDisable_RemoveDuplicateIndices);
         memmove(&indices[im2], &indices[cur], sizeof(int) * tail);
-        if ( auxElemSize )
-          memmove(&auxData[auxElemSize * im2], &auxData[auxElemSize * (im2 + 2)], auxElemSize * tail);
       }
 
       matched = 1;
@@ -1625,12 +1305,11 @@ Converts a float winding to an integer winding by mapping
 vertices through the merge vertex table and removing duplicates
 ================
 */
-IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair, int auxElemSize)
+IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair)
 {
   #define MAX_INDEX_LIST_POINTS 1024
   Winding_t *w = vertsPair->winding;
   int indices[MAX_INDEX_LIST_POINTS];
-  void *auxCopy;
   int i, n, dstCount = 0;
   IntWinding_t *result = 0;
 
@@ -1638,9 +1317,6 @@ IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair, int auxElemSize)
     Com_Error("BuildIndexList: invalid winding size %i (max %i)", w->numpoints, MAX_INDEX_LIST_POINTS);
   if ( w->numpoints < 3 )
     return NULL;
-  auxCopy = auxElemSize ? malloc(auxElemSize * w->numpoints) : 0;
-  if ( auxElemSize && !auxCopy )
-    Com_Error("BuildIndexList: out of memory for auxiliary vertices");
 
   /* map each float vertex to a merge-table index, skip consecutive duplicates */
   n = w->numpoints;
@@ -1649,11 +1325,7 @@ IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair, int auxElemSize)
     int idx = GetOrAddMergeVertex((int *)w->points[i]);
     indices[dstCount] = idx;
     if ( !dstCount || idx != indices[dstCount - 1] )
-    {
-      if ( auxElemSize )
-        AuxDataCopy(auxElemSize, (char *)vertsPair->auxData, i, 1, (char *)auxCopy, dstCount);
       dstCount++;
-    }
   }
 
   /* trim trailing vertices that duplicate the first */
@@ -1662,19 +1334,16 @@ IntWinding_t *BuildIndexList(WindingAuxPair_t *vertsPair, int auxElemSize)
 
   if ( dstCount >= 3 )
   {
-    int cleanCount = RemoveDuplicateIndices(dstCount, indices, (char *)auxCopy, auxElemSize);
+    int cleanCount = RemoveDuplicateIndices(dstCount, indices);
     if ( cleanCount >= 3 )
     {
-      IntWinding_t *iw = AllocIntWinding(cleanCount, auxElemSize);
+      IntWinding_t *iw = AllocIntWinding(cleanCount);
       iw->numpoints = cleanCount;
       memcpy(iw->indices, indices, sizeof(int) * cleanCount);
-      if ( auxElemSize )
-        memcpy(iw->auxData, auxCopy, auxElemSize * cleanCount);
       result = iw;
     }
   }
 
-  free(auxCopy);
   return result;
   #undef MAX_INDEX_LIST_POINTS
 }
@@ -1702,7 +1371,7 @@ int InitVertMap(IntWinding_t **indexLists, int totalVerts)
   i = 0;
   while ( i < (int)mergeSurfCount )
   {
-    indexLists[i] = BuildIndexList((WindingAuxPair_t *)&mergeSurfArray[i]->winding, mergeSurfArray[i]->auxElemSize);
+    indexLists[i] = BuildIndexList((WindingAuxPair_t *)&mergeSurfArray[i]->winding);
     FreeVerts((WindingAuxPair_t *)&mergeSurfArray[i]->winding);
     if ( indexLists[i] )
     {
@@ -1755,17 +1424,15 @@ Removes collinear vertices from a winding by checking if
 adjacent vertices are coplanar and can be safely removed
 ================
 */
-Winding_t *CollapseCollinearVerts(Winding_t **verts, int auxElemSize, int axisU, int axisV, float epsilon)
+Winding_t *CollapseCollinearVerts(Winding_t **verts, int axisU, int axisV, float epsilon)
 {
   Winding_t *w;
-  char *auxData;
   int i;
 
   Assert(verts, s_assertDisable_CollapseCollinearVerts);
   Assert(*verts, s_assertDisable_CollapseCollinearVerts);
 
   w = *verts;
-  auxData = (char *)(intptr_t)((int **)verts)[1];
   i = 0;
 
   while ( i < w->numpoints )
@@ -1783,8 +1450,6 @@ Winding_t *CollapseCollinearVerts(Winding_t **verts, int auxElemSize, int axisU,
       {
         /* KIWI FIX: memmove - in-place shift (overlapping memcpy is undefined) */
         memmove(w->points[next], w->points[test], sizeof(vec3_t) * (w->numpoints - next));
-        if ( auxElemSize )
-          memmove(&auxData[auxElemSize * next], &auxData[auxElemSize * (next + 1)], auxElemSize * (w->numpoints - next));
       }
     }
     else
@@ -1809,7 +1474,7 @@ char ValidateHoles(TriSurf_t *ts, float epsilon)
   int i;
 
   GetProjectionAxes(ts->props->plane, &axisU, &axisV);
-  CollapseCollinearVerts(&ts->winding, ts->auxElemSize, axisU, axisV, epsilon);
+  CollapseCollinearVerts(&ts->winding, axisU, axisV, epsilon);
   if ( ts->winding->numpoints < 3 )
     return 0;
 
@@ -1817,7 +1482,7 @@ char ValidateHoles(TriSurf_t *ts, float epsilon)
   while ( i < ts->holeCount )
   {
     WindingAuxPair_t *hole = &ts->holes[i];
-    CollapseCollinearVerts(&hole->winding, ts->auxElemSize, axisU, axisV, epsilon);
+    CollapseCollinearVerts(&hole->winding, axisU, axisV, epsilon);
 
     /* keep valid holes (>= 3 points, negative signed area) */
     if ( hole->winding->numpoints >= 3 && WindingSignedArea(hole->winding, ts->props->plane) < 0.0 )
@@ -1828,7 +1493,6 @@ char ValidateHoles(TriSurf_t *ts, float epsilon)
 
     /* invalid hole — free and swap-remove from array */
     FreeWinding(hole->winding);
-    free(hole->auxData);
     ts->holeCount--;
     if ( !ts->holeCount )
     {
@@ -1849,7 +1513,7 @@ Removes shared boundary points from a merged winding after
 splicing, handling wrap-around and collinear vertex collapse
 ================
 */
-IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int startIdx, int dupCount)
+IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int startIdx, int dupCount)
 {
   int n, start, count, remEnd, next, prev;
   char endsMismatch = 0;
@@ -1867,8 +1531,7 @@ IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int 
   }
 
   n = w0->numpoints;
-  Assert(n - count >= 3 || n == count || s_assertDisable_RemoveSharedBoundaryPoints,
-         s_assertDisable_RemoveSharedBoundaryPoints);
+  Assert(n - count >= 3 || n == count, s_assertDisable_RemoveSharedBoundaryPoints);
 
   if ( n == count )
     return w0;
@@ -1883,8 +1546,6 @@ IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int 
       start = 0;
     }
     memmove(&w0->indices[start], &w0->indices[remEnd], sizeof(int) * (n - remEnd)); /* KIWI FIX: was overlapping memcpy */
-    if ( auxElemSize )
-      WindingArrayShift(auxElemSize, (intptr_t)w0->auxData, start, remEnd - start, start + w0->numpoints - remEnd);
   }
   w0->numpoints -= dupCount;
 
@@ -1910,10 +1571,6 @@ IntWinding_t *RemoveSharedBoundaryPoints(IntWinding_t *w0, int auxElemSize, int 
         {
           /* KIWI FIX: memmove - in-place shift (overlapping memcpy is undefined) */
           memmove(&w0->indices[start], &w0->indices[start + 2], sizeof(int) * (n - start));
-          if ( auxElemSize )
-            memmove((void *)((intptr_t)w0->auxData + start * auxElemSize),
-                   (const void *)((intptr_t)w0->auxData + auxElemSize * (start + 2)),
-                   auxElemSize * n - start * auxElemSize);
           start = (start < prev) ? prev - 2 : prev;
         }
       }
@@ -1940,16 +1597,14 @@ SpliceWindingsAtSharedEdge
 Splices two windings at a shared edge into a combined winding
 ================
 */
-IntWinding_t *SpliceWindingsAtSharedEdge(IntWinding_t *w0, IntWinding_t *w1, int auxElemSize, int unused4, int unused5, int startA, int startB, int dupCount)
+IntWinding_t *SpliceWindingsAtSharedEdge(IntWinding_t *w0, IntWinding_t *w1, int unused4, int unused5, int startA, int startB, int dupCount)
 {
   int nA = w0->numpoints, nB = w1->numpoints;
-  IntWinding_t *out = AllocIntWinding(nB - 2 * dupCount + nA + 2, auxElemSize);
+  IntWinding_t *out = AllocIntWinding(nB - 2 * dupCount + nA + 2);
   int i, skip;
 
   #define OUT_ADD(src, srcIdx) do { \
     out->indices[out->numpoints] = (src)->indices[((srcIdx) % (src == w0 ? nA : nB))]; \
-    if ( auxElemSize ) \
-      AuxDataCopy(auxElemSize, (char *)(src)->auxData, (srcIdx) % (src == w0 ? nA : nB), 1, (char *)out->auxData, out->numpoints); \
     out->numpoints++; \
   } while(0)
 
@@ -2024,10 +1679,10 @@ size_t MergeGroupSurfaces(
   }
 
   if ( baseSurf )
-    baseIndexList = BuildIndexList((WindingAuxPair_t *)&baseSurf->winding, baseSurf->auxElemSize);
+    baseIndexList = BuildIndexList((WindingAuxPair_t *)&baseSurf->winding);
 
   if ( !baseSurf || baseIndexList )
-    mergeSurfCount = mergeCallback(mergeSurfArray, indexLists, mergeSurfCount, mergeSurfArray[0]->auxElemSize, baseSurf, baseIndexList, mergeFlags);
+    mergeSurfCount = mergeCallback(mergeSurfArray, indexLists, (int)mergeSurfCount, baseSurf, baseIndexList, mergeFlags);
 
   /* convert intWindings back to float windings */
   for ( i = 0; i < (int)mergeSurfCount; i++ )
@@ -2219,9 +1874,7 @@ static char TryPlugNotch(TriSurf_t *ts, int pointIndex, unsigned int endIndex,
   return 1;
 }
 
-/* CoD4 0x458C30.  Removes a visibility-safe concave notch in place.  The
-   native carrier only has position data; KIWI mirrors the exact removal into
-   the optional sidecar so every surviving point keeps its matching payload. */
+/* CoD4 0x458C30.  Removes a visibility-safe concave notch in place. */
 static char PlugNotchesInWinding(TriSurf_t *ts)
 {
   Winding_t *winding = ts->winding;
@@ -2253,20 +1906,12 @@ static char PlugNotchesInWinding(TriSurf_t *ts)
         /* KIWI FIX: memmove - in-place shifts (overlapping memcpy is undefined) */
         memmove(&winding->points[pointIndex + 1], &winding->points[end],
                sizeof(vec3_t) * copyCount);
-        if (ts->auxElemSize)
-          memmove((char *)ts->auxData + ts->auxElemSize * (pointIndex + 1),
-                 (char *)ts->auxData + ts->auxElemSize * end,
-                 ts->auxElemSize * copyCount);
       }
       else
       {
         int copyCount = winding->numpoints - span;
         memmove(winding->points, &winding->points[end - winding->numpoints],
                sizeof(vec3_t) * copyCount);
-        if (ts->auxElemSize)
-          memmove(ts->auxData,
-                 (char *)ts->auxData + ts->auxElemSize * (end - winding->numpoints),
-                 ts->auxElemSize * copyCount);
       }
 
       winding->numpoints -= span;
@@ -2308,7 +1953,7 @@ TriSurf_t *MergeVisGroupList(
     for ( i = 0; i < (int)mergeSurfCount; i++ )
     {
       TriSurf_t *cur = mergeSurfArray[i];
-      CollectHoles(cur, bspHead, 0);
+      CollectHoles(cur, bspHead);
       if ( ValidateHoles(cur, HOLE_VALIDATE_EPSILON)
         && (!PlugNotchesInWinding(cur) || ValidateHoles(cur, HOLE_VALIDATE_EPSILON)) )
       {
@@ -2331,49 +1976,6 @@ TriSurf_t *MergeVisGroupList(
   mergeVisGroupListHead = NULL;
   return *visGroupList;
   #undef MAX_SURFACE_HOLES
-}
-
-/*
-================
-PlugNotchesInList
-
-Plugs notch surfaces by merging with neighbors
-================
-*/
-char PlugNotchesInList(
-        TriSurf_t **surfList,
-        float *worldMins,
-        float *worldMaxs,
-        char (*isNotchCallback)(TriSurf_t *),
-        MergeCallback_t mergeCallback)
-{
-  TriSurf_t *cur, *next;
-  int i;
-
-  MergeConcave_BuildGridTree(*surfList, worldMins, worldMaxs);
-
-  for ( cur = *surfList; cur; cur = next )
-  {
-    next = cur->next;
-    if ( isNotchCallback(cur) )
-      continue;
-
-    MergeConcave_PropagateGroup(cur);
-    if ( !mergeSurfCount )
-      continue;
-
-    { int prevPts = cur->winding->numpoints;
-    MergeGroupSurfaces(1, cur, mergeCallback, 0);
-    if ( cur->winding->numpoints != prevPts && !ValidateHoles(cur, HOLE_VALIDATE_EPSILON) )
-    {
-      UnlinkAndFreeSurf(cur, surfList);
-      FreeTriSurf(cur);
-    } }
-
-    for ( i = 0; i < (int)mergeSurfCount; i++ )
-      FreeTriSurf(mergeSurfArray[i]);
-  }
-  return (char)mergeSurfCount;
 }
 
 /*

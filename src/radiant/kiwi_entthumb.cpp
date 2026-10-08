@@ -12,6 +12,8 @@
 #include "kiwi_thumbcache.h"        // executable-local .kthumb files
 #include "radiant_rtt.h"            // RTT_BeginThumb / RTT_EndThumb / RTT_ThumbSurface
 #include "kiwi_texcache.h"          // by-name texture cache
+#include "kiwi_ported.h"
+#include "kiwi_vec.h"
 
 #include <d3d9.h>
 #include <gfx_d3d/r_gfx.h>          // GfxMatrix
@@ -33,14 +35,12 @@
 #include <string.h>
 
 // Declarations mirror their definitions in the cited renderer files.
-extern void  Radiant_FL_Log( const char *fmt, ... );                             // mainfrm.cpp
 // r_ed_scene.cpp:335-375: `axis` is origin[3] then axis[3][3]; result is 1-based, 0 on failure.
 extern int   AddModelToModelInstBuff( XModel *model, float *axis, float scale );  // r_ed_scene.cpp:375
 extern void  RemoveModelInstFromBuf( int inst );                                  // r_ed_scene.cpp:427
 extern void  SkinModelInst( int instanceHandle, Material *checkhandle, int techType,
                             const int *colorPtr, int drawFlags );                 // r_ed_scene.cpp:897
 extern void *R_AddEditorSurfsCmd();                                               // r_ed_scene.cpp:301
-extern void  R_SortMaterials();                                                   // r_ed_scene.cpp:2118
 // Editor asset-drop recovery frame (engine_stubs.cpp:222-223).
 extern int     g_radiantAssetLoadGuard;                                           // engine_stubs.cpp:222
 extern jmp_buf g_radiantAssetLoadJmp;                                             // engine_stubs.cpp:223
@@ -205,6 +205,9 @@ namespace
         return m;
     }
 
+    // KIWI: C4611 fires on any C++ setjmp; POD-only frame, checked (pointers and ints).
+#pragma warning( push )
+#pragma warning( disable : 4611 )
     XModel *RegisterGuarded( const char *name )
     {
         // Thumbnail ticks run at parseInfoNum 0; collmap parsing inherits that slot's
@@ -226,6 +229,7 @@ namespace
         pi->negativeNumbers = savedNeg;
         return m;
     }
+#pragma warning( pop )
 
     // SEH returns inside the RTT bracket so RTT_EndThumb still runs; asset loading is done.
     void SkinSEH( int inst, int techType )
@@ -362,7 +366,7 @@ namespace
             else if ( ey > ex * KENTT_LONG_AXIS_RATIO )
                 modelYaw = KENTT_LONG_AXIS_YAW - 90.0f;      // long axis is +Y (yaw 90)
         }
-        const float yawRad = modelYaw * 0.017453292f;        // deg -> rad
+        const float yawRad = modelYaw * (float)KIWI_DEG2RAD;
         const float yawC   = (float)cos( yawRad );
         const float yawS   = (float)sin( yawRad );
 

@@ -44,6 +44,6 @@ bool LinearMapping_Setup( LinearMapping *lm, const float *normal,
                           const float *p2, const float *p0, const float *p1 );
 
 // 0x4B7340  solve the system for the scalar coords (c0,c1,c2) and scatter the
-// recovered (s,t) into out[axisI]/out[axisJ], out[axisK]=0, out[3]=c2.
-void LinearMapping_Apply( LinearMapping *lm, float *out,
-                          float c0, float c1, float c2 );
+// recovered row into out[axisI]/out[axisJ], out[axisK]=0, out[3] (KIWI: double).
+void LinearMapping_Apply( LinearMapping *lm, double *out,
+                          double c0, double c1, double c2 );

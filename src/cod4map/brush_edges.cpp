@@ -3,8 +3,6 @@
 
 #define BRUSH_EDGE_CONTENTS_MASK 0x0280E491
 
-static char s_assertDisable_BrushEdges;
-
 /* CoD4 0x402C50: retain a three-plane intersection only when it is inside
    every collision plane other than the planes that formed it. */
 /* CoD4 0x405590. */

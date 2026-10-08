@@ -13,6 +13,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_offset.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_region.h"
 #include "kiwi_units.h"
 #include "kiwi_vec.h"     // Dot3/Sub3/...
@@ -21,11 +22,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <vector>
-
-//   engine_stubs.cpp:773   int  g_nUpdateBits = 0;   // 0x25d5a74
-extern int  Sys_Printf( const char *fmt, ... );
-extern int  g_nUpdateBits;
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
@@ -548,10 +544,12 @@ namespace
                 o.closed = m_closed;
             }
 
-            KiwiCon_UndoPush();
-            const int added = KiwiCon_Add( o );
-            // The other selected faces land under the same snapshot (one undo).
-            int extras = 0;
+            // KIWI: the first accepted loop takes the snapshot (no empty undo step when the store
+            // refuses); the other selected faces land under it (one undo).
+            std::vector<int> made;
+            const int added = KiwiCon_AddWithUndo( o );
+            if ( added >= 0 )
+                made.push_back( added );
             for ( size_t i = 0; i < m_extra.size(); ++i )
             {
                 if ( m_extra[i].preview.size() < 9 )
@@ -561,12 +559,15 @@ namespace
                 e.plane  = m_extra[i].plane;              // a SEED; KiwiCon_Add refits
                 e.pts    = m_extra[i].preview;
                 e.closed = true;
-                if ( KiwiCon_Add( e ) >= 0 )
-                    ++extras;
+                const int idx = made.empty() ? KiwiCon_AddWithUndo( e ) : KiwiCon_Add( e );
+                if ( idx >= 0 )
+                    made.push_back( idx );
             }
-            if ( added < 0 )
+            // KIWI: a line source hands the selection to its copy; selected faces stay selected.
+            if ( !made.empty() && !m_region )
+                KiwiConSel_SelectObjects( &made[0], (int)made.size() );
+            if ( made.empty() )
             {
-                // Store validation failed after the undo snapshot was pushed.
                 Sys_Printf( "Offset: the store refused the new object.\n" );
             }
             else
@@ -577,7 +578,7 @@ namespace
                     Sys_Printf( "Offset: new %s at %s.\n",
                                 m_parametric ? "circle/arc" : ( m_closed ? "loop" : "chain" ), b );
                 else
-                    Sys_Printf( "Offset: %i new loops at %s%s.\n", 1 + extras, b,
+                    Sys_Printf( "Offset: %i new loops at %s%s.\n", (int)made.size(), b,
                                 m_extraSkipped ? " (faces too small for this distance were skipped)" : "" );
             }
             Reset();
@@ -869,7 +870,7 @@ namespace
                 const kconObject_t *o = ( m_object >= 0 ) ? KiwiCon_At( m_object ) : 0;
                 if ( !o )
                     return false;
-                const float a = ( o->ang0 + o->ang1 ) * 0.5f * 3.14159265358979f / 180.0f;
+                const float a = ( o->ang0 + o->ang1 ) * 0.5f * (float)KIWI_PI / 180.0f;
                 d2[0] = cosf( a );
                 d2[1] = sinf( a );
                 const float r = m_radius0 + m_dist;

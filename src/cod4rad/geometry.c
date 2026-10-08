@@ -1485,7 +1485,7 @@ int FindBestAxisSplit(Triangle_t **triArray, int triCount, float *outPlane)
     float bestSplitPos;
     int countMinMax, countCoplanar;
     int i;
-    float minVal, maxVal, val;
+    float minVal, maxVal;
     float splitPos, nextPos, prevSplitPos;
     int frontCount, backCount, crossCount, onCount;
     int remaining;

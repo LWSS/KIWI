@@ -11,28 +11,13 @@
 #include "prefs.h"                // g_PrefsDlg (prefs.h:119) — fast_2d_view_dragging
 #include "xywnd.h"                // xywndState_t (xywnd.h:49) — the XY client's cull state
 #include "kiwi_walkcache.h"
+#include "kiwi_ported.h"
 
 // The recording COPIES orientation_t by value, so its size is load-bearing here.
 static_assert( sizeof( orientation_t ) == 48, "orientation_t (fxprimitives.h != IDB)" );
 
-// win_qe3.cpp:123
-extern int  Sys_Printf( const char *fmt, ... );
-// entity.cpp:629
-extern void Entity_GetOrientation( entity_s_def *ent, orientation_t *orParent, orientation_t *orOut );
-// entity.cpp:89
-extern char *ValueForKey2( const entity_s *e, const char *key );
-// filters.cpp:688
-extern char FilterBrush( selbrush_t *a1, int a2 );
-// brush.cpp:7389
-extern void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
-                       int technique, GfxColor *col, char width, int drawFlags,
-                       const char *layerPrefix );
 // brush.cpp:7068 (0x478a50)
 extern bool PrefabContent_IsClipBrush( selbrush_t *b );
-// brush.cpp:7084-7087
-extern int  g_edPrefabPrefabsWalked;
-extern int  g_edPrefabBrushesWalked;
-extern int  g_edPrefabBrushesDrawn;
 
 // prefab_s - local mirror of entity.cpp:316's prefab_s (0x54); only the list sentinels are read.
 // Shared native prefab_s is declared in qe3.h.
@@ -442,7 +427,6 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
             return;
         const KiwiWalkNode &n = nodes[i];
         const int next = n.subtreeEnd ? n.subtreeEnd : i + 1;
-        ++g_edPrefabBrushesWalked;
         if ( FilterBrush( n.brush, fastDrag ) )     // 0x478d9a
         {
             i = next;
@@ -453,7 +437,6 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
             i = next;
             continue;
         }
-        ++g_edPrefabBrushesDrawn;
         s_curNode = i;                              // so a nested prefab finds itself
         DrawBrush( n.brush, prefabOrient, viewType, technique, col, width, drawFlags,
                    childPrefix );
@@ -538,7 +521,7 @@ unsigned long long KiwiWalk_SubtreeSignature( const selbrush_t *brush )
                   : ( s_curNode + 1 );
     if ( end <= s_curNode || end > s_replay->nodeCount )
         return 0;
-    unsigned long long h = 1469598103934665603ull;    // FNV-1a offset basis
+    unsigned long long h = 14695981039346656037ull;   // FNV-1a offset basis
     for ( int i = s_curNode; i < end; ++i )
         Sig_Node( h, nodes[i], s_replay );
     // Never hand back 0: that value is reserved for "unknown".
@@ -554,15 +537,4 @@ void KiwiWalkCache_Shutdown()
     KiwiWalkCache_MarkStructural();   // every recorded node pointer is gone
 }
 
-int KiwiWalkCache_ResidentKB()
-{
-    int bytes = 0;
-    for ( int i = 0; i < 2; ++i )
-    {
-        bytes += s_walks[i].nodeCap   * (int)sizeof( KiwiWalkNode );
-        bytes += s_walks[i].orientCap * (int)sizeof( orientation_t );
-        bytes += s_walks[i].topCap    * (int)sizeof( int );
-    }
-    return bytes / 1024;
-}
 

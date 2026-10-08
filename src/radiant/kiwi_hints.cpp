@@ -35,9 +35,6 @@
 // linkage to definitions in other translation units.
 extern bool        KiwiPatchVerts_Active();                                 // kiwi_patchverts.cpp
 extern bool        KiwiVP_CameraCanRidePan();                               // kiwi_viewport.cpp
-// Terrain-paint armed gate from patchdialog.cpp:229 (0x401D50); it matches the
-// cursor-ring and Alt+LMB routing gate.
-extern int         sub_401D50();                                            // patchdialog.cpp:229
 
 namespace
 {
@@ -291,9 +288,6 @@ namespace
     {
         int n = 0;
         AddPatchVertsChip( chips, &n );
-        // Literal: viewport input owns Alt+LMB; expose it only while paint is armed.
-        if ( sub_401D50() )
-            AddChip( chips, &n, "Alt+LMB", "Paint terrain" );
         AddChip( chips, &n, "LMB",   "Pick" );
         AddChip( chips, &n, "Shift", "Add" );
         AddChip( chips, &n, "Ctrl",  "Remove" );

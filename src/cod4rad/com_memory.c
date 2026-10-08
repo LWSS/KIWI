@@ -14,7 +14,6 @@ static int hunk_high_permanent;   /* high-side permanent watermark */
 
 static char s_assertDisable_Z_Malloc;
 static char s_assertDisable_Z_VirtualAlloc;
-static char s_assertDisable_Z_StrDup;
 static char s_assertDisable_Hunk_FreeTempMemory;
 static char s_assertDisable_Hunk_FreeTempMemory_pos;
 static char s_assertDisable_Hunk_AddDataForFile;
@@ -95,41 +94,6 @@ void *Z_VirtualAlloc(int size)
 
 /*
 ================
-Z_StrDup
-
-Duplicates a string via malloc + memcpy. Used by dvar name interning.
-================
-*/
-char *Z_StrDup(const char *string)
-{
-    int len;
-    char *copy;
-    const char *src;
-    char *dst;
-
-    len = (int)strlen(string) + 1;
-    copy = (char *)malloc(len);
-    if (!copy)
-    {
-        Assert(0, s_assertDisable_Z_StrDup);
-        Com_Printf("Z_Malloc: failed to allocate %d bytes\n", len);
-        Com_Error(0, "Z_Malloc: EXE_ERR_OUT_OF_MEMORY");
-    }
-
-    memset(copy, 0, len);
-
-    /* inline byte copy */
-    src = string;
-    dst = copy;
-    while (*src)
-        *dst++ = *src++;
-    *dst = 0;
-
-    return copy;
-}
-
-/*
-================
 Hunk_FreeTempMemory
 
 Frees temp memory from the hunk. If hunk not initialized, falls
@@ -160,30 +124,6 @@ void Hunk_FreeTempMemory(void *buf)
            s_assertDisable_Hunk_FreeTempMemory_pos);
 
     hunk_low_temp -= hdr[1];
-}
-
-/*
-================
-memmove_thunk
-
-Sign-extends count and calls memmove.
-================
-*/
-void *memmove_thunk(void *dest, const void *src, int count)
-{
-    return memmove(dest, src, (size_t)count);
-}
-
-/*
-================
-memset_thunk
-
-Sign-extends count and calls memset.
-================
-*/
-void *memset_thunk(void *dest, int val, int count)
-{
-    return memset(dest, val, (size_t)count);
 }
 
 /*

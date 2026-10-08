@@ -110,9 +110,10 @@ void UVRepack(void)
             int vc = base + bspDrawIndexes[idx+2];
             float x0, y0, x1, y1, x2, y2;
             if (va >= numBSPDrawVerts || vb >= numBSPDrawVerts || vc >= numBSPDrawVerts) continue;
-            x0 = allVerts[va].lmCoord[0] * 511.0f; y0 = allVerts[va].lmCoord[1] * 511.0f;
-            x1 = allVerts[vb].lmCoord[0] * 511.0f; y1 = allVerts[vb].lmCoord[1] * 511.0f;
-            x2 = allVerts[vc].lmCoord[0] * 511.0f; y2 = allVerts[vc].lmCoord[1] * 511.0f;
+            /* KIWI: the lighting's convention - pixel = lmCoord * 512 (was * 511) */
+            x0 = allVerts[va].lmCoord[0] * (float)LM_SIZE; y0 = allVerts[va].lmCoord[1] * (float)LM_SIZE;
+            x1 = allVerts[vb].lmCoord[0] * (float)LM_SIZE; y1 = allVerts[vb].lmCoord[1] * (float)LM_SIZE;
+            x2 = allVerts[vc].lmCoord[0] * (float)LM_SIZE; y2 = allVerts[vc].lmCoord[1] * (float)LM_SIZE;
             RasterizeTriangle(pixGrid, LM_SIZE, LM_SIZE, x0, y0, x1, y1, x2, y2, 1);
         }
     }
@@ -188,9 +189,9 @@ void UVRepack(void)
 
                 if (va >= numBSPDrawVerts || vb >= numBSPDrawVerts || vc >= numBSPDrawVerts) continue;
 
-                xv[0] = allVerts[va].lmCoord[0]*511.0f; yv[0] = allVerts[va].lmCoord[1]*511.0f;
-                xv[1] = allVerts[vb].lmCoord[0]*511.0f; yv[1] = allVerts[vb].lmCoord[1]*511.0f;
-                xv[2] = allVerts[vc].lmCoord[0]*511.0f; yv[2] = allVerts[vc].lmCoord[1]*511.0f;
+                xv[0] = allVerts[va].lmCoord[0]*(float)LM_SIZE; yv[0] = allVerts[va].lmCoord[1]*(float)LM_SIZE;
+                xv[1] = allVerts[vb].lmCoord[0]*(float)LM_SIZE; yv[1] = allVerts[vb].lmCoord[1]*(float)LM_SIZE;
+                xv[2] = allVerts[vc].lmCoord[0]*(float)LM_SIZE; yv[2] = allVerts[vc].lmCoord[1]*(float)LM_SIZE;
                 xMin = (int)floorf(xv[0]<xv[1]?(xv[0]<xv[2]?xv[0]:xv[2]):(xv[1]<xv[2]?xv[1]:xv[2]));
                 xMax = (int)ceilf (xv[0]>xv[1]?(xv[0]>xv[2]?xv[0]:xv[2]):(xv[1]>xv[2]?xv[1]:xv[2]));
                 yMin = (int)floorf(yv[0]<yv[1]?(yv[0]<yv[2]?yv[0]:yv[2]):(yv[1]<yv[2]?yv[1]:yv[2]));
@@ -474,7 +475,7 @@ void UVRepack(void)
     {
         int *islandOfVert = (int *)malloc(numBSPDrawVerts * sizeof(int));
         char *vertDone = (char *)calloc(numBSPDrawVerts, 1);
-        int rewritten = 0, vertNoIsland = 0, vertNotPlaced = 0;
+        int rewritten = 0, vertNoIsland = 0, vertNotPlaced = 0, vertFallback = 0;
         int origW, origH, dx, dy;
 
         for (i = 0; i < numBSPDrawVerts; i++) islandOfVert[i] = -1;
@@ -488,11 +489,12 @@ void UVRepack(void)
                 int vi = ts->firstVertex + v;
                 int px, py, lbl;
                 if (vi >= numBSPDrawVerts || islandOfVert[vi] >= 0) continue;
-                px = (int)(allVerts[vi].lmCoord[0] * 511.0f);
-                py = (int)(allVerts[vi].lmCoord[1] * 511.0f);
+                px = (int)floorf(allVerts[vi].lmCoord[0] * (float)LM_SIZE);
+                py = (int)floorf(allVerts[vi].lmCoord[1] * (float)LM_SIZE);
                 if (px < 0) px = 0; if (px > 511) px = 511;
                 if (py < 0) py = 0; if (py > 511) py = 511;
                 lbl = labels[py*LM_SIZE+px];
+                if (lbl < 0) vertFallback++;
                 /* 3x3 fallback - vertex pixel may land just off the rasterized region */
                 for (dy = -1; dy <= 1 && lbl < 0; dy++)
                     for (dx = -1; dx <= 1 && lbl < 0; dx++)
@@ -528,25 +530,27 @@ void UVRepack(void)
                 origW = c->dims[0][0];
                 origH = c->dims[0][1];
 
-                /* original pixel relative to island origin (+1 = dilation pad) */
-                lx = (double)allVerts[vi].lmCoord[0] * 511.0 - (double)c->offX + 1.0;
-                ly = (double)allVerts[vi].lmCoord[1] * 511.0 - (double)c->offY + 1.0;
-                if (lx < 0.0) lx = 0.0; else if (lx > (double)(origW - 1)) lx = (double)(origW - 1);
-                if (ly < 0.0) ly = 0.0; else if (ly > (double)(origH - 1)) ly = (double)(origH - 1);
+                /* position relative to island origin, in pixels (+1 = dilation pad).  KIWI: a
+                   continuous coordinate - pixel p spans [p, p+1) - so it clamps to [0, dim] and
+                   a mirror is dim - c (dim - 1 - c is the pixel-INDEX flip, one pixel off) */
+                lx = (double)allVerts[vi].lmCoord[0] * (double)LM_SIZE - (double)c->offX + 1.0;
+                ly = (double)allVerts[vi].lmCoord[1] * (double)LM_SIZE - (double)c->offY + 1.0;
+                if (lx < 0.0) lx = 0.0; else if (lx > (double)origW) lx = (double)origW;
+                if (ly < 0.0) ly = 0.0; else if (ly > (double)origH) ly = (double)origH;
 
                 switch (c->orient)
                 {
                     case 0: tx = lx; ty = ly; break;
-                    case 1: tx = (double)(origH - 1) - ly; ty = lx; break;
-                    case 2: tx = (double)(origW - 1) - lx; ty = (double)(origH - 1) - ly; break;
-                    case 3: tx = ly; ty = (double)(origW - 1) - lx; break;
-                    case 4: tx = (double)(origW - 1) - lx; ty = ly; break;
-                    case 5: tx = (double)(origH - 1) - ly; ty = (double)(origW - 1) - lx; break;
-                    case 6: tx = lx; ty = (double)(origH - 1) - ly; break;
+                    case 1: tx = (double)origH - ly; ty = lx; break;
+                    case 2: tx = (double)origW - lx; ty = (double)origH - ly; break;
+                    case 3: tx = ly; ty = (double)origW - lx; break;
+                    case 4: tx = (double)origW - lx; ty = ly; break;
+                    case 5: tx = (double)origH - ly; ty = (double)origW - lx; break;
+                    case 6: tx = lx; ty = (double)origH - ly; break;
                     default: tx = ly; ty = lx; break;
                 }
-                newU = ((double)c->newX + tx) / 511.0;
-                newV = ((double)c->newY + ty) / 511.0;
+                newU = ((double)c->newX + tx) / (double)LM_SIZE;
+                newV = ((double)c->newY + ty) / (double)LM_SIZE;
                 if (newU < 0.0) newU = 0.0; else if (newU > 1.0) newU = 1.0;
                 if (newV < 0.0) newV = 0.0; else if (newV > 1.0) newV = 1.0;
                 allVerts[vi].lmCoord[0] = (float)newU;
@@ -554,8 +558,8 @@ void UVRepack(void)
                 rewritten++;
             }
         }
-        Com_Printf("UVRepack: vertex rewrite ok=%d noIsland=%d notPlaced=%d\n",
-                   rewritten, vertNoIsland, vertNotPlaced);
+        Com_Printf("UVRepack: vertex rewrite ok=%d noIsland=%d notPlaced=%d (3x3 fallback %d)\n",
+                   rewritten, vertNoIsland, vertNotPlaced, vertFallback);
 
         /* === Step 7: per-surface lightmapIndex from dominant triangle island === */
         {
@@ -613,6 +617,83 @@ void UVRepack(void)
                 if (isle >= 0 && charts[isle].placed)
                     tri->lightmapIdx = (unsigned short)charts[isle].newPage;
             }
+        }
+
+        /* KIWI: check (print only) - rasterize every triangle at its NEW coords the way the
+           lighting samples them (x512, pixel centres); a covered pixel outside its own
+           island's placed mask escaped its reservation. */
+        {
+            int *owner = (int *)malloc(LM_SIZE * LM_SIZE * sizeof(int));
+            unsigned char *trMask = (unsigned char *)malloc(LM_SIZE * LM_SIZE);
+            int page, covered = 0, escaped = 0, foreign = 0, mixed = 0;
+            for (page = 0; page < g_lightmapSize; page++)
+            {
+                int any = 0;
+                for (i = 0; i < LM_SIZE*LM_SIZE; i++) owner[i] = -1;
+                for (j = 0; j < numIslands; j++)
+                {
+                    Chart_t *c = &charts[j];
+                    int my, mx;
+                    if (!c->placed || c->newPage != page) continue;
+                    any = 1;
+                    for (my = 0; my < c->h; my++)
+                        for (mx = 0; mx < c->w; mx++)
+                            if (c->mask[my*c->w + mx])
+                                owner[(c->newY+my)*LM_SIZE + (c->newX+mx)] = j;
+                }
+                if (!any) continue;
+                for (s = 0; s < numBSPTriSoups; s++)
+                {
+                    BspTriSoup_t *ts = &bspTriangles[s];
+                    int numTris;
+                    if (ts->lightmapIndex == 0x1F) continue;
+                    numTris = ts->indexCount / 3;
+                    for (t = 0; t < numTris; t++)
+                    {
+                        int idx = ts->firstIndex + t * 3;
+                        int base = ts->firstVertex;
+                        int vv[3], k, isle, one, xMin, xMax, yMin, yMax, rx, ry;
+                        float xv[3], yv[3];
+                        vv[0] = base + bspDrawIndexes[idx+0];
+                        vv[1] = base + bspDrawIndexes[idx+1];
+                        vv[2] = base + bspDrawIndexes[idx+2];
+                        if (vv[0] >= numBSPDrawVerts || vv[1] >= numBSPDrawVerts || vv[2] >= numBSPDrawVerts) continue;
+                        isle = islandOfVert[vv[0]];
+                        if (isle < 0 || !charts[isle].placed || charts[isle].newPage != page) continue;
+                        one = islandOfVert[vv[1]] == isle && islandOfVert[vv[2]] == isle;
+                        for (k = 0; k < 3; k++)
+                        {
+                            xv[k] = allVerts[vv[k]].lmCoord[0] * (float)LM_SIZE;
+                            yv[k] = allVerts[vv[k]].lmCoord[1] * (float)LM_SIZE;
+                        }
+                        xMin = (int)floorf(xv[0]<xv[1]?(xv[0]<xv[2]?xv[0]:xv[2]):(xv[1]<xv[2]?xv[1]:xv[2]));
+                        xMax = (int)ceilf (xv[0]>xv[1]?(xv[0]>xv[2]?xv[0]:xv[2]):(xv[1]>xv[2]?xv[1]:xv[2]));
+                        yMin = (int)floorf(yv[0]<yv[1]?(yv[0]<yv[2]?yv[0]:yv[2]):(yv[1]<yv[2]?yv[1]:yv[2]));
+                        yMax = (int)ceilf (yv[0]>yv[1]?(yv[0]>yv[2]?yv[0]:yv[2]):(yv[1]>yv[2]?yv[1]:yv[2]));
+                        if (xMin < 0) xMin = 0; if (xMax > LM_SIZE-1) xMax = LM_SIZE-1;
+                        if (yMin < 0) yMin = 0; if (yMax > LM_SIZE-1) yMax = LM_SIZE-1;
+                        for (ry = yMin; ry <= yMax; ry++)
+                            for (rx = xMin; rx <= xMax; rx++)
+                                trMask[ry*LM_SIZE+rx] = 0;
+                        RasterizeTriangle(trMask, LM_SIZE, LM_SIZE, xv[0], yv[0], xv[1], yv[1], xv[2], yv[2], 1);
+                        for (ry = yMin; ry <= yMax; ry++)
+                            for (rx = xMin; rx <= xMax; rx++)
+                            {
+                                int o;
+                                if (!trMask[ry*LM_SIZE+rx]) continue;
+                                o = owner[ry*LM_SIZE+rx];
+                                covered++;
+                                if (o != isle) { escaped++; if (!one) mixed++; }
+                                if (o >= 0 && o != isle) foreign++;
+                            }
+                    }
+                }
+            }
+            Com_Printf("UVRepack: check: %d covered pixels, %d outside their island's mask "
+                       "(%d inside another island's; %d from triangles whose corners are not "
+                       "all in one island)\n", covered, escaped, foreign, mixed);
+            free(owner);
+            free(trMask);
         }
 
         free(islandOfVert);

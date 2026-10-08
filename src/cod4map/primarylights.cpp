@@ -88,9 +88,6 @@ void BuildLightmapGridToWorldTransform(
 DiskPrimaryLight_t bspPrimaryLights[MAX_MAP_PRIMARY_LIGHTS];
 unsigned char bspLightRegions[MAX_MAP_PRIMARY_LIGHTS];
 int numBspPrimaryLights;
-static char s_assertDisable_DescribePrimaryLightIndex;
-static char s_assertDisable_CheckedPrimaryLightByteCast;
-static char s_assertDisable_PrimaryLightRegionSurfaceEligible;
 static unsigned char CheckedPrimaryLightByteCast(int value);
 
 /* Native 0x4337E0 tree node.  It is intentionally private to the
@@ -218,7 +215,7 @@ static int IntersectPatchSurface(float *segment, MapDrawSurf_t *surface)
   int column;
   int row;
 
-  /* The native argument slots a3/a5 are not read by SubdivideMesh. */
+  /* Two of the native arguments are not read by SubdivideMesh. */
   subdivided = SubdivideMesh(surface->u.patch.width, surface->u.patch.height, 0,
                              surface->verts, 0, (float)surface->u.patch.subdivLevel,
                              SUBDIV_NO_MIN_LENGTH, 0, 0);
@@ -333,8 +330,8 @@ static MapDrawSurf_t *TraversePrimaryLightAabb(PrimaryLightSurfaceAabbNode_t *no
   {
     PrimaryLightSurfaceAabbNode_t *child = node->children + index;
 
-    /* Native 0x433869 deliberately re-tests the current node bounds for
-       every child (a1 / a1+12), then visits the children in stored order. */
+    /* Native deliberately re-tests the current node bounds for every
+       child, then visits the children in stored order. */
     if (SegmentIntersectsAabb(segment, node->center, node->halfSize))
     {
       surface = TraversePrimaryLightAabb(child, segment);

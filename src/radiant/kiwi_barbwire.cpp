@@ -21,6 +21,7 @@
 #include "kiwi_selection.h"
 #include "kiwi_fmt.h"
 #include "kiwi_vec.h"
+#include "kiwi_ported.h"
 #include "radiant_registry.h"
 
 #include <float.h>
@@ -35,32 +36,7 @@
 #include <vector>
 
 // Ported entry points (all verified against their definitions, see the file:line notes).
-extern int         Sys_Printf( const char *fmt, ... );                      // win_qe3.cpp:118
-extern int         g_nUpdateBits;
-extern entity_s    entities;                                                 // entity.cpp:298
-extern entity_s   *world_entity;                                             // map.cpp
-extern selbrush_t  selected_brushes;                                         // map.cpp
-extern selbrush_t  active_brushes;                                           // map.cpp
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );
-extern brush_t    *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );
-extern void        Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls );
-extern void        Brush_BuildWindings( brush_t *def, int bFull );
-extern void        Select_Deselect( int a1 );                                // select.cpp:1444
-extern void        Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus, char center ); // select.cpp:904
-extern void        Select_Delete();                                          // select.cpp:1539
-extern void        CreateEntityFromName( const char *str );
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:213
-extern void        Undo_ClearRedo();                                         // undo.cpp:176
-extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367
-extern void        Undo_AddBrushList( selbrush_t *list );                    // undo.cpp:551
-extern void        Undo_EndBrushList( selbrush_t *list );                    // undo.cpp:576
-extern void        Undo_AddEntity_W( entity_s *e );                          // undo.cpp:633
 extern void        Undo_KiwiMarkCreated( brush_t *def );                     // undo.cpp (KIWI tail)
-extern void        Undo_End();                                               // undo.cpp:686
-extern void        MarkMapModified();                                        // win_qe3.cpp:198
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1358
-extern void        Ed_EnsureCurrentMaterial_Kiwi();
-extern selbrush_t *KiwiExtrude_LandDef( brush_t *def );                     // kiwi_extrude.cpp
 
 namespace
 {
@@ -1138,7 +1114,6 @@ namespace
 
 // ── public ───────────────────────────────────────────────────────────────────────
 int         KiwiBarbwire_SourceCount()          { return KBW_SOURCE_COUNT; }
-const char *KiwiBarbwire_SourceName( int i )    { return ( i >= 0 && i < KBW_SOURCE_COUNT ) ? KBW_SOURCES[i].model : ""; }
 const char *KiwiBarbwire_SourceLabel( int i )   { return ( i >= 0 && i < KBW_SOURCE_COUNT ) ? KBW_SOURCES[i].label : ""; }
 
 void KiwiBarbwire_GetOpts( kiwiBarbwireOpts_t *out )
@@ -1152,11 +1127,11 @@ void KiwiBarbwire_SetOpts( const kiwiBarbwireOpts_t &o )
 {
     LoadOpts();
     s_opts = o;
-    char z[32];
+    char z[48];
     Radiant_ProfileSetInt( KBW_PROFILE, "Source", o.source );
-    Radiant_ProfileSetString( KBW_PROFILE, "ZOffset", KiwiFmt_Num( z, sizeof( z ), o.zOffset ) );
+    Radiant_ProfileSetString( KBW_PROFILE, "ZOffset", KiwiFmt_Exact( z, sizeof( z ), o.zOffset + 0.0f, 0 ) );
     Radiant_ProfileSetInt( KBW_PROFILE, "SplitAbove", (int)o.pieceLen );
-    Radiant_ProfileSetString( KBW_PROFILE, "Wobble", KiwiFmt_Num( z, sizeof( z ), o.wobble ) );
+    Radiant_ProfileSetString( KBW_PROFILE, "Wobble", KiwiFmt_Exact( z, sizeof( z ), o.wobble + 0.0f, 0 ) );
     Radiant_ProfileSetInt( KBW_PROFILE, "Seed", o.seed );
     Radiant_ProfileSetInt( KBW_PROFILE, "MirrorTiles", o.mirrorTiles ? 1 : 0 );
     Radiant_ProfileSetInt( KBW_PROFILE, "Replace", o.replace ? 1 : 0 );

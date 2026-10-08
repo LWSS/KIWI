@@ -1,8 +1,8 @@
 #pragma once
 // KIWI (2026-10-05, precision): exact texture lock for whole-face transforms (brush.cpp).
 // Translation: Face_TexLockTranslate (Brush_Move).  Rotate / flip: Begin before the planepts
-// move (rows turned in double from the pre-move texdef and normal), End after (texturevecs_02
-// against the moved face) - Select_ApplyMatrix (0x47CDE0) and KIWI R.  lockFlags are the
+// move (rows turned in double from the pre-move texdef and normal), End after
+// (texturevecs_02_exact against the moved face) - Select_ApplyMatrix (0x47CDE0) and KIWI R.  lockFlags are the
 // binary's 3 bytes: texture lock, lightmap lock, 1.
 
 struct face_t;
@@ -14,6 +14,12 @@ void Face_TexLockTranslate( face_t *f, const float *d, const byte *lockFlags );
 void Face_TexLockAffineBegin( face_t *f, const float *normal, const double ( *turn )[3],
                               const double *origin, const byte *lockFlags, double ( *rows )[KTEXLOCK_LAYERS][8] );
 void Face_TexLockAffineEnd( face_t *f, double ( *rows )[KTEXLOCK_LAYERS][8], const byte *lockFlags );
+
+// Match Face (a shear about the hinge): the texture follows the face's 3 plane points -
+// Save before they move, Reproject after.  The binary's Face_TexLock_Save / _Reproject in
+// double; `save` is [channel][layer][S0 T0 S1 T1 S2 T2].
+void Face_TexLockPointsSave( face_t *f, double ( *save )[KTEXLOCK_LAYERS][6] );
+void Face_TexLockPointsReproject( face_t *f, double ( *save )[KTEXLOCK_LAYERS][6], const byte *lockFlags );
 
 // texturevecs.cpp: texturevecs_02 in double, snapping only float noise onto its grids.
 void texturevecs_02_exact( float *outSize, const double *texMat, const float *planeNormal, double planeDist,

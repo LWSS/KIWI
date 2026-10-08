@@ -22,6 +22,7 @@
 #include "kiwi_extrude.h"
 #include "kiwi_primitive.h"
 #include "kiwi_numeric.h"
+#include "kiwi_ported.h"
 #include "kiwi_units.h"
 #include "kiwi_conselect.h"    // ...selected for the verbs that act on construction
 #include "kiwi_barbwire.h"     // barbwire verb (test mode, no dialog)
@@ -50,46 +51,19 @@
 
 // Existing editor entry points.  Each declaration is kept beside the test-only
 // call site so this translation unit does not expose another editor API surface.
-extern entity_s entities;                                                   // entity.cpp:298
 extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
-extern int      modified;                                                   // map.cpp:67
-extern int      g_nUpdateBits;                                               // engine_stubs.cpp:773
-extern char     currentmap[];                                                // map.cpp (particle_export)
 
 extern void Map_New();                                                       // entity.cpp:1839
 extern void RadiantClipboard_ForgetLocal();                                  // entity.cpp (test hook)
-extern void Map_SaveFile( const char *path, char region, char autosave );     // map.cpp:744
-extern void Select_Deselect( int deselectFaces );                            // select.cpp:1448
+extern bool Map_SaveFile( const char *path, char region );                   // map.cpp
 extern void Select_Invert();                                                 // select.cpp:1196
-extern void Select_Brush( selbrush_t *b, char wholeEntity, char status,
-                          char center );                                     // select.cpp:904
-extern void Select_Move( const float *delta, char snap );                    // select.cpp:2156
 extern void Select_GetMid( float *mid );                                     // select.cpp:2213
-extern void Select_RotateAxis( int axis, float deg, float (*matrix)[4][3] ); // select.cpp:2367
-extern void Select_ApplyMatrix_SelectedBrushes( int snap, float *matrix,
-                                                 float deg, char swap );      // select.cpp:2245
-extern int  UpdateSelection( int wParam, eclass_t *cls );                    // win_ent.cpp:664
 
-extern void Undo_ClearRedo();                                                // undo.cpp:176
-extern void Undo_GeneralStart( const char *operation );                      // undo.cpp:367
-extern void Undo_AddBrushList( selbrush_t *list );                           // undo.cpp:551
-extern void Undo_EndBrushList( selbrush_t *list );                           // undo.cpp:576
-extern void Undo_AddEntity_W( entity_s *def );                               // undo.cpp:633
-extern void Undo_End();                                                      // undo.cpp:686
 extern void Undo_Undo();                                                     // undo.cpp:736
 extern void Undo_Redo();                                                     // undo.cpp:1019
 
-extern void SetKeyValue( entity_s_def *ent, const char *key, const char *value ); // entity.cpp:213
-// KIWI GLASS
-extern char *ValueForKey2( const entity_s *e, const char *key );            // entity.cpp:91; "" when absent
-// KIWI END
-extern int  Entity_GetVec3ForKey( entity_s_def *ent, float *out, const char *key ); // entity.cpp:100
-extern void MarkMapModified();                                               // win_qe3.cpp:198
 extern bool TexWnd_MakeMaterialCurrentByName( const char *name );             // texwnd.cpp:793
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *def );             // materialdef.cpp:159
 extern void Patch_Thicken( int amount, char seam );                           // pmesh.cpp:7667
-extern camera_s *Ed_Camera();                                                // camwnd.cpp:165
-extern void CamWnd_BuildMatrix();                                            // camwnd.cpp:214
 extern int Radiant_ProfileGetInt( const char *, const char *, int );
 extern bool Radiant_ProfileSetInt( const char *, const char *, int );
 
@@ -324,7 +298,6 @@ static LONG WINAPI TestVectoredExceptionHandler( EXCEPTION_POINTERS *ep )
                                   (unsigned long)ep->ExceptionRecord->ExceptionCode, where );
     WriteOneLine( "CRASH", message, length > 0 ? (size_t)length : 0 );
     ExitProcess( 3 );
-    return EXCEPTION_EXECUTE_HANDLER;
 }
 
 static bool ParseWords( const std::string &line, std::vector<std::string> &out,
@@ -1145,6 +1118,56 @@ static void ExecuteSelect( const ScriptLine &line )
         return;
     }
     // KIWI END
+    if ( mode == "vertex" )
+    {
+        // select vertex <entity-index> <ordinal> <x> <y> <z>   (that brush's corner within 0.01;
+        // no pixel pick, so two corners on one screen pixel cannot be confused)
+        int entityIndex = 0, brushIndex = 0;
+        float p[3];
+        if ( w.size() != 7 || !ParseInt( w[2], entityIndex ) || !ParseInt( w[3], brushIndex ) ||
+             !ParseFloat( w[4], p[0] ) || !ParseFloat( w[5], p[1] ) || !ParseFloat( w[6], p[2] ) ||
+             !SelectBrushOrdinal( entityIndex, brushIndex ) )
+        {
+            ScriptError( line, "select vertex syntax is: select vertex <entity-index> <ordinal> <x> <y> <z>" );
+            return;
+        }
+        selbrush_t *node = selected_brushes.next;
+        brush_t    *def  = ( node && node != &selected_brushes ) ? node->def : nullptr;
+        // a patch's control point (the point-mode item: no face, index col * height + row)
+        if ( def && def->patch )
+        {
+            const patchMesh_t *pm = def->patch;
+            for ( int col = 0; col < pm->width; ++col )
+                for ( int row = 0; row < pm->height; ++row )
+                {
+                    const float *c = pm->ctrl[col][row].xyz;
+                    if ( fabsf( c[0] - p[0] ) < 0.01f && fabsf( c[1] - p[1] ) < 0.01f && fabsf( c[2] - p[2] ) < 0.01f )
+                    {
+                        Sel_Clear( KiwiSel() );
+                        Sel_Add( KiwiSel(), Sel_MakePatchPoint( node, col * pm->height + row ) );
+                        Sel_SyncToLegacy();
+                        g_nUpdateBits = -1;
+                        return;
+                    }
+                }
+        }
+        for ( int fi = 0; def && fi < def->faceCount; ++fi )
+        {
+            const winding_t *wd = def->faces[fi].w;
+            for ( int vi = 0; wd && vi < wd->numpoints; ++vi )
+                if ( fabsf( wd->p[vi][0] - p[0] ) < 0.01f && fabsf( wd->p[vi][1] - p[1] ) < 0.01f &&
+                     fabsf( wd->p[vi][2] - p[2] ) < 0.01f )
+                {
+                    Sel_Clear( KiwiSel() );
+                    Sel_Add( KiwiSel(), Sel_MakeVertex( node, fi, vi ) );
+                    Sel_SyncToLegacy();
+                    g_nUpdateBits = -1;
+                    return;
+                }
+        }
+        ScriptError( line, "brush has no corner at %g %g %g", p[0], p[1], p[2] );
+        return;
+    }
     if ( mode == "entity" )
     {
         int entityIndex = 0;
@@ -1607,7 +1630,7 @@ static void ExecuteLine( const ScriptLine &line )
     if ( command == "save" || command == "saveas" )
     {
         if ( w.size() != 2 ) { ScriptError( line, "%s requires one map path", command.c_str() ); return; }
-        Map_SaveFile( w[1].c_str(), 0, 0 );
+        Map_SaveFile( w[1].c_str(), 0 );
         return;
     }
     if ( command == "plasticity_export" )

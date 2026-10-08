@@ -90,7 +90,6 @@ bool KiwiXform_ActivePushDir( float *out3 );
 
 // V places one session-only pivot inside the live Move/Rotate gesture. It survives
 // commits but expires when the selection signature changes and is never persisted.
-bool KiwiXform_PivotOverride( float *out3 );   // false = no session pivot in force
 bool KiwiXform_PivotPlacing();                 // true while V-placement is live
 
 // Snap candidates are useful only while placing a pivot or aiming a move handle.

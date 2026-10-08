@@ -34,6 +34,7 @@
 // tolerates messages arriving before the children exist (every handler null-checks).
 #include "stdafx.h"
 #include "kiwi_plastbridge.h"
+#include "kiwi_ported.h"
 #include "kiwi_test.h"               // KIWI-TEST: unattended script mode hooks
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
@@ -81,8 +82,6 @@ extern LRESULT     Texture_ShowAll();                            // texwnd.cpp (
 extern void        Texture_SetMode( int iTexMenu );              // texwnd.cpp (0x45a520)
 extern void        Map_NewMap();                                 // map.cpp (0x486110)
 extern void        Map_New();                                    // entity.cpp (0x4870c0)
-extern entity_s   *world_entity;                                 // map.cpp (0x25d5b30)
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name ); // eclass.cpp
 extern void        QE_CountBrushesAndUpdateStatusBar();          // qe3.cpp
 extern void        Radiant_RefreshFilterPane();                  // win_ent.cpp (no-op in this shell)
 extern void        console_print( const char *fmt, va_list args );          // win_qe3.cpp (0x499d80)
@@ -164,7 +163,7 @@ static void Radiant_SyncFrameSwapChain( HWND hwnd )
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Layout — CMainFrame::RelayoutPanes (mainfrm.cpp:1662) minus the two docked MFC bars.
-//  The MFC body subtracted the status-bar height and passed g_texBarHeight as the topInset;
+//  The MFC body subtracted the status-bar height and passed the texture-bar height as the topInset;
 //  neither bar exists in this shell (see the SKIPPED list at the bottom of this file), so
 //  the full client area goes to the QE4 panes with topInset 0.  Radiant_ComputeLayout is
 //  the SAME function the MFC shell calls, so the pane arrangement + the persisted splitter
@@ -365,7 +364,7 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         break;
 
     case WM_KEYDOWN:
-        // CMainFrame::OnKeyDown (mainfrm.cpp:2299, IDB 0x422370) — ON_WM_KEYDOWN existed so
+        // CMainFrame::OnKeyDown (mainfrm.cpp:2299, 0x422370) — ON_WM_KEYDOWN existed so
         // editor hotkeys still fire when the FRAME ITSELF has focus.  Keys pressed over a
         // view are pre-translated in the pump instead (see Radiant_PreTranslateMessage).
         if ( Radiant_TryHotkey( (unsigned int)wParam ) )
@@ -427,7 +426,7 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         return 1;                     // the panes own their client areas (D3D present / EDIT)
 
     case WM_CLOSE:
-        // CMainFrame::OnClose (IDB 0x422220): guard on OkToDiscard() + Prefab_LevelBack()
+        // CMainFrame::OnClose (0x422220): guard on OkToDiscard() + Prefab_LevelBack()
         // before letting the frame go.  U-CMD-2 lifted that guard to
         // Radiant_FrameCloseAllowed(), so quitting with unsaved edits now prompts here too —
         // and File→Exit (Radiant_FileExit) just posts WM_CLOSE, so it goes through this one
@@ -439,7 +438,7 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
         return 0;
 
     case WM_DESTROY:
-        // CMainFrame::OnDestroy (mainfrm.cpp:2575, IDB 0x421C60): persist the MRU list.
+        // CMainFrame::OnDestroy (mainfrm.cpp:2575, 0x421C60): persist the MRU list.
         if ( g_qeglobals.d_lpMruMenu )
             SaveMruInReg( g_qeglobals.d_lpMruMenu );
         g_radiantFrameState.doLoop = false;   // stop the idle pump before the views go away
@@ -532,7 +531,7 @@ static bool Radiant_CreateRenderWindows( HWND frame, const EdLayout &L )
         if ( !s_hwndConsole )
             return false;
         g_qeglobals.d_hwndEdit = s_hwndConsole;
-        // The binary sets the console font to DEFAULT_GUI_FONT (OnCreateClient tail 0x4232B0).
+        // The binary sets the console font to DEFAULT_GUI_FONT.
         ::SendMessageA( g_qeglobals.d_hwndEdit, WM_SETFONT,
                         (WPARAM)::GetStockObject( DEFAULT_GUI_FONT ), TRUE );
         // Install console_print as the editor-log sink (the binary's console_stuff =
@@ -549,7 +548,7 @@ static bool Radiant_CreateRenderWindows( HWND frame, const EdLayout &L )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  Radiant_BootFrame — CMainFrame::OnCreate (mainfrm.cpp:1432, IDB 0x4209b0) step for step.
+//  Radiant_BootFrame — CMainFrame::OnCreate (mainfrm.cpp:1432, 0x4209b0) step for step.
 //  Every numbered comment is the MFC step number it reproduces; the two skipped steps keep
 //  their numbers so the sequence stays diff-able against the MFC body.
 // ═════════════════════════════════════════════════════════════════════════════
@@ -576,11 +575,11 @@ static bool Radiant_BootFrame( HWND frame )
     // 1a) The FULL cod4.prj parse (QE_LoadProject 0x48BAB0).
     Radiant_LoadProjectAtStartup();                            // mainfrm.cpp:1460
 
-    // 1a-bis) Create the MRU (recent-files) menu structure (OnCreate 0x4210b0).  The registry
+    // 1a-bis) Create the MRU (recent-files) menu structure.  The registry
     //     load + menu insertion happen after ::SetMenu (step 4c), per SetButtonMenuStates.
     g_qeglobals.d_lpMruMenu = CreateMruMenuDefault();          // mainfrm.cpp:1467
 
-    // 1b) SKIPPED — the icon toolbar (mainfrm.cpp:1473, OnCreate 0x420ac6 CreateEx +
+    // 1b) SKIPPED — the icon toolbar (mainfrm.cpp:1473, CreateEx +
     //     LoadToolBar(152)) is a CToolBar, and every TB_CHECKBUTTON seed with it.
     // i)  SKIPPED — m_bAutoMenuEnable = FALSE (mainfrm.cpp:1513) is CCmdTarget state.
     // 2)  SKIPPED — the docked CTextureBar strip (mainfrm.cpp:1521); barH is therefore 0 and
@@ -630,7 +629,7 @@ static bool Radiant_BootFrame( HWND frame )
     s_hAccel = ::LoadAcceleratorsA( inst, MAKEINTRESOURCEA( IDR_MAIN_ACCEL ) );
     Radiant_FL_Log( "menu=%p accel=%p", (void *)s_hMenu, (void *)s_hAccel );
 
-    // 4a) User keyboard command map (OnCreate 0x4210bf/0x4210c9): layer the radiant.ini
+    // 4a) User keyboard command map: layer the radiant.ini
     //     [Commands] overrides onto the built-in defaults, then annotate the menu items with
     //     their current key bindings (mainfrm.cpp:1562-1564).
     Radiant_LoadCommandMap();
@@ -666,7 +665,7 @@ static bool Radiant_BootFrame( HWND frame )
         //     plus "Show Grid" / "Show Axes" check items appended INTO the existing
         //     View popup (index 2).  Appending ITEMS to a popup cannot shift the
         //     menu bar's POPUP indices, which is all the index-based consumers read
-        //     (texwnd.cpp:1640 index 5, radiant_main.cpp:530 index 0) — the argument
+        //     (texwnd.cpp:1640 index 5, step 4c below index 0) — the argument
         //     is written out in kiwi_windows.h.  Same post-annotator placement as
         //     the Windows popup above, and for the same caption-cleanliness reason.
         extern void KiwiWindows_BuildViewMenu( void *frameMenu );
@@ -793,7 +792,7 @@ static bool Radiant_BootFrame( HWND frame )
     // the persisted mode was invisible until the user picked one.
     Radiant_SetEntityCheck();
 
-    // CMainFrame::OnCreateClient tail, 0x4232E3: apply the persisted render mode after the
+    // CMainFrame::OnCreateClient tail: apply the persisted render mode after the
     // camera window exists (mainfrm.cpp:1650).
     Texture_SetMode( g_qeglobals.d_savedinfo.iTextMenu );
 
@@ -1027,6 +1026,8 @@ static bool Radiant_PreTranslateMessage( MSG *pMsg )
 // ═════════════════════════════════════════════════════════════════════════════
 static bool Radiant_OnIdle( long idleCount )
 {
+    extern void Prefab_RefreshProxyBounds();   // entity.cpp - KIWI: boxes of prefabs whose models resolved
+    Prefab_RefreshProxyBounds();
     // CRadiantApp::OnIdle (radiantapp.cpp:38): flush the pending window-update bits once per
     // idle pass.  RoutineProcessing no-ops when g_nUpdateBits == 0, so this cannot spin.
     if ( ::IsWindow( s_hwndFrame ) )
@@ -1262,8 +1263,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
     }
 
     // radiantapp.cpp:77-88 — the initial frame rect: the desktop work area inset by 1/40 on
-    // each side (the fallback 1600x1000 stands in when SPI_GETWORKAREA fails).  Reproduced
-    // verbatim, including the fact that the insets are applied inside the `if`.
+    // each side (the fallback 1600x1000 stands in when SPI_GETWORKAREA fails).  The insets
+    // are applied only inside the `if`.
     RECT work = { 0, 0, 1600, 1000 };
     if ( ::SystemParametersInfoA( SPI_GETWORKAREA, 0, &work, 0 ) )
     {

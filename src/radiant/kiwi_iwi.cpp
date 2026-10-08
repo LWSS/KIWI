@@ -10,14 +10,14 @@
 #include <universal/com_files.h>    // FS_FOpenFileWrite / FS_Write / FS_Read / FS_FCloseFile / FS_Delete
 
 #include "kiwi_iwi.h"
+#include "kiwi_matwriter.h"         // KiwiFS_WriteRawAtomic
+#include "kiwi_ported.h"
 
 #include <math.h>                   // sqrt, for the normal-map encode
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
-
-extern int Sys_Printf( const char *fmt, ... );   // win_qe3.cpp:118   int Sys_Printf(const char*,...)
 
 // Keep the serialized 28-byte header in lockstep with GfxImageFileHeader.
 static_assert( sizeof( GfxImageFileHeader ) == 28, "GfxImageFileHeader must be 28 bytes (r_image.h:118)" );
@@ -517,20 +517,9 @@ bool KiwiIwi_WriteFromFile( const char *srcPath, const char *qpath,
     }
 
     // Write <fs_homepath>/raw/<qpath>; map compilers search raw/raw_shared/devraw, not main.
-    const int h = FS_FOpenFileWriteToDir( qpath, "raw" );
-    if ( !h )
-    {
-        SetErr( err, errSz, "could not open '%s' for writing", qpath );
+    // KIWI: through a tmp beside it - a failed overwrite used to truncate, then delete, the original.
+    if ( !KiwiFS_WriteRawAtomic( qpath, p, (unsigned)( 28 + dataBytes ), err, errSz ) )
         return false;
-    }
-    const unsigned wrote = FS_Write( (const char *)p, (unsigned)( 28 + dataBytes ), h );
-    FS_FCloseFile( h );
-    if ( wrote != (unsigned)( 28 + dataBytes ) )
-    {
-        FS_DeleteInDir( (char*)qpath, (char *)"raw" );
-        SetErr( err, errSz, "short write to '%s' (%u of %d bytes)", qpath, wrote, 28 + dataBytes );
-        return false;
-    }
 
     if ( out )
     {

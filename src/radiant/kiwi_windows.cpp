@@ -10,14 +10,13 @@
 #include "kiwi_command.h"          // KIWI_CMD_WINDOW_* (the reserved instant ids)
 #include "kiwi_ux.h"               // KiwiUX_ShowGrid / KiwiUX_ShowAxes
 #include "kiwi_camera.h"           // KiwiCam_Ortho / KiwiCam_SetOrtho
+#include "kiwi_ported.h"
 #include "radiant_registry.h"      // Radiant_ProfileGetInt/SetInt
 
 #include <shellapi.h>              // ShellExecuteA (KiwiWindows_RevealInExplorer)
 #include <stdio.h>                 // sprintf_s
 
 // Keep Radiant_CheckMenu single-sourced in radiant_frame.h.
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp
-extern int  Sys_Printf( const char *fmt, ... );                                             // win_qe3.cpp
 extern void ImGuiShell_ResetLayout();                                                        // imgui_shell.cpp
 extern bool KiwiGrass_PanelVisible();                                                        // kiwi_grass.cpp
 extern void KiwiGrass_TogglePanel();                                                         // kiwi_grass.cpp

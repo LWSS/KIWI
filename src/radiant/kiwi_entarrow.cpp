@@ -7,6 +7,7 @@
 #include "xywnd.h"
 #include "kiwi_entarrow.h"
 #include "kiwi_lines.h"
+#include "kiwi_ported.h"
 #include "kiwi_walkcache.h"
 
 #include <universal/com_math.h>
@@ -15,12 +16,11 @@
 #include <stdio.h>
 #include <string.h>
 
-extern entity_s entities;                                                  // entity.cpp:295
-
 namespace
 {
-    enum { KENTARROW_MAX_ARROWS = 256 };
-    enum { KENTARROW_WORLD_SEGMENTS = 5, KENTARROW_XY_SEGMENTS = 3 };
+    constexpr int KENTARROW_MAX_ARROWS     = 256;
+    constexpr int KENTARROW_WORLD_SEGMENTS = 5;
+    constexpr int KENTARROW_XY_SEGMENTS    = 3;
 
     const float KENTARROW_MIN_LEN = 48.0f;
     const float KENTARROW_XY_DEPTH = 131072.0f;

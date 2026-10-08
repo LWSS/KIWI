@@ -13,11 +13,10 @@
 #include <vector>
 #include <string>
 #include <utility>
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 
 extern void       Select_BrushByLayer( char *layer_str );    // select.cpp 0x48EE10
 extern void       Brush_SetInstanceLayerString( selbrush_t *inst, const char *str ); // brush.cpp 0x4758E0
-extern int        g_nUpdateBits;                              // engine_stubs 0x25D5A74
-extern void       Assert( const char *file, int line, int type, const char *fmt, ... );
 extern BOOL       LoadRegistryInfo( const char *pszName, void *pvBuf, long *plSize ); // win_qe3.cpp 0x4999C0
 void              LayersDlg_RefreshIfOpen();                  // below (dialog refresh hook)
 
@@ -72,73 +71,6 @@ bool Layers_SetHidden( const char *layerName, bool hidden )
     Layers_RebuildVisibilityFilters();
     Layers_SetLayerVisible( layerName, !hidden );
     return true;
-}
-
-// 0x41CB20 / 0x41CB50 via sub_41D1B0 — FREEZE a layer.  The binary's tree helper sets
-// the item state image to 0x3000 then Layers_ClearFlag(name,1) + Layers_SetFlag(name,8):
-// freezing implies NOT hidden (the three states are exclusive, see Layers_SetHidden).
-// There is no separate "unfreeze" command in MENU233 — Show Layer clears bit 8 too.
-bool Layers_SetFrozen( const char *layerName )
-{
-    if ( !Layers_Exists( layerName ) )
-        return false;
-    Layers_ClearFlag( layerName, 1 );
-    Layers_SetFlag( layerName, 8 );
-    // Frozen layers still DRAW (they are just not selectable — Layers_KeyIsFrozen in
-    // layers.cpp drives that), so unlike Hide there is no visibility-filter flip here.
-    return true;
-}
-
-// 0x41CB80 / 0x41CBB0 via sub_41D3D0 / sub_41D320 — collapse / expand a layer's subtree.
-// The binary does TVM_EXPAND on the CTreeCtrl item (guarded by a re-entrancy byte) and
-// then Layers_ClearFlag(name,4) / Layers_SetFlag(name,4) — the "expanded" bit that
-// round-trips in the .map layer flags.
-// UI REDUCTION (documented): this port's layers pane is a FLAT CListBox (see the file
-// header), so there is no tree node to expand or collapse.  The BACKEND flag write is
-// reproduced faithfully — the expanded state persists through save/load exactly as the
-// binary's does — but nothing visually folds.  Both binary handlers pass bRecurse = 1,
-// so the flag is written for the layer AND every descendant.
-bool Layers_SetExpanded( const char *layerName, bool expanded )
-{
-    if ( !Layers_Exists( layerName ) )
-        return false;
-    if ( expanded ) Layers_SetFlag( layerName, 4 );
-    else            Layers_ClearFlag( layerName, 4 );
-    return true;
-}
-
-// The "and children" recursion.  The binary walks the CTreeCtrl (TVGN_CHILD/TVGN_NEXT);
-// here the hierarchy lives in the layer PATH, so a child of "a/b" is any layer whose
-// full path starts with "a/b/".  Applies `fn` to `layerName` first, then to every
-// descendant — same pre-order as sub_41D0F0/1B0/270/320/3D0.
-static void Layers_ForSelfAndChildren( const char *layerName, bool recurse,
-                                       void ( *fn )( const char * ) )
-{
-    fn( layerName );
-    if ( !recurse )
-        return;
-
-    char prefix[1100];
-    _snprintf( prefix, sizeof( prefix ) - 1, "%s/", layerName );
-    prefix[sizeof( prefix ) - 1] = '\0';
-    const size_t plen = strlen( prefix );
-
-    std::vector<std::pair<std::string,int>> layers;
-    Layers_Enumerate( layers );
-    for ( const auto &kv : layers )
-    {
-        if ( kv.first.size() > plen && !strncmp( kv.first.c_str(), prefix, plen ) )
-            fn( kv.first.c_str() );
-    }
-}
-
-// UI-independent action behind MENU233's Hide / Show / Freeze / Collapse / Expand picks
-// (and their "and Children" variants): run `fn` over the layer and, when `recurse`, its
-// whole subtree, then invalidate every view.
-void LayerSubtreeOp_Apply( const char *layerName, bool recurse, void ( *fn )( const char * ) )
-{
-    Layers_ForSelfAndChildren( layerName, recurse, fn );
-    g_nUpdateBits = -1;
 }
 
 // UI-independent action behind CLayerDlg's New button / MENU233 "Create New Layer".
@@ -225,11 +157,12 @@ void LayerList_Gather( std::vector<std::pair<std::string,int>> &layers, const ch
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── backend → UI refresh entry ────────────────────────────────────────────────
-// The binary's Layers_02 (0x41A0E0) wipes the CTreeCtrl (TVM_DELETEITEM/TVI_ROOT),
-// re-inserts the "The Map" root (sub_41A070), walks layerMap re-inserting each layer
-// (maybeLayers), then bolds+icons the active item (sub_41C9C0).  In the port's flat
-// listbox form ALL of that is CLayerDlg::Refresh().  This free entry lets the
-// backend (layers.cpp Layers_02 / sub_41C9C0) reach the singleton without exposing it.
+// The binary's Layers_RefreshDialog (0x41A0E0) wipes the CTreeCtrl (TVM_DELETEITEM/
+// TVI_ROOT), re-inserts the "The Map" root (sub_41A070), walks layerMap re-inserting each
+// layer (maybeLayers), then bolds+icons the active item (Layers_HighlightActive).  In the
+// port's flat listbox form ALL of that is CLayerDlg::Refresh().  This free entry lets the
+// backend (layers.cpp Layers_RefreshDialog / Layers_HighlightActive) reach the singleton
+// without exposing it.
 void LayersDlg_RefreshIfOpen()
 {
     // NO-MFC: no-op — the ImGui layers panel pull-populates from LayerList_Gather every

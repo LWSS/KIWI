@@ -7,24 +7,6 @@
 
 #define PRIMARY_LIGHT_REGION_MAX_WINDING_POINTS 1024
 
-static char s_assertDisable_BuildHullLightConeWinding;
-static char s_assertDisable_BuildHullLightConePointCount;
-static char s_assertDisable_BuildHullLightConeInitialCosine;
-static char s_assertDisable_BuildHullLightConePositiveMinimum;
-static char s_assertDisable_BuildHullLightConeIterationCount;
-static char s_assertDisable_BuildHullLightConeDirectionChanged;
-static char s_assertDisable_BuildHullLightConeFinalCosine;
-static char s_assertDisable_GenerateEnclosingPrimaryLightHullWinding;
-static char s_assertDisable_GenerateEnclosingPrimaryLightHullClippedWinding;
-static char s_assertDisable_ClipPrimaryLightCastersSide;
-static char s_assertDisable_ClipPrimaryLightCastersPointCount;
-static char s_assertDisable_PrimaryLightRegionSmallestEdgeDistance;
-static char s_assertDisable_DecomposeConvexPrimaryLightRegionHullLimit;
-static char s_assertDisable_EmitReducedPrimaryLightKdopAxisCount;
-static char s_assertDisable_PrimaryLightCandidateDirectionLimit;
-static char s_assertDisable_BasePrimaryLightKdopAxisCount;
-static char s_assertDisable_BasePrimaryLightKdopAxisPair;
-
 /* Native 0x4FEE98: 26 k-DOP directions used by 0x4367F0. */
 static const float s_primaryLightKdopDirs[26][3] =
 {

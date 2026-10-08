@@ -104,12 +104,6 @@ void  KiwiCam_SetFlySpeedScale( float mul );
 bool  KiwiCam_Ortho();
 void  KiwiCam_SetOrtho( bool on );
 
-// Zoom meter.
-// outFrac is 0 at maximum zoom-in and 1 at the projection ceiling, logarithmic so
-// it is linear in multiplicative wheel notches. outWpp reports pivot scale.
-// Either output may be null; false means camera size/range is unusable.
-bool  KiwiCam_ZoomMeter( float *outFrac, float *outWpp );
-
 // Positive ortho half-height in world units; matrix, rays, inverse, and screen
 // scale all derive from this function.
 float KiwiCam_OrthoHalfHeight();

@@ -11,7 +11,9 @@
 #include "kiwi_command.h"
 #include "kiwi_construct.h"        // construction lines -> tiny STEP prisms
 #include "kiwi_droptrace.h"
+#include "kiwi_ported.h"
 #include "kiwi_shadowcache.h"
+#include "kiwi_vec.h"              // KIWI_PI + the double vector twins
 #include "kiwi_windows.h"          // KiwiWindows_RevealInExplorer
 #include "radiant_frame.h"
 #include "radiant_registry.h"
@@ -31,11 +33,6 @@
 #include <string.h>
 #include <utility>
 #include <vector>
-
-extern int Sys_Printf( const char *fmt, ... );
-extern float *AnglesToAxis( float *angles, float ( *axisOut )[3] );
-extern selbrush_t active_brushes;                       // map.cpp (the unselected list)
-extern char FilterBrush( selbrush_t *a1, int a2 );      // filters.cpp:718 - hidden/filtered
 
 namespace
 {
@@ -310,30 +307,6 @@ namespace
         return x * x + y * y + z * z;
     }
 
-    double Dot3( const double a[3], const double b[3] )
-    {
-        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    }
-
-    void Cross3( const double a[3], const double b[3], double out[3] )
-    {
-        out[0] = a[1] * b[2] - a[2] * b[1];
-        out[1] = a[2] * b[0] - a[0] * b[2];
-        out[2] = a[0] * b[1] - a[1] * b[0];
-    }
-
-    bool Normalize3( double value[3] )
-    {
-        const double lengthSquared = Dot3( value, value );
-        if ( !FiniteDouble( lengthSquared ) || lengthSquared <= 1.0e-24 )
-            return false;
-        const double inverseLength = 1.0 / sqrt( lengthSquared );
-        value[0] *= inverseLength;
-        value[1] *= inverseLength;
-        value[2] *= inverseLength;
-        return FiniteDouble( value[0] ) && FiniteDouble( value[1] ) &&
-               FiniteDouble( value[2] );
-    }
 
     bool RemoveCollinearPoints( std::vector<StepPoint> &points )
     {
@@ -363,7 +336,7 @@ namespace
                 const double offset[3] = { points[i].x - points[previous].x,
                                            points[i].y - points[previous].y,
                                            points[i].z - points[previous].z };
-                const double lineLengthSquared = Dot3( line, line );
+                const double lineLengthSquared = Dot3d( line, line );
                 if ( lineLengthSquared <= toleranceSquared )
                 {
                     points.erase( points.begin() + i );
@@ -372,9 +345,9 @@ namespace
                 }
 
                 double cross[3];
-                Cross3( offset, line, cross );
-                const double projection = Dot3( offset, line );
-                const double distanceSquared = Dot3( cross, cross ) /
+                Cross3d( offset, line, cross );
+                const double projection = Dot3d( offset, line );
+                const double distanceSquared = Dot3d( cross, cross ) /
                                                lineLengthSquared;
                 if ( distanceSquared <= toleranceSquared &&
                      projection >= -toleranceSquared &&
@@ -400,7 +373,7 @@ namespace
             normal[1] += ( current.z - next.z ) * ( current.x + next.x );
             normal[2] += ( current.x - next.x ) * ( current.y + next.y );
         }
-        return Normalize3( normal );
+        return Norm3d( normal );
     }
 
     bool FacePlanePointsOutward( const brush_t *brush, int faceIndex,
@@ -410,7 +383,7 @@ namespace
         const double rawNormal[3] = { (double)plane.normal[0],
                                       (double)plane.normal[1],
                                       (double)plane.normal[2] };
-        const double rawLengthSquared = Dot3( rawNormal, rawNormal );
+        const double rawLengthSquared = Dot3d( rawNormal, rawNormal );
         if ( !FiniteDouble( rawLengthSquared ) || rawLengthSquared <= 1.0e-24 )
             return false;
         const double distance = (double)plane.dist / sqrt( rawLengthSquared );
@@ -439,7 +412,7 @@ namespace
             centroid[0] *= inverseCount;
             centroid[1] *= inverseCount;
             centroid[2] *= inverseCount;
-            if ( Dot3( normal, centroid ) > distance + STEP_PLANE_TOLERANCE )
+            if ( Dot3d( normal, centroid ) > distance + STEP_PLANE_TOLERANCE )
                 return false;
         }
         return true;
@@ -486,7 +459,7 @@ namespace
             face.normal[0] = (double)sourceFace.plane.normal[0];
             face.normal[1] = (double)sourceFace.plane.normal[1];
             face.normal[2] = (double)sourceFace.plane.normal[2];
-            if ( !Normalize3( face.normal ) ||
+            if ( !Norm3d( face.normal ) ||
                  !FacePlanePointsOutward( brush, faceIndex, face.normal ) )
                 return false;
 
@@ -506,7 +479,7 @@ namespace
             double windingNormal[3];
             if ( !NewellNormal( face.points, windingNormal ) )
                 return false;
-            const double agreement = Dot3( windingNormal, face.normal );
+            const double agreement = Dot3d( windingNormal, face.normal );
             if ( !FiniteDouble( agreement ) || fabs( agreement ) <= 1.0e-8 )
                 return false;
             if ( agreement < 0.0 )
@@ -821,13 +794,6 @@ namespace
     const double SWEEP_MIN_MITRE_DENOM = 0.05;   // 1 + left(prev).left(next); ~174 deg turn
     const double SWEEP_PLANAR_DOT = 1.0e-3;      // |segment dir . plane normal| ceiling
 
-    void Scale3( double value[3], double scale )
-    {
-        value[0] *= scale;
-        value[1] *= scale;
-        value[2] *= scale;
-    }
-
     StepPoint OffsetPoint( const StepPoint &base, const double *along, double a,
                            const double *normal, double b )
     {
@@ -849,8 +815,8 @@ namespace
                 const double b[3] = { p[i].x, p[i].y, p[i].z };
                 const double c[3] = { p[i + 1].x, p[i + 1].y, p[i + 1].z };
                 double cross[3];
-                Cross3( b, c, cross );
-                volume += Dot3( a, cross );
+                Cross3d( b, c, cross );
+                volume += Dot3d( a, cross );
             }
         }
         return volume / 6.0;
@@ -883,21 +849,21 @@ namespace
             const StepPoint &a = path[i];
             const StepPoint &b = path[( i + 1 ) % count];
             double d[3] = { b.x - a.x, b.y - a.y, b.z - a.z };
-            const double len = sqrt( Dot3( d, d ) );
+            const double len = sqrt( Dot3d( d, d ) );
             if ( !FiniteDouble( len ) || len <= SWEEP_POINT_WELD )
             {
                 reason = "degenerate segment";
                 return false;
             }
-            Scale3( d, 1.0 / len );
-            if ( fabs( Dot3( d, planeNormal ) ) > SWEEP_PLANAR_DOT )
+            Scale3d( d, 1.0 / len );
+            if ( fabs( Dot3d( d, planeNormal ) ) > SWEEP_PLANAR_DOT )
             {
                 reason = "path leaves its plane";
                 return false;
             }
             double u[3];
-            Cross3( planeNormal, d, u );
-            if ( !Normalize3( u ) )
+            Cross3d( planeNormal, d, u );
+            if ( !Norm3d( u ) )
             {
                 reason = "segment parallel to the plane normal";
                 return false;
@@ -928,7 +894,7 @@ namespace
                 const size_t prev = ( j + segments - 1 ) % segments;
                 const size_t next = j % segments;
                 const double denominator =
-                    1.0 + Dot3( &left[prev * 3], &left[next * 3] );
+                    1.0 + Dot3d( &left[prev * 3], &left[next * 3] );
                 if ( !FiniteDouble( denominator ) || denominator < SWEEP_MIN_MITRE_DENOM )
                 {
                     reason = "turn too sharp for a mitre";
@@ -947,8 +913,8 @@ namespace
         {
             const size_t j0 = i;
             const size_t j1 = ( i + 1 ) % count;
-            const double startPush = Dot3( &mitre[j0 * 3], &dir[i * 3] );
-            const double endPush = Dot3( &mitre[j1 * 3], &dir[i * 3] );
+            const double startPush = Dot3d( &mitre[j0 * 3], &dir[i * 3] );
+            const double endPush = Dot3d( &mitre[j1 * 3], &dir[i * 3] );
             const double remaining = length[i] - thickness * ( startPush - endPush );
             if ( remaining <= STEP_WELD_TOLERANCE * 4.0 )
             {
@@ -1009,7 +975,7 @@ namespace
             if ( volume < 0.0 )
                 std::reverse( face.points.begin(), face.points.end() );
             if ( !NewellNormal( face.points, face.normal ) ||
-                 !Normalize3( face.normal ) )
+                 !Norm3d( face.normal ) )
             {
                 reason = "degenerate prism face";
                 return false;
@@ -1028,8 +994,8 @@ namespace
             smallest = 2;
         double axis[3] = { 0.0, 0.0, 0.0 };
         axis[smallest] = 1.0;
-        Cross3( axis, d, out );
-        if ( !Normalize3( out ) )
+        Cross3d( axis, d, out );
+        if ( !Norm3d( out ) )
         {
             out[0] = 0.0;
             out[1] = 0.0;
@@ -1042,7 +1008,7 @@ namespace
                           std::string &reason )
     {
         double d[3] = { b.x - a.x, b.y - a.y, b.z - a.z };
-        if ( !Normalize3( d ) )
+        if ( !Norm3d( d ) )
         {
             reason = "degenerate segment";
             return false;
@@ -1153,7 +1119,7 @@ namespace
             {
                 double normal[3] = { (double)plane.normal[0], (double)plane.normal[1],
                                      (double)plane.normal[2] };
-                if ( Normalize3( normal ) )
+                if ( Norm3d( normal ) )
                 {
                     // Flatten float noise so every side face is exactly planar.
                     const double origin[3] = { (double)plane.origin[0],
@@ -1164,7 +1130,7 @@ namespace
                         const double offset[3] = { path[p].x - origin[0],
                                                    path[p].y - origin[1],
                                                    path[p].z - origin[2] };
-                        const double height = Dot3( offset, normal );
+                        const double height = Dot3d( offset, normal );
                         path[p].x -= normal[0] * height;
                         path[p].y -= normal[1] * height;
                         path[p].z -= normal[2] * height;
@@ -1416,7 +1382,7 @@ namespace
                 const StepPoint &a = solid.vertices[edge.a];
                 const StepPoint &b = solid.vertices[edge.b];
                 double directionValue[3] = { b.x - a.x, b.y - a.y, b.z - a.z };
-                if ( !Normalize3( directionValue ) )
+                if ( !Norm3d( directionValue ) )
                 {
                     error = "STEP edge direction became degenerate";
                     return false;
@@ -1467,7 +1433,7 @@ namespace
                 referenceDirectionValue[0] -= projection * face.normal[0];
                 referenceDirectionValue[1] -= projection * face.normal[1];
                 referenceDirectionValue[2] -= projection * face.normal[2];
-                if ( !Normalize3( referenceDirectionValue ) )
+                if ( !Norm3d( referenceDirectionValue ) )
                 {
                     error = "STEP plane reference direction became degenerate";
                     return false;
@@ -2627,7 +2593,7 @@ namespace
         double yaw = 0.0;
         if ( sumSin * sumSin + sumCos * sumCos > 1.0e-12 )
             yaw = atan2( sumSin, sumCos ) / 4.0;
-        if ( fabs( yaw ) < 0.5 * 3.14159265358979 / 180.0 )
+        if ( fabs( yaw ) < 0.5 * KIWI_DEG2RAD )
             yaw = 0.0;                                          // already on the axes
         const double c = cos( yaw ), s = sin( yaw );
         frame.axis[0][0] =  c; frame.axis[0][1] = s; frame.axis[0][2] = 0.0;
@@ -2663,7 +2629,7 @@ namespace
         char text[256];
         _snprintf( text, sizeof( text ),
                    "brush selection yawed by %.2f deg, base centre %.1f %.1f %.1f moved to the origin",
-                   -yaw * 180.0 / 3.14159265358979, frame.origin[0], frame.origin[1], frame.origin[2] );
+                   -yaw * KIWI_RAD2DEG, frame.origin[0], frame.origin[1], frame.origin[2] );
         text[sizeof( text ) - 1] = '\0';
         frame.describe = text;
         frame.active = true;

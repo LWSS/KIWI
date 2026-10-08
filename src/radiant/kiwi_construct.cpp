@@ -27,6 +27,7 @@
 #include "kiwi_offset.h"
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
 #include "kiwi_snap.h"
@@ -37,6 +38,7 @@
 #include "kiwi_visibility.h"
 #include "radiant_registry.h"
 #include "kiwi_vec.h"
+#include "kiwi_fmt.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -45,13 +47,6 @@
 #include <string.h>
 
 // Ported entry points, with definition anchors.
-extern int       Sys_Printf( const char *fmt, ... );          // win_qe3.cpp:118
-extern camera_s *Ed_Camera();                                 // camwnd.cpp:161
-extern void      CamWnd_BuildMatrix();                        // camwnd.cpp:210 (0x403470)
-extern int       g_nUpdateBits;                               // engine_stubs.cpp:773 (0x25D5A74)
-extern bool      ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );  // imgui_shell.cpp:297
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );  // mainfrm.cpp:1358
-extern void      Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
 extern bool      KiwiBarbwire_CanExecute();                   // kiwi_barbwire.cpp (panel button)
 
 namespace
@@ -1278,11 +1273,6 @@ int KiwiCon_GroupIdAt( int i )
     return s_groups[i].id;
 }
 
-bool KiwiCon_GroupExists( int group )
-{
-    return group >= 0 && GroupSlot( group ) >= 0;
-}
-
 const char *KiwiCon_GroupName( int group )
 {
     const int slot = GroupSlot( group );
@@ -1435,11 +1425,6 @@ void KiwiCon_MarkPlaneExplicit( const char *desc )
 }
 
 bool KiwiCon_PlaneIsExplicit() { return s_planeExplicit; }
-
-const char *KiwiCon_PlaneDesc()
-{
-    return s_planeExplicit ? s_planeDesc : "";
-}
 
 void KiwiCon_ClearPlaneToDefault()
 {
@@ -1696,38 +1681,6 @@ bool KiwiCon_SetPlaneFromFace( selbrush_t *node, int fi, bool requireReach )
     if ( !KiwiCon_MakePlane( centre, f->plane.normal, hint, &p ) )
         return false;
     KiwiCon_SetActivePlane( p );
-    return true;
-}
-
-// Quantize camera direction to the nearest world-axis plane; arbitrary view
-// planes are unsuitable for axis-bound brush primitives. This is a named
-// operation, not an automatic tool-start inference.
-bool KiwiCon_SetPlaneFromViewDominantAxis()
-{
-    CamWnd_BuildMatrix();
-    const camera_s *c = Ed_Camera();
-    if ( !c )
-        return false;
-
-    int   axis = 2;
-    float best = fabsf( c->vpn[2] );
-    for ( int k = 0; k < 2; ++k )
-        if ( fabsf( c->vpn[k] ) > best ) { best = fabsf( c->vpn[k] ); axis = k; }
-    if ( !( best > 1.0e-4f ) )
-        return false;                       // a degenerate view matrix; leave it alone
-
-    // Reuse only a parallel explicit, grid-quantized working height.
-    float o[3];
-    KiwiCon_MajorPlaneOrigin( axis, o );
-    float n[3] = { 0.0f, 0.0f, 0.0f };
-    n[axis] = 1.0f;
-
-    kconPlane_t p;
-    if ( !KiwiCon_MakePlane( o, n, 0, &p ) )
-        return false;
-    KiwiCon_SetActivePlane( p );
-    Sys_Printf( "Construction plane: %s (from the view) at %g\n",
-                ( axis == 2 ) ? "XY" : ( axis == 1 ) ? "XZ" : "YZ", (double)o[axis] );
     return true;
 }
 
@@ -3634,11 +3587,6 @@ namespace
     KiwiSplineTool     s_splineTool;
 }
 
-bool KiwiCon_ToolActive()
-{
-    return s_activeTool != 0;
-}
-
 namespace
 {
     bool s_planePlacement = false;
@@ -4089,13 +4037,13 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
         // Parametric planes are authoritative; point-object planes are derived caches.
         if ( KiwiCon_IsParametric( o ) )
         {
-            // KIWI (2026-10-05): %.9g round-trips a float exactly; %g's 6 digits moved
-            // construction geometry up to 0.05 on every save + reopen (30000.123 -> 30000.1).
-            fprintf( f, "plane %.9g %.9g %.9g  %.9g %.9g %.9g  %.9g %.9g %.9g  %.9g %.9g %.9g\n",
-                     (double)o.plane.origin[0], (double)o.plane.origin[1], (double)o.plane.origin[2],
-                     (double)o.plane.normal[0], (double)o.plane.normal[1], (double)o.plane.normal[2],
-                     (double)o.plane.u[0],      (double)o.plane.u[1],      (double)o.plane.u[2],
-                     (double)o.plane.v[0],      (double)o.plane.v[1],      (double)o.plane.v[2] );
+            // Exact float text: %g's 6 digits moved geometry up to 0.05 per save (30000.123 -> 30000.1).
+            char po[160], pn[160], pu[160], pv[160];
+            fprintf( f, "plane %s  %s  %s  %s\n",
+                     KiwiFmt_Vec3Exact( po, sizeof( po ), o.plane.origin, 0 ),
+                     KiwiFmt_Vec3Exact( pn, sizeof( pn ), o.plane.normal, 0 ),
+                     KiwiFmt_Vec3Exact( pu, sizeof( pu ), o.plane.u, 0 ),
+                     KiwiFmt_Vec3Exact( pv, sizeof( pv ), o.plane.v, 0 ) );
         }
         fprintf( f, "closed %i\n", o.closed ? 1 : 0 );
         // Optional fields are omitted at their defaults for KIWI2 compatibility.
@@ -4121,15 +4069,19 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
             // Omit AUTO tessellation so older KIWI2 output remains stable.
             if ( o.segs > 0 )
                 fprintf( f, "segs %i\n", o.segs );
-            fprintf( f, "arc %.9g %.9g %.9g %.9g %.9g\n",
-                     (double)o.centre[0], (double)o.centre[1], (double)o.radius,
-                     (double)o.ang0, (double)o.ang1 );
+            char cx[48], cy[48], rad[48], a0[48], a1[48];
+            fprintf( f, "arc %s %s %s %s %s\n",
+                     KiwiFmt_Exact( cx, sizeof( cx ), o.centre[0] + 0.0f, 0 ),
+                     KiwiFmt_Exact( cy, sizeof( cy ), o.centre[1] + 0.0f, 0 ),
+                     KiwiFmt_Exact( rad, sizeof( rad ), o.radius + 0.0f, 0 ),
+                     KiwiFmt_Exact( a0, sizeof( a0 ), o.ang0 + 0.0f, 0 ),
+                     KiwiFmt_Exact( a1, sizeof( a1 ), o.ang1 + 0.0f, 0 ) );
         }
         else
         {
+            char wp[160];
             for ( size_t k = 0; k + 2 < o.pts.size(); k += 3 )
-                fprintf( f, "wpt %.9g %.9g %.9g\n",
-                         (double)o.pts[k], (double)o.pts[k + 1], (double)o.pts[k + 2] );
+                fprintf( f, "wpt %s\n", KiwiFmt_Vec3Exact( wp, sizeof( wp ), &o.pts[k], 0 ) );
         }
         fprintf( f, "end\n" );
     }

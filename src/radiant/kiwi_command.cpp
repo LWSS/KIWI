@@ -42,6 +42,7 @@
 #include "kiwi_palette.h"
 #include "kiwi_patchverts.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_primitive.h"              // §16b Box / Cylinder / Sphere / Cone
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
@@ -78,19 +79,7 @@
 #include <string.h>
 
 // Ported entry points. Keep address anchors synchronized with their definitions.
-extern int  Sys_Printf( const char *fmt, ... );                  // win_qe3.cpp:118 (undo.cpp:57 declares it the same way)
-extern void Undo_ClearRedo();                                    // undo.cpp 0x45e2b0
-extern void Undo_AddBrush( entity_brush_s *pBrushInst );         // undo.cpp:494  (0x45E680)
-extern void Undo_AddEntity( entity_s *entity );                            // undo.cpp:601  (0x45E8B0)
-extern void Undo_GeneralStart( const char *operation );          // undo.cpp 0x45e3f0
-extern void Undo_AddBrushList( selbrush_t *sb );                 // undo.cpp 0x45e7c0
-extern void Undo_EndBrushList( selbrush_t *brushlist );          // undo.cpp 0x45e870
-extern void Undo_End();                                          // undo.cpp 0x45ea20
 extern void Undo_Undo();                                         // undo.cpp 0x45ea90
-extern int  g_nUpdateBits;                                       // 0x25D5A74 (mainfrm.cpp)
-extern bool ImGuiShell_CameraPaintCursor( int *x, int *y, int *w, int *h );   // imgui_shell.cpp
-
-extern bool Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId );
 
 namespace
 {
@@ -142,7 +131,7 @@ namespace
     bool s_lastShift  = false;
 
     // Grid bounds follow the engine world limit; typed values and ladder steps share them.
-    const float KGRID_MIN_INCHES = 0.125f;
+    const float KGRID_MIN_INCHES = 0.0001f;   // KIWI: the settings floor (KUNITS_MIN), not 0.125
     const float KGRID_MAX_INCHES = 65536.0f;
 
     void SetModeMask( sel_mask_t m )
@@ -175,10 +164,12 @@ namespace
             s = KCMD_GRID_LADDER[KCMD_GRID_LADDER_COUNT - 1];
             for ( int i = 0; i < KCMD_GRID_LADDER_COUNT; ++i )
                 if ( KCMD_GRID_LADDER[i] > cur + eps ) { s = KCMD_GRID_LADDER[i]; break; }
+            if ( cur < KCMD_GRID_LADDER[0] && cur * 2.0f < s )
+                s = cur * 2.0f;   // KIWI: below the ladder, double back up to 0.125
         }
         else
         {
-            s = KCMD_GRID_LADDER[0];
+            s = cur * 0.5f;   // KIWI: below the ladder's 0.125 rung, halve
             for ( int i = KCMD_GRID_LADDER_COUNT - 1; i >= 0; --i )
                 if ( KCMD_GRID_LADDER[i] < cur - eps ) { s = KCMD_GRID_LADDER[i]; break; }
         }
@@ -341,8 +332,8 @@ namespace
         { KIWI_CMD_SELMODE_OBJECT, { "Select Mode: Object",       "Selection", SEL_MASK_OBJECT,     nullptr } },
         { KIWI_CMD_SELMODE_ALL,    { "Select Mode: Everything",   "Selection", SEL_MASK_EVERYTHING, nullptr } },
         { KIWI_CMD_PALETTE,        { "Command Palette",           "KIWI",      0,                   nullptr } },
-        { KIWI_CMD_GRID_HALVE,     { "Grid Spacing: Halve",       "Grid",      0,                   nullptr } },
-        { KIWI_CMD_GRID_DOUBLE,    { "Grid Spacing: Double",      "Grid",      0,                   nullptr } },
+        { KIWI_CMD_GRID_HALVE,     { "Grid Spacing: Finer",       "Grid",      0,                   nullptr } },
+        { KIWI_CMD_GRID_DOUBLE,    { "Grid Spacing: Coarser",     "Grid",      0,                   nullptr } },
         { KIWI_CMD_SNAP_TOGGLE,    { "Snap Markers: Toggle",      "Grid",      0,                   nullptr } },
         { KIWI_CMD_SELFTEST,       { "UX: Modal Self-Test",       "KIWI",      0,                   nullptr } },
         { KIWI_CMD_PLASTICITY_PUSH,{ "Send Selection to Plasticity", "Export", SEL_MASK_OBJECT,     KiwiPlastBridge_CanPush } },
@@ -522,7 +513,7 @@ namespace
                     m_haveStart = true;
                 }
             }
-            Sys_Printf( "Modal self-test: begin (Esc cancels, Enter/LMB commits).\n" );
+            Sys_Printf( "Modal self-test: begin (Esc cancels, Enter/RMB commits, LMB pauses).\n" );
             return true;
         }
 
@@ -679,11 +670,21 @@ void KiwiCmd_SetTestMods( int mods )
     s_testMods = mods;
 }
 
-bool KiwiCmd_CtrlHeld()
+bool KiwiCmd_KeyHeld( int vk )
 {
     if ( s_testMods >= 0 )
-        return ( s_testMods & 4 ) != 0;
-    return ( ::GetAsyncKeyState( VK_CONTROL ) & 0x8000 ) != 0;
+    {
+        if ( vk == VK_SHIFT )   return ( s_testMods & 1 ) != 0;
+        if ( vk == VK_MENU )    return ( s_testMods & 2 ) != 0;
+        if ( vk == VK_CONTROL ) return ( s_testMods & 4 ) != 0;
+        return false;                       // a test instance reads no other key
+    }
+    return ( ::GetAsyncKeyState( vk ) & 0x8000 ) != 0;
+}
+
+bool KiwiCmd_CtrlHeld()
+{
+    return KiwiCmd_KeyHeld( VK_CONTROL );
 }
 
 // Exported grid controls share StepGrid's ladder, clamp, and console report.
@@ -922,8 +923,6 @@ bool KiwiCmd_RepeatLast()
 // another bracket. Empty selection must leave the clipboard unchanged.
 void KiwiCmd_ClipCut()
 {
-    extern void Radiant_ExecCommand( unsigned int cmdId );   // mainfrm.cpp:4054
-
     if ( selected_brushes.next == &selected_brushes )
     {
         Sys_Printf( "Cut: nothing is selected - the clipboard is unchanged.\n" );
@@ -1507,6 +1506,8 @@ bool KiwiCmd_HandleGrab( int imgX, int imgY )
         return false;
 
     KiwiCmd_MouseMove( imgX, imgY );        // 1. the press pixel IS the grab point
+    if ( g_activeCommand != cmd )
+        return true;                        // the move ended the gesture under us
     if ( !s_hot )
         KiwiCmd_Resume();                   // 2a. …which Rebase()s at that pixel
     else

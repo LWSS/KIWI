@@ -3,7 +3,6 @@
 cod2rad64.h — Master header for CoD2 radiosity light compiler (x64)
 
 Reverse engineered from cod2rad64_original.exe.
-All struct offsets and function signatures verified against LST.
 
 ------------------------------------------------------------------------------- */
 
@@ -129,7 +128,6 @@ Constants
 #define CONTENTS_CLIPSHOT       0x00002000
 #define CONTENTS_TELEPORTER     0x00040000
 #define CONTENTS_NODROP         0x80000000
-#define LMAP_STRIDE                     512   /* row stride shared by primary and secondary lightmaps */
 
 /* transfer pool constants */
 #define TRANSFERS_PER_BLOCK             15
@@ -159,7 +157,7 @@ Constants
 #define IS_NAN(x)           (((*(unsigned int *)&(x)) & 0x7F800000) == 0x7F800000)
 #define IS_NAN_FLOAT(x)     ((*(int *)&(x) & 0x7F800000) == 0x7F800000)
 
-/* vector macros — pure float, NO double promotion (verified against LST) */
+/* vector macros — pure float, NO double promotion */
 #define DotProduct(a,b)         ((a)[0]*(b)[0]+(a)[1]*(b)[1]+(a)[2]*(b)[2])
 #define DotProduct2D(a,b)       ((a)[0]*(b)[0]+(a)[1]*(b)[1])
 #define VectorCopy(a,b)         ((b)[0]=(a)[0],(b)[1]=(a)[1],(b)[2]=(a)[2])
@@ -202,7 +200,6 @@ typedef struct MaterialInfo_s
 
 /*
  * MaterialDef — material/surface definition, 128 bytes.
- * Layout verified from cod2rad LST LoadMaterial 0x4177B0..0x41785F.
  * Field names si->width / si->height from binary assert strings.
  * Offsets [84] and [104] are never written — real alignment gaps.
  */
@@ -268,8 +265,8 @@ typedef struct ScriptStringRef
 } ScriptStringRef;
 
 /*
- * PlatformEntry_t — 40 bytes per entry. Entry in the target platform table.
- * Layout verified against binary .rdata at 0x45A0C8.
+ * PlatformEntry_t — 40 bytes per entry. Entry in the target platform table
+ * (.rdata at 0x45A0C8).
  */
 typedef struct PlatformEntry_s {
     const char  *name;              /* [0]  platform name ("xenon", "pc") */
@@ -307,8 +304,8 @@ typedef struct DSkelPartBits_s {
 
 /*
  * DSkel_t — 48 bytes header + variable-length mat array.
- * Field names from LST assert strings ("skel->animPartBits",
- * "skel->skelPartBits") and offsets from DObjCalcSkel at 0x41D350.
+ * Field names from assert strings ("skel->animPartBits",
+ * "skel->skelPartBits"), offsets from DObjCalcSkel (0x41D350).
  */
 typedef struct DSkel_s {
     int           animPartBits[4];    /* [0]  anim bits per 32 bones */
@@ -860,24 +857,6 @@ typedef struct LinearMappingData_s {
 
 /* -------------------------------------------------------------------------------
 
-Struct Definitions — lightmap_bleed.c
-
-------------------------------------------------------------------------------- */
-
-/*
- * LmapSample — lightmap sample, 32 bytes.
- */
-typedef struct LmapSample_s {
-    float *colorData;    /* [0]  color data pointer */
-    float  areaX2;       /* [8]  2 * sample area */
-    float  subSample[4]; /* [12] sub-sample weights */
-    int    _pad;         /* [28] */
-} LmapSample_t;
-
-
-
-/* -------------------------------------------------------------------------------
-
 Struct Definitions — cmdline.c
 
 ------------------------------------------------------------------------------- */
@@ -1379,9 +1358,9 @@ Global Variables — bspfile.c data arrays
 #define MAX_MAP_BRUSHES              0x8000
 #define MAX_MAP_TRISOUPS             0x8000
 #define MAX_MAP_DRAW_VERTS           0x80000
-#define MAX_RAD_TRIANGLES            0x100000  /* cod2rad triangle buffer cap — LST 0x40BE0E */
+#define MAX_RAD_TRIANGLES            0x100000  /* cod2rad triangle buffer cap (0x40BE0E) */
 #define MAX_MAP_DRAW_INDEXES         3145728
-#define MAX_MAP_VERTEXES             0x80000  /* LST 0x40BDE6 / 0x40BD24 — matches MAX_MAP_DRAW_VERTS */
+#define MAX_MAP_VERTEXES             0x80000  /* 0x40BDE6 / 0x40BD24 — matches MAX_MAP_DRAW_VERTS */
 #define MAX_MAP_CULLGROUPS           2048
 #define MAX_MAP_CULLGROUPINDEXES     4096
 #define MAX_MAP_SHADOW_VERTS         0x80000
@@ -1549,7 +1528,6 @@ Global Variables — lighting
 ------------------------------------------------------------------------------- */
 
 extern void *g_lightingSampleCallback;
-extern void *g_lightingPixelCallback;
 extern int g_lightmapSize;
 extern void *g_lightingSamples;
 extern int g_usefulSampleCount;
@@ -1751,10 +1729,7 @@ extern void Z_FreeInternal(void *ptr);
 extern void Z_VirtualFree(void *ptr);
 extern void *Z_Malloc(size_t size);
 extern void *Z_VirtualAlloc(int size);
-extern char *Z_StrDup(const char *string);
 extern void Hunk_FreeTempMemory(void *buf);
-extern void *memmove_thunk(void *dest, const void *src, int count);
-extern void *memset_thunk(void *dest, int val, int count);
 /* Hunk file-data type constants */
 #define FILEDATA_XMODELSURFS    2
 #define FILEDATA_XMODELPARTS    3
@@ -1822,7 +1797,6 @@ extern void SwapNodes(void *data, int len);
 extern void SwapLeafs(void *data, int len);
 extern void SwapLeafBrushes(void *data, int len);
 extern void SwapDrawVerts(void *data, int len);
-extern void SwapBrushes(void *data, int len);
 extern void SwapCollisionAabbTree(void *data, int len, int preSwap);
 extern void SwapBSPFile(int direction);
 
@@ -1844,7 +1818,6 @@ extern void BounceGatherCallback(Sample_t *sample);
 extern void Compile(int threadCount);
 extern void GatherPointLightForSample(int sampleIdx, int lightIdx, float *position, float *basis, float subAreaFactor, unsigned char primaryLightIndex, SubSample_t *subSample);
 extern void SetupSampleRadii(void);
-extern void BuildLightingTransfersForSample(float *bouncedLight, float weight, Sample_t *sample);
 extern void GatherBounceForSample(Sample_t *sourceSample, int threadIdx);
 extern void RadiosityBounce(float epsilon, int threadCount);
 extern int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample, float *position, float *basis, float subAreaFactor, int dirIdx);
@@ -1919,7 +1892,6 @@ extern float GammaCorrectColorChannel(float color);
 extern void DegammaColor(float *color);
 extern void Lighting_InitSamples(void);
 extern void Lighting_ApplyRadiosityScale(LightingSample_t *sample);
-extern void Lighting_InitAntiBleed(void);
 extern void InitBleeding(int threadCount);
 extern unsigned char EncodeGammaCorrectedByte(float value);
 extern void BuildFinalLightmaps_TripleLoop(void);
@@ -1930,10 +1902,8 @@ extern unsigned char EncodeFloatInByte(float value);
 extern void Lighting_AllocSampleVars(LightingSample_t *sample);
 extern void Lighting_IncrementUsefulSampleCount(void);
 extern void Lighting_SampleCallback_Trampoline1(int sampleIndex);
-extern void Lighting_PixelCallback_Trampoline(int pixelIndex, int a2);
 extern void ForEachUsefulLightingSample(void *callback, int a2);
 extern void ForEachUsefulLightingSampleThreaded(void *callback, int threadCount);
-extern void Lighting_ForEachPixel_Helper(void *callback, int a2);
 
 
 
@@ -1943,18 +1913,9 @@ Function Prototypes — lightmap_bleed.c
 
 ------------------------------------------------------------------------------- */
 
-extern float Bleed_GetSampleAreaX2_Secondary(void *data, int s, int t);
-extern void Bleed_CopySampleX2_Primary(void *srcData, int s, int t, void *dstData);
-extern void Bleed_ScaleSampleX2_Secondary(float scale, void *data, int s, int t);
-extern void Bleed_ScaleSampleX2_Primary(float scale, void *data, int s, int t);
-extern void Bleed_AddWeightedSample_Secondary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
-extern void Bleed_AddWeightedSubSample_Primary(void *srcData, int srcS, int srcT, float weight, void *dstData, int dstS, int dstT);
 extern void Lmap_FindBleeding_Callback(float unused, float *samplePos, int unused1, int unused2, void *userData);
-extern void Bleed_CopySampleX2_Secondary(void *srcData, int s, int t, void *dstData);
 extern void Lmap_InitBilinearBleeding(int lmapCount, int threadCount);
-extern void Lmap_ApplyBleeding(void *lmapData, int lmapIdx);
 extern void Lmap_FindBleedingForSample(void *data, int lmapIdx, int width, int height, float u, float v);
-extern void Bleed_FillEmptySubSamples(void *data);
 
 
 
@@ -1982,7 +1943,6 @@ extern void CalculateLightGrid_Worker(int gridIndex, int flags);
 extern void AllocGridTraceDirections(void);
 extern void AddStaticModelLightGridSamples(void);
 extern void GatherIncidentEnergyInSpaceForLightFromDir(float *lightColor, float *direction, float *outBuffer);
-extern void CalculateLightGrid_GatherLight(int flags, int gridIndex, float *outBuffer);
 extern short LightGrid_EncodeSH(float scale, float *buffer);
 extern short LightGrid_FindOrInsertColor(unsigned char *colorData);
 extern void CalculateLightGrid(int flags);
@@ -2421,7 +2381,6 @@ extern int AssertFailed(const char *expr, const char *file, int line, int skip, 
 /* These native records are also accessed by recovered byte-stride code. */
 typedef char cod4rad_pointer_size[(sizeof(void *) == 8) ? 1 : -1];
 typedef char cod4rad_lightmap_sample_size[(sizeof(LightmapSample_t) == 32) ? 1 : -1];
-typedef char cod4rad_bleed_sample_size[(sizeof(LmapSample_t) == 32) ? 1 : -1];
 typedef char cod4rad_sample_weight_offset[(offsetof(LightmapSample_t, weight) == 8) ? 1 : -1];
 typedef char cod4rad_collision_tri_size[(sizeof(CollisionTri_t) == 80) ? 1 : -1];
 typedef char cod4rad_draw_vert_size[(sizeof(DrawVert_t) == 68) ? 1 : -1];

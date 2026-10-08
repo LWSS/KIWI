@@ -22,6 +22,3 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
 
 // Free cache storage during Map_NewMap teardown.
 void KiwiShadowCache_Shutdown();
-
-int KiwiShadowCache_ResidentKB();
-int KiwiShadowCache_CachedModels();

@@ -17,9 +17,7 @@ const char    g_fmtVec2[] = "%g %g";
 const char    g_fmtVec4[] = "%g %g %g %g";
 const char    g_localizedBlankPrefix[] = "          ";
 int           g_printfInit;
-char          g_vaBigBuf[VA_BIG_BUF_SIZE];
 int           g_vaBufferIdx;
-int           g_vaBufferToggle;
 char          g_vaBuffer[VA_BUFFER_SIZE];
 char          g_vaCircularBuf[VA_CIRCULAR_BUF_SIZE];
 char          g_vaTerminator;
@@ -29,26 +27,6 @@ void        *_LittleLong;
 void        *_LittleShort;
 size_t        SrcSizeInBytes = 1;
 float         vec3_origin_float[3] = {0.0f, 0.0f, 0.0f};
-
-char s_assertDisable_COM_GetExtension;
-char s_assertDisable_I_stricmpWild;
-char s_assertDisable_I_stricmpWild;
-char s_assertDisable_I_strncat;
-char s_assertDisable_I_strncpyz;
-char s_assertDisable_I_strncpyz;
-char s_assertDisable_I_strncpyz;
-char s_assertDisable_MatrixTransformVector43;
-char s_assertDisable_MatrixTransformVector43;
-char s_assertDisable_MatrixTransposeTransformVector;
-char s_assertDisable_MatrixVecScaleAddTransform43;
-char s_assertDisable_Q_strcmp;
-char s_assertDisable_Q_strcmp;
-char s_assertDisable_Q_stricmp;
-char s_assertDisable_Q_stricmp;
-char s_assertDisable_TransformPlane;
-char s_assertDisable_TransformPoint;
-char s_assertDisable_TransformPoint;
-
 
 /*
 ================
@@ -243,20 +221,6 @@ char *COM_GetExtension(char *filename)
   return lastDot ? lastDot : p;
 }
 
-char *COM_SkipPath(char *pathname)
-{
-  char *lastComponent = pathname;
-
-  while ( *pathname )
-  {
-    if ( *pathname == '/' || *pathname == '\\' )
-      lastComponent = pathname + 1;
-    ++pathname;
-  }
-
-  return lastComponent;
-}
-
 char *COM_StripExtension(char *input, char *output)
 {
   char *extension = COM_GetExtension(input);
@@ -409,26 +373,6 @@ Returns 1 if character is lowercase ASCII letter.
 int Q_islower(int c)
 {
   return c >= 'a' && c <= 'z';
-}
-
-int Q_isupper(int c)
-{
-  return c >= 'A' && c <= 'Z';
-}
-
-int Q_isalpha(int c)
-{
-  return Q_islower(c) || Q_isupper(c);
-}
-
-int Q_isnumeric(int c)
-{
-  return c >= '0' && c <= '9';
-}
-
-int Q_isalphanumeric(int c)
-{
-  return Q_isalpha(c) || Q_isnumeric(c);
 }
 
 /*
@@ -627,42 +571,6 @@ int CanKeepStringPointer(uintptr_t ptr)
 
 /*
 ================
-fix_exponent_format
-
-Restores MSVC6 3-digit exponent format (e.g. 1.00179e-005)
-from modern UCRT 2-digit format (e.g. 1.00179e-05).
-================
-*/
-static void fix_exponent_format(char *buf, unsigned int *plen)
-{
-  unsigned int len = *plen;
-  unsigned int i = 0;
-  while (i + 3 < len) {
-    if ((buf[i] == 'e' || buf[i] == 'E') &&
-        (buf[i+1] == '+' || buf[i+1] == '-') &&
-        buf[i+2] >= '0' && buf[i+2] <= '9' &&
-        buf[i+3] >= '0' && buf[i+3] <= '9') {
-      if (i + 4 >= len || buf[i+4] < '0' || buf[i+4] > '9') {
-        if (len + 1 < VA_CIRCULAR_BUF_SIZE) {
-          memmove(buf + i + 3, buf + i + 2, len - (i + 2) + 1);
-          buf[i+2] = '0';
-          len++;
-          i += 5;
-        } else {
-          i += 4;
-        }
-      } else {
-        i += 5;
-      }
-    } else {
-      i++;
-    }
-  }
-  *plen = len;
-}
-
-/*
-================
 va
 
 Variable-argument string formatter with circular buffer.
@@ -690,220 +598,6 @@ char *va(const char *format, ...)
   memcpy(result, g_vaBuffer, len + 1);
   g_vaBufferIdx += len + 1;
   return result;
-}
-
-/*
-================
-Info_ValueForKey
-
-Searches for a key in a backslash-delimited info string
-and returns the associated value.
-================
-*/
-char *Info_ValueForKey(const char *s, const char *key)
-{
-  const char *ptr;
-  int altBuf;
-  bool startsWith;
-  char ch;
-  char *kp;
-  char *valWalk;
-  char *vp;
-  char *valStart;
-  char keyBuf[BIG_INFO_STRING];
-
-  ptr = s;
-  if ( !s || !key )
-    return "";
-  /* BIG_INFO_STRING already defined in cod4map.h as 8192 (0x2000) */
-  altBuf = g_vaBufferToggle ^ 1;
-  startsWith = *s == '\\';
-  g_vaBufferToggle ^= 1;
-  if ( startsWith )
-    ptr = s + 1;
-  while ( 1 )
-  {
-    ch = *ptr;
-    kp = keyBuf;
-    if ( *ptr != '\\' )
-    {
-      while ( ch )
-      {
-        if ( kp - keyBuf >= BIG_INFO_STRING )
-          Com_ErrorLevel(1, "Info_ValueForKey: oversize key %d", kp - keyBuf);
-        *kp = ch;
-        ch = ptr[1];
-        ++kp;
-        ++ptr;
-        if ( ch == '\\' )
-          break;
-      }
-      if ( ch != '\\' )
-        return "";
-    }
-    ch = ptr[1];
-    valWalk = (char *)ptr + 1;
-    vp = (char *)&g_vaBigBuf + (VA_BIG_BUF_SIZE / 2) * altBuf;
-    *kp = 0;
-    for ( valStart = vp; ch != '\\'; ++valWalk )
-    {
-      if ( !ch )
-        break;
-      if ( vp - valStart >= BIG_INFO_STRING )
-        Com_ErrorLevel(1, "Info_ValueForKey: oversize key %d", vp - valStart);
-      *vp = ch;
-      ch = valWalk[1];
-      ++vp;
-    }
-    *vp = 0;
-    if ( !Q_stricmp(key, keyBuf) )
-      return valStart;
-    if ( !*valWalk )
-      return "";
-    altBuf = g_vaBufferToggle;
-    ptr = valWalk + 1;
-  }
-}
-
-/*
-================
-Info_RemoveKey
-
-Removes a key/value pair from a backslash-delimited info string.
-================
-*/
-char *Info_RemoveKey(char *s, char *key)
-{
-  char *p;
-  char *found;
-  char *kp;
-  char c;
-  char *vp;
-  char *start;
-  char ch;
-  char valBuf[MAX_OS_PATH];
-  char keyBuf[MAX_OS_PATH];
-
-  p = (char *)s;
-  #define MAX_INFO_STRING 0x400
-  if ( strlen(s) >= MAX_INFO_STRING )
-    Com_ErrorLevel(1, "Info_RemoveKey: oversize infostring");
-  found = strchr(key, '\\');
-  if ( !found )
-  {
-    while ( 1 )
-    {
-      start = p;
-      if ( *p == '\\' )
-        ++p;
-      ch = *p;
-      kp = keyBuf;
-      if ( *p != '\\' )
-      {
-        while ( ch )
-        {
-          *kp = ch;
-          ch = p[1];
-          ++kp;
-          ++p;
-          if ( ch == '\\' )
-            break;
-        }
-        if ( ch != '\\' )
-          break;
-      }
-      c = *++p;
-      *kp = 0;
-      for ( vp = valBuf; c != '\\'; ++p )
-      {
-        if ( !c )
-          break;
-        *vp = c;
-        c = p[1];
-        ++vp;
-      }
-      *vp = 0;
-      found = (char *)(intptr_t)strcmp(key, keyBuf);
-      if ( !found )
-      {
-        strcpy(start, p);
-        return found;
-      }
-      if ( !*p )
-        return found;
-    }
-  }
-  return found;
-}
-
-/*
-================
-Info_RemoveKey_Big
-
-Removes a key/value pair from a big (0x2000) info string.
-================
-*/
-char *Info_RemoveKey_Big(char *s, char *key)
-{
-  char *p;
-  char *found;
-  char *kp;
-  char c;
-  char *vp;
-  char *start;
-  char ch;
-  char valBuf[BIG_INFO_STRING];
-  char keyBuf[BIG_INFO_STRING];
-
-  p = (char *)s;
-  if ( strlen(s) >= BIG_INFO_STRING )
-    Com_ErrorLevel(1, "Info_RemoveKey_Big: oversize infostring");
-  found = strchr(key, '\\');
-  if ( !found )
-  {
-    while ( 1 )
-    {
-      start = p;
-      if ( *p == '\\' )
-        ++p;
-      ch = *p;
-      kp = keyBuf;
-      if ( *p != '\\' )
-      {
-        while ( ch )
-        {
-          *kp = ch;
-          ch = p[1];
-          ++kp;
-          ++p;
-          if ( ch == '\\' )
-            break;
-        }
-        if ( ch != '\\' )
-          break;
-      }
-      c = *++p;
-      *kp = 0;
-      for ( vp = valBuf; c != '\\'; ++p )
-      {
-        if ( !c )
-          break;
-        *vp = c;
-        c = p[1];
-        ++vp;
-      }
-      *vp = 0;
-      found = (char *)(intptr_t)strcmp(key, keyBuf);
-      if ( !found )
-      {
-        strcpy(start, p);
-        return found;
-      }
-      if ( !*p )
-        return found;
-    }
-  }
-  return found;
 }
 
 /*
@@ -1147,22 +841,4 @@ char *I_strncpyz(char *dest, const char *src, int destsize)
   strncpy(dest, src, destsize - 1);
   dest[destsize - 1] = 0;
   return dest;
-}
-
-/*
-================
-I_strncat
-
-Safe string concatenation with size limit.
-================
-*/
-char *I_strncat(const char *dest, int size, char *src)
-{
-  int len;
-
-  Assert(size != sizeof(char *), s_assertDisable_I_strncat);
-  len = (int)strlen(dest);
-  if ( len >= size )
-    Com_ErrorLevel(0, "I_strncat: already overflowed");
-  return I_strncpyz((char *)&dest[len], src, size - len);
 }

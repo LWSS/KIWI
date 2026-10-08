@@ -46,7 +46,6 @@ struct krefImage_t
 // is replaced by map load/undo.
 int                KiwiRefImage_Count();
 const krefImage_t *KiwiRefImage_At( int index );
-krefImage_t       *KiwiRefImage_MutableAt( int index );
 int                KiwiRefImage_Add( const krefImage_t &image );
 bool               KiwiRefImage_RemoveAt( int index );
 unsigned           KiwiRefImage_Generation();
@@ -75,10 +74,7 @@ void KiwiRefImage_ApplyClick( int index, bool shift, bool ctrl, bool viewport );
 // against brush area hits.
 bool KiwiRefImage_PickAt( int imgX, int imgY, int *outIndex, float *outDepthOrDist );
 
-// Directional marquee selection.  The first form consumes camera-image pixels;
-// the second consumes active-2D-view image pixels.
-void KiwiRefImage_ApplyRect( float x0, float y0, float x1, float y1,
-                             bool crossing, bool shift, bool ctrl );
+// Directional marquee selection; consumes active-2D-view image pixels.
 void KiwiRefImage_ApplyRectXY( float x0, float y0, float x1, float y1,
                                bool crossing, bool shift, bool ctrl );
 
@@ -95,10 +91,8 @@ bool KiwiRefImage_Focus( int index );
 // ref-image undo record; the whole-store snapshot carries the group table too.
 int         KiwiRefImage_Group( int index );                 // -1 = ungrouped / bad index
 bool        KiwiRefImage_SetGroup( int index, int group );   // -1 removes; unknown ids refused
-int         KiwiRefImage_NewGroup( const char *name );       // mints an id; null/empty = "Group N"
 int         KiwiRefImage_GroupCount();
 int         KiwiRefImage_GroupIdAt( int i );
-bool        KiwiRefImage_GroupExists( int group );
 const char *KiwiRefImage_GroupName( int group );             // "" for an unknown id
 bool        KiwiRefImage_SetGroupName( int group, const char *name );
 bool        KiwiRefImage_RemoveGroup( int group );           // members return to ungrouped

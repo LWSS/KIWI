@@ -280,10 +280,10 @@ void Prefs_SavePrefs( prefData_t *p )
     Radiant_ProfileSetInt( "Prefs", "VehArrowSize", p->vehicle_arrow_size );
     Radiant_ProfileSetInt( "Prefs", "SplayDistance", p->splay );
     Radiant_ProfileSetInt( "Prefs", "ModelSelection", p->m_bSelectableModels );
-    // IDA SavePrefs 0x44f280 does NOT write "SelectCurves" here (LoadPrefs reads it, but the
-    // binary never persists it — a latent quirk); matched by omitting the write.  The binary
-    // instead re-writes "ModelSelection" a SECOND time later (after VertSnapPrefab — restored
-    // below), so this was a swapped/invented write.
+    // IDA SavePrefs 0x44f280 never writes "SelectCurves" (LoadPrefs reads it), so the toggle
+    // did not persist.  KIWI: write it.  The binary's second "ModelSelection" write (after
+    // VertSnapPrefab) is restored below.
+    Radiant_ProfileSetInt( "Prefs", "SelectCurves", p->m_bSelectCurves );
     Radiant_ProfileSetInt( "Prefs", "ChaseMouse", p->m_bChaseMouse );
     Radiant_ProfileSetInt( "Prefs", "EntityShow", p->m_nEntityShowState );
     Radiant_ProfileSetInt( "Prefs", "TextureScale", p->m_nTextureWindowScale );

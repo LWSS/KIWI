@@ -37,8 +37,10 @@
 #include "kiwi_matwriter.h"
 #include "kiwi_numeric.h"    // KiwiNum_EvalDisplay - height fields take the viewport's unit grammar
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_terrain.h"
 #include "kiwi_units.h"      // KiwiUnits_Format / Units_FromDisplay
+#include "kiwi_vec.h"
 #include "radiant_registry.h"
 
 #include <float.h>
@@ -54,45 +56,15 @@
 #include <utility>
 #include <vector>
 
-extern int          Sys_Printf( const char *fmt, ... );
-extern int          g_nUpdateBits;
-extern camera_s    *Ed_Camera();                                       // camwnd.cpp:165 (re-tint order)
-extern selbrush_t   selected_brushes;                       // map.cpp 0x23F1864
-extern selbrush_t   active_brushes;                         // map.cpp 0x23F189C
-extern entity_s    *world_entity;
-extern char         FilterBrush( selbrush_t *b, int updateFilters );   // filters.cpp 0x46A1F0
-extern char         PMESH_51( const float *org, const float *dir, patch_t *pm,
+extern char         Patch_RayTest( const float *org, const float *dir, patch_t *pm,
                               float *outDist, int *outCol, int *outRow,
                               byte *outColor, float *outPlane );       // pmesh.cpp 0x43DDE0
-extern void         Patch_Rebuild( patchMesh_t *p, char doBounds );    // pmesh.cpp 0x438D90
 extern void         Patch_Paint( selbrush_t *list );                   // pmesh.cpp 0x43EB70 (clear xx22b)
-extern void         Patch_PaintMarkUndo( patchMesh_t *def );           // pmesh.cpp (sub_45E770 wrapper)
-extern void         Patch_PaintFinish( selbrush_t *list );             // pmesh.cpp (PMESH_18 wrapper)
-extern patchMesh_t *MakeNewPatch();                                    // pmesh.cpp:137
-extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent ); // pmesh.cpp:841
+extern void         Patch_PaintMarkUndo( patchMesh_t *def );           // pmesh.cpp (Undo_AddPaintedBrush wrapper)
+extern void         Patch_PaintFinish( selbrush_t *list );             // pmesh.cpp 0x43ec10
 extern void         Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale ); // pmesh.cpp (tail)
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );  // brush.cpp:670
-extern void         SetMaterial( const char *name, patchMesh_material *out ); // materialdef.cpp:101
-extern void         Select_Deselect( int deselectFaces );              // select.cpp
-extern void         Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus, char center ); // select.cpp:904
-extern void         Select_Delete();                                   // select.cpp:1524
-extern void         Undo_ClearRedo();
-extern void         Undo_GeneralStart( const char *operation );
-extern void         Undo_AddBrushList( selbrush_t *list );             // undo.cpp:551
-extern void         Undo_EndBrushList( selbrush_t *list );             // undo.cpp:576
-extern void         Undo_AddEntity_W( entity_s *ent );                 // undo.cpp:633
-extern void         Undo_End();
 extern void         Undo_KiwiMarkCreated( brush_t *def );              // undo.cpp (KIWI tail)
-extern void         Undo_AddBrush( entity_brush_s *pBrushInst );       // undo.cpp:494 (takes the brush DEF)
-extern entity_s    *Brush_Move( const float *move, brush_t *def, char snap ); // brush.cpp 0x4782A0: faces, patch ctrl, entity origin
 // Flatten-to-brushes and brush-face painting.
-extern brush_t     *Brush_Alloc( const void *planeptsSrc, eclass_t *ecls );          // brush.cpp
-extern void         Brush_Create( float *mins, float *maxs, brush_t *b, eclass_t *ecls ); // brush.cpp:510
-extern void         Brush_BuildWindings( brush_t *def, int bFull );                  // brush.cpp:1434
-extern void         Ed_EnsureCurrentMaterial_Kiwi();                                  // texwnd.cpp
-extern selbrush_t  *KiwiExtrude_LandDef( brush_t *def );                              // kiwi_extrude.cpp (world + selected)
-extern void         sub_47B940( brush_t *def );                                       // brush.cpp:5841 Brush_UpdateSpecialMaterialFlag
-extern void         MarkMapModified();                                                // win_qe3.cpp
 extern void         KiwiWindows_SyncMenu();                                           // kiwi_windows.cpp
 extern void         KiwiMtl_RealizeFace( face_t *f );                                 // kiwi_material.h
 // The weight overlay re-emits a patch's flat-colour run after the reference images.
@@ -100,12 +72,11 @@ extern int          Editor_MaterialSortKey( Material *handle );        // r_ed_s
 extern void         Editor_AddMeshCmd( Material *handle, int techType, int sortKey,
                         int vertCount, int vbIndexAndOffs, int indexCount, const uint16_t *indexTable ); // r_ed_scene.cpp 0x4FDA50
 extern void        *R_AddEditorSurfsCmd();                             // r_ed_scene.cpp 0x4FDA10
-extern void         R_SortMaterials();                                 // r_ed_scene.cpp
 
 namespace
 {
     const char *KTER_PROFILE = "KiwiTerrain";
-    const float KTER_PI      = 3.14159265358979323846f;
+    const float KTER_PI      = (float)KIWI_PI;
     enum { KTER_SLOTS = 4 };
 
     enum kterTool_t
@@ -286,7 +257,7 @@ namespace
     void WriteFloat( const char *entry, float v )
     {
         char text[64];
-        KiwiFmt_Num( text, sizeof( text ), v, 6 );
+        KiwiFmt_Exact( text, sizeof( text ), v + 0.0f, 0 );
         Radiant_ProfileSetString( KTER_PROFILE, entry, text );
     }
 
@@ -422,7 +393,7 @@ namespace
         return PatchEligibleAnyType( b ) && ( b->patch->def->type & PATCH_TERRAIN ) != 0;
     }
 
-    // Slab test: does the ray hit the node's AABB before `maxT`?  PMESH_51 walks the
+    // Slab test: does the ray hit the node's AABB before `maxT`?  Patch_RayTest walks the
     // WHOLE tessellation (a 16x16 bezier at subdivision 8 is ~29k triangles), so every
     // pick must reject on bounds first.
     bool RayHitsBounds( const float *org, const float *dir, const float *mins, const float *maxs, float maxT )
@@ -462,7 +433,7 @@ namespace
                 return;
             float dist;
             byte  c[4];
-            if ( PMESH_51( org, dir, b->patch, &dist, nullptr, nullptr, c, nullptr ) && dist < best )
+            if ( Patch_RayTest( org, dir, b->patch, &dist, nullptr, nullptr, c, nullptr ) && dist < best )
             {
                 best = dist;
                 bestNode = b;
@@ -732,22 +703,22 @@ namespace
     // ── brush weight ─────────────────────────────────────────────────────────
     float BrushDistance( const float *c, const float *p )
     {
-        float dx = p[0] - c[0];
-        float dy = p[1] - c[1];
+        float ddx = p[0] - c[0];
+        float ddy = p[1] - c[1];
         if ( s_shape == KTER_SQUARE )
         {
             if ( s_squareRot != 0.0f )
             {
                 const float a = -s_squareRot * KTER_PI / 180.0f;
                 const float ca = cosf( a ), sa = sinf( a );
-                const float rx = dx * ca - dy * sa;
-                const float ry = dx * sa + dy * ca;
-                dx = rx; dy = ry;
+                const float rx = ddx * ca - ddy * sa;
+                const float ry = ddx * sa + ddy * ca;
+                ddx = rx; ddy = ry;
             }
-            const float ax = fabsf( dx ), ay = fabsf( dy );
+            const float ax = fabsf( ddx ), ay = fabsf( ddy );
             return ax > ay ? ax : ay;
         }
-        return sqrtf( dx * dx + dy * dy );
+        return sqrtf( ddx * ddx + ddy * ddy );
     }
 
     // Can the brush at `center` reach anything inside this node's XY bounds?
@@ -1521,11 +1492,11 @@ namespace
                     if ( border )
                     {
                         float bestDz = KTER_WELD_Z;
-                        for ( int dx = -1; dx <= 1; ++dx )
-                            for ( int dy = -1; dy <= 1; ++dy )
+                        for ( int ddx = -1; ddx <= 1; ++ddx )
+                            for ( int ddy = -1; ddy <= 1; ++ddy )
                             {
                                 const std::unordered_map<long long, std::vector<int> >::const_iterator it =
-                                    buckets.find( BucketKey( bx + dx, by + dy ) );
+                                    buckets.find( BucketKey( bx + ddx, by + ddy ) );
                                 if ( it == buckets.end() )
                                     continue;
                                 for ( size_t c = 0; c < it->second.size(); ++c )
@@ -1606,15 +1577,15 @@ namespace
                 if ( a == b )
                     continue;
                 const float ax = g.verts[a].x, ay = g.verts[a].y, az = g.verts[a].z;
-                const float dx = g.verts[b].x - ax, dy = g.verts[b].y - ay, dz = g.verts[b].z - az;
-                const float len2 = dx * dx + dy * dy;
+                const float ddx = g.verts[b].x - ax, ddy = g.verts[b].y - ay, ddz = g.verts[b].z - az;
+                const float len2 = ddx * ddx + ddy * ddy;
                 if ( len2 <= 4.0f * KTER_WELD * KTER_WELD )
                     continue;
                 const float len = sqrtf( len2 );
-                const int bx0 = (int)floorf( ( ( dx < 0.0f ? ax + dx : ax ) - KTER_WELD ) / KTER_BUCKET );
-                const int bx1 = (int)floorf( ( ( dx < 0.0f ? ax : ax + dx ) + KTER_WELD ) / KTER_BUCKET );
-                const int by0 = (int)floorf( ( ( dy < 0.0f ? ay + dy : ay ) - KTER_WELD ) / KTER_BUCKET );
-                const int by1 = (int)floorf( ( ( dy < 0.0f ? ay : ay + dy ) + KTER_WELD ) / KTER_BUCKET );
+                const int bx0 = (int)floorf( ( ( ddx < 0.0f ? ax + ddx : ax ) - KTER_WELD ) / KTER_BUCKET );
+                const int bx1 = (int)floorf( ( ( ddx < 0.0f ? ax : ax + ddx ) + KTER_WELD ) / KTER_BUCKET );
+                const int by0 = (int)floorf( ( ( ddy < 0.0f ? ay + ddy : ay ) - KTER_WELD ) / KTER_BUCKET );
+                const int by1 = (int)floorf( ( ( ddy < 0.0f ? ay : ay + ddy ) + KTER_WELD ) / KTER_BUCKET );
                 for ( int bx = bx0; bx <= bx1; ++bx )
                     for ( int by = by0; by <= by1; ++by )
                     {
@@ -1628,11 +1599,11 @@ namespace
                             kterVert_t &V = g.verts[q];
                             if ( q == a || q == b || V.host0 >= 0 )
                                 continue;
-                            const float t = ( ( V.x - ax ) * dx + ( V.y - ay ) * dy ) / len2;
+                            const float t = ( ( V.x - ax ) * ddx + ( V.y - ay ) * ddy ) / len2;
                             if ( t * len <= KTER_WELD || ( 1.0f - t ) * len <= KTER_WELD )
                                 continue;                   // off the segment, or at an end
-                            const float ex = V.x - ( ax + dx * t ), ey = V.y - ( ay + dy * t );
-                            if ( ex * ex + ey * ey > KTER_WELD * KTER_WELD || fabsf( V.z - ( az + dz * t ) ) > KTER_WELD_Z )
+                            const float ex = V.x - ( ax + ddx * t ), ey = V.y - ( ay + ddy * t );
+                            if ( ex * ex + ey * ey > KTER_WELD * KTER_WELD || fabsf( V.z - ( az + ddz * t ) ) > KTER_WELD_Z )
                                 continue;
                             bool own = false;               // a point of this very patch: a degenerate border
                             for ( int r = 0; r < V.refN && !own; ++r )
@@ -2139,7 +2110,7 @@ namespace
             {
                 ++def->version;
                 Brush_BuildWindings( def, 0 );
-                sub_47B940( def );
+                Brush_UpdateSpecialMaterialFlag( def );
                 MarkMapModified();
             }
         } );
@@ -2702,10 +2673,10 @@ namespace
     float BoundsDistanceXY( const selbrush_t *b, const float *p )
     {
         const float *mins = b->def->mins, *maxs = b->def->maxs;
-        float dx = 0.0f, dy = 0.0f;
-        if ( p[0] < mins[0] ) dx = mins[0] - p[0]; else if ( p[0] > maxs[0] ) dx = p[0] - maxs[0];
-        if ( p[1] < mins[1] ) dy = mins[1] - p[1]; else if ( p[1] > maxs[1] ) dy = p[1] - maxs[1];
-        return sqrtf( dx * dx + dy * dy );
+        float ddx = 0.0f, ddy = 0.0f;
+        if ( p[0] < mins[0] ) ddx = mins[0] - p[0]; else if ( p[0] > maxs[0] ) ddx = p[0] - maxs[0];
+        if ( p[1] < mins[1] ) ddy = mins[1] - p[1]; else if ( p[1] > maxs[1] ) ddy = p[1] - maxs[1];
+        return sqrtf( ddx * ddx + ddy * ddy );
     }
 
     // Off the terrain at (x, y): the height of the nearest point of every terrain border within
@@ -2728,9 +2699,9 @@ namespace
             for ( int k = 0; k < n; ++k )
             {
                 const float *a = def->ctrl[ii[k]][jj[k]].xyz, *c = def->ctrl[ii[( k + 1 ) % n]][jj[( k + 1 ) % n]].xyz;
-                const float dx = c[0] - a[0], dy = c[1] - a[1], l2 = dx * dx + dy * dy;
-                const float u  = l2 > 1e-6f ? ClampF( ( ( p[0] - a[0] ) * dx + ( p[1] - a[1] ) * dy ) / l2, 0.0f, 1.0f ) : 0.0f;
-                const float ex = a[0] + dx * u - p[0], ey = a[1] + dy * u - p[1];
+                const float ddx = c[0] - a[0], ddy = c[1] - a[1], l2 = ddx * ddx + ddy * ddy;
+                const float u  = l2 > 1e-6f ? ClampF( ( ( p[0] - a[0] ) * ddx + ( p[1] - a[1] ) * ddy ) / l2, 0.0f, 1.0f ) : 0.0f;
+                const float ex = a[0] + ddx * u - p[0], ey = a[1] + ddy * u - p[1];
                 if ( ex * ex + ey * ey < best )
                 {
                     best  = ex * ex + ey * ey;
@@ -2741,10 +2712,10 @@ namespace
                 {
                     if ( sides & ( 1u << q ) )
                         continue;
-                    const float den = DIRS[q][0] * dy - DIRS[q][1] * dx;
+                    const float den = DIRS[q][0] * ddy - DIRS[q][1] * ddx;
                     if ( fabsf( den ) < 1e-6f )
                         continue;
-                    const float s = ( ax * dy - ay * dx ) / den, v = ( ax * DIRS[q][1] - ay * DIRS[q][0] ) / den;
+                    const float s = ( ax * ddy - ay * ddx ) / den, v = ( ax * DIRS[q][1] - ay * DIRS[q][0] ) / den;
                     if ( s > 0.0f && s <= R && v >= 0.0f && v <= 1.0f )
                         sides |= 1u << q;
                 }
@@ -3009,8 +2980,8 @@ namespace
 
     float HLen( const kterHFill_t &F, int a, int b )
     {
-        const float dx = F.pts[b * 7] - F.pts[a * 7], dy = F.pts[b * 7 + 1] - F.pts[a * 7 + 1];
-        return sqrtf( dx * dx + dy * dy );
+        const float ddx = F.pts[b * 7] - F.pts[a * 7], ddy = F.pts[b * 7 + 1] - F.pts[a * 7 + 1];
+        return sqrtf( ddx * ddx + ddy * ddy );
     }
 
     int HLerp( kterHFill_t &F, int a, int b, float t )
@@ -3070,10 +3041,10 @@ namespace
             if ( ( o[0] - c[0] ) * ( o[0] - c[0] ) + ( o[1] - c[1] ) * ( o[1] - c[1] ) >= minLen * minLen )
                 break;
         }
-        const float dx = ( o[0] - c[0] ) * (float)step, dy = ( o[1] - c[1] ) * (float)step;
-        const float len = sqrtf( dx * dx + dy * dy );
-        out[0] = len > 1e-6f ? dx / len : 1.0f;
-        out[1] = len > 1e-6f ? dy / len : 0.0f;
+        const float ddx = ( o[0] - c[0] ) * (float)step, ddy = ( o[1] - c[1] ) * (float)step;
+        const float len = sqrtf( ddx * ddx + ddy * ddy );
+        out[0] = len > 1e-6f ? ddx / len : 1.0f;
+        out[1] = len > 1e-6f ? ddy / len : 0.0f;
     }
 
     // The turn at point k: + left (a convex corner of a counter-clockwise piece), - right.
@@ -3703,11 +3674,11 @@ namespace
             for ( int j = cj - 2; j <= cj + 2; ++j )
                 for ( int i = ci - 2; i <= ci + 2; ++i )
                 {
-                    const float dx = S.ox + ( (float)i + 0.5f ) * S.res - start[0];
-                    const float dy = S.oy + ( (float)j + 0.5f ) * S.res - start[1];
-                    if ( S.At( i, j ) == 0 && dx * dx + dy * dy < bd )
+                    const float ddx = S.ox + ( (float)i + 0.5f ) * S.res - start[0];
+                    const float ddy = S.oy + ( (float)j + 0.5f ) * S.res - start[1];
+                    if ( S.At( i, j ) == 0 && ddx * ddx + ddy * ddy < bd )
                     {
-                        bd = dx * dx + dy * dy;
+                        bd = ddx * ddx + ddy * ddy;
                         si = i;
                         sj = j;
                     }
@@ -3778,10 +3749,10 @@ namespace
                 for ( int e = 0; e < en; ++e )
                 {
                     const float *a = &edge[e * 2], *c = &edge[( ( e + 1 ) % en ) * 2];
-                    const float dx = c[0] - a[0], dy = c[1] - a[1];
-                    const float l2 = dx * dx + dy * dy;
-                    const float t  = ClampF( l2 > 1e-6f ? ( ( h.p[0] - a[0] ) * dx + ( h.p[1] - a[1] ) * dy ) / l2 : 0.0f, 0.0f, 1.0f );
-                    const float ex = h.p[0] - a[0] - dx * t, ey = h.p[1] - a[1] - dy * t;
+                    const float ddx = c[0] - a[0], ddy = c[1] - a[1];
+                    const float l2 = ddx * ddx + ddy * ddy;
+                    const float t  = ClampF( l2 > 1e-6f ? ( ( h.p[0] - a[0] ) * ddx + ( h.p[1] - a[1] ) * ddy ) / l2 : 0.0f, 0.0f, 1.0f );
+                    const float ex = h.p[0] - a[0] - ddx * t, ey = h.p[1] - a[1] - ddy * t;
                     if ( ex * ex + ey * ey < bd )
                     {
                         bd  = ex * ex + ey * ey;
@@ -3818,11 +3789,11 @@ namespace
             for ( int i = 0; i < n; ++i )
             {
                 kterHV_t &a = ring[i], &b = ring[( i + 1 ) % n];
-                const float dx = b.p[0] - a.p[0], dy = b.p[1] - a.p[1];
-                if ( dx * dx + dy * dy > 4.0f * S.res * S.res )
+                const float ddx = b.p[0] - a.p[0], ddy = b.p[1] - a.p[1];
+                if ( ddx * ddx + ddy * ddy > 4.0f * S.res * S.res )
                     continue;
                 const kterHV_t &p = ring[( i + n - 1 ) % n], &q = ring[( i + 2 ) % n];
-                if ( dx * ( q.p[0] - p.p[0] ) + dy * ( q.p[1] - p.p[1] ) < 0.0f )
+                if ( ddx * ( q.p[0] - p.p[0] ) + ddy * ( q.p[1] - p.p[1] ) < 0.0f )
                 {
                     std::swap( a, b );
                     swapped = true;
@@ -3861,8 +3832,8 @@ namespace
             return false;
         if ( s_holeFailValid )
         {
-            const float dx = s_cursor[0] - s_holeFailAt[0], dy = s_cursor[1] - s_holeFailAt[1];
-            if ( dx * dx + dy * dy < 16.0f * 16.0f )
+            const float ddx = s_cursor[0] - s_holeFailAt[0], ddy = s_cursor[1] - s_holeFailAt[1];
+            if ( ddx * ddx + ddy * ddy < 16.0f * 16.0f )
                 return false;
         }
         s_holeFailValid = true;
@@ -4310,9 +4281,9 @@ namespace
         int n = 1;
         if ( s_haveLastCenter )
         {
-            const float dx = s_cursor[0] - s_lastCenter[0];
-            const float dy = s_cursor[1] - s_lastCenter[1];
-            const float dist = sqrtf( dx * dx + dy * dy );
+            const float ddx = s_cursor[0] - s_lastCenter[0];
+            const float ddy = s_cursor[1] - s_lastCenter[1];
+            const float dist = sqrtf( ddx * ddx + ddy * ddy );
             const float spacing = s_outer * 0.25f;
             if ( spacing > 0.0f )
                 n = (int)ceilf( dist / spacing );
@@ -5553,14 +5524,6 @@ void KiwiTerrain_HandleAbort()
     EndStroke();
 }
 
-bool KiwiTerrain_HandleEscape()
-{
-    if ( !s_armed )
-        return false;
-    SetArmed( false );
-    return true;
-}
-
 // I: eyedropper.  Loads "Paint with" from whatever is under the pointer: on a patch,
 // the layer with the heaviest weight at the nearest control point (the base when no
 // layer carries at least 25 %); on a brush, the face the pointer is on.
@@ -5580,8 +5543,8 @@ static bool EyedropMaterial()
         for ( int i = 0; i < def->width; ++i )
             for ( int j = 0; j < def->height; ++j )
             {
-                const float dx = def->ctrl[i][j].xyz[0] - hit[0], dy = def->ctrl[i][j].xyz[1] - hit[1];
-                const float d = dx * dx + dy * dy;
+                const float ddx = def->ctrl[i][j].xyz[0] - hit[0], ddy = def->ctrl[i][j].xyz[1] - hit[1];
+                const float d = ddx * ddx + ddy * ddy;
                 if ( d < best ) { best = d; bi = i; bj = j; }
             }
         const byte *w = (const byte *)&def->ctrl[bi][bj].vert_color;
@@ -5619,9 +5582,9 @@ bool KiwiTerrain_HandleKey( int vk )
         SetArmed( false );
         return true;
     }
-    if ( vk == 0x09 && ::GetKeyState( VK_CONTROL ) < 0 )   // KIWI: Ctrl+Tab / Ctrl+Shift+Tab: next / previous tool
+    if ( vk == 0x09 && KiwiCmd_KeyHeld( VK_CONTROL ) )   // KIWI: Ctrl+Tab / Ctrl+Shift+Tab: next / previous tool
     {
-        CycleTool( ::GetKeyState( VK_SHIFT ) < 0 ? -1 : 1 );
+        CycleTool( KiwiCmd_KeyHeld( VK_SHIFT ) ? -1 : 1 );
         return true;
     }
     if ( vk == 0x09 && s_tool != KTER_GRASS )  // VK_TAB: hide / show the wireframe around the brush
@@ -6075,12 +6038,22 @@ void KiwiTerrain_DrawOverlay( float imgMinX, float imgMinY, float imgW, float im
 }
 
 // ── J: join selected terrain sheets ──────────────────────────────────────────
+// Only a pure patch selection takes this arm; mixed selections fall through.
+static bool PurePatchSelection()
+{
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        if ( !NodeIsPatch( b ) )
+            return false;
+    return true;
+}
+
+// KIWI: true exactly when KiwiTerrain_JoinSelected would join something.
 bool KiwiTerrain_CanJoinSelected()
 {
     Load();
     std::vector<selbrush_t *> sheets;
     SelectedSheets( sheets );
-    if ( sheets.size() < 2 )
+    if ( sheets.size() < 2 || !PurePatchSelection() )
         return false;
     size_t ia, ib; int axis;
     return FindJoinPair( sheets, &ia, &ib, &axis );
@@ -6091,12 +6064,8 @@ int KiwiTerrain_JoinSelected()
     Load();
     std::vector<selbrush_t *> sheets;
     SelectedSheets( sheets );
-    if ( sheets.size() < 2 )
+    if ( sheets.size() < 2 || !PurePatchSelection() )
         return -1;
-    // Only a pure patch selection takes this arm; mixed selections fall through.
-    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
-        if ( !NodeIsPatch( b ) )
-            return -1;
 
     int joins = 0;
     for ( ;; )

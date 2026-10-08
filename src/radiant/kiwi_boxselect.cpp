@@ -20,6 +20,7 @@
 #include "kiwi_hover.h"
 #include "kiwi_particles.h"          // particles-only: particle click + marquee
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_region.h"             // region click/extrude
 #include "kiwi_selection.h"
@@ -29,12 +30,6 @@
 #include <math.h>
 #include <stdlib.h>                  // abs
 #include <vector>
-
-// Ported entry points.
-extern int        g_nUpdateBits;     // 0x25D5A74 (mainfrm.cpp)
-// camwnd.cpp:157 camera_s *Ed_Camera(); :162 void CamWnd_BuildMatrix();
-extern camera_s  *Ed_Camera();
-extern void       CamWnd_BuildMatrix();
 
 namespace
 {

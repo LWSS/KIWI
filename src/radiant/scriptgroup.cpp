@@ -9,32 +9,66 @@
 #include "prefs.h"      // prefData_t / g_PrefsDlg (ScriptGroupKey / ScriptColorTeamKey CStrings)
 #include <cstring>
 #include <cstdlib>     // atol / _itoa
+#include <set>
 #include <string>
 #include <vector>
-
-extern void Assert( const char *file, int line, int type, const char *fmt, ... );
+#include "kiwi_ported.h"   // KIWI: shared engine/editor externs
 
 // ── externs (per-TU, matching the established pattern in select.cpp/brush.cpp) ──
-extern int          Sys_Printf( const char *fmt, ... );
-extern char        *va( const char *fmt, ... );
-extern entity_s    *world_entity;                                         // 0x25D5B30 (map.cpp)
-extern void         SetKeyValue( entity_s_def *e, const char *key, const char *value );  // 0x483690
-extern void         DeleteKey( epair_t **head, const char *key );         // 0x483720
-extern bool         Entity_HasEpairMatch( entity_s *e, const char *key, const char *val );// 0x483930
-extern bool         HasKeyValuePair( entity_s_def *e, const char *key );  // 0x4838B0 (entity.cpp)
-extern char        *ValueForKey2( const entity_s *defPtr, const char *key );          // 0x4825C0 (entity.cpp)
-extern int          UpdateSelection( int wParam, eclass_t *cls );         // 0x497180 (win_ent.cpp)
 extern void         ImGuiPanel_ScriptGroup_Toggle();                      // imgui_panel_scriptgroup.cpp:76  void ImGuiPanel_ScriptGroup_Toggle()
 // selected_brushes / active_brushes sentinels are declared in qe3.h.
 
+// KIWI: the binary copied every epair value below into char[1024] / [N][16] stack buffers and
+// split it with strtok - a long value, a 16+ character token or 512+ kept tokens overran them,
+// and the nested strtok calls (SetKey -> ScriptGroup_01 -> HasKey) cut each other's loops short.
+// These helpers keep the same strings on std::string.
+
+// strtok( value, " " )'s tokens: runs of spaces split, no empty tokens.
+static std::vector<std::string> SG_Tokens( const char *value )
+{
+    std::vector<std::string> tokens;
+    const char *p = value;
+    while ( *p )
+    {
+        while ( *p == ' ' )
+            ++p;
+        const char *start = p;
+        while ( *p && *p != ' ' )
+            ++p;
+        if ( p > start )
+            tokens.emplace_back( start, p );
+    }
+    return tokens;
+}
+
+// Each kept token followed by one space - the trailing space is load-bearing for the .map text.
+static std::string SG_Join( const std::vector<std::string> &kept )
+{
+    std::string out;
+    for ( const std::string &token : kept )
+    {
+        out += token;
+        out += ' ';
+    }
+    return out;
+}
+
+// A colour token holds the code ANYWHERE (strstr); its number is read from token + strlen( code ).
+static bool SG_HasCode( const std::string &token, const char *code )
+{
+    return strstr( token.c_str(), code ) != nullptr;
+}
+static int SG_TokenNumber( const std::string &token, const char *code )
+{
+    return atol( token.c_str() + strlen( code ) );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 0x451170  ScriptGroup_Unreachable  (70 bytes)   [PORTED — dependency-free]
+// 0x451170  ScriptGroup_Unreachable
 // Maps a script-colour code substring to its index 0..6 (r,b,y,c,g,p,o =
-// red/blue/yellow/cyan/green/purple/orange).  Returns -1 (and asserts) if none
-// match.  The only scriptgroup.cpp function with no g_PrefsDlg/UpdateSelection
-// dependency.  (off_73B07C in the binary; ASSERT_UNKOWN gate omitted — the assert
-// message is literally "Unreachable", i.e. the not-found path is a programming
-// error, so we always assert there.)
+// red/blue/yellow/cyan/green/purple/orange).  Returns -1 if none match.
+// KIWI: no assert on -1 (the binary's "Unreachable", ScriptGroup.cpp:39) - the tokens are map
+// data, the three callers draw every frame and all skip -1.
 // ─────────────────────────────────────────────────────────────────────────────
 int ScriptGroup_Unreachable( const char *a1 )
 {
@@ -44,119 +78,83 @@ int ScriptGroup_Unreachable( const char *a1 )
         if ( strstr( a1, codes[i] ) )
             return i;
     }
-    // KEEP_VERBOSE: prose condition string ("Unreachable").
-    Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\ScriptGroup.cpp",
-            39, 0, "Unreachable" );
     return -1;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  KEY ADD/REMOVE subsystem (PORTED — real, gate-verified)
+//  KEY ADD/REMOVE subsystem
 // ═════════════════════════════════════════════════════════════════════════════
 //
 // CoD editor design fact (relied on by every iterator's Assert and by the def
 // dereferences): for a placed entity, entity_s and entity_s_def are the SAME struct
 // and `def` is self-referential (entity IS its own def), so the
-// binary's `b->owner->def == b->def->owner` assert is `entity->def == entity`.  The
+// `b->owner->def == b->def->owner` assert is `entity->def == entity`.  The
 // epair list head lives at offset 0x74 on that def (entity_s::epairs).  The asserts
 // pass type=0 (engine_stubs Assert only DebugBreak()s on type!=0), so they log-and-
-// continue — faithful and gate-safe.
+// continue.
 
-// 0x4537A0  ScriptGroup_AddKey  (512) — ADD a space-separated value-token to one
-// entity's key.  Binary: copy the existing key value into a 1024 buffer; if empty,
-// the value becomes the whole string; else tokenise and, if the value isn't already
-// a token, append " <value>".  (The decompile's v16/v17 contiguous-buffer + strtok-
-// then-restore dance is exactly a strcpy(existing)+membership-test+strcat below.)
+// 0x4537A0  ScriptGroup_AddKey — ADD a space-separated value-token to one
+// entity's key: an empty key takes the value whole; otherwise, if the value isn't
+// already a token, " <value>" is appended.
 static void ScriptGroup_AddKey( const char *key, const char *value, entity_s_def *def )
 {
-    // Resolve the existing value for `key` (case-insensitive, like the binary's _stricmp walk).
-    const char *existing = "";
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-    {
-        if ( !_stricmp( ep->key, key ) ) { existing = ep->value; break; }
-    }
+    const std::string existing = ValueForKey2( def, key );   // copied: SetKeyValue frees the epair
 
-    char buf[1024];
-    strcpy( buf, existing );
-
-    if ( !buf[0] )
+    if ( existing.empty() )
     {
-        // No existing value → the value becomes the whole string.
         Sys_Printf( "Added value %s to key %s\n", value, key );
-        strcpy( buf, value );
-        SetKeyValue( def, key, buf );
+        SetKeyValue( def, key, value );
         return;
     }
 
-    // Existing value present → test membership against a scratch copy (the binary
-    // strtok's buf in place, then restores it from the saved value pointer; tokenising
-    // a copy keeps buf intact so we can append directly — identical net string).
-    char scratch[1024];
-    strcpy( scratch, buf );
-    for ( char *token = strtok( scratch, " " ); token; token = strtok( nullptr, " " ) )
+    for ( const std::string &token : SG_Tokens( existing.c_str() ) )
     {
-        iassert( token[0] );
-        if ( !strcmp( token, value ) )
+        if ( token == value )
         {
             Sys_Printf( "Entity already has value %s on their key %s\n", value, key );
             return;
         }
     }
 
-    // Not present → append " <value>" (binary: strcpy(buf,existing)+va(" %s",value)).
-    strcat( buf, va( " %s", value ) );
-    SetKeyValue( def, key, buf );
+    const std::string joined = existing + " " + value;
+    SetKeyValue( def, key, joined.c_str() );
     Sys_Printf( "Added value %s to key %s\n", value, key );
 }
 
-// 0x453440  ScriptGroup_HasKey  (553) — REMOVE a space-separated value-token from one
-// entity's key (the name is from the ID-pass; it is a REMOVE, not a query).  Binary:
-// copy the existing value into v18; tokenise; rebuild the kept tokens (each followed by
-// a trailing space) into the contiguous v19; then SetKeyValue(v19) if non-empty else
-// DeleteKey.  The TRAILING SPACE on every kept token is preserved verbatim (the binary
-// emits `va("%s ", token)`), which is load-bearing for the .map round-trip diff.
+// 0x453440  ScriptGroup_HasKey — REMOVE a space-separated value-token from one
+// entity's key (despite the name it is a REMOVE, not a query).  The kept
+// tokens are re-joined each followed by a space (SG_Join); SetKeyValue if any are left,
+// else DeleteKey.
 static void ScriptGroup_HasKey( const char *value, const char *key, entity_s_def *def )
 {
-    const char *existing = "";
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-    {
-        if ( !_stricmp( ep->key, key ) ) { existing = ep->value; break; }
-    }
-
-    char buf[1024];
-    strcpy( buf, existing );
-    if ( !buf[0] )
+    const char *existing = ValueForKey2( def, key );
+    if ( !existing[0] )
     {
         Sys_Printf( "Entity doesn't have key %s\n", key );
         return;
     }
 
-    char out[1024];
-    out[0] = 0;
-    bool hasKey = false;
-
-    char *token = strtok( buf, " " );
-    if ( !token )
+    const std::vector<std::string> tokens = SG_Tokens( existing );
+    if ( tokens.empty() )
     {
         Sys_Printf( "Entity doesn't have key %s value %s\n", key, value );
         return;
     }
-    do
+
+    std::vector<std::string> kept;
+    bool hasKey = false;
+    for ( const std::string &token : tokens )
     {
-        iassert( token[0] );
-        if ( !strcmp( token, value ) )
+        if ( token == value )
         {
             iassert( !hasKey );
             hasKey = true;
         }
         else
         {
-            // Keep this token — append "<token> " (TRAILING SPACE, matching va("%s ",tok)).
-            strcat( out, va( "%s ", token ) );
+            kept.push_back( token );
         }
-        token = strtok( nullptr, " " );
     }
-    while ( token );
 
     if ( !hasKey )
     {
@@ -164,21 +162,21 @@ static void ScriptGroup_HasKey( const char *value, const char *key, entity_s_def
         return;
     }
 
-    if ( strlen( out ) )
-        SetKeyValue( def, key, out );
+    const std::string out = SG_Join( kept );
+    if ( !out.empty() )
+        SetKeyValue( def, key, out.c_str() );
     else
-        DeleteKey( &def->epairs, key );           // binary: DeleteKey(&def->epairs, key)
+        DeleteKey( &def->epairs, key );
     Sys_Printf( "Removed value %s from key %s\n", value, key );
 }
 
 // ── selection iterators ───────────────────────────────────────────────────────
-// All four walk selected_brushes, skip world/null-owner brushes, and (faithfully) carry
+// All four walk selected_brushes, skip world/null-owner brushes, and carry
 // the `b->owner->def == b->def->owner` self-ref assert; the *Triggers variants additionally
 // gate on the entity being trigger_multiple/trigger_radius.  Each ends with UpdateSelection.
 
 // 0x453A50  ScriptGroup_AddKeyToSelected — add `value` to `key` on every selected entity.
-// (Binary calls ScriptGroup_AddKey(key, value, def); the dialog wrapper sub_454780 passes
-//  value=field2(ScriptSubValue), key=field1(ScriptSubKey).)
+// Note the (value, key) argument order; ScriptGroupAddSubKey_Apply passes ScriptSubValue, ScriptSubKey.
 int ScriptGroup_AddKeyToSelected( const char *value, const char *key )
 {
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -210,8 +208,7 @@ int ScriptGroup_AddKeyToSelectedTriggers( const char *key, const char *value )
 }
 
 // 0x453670  ScriptGroup_RemoveKeyFromSelected — remove `value` from `key` on every
-// selected entity.  (Binary calls ScriptGroup_HasKey(value, key, def); wrapper sub_4549B0
-// passes key=field1, value=field2.)
+// selected entity.  Here the order is (key, value); ScriptGroup_HasKey takes (value, key).
 int ScriptGroup_RemoveKeyFromSelected( const char *key, const char *value )
 {
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -243,97 +240,57 @@ int ScriptGroup_RemoveKeyFromSelectedTriggers( const char *key, const char *valu
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  SCRIPT-GROUP NUMBER ASSIGNMENT (PORTED — real, scriptgrpcolor-gate verified)
+//  SCRIPT-GROUP NUMBER ASSIGNMENT
 // ═════════════════════════════════════════════════════════════════════════════
 //
 // This is the core both the Script-Group dialog's colour buttons AND the Vehicle
 // dialog's 10 script-group buttons drive.  Each button stores a key NAME into
-// g_PrefsDlg->ScriptGroupKey (VehicleDlg_SetScriptGroupKey 0x45FBA0 →
-// str_set(&ScriptGroupKey, key)) and then calls ScriptGroup_AssignNextNumber, which
-// finds the highest existing group number stored under that key across all
-// (non-selected) world entities and assigns max+1 to the current selection.
+// g_PrefsDlg->ScriptGroupKey (VehicleDlg_SetScriptGroupKey) and then calls
+// ScriptGroup_AssignNextNumber, which finds the highest existing group number stored
+// under that key across all (non-selected) world entities and assigns max+1 to the
+// current selection.
 //
 // SCOPE NOTE — this is NOT the colour-token machinery (ScriptGroup_RemoveColors[_02]
 // / ScriptGroup_Color / the single-char ScriptColorKey "r/b/y/c/g/p/o" codes).  Those
 // edit a DIFFERENT key (g_PrefsDlg->ScriptColorTeamKey, a space-separated list of
 // <colourCode><number> tokens) and are implemented separately, with the Script-Group
 // MFC dialog, further down this file.  AssignNextNumber writes a single SCALAR number under
-// ScriptGroupKey via SetKeyValue (wholesale replace), so its faithful inverse is a
-// plain DeleteKey of that key — ScriptGroup_RemoveAssignedNumber below (NOT
-// ScriptGroup_RemoveColors, which is the colour-list subsystem).
+// ScriptGroupKey via SetKeyValue (wholesale replace), so its inverse is a plain DeleteKey
+// of that key (NOT ScriptGroup_RemoveColors, which is the colour-list subsystem).
 
-// ScriptGroup_AssignNextNumber (0x479FF0) now lives in brush.cpp — its asserts are
-// brush.cpp:4293/4298, i.e. that is its source file.
+// ScriptGroup_AssignNextNumber (0x479FF0) lives in brush.cpp (its asserts are
+// brush.cpp:4293/4298).
 extern void ScriptGroup_AssignNextNumber();   // brush.cpp 0x479FF0
 
 // 0x45FBA0  VehicleDlg_SetScriptGroupKey — the Vehicle dialog's script-group button
 // entry: store the chosen key NAME into g_PrefsDlg->ScriptGroupKey, then assign the next
-// group number to the selection.  (The binary's str_set is a CString assignment; the
-// EndDialog/SetFocus/g_nUpdateBits tail is the modeless-dialog "applied, return focus"
-// gesture, supplied by the caller in the UI.)  Ported here so the assignment closure
-// lives with the rest of the script-group machinery; vehicledlg.cpp's buttons call it.
+// group number to the selection.  (The EndDialog/SetFocus/g_nUpdateBits tail is the
+// modeless-dialog "applied, return focus" gesture, supplied by the caller in the UI.)
+// vehicledlg.cpp's buttons call it.
 void VehicleDlg_SetScriptGroupKey( const char *key )
 {
     g_PrefsDlg->ScriptGroupKey = ( key ? key : "" );
     ScriptGroup_AssignNextNumber();
 }
 
-// ── INVERSE (the faithful undo of AssignNextNumber's scalar write) ─────────────
-// AssignNextNumber does SetKeyValue(def, ScriptGroupKey, "<N>") — a wholesale scalar
-// write — so removing it is a plain DeleteKey of that key on every selected non-world
-// entity.  (This is the number subsystem's inverse; the colour-LIST inverse is the
-// ScriptGroup_RemoveColors[_02] below, a different key + token-strip.)  Used by the
-// scriptgrpcolor gate to verify assign → remove → gone.
-void ScriptGroup_RemoveAssignedNumber( const char *key )
-{
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-    {
-        entity_s *owner = b->owner;
-        if ( !owner || owner == world_entity )
-            continue;
-        entity_s_def *def = (entity_s_def *)owner->def;
-        // KEEP_VERBOSE: inlined brush.cpp:4313 owner-vs-def invariant (the carrier
-        // iassert lives in brush.cpp; this copy's guard shape can't stringize to it).
-        if ( b->def && def != (entity_s_def *)b->def->owner )
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\brush.cpp",
-                    4313, 0, "%s", "b->owner->def == b->def->owner" );
-        DeleteKey( &def->epairs, key );      // entity_s::epairs @0x74
-    }
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
-//  COLOUR-GROUP / TRIGGER-NUMBER machinery (partial — ScriptGroup_Type only)
+//  COLOUR-GROUP / TRIGGER-NUMBER machinery (ScriptGroup_Type)
 // ═════════════════════════════════════════════════════════════════════════════
 #define MAX_COLORGROUPS 512
-// MAX_COLORENTREES is the per-turret export-token cap in the turret-share helper.
-#define MAX_COLORENTREES 32
-
-// IDB `zero` (0x6d58f0) is the shared empty-string global the colour fns default an absent
-// epair value to.  Reproduced as a local empty string (value-identical to "").
-static const char zero[] = "";
-
-extern void Brush_RemoveFromList( selbrush_t *b );   // brush.cpp 0x476680
-extern void Brush_AddToList2( selbrush_t *b );       // brush.cpp 0x4765a0
-extern void Select_Deselect( int bDeselectFaces );   // select.cpp 0x48E800
-extern int  g_nUpdateBits;                           // engine_stubs.cpp 0x25D5A74
-extern void sub_47D060( selbrush_t *listSentinel );   // brush.cpp (brush-list display rebuild)
 
 // 0x451200  ScriptGroup_Type  (ScriptGroup.cpp:62)
 // Grow the selection by trigger COLOUR GROUP: gather the colour-group numbers of every
 // selected trigger_multiple/trigger_radius entity (parsed from the ScriptColorTeamKey
 // epair's ScriptColorKey-prefixed token), then select every active trigger whose own
 // colour-group number is one of them.  Called by SelectedAssociated when
-// ScriptGroupKey == ScriptColorTeamKey.  The binary builds the per-entity value string
-// into a 1024 stack buffer (inlined strcpy of the `zero`-defaulted epair value) and
-// parses it with strtok/strstr/atol; reproduced 1:1 below.  The active-brush walk saves
-// `&match->next->prev` before Brush_RemoveFromList/AddToList2 relink the node.
+// ScriptGroupKey == ScriptColorTeamKey.  The active-brush walk saves the next node
+// before Brush_RemoveFromList/AddToList2 relink the current one.
 void ScriptGroup_Type()
 {
     const char *scriptColorTeamKey = g_PrefsDlg->ScriptColorTeamKey.c_str();
     const char *scriptColorKey     = g_PrefsDlg->ScriptColorKey.c_str();
 
-    int colorGroups[MAX_COLORGROUPS];
-    int colors = 0;
+    std::vector<int> colorGroups;
 
     // Pass 1 — collect each selected trigger entity's colour-group number.
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
@@ -349,28 +306,18 @@ void ScriptGroup_Type()
              && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = "";   // IDB `zero` — empty string when the key is absent
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, scriptColorTeamKey ) ) { value = ep->value; break; }
-        }
-
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] )
-            continue;
-        if ( !strstr( buf, scriptColorKey ) )
+        const char *value = ValueForKey2( def, scriptColorTeamKey );
+        if ( !value[0] || !strstr( value, scriptColorKey ) )
             continue;
 
-        // Find the single ScriptColorKey-prefixed token and atol its numeric tail.
+        // The single ScriptColorKey token's number.
         int triggerNumber = -1;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+        for ( const std::string &token : SG_Tokens( value ) )
         {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
+            if ( SG_HasCode( token, scriptColorKey ) )
             {
-                vassert( (triggerNumber == -1), "(token) = %s", token );   // ScriptGroup.cpp:98
-                triggerNumber = atol( &token[strlen( scriptColorKey )] );
+                vassert( (triggerNumber == -1), "(token) = %s", token.c_str() );   // ScriptGroup.cpp:98
+                triggerNumber = SG_TokenNumber( token, scriptColorKey );
             }
         }
         if ( triggerNumber != -1 )
@@ -378,11 +325,10 @@ void ScriptGroup_Type()
         else
             iassert( triggerNumber != -1 );
 
-        colorGroups[colors++] = triggerNumber;
-        iassert( colors < MAX_COLORGROUPS );
+        colorGroups.push_back( triggerNumber );
     }
 
-    // Pass 2 — select every active trigger whose colour-group number is in the set.
+    // Pass 2 — select every active entity whose colour-group number is in the set.
     for ( selbrush_t *bAll = active_brushes.next; bAll != &active_brushes; )
     {
         selbrush_t *next = bAll->next;   // captured before Brush_RemoveFromList/AddToList2 relink
@@ -392,30 +338,21 @@ void ScriptGroup_Type()
             iassert( bAll->owner->def == bAll->def->owner );
 
             entity_s_def *def = (entity_s_def *)bAll->owner->def;
-            const char *value = "";
-            for ( epair_t *ep = def->epairs; ep; ep = ep->next )
+            const char *value = ValueForKey2( def, scriptColorTeamKey );
+            if ( value[0] && strstr( value, scriptColorKey ) )
             {
-                if ( !_stricmp( ep->key, scriptColorTeamKey ) ) { value = ep->value; break; }
-            }
-
-            char buf[1024];
-            strcpy( buf, value );
-            if ( buf[0] && strstr( buf, scriptColorKey ) )
-            {
-                for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+                for ( const std::string &token : SG_Tokens( value ) )
                 {
-                    iassert( token[0] );
-                    if ( strstr( token, scriptColorKey ) )
+                    if ( !SG_HasCode( token, scriptColorKey ) )
+                        continue;
+                    const int triggerNumber = SG_TokenNumber( token, scriptColorKey );
+                    for ( int group : colorGroups )
                     {
-                        int triggerNumber = atol( &token[strlen( scriptColorKey )] );
-                        for ( int n = 0; n < colors; ++n )
+                        if ( group == triggerNumber )
                         {
-                            if ( colorGroups[n] == triggerNumber )
-                            {
-                                Brush_RemoveFromList( bAll );
-                                Brush_AddToList2( bAll );
-                                break;
-                            }
+                            Brush_RemoveFromList( bAll );
+                            Brush_AddToList2( bAll );
+                            break;
                         }
                     }
                 }
@@ -429,22 +366,18 @@ void ScriptGroup_Type()
 //  COLOUR-GROUP / TRIGGER-NUMBER cluster
 // ═════════════════════════════════════════════════════════════════════════════
 //
-// CONVENTIONS used throughout (all verified against the disasm, NOT hex-rays):
+// CONVENTIONS used throughout:
 //  * selbrush_t (display-list node): owner@0x08, def@0x14.  The self-ref invariant
-//    `b->owner->def == b->def->owner` (= entity->def == entity) is carried verbatim.
+//    `b->owner->def == b->def->owner` (= entity->def == entity) is asserted throughout.
 //  * the colour-team value is a space-separated list of "<colourCode><number>" tokens
 //    stored under the epair key g_PrefsDlg->ScriptColorTeamKey; the single-char colour
-//    code is (const char*)g_PrefsDlg->ScriptColorKey (IDB `*(const char**)…ScriptColorKey`
-//    is the CString-buffer-as-ptr idiom).  `zero` (IDB) → "".
-//  * the binary copies an epair value into a 1024 stack buffer with an inlined strcpy
-//    (`v5 = buf - src; src[v5] = *src; ++src`) — reproduced as strcpy below.
-//  * the rebuild-into-a-fixed-16-byte-stride-scratch + rejoin-with-trailing-spaces dance
-//    (`strcpy(scratch+16*n, tok)` then `qmemcpy(&buf[..],scratch+16*n); strcpy(end," ")`)
-//    is reproduced as a real scratch[N][16] + strcat with a trailing space.
+//    code is g_PrefsDlg->ScriptColorKey.  An absent key reads as "" (ValueForKey2).
+//  * values are split with SG_Tokens and kept tokens re-joined with SG_Join (each followed
+//    by a space).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 0x453fd0  ScriptGroup_BrushIsTrigger (ScriptGroup.cpp:1150) — true if the brush's
-// entity is trigger_multiple/trigger_radius.  (Leaf.)  Exported (non-static) so the
+// entity is trigger_multiple/trigger_radius.  Exported (non-static) so the
 // render-decoration draws (brush.cpp DrawModels_Decorations / camwnd.cpp Cam_DrawTokens)
 // can gate on it.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -459,20 +392,8 @@ bool ScriptGroup_BrushIsTrigger( selbrush_t *b )
         || Entity_HasEpairMatch( def, "classname", "trigger_radius" );
 }
 
-// 0x454050  ScriptGroup_BrushIsTurret (ScriptGroup.cpp:1162) — true if the brush's
-// entity is misc_turret.  (Leaf; unused by the wired paths but ported for completeness.)
-static bool ScriptGroup_BrushIsTurret( selbrush_t *b )
-{
-    entity_s *owner = b->owner;
-    if ( !owner || owner == world_entity )
-        return false;
-    iassert( b->owner->def == b->def->owner );
-    return Entity_HasEpairMatch( (entity_s_def *)owner->def, "classname", "misc_turret" );
-}
-
-// 0x454260  ScriptGroup_IsValidColorCode (already IDB-renamed) — true if the current
+// 0x454260  ScriptGroup_IsValidColorCode — true if the current
 // ScriptColorKey exactly matches one of the 7 single-char codes {r,b,y,c,g,p,o}.
-// (Binary walks off_73B07C with strcmp until the array-end sentinel flt_73B098.)
 static bool ScriptGroup_IsValidColorCode()
 {
     static const char *const codes[7] = { "r", "b", "y", "c", "g", "p", "o" };
@@ -485,22 +406,15 @@ static bool ScriptGroup_IsValidColorCode()
     return false;
 }
 
-// 0x451a40  ScriptGroup_TeamKeyContains (already IDB-renamed) — true if the entity DEF
-// `def`'s ScriptColorTeamKey value contains the substring `code`.  Walks the def's epairs
-// directly (defaults to `zero`=""), copies into a 1024 buffer, returns buf[0]&&strstr.
+// 0x451a40  ScriptGroup_TeamKeyContains — true if the entity DEF
+// `def`'s ScriptColorTeamKey value contains the substring `code`.
 static bool ScriptGroup_TeamKeyContains( const char *code, entity_s_def *def )
 {
-    const char *value = zero;       // IDB `zero` = ""
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-    {
-        if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-    }
-    char buf[1024];
-    strcpy( buf, value );
-    return buf[0] && strstr( buf, code ) != nullptr;
+    const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+    return value[0] && strstr( value, code ) != nullptr;
 }
 
-// 0x4540b0  ScriptGroup_TriggerColorNumber (already IDB-renamed) — read the FIRST
+// 0x4540b0  ScriptGroup_TriggerColorNumber — read the FIRST
 // ScriptColorKey-prefixed token's number from the brush entity's ScriptColorTeamKey
 // value, or -1 if absent.  (Single-match: no `triggerNumber==-1` duplicate assert.)
 static int ScriptGroup_TriggerColorNumber( selbrush_t *b )
@@ -508,26 +422,19 @@ static int ScriptGroup_TriggerColorNumber( selbrush_t *b )
     entity_s_def *def = (entity_s_def *)b->owner->def;
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
-    const char *value = zero;
-    for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-    {
-        if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-    }
-    char buf[1024];
-    strcpy( buf, value );
-    if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+    const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+    if ( !value[0] || !strstr( value, scriptColorKey ) )
         return -1;
 
-    for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+    for ( const std::string &token : SG_Tokens( value ) )
     {
-        iassert( token[0] );
-        if ( strstr( token, scriptColorKey ) )
-            return atol( &token[strlen( scriptColorKey )] );
+        if ( SG_HasCode( token, scriptColorKey ) )
+            return SG_TokenNumber( token, scriptColorKey );
     }
     return -1;
 }
 
-// 0x454220  ScriptGroup_SelectionTriggerNumber (already IDB-renamed) — the LAST
+// 0x454220  ScriptGroup_SelectionTriggerNumber — the LAST
 // trigger-colour number across the selected trigger brushes (or -1).
 static int ScriptGroup_SelectionTriggerNumber()
 {
@@ -567,113 +474,82 @@ static bool ScriptGroup_SelectedHasColorTeam( selbrush_t *b, const char *code )
     if ( Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
         return false;
 
-    char buf[1024];
-    strcpy( buf, ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
-    return buf[0] && strstr( buf, code ) != nullptr;
+    const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+    return value[0] && strstr( value, code ) != nullptr;
 }
 
 // 0x451650  ScriptGroup_Color — pick the FIRST free colour-group number (0..511) not
-// currently used by any active OR selected trigger entity.  Builds a used[512] bitmap by
-// parsing every entity's ScriptColorTeamKey token list (atol of each ScriptColorKey-
-// prefixed token → used[n]=1), then returns the first index where used==0.
+// currently used by any active OR selected entity.  Builds a used[512] bitmap from every
+// ScriptColorKey token's number, then returns the first index where used==0.
+// KIWI: a number outside 0..511 (typed or map-loaded) is skipped - it wrote past used[].
 static int ScriptGroup_Color()
 {
     char used[MAX_COLORGROUPS];
     memset( used, 0, sizeof( used ) );
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
 
-    // Pass 1 — active brushes.
-    for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
+    // Pass 1 — active brushes, pass 2 — selected brushes.
+    selbrush_t *const lists[2] = { &active_brushes, &selected_brushes };
+    for ( selbrush_t *list : lists )
     {
-        entity_s *owner = b->owner;
-        if ( !owner || owner == world_entity )
-            continue;
-        iassert( b->owner->def == b->def->owner );
+        for ( selbrush_t *b = list->next; b != list; b = b->next )
+        {
+            entity_s *owner = b->owner;
+            if ( !owner || owner == world_entity )
+                continue;
+            iassert( b->owner->def == b->def->owner );
 
-        entity_s_def *def = (entity_s_def *)owner->def;
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
-            continue;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-        {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
+            entity_s_def *def = (entity_s_def *)owner->def;
+            const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+            if ( !value[0] || !strstr( value, scriptColorKey ) )
+                continue;
+            for ( const std::string &token : SG_Tokens( value ) )
             {
-                int n = atol( &token[strlen( scriptColorKey )] );
-                iassert( n < MAX_COLORGROUPS );      // "colorNumber < MAX_COLORGROUPS"
-                used[n] = 1;
+                if ( !SG_HasCode( token, scriptColorKey ) )
+                    continue;
+                const int n = SG_TokenNumber( token, scriptColorKey );
+                if ( n >= 0 && n < MAX_COLORGROUPS )
+                    used[n] = 1;
             }
         }
     }
 
-    // Pass 2 — selected brushes (identical parse).
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
-    {
-        entity_s *owner = b->owner;
-        if ( !owner || owner == world_entity )
-            continue;
-        iassert( b->owner->def == b->def->owner );
-
-        entity_s_def *def = (entity_s_def *)owner->def;
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
-            continue;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-        {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
-            {
-                int n = atol( &token[strlen( scriptColorKey )] );
-                iassert( n < MAX_COLORGROUPS );
-                used[n] = 1;
-            }
-        }
-    }
-
-    // First free index.  (Binary: while (used[result]) if (++result>=512) assert "unreachable".)
+    // First free index; all 512 taken asserts "unreachable".
     int result = 0;
     while ( used[result] )
     {
         if ( ++result >= MAX_COLORGROUPS )
         {
-            // KEEP_VERBOSE: prose condition string ("unreachable").
-            Assert( "C:\\trees\\cod3-pc\\cod3-modtools\\cod3src\\Radiant\\ScriptGroup.cpp",
-                    249, 0, "unreachable" );
+            iassert( !"unreachable" );   // ScriptGroup.cpp:249
             return 0;
         }
     }
     return result;
 }
 
-// ── helper used by ScriptGroup_SetKey/SetKey2/ApplyColorToSelected/RemoveColors* ──
-// Rejoin a fixed 16-byte-stride scratch array of `count` tokens into `out` with a
-// trailing space after EACH token (matching the binary's `qmemcpy + strcpy(" ")` dance).
-// Net string is byte-identical (incl. the trailing space, load-bearing for the .map diff).
-static void ScriptGroup_JoinTokens( char *out, const char ( *scratch )[16], int count )
+// ── helpers used by ScriptGroup_SetKey2 / RemoveColors / RemoveColors_02 ──
+// `def`'s ScriptColorTeamKey value without the `code` tokens numbered `colorNumber`, the
+// others re-joined (SG_Join); written back with SetKeyValue, or DeleteKey when none are left.
+static std::string ScriptGroup_StripColor( entity_s_def *def, const char *code, int colorNumber )
 {
-    for ( int n = 0; n < count; ++n )
+    const char *teamKey = g_PrefsDlg->ScriptColorTeamKey.c_str();
+    std::vector<std::string> kept;
+    for ( const std::string &token : SG_Tokens( ValueForKey2( def, teamKey ) ) )
     {
-        strcat( out, scratch[n] );
-        strcat( out, " " );
+        if ( !SG_HasCode( token, code ) || SG_TokenNumber( token, code ) != colorNumber )
+            kept.push_back( token );
     }
+    const std::string out = SG_Join( kept );
+    if ( !out.empty() )
+        SetKeyValue( def, teamKey, out.c_str() );
+    else
+        DeleteKey( &def->epairs, teamKey );
+    return out;
 }
 
 // 0x4520c0  ScriptGroup_SetKey2 (ScriptGroup.cpp:401) — remove the colour token whose
 // number == `colorNumber` from ONE brush entity's ScriptColorTeamKey value (keep all
-// other tokens, re-joined with trailing spaces).  Brush arrives in ecx (RemoveUnused
-// passes it); colorNumber is the second arg.  SetKeyValue if non-empty else DeleteKey.
+// other tokens, re-joined with trailing spaces).
 static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
 {
     entity_s *owner = b->owner;
@@ -683,34 +559,12 @@ static void ScriptGroup_SetKey2( selbrush_t *b, int colorNumber )
     entity_s_def *def = (entity_s_def *)owner->def;
 
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
-    char buf[1024];
-    strcpy( buf, ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
-    if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+    const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+    if ( !value[0] || !strstr( value, scriptColorKey ) )
         return;
 
-    char scratch[MAX_COLORGROUPS][16];
-    int kept = 0;
-    for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-    {
-        iassert( token[0] );
-        // Keep every token EXCEPT the one matching this colour code AND number.
-        if ( !strstr( token, scriptColorKey ) || atol( &token[strlen( scriptColorKey )] ) != colorNumber )
-        {
-            strcpy( scratch[kept], token );
-            ++kept;
-        }
-    }
-
-    char out[1024];
-    out[0] = 0;
-    if ( kept > 0 )
-        ScriptGroup_JoinTokens( out, scratch, kept );
-
-    if ( strlen( out ) )
-        SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
-    else
-        DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
-    Sys_Printf( "Set entity key value to %s\n", out );
+    const std::string out = ScriptGroup_StripColor( def, scriptColorKey, colorNumber );
+    Sys_Printf( "Set entity key value to %s\n", out.c_str() );
 }
 
 // 0x452330  ScriptGroup_RemoveUnused (ScriptGroup.cpp:~447) — strip colour group
@@ -725,23 +579,21 @@ static void ScriptGroup_RemoveUnused( int colorNumber )
         ScriptGroup_SetKey2( b, colorNumber );
 }
 
-// 0x452a... forward decl needed by RemoveUnusedIfOrphaned.
-// 0x452b50  ScriptGroup_RemoveUnusedIfOrphaned (already IDB-renamed) — remove colour
+// 0x452b50  ScriptGroup_RemoveUnusedIfOrphaned — remove colour
 // group `colorNumber` everywhere ONLY IF no non-trigger (AI/node) entity still references
 // it (scan selected then active brushes for the "<code><n> " token; bail if found).
 static bool ScriptGroup_RemoveUnusedIfOrphaned( int colorNumber )
 {
-    char token[1024];
-    strcpy( token, va( "%s%i ", g_PrefsDlg->ScriptColorKey.c_str(), colorNumber ) );
+    const std::string token = va( "%s%i ", g_PrefsDlg->ScriptColorKey.c_str(), colorNumber );
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
-        if ( ScriptGroup_SelectedHasColorTeam( b, token ) )
+        if ( ScriptGroup_SelectedHasColorTeam( b, token.c_str() ) )
             return true;       // still in use → keep
     }
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
     {
-        if ( ScriptGroup_SelectedHasColorTeam( b, token ) )
+        if ( ScriptGroup_SelectedHasColorTeam( b, token.c_str() ) )
             return true;
     }
     ScriptGroup_RemoveUnused( colorNumber );
@@ -750,9 +602,7 @@ static bool ScriptGroup_RemoveUnusedIfOrphaned( int colorNumber )
 
 // 0x4523a0  ScriptGroup_RemoveColors (ScriptGroup.cpp:~478) — strip colour token
 // (code `colorCode`, number `colorNumber`) from every selected NON-trigger (AI/node)
-// entity.  Returns true if any entity was modified.  (The binary takes `colorCode` as a
-// CString-by-value and releases it at the end; we take a plain const char* — it is only
-// ever read via strstr/strlen — so the CString fork/release pair in the caller is dropped.)
+// entity.  Returns true if any entity was modified.
 static bool ScriptGroup_RemoveColors( int colorNumber, const char *colorCode )
 {
     bool modified = false;
@@ -769,45 +619,20 @@ static bool ScriptGroup_RemoveColors( int colorNumber, const char *colorCode )
           || Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, colorCode ) )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( !value[0] || !strstr( value, colorCode ) )
             continue;
 
-        char scratch[MAX_COLORGROUPS][16];
-        char out[1024];
-        out[0] = 0;
-        int kept = 0;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-        {
-            iassert( token[0] );
-            if ( !strstr( token, colorCode ) || atol( &token[strlen( colorCode )] ) != colorNumber )
-            {
-                strcpy( scratch[kept], token );
-                ++kept;
-            }
-        }
-        if ( kept > 0 )
-            ScriptGroup_JoinTokens( out, scratch, kept );
-
-        if ( strlen( out ) )
-            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
-        else
-            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        const std::string out = ScriptGroup_StripColor( def, colorCode, colorNumber );
         modified = true;
-        Sys_Printf( "Set entity key value %s\n", out );
+        Sys_Printf( "Set entity key value %s\n", out.c_str() );
     }
     return modified;
 }
 
 // 0x452720  ScriptGroup_RemoveColors_02 (ScriptGroup.cpp:~553) — the TRIGGER-entity
-// variant of the above (uses g_PrefsDlg->ScriptColorKey directly; no return value, no
-// CString release).  Strips colour group `colorNumber` from selected trigger entities.
+// variant of the above (uses g_PrefsDlg->ScriptColorKey directly; no return value).
+// Strips colour group `colorNumber` from selected trigger entities.
 static void ScriptGroup_RemoveColors_02( int colorNumber )
 {
     Sys_Printf( "Removing colorNumber %s %i\n",
@@ -825,46 +650,19 @@ static void ScriptGroup_RemoveColors_02( int colorNumber )
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( !value[0] || !strstr( value, scriptColorKey ) )
             continue;
 
-        char scratch[MAX_COLORGROUPS][16];
-        char out[1024];
-        out[0] = 0;
-        int kept = 0;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-        {
-            iassert( token[0] );
-            if ( !strstr( token, scriptColorKey ) || atol( &token[strlen( scriptColorKey )] ) != colorNumber )
-            {
-                strcpy( scratch[kept], token );
-                ++kept;
-            }
-        }
-        if ( kept > 0 )
-            ScriptGroup_JoinTokens( out, scratch, kept );
-
-        if ( strlen( out ) )
-            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
-        else
-            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
-        Sys_Printf( "Set entity key value %s\n", out );
+        const std::string out = ScriptGroup_StripColor( def, scriptColorKey, colorNumber );
+        Sys_Printf( "Set entity key value %s\n", out.c_str() );
     }
 }
 
 // 0x453170  ScriptGroup_TriggerNumber — the DISASSOCIATE core.  For each selected
 // trigger's single colour number, try removing it from non-trigger entities; if NONE had
 // it (RemoveColors returned false) fall back to removing it from the trigger entities;
-// then RemoveUnusedIfOrphaned.  (The binary passes a CString COPY of ScriptColorKey to
-// RemoveColors via sub_40F2D0 [CString fork] and RemoveColors releases it; we pass the
-// const char* directly — behaviour-identical, the fork/release pair is dropped.)
+// then RemoveUnusedIfOrphaned.
 void ScriptGroup_TriggerNumber()
 {
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
@@ -880,25 +678,18 @@ void ScriptGroup_TriggerNumber()
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( !value[0] || !strstr( value, scriptColorKey ) )
             continue;
 
         int triggerNumber = -1;
         bool hasColor = false;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+        for ( const std::string &token : SG_Tokens( value ) )
         {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
+            if ( SG_HasCode( token, scriptColorKey ) )
             {
                 iassert( triggerNumber == -1 );   // scriptgroup.cpp:842
-                triggerNumber = atol( &token[strlen( scriptColorKey )] );
+                triggerNumber = SG_TokenNumber( token, scriptColorKey );
                 iassert( !hasColor );   // scriptgroup.cpp:846
                 hasColor = true;
             }
@@ -915,20 +706,20 @@ void ScriptGroup_TriggerNumber()
 }
 
 // 0x452c20  ScriptGroup_Trigger (ScriptGroup.cpp:~683) — reconcile a trigger COLOUR
-// GROUP toward target `colorNumber`.  Two 512-bitmaps (verified slot-for-slot vs disasm):
-//   selSeen = var_604 (written by PASS 1, the SELECTED triggers, at 0x452ea2)
-//   actSeen = var_804 (written by PASS 2, the ACTIVE  triggers, at 0x453100)
+// GROUP toward target `colorNumber`.  Two 512-bitmaps:
+//   selSeen — written by PASS 1 (the SELECTED triggers)
+//   actSeen — written by PASS 2 (the ACTIVE  triggers)
 // PASS 1 marks selSeen[n] for every selected trigger's colour number n != target.
 // PASS 2 marks actSeen[n] for every active  trigger's colour number n != target (read-
-//   only; the active walk uses the SAME selbrush_t ->next link [esi+4], not an entity
-//   onext — the hex-rays `entity_brush_s::onext`/`owner->owner` were type artifacts).
-// FINAL (0x453130): for j in 0..511, if selSeen[j] && j!=target && !actSeen[j] →
+//   only; the active walk uses the same selbrush_t ->next link as the selected list).
+// FINAL: for j in 0..511, if selSeen[j] && j!=target && !actSeen[j] →
 //   RemoveUnused(j) — drop a colour group a selected trigger used that no active one does.
+// KIWI: a number outside 0..511 (typed or map-loaded) is not marked - it wrote past the maps.
 static void ScriptGroup_Trigger( int colorNumber )
 {
     const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
-    char selSeen[MAX_COLORGROUPS];   // var_604 — PASS 1 (selected)
-    char actSeen[MAX_COLORGROUPS];   // var_804 — PASS 2 (active)
+    char selSeen[MAX_COLORGROUPS];   // PASS 1 (selected)
+    char actSeen[MAX_COLORGROUPS];   // PASS 2 (active)
     memset( selSeen, 0, sizeof( selSeen ) );
     memset( actSeen, 0, sizeof( actSeen ) );
 
@@ -944,32 +735,22 @@ static void ScriptGroup_Trigger( int colorNumber )
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( !value[0] || !strstr( value, scriptColorKey ) )
             continue;
 
         int triggerNumber = -1;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+        for ( const std::string &token : SG_Tokens( value ) )
         {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
+            if ( SG_HasCode( token, scriptColorKey ) )
             {
                 iassert( triggerNumber == -1 );   // scriptgroup.cpp:725
-                triggerNumber = atol( &token[strlen( scriptColorKey )] );
+                triggerNumber = SG_TokenNumber( token, scriptColorKey );
             }
         }
         iassert( triggerNumber != -1 );   // scriptgroup.cpp:729
-        if ( triggerNumber != colorNumber )
-        {
-            iassert( triggerNumber < MAX_COLORGROUPS );
-            selSeen[triggerNumber] = 1;          // var_604 (0x452ea2)
-        }
+        if ( triggerNumber != colorNumber && triggerNumber >= 0 && triggerNumber < MAX_COLORGROUPS )
+            selSeen[triggerNumber] = 1;
     }
 
     // PASS 2 — active triggers (read-only; same ->next link as the selected list).
@@ -984,40 +765,30 @@ static void ScriptGroup_Trigger( int colorNumber )
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] || !strstr( buf, scriptColorKey ) )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( !value[0] || !strstr( value, scriptColorKey ) )
             continue;
 
         int triggerNumber = -1;
         bool hasColor = false;
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+        for ( const std::string &token : SG_Tokens( value ) )
         {
-            iassert( token[0] );
-            if ( strstr( token, scriptColorKey ) )
+            if ( SG_HasCode( token, scriptColorKey ) )
             {
-                triggerNumber = atol( &token[strlen( scriptColorKey )] );
+                triggerNumber = SG_TokenNumber( token, scriptColorKey );
                 if ( triggerNumber == colorNumber )
                     break;                       // target found on an active trigger — stop scanning
-                vassert( (!hasColor), "(token) = %s", token );   // ScriptGroup.cpp:774
+                vassert( (!hasColor), "(token) = %s", token.c_str() );   // ScriptGroup.cpp:774
                 hasColor = true;
             }
         }
         iassert( triggerNumber != -1 );   // scriptgroup.cpp:778
-        if ( triggerNumber != colorNumber )
-        {
-            iassert( triggerNumber < MAX_COLORGROUPS );
-            actSeen[triggerNumber] = 1;          // var_804 (0x453100)
-        }
+        if ( triggerNumber != colorNumber && triggerNumber >= 0 && triggerNumber < MAX_COLORGROUPS )
+            actSeen[triggerNumber] = 1;
     }
 
     // FINAL — drop numbers a selected trigger uses (other than target) that no active
-    // trigger still uses.  (IDB 0x453130: if (selSeen[j] && j!=target && !actSeen[j]).)
+    // trigger still uses.
     for ( int j = 0; j < MAX_COLORGROUPS; ++j )
     {
         if ( selSeen[j] && j != colorNumber && !actSeen[j] )
@@ -1043,48 +814,33 @@ static void ScriptGroup_ApplyColorToSelected( int colorNumber )
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
 
-        char out[1024];
-        out[0] = 0;
+        std::string out;
         bool hasColor = false;
-        if ( buf[0] )
+        if ( value[0] )
         {
-            char scratch[MAX_COLORGROUPS][16];
-            int kept = 0;
-            for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
+            std::vector<std::string> kept;
+            for ( const std::string &token : SG_Tokens( value ) )
             {
-                iassert( token[0] );
-                if ( strstr( token, scriptColorKey ) )
+                if ( SG_HasCode( token, scriptColorKey ) )
                 {
                     iassert( !hasColor );   // scriptgroup.cpp:1076
                     hasColor = true;
                 }
                 else
                 {
-                    strcpy( scratch[kept], token );
-                    ++kept;
+                    kept.push_back( token );
                 }
             }
-            if ( kept > 0 )
-                ScriptGroup_JoinTokens( out, scratch, kept );
-            // The binary appends one extra trailing space after the kept block here.
-            strcat( out, " " );
+            // One extra trailing space after the kept block (the binary's format).
+            out = SG_Join( kept ) + " ";
         }
-        // Append the new colour token "<code><n> " (trailing space).
-        strcat( out, va( "%s%i ", scriptColorKey, colorNumber ) );
+        // Append the new colour token "<code><n> " (trailing space) - never empty.
+        out += va( "%s%i ", scriptColorKey, colorNumber );
 
-        if ( strlen( out ) )
-            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out );
-        else
-            DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
-        Sys_Printf( "Set trigger key value to %s\n", out );
+        SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), out.c_str() );
+        Sys_Printf( "Set trigger key value to %s\n", out.c_str() );
     }
 }
 
@@ -1093,10 +849,15 @@ static void ScriptGroup_ApplyColorToSelected( int colorNumber )
 // trigger whose team key already holds "<code><n>", walk that trigger's team-key tokens
 // and, for any token (other than "<code><n>") that `def` ALSO carries, remove it from
 // `def`'s team key.  Keeps a node/AI entity from holding colour tokens a selected trigger
-// now owns.  (Called from ScriptGroup_SetKey for each freshly-written token.)
+// now owns.  (Called once from ScriptGroup_SetKey after the token is written.)
+// KIWI: the binary's nested strtok (this loop around HasKey's own) ended the loop after the
+// first removal; every shared token goes now.  Its va( "%s%", team key ) key was the bare
+// team key (_vsnprintf drops the lone '%'), passed directly here.
 static void ScriptGroup_01( entity_s_def *def, int colorNumber )
 {
-    const char *scriptColorKey = g_PrefsDlg->ScriptColorKey.c_str();
+    const char *teamKey = g_PrefsDlg->ScriptColorTeamKey.c_str();
+    // colourToken = "<code><n>" (no trailing space here).
+    const std::string colourToken = va( "%s%i", g_PrefsDlg->ScriptColorKey.c_str(), colorNumber );
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1109,34 +870,15 @@ static void ScriptGroup_01( entity_s_def *def, int colorNumber )
           && !Entity_HasEpairMatch( trigDef, "classname", "trigger_radius" ) )
             continue;
 
-        // colourToken = "<code><n>" (no trailing space here — binary va("%s%i",code,n)).
-        char colourToken[1024];
-        strcpy( colourToken, va( "%s%i", scriptColorKey, colorNumber ) );
-
         // Only act when THIS trigger's team key already contains the colour token.
-        if ( !ScriptGroup_TeamKeyContains( colourToken, trigDef ) )
+        if ( !ScriptGroup_TeamKeyContains( colourToken.c_str(), trigDef ) )
             continue;
 
-        char list[1024];
-        strcpy( list, ValueForKey2( trigDef, g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
-        for ( char *token = strtok( list, " " ); token; token = strtok( nullptr, " " ) )
+        for ( const std::string &token : SG_Tokens( ValueForKey2( trigDef, teamKey ) ) )
         {
-            iassert( token[0] );
-            if ( strcmp( colourToken, token ) )       // skip the colour token itself
-            {
-                if ( ScriptGroup_TeamKeyContains( token, def ) )
-                {
-                    // Remove `token` from def's team-key value.  The binary builds the key via
-                    // va("%s%", ScriptColorTeamKey) — the format string is literally "%s%" with a
-                    // trailing LONE '%'.  Both the binary and this port route va through _vsnprintf,
-                    // which emits NOTHING for a malformed trailing '%', so the key is exactly the
-                    // team key (e.g. "script_color_allies").  Passing the same "%s%" reproduces it
-                    // byte-for-byte (do NOT write "%s%%" — that would append a literal '%').
-                    char teamKeyArg[256];
-                    strcpy( teamKeyArg, va( "%s%", g_PrefsDlg->ScriptColorTeamKey.c_str() ) );
-                    ScriptGroup_HasKey( token, teamKeyArg, def );
-                }
-            }
+            // skip the colour token itself; remove any other token `def` also carries
+            if ( token != colourToken && ScriptGroup_TeamKeyContains( token.c_str(), def ) )
+                ScriptGroup_HasKey( token.c_str(), teamKey, def );
         }
     }
 }
@@ -1157,18 +899,14 @@ static void ScriptGroup_SetKey( int colorNumber )
         iassert( b->owner->def == b->def->owner );
         entity_s_def *def = (entity_s_def *)owner->def;
 
-        const char *classname = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, "classname" ) ) { classname = ep->value; break; }
-        }
+        const char *classname = ValueForKey2( def, "classname" );
 
         // Filter: only actor / node / info_volume entities are eligible.
         if ( !strstr( classname, "actor" ) )
         {
             if ( strstr( classname, "node" ) )
             {
-                if ( !strcmp( ValueForKey2( def, "radius" ), zero ) )
+                if ( !ValueForKey2( def, "radius" )[0] )
                     SetKeyValue( def, "radius", "64" );
             }
             else if ( !strstr( classname, "info_volume" ) )
@@ -1177,38 +915,23 @@ static void ScriptGroup_SetKey( int colorNumber )
             }
         }
 
-        // Read existing team-key value.
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
+        const char *value = ValueForKey2( def, g_PrefsDlg->ScriptColorTeamKey.c_str() );
+        if ( value[0] )
         {
-            if ( !_stricmp( ep->key, g_PrefsDlg->ScriptColorTeamKey.c_str() ) ) { value = ep->value; break; }
-        }
-        char tempString[1024];
-        strcpy( tempString, value );
-
-        if ( tempString[0] )
-        {
-            // Append " <code><n> " (the binary's leading-and-trailing-space variant).
-            strcat( tempString, va( " %s%i ", scriptColorKey, colorNumber ) );
-            iassert( strlen( tempString ) );      // "strlen(tempString)"
-            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString );
-            Sys_Printf( "Set node/AI key value to %s\n", tempString );
-            // Reconcile each token (binary strtok's tempString and calls ScriptGroup_01 per token).
-            for ( char *token = strtok( tempString, " " ); token; token = strtok( nullptr, " " ) )
-            {
-                iassert( token[0] );
-                ScriptGroup_01( def, colorNumber );
-            }
+            // Append " <code><n> " (leading and trailing space).
+            const std::string tempString = std::string( value ) + va( " %s%i ", scriptColorKey, colorNumber );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString.c_str() );
+            Sys_Printf( "Set node/AI key value to %s\n", tempString.c_str() );
+            // KIWI: once - the binary re-ran it per token of tempString, but _01's own strtok
+            // ended that loop whenever _01 did anything
+            ScriptGroup_01( def, colorNumber );
         }
         else
         {
             // Create the value as "<code><n> " (trailing space).
-            strcpy( tempString, va( "%s%i ", scriptColorKey, colorNumber ) );
-            if ( strlen( tempString ) == 0 )
-                DeleteKey( &def->epairs, g_PrefsDlg->ScriptColorTeamKey.c_str() );
-            else
-                SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString );
-            Sys_Printf( "Set node/AI key value to %s\n", tempString );
+            const std::string tempString = va( "%s%i ", scriptColorKey, colorNumber );
+            SetKeyValue( def, g_PrefsDlg->ScriptColorTeamKey.c_str(), tempString.c_str() );
+            Sys_Printf( "Set node/AI key value to %s\n", tempString.c_str() );
         }
     }
 }
@@ -1248,13 +971,7 @@ void ScriptGroup_AddColorToSelection()
                 continue;
             iassert( b->owner->def == b->def->owner );
             entity_s_def *def = (entity_s_def *)owner->def;
-
-            const char *classname = zero;
-            for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-            {
-                if ( !_stricmp( ep->key, "classname" ) ) { classname = ep->value; break; }
-            }
-            if ( strstr( classname, "actor" ) )
+            if ( strstr( ValueForKey2( def, "classname" ), "actor" ) )
                 SetKeyValue( def, "script_forcecolor", g_PrefsDlg->ScriptColorKey.c_str() );
         }
     }
@@ -1277,11 +994,13 @@ void ScriptGroup_AddColorToSelection()
 //   1671 script_flag_true listbox    1298 script_flag_false listbox
 
 // UI-independent read behind the two script-flag lists (ScriptGroup_HasFlag 0x454e40's
-// selected-trigger token walk).  Dedups via a 16-byte-stride scratch.
+// selected-trigger token walk), deduplicated.
+// KIWI: a std::set - the binary's seen[256][16] slots and buf[1024] overran on normal 16+
+// character flag names and on long values, and this runs every frame while the Script group
+// panel is open.
 void ScriptGroupFlags_Gather( const char *key, std::vector<std::string> &rows )
 {
-    char seen[256][16];
-    int  seenCount = 0;
+    std::set<std::string> seen;
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
@@ -1294,47 +1013,26 @@ void ScriptGroupFlags_Gather( const char *key, std::vector<std::string> &rows )
           && !Entity_HasEpairMatch( def, "classname", "trigger_radius" ) )
             continue;
 
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
+        for ( const std::string &token : SG_Tokens( ValueForKey2( def, key ) ) )
         {
-            if ( !_stricmp( ep->key, key ) ) { value = ep->value; break; }
-        }
-        char buf[1024];
-        strcpy( buf, value );
-        if ( !buf[0] )
-            continue;
-
-        for ( char *token = strtok( buf, " " ); token; token = strtok( nullptr, " " ) )
-        {
-            iassert( token[0] );
-            // Add only if not already seen.
-            bool found = false;
-            for ( int i = 0; i < seenCount; ++i )
-            {
-                if ( !strcmp( token, seen[i] ) ) { found = true; break; }
-            }
-            if ( !found )
-            {
+            if ( seen.insert( token ).second )   // add only if not already seen
                 rows.push_back( token );
-                strcpy( seen[seenCount], token );
-                ++seenCount;
-            }
         }
     }
 }
 
-// 0x454480  ScriptGroup_SyncGroupKeyToTeam (was sub_454480) — force the active script
+// 0x454480  ScriptGroup_SyncGroupKeyToTeam — force the active script
 // "group key" to be the colour-team key (so the colour-team path owns the selection) and
 // save prefs.  The two menu handlers call this BEFORE the cluster ops, to switch the
 // system into colour-team mode.  The binary also mirrored the new value into the dialog's
 // group-key edit and returned focus to the camera; the panel re-reads the pref instead.
 void ScriptGroup_SyncGroupKeyToTeam()
 {
-    g_PrefsDlg->ScriptGroupKey = g_PrefsDlg->ScriptColorTeamKey;   // CString_Assign
+    g_PrefsDlg->ScriptGroupKey = g_PrefsDlg->ScriptColorTeamKey;
     Prefs_SavePrefs( g_PrefsDlg );
 }
 
-// ── button actions (the sub_454*/455B* helpers) ───────────────────────────────
+// ── button actions ────────────────────────────────────────────────────────────
 // Each took its edit control's text and drove a cluster function; the panel passes the
 // same strings straight in.
 
@@ -1421,67 +1119,51 @@ void ScriptGroupColorCode_Apply( const char *code )
 
 // ── turret-share button handlers ──────────────────────────────────────────────
 // 0x455b60  ScriptGroupDlg_TurretShare — the "Share" turret-key button.
-// Sets the group key to "token" + the token key to "script_turret_share" (which the
-// binary mirrored into the sub-key edit 0x65F), then for EACH selected misc_turret entity
-// whose "export" key has atol>0, adds token key + that export number to every selected
-// entity.  The binary staged both through the two edit controls and read them back out
-// via ScriptGroupDlg_AddSubKey; the same pair goes straight into ScriptGroupAddSubKey_Apply
-// here, which is what that round trip amounted to (and which stores them to prefs, so the
-// panel's fields still end up holding the values the edits did).
-void ScriptGroupTurretShare_Apply()   // 0x455b60
+// Sets the group key to "token" + the token key to "script_turret_share", then for EACH
+// selected misc_turret entity whose "export" key has atol>0, adds token key + that export
+// number to every selected entity through ScriptGroupAddSubKey_Apply (which stores the
+// pair to prefs, so the panel's fields end up holding the values).
+void ScriptGroupTurretShare_Apply()
 {
-    std::string exportStr;   // IDB local CString (str_set scratch); std::string here
+    std::string exportStr;
 
-    g_PrefsDlg->ScriptGroupKey      = "token";                  // str_set(&ScriptGroupKey,"token",5)
-    g_PrefsDlg->ScriptGroupTokenKey = "script_turret_share";    // str_set(&ScriptGroupTokenKey,...)
+    g_PrefsDlg->ScriptGroupKey      = "token";
+    g_PrefsDlg->ScriptGroupTokenKey = "script_turret_share";
     const std::string subKey = g_PrefsDlg->ScriptGroupTokenKey;
 
     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
     {
         entity_s_def *def = (entity_s_def *)b->owner->def;
-
-        // classname == "misc_turret"?
-        const char *classname = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, "classname" ) ) { classname = ep->value; break; }
-        }
-        if ( strcmp( classname, "misc_turret" ) )
+        if ( strcmp( ValueForKey2( def, "classname" ), "misc_turret" ) )
             continue;
 
-        // its "export" key value.
-        const char *value = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, "export" ) ) { value = ep->value ? ep->value : zero; break; }
-        }
-        exportStr = value;
+        exportStr = ValueForKey2( def, "export" );
         if ( atol( exportStr.c_str() ) > 0 )
             ScriptGroupAddSubKey_Apply( subKey.c_str(), exportStr.c_str() );
     }
 
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 
 // 0x455d80  ScriptGroupDlg_TurretKey — the "ambush"/"share" turret-key rows.
-// Sets the group key to "token" + the token key to `turretKey` (which the binary mirrored
-// into the sub-key edit 0x65F).  If the FIRST selected entity's "export" key has atol>0
-// (the turret being shared), it gathers the export numbers of every OTHER selected
-// misc_turret (up to MAX_COLORENTREES=32, packed into a [32][16] table), re-links the first
-// brush to the FRONT of the selection (Select_Deselect(1) + Brush_RemoveFromList/AddToList2),
-// then adds token key + each gathered export to every selected entity.  Same edit-control
-// round trip collapsed as in ScriptGroupTurretShare_Apply above.
-void ScriptGroupTurretKey_Apply( const char *turretKey )   // 0x455d80
+// Sets the group key to "token" + the token key to `turretKey`.  If the FIRST selected
+// entity's "export" key has atol>0 (the turret being shared), it gathers the export numbers
+// of every OTHER selected misc_turret, re-links the first brush to the FRONT of the
+// selection (Select_Deselect(1) + Brush_RemoveFromList/AddToList2), then adds token key +
+// each gathered export to every selected entity (via ScriptGroupAddSubKey_Apply, as in
+// ScriptGroupTurretShare_Apply above).
+void ScriptGroupTurretKey_Apply( const char *turretKey )
 {
-    std::string exportStr;   // IDB local CString (str_set scratch); std::string here
-    char    String[MAX_COLORENTREES][16];   // IDB String[512] = export-token table, stride 16
-    int     exports = 0;
+    std::string exportStr;
+    // KIWI: the binary's String[32][16] export table took a strcpy per turret with only an
+    // assert on the count - a 16+ character export or 32+ other turrets overran the stack.
+    std::vector<std::string> exportList;
 
-    g_PrefsDlg->ScriptGroupKey      = "token";                                  // str_set(...,"token",5)
-    g_PrefsDlg->ScriptGroupTokenKey = ( turretKey ? turretKey : "" );           // str_set(&...,Src,strlen); NULL-safe like MFC's CString=
+    g_PrefsDlg->ScriptGroupKey      = "token";
+    g_PrefsDlg->ScriptGroupTokenKey = ( turretKey ? turretKey : "" );           // NULL-safe like MFC's CString=
     const std::string subKey = g_PrefsDlg->ScriptGroupTokenKey;
 
     selbrush_t *first = selected_brushes.next;
@@ -1490,51 +1172,31 @@ void ScriptGroupTurretKey_Apply( const char *turretKey )   // 0x455d80
 
     // the FIRST selected entity's "export" value.
     entity_s_def *firstDef = (entity_s_def *)first->owner->def;
-    const char *value = zero;
-    for ( epair_t *ep = firstDef->epairs; ep; ep = ep->next )
-    {
-        if ( !_stricmp( ep->key, "export" ) ) { value = ep->value; break; }
-    }
-    if ( atol( value ) <= 0 )
+    if ( atol( ValueForKey2( firstDef, "export" ) ) <= 0 )
         return;
 
-    // gather every OTHER selected misc_turret's export number into the table.
+    // gather every OTHER selected misc_turret's export number.
     for ( selbrush_t *b = first->next; b != &selected_brushes; b = b->next )
     {
         entity_s_def *def = (entity_s_def *)b->owner->def;
-
-        const char *classname = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, "classname" ) ) { classname = ep->value; break; }
-        }
-        if ( strcmp( classname, "misc_turret" ) )
+        if ( strcmp( ValueForKey2( def, "classname" ), "misc_turret" ) )
             continue;
 
-        const char *exp = zero;
-        for ( epair_t *ep = def->epairs; ep; ep = ep->next )
-        {
-            if ( !_stricmp( ep->key, "export" ) ) { exp = ep->value ? ep->value : zero; break; }
-        }
-        exportStr = exp;
+        exportStr = ValueForKey2( def, "export" );
         if ( atol( exportStr.c_str() ) > 0 )
-        {
-            strcpy( String[exports], exportStr.c_str());
-            ++exports;
-            iassert( exports < MAX_COLORENTREES );   // ScriptGroup.cpp:1818
-        }
+            exportList.push_back( exportStr );
     }
 
     // re-link the shared turret to the front of the selection, then propagate.
     Select_Deselect( 1 );
     Brush_RemoveFromList( first );
     Brush_AddToList2( first );
-    for ( int i = 0; i < exports; ++i )
-        ScriptGroupAddSubKey_Apply( subKey.c_str(), String[i] );
+    for ( size_t i = 0; i < exportList.size(); ++i )
+        ScriptGroupAddSubKey_Apply( subKey.c_str(), exportList[i].c_str() );
 
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     g_nUpdateBits = -1;
 }
 
@@ -1544,9 +1206,9 @@ void ScriptGroupTurretKey_Apply( const char *turretKey )   // 0x455d80
 void ScriptGroupKeyPreset_Apply( const char *key )
 {
     g_PrefsDlg->ScriptGroupKey = key;
-    sub_47D060( &active_brushes );
-    sub_47D060( &selected_brushes );
-    sub_47D060( &filtered_brushes );
+    BrushList_RebuildDisplay( &active_brushes );
+    BrushList_RebuildDisplay( &selected_brushes );
+    BrushList_RebuildDisplay( &filtered_brushes );
     Prefs_SavePrefs( g_PrefsDlg );
     ScriptGroup_AssignNextNumber();
     g_nUpdateBits = -1;
@@ -1573,21 +1235,18 @@ void AssociateEntities()
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  SCRIPT-GROUP single-char TEAM-COLOUR VISUALIZATION (the 2D-view marker)
-//  sub_46B110 (0x46B110) + its two leaves CamTokens_EntityGate (0x46AAE0) /
-//  CamTokens_BrushMatchesToken (0x46AA80).  Ported VERBATIM from the disasm
-// This is the XYWnd analog of camwnd.cpp's Cam_DrawTokens
-//  (CamWnd_Tokens 0x4076C0) — same token-parse + per-entity billboard machinery,
-//  but driven from CXYWnd::XY_Draw with the view-rect AABB cull + the two view
-//  axes the 2D view supplies.  Wired into XY_DrawBrushes (xywnd.cpp) at the
-//  binary's call position (XY_Draw 0x46D867, gated on a selected trigger's
-//  non-empty ScriptColorTeamKey value).
+//  The drawing itself (ScriptGroup_DrawTeamColorViz 0x46B110 and its two leaves) lives in
+//  xywnd.cpp.  It is the XYWnd analog of camwnd.cpp's Cam_DrawTokens (CamWnd_Tokens
+//  0x4076C0) - same token-parse + per-entity billboard machinery, but driven from
+//  CXYWnd::XY_Draw with the view-rect AABB cull + the two view axes the 2D view supplies.
+//  Called from XY_DrawBrushes (the binary's call position: XY_Draw 0x46D867), gated on a
+//  selected trigger's non-empty ScriptColorTeamKey value.
 // ═════════════════════════════════════════════════════════════════════════════
-extern char  FilterBrush( selbrush_t *b, int updateFilters );        // filters.cpp 0x46A1F0
 extern void  Ed_DrawScriptColorQuad( const entity_s *entDef, const float *color );// brush.cpp  0x46AE10
 
-// 0x4560F0  PrefsDlg_ScriptTeamColorEnabled (sub_4560F0) — true when the team-colour
+// 0x4560F0  PrefsDlg_ScriptTeamColorEnabled — true when the team-colour
 // visualization is active: ScriptGroupKey != "token" AND ScriptGroupKey == the
-// ScriptColorTeamKey.  Disasm-faithful (the && of strcmp!=0 and strcmp==0).  XY_Draw
+// ScriptColorTeamKey.  XY_Draw
 // (xywnd.cpp) gates the per-trigger team-colour capture on this; the camera path inlines
 // the same test.
 bool PrefsDlg_ScriptTeamColorEnabled()

@@ -21,7 +21,9 @@
 #include "kiwi_glass.h"
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"
+#include "kiwi_fmt.h"
 #include "kiwi_matwriter.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_windows.h"
 #include "radiant_registry.h"
@@ -42,43 +44,16 @@
 #define CONTENTS_GLASS 0x10
 #endif
 
-extern int         Sys_Printf( const char *fmt, ... );
-extern int         g_nUpdateBits;
-extern entity_s   *world_entity;                                             // map.cpp
-extern entity_s    entities;                                                 // entity.cpp (definition list)
-extern entity_s    entityInsts;                                              // entity.cpp (instance list)
-extern selbrush_t  selected_brushes;
-extern selbrush_t  active_brushes;
 extern eclass_t   *g_eclass;                                                 // eclass.cpp:117
 extern eclass_t   *Eclass_InitFromText( void *textPtr );                     // eclass.cpp:792
-extern void        Eclass_InsertAlphabetized( const char ***a1, const char **a2 ); // eclass.cpp:947
-extern eclass_t   *Eclass_ForName( int has_brushes, const char *name );      // eclass.cpp:1090
-extern entity_s   *Entity_Create( eclass_t *eclass );                        // entity.cpp:1660
-extern void        Entity_Free( char *a1 );                                  // entity.cpp:1519
-extern void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );      // entity.cpp:469
-extern void        Entity_UnlinkBrush( brush_t *b );                         // entity.cpp:503
+extern void        Eclass_InsertAlphabetized( eclass_t **list, eclass_t *ec ); // eclass.cpp
 extern selbrush_t *Entity_LinkBrush_0_extern( entity_s *e, entity_brush_s *b );// brush.cpp:639
-extern void        Brush_BuildWindings( brush_t *def, int bFull );
-extern void        SetupVertexSelection();
-extern void        MarkMapModified();
-extern void        sub_476330( selbrush_t *b );                              // brush.cpp:858 Brush_Deselect_Helper
-extern void        sub_476470( selbrush_t *b );                              // brush.cpp:973 Brush_Select_Helper
-extern void        sub_47B940( brush_t *def );                               // brush.cpp Brush_UpdateSpecialMaterialFlag
-extern void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:234
-extern char       *ValueForKey2( const entity_s *e, const char *key );       // entity.cpp:91; "" when absent
-extern void        Undo_ClearRedo();                                         // undo.cpp:176
-extern void        Undo_GeneralStart( const char *operation );               // undo.cpp:367 (keeps the pointer)
-extern void        Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494; takes brush def
-extern void        Undo_AddEntity_W( entity_s *a1 );                         // undo.cpp:634
+extern void        Brush_Deselect_Helper( selbrush_t *b );                   // brush.cpp
+extern void        Brush_Select_Helper( selbrush_t *b );                     // brush.cpp
 extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // undo.cpp:664
-extern void        Undo_End();                                               // undo.cpp:687
-extern bool        Radiant_RegisterCommand( const char *name, byte vk, byte mods, int commandId ); // mainfrm.cpp:1481
-extern ImGuiID     ImGuiShell_DockRoot();                                    // imgui_shell.cpp
-extern qtexture_s *Texture_GetHandle( const char *name );                    // texwnd.cpp:318 (registers)
 extern int         TexWnd_MaterialCount();                                   // texwnd.cpp (end)
 extern qtexture_s *TexWnd_MaterialAt( int idx );                             // texwnd.cpp (end)
 extern void        TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out ); // texwnd.cpp (end)
-extern LayerMaterialDef *Materialdef_GetName( MaterialDef *m );              // 0x431640: the name
 
 namespace
 {
@@ -178,15 +153,15 @@ namespace
     {
         char buf[64];
         std::string t = "GLASSDEF";
-        auto num  = [&]( const char *k, const char *fmt, double v ) { _snprintf( buf, sizeof( buf ) - 1, fmt, v ); buf[sizeof( buf ) - 1] = '\0'; t += "\\"; t += k; t += "\\"; t += buf; };
+        auto num  = [&]( const char *k, float v ) { t += "\\"; t += k; t += "\\"; t += KiwiFmt_Exact( buf, sizeof( buf ), v + 0.0f, 0 ); };
         auto inum = [&]( const char *k, int v ) { _snprintf( buf, sizeof( buf ) - 1, "%i", v ); buf[sizeof( buf ) - 1] = '\0'; t += "\\"; t += k; t += "\\"; t += buf; };
         auto str  = [&]( const char *k, const std::string &v ) { if ( !v.empty() ) { t += "\\"; t += k; t += "\\"; t += v; } };
         inum( "maxHealth", s.maxHealth );
-        num( "minShardSize", "%.9g", s.minShardSize );          // %.9g: %g kept 6 digits
-        num( "maxShardSize", "%.9g", s.maxShardSize );
-        num( "shardLifeProbability", "%.9g", s.keep );
+        num( "minShardSize", s.minShardSize );
+        num( "maxShardSize", s.maxShardSize );
+        num( "shardLifeProbability", s.keep );
         inum( "maxShards", s.maxShards );
-        num( "uvScale", "%.9g", s.uvScale );
+        num( "uvScale", s.uvScale );
         inum( "frameEdges", s.frameEdges );
         str( "pristineMaterial", s.pristine );
         str( "crackedMaterial", s.cracked );
@@ -378,7 +353,7 @@ namespace
     {
         const bool wasSelected = ( (unsigned)sb->brushFlags & 0x80u ) != 0;
         if ( wasSelected )
-            sub_476330( sb );
+            Brush_Deselect_Helper( sb );
         brush_t *bDef = sb->def;
         Entity_UnlinkBrush( bDef );
         Entity_LinkBrush( bDef, (entity_s *)targetDef );
@@ -389,7 +364,7 @@ namespace
         MarkMapModified();
         ++bDef->version;
         if ( wasSelected )
-            sub_476470( sb );
+            Brush_Select_Helper( sb );
     }
 
     // ── slab geometry (the game's routine) ──────────────────────────────────
@@ -429,10 +404,8 @@ namespace
             return false;
         const texdef_sub_t &td = def->faces[slab.frontFace].mtldef[0].mat_texDef;
         const float sx = td.size[0] != 0.0f ? fabsf( td.size[0] ) : 128.0f;
-        char buf[32];
-        _snprintf( buf, sizeof( buf ) - 1, "%.9g", (double)(float)( 1.0 / (double)sx ) );   // the float the game reads
-        buf[sizeof( buf ) - 1] = '\0';
-        out = buf;
+        char buf[48];
+        out = KiwiFmt_Exact( buf, sizeof( buf ), (float)( 1.0 / (double)sx ), 0 );   // the float the game reads
         return true;
     }
 
@@ -574,7 +547,7 @@ namespace
         Brush_BuildWindings( def, 1 );
         MarkMapModified();
         ++def->version;
-        sub_47B940( def );
+        Brush_UpdateSpecialMaterialFlag( def );
     }
 
     // The editor's pane material for faces that are not glass when the set names none
@@ -984,7 +957,7 @@ void KiwiGlass_RegisterEclass()
         "*/";
     eclass_t *ec = Eclass_InitFromText( text );
     if ( ec )
-        Eclass_InsertAlphabetized( (const char ***)&g_eclass, (const char **)ec );
+        Eclass_InsertAlphabetized( &g_eclass, ec );
 }
 
 // ── commands ───────────────────────────────────────────────────────────────────
@@ -1104,7 +1077,7 @@ bool KiwiGlass_Make()
     for ( size_t i = 0; i < reset.size(); ++i )
         ApplyToPane( reset[i], setName.c_str(), pristine, fallback );
     for ( size_t i = 0; i < drained.size(); ++i )
-        Entity_Free( (char *)drained[i] );
+        Entity_Free( drained[i] );
     Undo_End();
 
     RestoreSelection( keep );
@@ -1187,7 +1160,7 @@ bool KiwiGlass_Unmake()
         RelinkBrush( b, targetInst, targetInst == world_entity ? worldDef : (entity_s_def *)targetInst->def );
     }
     for ( size_t i = 0; i < drained.size(); ++i )
-        Entity_Free( (char *)drained[i] );
+        Entity_Free( drained[i] );
     Undo_End();
 
     RestoreSelection( keep );

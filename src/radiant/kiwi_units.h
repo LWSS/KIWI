@@ -27,3 +27,6 @@ void  KiwiUnits_SetGridSpacingInches( float inches );
 
 // Convert grid spacing back to raw world units for geometry.
 float KiwiUnits_GridSpacingWorld();
+
+// Test-only: re-read the persisted values (kiwi_testprobe's `pref units reload`).
+void  KiwiUnits_ReloadForTest();

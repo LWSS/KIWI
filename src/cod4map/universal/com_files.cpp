@@ -19,46 +19,21 @@ Searchpath_t     *fs_searchpaths;
 
 char          DstBuf[MAX_OS_PATH];
 int           fs_loadStack;
-char          g_assertLangBuf[138];
 char          g_basePath[MAX_OS_PATH];
 void        (*g_errorHandler)(const char *, va_list);
 char          g_fsBaseGame[MAX_OS_PATH_SHORT] = "";
 const char   *g_fsDefaultCfgDvar;
 char          g_fsGameDir[MAX_OS_PATH_SHORT];
 int           g_fsInitialized;
-char          g_fsPathFlags0;
-char          g_fsPathFlags1;
-char          g_fsPathFlags2;
-char          g_fsPathFlags3;
 char          g_gameDirRelative[MAX_OS_PATH];
 char          g_gameDir[MAX_OS_PATH];
 int           g_langBufToggle;
+static char   s_iwdLangBuf[2][64]; // KIWI: was bytes 10..137 of the decomp's g_assertLangBuf (0..9 held assert flags)
 char          g_ospath[MAX_OS_PATH];
 char          g_savedFsBasepath[MAX_OS_PATH_SHORT];
 char          g_savedFsGame[MAX_OS_PATH_SHORT];
 int           g_totalIwdFiles;
 static char   iwd_wildcard[] = "*.iwd";
-
-char s_assertDisable_FS_HandleForFile;
-char s_assertDisable_FS_FileForHandle;
-char s_assertDisable_FS_FileForHandle;
-char s_assertDisable_FS_FileForHandle;
-char s_assertDisable_FS_filelength;
-char s_assertDisable_FS_FCloseFile;
-char s_assertDisable_FS_FOpenFileAppend;
-char s_assertDisable_FS_SanitizePath;
-char s_assertDisable_FS_BuildOSPathFull;
-char s_assertDisable_FS_BuildOSPathFull;
-char s_assertDisable_FS_BuildOSPathFull;
-char s_assertDisable_FS_FOpenFileRead;
-char s_assertDisable_FS_FOpenFileRead;
-char s_assertDisable_FS_SV_GetFilepath;
-char s_assertDisable_FS_SV_GetFilepath;
-char s_assertDisable_FS_ListFilteredFiles;
-char s_assertDisable_FS_ListFilteredFiles;
-char s_assertDisable_FS_ListFiles;
-char s_assertDisable_FS_AddGameDirectory;
-char s_assertDisable_FS_InitFilesystem;
 
 /*
 ================
@@ -674,18 +649,6 @@ int FS_Write( const void *buffer, int len, int f )
 
 /*
 ================
-FS_ClearLoadStack
-
-Resets the load stack counter.
-================
-*/
-void FS_ClearLoadStack()
-{
-  fs_loadStack = 0;
-}
-
-/*
-================
 FS_FreeFile
 
 Frees a file buffer allocated by FS_LoadFile.
@@ -861,14 +824,12 @@ Extracts language string from IWD filename (e.g. "localized_english_iw00").
 */
 char *IwdFileLanguage(const char *iwdName)
 {
-  #define LANG_BUF_OFFSET 10
-  #define LANG_BUF_SIZE   64
   char *buf;
   int slot, i;
 
   slot = g_langBufToggle ^ 1;
   g_langBufToggle = slot;
-  buf = &g_assertLangBuf[LANG_BUF_OFFSET + LANG_BUF_SIZE * slot];
+  buf = s_iwdLangBuf[slot];
 
   if ( strlen(iwdName) < LOCALIZED_PREFIX_LEN )
   {
@@ -876,16 +837,14 @@ char *IwdFileLanguage(const char *iwdName)
     return buf;
   }
 
-  memset(buf, 0, LANG_BUF_SIZE);
-  for ( i = LOCALIZED_PREFIX_LEN; i < LANG_BUF_SIZE; i++ )
+  memset(buf, 0, sizeof(s_iwdLangBuf[0]));
+  for ( i = LOCALIZED_PREFIX_LEN; i < (int)sizeof(s_iwdLangBuf[0]); i++ )
   {
     if ( !iwdName[i] || !isalpha(iwdName[i]) )
       break;
     buf[i - LOCALIZED_PREFIX_LEN] = iwdName[i];
   }
   return buf;
-  #undef LANG_BUF_OFFSET
-  #undef LANG_BUF_SIZE
 }
 
 /*
@@ -1380,45 +1339,6 @@ int FS_LoadFile(const char *filename, void **bufferptr)
   }
   FS_FCloseFile( fileHandle );
   return fileSize;
-}
-
-/*
-================
-FS_SV_GetFilepath
-
-Finds a file across search paths, returns its OS path.
-================
-*/
-int FS_SV_GetFilepath( const char *filename, char *ospath )
-{
-  Searchpath_t *sp;
-  FILE *file;
-  char sanitized[MAX_OS_PATH_SHORT];
-
-  Assert( filename, s_assertDisable_FS_SV_GetFilepath );
-  Assert( ospath, s_assertDisable_FS_SV_GetFilepath );
-
-  if ( !FS_SanitizePath( filename, sanitized, MAX_OS_PATH_SHORT ) )
-    return -1;
-
-  /* search directory paths (skip IWD packs) */
-  for ( sp = (Searchpath_t *)fs_searchpaths; sp; sp = sp->next )
-  {
-    if ( sp->localized && fs_ignoreLocalized->current.enabled )
-      continue;
-    if ( sp->iwd )
-      continue;
-
-    FS_BuildOSPathFull( sp->dir->path, sp->dir->gamedir, sanitized, ospath, 0 );
-    file = fopen( ospath, "rb" );
-    if ( file )
-    {
-      fclose( file );
-      return 0;
-    }
-  }
-
-  return -1;
 }
 
 /*
@@ -2035,42 +1955,6 @@ int FS_StartupFull( const char *gamedir )
   Dvar_ClearModified( *fs_gameDirVar );
   Sys_Printf( "----------------------\n" );
   return Sys_Printf( "%d files in iwd files\n", g_totalIwdFiles );
-}
-
-/*
-================
-FS_FindDefaultConfig
-
-Checks for default_localize.cfg then default.cfg.
-================
-*/
-const char *FS_FindDefaultConfig( void )
-{
-  int fileSize, fileHandle;
-
-  if ( !fs_searchpaths )
-    Com_ErrorLevel( 0, "Filesystem call made without initialization\n" );
-  g_fsInitialized = 1;
-
-  /* try localized config first */
-  fileSize = FS_FOpenFileRead( "default_localize.cfg", &fileHandle, FS_THREAD_MAIN );
-  if ( fileHandle )
-  {
-    FS_FCloseFile( fileHandle );
-    if ( fileSize > 0 )
-      return "default_localize.cfg";
-  }
-
-  /* fall back to default config */
-  fileSize = FS_FOpenFileRead( "default.cfg", &fileHandle, FS_THREAD_MAIN );
-  if ( fileHandle )
-  {
-    FS_FCloseFile( fileHandle );
-    if ( fileSize > 0 )
-      return "default.cfg";
-  }
-
-  return NULL;
 }
 
 /*

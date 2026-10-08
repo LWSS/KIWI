@@ -6,12 +6,6 @@ Reconstructed from cod2map.exe by Rose.
 
 #include "cod4map.h"
 
-char s_assertDisable_LeakFile;
-char s_assertDisable_LeakFile;
-char s_assertDisable_PortalLeakFile;
-char s_assertDisable_PortalLeakFile;
-
-
 /*
 ================
 LeakFile

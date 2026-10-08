@@ -55,17 +55,21 @@ typedef struct DXGI_JPEG_QUANTIZATION_TABLE
 
 #include "kiwi_refimage.h"
 #include "kiwi_camera.h"
+#include "kiwi_command.h"   // KiwiCmd_KeyHeld
 #include "kiwi_conselect.h"
 #include "kiwi_droptrace.h"
+#include "kiwi_fmt.h"
 #include "kiwi_focus.h"
 #include "kiwi_grid.h"
 #include "kiwi_iwi.h"
 #include "kiwi_lines.h"
 #include "kiwi_matwriter.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_undo.h"
 #include "kiwi_units.h"
+#include "kiwi_vec.h"
 #include "kiwi_windows.h"
 #include "radiant_frame.h"
 #include "radiant_registry.h"
@@ -90,23 +94,12 @@ typedef struct DXGI_JPEG_QUANTIZATION_TABLE
 
 #pragma comment(lib, "windowscodecs.lib")
 
-extern int       Sys_Printf( const char *fmt, ... );                         // win_qe3.cpp:121
 extern void      KiwiRegion_ClearSelection();                                // kiwi_region.cpp
 extern void      KiwiSun_ClearSelection();                                   // kiwi_sun.cpp
-extern int       g_nUpdateBits;                                              // engine_stubs.cpp:773
-extern int       modified;                                                   // map.cpp:67
-extern camera_s *Ed_Camera();                                                // camwnd.cpp:165
-extern char      Byte4PackPixelColor( float *from, GfxColor *out );          // engine_stubs.cpp:827
-extern void __cdecl R_AddRenderCmdDrawTris(
-    Material *material, MaterialTechniqueType techType, short indexCount,
-    const uint16_t *indices, short vertexCount,
-    const float ( *xyzw )[4], const float ( *normal )[3], float *color,
-    const float ( *st )[2] );                                                // r_rendercmds.cpp:2505
 extern bool ImGuiShell_ViewportAtScreen( int screenX, int screenY,
                                          int *rttId, int *imgX, int *imgY );  // imgui_shell.cpp:385
 extern bool ImGuiShell_LastViewport( int *rttId, int *imgX, int *imgY );      // imgui_shell.cpp:405
 extern void ImGuiShell_AbortViewportInput();                                  // imgui_shell.cpp:730
-extern ImGuiID ImGuiShell_DockRoot();                                         // imgui_shell.cpp:974
 extern void ImGuiShell_FocusTab( const char *title );                         // imgui_shell.cpp:208
 
 krefImage_t::krefImage_t()
@@ -126,7 +119,7 @@ krefImage_t::krefImage_t()
 namespace
 {
     const char *KREF_PROFILE = "KiwiRefImage";
-    const float KREF_PI = 3.14159265358979323846f;
+    const float KREF_PI = (float)KIWI_PI;
     const int   KREF_UNDO_DEPTH = KUNDO_DOMAIN_DEPTH;
     const float KREF_MIN_SIZE = 0.125f;
 
@@ -244,11 +237,6 @@ const krefImage_t *KiwiRefImage_At( int index )
     return index >= 0 && index < (int)s_images.size() ? &s_images[index] : nullptr;
 }
 
-krefImage_t *KiwiRefImage_MutableAt( int index )
-{
-    return index >= 0 && index < (int)s_images.size() ? &s_images[index] : nullptr;
-}
-
 int KiwiRefImage_Add( const krefImage_t &image )
 {
     krefImage_t copy = image;
@@ -359,13 +347,6 @@ bool KiwiRefImage_PickAt( int imgX, int imgY, int *outIndex, float *outDepthOrDi
     return false;
 }
 
-void KiwiRefImage_ApplyRect( float x0, float y0, float x1, float y1,
-                             bool crossing, bool shift, bool ctrl )
-{
-    // Marquee never selects images (viewport clicks are not image selection).
-    (void)x0; (void)y0; (void)x1; (void)y1; (void)crossing; (void)shift; (void)ctrl;
-}
-
 void KiwiRefImage_ApplyRectXY( float x0, float y0, float x1, float y1,
                                bool crossing, bool shift, bool ctrl )
 {
@@ -455,28 +436,8 @@ bool KiwiRefImage_SetGroup( int index, int group )
     return true;
 }
 
-int KiwiRefImage_NewGroup( const char *name )
-{
-    CommitPending();
-    const storeSnap_t before = Snapshot();
-    krefGroup_t g;
-    g.id = s_nextGroupId++;
-    if ( name && name[0] ) g.name = name;
-    else
-    {
-        char nm[32];
-        _snprintf( nm, sizeof( nm ), "Group %i", g.id ); nm[sizeof( nm ) - 1] = '\0';
-        g.name = nm;
-    }
-    s_groups.push_back( g );
-    Touch( true );
-    ImmediateCommit( before, "new reference image group" );
-    return g.id;
-}
-
 int KiwiRefImage_GroupCount()          { return (int)s_groups.size(); }
 int KiwiRefImage_GroupIdAt( int i )     { return ( i >= 0 && i < (int)s_groups.size() ) ? s_groups[i].id : -1; }
-bool KiwiRefImage_GroupExists( int group ) { return GroupSlot( group ) >= 0; }
 
 const char *KiwiRefImage_GroupName( int group )
 {
@@ -834,7 +795,7 @@ void KiwiRefImage_RotateApplyMatrix( const float pivot[3], const float m[3][3] )
     // Favour the major planes: a near-aligned result snaps onto its plane.  Alt
     // keeps the exact free pose (the same modifier the armed drags use).
     if ( TiltDegrees( next ) <= KIWI_REFIMG_ALIGN_SNAP_DEG
-      && !( ::GetKeyState( VK_MENU ) & 0x8000 ) )
+      && !KiwiCmd_KeyHeld( VK_MENU ) )
         TiltSetIdentity( next );
     Sanitize( next );
 
@@ -2895,7 +2856,7 @@ namespace
         return ( XYPick( x, y, &hit, hitPoint ) && IsSel( hit ) ) ? hit : -1;
     }
 
-    bool AltDown() { return ( ::GetKeyState( VK_MENU ) & 0x8000 ) != 0; }
+    bool AltDown() { return KiwiCmd_KeyHeld( VK_MENU ); }
 
     bool BeginDrag( int index, int corner, bool shift, const float point[3] )
     {
@@ -3408,17 +3369,18 @@ void KiwiRefImage_WriteSidecar( FILE *f )
         WriteQuoted( f, "refimage", r.file );
         if ( r.group >= 0 ) fprintf( f, "group %i\n", r.group );
         fprintf( f, "axis %i\n", r.axis );
-        fprintf( f, "origin %.9g %.9g %.9g\n", r.origin[0], r.origin[1], r.origin[2] );
-        fprintf( f, "size %.9g %.9g\n", r.width, r.height );
+        char va[160], vb[160], vc[160];
+        fprintf( f, "origin %s\n", KiwiFmt_Vec3Exact( va, sizeof( va ), r.origin, 0 ) );
+        fprintf( f, "size %s %s\n", KiwiFmt_Exact( va, sizeof( va ), r.width + 0.0f, 0 ),
+                 KiwiFmt_Exact( vb, sizeof( vb ), r.height + 0.0f, 0 ) );
         if ( !r.keepAspect ) fprintf( f, "keepaspect 0\n" );
-        fprintf( f, "rotation %.9g\n", r.rotation );
+        fprintf( f, "rotation %s\n", KiwiFmt_Exact( va, sizeof( va ), r.rotation + 0.0f, 0 ) );
         if ( !TiltIsIdentity( r ) )
-            fprintf( f, "tilt %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g\n",
-                     r.tilt[0][0], r.tilt[0][1], r.tilt[0][2],
-                     r.tilt[1][0], r.tilt[1][1], r.tilt[1][2],
-                     r.tilt[2][0], r.tilt[2][1], r.tilt[2][2] );
+            fprintf( f, "tilt %s %s %s\n", KiwiFmt_Vec3Exact( va, sizeof( va ), r.tilt[0], 0 ),
+                     KiwiFmt_Vec3Exact( vb, sizeof( vb ), r.tilt[1], 0 ),
+                     KiwiFmt_Vec3Exact( vc, sizeof( vc ), r.tilt[2], 0 ) );
         fprintf( f, "flip %i %i\n", r.flipU ? 1 : 0, r.flipV ? 1 : 0 );
-        fprintf( f, "opacity %.9g\n", r.opacity );
+        fprintf( f, "opacity %s\n", KiwiFmt_Exact( va, sizeof( va ), r.opacity + 0.0f, 0 ) );
         fprintf( f, "locked %i\n", r.locked ? 1 : 0 );
         fprintf( f, "hidden %i\n", r.hidden ? 1 : 0 );
         fprintf( f, "order %i\n", r.layerOrder );

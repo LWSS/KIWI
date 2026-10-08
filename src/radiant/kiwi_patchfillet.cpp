@@ -17,6 +17,7 @@
 #include "kiwi_material.h"              // patch material realization
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -29,39 +30,21 @@
 #include <vector>
 
 // Ported entry points.
-extern int          Sys_Printf( const char *fmt, ... );                       // win_qe3.cpp:118
-extern int          g_nUpdateBits;                                            // 0x25D5A74 (mainfrm.cpp)
-
-extern size_t Brush_RemoveFace( brush_t *b, unsigned int faceIndex );   // brush.cpp:345  0x471640
-extern selbrush_t  *Brush_AddToList( brush_t *def, entity_s *owner );         // brush.cpp:669  0x475980
-extern void         Brush_AddToList2( selbrush_t *b );                        // brush.cpp:927  0x4765A0
-extern void         Select_Deselect( int a1 );                                // select.cpp:1444 0x48E800 (int, NOT char — mangling)
 
 // Patch allocation and linking mirror Patch_BrushToMesh; FinishNew* forwards
 // through its file-static material and tessellation workers.
-extern patchMesh_t *MakeNewPatch();                                           // pmesh.cpp:136  0x437AC0
-extern brush_t     *AddBrushForPatch( patchMesh_t *p, entity_s *world_ent );  // pmesh.cpp:840  0x4386A0
 extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558
 // Uses the parent face's texture scale instead of the editor default.
 extern void         Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );
 // Per-patch 0x4397B0 forwarder keeps Lmap alignment inside this undo bracket.
 extern void         Patch_KiwiLmapAlign( patchMesh_t *p );                    // pmesh.cpp
 extern void         Patch_KiwiCapAlign( patchMesh_t *p );                     // pmesh.cpp
-// Ported bounds, brush rebuild, curveDef, and version bookkeeping.
-extern void         Patch_Rebuild( patchMesh_t *p, char doBounds );           // pmesh.cpp:2137
-
-// Edge selections are absent from selected_brushes, so the undo head misses them.
-extern void         Undo_AddBrush( entity_brush_s *pBrushInst );              // undo.cpp:494  0x45E680
-
-// Must remain at file scope for MSVC linkage.
-extern bool         Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                             int commandId );                 // mainfrm.cpp:1340
 
 namespace
 {
     const float KPF_EPS       = 1.0e-4f;
     const float KPF_MATCH_TOL = 0.1f;      // the ported FindPoint dedup tolerance
-    const float KPF_PI        = 3.14159265358979f;
+    const float KPF_PI        = (float)KIWI_PI;
 
     // Bind the span limit to the patch format's column limit.
     static_assert( KPF_MAX_SPANS * 2 + 1 == KPATCH_MAX_WIDTH,
@@ -70,13 +53,6 @@ namespace
     const float KPF_COL_OK [3] = { 0.55f, 0.95f, 0.80f };   // the arc preview
     const float KPF_COL_BAD[3] = { 1.00f, 0.30f, 0.25f };
     const float KPF_COL_EDGE[3]= { 0.45f, 0.62f, 0.72f };   // the edges being filleted
-
-    inline bool PointNear( const float *a, const float *b, float tol )
-    {
-        float d[3];
-        Sub3( a, b, d );
-        return fabsf( d[0] ) <= tol && fabsf( d[1] ) <= tol && fabsf( d[2] ) <= tol;
-    }
 
 
     winding_t *WindingOf( const selbrush_t *b, int faceIndex )
@@ -792,7 +768,7 @@ namespace
             float deg = m_angleBase + (float)( x - m_angleX0 ) * KPF_ANGLE_DEG_PER_PIX;
             if ( KiwiCmd_SnapEngaged() )
                 deg = floorf( deg / KPF_ANGLE_SNAP_DEG + 0.5f ) * KPF_ANGLE_SNAP_DEG;
-            const float lim = m_units[0].biasLimit * ( 180.0f / 3.14159265358979f )
+            const float lim = m_units[0].biasLimit * ( 180.0f / (float)KIWI_PI )
                             - KPF_BIAS_GUARD_DEG;
             bool clamped = true;
             if ( !( lim > 0.0f ) )  deg = 0.0f;
@@ -886,7 +862,7 @@ namespace
         // forces zero because its circular arc has no biased form.
         void ApplyBias()
         {
-            const float toRad = 3.14159265358979f / 180.0f;
+            const float toRad = (float)KIWI_PI / 180.0f;
             for ( size_t i = 0; i < m_units.size(); ++i )
             {
                 filletUnit_t &u = m_units[i];

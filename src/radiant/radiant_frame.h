@@ -78,17 +78,17 @@ void        CommandList_Mods( const RadiantCommand &c, char mods[64] );
 
 // ─── The unsaved-changes prompts + the File-menu map flows (U-CMD-2) ─────────────
 // All plain Win32: the prompts are MessageBoxA over ::GetActiveWindow(), and the file flows
-// reach the shell only through s_currentMapPath + g_qeglobals.d_hwndMain (the frame HWND).
+// reach the shell only through the map path (currentmap) + g_qeglobals.d_hwndMain (the frame HWND).
 bool Radiant_ConfirmModified();                           // was CMainFrame::ConfirmModified   (0x49A030)
 bool Radiant_OkToDiscard();                               // was CMainFrame::OkToDiscard (the per-command guard)
 bool Radiant_FileSaveAs();                                // was CMainFrame::OnFileSaveAs_Confirmed (SaveAsDialog 0x49A760)
 void Radiant_FileNew();                                   // was CMainFrame::OnFileNew         (0x423AA0)
 void Radiant_FileOpen();                                  // was CMainFrame::OnFileOpen        (0x423AE0)
-void Radiant_FileSave();                                  // was CMainFrame::OnFileSave
-// KIWI-UX (ROUND BF): read-only view of s_currentMapPath (mainfrm.cpp:488), "" when the
-// map is untitled.  The Build & Run dialog (kiwi_launch.cpp) needs the AUTHORITATIVE saved
-// path to derive the compiler's -loadFrom source and the map name; `currentmap` (map.cpp:44)
-// is not that path -- prefab editing stomps it (map.cpp:1797-1813).
+bool Radiant_FileSave();                                  // was CMainFrame::OnFileSave; true = written
+bool Radiant_LeavePrefabLevels();                         // KIWI: leave every prefab level, each prompting like Leave Prefab
+// KIWI-UX (ROUND BF): the TOP LEVEL's saved map path, "" when the map is untitled - read
+// through `currentmap` (inside a prefab, through the stack slot that saved it).  The Build &
+// Run dialog (kiwi_launch.cpp) derives the compiler's -loadFrom source and the map name from it.
 const char *Radiant_CurrentMapPath();                     // mainfrm.cpp:495
 void Radiant_FileExit();                                  // was CMainFrame::OnFileExit (posts WM_CLOSE)
 bool Radiant_FrameCloseAllowed();                         // the guard half of CMainFrame::OnClose (0x422220)

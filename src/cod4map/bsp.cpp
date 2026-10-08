@@ -9,9 +9,6 @@ builds BSP tree, emits brushes/surfaces/portals/collision, writes d3dbsp.
 
 #include "cod4map.h"
 
-unsigned char _memory_placeholder[256];
-unsigned char _stack_placeholder[0x10000];
-
 OptionEntry_t optionsTable[] = {
     { "-platform",           "Required if not copying a bsp between platforms; specifies target platform", (OptionHandler)HandlePlatformOption },
     { "-pcToXenon",          "Copies a PC bsp to a Xenon bsp",                            (OptionHandler)Opt_PcToXenon          },
@@ -162,29 +159,6 @@ char *BuildOutputPathFromLoadSource(const char *extension, char *path, int pathS
   pathLength = (int)strlen(path);
   return I_strncpyz(path + pathLength, extension, pathSize - pathLength);
 }
-
-char g_assertFlags0;
-char g_assertFlags1;
-char g_assertFlags2;
-char g_assertFlags3;
-char g_assertFlags4;
-char g_assertFlags5;
-char g_assertFlags6;
-char g_assertFlags7;
-char g_assertFlags8;
-char g_assertFlags9;
-char g_assertFlagsA;
-char g_assertFlagsB;
-char g_assertFlagsC;
-char g_assertFlagsD;
-char g_assertFlagsE;
-char g_assertFlagsF;
-char s_assertDisable_BSP_SetTargetPlatform;
-char s_assertDisable_BSP_SetTargetPlatform_0;
-char s_assertDisable_OnlyEnts;
-char s_assertDisable_ProcessBSPArguments_0;
-char s_assertDisable_ProcessModels;
-char s_assertDisable_PrintSlowEntity;
 
 void ClampBlockSize(void)
 {
@@ -442,7 +416,7 @@ static void PrintSlowEntity(const Entity_t *entity, double elapsedSeconds)
 
 /*
 ================
-EmitBSP
+ProcessModels
 
 Emit BSP data for all entities.
 ================
@@ -513,11 +487,6 @@ int ProcessModels(void)
 
   verbose = savedVerbose;
   return numBSPModels;
-}
-
-int EmitBSP(void)
-{
-  return ProcessModels();
 }
 
 /*
@@ -799,15 +768,9 @@ void BSP_SetTargetPlatform()
   Assert(g_targetPlatform, s_assertDisable_BSP_SetTargetPlatform);
 
   /* PC and Xenon both use d3d extensions */
+  iassert( g_targetPlatform->platformId < PLATFORM_COUNT );
   if ( g_targetPlatform->platformId < PLATFORM_COUNT )
-  {
     SetBSPFileExtensions("d3d");
-  }
-  else if ( !g_assertsDisabled )
-  {
-    /* unhandled platform */
-    AssertFatal(0, s_assertDisable_BSP_SetTargetPlatform_0);
-  }
 }
 
 /*
@@ -1426,52 +1389,6 @@ int Opt_SmoothAngle(int argc, char **argv)
 
 /*
 ================
-Opt_curveSmoothAngle
-
-Set smooth shading angle threshold for curve surfaces.
-================
-*/
-int Opt_curveSmoothAngle(int argc, char **argv)
-{
-  unsigned int i;
-
-  if ( argc < 2 )
-  {
-    Com_Printf("USAGE: cod2map [options] mapname, where options are 0 or more of the following.\n");
-    Com_Printf("Options ignore capitalization; it is only present in the list for clarity.\n");
-    for ( i = 0; optionsTable[i].name != NULL; i++ )
-      Com_Printf("%-20s %s\n", optionsTable[i].name, optionsTable[i].description);
-    exit(-1);
-  }
-  smoothAngle = ParseSmoothAngle(argv[1], "curveSmoothAngle");
-  return 2;
-}
-
-/*
-================
-Opt_terrainSmoothAngle
-
-Set smooth shading angle threshold for terrain surfaces.
-================
-*/
-int Opt_terrainSmoothAngle(int argc, char **argv)
-{
-  unsigned int i;
-
-  if ( argc < 2 )
-  {
-    Com_Printf("USAGE: cod2map [options] mapname, where options are 0 or more of the following.\n");
-    Com_Printf("Options ignore capitalization; it is only present in the list for clarity.\n");
-    for ( i = 0; optionsTable[i].name != NULL; i++ )
-      Com_Printf("%-20s %s\n", optionsTable[i].name, optionsTable[i].description);
-    exit(-1);
-  }
-  smoothAngle = ParseSmoothAngle(argv[1], "terrainSmoothAngle");
-  return 2;
-}
-
-/*
-================
 Opt_subdivisions
 
 Set automatic subdivision tessellation size.
@@ -1548,107 +1465,3 @@ int Opt_brushMethod(int argc, char **argv)
   return 2;
 }
 
-/*
-================
-ProcessWorldBrushes
-
-Assign model numbers to brush entities.
-Iterates through all non-worldspawn entities and assigns "model" keys
-to entities that have brushes or patches. Model numbers start at "*1".
-These model references are used in the BSP to link entities to geometry.
-================
-*/
-int ProcessWorldBrushes(void)
-{
-  int i;
-  int modelNum;
-  Entity_t *ent;
-  char modelBuffer[12];
-
-  modelNum = 1;
-  for ( i = 1; i < num_entities; i++ )
-  {
-    ent = &g_entities[i];
-    if ( ent->brushes || ent->patches )
-    {
-      sprintf(modelBuffer, "*%i", modelNum++);
-      SetKeyValue(ent, "model", modelBuffer);
-    }
-  }
-  return num_entities;
-}
-
-/*
-================
-ProcessCoronaLights
-
-Auto-configure corona light z-cutoff values.
-
-Corona lights are glowing effects around light sources. This function finds
-corona entities that don't have zcutoff/zfadeout set, then looks for nearby
-misc_model entities (within 8 units) that are hanging lights. If found,
-it automatically sets the z-cutoff values for proper rendering.
-
-This prevents coronas from being visible through floors/ceilings by
-fading them out when viewed from above/below.
-================
-*/
-int ProcessCoronaLights(void)
-{
-  int i, j;
-  Entity_t *ent, *other;
-  const char *classname, *zcutoff, *model;
-
-  for ( i = 1; i < num_entities; i++ )
-  {
-    ent = &g_entities[i];
-    classname = ValueForKey(ent, "classname");
-    if ( Q_stricmp(classname, "corona") )
-      continue;
-
-    zcutoff = ValueForKey(ent, "zcutoff");
-    if ( zcutoff && *zcutoff )
-      continue;
-
-    /* find nearby misc_model that is a hanging light */
-    for ( j = 1; j < num_entities; j++ )
-    {
-      other = &g_entities[j];
-      if ( Q_stricmp(ValueForKey(other, "classname"), "misc_model") )
-        continue;
-      if ( VectorDistance(ent->origin, other->origin) > DUPLICATE_MODEL_DIST )
-        continue;
-
-      model = ValueForKey(other, "model");
-      if ( !Q_stricmp(model, "xmodel/hangingutillight")
-        || !Q_stricmp(model, "xmodel/light_ind_ceiling2on") )
-      {
-        SetKeyValue(ent, "zcutoff", "-0.15");
-        SetKeyValue(ent, "zfadeout", "-0.25");
-      }
-      break;
-    }
-  }
-  return num_entities;
-}
-
-/*
-================
-ProcessVisibility
-
-Initialize visibility/BSP counters.
-Resets global counters used during BSP generation before processing begins.
-Called after map entities are loaded, before BSP tree building.
-================
-*/
-int ProcessVisibility(void)
-{
-  numBSPModels = 0;
-  numBSPNodes = 0;
-  numBSPBrushSides = 0;
-  numBSPBrushEdges = 0;
-  numBSPLeafSurfaces = 0;
-  numBSPLeafBrushes = 0;
-  numBSPLeafs = 1;
-  return 0;
-}

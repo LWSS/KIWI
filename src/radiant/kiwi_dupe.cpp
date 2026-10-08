@@ -20,6 +20,7 @@
 #include "kiwi_lines.h"
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
+#include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_snap.h"
 #include "kiwi_units.h"
@@ -32,30 +33,7 @@
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
-extern int       Sys_Printf( const char *fmt, ... );                    // win_qe3.cpp:118
-extern int       g_nUpdateBits;                                         // 0x25D5A74 (mainfrm.cpp)
 extern void      Clone_Selection( float gridSize );                     // select.cpp:2508 0x48F0D0
-extern void      Select_Move( const float *delta, char bSnap );         // select.cpp:2152 0x48E9C0
-extern void      Select_Deselect( int a1 );                             // select.cpp:1463 0x48E800
-extern void      Select_Brush( selbrush_t *brush, char some_overwrite, char bStatus,
-                               char center_grid_on_selection );         // select.cpp:919
-extern void      Select_RotateAxis( int axis, float deg,
-                                    float (*rot_around)[4][3] );        // select.cpp:2364 0x48FF40
-extern void      Select_ApplyMatrix_SelectedBrushes( int bSnap, float *mat,
-                                                     float deg, char bSwap ); // select.cpp:2242 0x48FD10
-extern void      sub_47B940( brush_t *def );                            // brush.cpp:5839 (Brush_UpdateSpecialMaterialFlag)
-extern float     grid_sizes[];                                          // engine_stubs.cpp:771 (0x6DDE5C)
-
-extern void      Radiant_ExecCommand( unsigned int cmdId );             // mainfrm.cpp:4054
-// Keep at file scope; MSVC mangles a block-scope declaration with its namespace.
-extern bool      Radiant_RegisterCommand( const char *name, byte vk, byte mods,
-                                          int commandId );              // mainfrm.cpp:1340
-
-// Duplicate uses a creation bracket: these four calls deliberately omit Undo_AddBrushList.
-extern void      Undo_ClearRedo();                                      // undo.cpp:176  0x45e2b0
-extern void      Undo_GeneralStart( const char *operation );            // undo.cpp:367  0x45e3f0
-extern void      Undo_EndBrushList( selbrush_t *brushlist );            // undo.cpp:576  0x45e870
-extern void      Undo_End();                                            // undo.cpp:686  0x45ea20
 extern bool      g_kiwiImportInCallerUndo;                              // map.cpp (KIWI hook)
 
 namespace
@@ -118,7 +96,7 @@ namespace
     // transpose is the row form Select_ApplyMatrix_SelectedBrushes takes.
     void AxisTurn( const float u[3], float deg, float m[3][3] )
     {
-        const float rad = -deg * 3.14159265358979323846f / 180.0f;
+        const float rad = -deg * (float)KIWI_PI / 180.0f;
         const float c = cosf( rad ), s = sinf( rad );
         const float ux[3][3] = { {  0.0f, -u[2],  u[1] },
                                  {  u[2],  0.0f, -u[0] },
@@ -1174,7 +1152,7 @@ namespace
                     for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
                     {
                         clones.push_back( b );
-                        sub_47B940( b->def );                // Cmd_OnSelectionClone's material hint
+                        Brush_UpdateSpecialMaterialFlag( b->def );                // Cmd_OnSelectionClone's material hint
                     }
                 }
                 g_kiwiImportInCallerUndo = false;
@@ -1328,9 +1306,9 @@ bool KiwiDupe_DispatchInstant( unsigned int cmdId )
 
     // Match Cmd_OnSelectionClone: refresh the material-derived 2D cull hint.
     for ( selbrush_t *i = selected_brushes.next; i != &selected_brushes; i = i->next )
-        sub_47B940( i->def );
+        Brush_UpdateSpecialMaterialFlag( i->def );
     for ( selbrush_t *j = active_brushes.next;   j != &active_brushes;   j = j->next )
-        sub_47B940( j->def );
+        Brush_UpdateSpecialMaterialFlag( j->def );
 
     Undo_EndBrushList( &selected_brushes );
     Undo_End();
