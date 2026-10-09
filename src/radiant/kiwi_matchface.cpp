@@ -48,14 +48,15 @@ namespace
 
 
     // Return the first face sharing faceIndex's half-space under V5 thresholds, or -1.
-    int CoincidentFace( const brush_t *def, int faceIndex )
+    // `skipFace` (a face already being dropped) is not a twin.
+    int CoincidentFace( const brush_t *def, int faceIndex, int skipFace = -1 )
     {
         if ( !def || !def->faces || faceIndex < 0 || faceIndex >= def->faceCount )
             return -1;
         const plane_t &pf = def->faces[faceIndex].plane;
         for ( int i = 0; i < def->faceCount; ++i )
         {
-            if ( i == faceIndex )
+            if ( i == faceIndex || i == skipFace )
                 continue;
             const plane_t &pi = def->faces[i].plane;
             if ( Dot3( pf.normal, pi.normal ) > KVALID_PLANE_DOT
@@ -182,6 +183,20 @@ namespace
     // Match Face modal command.
     class KiwiMatchCommand : public KiwiEditorCommand
     {
+        // One selected brush face and what a click computes for it.
+        struct matchSrc_t
+        {
+            selbrush_t *node = 0;
+            int         face = -1;
+            float       n[3] = { 0.0f, 0.0f, 1.0f };    // its plane normal at Begin
+            // Mirror face_t::mtldef so both memcpy sizes stay type-derived.
+            MaterialDef mtl[4];                         // texdef baseline (snapshot omits materials)
+            float       pts[3][3];                      // its plane points slid onto the target
+            float       exact[3][3];                    // the target's own points, in its sense
+            bool        slid = false;
+            bool        twin = false;                   // its matched plane duplicates another face
+        };
+
     public:
         const char *Name() const override { return "Match Face"; }
         bool CanExecute() override { return KiwiMatch_CanMatch(); }
@@ -202,50 +217,74 @@ namespace
             m_rejected   = false;
             m_srcPatch   = 0;               // clear the arm latch before any failure path
             m_node       = 0;
-            m_face       = -1;
+            m_srcs.clear();
+            m_bases.clear();
             m_hud[0]     = '\0';
 
+            // KIWI (2026-10-08, user: "edit the match face feature so it will work with
+            // multiple faces that are shift-selected already"): every selected brush face is
+            // a source; one target click gives all of them its plane.
             const selection_t &sel = KiwiSel();
-            const sel_item_t  *src = 0;
-            int                n   = 0;
             for ( size_t i = 0; i < sel.items.size(); ++i )
             {
-                if ( sel.items[i].kind != SEL_FACE || !Sel_BrushLive( sel.items[i].brush ) )
+                const sel_item_t &it = sel.items[i];
+                if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) )
                     continue;
-                src = &sel.items[i];
-                ++n;
+                if ( it.brush->patch )
+                {
+                    Sys_Printf( "Match Face: a curve face is selected — only brush faces "
+                                "can be matched.\n" );
+                    return false;
+                }
+                if ( IsSource( it.brush, it.faceIndex ) )
+                    continue;
+                matchSrc_t s;
+                s.node = it.brush;
+                s.face = it.faceIndex;
+                m_srcs.push_back( s );
             }
 
             // A face selection takes precedence; only zero faces selects the patch arm.
-            if ( n == 0 )
+            if ( m_srcs.empty() )
                 return BeginPatchSource();
 
-            if ( n != 1 || !src || src->brush->patch )
+            for ( size_t i = 0; i < m_srcs.size(); ++i )
             {
-                Sys_Printf( "Match Face: select exactly ONE brush face first.\n" );
-                return false;
-            }
+                matchSrc_t &s   = m_srcs[i];
+                brush_t    *def = s.node->def;
+                if ( !def || !def->faces || s.face < 0 || s.face >= def->faceCount
+                  || !def->faces[s.face].w )
+                {
+                    Sys_Printf( "Match Face: a selected face has no winding.\n" );
+                    m_srcs.clear();
+                    m_bases.clear();
+                    return false;
+                }
+                memcpy( s.mtl, def->faces[s.face].mtldef, sizeof( s.mtl ) );   // snapshot omits materials
+                Copy3( def->faces[s.face].plane.normal, s.n );
 
-            m_node = src->brush;
-            m_face = src->faceIndex;
-            brush_t *def = m_node->def;
-            if ( !def || !def->faces || m_face < 0 || m_face >= def->faceCount
-              || !def->faces[m_face].w )
-            {
-                Sys_Printf( "Match Face: that face has no winding.\n" );
-                return false;
+                // The baseline the trial rolls back to, one per brush —
+                // KiwiValid_Snapshot only knows planepts / control points.
+                if ( BaseOf( def ) )
+                    continue;
+                m_bases.push_back( kiwiBaseBrush_t() );
+                if ( !KiwiValid_Snapshot( def, &m_bases.back() ) )
+                {
+                    m_srcs.clear();
+                    m_bases.clear();
+                    return false;
+                }
             }
-
-            // The baseline the trial rolls back to, and the texdef half of it —
-            // KiwiValid_Snapshot only knows planepts / control points.
-            if ( !KiwiValid_Snapshot( def, &m_base ) )
-                return false;
-            memcpy( m_baseMtl, def->faces[m_face].mtldef, sizeof( m_baseMtl ) );   // snapshot omits materials
-            Copy3( def->faces[m_face].plane.normal, m_srcNormal );
+            m_node = m_srcs[0].node;
+            Copy3( m_srcs[0].n, m_srcNormal );      // the target's sense follows the first face
 
             UpdateHud();
-            Sys_Printf( "Match Face: click the face to copy the plane FROM "
-                        "(Esc cancels).\n" );
+            if ( m_srcs.size() == 1 )
+                Sys_Printf( "Match Face: click the face to copy the plane FROM "
+                            "(Esc cancels).\n" );
+            else
+                Sys_Printf( "Match Face: %i faces — click the face to copy the plane FROM "
+                            "(Esc cancels).\n", (int)m_srcs.size() );
             return true;
         }
 
@@ -263,7 +302,7 @@ namespace
                 const pick_result_t hit = Pick( ray, SEL_MASK_FACE );
                 if ( hit.valid && hit.item.kind == SEL_FACE && Sel_BrushLive( hit.item.brush )
                   && !hit.item.brush->patch
-                  && !( hit.item.brush == m_node && hit.item.faceIndex == m_face ) )
+                  && !IsSource( hit.item.brush, hit.item.faceIndex ) )
                 {
                     m_target     = hit.item;
                     m_haveTarget = BuildPlanePts( m_target, m_pts, m_ghostN );
@@ -283,15 +322,22 @@ namespace
                             "match, or press Esc.\n" );
                 return true;
             }
-            if ( !Sel_BrushLive( m_node ) )
-            {
-                Sys_Printf( "Match Face: the source brush went away.\n" );
-                return false;
-            }
-
-            // Both arms share the target and source-liveness guards above.
+            // Both arms share the target guard above.
             if ( m_srcPatch )
+            {
+                if ( !Sel_BrushLive( m_node ) )
+                {
+                    Sys_Printf( "Match Face: the source curve went away.\n" );
+                    return false;
+                }
                 return ClickPatch();
+            }
+            for ( size_t i = 0; i < m_srcs.size(); ++i )
+                if ( !Sel_BrushLive( m_srcs[i].node ) )
+                {
+                    Sys_Printf( "Match Face: a source brush went away.\n" );
+                    return false;
+                }
 
             // KIWI (2026-09-21, user: "the UV's sometimes get stretched/blown out. all the
             // command should do is a precise extrude"): the plane points written are the
@@ -302,94 +348,169 @@ namespace
             // centre +/- its radius along an arbitrary basis) are unrelated points, and
             // with Texture Lock on the solve mapped the old texcoords onto them: an
             // arbitrary affine stretch.  "Sometimes" = whenever the lock pref was on.
-            float pts[3][3];
-            const bool slid = SlidePlanePts( pts );
-            if ( !slid )
-                memcpy( pts, m_pts, sizeof( pts ) );   // edge-on: plane only, no lock below
-
+            //
             // KIWI (2026-10-05, precision gauntlet): the STORED plane is the target face's own
             // three points (oriented like the source).  The slid points lie on a plane rebuilt
             // from the target's normal and winding centre - a float near-copy, which cod4map
             // (planes merge only within 1e-7 / 0.001) keeps as a second plane beside the one
             // the face was matched to.  The slid points still drive the texture-lock solve
             // below; a planar projection does not depend on which points define the plane.
-            float exact[3][3];
-            const bool haveExact = TargetPlanePts( exact );
-            const float ( *stored )[3] = haveExact ? exact : pts;
+            for ( size_t i = 0; i < m_srcs.size(); ++i )
+            {
+                matchSrc_t &s = m_srcs[i];
+                s.slid = SlidePlanePts( s, s.pts );
+                if ( !TargetPlanePts( s.n, s.exact ) )
+                {
+                    m_rejected = true;
+                    UpdateHud();
+                    Sys_Printf( "Match Face: rejected — the target face went away.  Nothing "
+                                "was changed.\n" );
+                    return true;
+                }
+            }
 
-            // Trial: no undo bracket or texture lock.
-            WritePlanePts( stored );
-            KiwiValid_Rebuild( m_node->def );
+            // Trial: no undo bracket or texture lock.  Every source is written, then each
+            // brush is rebuilt and gated once with all of its matched faces in place.
+            for ( size_t i = 0; i < m_srcs.size(); ++i )
+                WritePlanePts( m_srcs[i], m_srcs[i].exact );
 
-            // A copied chamfer plane may duplicate an existing V5 half-space.
-            // If so, gate with the source omitted and require V8 closure; V5 stays strict.
-            // The source is the only face this edit may remove.
-            const int twin = CoincidentFace( m_node->def, m_face );
+            const char *why = 0;
+            size_t      bad = 0;
+            for ( size_t b = 0; b < m_bases.size() && !why; ++b )
+            {
+                brush_t *def = m_bases[b].def;
+                KiwiValid_Rebuild( def );
 
-            const char *why = "invalid geometry";
-            const bool  ok  = KiwiValid_CheckBrushIgnoringFace(
-                                  m_node->def, twin >= 0 ? m_face : -1, &why )
-                           && KiwiValid_BrushCloses( m_node->def, &why );
-            KiwiValid_Restore( m_base );            // restore the original before deciding
+                // A copied chamfer plane may duplicate an existing V5 half-space.  If so,
+                // gate with that source omitted and require V8 closure; V5 stays strict.
+                // Sources are the only faces this edit may remove, one per brush (the
+                // gate can leave out one face).  Two sources matched onto the same plane
+                // keep the later one and drop the earlier.
+                int redundant = -1;
+                for ( size_t i = 0; i < m_srcs.size(); ++i )
+                {
+                    matchSrc_t &s = m_srcs[i];
+                    if ( s.node->def != def )
+                        continue;
+                    s.twin = false;
+                    if ( CoincidentFace( def, s.face, redundant ) < 0 )
+                        continue;
+                    if ( redundant >= 0 )
+                    {
+                        why = "two of the faces on one brush would both become redundant — "
+                              "match those one at a time";
+                        bad = i;
+                        break;
+                    }
+                    redundant = s.face;
+                    s.twin    = true;
+                }
+                if ( why )
+                    break;
+                const char *w = "invalid geometry";
+                if ( !KiwiValid_CheckBrushIgnoringFace( def, redundant, &w )
+                  || !KiwiValid_BrushCloses( def, &w ) )
+                {
+                    why = w ? w : "invalid geometry";
+                    for ( bad = 0; bad < m_srcs.size() && m_srcs[bad].node->def != def; ++bad )
+                        ;
+                }
+            }
+            for ( size_t b = 0; b < m_bases.size(); ++b )
+                KiwiValid_Restore( m_bases[b] );    // restore the originals before deciding
 
-            if ( !ok )
+            if ( why )
             {
                 m_rejected = true;
                 UpdateHud();
-                Sys_Printf( "Match Face: rejected — %s.  Nothing was changed.\n",
-                            why ? why : "invalid geometry" );
+                if ( m_srcs.size() == 1 )
+                    Sys_Printf( "Match Face: rejected — %s.  Nothing was changed.\n", why );
+                else
+                    Sys_Printf( "Match Face: rejected — %s (selected face %i of %i).  Nothing "
+                                "was changed.\n", why, (int)bad + 1, (int)m_srcs.size() );
                 g_nUpdateBits = -1;
                 return true;                        // stay running: pick another face
             }
 
-            // Real apply: undo bracket, then the ported texture-lock sequence.
-            KiwiCmd_UndoBegin( "match face" );      // clones the untouched original
-            KiwiCmd_UndoCoverBrush( m_node );               // face selections are absent from selected_brushes
-
-            // The trial restored the original; removing the source directly yields
-            // the gated result because its proposed plane duplicates `twin`.
-            // Whole face_t records move, so surviving planes/materials need no reproject.
-            if ( twin >= 0 )
-            {
-                Brush_RemoveFace( m_node->def, (unsigned int)m_face );
-                KiwiValid_Rebuild( m_node->def );
-
-                // Later face indices now name different surfaces; discard every cached index.
-                m_face = -1;
-                Sel_Clear( KiwiSel() );
-                Sel_RebuildFromLegacy();
-
-                Sys_Printf( "Match Face: the face is now coplanar with its "
-                            "neighbour — the redundant plane was removed and the "
-                            "edge restored (%i face(s) left).\n",
-                            m_node->def->faceCount );
-                g_nUpdateBits = -1;
-                return false;                       // COMMIT
-            }
+            // Real apply: one undo bracket over every brush, then the ported texture-lock
+            // sequence per face.
+            KiwiCmd_UndoBegin( "match face" );      // clones the untouched originals
+            for ( size_t b = 0; b < m_bases.size(); ++b )
+                for ( size_t i = 0; i < m_srcs.size(); ++i )
+                    if ( m_srcs[i].node->def == m_bases[b].def )
+                    {
+                        KiwiCmd_UndoCoverBrush( m_srcs[i].node );   // face selections are absent from selected_brushes
+                        break;
+                    }
 
             byte lockFlags[3];
             lockFlags[0] = (byte)( g_PrefsDlg->m_bTextureLock  != 0 );
             lockFlags[1] = (byte)( g_PrefsDlg->m_bLightmapLock != 0 );
             lockFlags[2] = 1;
-            double saveBuf[3][KTEXLOCK_LAYERS][6];
 
-            face_t *f = &m_node->def->faces[m_face];
-            memcpy( f->mtldef, m_baseMtl, sizeof( m_baseMtl ) );                   // restore typed baseline
-            Face_MakePlane( f );                    // baseline plane must exist before the save
-            if ( f->w && slid )
-                Face_TexLockPointsSave( f, saveBuf );
+            int matched = 0, removed = 0;
+            for ( size_t b = 0; b < m_bases.size(); ++b )
+            {
+                brush_t *def  = m_bases[b].def;
+                int      drop = -1;
+                for ( size_t i = 0; i < m_srcs.size(); ++i )
+                {
+                    matchSrc_t &s = m_srcs[i];
+                    if ( s.node->def != def )
+                        continue;
+                    // The trial restored the original; removing a twin source directly
+                    // yields the gated result because its proposed plane duplicates another.
+                    if ( s.twin )
+                    {
+                        drop = s.face;
+                        continue;
+                    }
 
-            WritePlanePts( pts );
+                    double saveBuf[3][KTEXLOCK_LAYERS][6];
+                    face_t *f = &def->faces[s.face];
+                    memcpy( f->mtldef, s.mtl, sizeof( s.mtl ) );           // restore typed baseline
+                    Face_MakePlane( f );            // baseline plane must exist before the save
+                    if ( f->w && s.slid )
+                        Face_TexLockPointsSave( f, saveBuf );
 
-            // Unslid points carry no texcoord meaning: leave the texdef alone, which for
-            // a planar projection is already the "nothing moved in the plane" answer.
-            if ( f->w && slid )
-                Face_TexLockPointsReproject( f, saveBuf, lockFlags );
-            if ( haveExact )
-                WritePlanePts( exact );             // the same plane, on the target's own points
+                    WritePlanePts( s, s.slid ? s.pts : s.exact );
 
-            KiwiValid_Rebuild( m_node->def );
-            Sys_Printf( "Match Face: plane copied.\n" );
+                    // Unslid points carry no texcoord meaning: leave the texdef alone, which
+                    // for a planar projection is already the "nothing moved in the plane" answer.
+                    if ( f->w && s.slid )
+                        Face_TexLockPointsReproject( f, saveBuf, lockFlags );
+                    WritePlanePts( s, s.exact );    // the same plane, on the target's own points
+                    ++matched;
+                }
+
+                // Whole face_t records move, so surviving planes/materials need no reproject.
+                // Removed last: later face indices on this brush shift down.
+                if ( drop >= 0 )
+                {
+                    Brush_RemoveFace( def, (unsigned int)drop );
+                    ++removed;
+                }
+                KiwiValid_Rebuild( def );
+            }
+
+            if ( removed > 0 )
+            {
+                // Later face indices now name different surfaces; discard every cached index.
+                m_srcs.clear();
+                Sel_Clear( KiwiSel() );
+                Sel_RebuildFromLegacy();
+            }
+
+            if ( removed == 0 )
+                Sys_Printf( matched == 1 ? "Match Face: plane copied.\n"
+                                         : "Match Face: plane copied to %i faces.\n", matched );
+            else if ( matched == 0 && removed == 1 )
+                Sys_Printf( "Match Face: the face is now coplanar with its neighbour — the "
+                            "redundant plane was removed and the edge restored.\n" );
+            else
+                Sys_Printf( "Match Face: plane copied to %i face(s); %i face(s) became "
+                            "coplanar with a neighbour and their redundant planes were "
+                            "removed.\n", matched, removed );
             g_nUpdateBits = -1;
             return false;                           // COMMIT
         }
@@ -419,46 +540,9 @@ namespace
                 return;
             }
 
-            winding_t *sw = WindingOf( m_node, m_face );
-            if ( !sw || sw->numpoints < 3 || sw->numpoints > MAX_POINTS_ON_WINDING )
-                return;
-
-            KiwiLines_Color( KMATCH_SRC_COL[0], KMATCH_SRC_COL[1], KMATCH_SRC_COL[2] );
-            for ( int i = 0; i < sw->numpoints; ++i )
-                if ( !KiwiLines_Add( sw->p[i], sw->p[( i + 1 ) % sw->numpoints] ) )
+            for ( size_t s = 0; s < m_srcs.size(); ++s )
+                if ( !DrawFacePreview( m_srcs[s] ) )
                     return;
-
-            if ( !m_haveTarget )
-                return;
-
-            const float d = Dot3( m_ghostN, m_pts[1] );      // pts[1] is the plane point
-            const float denom = Dot3( m_ghostN, m_srcNormal );
-            if ( fabsf( denom ) < KMATCH_EPS )
-                return;                                       // edge-on: projection is undefined
-
-            KiwiLines_Color( KMATCH_GHOST_COL[0], KMATCH_GHOST_COL[1], KMATCH_GHOST_COL[2] );
-            float prev[3];
-            float first[3];
-            for ( int i = 0; i < sw->numpoints; ++i )
-            {
-                float p[3];
-                const float t = ( d - Dot3( m_ghostN, sw->p[i] ) ) / denom;
-                Mad3( sw->p[i], m_srcNormal, t, p );
-                if ( i == 0 )
-                    Copy3( p, first );
-                else if ( !KiwiLines_Add( prev, p ) )
-                    return;
-                Copy3( p, prev );
-            }
-            KiwiLines_Add( prev, first );
-
-            float sc[3], tc[3], r;
-            winding_t *tw = WindingOf( m_target.brush, m_target.faceIndex );
-            if ( WindingCentre( sw, sc, &r ) && WindingCentre( tw, tc, &r ) )
-            {
-                KiwiLines_Color( KMATCH_LINK_COL[0], KMATCH_LINK_COL[1], KMATCH_LINK_COL[2] );
-                KiwiLines_Add( sc, tc );
-            }
         }
 
     private:
@@ -480,7 +564,7 @@ namespace
             }
             if ( n != 1 || !node )
             {
-                Sys_Printf( "Match Face: select exactly ONE brush face — or ONE flat "
+                Sys_Printf( "Match Face: select one or more brush faces — or ONE flat "
                             "curve, to push it onto a face.\n" );
                 return false;
             }
@@ -502,8 +586,7 @@ namespace
                 return false;
             }
 
-            m_node     = node;
-            m_face     = -1;                // no face index in this arm, ever
+            m_node     = node;              // no face sources in this arm, ever
             m_srcPatch = pm;
             UpdateHud();
             Sys_Printf( "Match Face: flat curve (%ix%i control points).  Click the face "
@@ -706,20 +789,72 @@ namespace
             return true;
         }
 
-        // The source face's current plane points, each slid along the source normal onto
-        // the target plane.  A shear along n with n.N > 0 (BuildPlanePts flips N to make
-        // it so) keeps the three points non-collinear and their winding sense.  False
-        // when the face is edge-on to the target: the slide is then ill-conditioned.
-        bool SlidePlanePts( float out[3][3] ) const
+        // One source face: its boundary, its projection along its own normal onto the
+        // target plane, and a centre link.  False once the line buffer is full.
+        bool DrawFacePreview( const matchSrc_t &s ) const
         {
-            const float denom = Dot3( m_srcNormal, m_ghostN );
+            if ( !Sel_BrushLive( s.node ) )
+                return true;
+            winding_t *sw = WindingOf( s.node, s.face );
+            if ( !sw || sw->numpoints < 3 || sw->numpoints > MAX_POINTS_ON_WINDING )
+                return true;
+
+            KiwiLines_Color( KMATCH_SRC_COL[0], KMATCH_SRC_COL[1], KMATCH_SRC_COL[2] );
+            for ( int i = 0; i < sw->numpoints; ++i )
+                if ( !KiwiLines_Add( sw->p[i], sw->p[( i + 1 ) % sw->numpoints] ) )
+                    return false;
+
+            if ( !m_haveTarget )
+                return true;
+
+            // The slide t = (d - N.p) / (N.n) is the same for N and -N, so the target's
+            // sense (set by the first source) does not matter here.
+            const float d = Dot3( m_ghostN, m_pts[1] );      // pts[1] is the plane point
+            const float denom = Dot3( m_ghostN, s.n );
+            if ( fabsf( denom ) < KMATCH_EPS )
+                return true;                                  // edge-on: projection is undefined
+
+            KiwiLines_Color( KMATCH_GHOST_COL[0], KMATCH_GHOST_COL[1], KMATCH_GHOST_COL[2] );
+            float prev[3];
+            float first[3];
+            for ( int i = 0; i < sw->numpoints; ++i )
+            {
+                float p[3];
+                const float t = ( d - Dot3( m_ghostN, sw->p[i] ) ) / denom;
+                Mad3( sw->p[i], s.n, t, p );
+                if ( i == 0 )
+                    Copy3( p, first );
+                else if ( !KiwiLines_Add( prev, p ) )
+                    return false;
+                Copy3( p, prev );
+            }
+            if ( !KiwiLines_Add( prev, first ) )
+                return false;
+
+            float sc[3], tc[3], r;
+            winding_t *tw = WindingOf( m_target.brush, m_target.faceIndex );
+            if ( WindingCentre( sw, sc, &r ) && WindingCentre( tw, tc, &r ) )
+            {
+                KiwiLines_Color( KMATCH_LINK_COL[0], KMATCH_LINK_COL[1], KMATCH_LINK_COL[2] );
+                return KiwiLines_Add( sc, tc );
+            }
+            return true;
+        }
+
+        // The source face's current plane points, each slid along the source normal onto
+        // the target plane.  A shear along n keeps the three points non-collinear and
+        // their winding sense (the slide is the same for N and -N).  False when the face
+        // is edge-on to the target: the slide is then ill-conditioned.
+        bool SlidePlanePts( const matchSrc_t &s, float out[3][3] ) const
+        {
+            const float denom = Dot3( s.n, m_ghostN );
             if ( fabsf( denom ) < KMATCH_MIN_COS )
                 return false;
             const float   planeD = Dot3( m_ghostN, m_pts[1] );
-            const face_t *f      = &m_node->def->faces[m_face];
+            const face_t *f      = &s.node->def->faces[s.face];
             for ( int p = 0; p < 3; ++p )
             {
-                ProjectAlong( f->planepts[p], m_srcNormal, m_ghostN, planeD, denom, out[p] );
+                ProjectAlong( f->planepts[p], s.n, m_ghostN, planeD, denom, out[p] );
                 for ( int k = 0; k < 3; ++k )
                     if ( !( fabsf( out[p][k] ) <= KVALID_MAX_COORD ) )
                         return false;
@@ -728,31 +863,50 @@ namespace
         }
 
         // The target face's own plane points, reversed when its normal opposes the source's
-        // (BuildPlanePts keeps the source's outward sense).  False: no brush-face target.
-        bool TargetPlanePts( float out[3][3] ) const
+        // `srcN` (each source keeps its own outward sense).  False: no brush-face target.
+        bool TargetPlanePts( const float *srcN, float out[3][3] ) const
         {
             const selbrush_t *tb = m_target.brush;
-            if ( !tb || !tb->def || !tb->def->faces || m_target.faceIndex < 0
-              || m_target.faceIndex >= tb->def->faceCount )
+            if ( !Sel_BrushLive( m_target.brush ) || !tb->def || !tb->def->faces
+              || m_target.faceIndex < 0 || m_target.faceIndex >= tb->def->faceCount )
                 return false;
             const face_t *tf   = &tb->def->faces[m_target.faceIndex];
-            const bool    flip = Dot3( tf->plane.normal, m_srcNormal ) < 0.0f;
+            const bool    flip = Dot3( tf->plane.normal, srcN ) < 0.0f;
             for ( int p = 0; p < 3; ++p )
                 Copy3( tf->planepts[flip ? 2 - p : p], out[p] );
             return true;
         }
 
-        void WritePlanePts( const float pts[3][3] )
+        void WritePlanePts( const matchSrc_t &s, const float pts[3][3] )
         {
-            face_t *f = &m_node->def->faces[m_face];
+            face_t *f = &s.node->def->faces[s.face];
             for ( int p = 0; p < 3; ++p )
                 Copy3( pts[p], f->planepts[p] );
+        }
+
+        bool IsSource( const selbrush_t *node, int face ) const
+        {
+            for ( size_t i = 0; i < m_srcs.size(); ++i )
+                if ( m_srcs[i].node == node && m_srcs[i].face == face )
+                    return true;
+            return false;
+        }
+
+        const kiwiBaseBrush_t *BaseOf( const brush_t *def ) const
+        {
+            for ( size_t i = 0; i < m_bases.size(); ++i )
+                if ( m_bases[i].def == def )
+                    return &m_bases[i];
+            return 0;
         }
 
         void UpdateHud()
         {
             // Name the active arm because face and patch modes move different geometry.
-            const char *what = m_srcPatch ? "match curve" : "match face";
+            char faces[32];
+            _snprintf( faces, sizeof( faces ), "match %i faces", (int)m_srcs.size() );
+            faces[sizeof( faces ) - 1] = '\0';
+            const char *what = m_srcPatch ? "match curve" : ( m_srcs.size() > 1 ? faces : "match face" );
             if ( m_rejected )
             {
                 _snprintf( m_hud, sizeof( m_hud ), "%s  REJECTED - pick another", what );
@@ -772,8 +926,11 @@ namespace
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
+        // Face arm: every source, and one trial baseline per distinct brush.
+        std::vector<matchSrc_t>      m_srcs;
+        std::vector<kiwiBaseBrush_t> m_bases;
+        // Patch arm source; the face arm keeps its first source here.
         selbrush_t     *m_node = 0;
-        int             m_face = -1;
         // Non-null selects the patch arm and latches mesh identity for liveness checks.
         patchMesh_t    *m_srcPatch = 0;
         float           m_srcCentre[3] = { 0.0f, 0.0f, 0.0f };
@@ -784,16 +941,13 @@ namespace
         float           m_ghostN[3]    = { 0.0f, 0.0f, 1.0f };
         float           m_pts[3][3]    = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
                                            { 0.0f, 0.0f, 0.0f } };
-        kiwiBaseBrush_t m_base;
-        // Mirror face_t::mtldef so both memcpy sizes stay type-derived.
-        MaterialDef     m_baseMtl[4];
         char            m_hud[128] = { 0 };
     };
 
     KiwiMatchCommand s_match;
 }
 
-// Offer for one face or, with no faces, one patch object.
+// Offer for one or more faces or, with no faces, one patch object.
 // Begin performs the costlier winding and planarity validation.
 bool KiwiMatch_CanMatch()
 {
@@ -810,7 +964,7 @@ bool KiwiMatch_CanMatch()
         else if ( it.kind == SEL_OBJECT && it.brush->patch )
             ++patches;
     }
-    return ( faces == 1 ) || ( faces == 0 && patches == 1 );
+    return ( faces >= 1 ) || ( faces == 0 && patches == 1 );
 }
 
 // Registration and lookup.

@@ -3,10 +3,12 @@
 #error this file is only for Radiant!
 #endif
 // Match Face (Z) is KIWI-specific; Plasticity has no equivalent face-plane verb.
-// With one selected brush face, click a target face to copy its plane. The same
-// brush is allowed, but the source face itself is not a target.
+// With one or more selected brush faces, click a target face to copy its plane onto
+// every one of them (one undo step). The same brush is allowed, but a source face
+// itself is not a target. Each brush is gated with all its matched faces in place;
+// if any brush would fail, nothing changes.
 //
-// Preserve the source's outward sense by flipping an opposed target normal.
+// Preserve each source's outward sense by flipping an opposed target normal.
 // Plane-point order (c + u*r, c, c + v*r) is required because Face_MakePlane uses
 // cross(p0 - p1, p2 - p1); face-radius spacing avoids a weak plane definition.
 //
@@ -16,6 +18,7 @@
 // Restoring first prevents texture lock from reprojecting an accumulated texdef.
 // If V5 finds a duplicate half-space, gate without the source plus V8 closure,
 // then remove the source; no surviving plane moves, so no texture reproject runs.
+// At most one source per brush may be removed that way (the gate omits one face).
 //
 // With no face and one patch object selected, project each control point along the
 // patch's Newell normal: P' = P + n * (D - P·N) / (n·N).
@@ -37,5 +40,5 @@ class KiwiEditorCommand;
 void KiwiMatch_RegisterCommands();
 KiwiEditorCommand *KiwiMatch_CommandForId( int commandId );
 
-// Palette predicate: one face, or no faces and one patch object.
+// Palette predicate: one or more faces, or no faces and one patch object.
 bool KiwiMatch_CanMatch();
