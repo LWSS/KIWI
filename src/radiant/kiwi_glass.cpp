@@ -939,6 +939,35 @@ namespace
         g_nUpdateBits = -1;
         Sys_Printf( "Glass: retextured %i pane(s) using %s\n", (int)defs.size(), set.name.c_str() );
     }
+
+    // Every pane takes a random set, one record.
+    void RandomizeAllPanes()
+    {
+        std::vector<entity_s_def *> defs;
+        for ( entity_s *e = entities.next; e && e != &entities; e = e->next )
+        {
+            entity_s_def *def = (entity_s_def *)e;
+            if ( IsGlassDef( def ) && FirstBrush( def ) )
+                defs.push_back( def );
+        }
+        if ( defs.empty() || s_sets.empty() )
+            return;
+        static const char *op = "randomize glass sets";
+        Undo_ClearRedo();
+        Undo_GeneralStart( op );
+        for ( size_t i = 0; i < defs.size(); ++i )
+            Undo_AddEntity_W( (entity_s *)defs[i] );
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            const glassSet_t &set = s_sets[rand() % s_sets.size()];
+            qtexture_s *q = PristineFor( &set );
+            ApplyToPane( defs[i], set.name.c_str(), q, q ? nullptr : FallbackPaneMaterial() );
+        }
+        Undo_End();
+        g_nUpdateBits = -1;
+        s_map.time = -1.0;
+        Sys_Printf( "Glass: randomized %i pane(s)\n", (int)defs.size() );
+    }
 }
 
 // ── eclass ─────────────────────────────────────────────────────────────────────
@@ -1583,6 +1612,25 @@ namespace
         if ( ImGui::Button( "Select Invalid Panes" ) )
             SelectPanes( IsInvalid );
         ImGui::EndDisabled();
+
+        ImGui::BeginDisabled( s_sets.size() < 2 || s_map.panes.empty() );
+        if ( ImGui::Button( "Randomize All Glass..." ) )
+            ImGui::OpenPopup( "Randomize glass sets?" );
+        ImGui::EndDisabled();
+        ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
+        if ( ImGui::BeginPopupModal( "Randomize glass sets?", nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        {
+            ImGui::Text( "Give each of the %i pane(s) a random set? (one undo step)", (int)s_map.panes.size() );
+            if ( ImGui::Button( "Randomize", ImVec2( 110.0f, 0.0f ) ) )
+            {
+                RandomizeAllPanes();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if ( ImGui::Button( "Cancel", ImVec2( 110.0f, 0.0f ) ) || ImGui::IsKeyPressed( ImGuiKey_Escape ) )
+                ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
     }
 }
 

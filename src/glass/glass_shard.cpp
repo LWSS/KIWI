@@ -2496,6 +2496,10 @@ void __thiscall GlassShard::ExplosionEvent(
     float dist; // [esp+48h] [ebp-8h]
     float distSq; // [esp+4Ch] [ebp-4h]
 
+    // KIWI (GLASS): waiting edge piece keeps its drop timer
+    if ( this->delayedDrop )
+        return;
+
     distSq = Vec3DistanceSq(expOrigin, this->origin);
     if ( (float)(radius * radius) > distSq )
     {

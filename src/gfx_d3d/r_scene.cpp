@@ -1076,7 +1076,9 @@ void __cdecl R_InitScene()
     scene.maxDrawSurfCount[2] = 0x2000;
     scene.maxDrawSurfCount[3] = 512;
     scene.maxDrawSurfCount[4] = 512;
-    scene.maxDrawSurfCount[5] = 512;
+    // KIWI GLASS
+    scene.maxDrawSurfCount[5] = 0x2000; // was 512
+    // KIWI END
     scene.maxDrawSurfCount[6] = 0x2000;
     scene.maxDrawSurfCount[7] = 0x2000;
     scene.maxDrawSurfCount[8] = 0x2000;
