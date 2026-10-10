@@ -1265,12 +1265,10 @@ extern void Patch_KiwiReNaturalizeSelected();                  // pmesh.cpp (ROU
 //   "texture applications require a right-click/enter to confirm" report.  The full
 //   chain is on KiwiUv_EndGestureBeforeApply (kiwi_uv.cpp).  It must run BEFORE the
 //   apply — a Cancel afterwards would revert the apply it exists to protect.
-// ITEM 2 at the TAIL: caulk is always fitted one repeat per face (kiwi_caulk.h D-BH-C).
 // Declared at FILE scope for the same reason Patch_KiwiReNaturalizeSelected above is
 // (round AI's MSVC namespace-mangling link error on a block-scope extern).
 extern bool KiwiUv_EndGestureBeforeApply( const char *what );  // kiwi_uv.cpp (ROUND BH)
 extern void KiwiUv_RestoreGestureAfterApply();                 // kiwi_uv.cpp (ROUND BH)
-extern void KiwiCaulk_AutoFitApplied( const char *appliedName ); // kiwi_caulk.cpp (ROUND BH)
 
 void TexWnd_ApplyMaterialAtIndex( int idx )
 {
@@ -1336,22 +1334,14 @@ void TexWnd_ApplyMaterialAtIndex( int idx )
             // block-scope extern that MSVC mangled with its enclosing namespace.)
             Patch_KiwiReNaturalizeSelected();
 
-            // ── KIWI-UX (ROUND BH, ITEM 2): CAULK IS ALWAYS FIT ─────────────
-            // USER DIRECTIVE, verbatim: *"Also make it so caulk is always
-            // stretched (fit?).  I can't see caulk when I apply it manually
-            // atm."*  Placed HERE, in the one funnel every apply goes through
-            // (the browser click, the Sky tab's apply and the End-key verb), so
-            // there is one place that decides it.  It is a NO-OP for every
-            // material that is not caulk — kiwi_caulk.h D-BH-D says why the
-            // scope is deliberately that narrow — and it runs AFTER the patch
-            // re-lay so a patch's density is settled before its texdef is fit.
-            KiwiCaulk_AutoFitApplied( q->name );
+            // KIWI (2026-10-10, user: "you dont need to texture fit the caulking"): the
+            // round-BH caulk auto-fit is gone; it was a second undo record per caulk.
 
             // ── KIWI-UX (ROUND BH, ITEM 3): give the face gizmo back ────────
             // AFTER every mutation, so the restarted gesture's BeginFaces
-            // baseline captures the material AND the texdef this apply (and the
-            // caulk fit above) just wrote.  No-op unless the head of this
-            // function actually ended an auto-entered face push.
+            // baseline captures the material AND the texdef this apply just
+            // wrote.  No-op unless the head of this function actually ended an
+            // auto-entered face push.
             KiwiUv_RestoreGestureAfterApply();
         }
         g_nUpdateBits = -1;          // redraw camera (the applied face) + this window

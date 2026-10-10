@@ -134,6 +134,7 @@
 #define KIWI_CMD_BUILD_RUN          34130   // "Build & Run..." (cod4map / cod4rad / the game)
 
 #define KIWI_CMD_CAULK_FACES        34131   // "Caulk Selection" (End, modern profile)
+#define KIWI_CMD_UNCAULK_FACES      34169   // "Uncaulk Selection" (Shift+End, modern profile)
 
 #define KIWI_CMD_VIEW_FACE          34132   // "View Face Head-on" (Space, modern profile)
 // Section is persistent view state; making it modal would monopolize the gesture slot.

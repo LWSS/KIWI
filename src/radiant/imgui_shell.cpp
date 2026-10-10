@@ -228,6 +228,16 @@ void ImGuiShell_FocusTab( const char *title )
     }
 }
 
+// KIWI: true when the window titled `title` drew last frame and, if docked, its tab is the
+// selected one - i.e. the user can see it.
+bool ImGuiShell_TabShowing( const char *title )
+{
+    ImGuiWindow *w = title ? ImGui::FindWindowByName( title ) : nullptr;
+    if ( !w || !w->WasActive || w->Hidden )
+        return false;
+    return !w->DockIsActive || w->DockTabIsVisible;
+}
+
 // ── Phase 5: viewports as RTT images ────────────────────────────────────────────
 // Each of the four render viewports is drawn as ImGui::Image(RTT texture) inside its dock
 // window — NOT a native child parked over the surface. The image's content-region size is

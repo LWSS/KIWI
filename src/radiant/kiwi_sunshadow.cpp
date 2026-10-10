@@ -31,7 +31,7 @@ void KiwiSunPreview_SetEnabled( bool enabled )
 const char *KiwiSunPreview_Status()
 {
     if ( !g_PrefsDlg->enable_light_preview )
-        return "light preview disabled (View -> Enable light preview)";
+        return "light preview disabled (View -> Light Preview -> Enable light preview)";
     if ( !KiwiSunPreview_Enabled() )
         return "sun preview disabled (View -> Preview sun as well)";
     if ( !KiwiSun_Exists() )

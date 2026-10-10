@@ -40,6 +40,7 @@ extern void        KiwiUndo_NoteLegacyRecord( const char *operation );
 extern void        KiwiUndo_NoteLegacyEvicted();
 extern void        KiwiUndo_NoteLegacyCleared();
 extern void        KiwiUndo_NoteLegacyRedoCleared();
+extern void        KiwiUndo_ArmLegacySnapshot();
 
 extern void        IncRef( entity_s *e, entity_s *list );   // entity.cpp 0x483bf0
 extern void        DecRef( entity_s *e );                   // entity.cpp 0x483c30
@@ -392,6 +393,10 @@ void Undo_GeneralStart( const char *operation )
 
     if ( g_lastundo && !g_lastundo->done )
         Sys_Printf( "Undo_Start: WARNING last undo not finished.\n" );
+
+    // KIWI: the BEFORE selection, which undo puts back (Undo_Undo selects every brush it
+    // recreates - a Delete's whole owning entity).
+    KiwiUndo_ArmLegacySnapshot();
 
     undo_s *_undo = (undo_s *)::operator new( sizeof(undo_s) );
     if ( !_undo )

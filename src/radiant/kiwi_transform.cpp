@@ -2132,17 +2132,24 @@ namespace
                 return true;
             }
 
+            // KIWI (2026-10-09): the axis / plane runs through where the object IS at this
+            // grab (m_ref + m_lockBase; the base only changes at a grab or constraint
+            // change), not where the gesture started.  Through m_ref, a second arrow after a
+            // move along another axis mapped the cursor onto a line off to the side of the
+            // drawn arrow.
+            float at[3];
+            Add3( m_ref, m_lockBase, at );
             if ( m_con == CON_AXIS )
             {
                 float ax[3]; FrameAxis( m_axis, ax );
-                return KiwiCam_RayAxis( ray, m_ref, ax, out );
+                return KiwiCam_RayAxis( ray, at, ax, out );
             }
             if ( m_con == CON_PLANE )
             {
                 float n[3]; FrameAxis( m_axis, n );
-                return RayPlane( ray, m_ref, n, out );
+                return RayPlane( ray, at, n, out );
             }
-            return RayPlane( ray, m_ref, m_planeN, out );
+            return RayPlane( ray, at, m_planeN, out );
         }
 
         void LatchMapStart()
@@ -2223,9 +2230,11 @@ namespace
             else
             {
                 Copy3( m_total, m_lockBase );
-                // Arm pivot rebase on each grab/constraint change, but consume it only after
-                // freshness ends; the press frame must reproduce the current pose exactly.
-                m_pivotRebase = true;
+                // KIWI (2026-10-09, user: "when you change to another arrow after using 1 arrow,
+                // it resets the position of the model completely back to where you started"):
+                // a grab moves the object by the cursor's travel from the press point.  The old
+                // pivot rebase jumped the pivot onto the cursor's projection on the first live
+                // frame - the arrow's shaft offset (and, through m_ref, the start position).
             }
             LatchMapStart();
         }
@@ -2372,7 +2381,6 @@ namespace
             m_grabbed = true;
             m_grabFresh = CursorPixels( &m_grabPixX, &m_grabPixY );
             LatchMapStart();
-            m_pivotRebase = false;
             UpdateHud();
         }
 
@@ -2403,17 +2411,6 @@ namespace
             float p[3];
             if ( GrabLive() && m_haveMapStart && MapCursor( p ) )
             {
-                // On the first live frame, rebase owned axes so the pivot meets the cursor's
-                // constrained projection. Off-axis carried totals remain untouched; m_ref stays
-                // latched and m_mapStart becomes this projection for subsequent deltas.
-                if ( m_pivotRebase )
-                {
-                    m_pivotRebase = false;
-                    for ( int k = 0; k < 3; ++k )
-                        if ( OwnsAxis( k ) )
-                            m_lockBase[k] = p[k] - m_ref[k];
-                    Copy3( p, m_mapStart );
-                }
                 float d[3];
                 Sub3( p, m_mapStart, d );
                 // Constrain this grab's delta, not the carried total; otherwise changing axes
@@ -3242,9 +3239,7 @@ namespace
         mutable float m_liveRef[3] = { 0.0f, 0.0f, 0.0f };
         // Confirm deletes when this frame's push annihilates a brush.
         bool  m_deleting     = false;
-        // Pivot rebase is consumed on the first live grab frame. majorLock is a
-        // per-frame HUD result from the lattice pass.
-        bool  m_pivotRebase  = false;
+        // Per-frame HUD result from the lattice pass.
         bool  m_majorLock    = false;
     };
 

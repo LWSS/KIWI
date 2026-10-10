@@ -422,6 +422,7 @@ namespace
         { KIWI_CMD_BUILD_RUN,       { "Build...",                     "Build",     0, 0 } },   // KIWI: game launch removed from the panel
 
         { KIWI_CMD_CAULK_FACES,     { "Caulk Selection",              "Textures",  SEL_MASK_FACE | SEL_MASK_OBJECT, KiwiCaulk_CanExecute } },
+        { KIWI_CMD_UNCAULK_FACES,   { "Uncaulk Selection",            "Textures",  SEL_MASK_FACE | SEL_MASK_OBJECT, KiwiCaulk_CanExecute } },
 
         { KIWI_CMD_TEX_SHIFT,       { "Texture Shift",               "Textures",  SEL_MASK_FACE | SEL_MASK_OBJECT, KiwiUv_CanEdit } },
         { KIWI_CMD_TEX_ROTATE,      { "Texture Rotate",              "Textures",  SEL_MASK_FACE | SEL_MASK_OBJECT, KiwiUv_CanEdit } },
@@ -1691,7 +1692,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     if ( g_activeCommand && g_activeCommand->PreemptIdle() )
     {
         const int id = LookupBinding( vk, CurrentMods() );
-        if ( id == KIWI_CMD_CAULK_FACES && KiwiCmd_CanExecute( id ) )
+        if ( ( id == KIWI_CMD_CAULK_FACES || id == KIWI_CMD_UNCAULK_FACES ) && KiwiCmd_CanExecute( id ) )
             return false;                   // …the BH handshake owns the gesture
     }
 

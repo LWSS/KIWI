@@ -206,9 +206,11 @@ namespace
         BindName( table, count, "KiwiGridDoublePage", 0x21, 0 );   // PageUp   -> 34021
         BindName( table, count, "KiwiGridHalvePage",  0x22, 0 );   // PageDown -> 34020
 
-        // End displaces CenterView to free Shift+End; classic remains untouched.
-        Bind( table, count, 32953, 0x23, 1 );                  // CenterView -> Shift+End
+        // End caulks and Shift+End uncaulks, displacing CenterView to Ctrl+End; classic
+        // remains untouched.
+        Bind( table, count, 32953, 0x23, 4 );                  // CenterView -> Ctrl+End
         Bind( table, count, KIWI_CMD_CAULK_FACES, 0x23, 0 );   // End -> Caulk Selection
+        Bind( table, count, KIWI_CMD_UNCAULK_FACES, 0x23, 1 ); // Shift+End -> Uncaulk Selection
 
         // Space displaces Clone to free Shift+Space; modal numeric input handles Space
         // before global lookup, preserving its feet/inches separator.
@@ -284,7 +286,8 @@ void KiwiKeymap_DrawSettings()
             "and the creation chords: Shift+A line, Shift+S spline,\n"
             "Shift+Q rect, Shift+C circle, Shift+W box, Shift+V box(centre),\n"
             "Alt+V rect(centre), Shift+X cylinder, Shift+Z sphere.\n"
-            "End caulks the selection (View->Center moves to Shift+End).\n"
+            "End caulks the selection, Shift+End uncaulks it\n"
+            "(View->Center moves to Ctrl+End).\n"
             "The displaced commands move to Shift/Alt chords, never dropped.\n"
             "Classic: the stock table plus your radiant.ini remaps, unchanged.\n"
             "Every new feature stays reachable from the command palette in both." );

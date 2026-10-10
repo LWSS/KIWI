@@ -37,7 +37,8 @@ extern void SpawnFlagBit_Apply( int bit, int checked );                // win_en
 extern void EclassCreate_Apply( const char *name );                    // win_ent.cpp:572
 extern void EclassSelect_Apply( int listIndex, eclass_t *pec );        // win_ent.cpp:778
 extern void Entity_UpdateSelection();                                  // win_ent.cpp:791
-extern void ImGuiShell_FocusTab( const char *title );                  // imgui_shell.cpp:205
+extern void ImGuiShell_FocusTab( const char *title );                  // imgui_shell.cpp:222
+extern bool ImGuiShell_TabShowing( const char *title );                // imgui_shell.cpp:233
 
 namespace
 {
@@ -1123,8 +1124,13 @@ namespace
             KiwiGlass_Focus();                   // a pane: the Glass window, not the Inspector
         else
         // KIWI END
+        // KIWI (2026-10-09, user: "if I have the models tab open, stop switching to the
+        // inspector tab each time a model is clicked in 3d"): a model pick leaves a showing
+        // Models tab in front.
         if ( edit_entity && !selectionEmpty && classname &&
-             _stricmp( classname, "worldspawn" ) && !StartsNoCase( classname, "light" ) )
+             _stricmp( classname, "worldspawn" ) && !StartsNoCase( classname, "light" )
+          && !( !_stricmp( classname, "misc_model" )
+                && ImGuiShell_TabShowing( KiwiWindows_Title( KIWI_WIN_MODELS ) ) ) )
         {
             KiwiWindows_Set( KIWI_WIN_INSPECTOR, true );
             ImGuiShell_FocusTab( "Inspector" );

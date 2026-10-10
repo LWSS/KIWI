@@ -16,6 +16,8 @@
 #include "kiwi_ported.h"
 
 #include <vector>
+#include <unordered_map>
+#include <algorithm>
 #include <math.h>
 
 // Ported undo entry points.
@@ -56,9 +58,11 @@ namespace
     {
         kundoDomain_t domain;
         const char   *label;    // a literal / static — see kiwi_undo.h
-        // Empty unless a KIWI undo bracket armed a selection snapshot.
+        // Selection before the record (restored by undo) and after it (by redo).
+        // hasSel is false only for a record whose open was never armed.
         std::vector<kundoSelKey_t> sel;
-        bool                       selHasFace;
+        std::vector<kundoSelKey_t> after;
+        bool                       hasSel;
     };
 
     std::vector<ticket_t> s_undo;    // oldest .. newest
@@ -79,23 +83,64 @@ namespace
         KiwiRefImage_ClearRedo();       // same rule for reference images
     }
 
-    // Snapshot armed by the current KIWI bracket and consumed by its ticket.
+    // Snapshot armed by the current bracket and consumed by its ticket.
     std::vector<kundoSelKey_t> s_pendingSel;
-    bool                       s_pendingHasFace = false;
-    bool                       s_pendingArmed   = false;
+    bool                       s_pendingArmed  = false;
+    bool                       s_pendingLegacy = false;   // armed by Undo_GeneralStart
+
+    // The live selection as value keys (see kundoSelKey_t).
+    void CaptureSelection( std::vector<kundoSelKey_t> &out )
+    {
+        out.clear();
+        const selection_t &sel = KiwiSel();
+
+        // Deduplicated brush order supplies snapshot-local ordinals.
+        std::unordered_map<const selbrush_t *, int> order;
+        for ( size_t i = 0; i < sel.items.size(); ++i )
+        {
+            const sel_item_t &it = sel.items[i];
+            if ( !it.brush || !it.brush->def )
+                continue;
+            const int ord = (int)order.emplace( it.brush, (int)order.size() ).first->second;
+            const brush_t *def = it.brush->def;
+
+            kundoSelKey_t key;
+            key.kind      = (int)it.kind;
+            key.ordinal   = ord;
+            key.faceIndex = it.faceIndex;
+            key.edgeIndex = it.edgeIndex;
+            key.vertIndex = it.vertIndex;
+            key.faceCount = def->faceCount;
+            for ( int c = 0; c < 3; ++c )
+            {
+                key.mins[c]   = def->mins[c];
+                key.maxs[c]   = def->maxs[c];
+                key.normal[c] = 0.0f;
+            }
+            key.dist = 0.0f;
+            if ( it.faceIndex >= 0 && def->faces && it.faceIndex < def->faceCount )
+            {
+                const face_t &f = def->faces[it.faceIndex];
+                for ( int c = 0; c < 3; ++c )
+                    key.normal[c] = f.plane.normal[c];
+                key.dist = (float)f.plane.dist;
+            }
+            key.isActive = Sel_ItemEqual( it, sel.active );
+            out.push_back( key );
+        }
+    }
 
     void Append( kundoDomain_t domain, const char *label )
     {
         // Consume before suppression so a cancelled bracket cannot leak its
         // snapshot into the next record.
         std::vector<kundoSelKey_t> sel;
-        bool hasFace = false;
+        const bool hasSel = s_pendingArmed;
         if ( s_pendingArmed )
         {
             sel.swap( s_pendingSel );
-            hasFace        = s_pendingHasFace;
-            s_pendingArmed = false;
-            s_pendingHasFace = false;
+            s_pendingArmed  = false;
+            s_pendingLegacy = false;
         }
 
         if ( s_suppress > 0 || s_replay )
@@ -104,7 +149,9 @@ namespace
         t.domain = domain;
         t.label  = label ? label : "edit";
         t.sel.swap( sel );
-        t.selHasFace = hasFace;
+        t.hasSel = hasSel && domain == KUNDO_LEGACY;
+        if ( t.hasSel )
+            CaptureSelection( t.after );            // Undo_End: the record's AFTER state
         s_undo.push_back( t );
         if ( (int)s_undo.size() > MaxTickets() )
             s_undo.erase( s_undo.begin() );
@@ -179,42 +226,49 @@ namespace
                 out.push_back( b );
     }
 
-    void RestoreSelection( const ticket_t &t )
+    // The snapshot replaces whatever legacy undo/redo selected (it selects every brush
+    // it recreates - for a Delete, the whole owning entity).
+    void RestoreSelection( const ticket_t &t, const std::vector<kundoSelKey_t> &keys )
     {
-        // Restore only face-bearing snapshots and never under a live modal command.
-        if ( !t.selHasFace || t.sel.empty() )
-            return;
+        if ( !t.hasSel )
+            return;                         // no snapshot: legacy selection stands
         if ( KiwiCmd_Active() )
             return;
 
         std::vector<selbrush_t *> live;
         CollectLiveBrushes( live );
-        if ( live.empty() )
-            return;
 
         // First-unused matching keeps coincident brush ordinals from collapsing
         // onto one live instance.
         int maxOrd = -1;
-        for ( size_t i = 0; i < t.sel.size(); ++i )
-            if ( t.sel[i].ordinal > maxOrd )
-                maxOrd = t.sel[i].ordinal;
-        if ( maxOrd < 0 )
-            return;
+        for ( size_t i = 0; i < keys.size(); ++i )
+            if ( keys[i].ordinal > maxOrd )
+                maxOrd = keys[i].ordinal;
+
+        // Live brushes by mins[0]; a fingerprint can only match inside +-KUNDO_FP_EPS.
+        std::vector<std::pair<float, size_t>> byX;
+        byX.reserve( live.size() );
+        for ( size_t i = 0; i < live.size(); ++i )
+            byX.push_back( std::make_pair( live[i]->def->mins[0], i ) );
+        std::sort( byX.begin(), byX.end() );
 
         std::vector<selbrush_t *> byOrd( (size_t)( maxOrd + 1 ), (selbrush_t *)0 );
         std::vector<char>         used( live.size(), 0 );
+        std::vector<const kundoSelKey_t *> proto( (size_t)( maxOrd + 1 ), (const kundoSelKey_t *)0 );
+        for ( size_t i = 0; i < keys.size(); ++i )   // every key of an ordinal has the same fingerprint
+            if ( keys[i].ordinal >= 0 && !proto[(size_t)keys[i].ordinal] )
+                proto[(size_t)keys[i].ordinal] = &keys[i];
         for ( int ord = 0; ord <= maxOrd; ++ord )
         {
-            // Every key for an ordinal carries the same brush fingerprint.
-            const kundoSelKey_t *proto = 0;
-            for ( size_t i = 0; i < t.sel.size() && !proto; ++i )
-                if ( t.sel[i].ordinal == ord )
-                    proto = &t.sel[i];
-            if ( !proto )
+            const kundoSelKey_t *p = proto[(size_t)ord];
+            if ( !p )
                 continue;
-            for ( size_t i = 0; i < live.size(); ++i )
+            auto it = std::lower_bound( byX.begin(), byX.end(),
+                                        std::make_pair( p->mins[0] - KUNDO_FP_EPS, (size_t)0 ) );
+            for ( ; it != byX.end() && it->first <= p->mins[0] + KUNDO_FP_EPS; ++it )
             {
-                if ( used[i] || !FingerprintMatches( live[i]->def, *proto ) )
+                const size_t i = it->second;
+                if ( used[i] || !FingerprintMatches( live[i]->def, *p ) )
                     continue;
                 byOrd[(size_t)ord] = live[i];
                 used[i] = 1;
@@ -224,10 +278,9 @@ namespace
 
         selection_t rebuilt;
         sel_item_t  activeItem;          // assign after the loop: Sel_Add moves active
-        int faces = 0;
-        for ( size_t i = 0; i < t.sel.size(); ++i )
+        for ( size_t i = 0; i < keys.size(); ++i )
         {
-            const kundoSelKey_t &k = t.sel[i];
+            const kundoSelKey_t &k = keys[i];
             if ( k.ordinal < 0 || (size_t)k.ordinal >= byOrd.size() )
                 continue;
             selbrush_t *node = byOrd[(size_t)k.ordinal];
@@ -237,7 +290,7 @@ namespace
             sel_item_t it;
             switch ( k.kind )
             {
-            case SEL_FACE:   it = Sel_MakeFace  ( node, k.faceIndex ); ++faces; break;
+            case SEL_FACE:   it = Sel_MakeFace  ( node, k.faceIndex ); break;
             case SEL_EDGE:   it = Sel_MakeEdge  ( node, k.faceIndex, k.edgeIndex ); break;
             case SEL_VERTEX: it = ( k.faceIndex < 0 )
                                   ? Sel_MakePatchPoint( node, k.vertIndex )
@@ -249,10 +302,6 @@ namespace
                 activeItem = it;
         }
         rebuilt.active = Sel_ItemValid( activeItem ) ? activeItem : rebuilt.active;
-
-        // If no face resolves, retain the selection produced by legacy undo.
-        if ( !faces )
-            return;
 
         selection_t &sel = KiwiSel();
         Sel_Clear( sel );
@@ -311,66 +360,20 @@ void KiwiUndo_NoteLegacyRedoCleared()
 // unconsumed snapshot.
 void KiwiUndo_ArmSelectionSnapshot()
 {
-    s_pendingSel.clear();
-    s_pendingHasFace = false;
-    s_pendingArmed   = true;
+    CaptureSelection( s_pendingSel );
+    s_pendingArmed  = true;
+    s_pendingLegacy = false;
+}
 
-    const selection_t &sel = KiwiSel();
-
-    // Deduplicated brush order supplies snapshot-local ordinals.
-    std::vector<selbrush_t *> order;
-    for ( size_t i = 0; i < sel.items.size(); ++i )
-    {
-        selbrush_t *b = sel.items[i].brush;
-        if ( !b || !b->def )
-            continue;
-        bool dup = false;
-        for ( size_t k = 0; k < order.size() && !dup; ++k )
-            dup = ( order[k] == b );
-        if ( !dup )
-            order.push_back( b );
-    }
-
-    for ( size_t i = 0; i < sel.items.size(); ++i )
-    {
-        const sel_item_t &it = sel.items[i];
-        if ( !it.brush || !it.brush->def )
-            continue;
-        const brush_t *def = it.brush->def;
-
-        int ord = -1;
-        for ( size_t k = 0; k < order.size(); ++k )
-            if ( order[k] == it.brush ) { ord = (int)k; break; }
-        if ( ord < 0 )
-            continue;
-
-        kundoSelKey_t key;
-        key.kind      = (int)it.kind;
-        key.ordinal   = ord;
-        key.faceIndex = it.faceIndex;
-        key.edgeIndex = it.edgeIndex;
-        key.vertIndex = it.vertIndex;
-        key.faceCount = def->faceCount;
-        for ( int c = 0; c < 3; ++c )
-        {
-            key.mins[c]   = def->mins[c];
-            key.maxs[c]   = def->maxs[c];
-            key.normal[c] = 0.0f;
-        }
-        key.dist = 0.0f;
-        if ( it.faceIndex >= 0 && def->faces && it.faceIndex < def->faceCount )
-        {
-            const face_t &f = def->faces[it.faceIndex];
-            for ( int c = 0; c < 3; ++c )
-                key.normal[c] = f.plane.normal[c];
-            key.dist = (float)f.plane.dist;
-        }
-        key.isActive = Sel_ItemEqual( it, sel.active );
-
-        if ( it.kind == SEL_FACE )
-            s_pendingHasFace = true;
-        s_pendingSel.push_back( key );
-    }
+// A KIWI bracket arms before its first mutation and then opens the record; that
+// arm is the truer BEFORE.  A legacy arm left by a record that never closed is stale.
+void KiwiUndo_ArmLegacySnapshot()
+{
+    if ( s_pendingArmed && !s_pendingLegacy )
+        return;
+    CaptureSelection( s_pendingSel );
+    s_pendingArmed  = true;
+    s_pendingLegacy = true;
 }
 
 // Suppression.
@@ -383,9 +386,9 @@ void KiwiUndo_Reset()
     s_undo.clear();
     s_redo.clear();
     s_pendingSel.clear();               // discard the map's pending bracket
-    s_pendingHasFace = false;
     s_pendingArmed   = false;
-    KiwiVis_UndoReset();                // visibility history belongs to the map
+    s_pendingLegacy  = false;
+    KiwiVis_UndoReset();               // visibility history belongs to the map
     KiwiRefImage_UndoReset();           // reference-image history belongs to the map
 }
 
@@ -451,10 +454,9 @@ bool KiwiUndo_Undo()
             continue;                               // try the next ticket down
         }
 
-        // Legacy restore selects covered brushes as whole objects; restore the
-        // saved face selection when this KIWI ticket carries one.
+        // Legacy restore selects every recreated brush; put back the BEFORE selection.
         if ( t.domain == KUNDO_LEGACY )
-            RestoreSelection( t );
+            RestoreSelection( t, t.sel );
 
         s_redo.push_back( t );
         Sys_Printf( "Undo: %s (%i left).\n", t.label, (int)s_undo.size() );
@@ -503,9 +505,9 @@ bool KiwiUndo_Redo()
             continue;
         }
 
-        // Reapply face selection after legacy redo when its value keys still match.
+        // Same for redo, with the AFTER selection.
         if ( t.domain == KUNDO_LEGACY )
-            RestoreSelection( t );
+            RestoreSelection( t, t.after );
 
         s_undo.push_back( t );
         Sys_Printf( "Redo: %s (%i left).\n", t.label, (int)s_redo.size() );

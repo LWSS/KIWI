@@ -37,6 +37,7 @@
 #include "kiwi_camera.h"               // KIWI: KiwiCam_LookAlong / KiwiCam_FrameBounds (3D fit)
 #include "kiwi_fmt.h"                  // KIWI: exact key values
 #include "kiwi_ported.h"               // KIWI: shared engine/editor externs
+#include "kiwi_selection.h"            // KIWI: KiwiSel() - Make Detail/Structural targets
 
 extern void Radiant_RegisterGroupCDvars();   // engine_stubs.cpp
 extern void Sys_InitializeCriticalSections();// universal/win_common.cpp (decl lives in win32/win_local.h, not radiant-safe)
@@ -244,7 +245,10 @@ void Radiant_SetDefaultGridState()
     // R_AddCmdSetMaterialColor batch, so the dark lines survive on the white background
     SavedInfo_t &si = g_qeglobals.d_savedinfo;
     si.iSize     = 0x2C4;
-    si.iTextMenu = 32993;
+    // KIWI (2026-10-09, user: "the editor displays surfaces as shiny ... unwanted by default"):
+    // Fullbright (32991).  The binary's View-based Fake Lighting (32993) default became live
+    // once Texture_SetMode pushed draw_mode into the ImGui camera again.
+    si.iTextMenu = 32991;
     si.d_picmip  = 2;
     static const float kColors[23][4] = {
         { 0.25f, 0.25f, 0.25f, 1.0f },   //  0
@@ -2624,24 +2628,105 @@ static void Cmd_OnSelectionKeyValue()        // 0x4263B0 â€” Selectionâ†
     Select_ByKeyValue();
 }
 
+// KIWI: the binary ran Select_ChangeBrushType over selected_brushes and said nothing, so
+// a face/edge/vertex pick (owners not in selected_brushes) did nothing at all.  Applies
+// to every brush the pick touches, without changing the pick, and reports the result.
+extern void KiwiCmd_UndoCoverBrush( selbrush_t *node );   // kiwi_command.cpp
+
+static int Brush_ContentsOf( const selbrush_t *b )
+{
+    if ( b->patch )
+        return ((patch_t *)b->patch)->def->contents;
+    return ( b->faceCount > 0 ) ? b->def->faces[0].contents : b->def->contents;   // Brush_Write's source
+}
+
+static void Cmd_SetBrushContents( const char *op, const char *what, int contents, int clearBits )
+{
+    std::vector<selbrush_t *> targets;
+    int pointEnts = 0;
+    const selection_t &sel = KiwiSel();
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+    {
+        selbrush_t *b = sel.items[i].brush;
+        if ( !b || !b->def )
+            continue;
+        bool dup = false;
+        for ( size_t k = 0; k < targets.size() && !dup; ++k )
+            dup = ( targets[k] == b );
+        if ( dup )
+            continue;
+        const entity_s *owner = b->def->owner;
+        if ( owner && owner->eclass && owner->eclass->fixedsize )
+        {
+            ++pointEnts;            // models, lights...: no brush contents
+            continue;
+        }
+        targets.push_back( b );
+    }
+
+    if ( targets.empty() )
+    {
+        if ( pointEnts )
+            Sys_Printf( "%s: only point entities selected; nothing changed.\n", op );
+        else
+            Sys_Printf( "%s: nothing selected.\n", op );
+        return;
+    }
+
+    const int mask = ~clearBits;
+    int changed = 0;
+    for ( size_t i = 0; i < targets.size(); ++i )
+        if ( ( ( Brush_ContentsOf( targets[i] ) & mask ) | contents ) != Brush_ContentsOf( targets[i] ) )
+            ++changed;
+
+    if ( changed )
+    {
+        Undo_ClearRedo();
+        Undo_GeneralStart( op );
+        Undo_AddBrushList( &selected_brushes );
+        for ( size_t i = 0; i < targets.size(); ++i )
+            KiwiCmd_UndoCoverBrush( targets[i] );   // component owners; self-deduplicates
+        for ( size_t i = 0; i < targets.size(); ++i )
+        {
+            selbrush_t *b = targets[i];
+            for ( int fi = 0; fi < b->faceCount; ++fi )
+            {
+                b->def->faces[fi].contents = ( b->def->faces[fi].contents & mask ) | contents;
+                b->def->contents           = ( b->def->contents & mask ) | contents;
+            }
+            if ( b->patch )
+            {
+                patch_t *patch = (patch_t *)b->patch;
+                patch->def->contents = ( patch->def->contents & mask ) | contents;
+            }
+            b->xx6 = 0;
+        }
+        Undo_EndBrushList( &selected_brushes );
+        Undo_End();
+        g_nUpdateBits = -1;
+    }
+
+    const int already = (int)targets.size() - changed;
+    if ( !changed )
+        Sys_Printf( "%s: %i brush%s already %s; nothing changed.\n", op,
+                    already, already == 1 ? "" : "es", what );
+    else if ( already )
+        Sys_Printf( "%s: %i brush%s now %s (%i already were).\n", op,
+                    changed, changed == 1 ? "" : "es", what, already );
+    else
+        Sys_Printf( "%s: %i brush%s now %s.\n", op, changed, changed == 1 ? "" : "es", what );
+    if ( pointEnts )
+        Sys_Printf( "%s: skipped %i point entit%s.\n", op, pointEnts, pointEnts == 1 ? "y" : "ies" );
+}
+
 static void Cmd_OnSelectionMakeDetail()      // 0x4261C0 â€” Selectionâ†’Make Detail (33042)
 {
-    Undo_ClearRedo();
-    Undo_GeneralStart( "make detail" );
-    Undo_AddBrushList( &selected_brushes );
-    Select_ChangeBrushType( 0x8000000, MASK_WEAPONCLIP );
-    Undo_EndBrushList( &selected_brushes );
-    Undo_End();
+    Cmd_SetBrushContents( "make detail", "detail", CONTENTS_DETAIL, MASK_WEAPONCLIP );
 }
 
 static void Cmd_OnSelectionMakeStructural()  // 0x426200 â€” Selectionâ†’Make Structural (33043)
 {
-    Undo_ClearRedo();
-    Undo_GeneralStart( "make structural" );
-    Undo_AddBrushList( &selected_brushes );
-    Select_ChangeBrushType( 0, 134226052 );
-    Undo_EndBrushList( &selected_brushes );
-    Undo_End();
+    Cmd_SetBrushContents( "make structural", "structural", 0, 134226052 );
 }
 
 // â”€â”€ SCRIPT-GROUP / FIXED-SIZE LIGHT command handlers (0x428E10-0x428EE0) â”€â”€â”€â”€â”€â”€â”€â”€â”€

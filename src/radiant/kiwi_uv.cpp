@@ -775,10 +775,21 @@ void KiwiUv_MenuItems()
     ImGui::EndDisabled();
     if ( ImGui::IsItemHovered() )
         ImGui::SetTooltip( canEdit
-            ? "End - set every selected face (and every face of a selected\n"
-              "brush, and selected patches) to the caulk material, then FIT\n"
-              "it one repeat per face.  Caulk tells the BSP compiler the face\n"
-              "can be optimised away.  Two undo steps: the fit, then the apply."
+            ? "Selected faces become caulk; selected brushes get caulk on\n"
+              "every face hidden by the other selected brushes.  Caulk is\n"
+              "never drawn in game.  One undo step."
+            : "Select brushes or faces first." );
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled( !canEdit );
+    if ( ImGui::Button( "Uncaulk" ) )
+        Radiant_ExecCommand( (unsigned int)KIWI_CMD_UNCAULK_FACES );
+    ImGui::EndDisabled();
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( canEdit
+            ? "Caulk faces of the selection take the texture of the flush\n"
+              "face beside them (same plane, so it continues seamlessly),\n"
+              "else their brush's main visible face.  One undo step."
             : "Select brushes or faces first." );
 }
 

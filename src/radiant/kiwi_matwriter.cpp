@@ -517,6 +517,21 @@ bool KiwiMat_Write( int templateIndex, const kiwiMatFields_t *f, char *err, size
         return false;
     }
 
+    // KIWI (2026-10-09, user: "the caulks are rendering in-game"): raw\materials\caulk had been
+    // rewritten as an l_sm_r0c0 clone, losing the tools techset and its nodraw flags, so cod4map
+    // drew every caulk face.  Never replace a tool material (caulk, clip, nodraw, ...).
+    {
+        std::vector<unsigned char> eblob;
+        ParsedMaterial             existing;
+        if ( ReadMaterialFile( f->name, &eblob ) && ParseMaterial( eblob, &existing )
+          && _stricmp( existing.techSet.c_str(), "tools" ) == 0 )
+        {
+            SetErr( err, errSz, "'%s' is a tool material (techset \"tools\") and is never overwritten",
+                    f->name );
+            return false;
+        }
+    }
+
     const char *tmplName = KiwiMat_ResolveTemplate( templateIndex );
     if ( !tmplName )
     {

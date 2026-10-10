@@ -51,16 +51,19 @@ void KiwiUndo_NoteLegacyEvicted();      // Undo_FreeFirstUndo tail — oldest re
 void KiwiUndo_NoteLegacyCleared();      // Undo_Clear tail — the whole legacy stack died
 void KiwiUndo_NoteLegacyRedoCleared();  // Undo_ClearRedo tail — the legacy redo died
 
-// Legacy undo clears face selection and recreates covered brushes selected as
-// whole objects. KIWI brackets therefore arm a selection snapshot before mutation.
+// Legacy undo clears face selection and selects every brush it recreates - for a
+// Delete that is the deleted brushes' whole owning entity. So every legacy record
+// carries the selection from before it (armed when the record opens) and after it
+// (taken when it closes); undo restores the first, redo the second, nothing else.
 //
 // Recreated instances cannot be keyed by pointer. The snapshot records a brush
 // ordinal, bounds, face count, face plane, and item indices; restore matches each
-// ordinal to the first unused live brush. If no face resolves, legacy selection wins.
+// ordinal to the first unused live brush. Unresolved keys are dropped.
 //
-// Object-only selection remains legacy-owned. Restore also declines while a modal
-// command is live so it does not perform another reselect beneath that gesture.
-void KiwiUndo_ArmSelectionSnapshot();
+// Restore declines while a modal command is live so it does not perform another
+// reselect beneath that gesture.
+void KiwiUndo_ArmSelectionSnapshot();   // KIWI brackets, before their first mutation
+void KiwiUndo_ArmLegacySnapshot();      // Undo_GeneralStart; keeps a KIWI bracket's arm
 
 // Re-entrant append suppression for KiwiCmd_UndoCancel.
 void KiwiUndo_SuppressBegin();
