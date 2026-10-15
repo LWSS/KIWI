@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <vector>
 #include <algorithm>
+#include <string>
 #include <unordered_map>
 
 extern bool KiwiSelect_TracePrefab( selbrush_t *, const float *, const float *, edTrace_t * );
@@ -552,8 +553,21 @@ bool KiwiDrop_GetModelInfo( selbrush_t *node,
     if ( !haveBounds )
         return false;
 
-    if ( !Entity_GetVec3ForKey( def, angles, "angles" ) )
-        angles[0] = angles[1] = angles[2] = 0.0f;
+    // KIWI (2026-10-11): memoised per entity on the key text - the snap pick runs this for
+    // every model on every mouse move, and the sscanf showed in the drag profile.
+    {
+        struct anglesMemo_t { std::string text; float a[3]; };
+        static std::unordered_map<const entity_s_def *, anglesMemo_t> s_anglesMemo;
+        const char   *text = EntityValue( def, "angles" );
+        anglesMemo_t &m    = s_anglesMemo[def];
+        if ( m.text.empty() || m.text != text )
+        {
+            m.text = text;
+            if ( !Entity_GetVec3ForKey( def, m.a, "angles" ) )
+                m.a[0] = m.a[1] = m.a[2] = 0.0f;
+        }
+        angles[0] = m.a[0]; angles[1] = m.a[1]; angles[2] = m.a[2];
+    }
     *scale = 1.0f;
     const char *modelScale = EntityValue( def, "modelscale" );
     if ( modelScale[0] )

@@ -287,6 +287,40 @@ namespace
         Mad3( c, u, spread, out[2] );
     }
 
+    float WindingAreaOf( const winding_t *w )
+    {
+        float s[3] = { 0.0f, 0.0f, 0.0f };
+        for ( int i = 1; w && i + 1 < w->numpoints; ++i )
+        {
+            float e1[3], e2[3], c[3];
+            Sub3( w->p[i], w->p[0], e1 );
+            Sub3( w->p[i + 1], w->p[0], e2 );
+            Cross3( e1, e2, c );
+            s[0] += c[0]; s[1] += c[1]; s[2] += c[2];
+        }
+        return 0.5f * Len3( s );
+    }
+
+    // KIWI (2026-10-14): a hull candidate that only grazes the solid (no winding, or a
+    // sub-gate sliver) is redundant - drop it after the rebuild.  The caps (0, 1) stay.
+    void DropDeadSides( brush_t *def )
+    {
+        for ( bool again = true; again; )
+        {
+            again = false;
+            for ( int f = def->faceCount - 1; f >= 2 && def->faceCount > 4; --f )
+            {
+                const winding_t *w = def->faces[f].w;
+                if ( w && w->numpoints >= 3 && WindingAreaOf( w ) >= KVALID_MIN_FACE_AREA )
+                    continue;
+                Brush_RemoveFace( def, (unsigned int)f );
+                again = true;
+            }
+            if ( again )
+                KiwiValid_Rebuild( def );
+        }
+    }
+
     // Build one unlinked segment from corresponded, planar, equal-count rings.
     // The caller rebuilds and gates it before either landing or freeing it.
     brush_t *BuildSegment( const ring_t &lo, const float loN[3], float loD,
@@ -324,28 +358,16 @@ namespace
             if ( b > spread ) spread = b;
         }
 
-        Ed_EnsureCurrentMaterial_Kiwi();
-        brush_t *def = Brush_Alloc( g_qeglobals.random_texture_stuff, 0 );
-        if ( !def )
-        {
-            *why = "brush allocation failed";
-            return 0;
-        }
-        Ed_BrushSetFaceCount( def, n + 2 );
-        if ( !def->faces || def->faceCount != n + 2 )
-        {
-            Brush_Free_R( def );              // still unlinked, refCount 0
-            *why = "face array allocation failed";
-            return 0;
-        }
-
         // Cap planes use their station planes, oriented away from the segment centre.
+        std::vector<float> pn, pd;             // every plane: 3 + 1 floats
+        for ( int cap = 0; cap < 2; ++cap )
         {
-            float nrm[3]; Copy3( loN, nrm );
-            float d = loD;
+            const ring_t &r = cap ? hi : lo;
+            float nrm[3]; Copy3( cap ? hiN : loN, nrm );
+            float d = cap ? hiD : loD;
             float toMid[3];
             {
-                float c[3]; RingCentroid( lo, c );
+                float c[3]; RingCentroid( r, c );
                 Sub3( mid, c, toMid );
             }
             if ( Dot3( nrm, toMid ) > 0.0f )
@@ -353,68 +375,93 @@ namespace
                 nrm[0] = -nrm[0]; nrm[1] = -nrm[1]; nrm[2] = -nrm[2];
                 d = -d;
             }
-            PlanePts( nrm, d, mid, spread, def->faces[0].planepts );
-        }
-        {
-            float nrm[3]; Copy3( hiN, nrm );
-            float d = hiD;
-            float toMid[3];
-            {
-                float c[3]; RingCentroid( hi, c );
-                Sub3( mid, c, toMid );
-            }
-            if ( Dot3( nrm, toMid ) > 0.0f )
-            {
-                nrm[0] = -nrm[0]; nrm[1] = -nrm[1]; nrm[2] = -nrm[2];
-                d = -d;
-            }
-            PlanePts( nrm, d, mid, spread, def->faces[1].planepts );
+            pn.insert( pn.end(), nrm, nrm + 3 );
+            pd.push_back( d );
         }
 
-        // Side quads may be non-planar. Use their Newell direction, then push the
-        // plane through the outermost corner so no source vertex is clipped.
-        for ( int e = 0; e < n; ++e )
+        // KIWI (2026-10-14, user: "The Loft(L) brush face feature needs to be re-examined.
+        // I tried using it to fill the corner gaps in my player clip areas in kisak_trash and
+        // I couldn't get the operation to work"): the sides are the CONVEX HULL of the two
+        // rings.  One pushed-out plane per corresponded quad left a zero-area face along an
+        // edge the two faces share (the gate refused every corner fill), and on a twisted
+        // correspondence it cut away part of the source faces (a kisak_trash clip corner
+        // covered 450 of its 669 cubic units).  Each hull facet holds an edge of one ring and
+        // a vertex of the other; one already holding all three points is the same facet.
         {
-            const int e1 = ( e + 1 ) % n;
-            ring_t quad;
-            quad.reserve( 12 );
-            const float *q[4] = { RingP( lo, e ), RingP( lo, e1 ),
-                                  RingP( hi, e1 ), RingP( hi, e ) };
-            for ( int k = 0; k < 4; ++k )
+            ring_t all( lo );
+            all.insert( all.end(), hi.begin(), hi.end() );
+            float cc[3];
+            RingCentroid( all, cc );
+            const int na = RingN( all );
+            for ( int side = 0; side < 2; ++side )
             {
-                quad.push_back( q[k][0] ); quad.push_back( q[k][1] ); quad.push_back( q[k][2] );
-            }
-
-            float nrm[3];
-            if ( !RingNormal( quad, nrm ) )
-            {
-                // Recover the limiting plane of a zero-height quad; refuse if it too collapses.
-                float ea[3], axis[3];
-                Sub3( q[1], q[0], ea );
-                Sub3( mid, q[0], axis );
-                Cross3( ea, axis, nrm );
-                if ( !Norm3( nrm ) )
+                const ring_t &ra = side ? hi : lo;
+                const ring_t &rb = side ? lo : hi;
+                for ( int e = 0; e < n; ++e )
                 {
-                    Brush_Free_R( def );
-                    *why = "a side face collapsed (the two profiles touch)";
-                    return 0;
+                    const float *a = RingP( ra, e );
+                    const float *b = RingP( ra, ( e + 1 ) % n );
+                    for ( int v = 0; v < n; ++v )
+                    {
+                        const float *p = RingP( rb, v );
+                        float ab[3], ap[3], nrm[3];
+                        Sub3( b, a, ab );
+                        Sub3( p, a, ap );
+                        Cross3( ab, ap, nrm );
+                        if ( !Norm3( nrm ) )
+                            continue;                      // collinear: no plane
+                        float d = Dot3( nrm, a );
+                        if ( Dot3( nrm, cc ) > d )
+                        {
+                            nrm[0] = -nrm[0]; nrm[1] = -nrm[1]; nrm[2] = -nrm[2];
+                            d = -d;
+                        }
+                        if ( d - Dot3( nrm, cc ) < 1.0e-3f )
+                            continue;                      // through the centre: flat
+                        bool hull = true;
+                        for ( int q = 0; q < na && hull; ++q )
+                            hull = Dot3( nrm, RingP( all, q ) ) - d <= KLOFT_ONPLANE_EPS;
+                        if ( !hull )
+                            continue;
+                        bool known = false;
+                        for ( size_t o = 0; o < pd.size() && !known; ++o )
+                        {
+                            const float *on = &pn[o * 3];
+                            known = fabsf( Dot3( on, a ) - pd[o] ) <= KLOFT_ONPLANE_EPS
+                                 && fabsf( Dot3( on, b ) - pd[o] ) <= KLOFT_ONPLANE_EPS
+                                 && fabsf( Dot3( on, p ) - pd[o] ) <= KLOFT_ONPLANE_EPS;
+                        }
+                        if ( known )
+                            continue;
+                        pn.insert( pn.end(), nrm, nrm + 3 );
+                        pd.push_back( d );
+                    }
                 }
             }
-            // Outward = away from the solid's centre.
-            {
-                float toMid[3];
-                Sub3( mid, q[0], toMid );
-                if ( Dot3( nrm, toMid ) > 0.0f )
-                { nrm[0] = -nrm[0]; nrm[1] = -nrm[1]; nrm[2] = -nrm[2]; }
-            }
-            float d = Dot3( nrm, q[0] );
-            for ( int k = 1; k < 4; ++k )
-            {
-                const float dk = Dot3( nrm, q[k] );
-                if ( dk > d ) d = dk;          // push out until all four are inside
-            }
-            PlanePts( nrm, d, mid, spread, def->faces[2 + e].planepts );
         }
+        const int planes = (int)pd.size();
+        if ( planes < 4 )
+        {
+            *why = "the two faces do not span a solid";
+            return 0;
+        }
+
+        Ed_EnsureCurrentMaterial_Kiwi();
+        brush_t *def = Brush_Alloc( g_qeglobals.random_texture_stuff, 0 );
+        if ( !def )
+        {
+            *why = "brush allocation failed";
+            return 0;
+        }
+        Ed_BrushSetFaceCount( def, planes );
+        if ( !def->faces || def->faceCount != planes )
+        {
+            Brush_Free_R( def );              // still unlinked, refCount 0
+            *why = "face array allocation failed";
+            return 0;
+        }
+        for ( int f = 0; f < planes; ++f )
+            PlanePts( &pn[(size_t)f * 3], pd[(size_t)f], mid, spread, def->faces[f].planepts );
 
         // Seed from the chosen source face; tool materials fall through the standard
         // brush fallback ladder instead of inventing a visible surface.
@@ -1457,6 +1504,7 @@ namespace
                     return false;
                 }
                 KiwiValid_Rebuild( def );
+                DropDeadSides( def );
                 if ( !KiwiValid_CheckBrush( def, why ) )
                 {
                     Brush_Free_R( def );        // never linked: refCount 0, no owner chain

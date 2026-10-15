@@ -5126,16 +5126,19 @@ static void Cmd_OnHideUnselected()         // cmd 32934 (0x42B6C0)
     Select_HideUnselected();
     KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
+extern void KiwiVis_KeepLockedHidden();             // kiwi_visibility.h
 static void Cmd_OnShowHidden()             // cmd 32924 (0x42B6D0)
 {
     KiwiVis_UndoPush( "unhide all" );       // KIWI-UX
     ShowHidden();
+    KiwiVis_KeepLockedHidden();             // KIWI: red-eye locks survive
     KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 static void Cmd_OnShowLastHidden()         // cmd 33246 (0x42B6E0)
 {
     KiwiVis_UndoPush( "show last hidden" ); // KIWI-UX
     ShowLastHidden();
+    KiwiVis_KeepLockedHidden();             // KIWI: red-eye locks survive
     KiwiVis_UndoCommit();                   // KIWI-UX (CLEANUP, C-41)
 }
 

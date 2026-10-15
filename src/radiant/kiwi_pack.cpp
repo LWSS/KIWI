@@ -17,8 +17,10 @@ namespace
 //   byte[i] = (int)( n[i] * encodeScale + 127.5 ),  decoded[i] = (byte[i] - 127) / encodeScale
 const int KPK_CANDIDATES = 6;          // scales tried, from the finest that fits
 
-// Direct-mapped memo keyed on the raw input bits; a miss costs one pack.
-const unsigned KPK_MEMO_SIZE = 4096;
+// Direct-mapped memo keyed on the raw input bits; a miss costs one pack (and a fallback
+// miss an exhaustive Vec3PackUnitVec).  65536 (KIWI 2026-10-11, was 4096): a moved building
+// re-packs thousands of distinct normals/tangents a frame and thrashed the small table.
+const unsigned KPK_MEMO_SIZE = 65536;
 struct kpkMemo_t
 {
     unsigned      key[3];
@@ -66,10 +68,13 @@ PackedUnitVec KPK_Pack( const float *v )
     PackedUnitVec best;
     best.packed = 0;
     float bestDir = FLT_MAX, bestLen = FLT_MAX;
-    for ( int k = 0; k < KPK_CANDIDATES; ++k )
+    // The first KPK_CANDIDATES scales, then - only if none fitted - every coarser one
+    // with the same test (KIWI 2026-10-11: the Vec3PackUnitVec fallback below re-normalises
+    // per scale, and a dragged building's normals miss the memo every frame).
+    for ( int k = 0; ; ++k )
     {
         const int s = s0 + k;
-        if ( s > 255 )
+        if ( s > 255 || ( k >= KPK_CANDIDATES && best.packed != 0 ) )
             break;
         const float encodeScale = 32385.0f / (float)( s + 192 );
         const float decodeScale = 1.0f / encodeScale;

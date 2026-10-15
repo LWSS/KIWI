@@ -665,7 +665,9 @@ namespace
         // Regions are area targets: a nearer brush face wins, while brush vertices
         // and edges always win.  Construction arbitrates first because its lines
         // bound regions.  Mode 4 is brush-only; mode 5 remains unrestricted.
-        if ( KiwiSel_GetModeMask() != SEL_MASK_OBJECT )
+        // KIWI (2026-10-15, user: "when im in edge mode and i click a construction face, it
+        // shouldnt select anything"): a region is a face, so only face mode and mode 5 take it.
+        if ( ( KiwiSel_GetModeMask() & SEL_MASK_FACE ) != 0 )
         {
             ray_t rray;
             int   reg = -1;

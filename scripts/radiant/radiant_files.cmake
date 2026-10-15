@@ -557,6 +557,12 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_pack.h"
     "${SRC_DIR}/radiant/kiwi_pack.cpp"
 
+    # Physics Drop: selected models fall in ODE and rest (editor side + ODE side).
+    "${SRC_DIR}/radiant/kiwi_physdrop.h"
+    "${SRC_DIR}/radiant/kiwi_physdrop.cpp"
+    "${SRC_DIR}/radiant/kiwi_physdrop_sim.h"
+    "${SRC_DIR}/radiant/kiwi_physdrop_sim.cpp"
+
     # ── Phase 2 — editor-only renderer files (OPUS stubs) ────────────────────
     # These have no kisak equivalents; fresh decompile + OPUS queue items.
     "${SRC_DIR}/radiant/r_ed_scene.cpp"
@@ -589,6 +595,22 @@ set(RADIANT_PHYSICS
     "${SRC_DIR}/physics/ode/fastdot.c"
     "${SRC_DIR}/physics/ode/fastlsolve.c"
     "${SRC_DIR}/physics/ode/fastltsolve.c"
+    # KIWI: Physics Drop (kiwi_physdrop_sim.cpp) - bodies, contact joints, QuickStep, and the
+    # collision kernel ode.cpp's pools pull in (no geoms are made).  The three Phys_* symbols
+    # these reference from game-only TUs are defined in engine_stubs.cpp.
+    "${SRC_DIR}/physics/ode/ode.cpp"
+    "${SRC_DIR}/physics/ode/joint.cpp"
+    "${SRC_DIR}/physics/ode/quickstep.cpp"
+    "${SRC_DIR}/physics/ode/util.cpp"
+    "${SRC_DIR}/physics/ode/rotation.cpp"
+    "${SRC_DIR}/physics/ode/odemath.cpp"
+    "${SRC_DIR}/physics/ode/collision_kernel.cpp"
+    "${SRC_DIR}/physics/ode/collision_space.cpp"
+    "${SRC_DIR}/physics/ode/collision_std.cpp"
+    "${SRC_DIR}/physics/ode/collision_transform.cpp"
+    "${SRC_DIR}/physics/ode/collision_util.cpp"
+    "${SRC_DIR}/physics/ode/collision_quadtreespace.cpp"
+    "${SRC_DIR}/physics/ode/collision_trimesh_box.cpp"
 )
 
 # qcommon/ — BSP API + console command layer + file access + pack funcs + mem track

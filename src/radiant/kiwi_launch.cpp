@@ -41,6 +41,7 @@ bool s_open = false;
 bool s_buildBsp    = true;
 bool s_buildLight  = true;
 bool s_buildPackage = false;
+bool s_buildReflections = true;  // bake reflection probes (skipped when the map has none)
 char s_packageLanguage[32] = "english";
 bool s_saveFirst   = true;
 bool s_verbose     = true;
@@ -71,6 +72,7 @@ enum launchStage_t
     LSTAGE_NONE = 0,
     LSTAGE_BSP,
     LSTAGE_LIGHT,
+    LSTAGE_REFLECTIONS,
     LSTAGE_PACKAGE
 };
 
@@ -250,7 +252,7 @@ struct launchPaths_t
 };
 
 launchPaths_t s_buildPaths;
-launchStage_t s_buildStages[3];
+launchStage_t s_buildStages[4];
 int s_buildStageCount;
 int s_nextBuildStage;
 
@@ -418,6 +420,7 @@ const char *StageName( launchStage_t s )
     {
     case LSTAGE_BSP:   return "BSP";
     case LSTAGE_LIGHT: return "LIGHT";
+    case LSTAGE_REFLECTIONS: return "REFLECTIONS";
     case LSTAGE_PACKAGE: return "NATIVE FASTFILE";
     default:           return "BUILD";
     }
@@ -966,6 +969,45 @@ bool StartPackage( const launchPaths_t &p )
     return true;
 }
 
+int CountReflectionProbes()
+{
+    int count = 0;
+    for ( entity_s *e = entities.next; e && e != &entities; e = e->next )
+    {
+        const entity_s_def *def = (const entity_s_def *)e;
+        if ( def->eclass && def->eclass->name && !_stricmp( def->eclass->name, "reflection_probe" ) )
+            ++count;
+    }
+    return count;
+}
+
+// KIWI (2026-10-13): the stock bake - the game renders every probe into the BSP's
+// reflection lump (R_GenerateReflections) and quits by itself.
+bool StartReflections( const launchPaths_t &p )
+{
+    ResetStageCapture();
+    char exe[MAX_PATH];
+    ToolPath( p, "KIWI-mp.exe", exe, sizeof( exe ) );
+    if ( !FileExists( exe ) || !FileExists( p.bspAbs ) )
+    {
+        LogLine( "ERROR: REFLECTIONS needs KIWI-mp.exe and a compiled BSP." );
+        return false;
+    }
+    std::string cmd = "\"";
+    cmd += exe;
+    cmd += "\" +set useFastFile 0 +set r_reflectionProbeGenerate 1"
+           " +set r_reflectionProbeRegenerateAll 1 +set r_reflectionProbeGenerateExit 1 +devmap ";
+    cmd += p.name;
+    LogLine( "" );
+    LogLine( "==== REFLECTIONS ====" );
+    LogLine( "Baking %d reflection probe(s); the game opens, renders them and closes.", CountReflectionProbes() );
+    LogLine( "%s", cmd.c_str() );
+    if ( !SpawnCaptured( cmd.c_str(), p.root ) )
+        return false;
+    s_stage = LSTAGE_REFLECTIONS;
+    return true;
+}
+
 void StartNextBuildStage()
 {
     if ( s_nextBuildStage == s_buildStageCount )
@@ -979,6 +1021,16 @@ void StartNextBuildStage()
     {
     case LSTAGE_BSP: started = StartBsp( s_buildPaths ); break;
     case LSTAGE_LIGHT: started = StartLight( s_buildPaths ); break;
+    case LSTAGE_REFLECTIONS:
+        if ( !CountReflectionProbes() )
+        {
+            LogLine( "" );
+            LogLine( "==== REFLECTIONS ==== skipped: the map has no reflection_probe." );
+            StartNextBuildStage();
+            return;
+        }
+        started = StartReflections( s_buildPaths );
+        break;
     case LSTAGE_PACKAGE: started = StartPackage( s_buildPaths ); break;
     default: break;
     }
@@ -1257,6 +1309,17 @@ void DrawStageRows( bool busy )
     ImGui::EndDisabled();
     ImGui::PopID();
 
+    ImGui::PushID( "reflections_stage" );
+    ImGui::Checkbox( "##enabled", &s_buildReflections );
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "REFLECTIONS" );
+    ImGui::SameLine( 105.0f );
+    ImGui::TextDisabled( "%d probe(s)", CountReflectionProbes() );
+    HelpMarker( "Bakes every reflection_probe into the .d3dbsp: the game opens the map, renders the "
+                "probes and closes. Skipped when the map has none. A BSP compile wipes the bake, so "
+                "keep this on after BSP + LIGHT." );
+    ImGui::PopID();
+
     ImGui::PushID( "fastfile_stage" );
     ImGui::Checkbox( "##enabled", &s_buildPackage );
     ImGui::SameLine();
@@ -1290,6 +1353,10 @@ void StartSelectedBuild( const launchPaths_t &p, bool skipFragileStop = false )
     if ( s_buildLight )
     {
         s_buildStages[s_buildStageCount++] = LSTAGE_LIGHT;
+    }
+    if ( s_buildReflections )
+    {
+        s_buildStages[s_buildStageCount++] = LSTAGE_REFLECTIONS;
     }
     if ( s_buildPackage )
     {
@@ -1500,12 +1567,14 @@ void DrawWindow()
     ToolPath( p, "KIWI-cod4map.exe", bspExe, sizeof( bspExe ) );
     ToolPath( p, "KIWI-cod4rad.exe", lightExe, sizeof( lightExe ) );
     ToolPath( p, "linker_pc64.exe", packageExe, sizeof( packageExe ) );
+    char reflExe[MAX_PATH];
+    ToolPath( p, "KIWI-mp.exe", reflExe, sizeof( reflExe ) );
     const bool haveBspExe = FileExists( bspExe );
     const bool haveLightExe = FileExists( lightExe );
     const char *blockedReason = nullptr;
     if ( !canBuild )
         blockedReason = "A saved map and fs_basepath are required.";
-    else if ( !s_buildBsp && !s_buildLight && !s_buildPackage )
+    else if ( !s_buildBsp && !s_buildLight && !s_buildReflections && !s_buildPackage )
         blockedReason = "Select at least one build stage.";
     else if ( s_buildBsp && !haveBspExe )
         blockedReason = "KIWI-cod4map.exe was not found beside Radiant.";
@@ -1515,8 +1584,10 @@ void DrawWindow()
     {
         blockedReason = "linker_pc64.exe was not found beside Radiant.";
     }
-    else if ( !s_buildBsp && ( s_buildLight || s_buildPackage ) && !FileExists( p.bspAbs ) )
-        blockedReason = "LIGHT and FF64 need an existing .d3dbsp; enable BSP first.";
+    else if ( s_buildReflections && CountReflectionProbes() && !FileExists( reflExe ) )
+        blockedReason = "KIWI-mp.exe (REFLECTIONS) was not found beside Radiant.";
+    else if ( !s_buildBsp && ( s_buildLight || s_buildReflections || s_buildPackage ) && !FileExists( p.bspAbs ) )
+        blockedReason = "LIGHT, REFLECTIONS and FF64 need an existing .d3dbsp; enable BSP first.";
 
     if ( busy )
     {

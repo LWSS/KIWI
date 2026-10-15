@@ -29,6 +29,7 @@ bool KiwiGlass_CanApply();
 bool KiwiGlass_Make();                       // Make Breakable Glass (active set)
 bool KiwiGlass_Unmake();                     // Make Regular Brush
 bool KiwiGlass_ApplySetToSelection();        // selected panes take the active set
+bool KiwiGlass_SetStartState( int state );   // selected panes' "startbroken": 0 intact, 1 cracked, 2 shattered
 
 void KiwiGlass_Draw();                       // the "Glass" dock window (KIWI_WIN_GLASS)
 void KiwiGlass_Focus();                      // open the window and front its tab (a pane got selected)

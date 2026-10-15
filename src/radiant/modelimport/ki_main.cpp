@@ -121,6 +121,16 @@ json InspectJson(Session& session, const Recipe& recipe, std::string& error, boo
                                 {"opacity", !v.files.opacity.empty()},
                                 {"size", std::to_string(v.width) + "x" + std::to_string(v.height)}});
             textures = {{"set", setName}, {"variants", list}};
+            std::vector<const std::vector<TextureVariant>*> perMaterial;
+            std::vector<std::string> materialSets;
+            if (recipe.textures.set == kAllTextureSets) {
+                textures["set"] = kAllTextureSets;
+                if (MaterialTextureSets(scan, state.mesh.materialNames, perMaterial, materialSets,
+                                        textureError))
+                    textures["materialSets"] = materialSets;
+                else
+                    textures["error"] = textureError;
+            }
         } else {
             textures = {{"error", textureError}};
         }

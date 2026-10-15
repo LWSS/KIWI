@@ -7,6 +7,9 @@
 #include <d3d9.h>
 #include <string.h>
 #include <stdlib.h>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
 #include <gfx_d3d/r_init.h>        // dx.device
 #include <gfx_d3d/r_gfx.h>         // packed vertex and placement types
 #include <gfx_d3d/r_xsurface.h>    // surface count helpers
@@ -77,6 +80,10 @@ struct Entry
 Entry                    s_table[KIWI_IC_TABLE_SIZE];
 int                      s_entryCount;
 int                      s_okCount;
+// KIWI (2026-10-11): placement -> the slots it ever claimed (checked on use), so
+// InvalidateInstance stops scanning all 262k slots - it runs twice per moved model per
+// frame (Model_SetModel's remove + add), 19% of a frame dragging the kisak_trash building.
+std::unordered_map<const GfxScaledPlacement *, std::vector<int>> s_byInst;
 
 IDirect3DVertexBuffer9  *s_page[KIWI_IC_MAX_PAGES];
 unsigned                 s_pageUsedVerts[KIWI_IC_MAX_PAGES];
@@ -126,6 +133,7 @@ Entry *IC_Slot( const GfxScaledPlacement *inst, const XSurface *xsurf )
 void IC_Forget()
 {
     memset( s_table, 0, sizeof( s_table ) );
+    s_byInst.clear();
     memset( s_page, 0, sizeof( s_page ) );
     memset( s_pageUsedVerts, 0, sizeof( s_pageUsedVerts ) );
     memset( s_idxBlk, 0, sizeof( s_idxBlk ) );
@@ -319,6 +327,12 @@ bool KiwiInstCache_Get( const GfxScaledPlacement *placement, const XSurface *xsu
     e->stale  = false;
     e->failed = true;
     ++s_entryCount;
+    {
+        std::vector<int> &slots = s_byInst[placement];
+        const int slot = (int)( e - s_table );
+        if ( std::find( slots.begin(), slots.end(), slot ) == slots.end() )
+            slots.push_back( slot );
+    }
 
     if ( vertCount <= 0 || triCount <= 0 || !xsurf->verts0 || !xsurf->triIndices )
         return false;
@@ -390,12 +404,14 @@ void KiwiInstCache_InvalidateInstance( const GfxScaledPlacement *placement )
     KiwiShadowCache_Invalidate();
     if ( !placement )
         return;
-    // The linear scan is confined to edit paths.
-    for ( int i = 0; i < KIWI_IC_TABLE_SIZE; ++i )
+    const auto it = s_byInst.find( placement );
+    if ( it == s_byInst.end() )
+        return;
+    for ( int i : it->second )
     {
         Entry *e = &s_table[i];
         if ( e->inst != placement )
-            continue;
+            continue;                      // the slot was released (and maybe re-claimed)
         if ( e->built )
         {
             e->stale     = true;   // re-transform in place once the pose settles

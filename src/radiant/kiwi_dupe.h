@@ -2,11 +2,12 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
-// Duplication operations: classic mirror commands plus KIWI linear/radial arrays.
+// Duplication operations: the Mirror tool plus KIWI linear/radial arrays.
 //
-// Mirror reuses Select_FlipAxis (select.cpp 0x48FD50) through DoFlip
-// (select.cpp 0x424F30). bSwap=1 preserves outward windings; DoFlip also
-// owns undo and fixed-size entity angle updates.
+// Mirror reuses the classic flip core (Select_FlipAxisAbout, split from Select_FlipAxis,
+// select.cpp 0x48FD50): bSwap=1 preserves outward windings.  The classic instant
+// Mirror X/Y/Z commands (32956-32958, DoFlip) remain in mainfrm's dispatch but have no
+// KIWI UI (user 2026-10-12: "the 3 flip variants are unneeded").
 //
 // Clone_Selection (select.cpp 0x48F0D0) clones through the map text (Copy ->
 // Map_ImportBuffer, KIWI 2026-09-09): brushes, patches and entities all duplicate,
@@ -56,7 +57,15 @@ class KiwiEditorCommand;
 void KiwiDupe_RegisterCommands();
 KiwiEditorCommand *KiwiDupe_CommandForId( int commandId );
 
-bool KiwiDupe_CanMirror();   // attaches to the CLASSIC ids 32956 / 32957 / 32958
+bool KiwiDupe_CanMirror();   // objects selected (the Mirror tool's object arm)
+// KIWI (2026-10-12): the Mirror tool (KIWI_CMD_MIRROR): engage, X / Y / Z previews the flip
+// across that axis through the selection's centre (the same key again takes it back), RMB /
+// Enter confirms, Esc restores.  Brushes and patches: the classic flip core; xmodels: a
+// mirrored twin asset ("<name>_mir", written to raw/xmodel* once, reused after; mirroring a
+// twin goes back to its source) on the mirrored origin; prefabs and models a twin cannot be
+// made for (a surface off the root bone): turned to the mirror image of their frame and kept
+// on their bounds centre; construction: the store.
+bool KiwiDupe_CanMirrorTool();
 bool KiwiDupe_CanArray();    // anything with a shape: objects, construction, regions, edges, faces
 bool KiwiDupe_CanDuplicate();// …the same precondition; a separate name so the two
                              // palette rows can diverge later without a rename

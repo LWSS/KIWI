@@ -691,6 +691,28 @@ void __cdecl FS_PureServerSetLoadedIwds(char *loaded, char *referenced) { (void)
 void __cdecl Phys_ObjSetCollisionFromXModel(const XModel *model, PhysWorld world, dxBody *body)
 { (void)model; (void)world; (void)body; }
 
+// KIWI: the editor links the ODE core + its CoD4 collision kernel for Physics Drop
+// (kiwi_physdrop_sim.cpp).  These three are referenced from those files and defined in
+// game-only physics TUs; the drop never creates geoms, so only the matrix one does work.
+struct dxGeom;
+void __cdecl Phys_AxisToOdeMatrix3(const float (*inAxis)[3], float *outMatrix)   // phys_coll_boxbrush.cpp
+{
+    for (int r = 0; r < 3; ++r)
+    {
+        for (int c = 0; c < 3; ++c)
+            outMatrix[4 * r + c] = (*inAxis)[3 * c + r];
+        outMatrix[4 * r + 3] = 0.0f;
+    }
+}
+void __cdecl Phys_GeomUserGetAAContainedBox(dxGeom *geom, float *mins, float *maxs)   // phys_ode.cpp
+{
+    (void)geom;
+    mins[0] = mins[1] = mins[2] = 0.0f;
+    maxs[0] = maxs[1] = maxs[2] = 0.0f;
+}
+void __cdecl Phys_NearCallback(void *userData, dxGeom *geom1, dxGeom *geom2)   // phys_ode.cpp
+{ (void)userData; (void)geom1; (void)geom2; }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // FX worker-thread update stubs (r_workercmds_common.cpp)
 // ─────────────────────────────────────────────────────────────────────────────

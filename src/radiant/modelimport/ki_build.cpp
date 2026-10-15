@@ -305,6 +305,13 @@ bool ResolveTextures(const Recipe& recipe, TextureScan& scan,
                 recipe.textures.folder;
         return false;
     }
+    if (recipe.textures.set == kAllTextureSets) {
+        // One set per source material: the variant list is the first set's
+        // (MaterialTextureSets pairs the rest).
+        variants = &scan.sets.begin()->second;
+        setName = scan.sets.begin()->first;
+        return true;
+    }
     if (!recipe.textures.set.empty()) {
         for (const auto& [name, list] : scan.sets)
             if (Lower(name) == Lower(recipe.textures.set)) {
@@ -322,11 +329,45 @@ bool ResolveTextures(const Recipe& recipe, TextureScan& scan,
         std::string names;
         for (const auto& [name, list] : scan.sets) names += (names.empty() ? "" : ", ") + name;
         error = "prefix '" + recipe.textures.prefix + "' has several texture sets (" + names +
-                "); multi-material sources are not supported yet - pick one with textures.set";
+                "); set textures.set to one of them, or \"" + kAllTextureSets +
+                "\" for one set per source material";
         return false;
     }
     variants = &scan.sets.begin()->second;
     setName = scan.sets.begin()->first;
+    return true;
+}
+
+bool MaterialTextureSets(const TextureScan& scan, const std::vector<std::string>& materialNames,
+                         std::vector<const std::vector<TextureVariant>*>& perMaterial,
+                         std::vector<std::string>& setNames, std::string& error) {
+    perMaterial.clear();
+    setNames.clear();
+    if (materialNames.size() < 2u) {
+        error = "the source has " + std::to_string(materialNames.size()) +
+                " material(s); one set per material needs several";
+        return false;
+    }
+    for (const std::string& material : materialNames) {
+        // Blender numbers duplicate material names "Default.001"; InstaMAT names the
+        // matching texture set "Default_1".
+        std::string wanted = material;
+        const std::size_t dot = wanted.rfind('.');
+        if (dot != std::string::npos && dot + 1u < wanted.size() &&
+            wanted.find_first_not_of("0123456789", dot + 1u) == std::string::npos)
+            wanted = wanted.substr(0, dot) + "_" + std::to_string(std::stoi(wanted.substr(dot + 1u)));
+        const std::vector<TextureVariant>* found = nullptr;
+        for (const auto& [name, list] : scan.sets)
+            if (Lower(name) == Lower(wanted)) {
+                found = &list;
+                setNames.push_back(name);
+            }
+        if (!found) {
+            error = "source material '" + material + "' has no texture set '" + wanted + "'";
+            return false;
+        }
+        perMaterial.push_back(found);
+    }
     return true;
 }
 
@@ -409,11 +450,14 @@ std::string NewRecipeAssetName(const fs::path& source, const NewRecipeOptions& o
 namespace {
 
 // Every variant name (<asset>_<id>) must fit the 46-character limit the _col/_nml/_spc
-// image suffixes leave, so a long asset name is shortened for its longest variant id.
-std::string FitAssetToVariants(std::string asset, const std::vector<TextureVariant>& variants) {
+// image suffixes leave, so a long asset name is shortened for its longest variant id
+// (plus "_m<k>" for a multi-material source).
+std::string FitAssetToVariants(std::string asset, const std::vector<TextureVariant>& variants,
+                               std::size_t materialCount = 1) {
     std::size_t longestSuffix = 0;
     for (const TextureVariant& variant : variants)
         if (variant.id != "1") longestSuffix = std::max(longestSuffix, variant.id.size() + 1u);
+    if (materialCount > 1u) longestSuffix += 2u + std::to_string(materialCount - 1u).size();
     if (asset.size() + longestSuffix > 46u) {
         asset.resize(46u - longestSuffix);
         while (!asset.empty() && asset.back() == '_') asset.pop_back();
@@ -439,7 +483,11 @@ std::string PlannedAssetName(const fs::path& source, const NewRecipeOptions& opt
     const std::vector<TextureVariant>* variants = nullptr;
     std::string setName;
     std::string error;
-    if (!ResolveTextures(probe, scan, variants, setName, error)) return asset;
+    if (!ResolveTextures(probe, scan, variants, setName, error)) {
+        // Several sets: a multi-material source, one set per material.
+        if (scan.sets.size() < 2u) return asset;
+        return FitAssetToVariants(asset, scan.sets.begin()->second, scan.sets.size());
+    }
     return FitAssetToVariants(asset, *variants);
 }
 
@@ -479,6 +527,28 @@ bool NewRecipe(const fs::path& source, const NewRecipeOptions& options, const Ga
                 recipe.asset = fitted;
                 if (log) log("Asset name shortened to '" + recipe.asset + "' to fit the variants");
             }
+        } else if (scan.sets.size() > 1u) {
+            // Several sets: one per source material when every material has one.
+            std::vector<const std::vector<TextureVariant>*> perMaterial;
+            std::vector<std::string> setNames;
+            std::string materialError;
+            if (MaterialTextureSets(scan, state.mesh.materialNames, perMaterial, setNames,
+                                    materialError)) {
+                recipe.textures.set = kAllTextureSets;
+                for (std::size_t k = 0; k < setNames.size() && log; ++k)
+                    log("Material '" + state.mesh.materialNames[k] + "' -> texture set '" +
+                        setNames[k] + "'");
+                for (const TextureVariant& variant : *perMaterial[0])
+                    recipe.textures.variants.push_back({variant.id, !variant.files.baseColor.empty()});
+                const std::string fitted =
+                    FitAssetToVariants(recipe.asset, *perMaterial[0], perMaterial.size());
+                if (fitted != recipe.asset) {
+                    recipe.asset = fitted;
+                    if (log) log("Asset name shortened to '" + recipe.asset + "' to fit the variants");
+                }
+            } else if (log) {
+                log("Warning: " + textureError + " (" + materialError + ")");
+            }
         } else if (log) {
             log("Warning: " + textureError);
         }
@@ -498,6 +568,11 @@ bool BuildRecipe(const Recipe& recipe, const GameRoot& root, SourceState& state,
     const std::vector<TextureVariant>* variants = nullptr;
     std::string setName;
     if (!ResolveTextures(recipe, scan, variants, setName, error)) return false;
+    std::vector<const std::vector<TextureVariant>*> perMaterial;
+    std::vector<std::string> materialSets;
+    if (recipe.textures.set == kAllTextureSets &&
+        !MaterialTextureSets(scan, state.mesh.materialNames, perMaterial, materialSets, error))
+        return false;
 
     // auto: rebuilt from the mesh every build (units/scale/origin edits can never
     // leave stale hulls); manual: the hand-edited master, as authored.
@@ -521,11 +596,28 @@ bool BuildRecipe(const Recipe& recipe, const GameRoot& root, SourceState& state,
             if (log) log("Warning: " + report.warnings.back());
             continue;
         }
+        // Multi-material: the same variant id from every material's set.
+        std::vector<TextureFiles> materialFiles;
+        std::string missingSet;
+        for (std::size_t k = 0; k < perMaterial.size() && missingSet.empty(); ++k) {
+            const TextureVariant* match = nullptr;
+            for (const TextureVariant& candidate : *perMaterial[k])
+                if (Lower(candidate.id) == Lower(wanted.id)) match = &candidate;
+            if (!match || match->files.baseColor.empty()) missingSet = materialSets[k];
+            else materialFiles.push_back(match->files);
+        }
+        if (!missingSet.empty()) {
+            report.warnings.push_back("variant '" + wanted.id + "' has no BaseColor in set '" +
+                                      missingSet + "'; skipped");
+            if (log) log("Warning: " + report.warnings.back());
+            continue;
+        }
         ConvertRequest request;
         if (!MakeRequest(recipe, &state, request, error)) return false;
         request.assetName = VariantAssetName(recipe.asset, variant->id);
         request.pieceType = types;
         request.textures = variant->files;
+        request.materialTextures = std::move(materialFiles);
         request.outputRoot = root.Raw();
         request.templateRoot = root.Raw();
         if (log) log("== " + request.assetName + " (texture variant " + variant->id + ")");

@@ -458,7 +458,7 @@ void __cdecl Com_SaveLump(LumpType type, const void *newLump, uint size, ComSave
     BspGlob *v6; // [esp+Ch] [ebp-52Ch]
     char savedName[68]; // [esp+10h] [ebp-528h] BYREF
     uint chunkIter; // [esp+58h] [ebp-4E0h]
-    uint zero; // [esp+5Ch] [ebp-4DCh] BYREF
+    uint zero = 0; // [esp+5Ch] [ebp-4DCh] BYREF
     BspHeader newHeader; // [esp+60h] [ebp-4D8h] BYREF
     uint offset; // [esp+394h] [ebp-1A4h]
     const BspChunk *chunk; // [esp+398h] [ebp-1A0h]
@@ -499,7 +499,7 @@ void __cdecl Com_SaveLump(LumpType type, const void *newLump, uint size, ComSave
         {
             newHeader.chunks[newHeader.chunkCount].type = chunk->type;
             newHeader.chunks[newHeader.chunkCount].length = chunk->length;
-            chunkData[newHeader.chunkCount++] = comBspGlob.header + offset;
+            chunkData[newHeader.chunkCount++] = (const char *)comBspGlob.header + offset; // KIWI: byte offset (was BspHeader* math)
         }
         offset += (chunk->length + 3) & 0xFFFFFFFC;
     }
@@ -524,8 +524,7 @@ void __cdecl Com_SaveLump(LumpType type, const void *newLump, uint size, ComSave
         for (chunkIter = 0; chunkIter < newHeader.chunkCount; ++chunkIter)
         {
             FS_Write((char*)chunkData[chunkIter], newHeader.chunks[chunkIter].length, h);
-            //zeroCount = -newHeader.chunks[chunkIter].length & 3;
-            zeroCount = -(int)(newHeader.chunks[chunkIter].length & 3); // KISAKTODO sus int cast
+            zeroCount = ( 0u - newHeader.chunks[chunkIter].length ) & 3; // KIWI: pad to 4 (was negative)
             if (zeroCount)
                 FS_Write((char*)&zero, zeroCount, h);
         }

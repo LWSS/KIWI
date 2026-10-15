@@ -22,7 +22,8 @@
 //                          occlude; the accent dots for them are not occlusion-gated
 //                          against other geometry, like the edge nubs)
 //   3.  SNAP_INTERSECTION  construction-segment crossing - with another construction
-//                          segment or with a brush edge (7 px)
+//                          segment or with a brush edge - or a brush edge passing through
+//                          another brush's face (7 px)
 //   3b. SNAP_EDGE_MID      construction-segment midpoint or quarter point (7 px)
 //   4.  SNAP_EDGE_MID      brush-edge midpoint or quarter point (7 px), over EVERY
 //                          edge near the cursor, not only the one the edge Pick names
@@ -45,7 +46,8 @@
 // adjacent segments, parallel/collinear pairs, and shared endpoints are rejected.
 // A construction segment also crosses brush edges (KIWI 2026-09-26): same 3D test, gap
 // KCON_ISECT_DIST or one screen pixel, edges of eye-facing faces only, the surface gate
-// below as the occlusion policy.  Brush edge x brush edge crossings remain unsupported.
+// below as the occlusion policy.  A brush edge crossing another brush's face (KIWI
+// 2026-10-11) covers brush x brush junctions, flush faces included; see BrushCrossings.
 // Free-tool angle capture allows 6 SCREEN PIXELS of lateral miss, floored at
 // 1 degree and capped at 0.22 of one 15-degree step.
 //
@@ -94,7 +96,7 @@ enum snap_type_t
     SNAP_FACE,
     SNAP_FACE_CENTER,
     SNAP_ENDPOINT,       // construction anchor or open-chain start
-    SNAP_INTERSECTION,   // construction segment x segment
+    SNAP_INTERSECTION,   // construction segment x segment / brush edge, brush edge x brush face
     SNAP_AXIS,           // axis line through the tool's last point
     SNAP_CPLANE,         // planar placement only
     SNAP_ANGLE,
@@ -137,8 +139,9 @@ inline bool KiwiSnap_IsGeometry( snap_type_t t )
 bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
                          const float *axis, float *outDist );
 
-// Lattice capture uses WORLD-UNIT grid spacing. A world-aligned gesture quantizes
-// the absolute world coordinate; a slanted gesture quantizes its signed distance.
+// Lattice capture uses WORLD-UNIT grid spacing. The gesture's signed distance steps in
+// whole cells (off-grid geometry moves by even grid steps); absolute = true instead
+// quantizes a world-aligned gesture's absolute world coordinate (the Ctrl depth ladder).
 // HARD mode always picks a cell. SOFT mode captures only inside a 5 SCREEN-PIXEL
 // band, converted at the gesture depth and capped at 0.22 of a cell.
 //
@@ -150,7 +153,7 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
 #define KSNAP_MAJOR_STRIDE    10
 #define KSNAP_MAJOR_BAND_MUL  1.5f
 float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
-                            bool hard, bool *outMajor );
+                            bool hard, bool *outMajor, bool absolute = false );
 
 // Applies an area target only within 14 SCREEN PIXELS of the cursor-mapped scalar,
 // converted to WORLD UNITS at the point supplied by at. Named targets remain exact.
@@ -174,7 +177,8 @@ void KiwiSnap_EmitMarker( const snap_result_t &r );
 
 // Draws advertised snap points while a compatible command is active and snapping is
 // engaged: the hovered face's corners and centre, and black nubs on the midpoints and
-// quarter points of every edge near the cursor. It owns its kiwi_lines batch.
+// quarter points of every edge near the cursor and on brush x brush crossings. It owns
+// its kiwi_lines batch.
 void KiwiSnap_DrawFaceAccents();
 // Selected/hovered cylinder centres and measured axis; screen-space camera overlay.
 void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, float imgH );

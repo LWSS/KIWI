@@ -961,6 +961,22 @@ void LoadExistingBSPReflectionProbes(char *filename)
        fileSize < 12 + 8 * (int)header->chunkCount )
     Com_Error("%s has an invalid BSP chunk directory", filename);
 
+  // KIWI: the old BSP is only a source of probe images; a truncated one (a crashed
+  // reflection bake) read past the file end. Skip it - the probes get re-baked.
+  {
+    long long end = 12 + 8 * (long long)header->chunkCount;
+    for ( unsigned int i = 0; i < header->chunkCount; ++i )
+      end += ( (long long)header->chunks[i].length + 3 ) & ~3ll;
+    if ( end > fileSize )
+    {
+      Com_Printf("WARNING: %s is truncated (%i of %lld bytes); its reflection probe images are not kept\n",
+                 filename, fileSize, end);
+      numBspReflectionProbes = 0;
+      free(header);
+      return;
+    }
+  }
+
   if ( version > 11 )
   {
     numBspReflectionProbes = CopyLump(

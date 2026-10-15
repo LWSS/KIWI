@@ -42,7 +42,7 @@ struct Recipe {
     struct Textures {
         std::string folder = "F:/3dlocal/INSTAMAT_EXPORTS";
         std::string prefix;
-        std::string set;                   // texture set name; "" = the only/first set
+        std::string set;                   // texture set name; "" = the only set; "*" = one per source material
         std::vector<RecipeVariant> variants;
         double glassOpacity = 0.35;
     } textures;

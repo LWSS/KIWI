@@ -85,7 +85,7 @@ float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
 
     // Final rung: absolute world-axis lattice with major-line preference.
     bool major = false;
-    const float ld = KiwiSnap_LatticeAxis( rawAbs, ref, axis, true, &major );
+    const float ld = KiwiSnap_LatticeAxis( rawAbs, ref, axis, true, &major, true );
     if ( outMajor )
         *outMajor = major;
     return ld;
@@ -1102,8 +1102,8 @@ namespace
                 }
                 else
                 {
-                    // Quantize the scalar depth, not the cursor point. The hard lattice uses
-                    // absolute world coordinates and can prefer nearby major lines; this arm
+                    // Quantize the scalar depth, not the cursor point. The hard lattice steps
+                    // whole grid cells and can prefer nearby major lines; this arm
                     // is reached only when the transform snap context is engaged.
                     bool major = false;
                     d = KiwiSnap_LatticeAxis( d, m_ref, m_plane.normal, true, &major );
@@ -1877,7 +1877,7 @@ namespace
                 }
                 else
                 {
-                    // Hard absolute lattice with major-line preference.
+                    // Hard lattice (whole grid steps of depth) with major-line preference.
                     bool major = false;
                     d = KiwiSnap_LatticeAxis( d, m_ref, m_plane.normal, true, &major );
                     m_gridMajor = major;

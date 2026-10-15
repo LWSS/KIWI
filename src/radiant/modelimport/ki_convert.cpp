@@ -125,6 +125,8 @@ struct Options {
     int surfaceType = cod4::kSurfaceTypeConcrete;
     // KIWI: the resolved texture set (ki_textures) instead of a folder scan.
     TextureFiles textures;
+    // KIWI: per source material, when there are several (see ConvertRequest).
+    std::vector<TextureFiles> materialTextures;
     // Glass pieces (surface type glass) get the shipped glass material family
     // (l_sm_b0c0s0, window sort, blended) over <asset>_glass_col whose alpha is
     // the InstaMAT opacity map when one is exported, else this constant.
@@ -954,6 +956,10 @@ bool PrepareTextures(const Options& options, TextureSet& textures,
                 textures.color[offset + channel] * metallic;
             textures.specularGloss[offset + channel] =
                 static_cast<std::uint8_t>(std::clamp(value, 0.0f, 255.0f));
+            // KIWI (2026-10-14, user: "my vertical gutter pipes look dark grey now instead
+            // of white. That shouldn't be happening"): the diffuse keeps the full base
+            // colour.  Darkening metal's diffuse (it kept 35%) turned InstaMAT's ~0.9-metal
+            // white paint dark grey under CoD4's sparse probes.
         }
         textures.specularGloss[offset + 3u] =
             static_cast<std::uint8_t>(gloss * 255.0f);
@@ -1074,32 +1080,37 @@ bool WriteMaterial(const Options& options, const fs::path& templatePath,
     return true;
 }
 
-// `triangleTypes` is aligned with `triangles` (one cod4 surface type each).
-// Triangles are grouped by type into separate surfaces that all share the one
-// material: collision flags live on the surface, so that is what gives a
+// `triangleTypes` and `triangleSlot` are aligned with `triangles` (one cod4 surface
+// type and one texture slot each). Triangles are grouped by slot, then by type into
+// separate surfaces: collision flags live on the surface, so that is what gives a
 // single-texture model wooden posts and a metal rail.
-bool WriteXModel(const Options& options,
+bool WriteXModel(const Options& options, const std::vector<Options>& slots,
                   std::vector<xmodel::BakeTriangle>& triangles,
-                  const std::vector<int>& triangleTypes, ConvertResult& convertResult,
+                  const std::vector<int>& triangleTypes,
+                  const std::vector<std::size_t>& triangleSlot, ConvertResult& convertResult,
                   const LogFn& log, std::string& error) {
     xmodel::BakeLod lod;
     lod.distance = 0.0f;
-    for (int type = 0; type < cod4::kSurfaceTypeCount; ++type) {
-        // The (all) type first so the model's first surface is the common one.
-        const int order = type == 0 ? options.surfaceType : type;
-        if (type != 0 && order == options.surfaceType) continue;
-        xmodel::MaterialTriangles material;
-        material.materialName = MaterialNameForType(options, order);
-        material.collisionSurfaceFlags = order << cod4::kSurfaceTypeShift;
-        for (std::size_t index = 0; index < triangles.size(); ++index) {
-            const int triangleType =
-                index < triangleTypes.size() ? triangleTypes[index] : options.surfaceType;
-            if (triangleType == order) material.triangles.push_back(triangles[index]);
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        for (int type = 0; type < cod4::kSurfaceTypeCount; ++type) {
+            // The (all) type first so the model's first surface is the common one.
+            const int order = type == 0 ? options.surfaceType : type;
+            if (type != 0 && order == options.surfaceType) continue;
+            xmodel::MaterialTriangles material;
+            material.materialName = MaterialNameForType(slots[slot], order);
+            material.collisionSurfaceFlags = order << cod4::kSurfaceTypeShift;
+            for (std::size_t index = 0; index < triangles.size(); ++index) {
+                const int triangleType =
+                    index < triangleTypes.size() ? triangleTypes[index] : options.surfaceType;
+                if (triangleType == order && triangleSlot[index] == slot)
+                    material.triangles.push_back(triangles[index]);
+            }
+            if (material.triangles.empty()) continue;
+            LogPrintf(log, "Collision surface %s (%s): %zu triangles",
+                      cod4::SurfaceTypeName(order), material.materialName.c_str(),
+                      material.triangles.size());
+            lod.materials.push_back(std::move(material));
         }
-        if (material.triangles.empty()) continue;
-        LogPrintf(log, "Collision surface %s: %zu triangles",
-                  cod4::SurfaceTypeName(order), material.triangles.size());
-        lod.materials.push_back(std::move(material));
     }
     triangles.clear();
     xmodel::BakeRequest request;
@@ -1176,7 +1187,7 @@ int RunConvert(const Options& options, const ObjMesh& mesh,
                       overridden, pieceSet.pieces.size(),
                       cod4::SurfaceTypeName(options.surfaceType));
     }
-    if (mesh.materialNames.size() > 1u)
+    if (mesh.materialNames.size() > 1u && options.materialTextures.size() <= 1u)
         LogPrintf(log,
                   "Warning: the source has %zu materials; they all bake with the one "
                   "texture set",
@@ -1195,8 +1206,27 @@ int RunConvert(const Options& options, const ObjMesh& mesh,
         triangleTypes[index] = meshTriangleTypes[sourceIndices[index]];
     PrintObjStats(mesh, bounds, log);
 
-    TextureSet textures;
-    if (!PrepareTextures(options, textures, log, error)) return 1;
+    // KIWI: one texture slot per source material when several sets were given:
+    // slot 0 keeps <asset>, slot k writes <asset>_m<k> images and materials.
+    std::vector<Options> slots;
+    if (options.materialTextures.size() > 1u) {
+        for (std::size_t k = 0; k < options.materialTextures.size(); ++k) {
+            Options slot = options;
+            if (k > 0) slot.assetName = options.assetName + "_m" + std::to_string(k);
+            slot.textures = options.materialTextures[k];
+            slots.push_back(std::move(slot));
+            LogPrintf(log, "Material '%s' -> %s", mesh.materialNames[k].c_str(),
+                      slots.back().assetName.c_str());
+        }
+    } else {
+        slots.push_back(options);
+    }
+    std::vector<std::size_t> triangleSlot(triangles.size(), 0);
+    if (slots.size() > 1u)
+        for (std::size_t index = 0; index < sourceIndices.size(); ++index)
+            if (sourceIndices[index] < mesh.triangleMaterial.size())
+                triangleSlot[index] = std::min<std::size_t>(
+                    mesh.triangleMaterial[sourceIndices[index]], slots.size() - 1u);
 
     fs::path materialTemplate;
     std::string templateError;
@@ -1221,25 +1251,35 @@ int RunConvert(const Options& options, const ObjMesh& mesh,
     auto templateFor = [&](int type) -> const fs::path& {
         return IsGlassType(type) ? glassTemplate : materialTemplate;
     };
-    if (!WriteTextures(options, textures, usesGlass, log, error) ||
-        !WriteMaterial(options, templateFor(options.surfaceType), options.assetName,
-                       options.surfaceType, log, error)) {
-        return 1;
-    }
-    // One extra material per overriding piece type, over the same images, so
-    // bullet holes land on those pieces too (see MaterialNameForType); glass
-    // pieces additionally switch template (see IsGlassType).
-    for (int type = 1; type < cod4::kSurfaceTypeCount; ++type) {
-        if (type == options.surfaceType) continue;
-        bool used = false;
-        for (std::size_t index = 0; index < triangleTypes.size() && !used; ++index)
-            used = triangleTypes[index] == type;
-        if (!used) continue;
-        if (!WriteMaterial(options, templateFor(type),
-                           MaterialNameForType(options, type), type, log, error))
+    for (std::size_t slot = 0; slot < slots.size(); ++slot) {
+        const Options& slotOptions = slots[slot];
+        bool slotGlass = IsGlassType(options.surfaceType);
+        for (std::size_t index = 0; index < triangleTypes.size() && !slotGlass; ++index)
+            slotGlass = triangleSlot[index] == slot && IsGlassType(triangleTypes[index]);
+        TextureSet textures;
+        if (!PrepareTextures(slotOptions, textures, log, error) ||
+            !WriteTextures(slotOptions, textures, slotGlass, log, error) ||
+            !WriteMaterial(slotOptions, templateFor(options.surfaceType),
+                           slotOptions.assetName, options.surfaceType, log, error)) {
             return 1;
+        }
+        // One extra material per overriding piece type, over the same images, so
+        // bullet holes land on those pieces too (see MaterialNameForType); glass
+        // pieces additionally switch template (see IsGlassType).
+        for (int type = 1; type < cod4::kSurfaceTypeCount; ++type) {
+            if (type == options.surfaceType) continue;
+            bool used = false;
+            for (std::size_t index = 0; index < triangleTypes.size() && !used; ++index)
+                used = triangleSlot[index] == slot && triangleTypes[index] == type;
+            if (!used) continue;
+            if (!WriteMaterial(slotOptions, templateFor(type),
+                               MaterialNameForType(slotOptions, type), type, log, error))
+                return 1;
+        }
     }
-    if (!WriteXModel(options, triangles, triangleTypes, result, log, error)) return 1;
+    if (!WriteXModel(options, slots, triangles, triangleTypes, triangleSlot, result, log,
+                     error))
+        return 1;
 
     LogPrintf(log,
               "Success: '%s' exported to '%s' as one LOD with three "
@@ -1282,6 +1322,7 @@ Options OptionsFromRequest(const ConvertRequest& request) {
     options.normalGreen = request.normalGreen;
     options.surfaceType = request.surfaceType;
     options.textures = request.textures;
+    options.materialTextures = request.materialTextures;
     options.glassOpacity = request.glassOpacity;
     return options;
 }
@@ -1304,6 +1345,20 @@ bool ValidateRequest(const ConvertRequest& request, std::string& error) {
     if (request.outputRoot.empty()) {
         error = "no output raw root";
         return false;
+    }
+    if (request.materialTextures.size() > 1u) {
+        if (request.materialTextures.size() != request.mesh->materialNames.size()) {
+            error = std::to_string(request.materialTextures.size()) +
+                    " material texture sets for a source with " +
+                    std::to_string(request.mesh->materialNames.size()) + " materials";
+            return false;
+        }
+        const std::string last = request.assetName + "_m" +
+                                 std::to_string(request.materialTextures.size() - 1u);
+        if (last.size() > 46u) {
+            error = "material asset name '" + last + "' is longer than 46 characters";
+            return false;
+        }
     }
     return true;
 }

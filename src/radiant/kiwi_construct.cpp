@@ -4019,8 +4019,8 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
         for ( int i = 0; i < hiddenCount; ++i )
         {
             const int ord = KiwiVis_SidecarOrdinal( i );
-            if ( ord >= 0 )
-                fprintf( f, "hiddenbrush %i\n", ord );
+            if ( ord >= 0 )   // "locked": the outliner's red eye; older readers ignore it
+                fprintf( f, "hiddenbrush %i%s\n", ord, KiwiVis_SidecarOrdinalLocked( i ) ? " locked" : "" );
         }
     }
 
@@ -4216,9 +4216,10 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
         }
         if ( !strcmp( kw, "hiddenbrush" ) )
         {
-            int n = -1;
-            if ( sscanf( line, "%*s %i", &n ) == 1 )
-                KiwiVis_SidecarLoadNote( n );      // range-checked at apply time
+            int  n = -1;
+            char tag[16] = "";
+            if ( sscanf( line, "%*s %i %15s", &n, tag ) >= 1 )
+                KiwiVis_SidecarLoadNote( n, !strcmp( tag, "locked" ) );   // range-checked at apply time
             continue;
         }
         if ( !inObject )

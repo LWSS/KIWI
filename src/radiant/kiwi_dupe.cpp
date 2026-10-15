@@ -10,6 +10,7 @@
 #include "prefs.h"          // g_PrefsDlg->m_bNoClamp (exact array copies)
 
 #include "kiwi_dupe.h"
+#include "kiwi_angles.h"              // Mirror: a model's frame in double
 #include "kiwi_camera.h"              // arrays: the lollipop axis mapping
 #include "kiwi_csg.h"                 // cloneability gate
 #include "kiwi_command.h"
@@ -27,9 +28,13 @@
 #include "kiwi_vec.h"     // vector helpers
 
 #include <imgui/imgui.h>
+#include <universal/com_files.h>   // Mirror: the mirrored model twins (FS_ReadFile / raw writes)
+#include <universal/com_math.h>    // Mirror: AnglesToAxis (the fallback's bounds centre)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <string>
+#include <utility>
 #include <vector>
 
 // ── ported entry points (each verified against its definition) ──────────────
@@ -38,11 +43,6 @@ extern bool      g_kiwiImportInCallerUndo;                              // map.c
 
 namespace
 {
-    // The three CLASSIC mirror ids (mainfrm.cpp:5267-5269).
-    const int KDUP_ID_FLIP_X = 32956;
-    const int KDUP_ID_FLIP_Y = 32957;
-    const int KDUP_ID_FLIP_Z = 32958;
-
     const float KDUP_COL_GHOST[3] = { 0.60f, 0.85f, 1.00f };
     const float KDUP_COL_BAD[3]   = { 1.00f, 0.30f, 0.25f };
     // Warm color distinguishes the input line from blue copy ghosts.
@@ -1250,9 +1250,656 @@ namespace
     KiwiArrayCommand s_radial( true );
 }
 
+// ── Mirror (KIWI 2026-10-12) ─────────────────────────────────────────────────────────────
+// User: "It flips the selected thing (can be line, brush, even model), in the x/y/z direction.
+// Mirror command is engaged, then user presses X Y or Z keys and it previews the flip, right
+// click confirms as usual.  Try to keep the model in place while mirroring."
+//
+// The preview IS the flip, inside the command's undo bracket: brushes and patches go through
+// the classic flip core (Select_FlipAxisAbout: Select_ApplyMatrix with the winding swap and
+// texture lock); another axis key reverts it exactly (KiwiCmd_UndoCancel - Undo_Undo puts the
+// originals back, deselected, stamped with Undo_LastUndoStamp, which re-selects them) and
+// flips again.  Construction lines go through their store's absolute-from-baseline matrix arm.
+//
+// Models (and prefabs, lights, any fixed-size entity): an xmodel cannot be mesh-mirrored, so
+// it is re-oriented to the mirror image of its frame with its own left/right flipped back
+// (exact for a left/right-symmetric model), and placed so its BOUNDS CENTRE lands on the
+// mirrored centre - a model mirrored alone stays where it is instead of jumping across its
+// origin.  The pivot is the centre of the selection's bounds (models by their world bounds).
+extern void Select_FlipAxisAbout( int axis, const float pivot[3], bool fixedSizeOrigins );  // select.cpp
+extern int  Undo_LastUndoStamp();                                                             // undo.cpp
+
+// ── mirrored model assets (KIWI 2026-10-12, user: "make it so that models really mirror") ──
+// An xmodel cannot be placed mirrored (rotation + uniform modelscale only), so Mirror gives a
+// model its TWIN: the same model mirrored across its own Y (left / right), written once under
+// raw/ as "<name>_mir" and reused.  Any world mirror is that twin under a rotation, so with
+// the frame Mirror computes the result is exact; mirroring a "_mir" model gives back its
+// source.  The v25 files are copied with every Y negated - positions, normals, binormals,
+// tangents, bounds, and the collision triangles' plane / svec / tvec (a reflection keeps the
+// dot products their inside test is made of) - and each triangle's winding reversed.  Rigid
+// models on bone 0 only (static props); others keep the old turn-only approximation.
+namespace
+{
+    const char *KMIR_SUFFIX = "_mir";
+
+    bool MrRead( const std::string &qpath, std::vector<unsigned char> *out )
+    {
+        void *buf = nullptr;
+        const int size = FS_ReadFile( qpath.c_str(), &buf );
+        if ( size <= 0 || !buf )
+        {
+            if ( buf )
+                FS_FreeFile( (char *)buf );
+            return false;
+        }
+        if ( out )
+            out->assign( (const unsigned char *)buf, (const unsigned char *)buf + size );
+        FS_FreeFile( (char *)buf );
+        return true;
+    }
+
+    // raw/, as kiwi_barbwire.cpp WriteRaw: the map compilers search raw/raw_shared/devraw.
+    bool MrWrite( const std::string &qpath, const std::vector<unsigned char> &bytes, std::string *err )
+    {
+        const int h = FS_FOpenFileWriteToDir( qpath.c_str(), "raw" );
+        if ( !h )
+        {
+            *err = "could not open '" + qpath + "' for writing";
+            return false;
+        }
+        const unsigned wrote = bytes.empty() ? 0u : FS_Write( (const char *)&bytes[0], (unsigned)bytes.size(), h );
+        FS_FCloseFile( h );
+        if ( wrote != (unsigned)bytes.size() )
+        {
+            FS_DeleteInDir( (char *)qpath.c_str(), (char *)"raw" );
+            *err = "short write to '" + qpath + "'";
+            return false;
+        }
+        return true;
+    }
+
+    // `base` + "_mir" within `maxLen` characters (the loaders' 64-byte qpath buffers), cut
+    // and tagged with a hash of the full name when longer.
+    std::string MrName( const std::string &base, size_t maxLen )
+    {
+        std::string n = base + KMIR_SUFFIX;
+        if ( n.size() <= maxLen )
+            return n;
+        unsigned h = 2166136261u;
+        for ( char c : base )
+            h = ( h ^ (unsigned char)c ) * 16777619u;
+        char tag[16];
+        _snprintf( tag, sizeof( tag ), "_%06x", h & 0xFFFFFFu );
+        tag[sizeof( tag ) - 1] = '\0';
+        return base.substr( 0, maxLen - strlen( tag ) - strlen( KMIR_SUFFIX ) ) + tag + KMIR_SUFFIX;
+    }
+
+    struct mrReader_t
+    {
+        const std::vector<unsigned char> &d;
+        size_t at = 0;
+        bool   ok = true;
+        bool Need( size_t n ) { if ( !ok || d.size() - at < n || at > d.size() ) ok = false; return ok; }
+        unsigned U16() { if ( !Need( 2 ) ) return 0; unsigned short v; memcpy( &v, &d[at], 2 ); at += 2; return v; }
+        int      S32() { if ( !Need( 4 ) ) return 0; int v; memcpy( &v, &d[at], 4 ); at += 4; return v; }
+        float    F32() { if ( !Need( 4 ) ) return 0.0f; float v; memcpy( &v, &d[at], 4 ); at += 4; return v; }
+        std::string CStr()
+        {
+            std::string s;
+            while ( Need( 1 ) )
+            {
+                const char c = (char)d[at++];
+                if ( !c ) break;
+                s.push_back( c );
+            }
+            return s;
+        }
+    };
+
+    struct mrWriter_t
+    {
+        std::vector<unsigned char> b;
+        void Raw( const void *p, size_t n ) { b.insert( b.end(), (const unsigned char *)p, (const unsigned char *)p + n ); }
+        void U8( unsigned v )      { const unsigned char c = (unsigned char)v; Raw( &c, 1 ); }
+        void U16( unsigned v )     { const unsigned short s = (unsigned short)v; Raw( &s, 2 ); }
+        void S32( int v )          { Raw( &v, 4 ); }
+        void F32( float v )        { Raw( &v, 4 ); }
+        void CStr( const std::string &s ) { Raw( s.c_str(), s.size() + 1 ); }
+    };
+
+    // A mins / maxs pair mirrored across Y (y swaps sides).
+    void MrBounds( mrReader_t &r, mrWriter_t &w )
+    {
+        float v[6];
+        for ( float &f : v )
+            f = r.F32();
+        const float lo = -v[4], hi = -v[1];
+        v[1] = lo;
+        v[4] = hi;
+        for ( float f : v )
+            w.F32( f );
+    }
+
+    void MrNegY( std::vector<unsigned char> &d, size_t vec3At )
+    {
+        float y;
+        memcpy( &y, &d[vec3At + 4], 4 );
+        y = -y;
+        memcpy( &d[vec3At + 4], &y, 4 );
+    }
+
+    // xmodelsurfs v25 (XModelReadSurface), mirrored in place.
+    bool MrSurfs( std::vector<unsigned char> &d, std::string *err )
+    {
+        mrReader_t r{ d };
+        if ( r.U16() != 25 ) { *err = "xmodelsurfs is not version 25"; return false; }
+        const unsigned surfs = r.U16();
+        for ( unsigned s = 0; s < surfs && r.ok; ++s )
+        {
+            r.at += 3;                                      // tileMode, the unused u16
+            const unsigned verts = r.U16();
+            const unsigned tris  = r.U16();
+            unsigned lists = 0, rigid = 0;
+            for ( ;; )
+            {
+                const unsigned count = r.U16();
+                if ( !r.ok || !count )
+                    break;
+                const unsigned bone = r.U16();
+                if ( bone != 0 ) { *err = "a surface is bound to a bone other than the root"; return false; }
+                rigid += count;
+                ++lists;
+            }
+            if ( lists != 1 || rigid != verts ) { *err = "the model is skinned or multi-bone"; return false; }
+            for ( unsigned v = 0; v < verts && r.ok; ++v )
+            {
+                if ( !r.Need( 60 ) )          // normal 12, color 4, uv 8, binormal 12, tangent 12, xyz 12
+                    break;
+                MrNegY( d, r.at );            // normal
+                MrNegY( d, r.at + 24 );       // binormal (after color 4 + uv 8)
+                MrNegY( d, r.at + 36 );       // tangent
+                MrNegY( d, r.at + 48 );       // position
+                r.at += 60;
+            }
+            for ( unsigned t = 0; t < tris && r.ok; ++t )
+            {
+                if ( !r.Need( 6 ) )
+                    break;
+                std::swap( d[r.at + 2], d[r.at + 4] );   // reverse the winding: corners 1 <-> 2
+                std::swap( d[r.at + 3], d[r.at + 5] );
+                r.at += 6;
+            }
+        }
+        if ( !r.ok || r.at != d.size() ) { *err = "xmodelsurfs is truncated or malformed"; return false; }
+        return true;
+    }
+
+    // xmodel v25 (XModelLoadConfigFile, XModelLoadCollData, the LOD material names, the
+    // per-bone bounds), rebuilt with the LOD files renamed and every Y mirrored.
+    bool MrConfig( const std::vector<unsigned char> &in, mrWriter_t &w,
+                   std::string lodIn[4], std::string lodOut[4], std::string *err )
+    {
+        mrReader_t r{ in };
+        if ( r.U16() != 25 ) { *err = "xmodel is not version 25"; return false; }
+        w.U16( 25 );
+        if ( !r.Need( 1 ) ) { *err = "xmodel is truncated"; return false; }
+        w.U8( in[r.at++] );                                 // flags
+        MrBounds( r, w );                                   // the radius cube
+        w.CStr( r.CStr() );                                 // physics preset
+        for ( int i = 0; i < 4; ++i )
+        {
+            w.F32( r.F32() );
+            lodIn[i]  = r.CStr();
+            lodOut[i] = lodIn[i].empty() ? std::string() : MrName( lodIn[i], 50 );
+            w.CStr( lodOut[i] );
+        }
+        w.S32( r.S32() );                                   // collLod
+        const int collSurfs = r.S32();
+        if ( collSurfs < 0 || collSurfs > 65536 ) { *err = "bad collision surface count"; return false; }
+        w.S32( collSurfs );
+        for ( int s = 0; s < collSurfs && r.ok; ++s )
+        {
+            const int tris = r.S32();
+            if ( tris < 0 ) { r.ok = false; break; }
+            w.S32( tris );
+            for ( int t = 0; t < tris && r.ok; ++t )
+                for ( int k = 0; k < 12; ++k )              // plane, svec, tvec: y is element 1
+                {
+                    const float f = r.F32();
+                    w.F32( ( k & 3 ) == 1 ? -f : f );
+                }
+            MrBounds( r, w );
+            w.S32( r.S32() );                               // bone
+            w.S32( r.S32() );                               // contents
+            w.S32( r.S32() );                               // surfFlags
+        }
+        for ( int i = 0; i < 4 && r.ok; ++i )
+        {
+            if ( lodIn[i].empty() )
+                continue;
+            const unsigned n = r.U16();
+            w.U16( n );
+            for ( unsigned j = 0; j < n && r.ok; ++j )
+                w.CStr( r.CStr() );
+        }
+        if ( !r.ok || ( in.size() - r.at ) % 24 != 0 ) { *err = "xmodel is truncated or malformed"; return false; }
+        while ( r.at < in.size() )
+            MrBounds( r, w );                               // per-bone bounds
+        return true;
+    }
+}
+
+// The mirrored twin of xmodel `name` (see above); false + `err` when it cannot be made.
+static bool KiwiMirror_ModelAsset( const std::string &name, std::string *out, std::string *err )
+{
+    // A "_mir" twin whose source is on the search path mirrors back to it.
+    const size_t sl = strlen( KMIR_SUFFIX );
+    if ( name.size() > sl && !_stricmp( name.c_str() + name.size() - sl, KMIR_SUFFIX ) )
+    {
+        const std::string base = name.substr( 0, name.size() - sl );
+        if ( MrRead( "xmodel/" + base, nullptr ) )
+        {
+            *out = base;
+            return true;
+        }
+    }
+    *out = MrName( name, 55 );
+    if ( MrRead( "xmodel/" + *out, nullptr ) )
+        return true;                                        // made before: reuse it
+
+    std::vector<unsigned char> cfg;
+    if ( !MrRead( "xmodel/" + name, &cfg ) ) { *err = "'xmodel/" + name + "' is not on the search path"; return false; }
+    mrWriter_t w;
+    std::string lodIn[4], lodOut[4];
+    if ( !MrConfig( cfg, w, lodIn, lodOut, err ) || lodIn[0].empty() )
+    {
+        if ( err->empty() ) *err = "the xmodel has no LOD 0";
+        return false;
+    }
+    // Every file is made and checked before any is written; the xmodel goes last.
+    std::vector<std::vector<unsigned char>> surfs( 4 );
+    for ( int i = 0; i < 4; ++i )
+    {
+        if ( lodIn[i].empty() )
+            continue;
+        if ( !MrRead( "xmodelsurfs/" + lodIn[i], &surfs[i] ) ) { *err = "'xmodelsurfs/" + lodIn[i] + "' is missing"; return false; }
+        if ( !MrSurfs( surfs[i], err ) )
+            return false;
+    }
+    std::vector<unsigned char> parts;                       // bones: the root carries no transform
+    if ( !MrRead( "xmodelparts/" + lodIn[0], &parts ) ) { *err = "'xmodelparts/" + lodIn[0] + "' is missing"; return false; }
+    if ( !MrWrite( "xmodelparts/" + lodOut[0], parts, err ) )
+        return false;
+    for ( int i = 0; i < 4; ++i )
+        if ( !lodIn[i].empty() && !MrWrite( "xmodelsurfs/" + lodOut[i], surfs[i], err ) )
+            return false;
+    if ( !MrWrite( "xmodel/" + *out, w.b, err ) )
+        return false;
+    Sys_Printf( "Mirror: wrote the mirrored model '%s' (raw/xmodel).\n", out->c_str() );
+    return true;
+}
+
+namespace
+{
+    bool MirrorFixedSize( const selbrush_t *b )
+    {
+        const entity_s_def *owner = b->owner ? (const entity_s_def *)b->owner->def : nullptr;
+        return owner && owner->eclass && owner->eclass->fixedsize;
+    }
+
+    // A fixed-size entity's world bounds centre relative to its origin (zero for a point
+    // entity with no model).
+    void MirrorEntityCentre( selbrush_t *b, float out[3] )
+    {
+        out[0] = out[1] = out[2] = 0.0f;
+        float mins[3], maxs[3], angles[3], origin[3], scale = 1.0f, rmin[3], rmax[3];
+        if ( !KiwiDrop_GetModelInfo( b, mins, maxs, angles, &scale, origin, nullptr )
+          || !KiwiDrop_TransformBounds( mins, maxs, angles, scale, rmin, rmax ) )
+            return;
+        for ( int k = 0; k < 3; ++k )
+            out[k] = ( rmin[k] + rmax[k] ) * 0.5f;
+    }
+
+    // The centre of the selection's bounds (models by their world bounds); `half` = the
+    // largest half extent (the plane marker's size).
+    void MirrorPivot( float out[3], float *half )
+    {
+        float mins[3] = {  1.0e30f,  1.0e30f,  1.0e30f };
+        float maxs[3] = { -1.0e30f, -1.0e30f, -1.0e30f };
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !b->def )
+                continue;
+            float lo[3], hi[3];
+            if ( MirrorFixedSize( b ) )
+            {
+                const entity_s_def *e = (const entity_s_def *)b->owner->def;
+                float mn[3], mx[3], an[3], org[3], sc = 1.0f;
+                if ( KiwiDrop_GetModelInfo( b, mn, mx, an, &sc, org, nullptr )
+                  && KiwiDrop_TransformBounds( mn, mx, an, sc, lo, hi ) )
+                {
+                    Add3( lo, e->origin, lo );
+                    Add3( hi, e->origin, hi );
+                }
+                else
+                {
+                    Copy3( e->origin, lo );
+                    Copy3( e->origin, hi );
+                }
+            }
+            else
+            {
+                Copy3( b->def->mins, lo );
+                Copy3( b->def->maxs, hi );
+            }
+            for ( int k = 0; k < 3; ++k )
+            {
+                mins[k] = lo[k] < mins[k] ? lo[k] : mins[k];
+                maxs[k] = hi[k] > maxs[k] ? hi[k] : maxs[k];
+            }
+        }
+        *half = 32.0f;
+        for ( int k = 0; k < 3; ++k )
+        {
+            out[k] = mins[k] <= maxs[k] ? ( mins[k] + maxs[k] ) * 0.5f : 0.0f;
+            if ( mins[k] <= maxs[k] && ( maxs[k] - mins[k] ) * 0.5f > *half )
+                *half = ( maxs[k] - mins[k] ) * 0.5f;
+        }
+    }
+
+    struct mirrorEnt_t
+    {
+        selbrush_t *node;
+        float       origin[3];
+        float       angles[3];
+        double      anglesD[3];         // the key text in double (the exact turn below)
+        bool        hasAngles;
+        float       centre[3];          // world bounds centre relative to the origin
+    };
+
+    // Mirror the selected objects across `axis` through `pivot` (the caller's undo bracket).
+    void MirrorObjects( int axis, const float pivot[3] )
+    {
+        // Fixed-size entities first, as they are (the brush flip below leaves them alone).
+        std::vector<mirrorEnt_t> ents;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !b->def || !MirrorFixedSize( b ) )
+                continue;
+            bool dup = false;
+            for ( const mirrorEnt_t &e : ents )
+                dup = dup || e.node->owner == b->owner;
+            if ( dup )
+                continue;
+            mirrorEnt_t e;
+            e.node = b;
+            entity_s_def *def = (entity_s_def *)b->owner->def;
+            Copy3( def->origin, e.origin );
+            double ang[3] = { 0.0, 0.0, 0.0 };
+            const char *text = ValueForKey2( (entity_s *)def, "angles" );
+            e.hasAngles = text && text[0] && sscanf( text, "%lf %lf %lf", &ang[0], &ang[1], &ang[2] ) == 3;
+            for ( int k = 0; k < 3; ++k )
+            {
+                e.anglesD[k] = e.hasAngles ? ang[k] : 0.0;
+                e.angles[k]  = (float)e.anglesD[k];
+            }
+            MirrorEntityCentre( b, e.centre );
+            ents.push_back( e );
+        }
+
+        Select_FlipAxisAbout( axis, pivot, false );
+
+        for ( const mirrorEnt_t &e : ents )
+        {
+            selbrush_t   *b   = e.node;
+            entity_s_def *def = (entity_s_def *)b->owner->def;
+            // The frame: rows forward / left / up.  Mirror each, then flip the model's own
+            // left so the result is a rotation again (det +1).
+            float axisM[3][3], turned[3][3];
+            AnglesToAxis( e.angles, axisM );
+            for ( int r = 0; r < 3; ++r )
+            {
+                Copy3( axisM[r], turned[r] );
+                turned[r][axis] = -turned[r][axis];
+            }
+            for ( int k = 0; k < 3; ++k )
+                turned[1][k] = -turned[1][k];
+            // The bounds centre in the model's frame, then where it sits in the new frame.
+            const float local[3] = { Dot3( e.centre, axisM[0] ), Dot3( e.centre, axisM[1] ), Dot3( e.centre, axisM[2] ) };
+            float newRel[3] = { 0.0f, 0.0f, 0.0f };
+            for ( int r = 0; r < 3; ++r )
+                for ( int k = 0; k < 3; ++k )
+                    newRel[k] += local[r] * turned[r][k];
+            // An xmodel takes its mirrored twin: then the mirror is exact and the origin simply
+            // mirrors.  Otherwise (prefab, skinned model, unreadable asset) the bounds centre
+            // mirrors through the pivot and the origin follows it.
+            std::string twin;
+            bool        exact = false;
+            const bool  isModel = KiwiDrop_IsModelEntity( b ) && !( def->eclass->classtype & 0x10 );
+            const char *modelKey = isModel ? ValueForKey2( (entity_s *)def, "model" ) : nullptr;
+            if ( modelKey && modelKey[0] )
+            {
+                std::string err;
+                exact = KiwiMirror_ModelAsset( modelKey, &twin, &err );
+                if ( !exact )
+                    Sys_Printf( "Mirror: '%s' cannot be mirrored as a mesh (%s) - turned instead.\n",
+                                modelKey, err.c_str() );
+            }
+            float want[3], move[3];
+            for ( int k = 0; k < 3; ++k )
+            {
+                if ( exact )
+                    want[k] = ( k == axis ) ? 2.0f * pivot[k] - e.origin[k] : e.origin[k];
+                else
+                {
+                    float centre = e.origin[k] + e.centre[k];
+                    if ( k == axis )
+                        centre = 2.0f * pivot[k] - centre;
+                    want[k] = centre - newRel[k];
+                }
+                move[k] = want[k] - def->origin[k];
+            }
+            if ( exact )
+                SetKeyValue( def, "model", twin.c_str() );
+            if ( Len3( move ) > 0.0f )
+                Brush_Move( move, b->def, 0 );
+            const bool turn = e.hasAngles || KiwiDrop_IsModelEntity( b ) || ( def->eclass->classtype & 0x10 );
+            if ( turn )
+            {
+                // The same frame in DOUBLE (kiwi_angles.h), written nearest the old angles, so
+                // a mirror and its mirror back give the original text ("1.715" -> "178.285" ->
+                // "1.715"; float AnglesToAxis / AxisToAngles came back as 1.7150143).
+                double axisD[3][3], turnedD[3][3], angD[3], nearD[3];
+                KiwiAng_ToAxis( e.anglesD, axisD );
+                for ( int r = 0; r < 3; ++r )
+                    for ( int k = 0; k < 3; ++k )
+                        turnedD[r][k] = ( k == axis ? -axisD[r][k] : axisD[r][k] ) * ( r == 1 ? -1.0 : 1.0 );
+                KiwiAng_FromAxis( turnedD, angD );
+                KiwiAng_Near( angD, e.anglesD, nearD );
+                const float newAng[3] = { (float)nearD[0], (float)nearD[1], (float)nearD[2] };
+                char text[160];
+                SetKeyValue( def, "angles", KiwiFmt_Vec3Exact( text, sizeof( text ), newAng, 0 ) );
+            }
+            Brush_RebuildAfterEdit( b->def );
+        }
+        g_nUpdateBits = -1;
+    }
+
+    class KiwiMirrorCommand : public KiwiEditorCommand
+    {
+    public:
+        const char *Name() const override { return "Mirror"; }
+
+        bool CanExecute() override { return KiwiDupe_CanMirror() || KiwiConSel_CanMove(); }
+
+        bool Begin() override
+        {
+            m_axis      = -1;
+            m_flipped   = false;
+            m_construct = false;
+            if ( selected_brushes.next == &selected_brushes )
+            {
+                if ( KiwiConSel_CanMove() && KiwiConSel_MoveBegin( m_pivot ) )
+                {
+                    m_construct = true;
+                    m_half = 64.0f;
+                    return true;
+                }
+                Sys_Printf( "Mirror: select brushes, models or construction lines first.\n" );
+                return false;
+            }
+            MirrorPivot( m_pivot, &m_half );
+            return true;
+        }
+
+        bool KeyDown( int vk, unsigned int mods ) override
+        {
+            if ( mods & 6u )                         // Ctrl / Alt chords are not axis keys
+                return false;
+            const int axis = vk == 'X' ? 0 : vk == 'Y' ? 1 : vk == 'Z' ? 2 : -1;
+            if ( axis < 0 )
+                return false;
+            SetAxis( axis == m_axis ? -1 : axis );   // the same key again takes the flip back
+            return true;
+        }
+
+        void Commit() override
+        {
+            if ( m_construct )
+            {
+                if ( m_axis >= 0 ) KiwiConSel_MoveCommit();   // the snapshot is the undo record
+                else               KiwiConSel_MoveCancel();   // nothing flipped: no empty step
+            }
+            if ( m_axis >= 0 )
+                Sys_Printf( "Mirror: mirrored across %c.\n", "XYZ"[m_axis] );
+            m_axis = -1;
+            m_flipped = false;
+            m_construct = false;
+            g_nUpdateBits = -1;
+        }
+
+        void Cancel() override
+        {
+            if ( m_construct )
+                KiwiConSel_MoveCancel();
+            else if ( m_flipped )
+                RevertObjects();                     // exact, and the originals stay selected
+            m_axis = -1;
+            m_flipped = false;
+            m_construct = false;
+            g_nUpdateBits = -1;
+        }
+
+        const char *HudStatus() const override
+        {
+            static const char *s_text[4] = { "press X, Y or Z", "across X", "across Y", "across Z" };
+            return s_text[m_axis + 1];
+        }
+
+        int HudPrompts( const kiwiPrompt_t **out ) const override
+        {
+            static const kiwiPrompt_t s_keys[] = {
+                { "X", "Mirror across X" },
+                { "Y", "Mirror across Y" },
+                { "Z", "Mirror across Z" },
+            };
+            *out = s_keys;
+            return 3;
+        }
+
+        // The mirror plane through the pivot, or a small cross before an axis is chosen.
+        void DrawWorld() override
+        {
+            if ( m_axis < 0 )
+            {
+                KiwiLines_Color( KDUP_COL_LINE[0], KDUP_COL_LINE[1], KDUP_COL_LINE[2] );
+                for ( int k = 0; k < 3; ++k )
+                {
+                    float a[3], b[3];
+                    Copy3( m_pivot, a );
+                    Copy3( m_pivot, b );
+                    a[k] -= 8.0f;
+                    b[k] += 8.0f;
+                    KiwiLines_Add( a, b );
+                }
+                return;
+            }
+            const int u = ( m_axis + 1 ) % 3, v = ( m_axis + 2 ) % 3;
+            const float h = m_half * 1.1f;
+            float c[4][3];
+            for ( int i = 0; i < 4; ++i )
+            {
+                Copy3( m_pivot, c[i] );
+                c[i][u] += ( i == 0 || i == 3 ) ? -h : h;
+                c[i][v] += ( i < 2 ) ? -h : h;
+            }
+            KiwiLines_Color( KDUP_COL_LINE[0], KDUP_COL_LINE[1], KDUP_COL_LINE[2] );
+            for ( int i = 0; i < 4; ++i )
+                KiwiLines_Add( c[i], c[( i + 1 ) % 4] );
+            KiwiLines_Add( c[0], c[2] );
+            KiwiLines_Add( c[1], c[3] );
+        }
+
+    private:
+        void SetAxis( int axis )
+        {
+            if ( m_construct )
+            {
+                float m[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
+                if ( axis >= 0 )
+                    m[axis][axis] = -1.0f;
+                KiwiConSel_RotateApplyMatrix( m_pivot, m );   // absolute from the baseline
+                m_axis = axis;
+                g_nUpdateBits = -1;
+                return;
+            }
+            if ( m_flipped )
+                RevertObjects();
+            if ( axis >= 0 )
+            {
+                KiwiCmd_UndoBegin( "mirror selection" );
+                MirrorObjects( axis, m_pivot );
+                Sel_InvalidateFromLegacy();
+                m_flipped = true;
+            }
+            m_axis = axis;
+        }
+
+        // The bracket's own Undo_Undo puts the originals back exactly (deselected, stamped);
+        // select them again.
+        void RevertObjects()
+        {
+            KiwiCmd_UndoCancel();
+            m_flipped = false;
+            const intptr_t stamp = (intptr_t)Undo_LastUndoStamp();
+            std::vector<selbrush_t *> back;
+            for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+                if ( b->def && (intptr_t)b->def->def == stamp )
+                    back.push_back( b );
+            for ( selbrush_t *b : back )
+                Select_Brush( b, 0, 0, 0 );
+            Sel_InvalidateFromLegacy();
+            g_nUpdateBits = -1;
+        }
+
+        int   m_axis      = -1;
+        bool  m_flipped   = false;            // objects: a flip is applied in the bracket
+        bool  m_construct = false;            // the construction store owns this gesture
+        float m_pivot[3]  = { 0.0f, 0.0f, 0.0f };
+        float m_half      = 64.0f;
+    };
+
+    KiwiMirrorCommand s_mirror;
+}
+
 bool KiwiDupe_CanMirror()
 {
     return selected_brushes.next != &selected_brushes;
+}
+
+bool KiwiDupe_CanMirrorTool()
+{
+    return KiwiDupe_CanMirror() || KiwiConSel_CanMove();
 }
 
 bool KiwiDupe_CanArray()
@@ -1330,6 +1977,7 @@ void KiwiDupe_RegisterCommands()
     Radiant_RegisterCommand( "KiwiArrayLinear", 0, 0, KIWI_CMD_ARRAY_LINEAR );
     Radiant_RegisterCommand( "KiwiArrayRadial", 0, 0, KIWI_CMD_ARRAY_RADIAL );
     Radiant_RegisterCommand( "KiwiDuplicate",   0, 0, KIWI_CMD_DUPLICATE );
+    Radiant_RegisterCommand( "KiwiMirror",      0, 0, KIWI_CMD_MIRROR );
 }
 
 KiwiEditorCommand *KiwiDupe_CommandForId( int commandId )
@@ -1338,6 +1986,8 @@ KiwiEditorCommand *KiwiDupe_CommandForId( int commandId )
         return &s_linear;
     if ( commandId == KIWI_CMD_ARRAY_RADIAL )
         return &s_radial;
+    if ( commandId == KIWI_CMD_MIRROR )
+        return &s_mirror;
     return 0;
 }
 
@@ -1345,27 +1995,15 @@ void KiwiDupe_MenuItems()
 {
     ImGui::SeparatorText( "Duplicate" );
 
-    const bool canMirror = KiwiDupe_CanMirror();
     const bool canArray  = KiwiDupe_CanArray();
 
-    // Aggregate hover because IsItemHovered after the loop sees only the last button.
-    bool mirrorHover = false;
-    ImGui::BeginDisabled( !canMirror );
-    ImGui::TextDisabled( "Mirror" );
-    ImGui::SameLine();
-    if ( ImGui::Button( "X##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_X );
-    mirrorHover = mirrorHover || ImGui::IsItemHovered();
-    ImGui::SameLine();
-    if ( ImGui::Button( "Y##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_Y );
-    mirrorHover = mirrorHover || ImGui::IsItemHovered();
-    ImGui::SameLine();
-    if ( ImGui::Button( "Z##kiwimirror" ) ) Radiant_ExecCommand( (unsigned int)KDUP_ID_FLIP_Z );
-    mirrorHover = mirrorHover || ImGui::IsItemHovered();
+    ImGui::BeginDisabled( !KiwiDupe_CanMirrorTool() );
+    if ( ImGui::Button( "Mirror..." ) )
+        Radiant_ExecCommand( (unsigned int)KIWI_CMD_MIRROR );
     ImGui::EndDisabled();
-    if ( mirrorHover )
-        ImGui::SetTooltip( "Mirrors the selection about the selection mid\n"
-                           "(the ported Select_FlipAxis; fixed-size entities\n"
-                           "also get their `angles` key flipped)." );
+    if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+        ImGui::SetTooltip( "Flip brushes, models or construction lines across an axis through\n"
+                           "the selection's centre, previewed before you confirm." );
 
     ImGui::BeginDisabled( !KiwiDupe_CanDuplicate() );
     if ( ImGui::Button( "Duplicate (and move)" ) )

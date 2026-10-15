@@ -85,6 +85,10 @@ static int      g_undoMaxMemorySize = 2 * 1024 * 1024;
 static int      g_undoId           = 1;
 // 0x739F78
 static int      g_redoId           = 1;
+// KIWI: the redo id the last Undo_Undo stamped on every brush def it restored
+// (bDef->def).  The Mirror tool re-selects what a reverted preview put back by it.
+static int      s_lastUndoStamp    = 0;
+int Undo_LastUndoStamp() { return s_lastUndoStamp; }
 
 // Accessor for the ON_UPDATE_COMMAND_UI Redo-greying handler (g_lastredo is static).
 // True when a redo record is available (matches OnUpdateEditRedo 0x428790).
@@ -786,6 +790,7 @@ void Undo_Undo()
 
     redo->time      = (double)clock() / 1000.0;
     redo->id        = g_redoId;
+    s_lastUndoStamp = redo->id;   // KIWI: Undo_LastUndoStamp
     redo->done      = 1;
     g_redoId        = g_redoId + 1;
     redo->operation = undo->operation;

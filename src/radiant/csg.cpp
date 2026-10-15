@@ -20,6 +20,8 @@
 #include "winding.h"
 #include <universal/assertive.h>   // iassert (USE_ASSERTS always on; same handler as Assert)
 #include "kiwi_ported.h"           // KIWI: shared engine/editor externs
+#include <math.h>
+#include <vector>
 
 // ─── externs from brush.cpp ──────────────────────────────────────────────────
 // Splits brush b with face f; front/back are new brushes (NULL if no piece).
@@ -312,6 +314,7 @@ void CSG_MakeHollow()
 // (threaded via .next, NULL-terminated — CSG_Merge builds it by reusing each instance's
 // own link, NOT the circular display list) into one new convex brush; NULL if the
 // result would be non-convex or carry duplicate planes.  The input list is not freed.
+// KIWI: the two phases below are the RETAIL algorithm, replaced by KmConvexUnion.
 //   Phase 1 — for every pair of OUTER faces (a face is INNER when another brush in the
 //     list has a flipped-equal plane), reject if Winding_PlanesConcave.
 //   Phase 2 — Face_Alloc every outer face whose plane is not already in the new brush.
@@ -322,157 +325,362 @@ void CSG_MakeHollow()
 // but the face DATA from node->def; the two mirror each other in the editor, so this
 // port uses def->faceCount throughout.
 // ─────────────────────────────────────────────────────────────────────────────
+// KIWI (2026-10-14, user: "the boolean merge of brushes not allowing a merge when the
+// shape is seemingly easy to merge ... kisak_trash"): the ported test calls a face
+// interior only when another brush carries its EXACT flipped plane, so brushes that
+// OVERLAP always read as a concave hull - kisak_trash had 445 overlapping wall-piece
+// pairs with a box-shaped union that were refused.  The union is now tested directly:
+// the hull planes are the brush faces with every input vertex behind them, the hull
+// must stay inside the inputs' bounds, and the hull minus every input must leave
+// nothing thicker than KMERGE_GAP.  Coplanar outer faces keep one face, a non-caulk one
+// first, then the largest.
+namespace
+{
+    const double KMERGE_EPS     = 0.02;      // vertex-behind-plane slack (DIST_EPSILON)
+    const double KMERGE_SAME    = 0.99999;   // normal dot for "one plane"
+    const double KMERGE_GAP     = 0.05;      // leftover pieces thinner than this are noise
+    const double KMERGE_MIN_VOL = 0.001;     // cubic units: below it a piece is noise
+    const double KMERGE_COINCIDE   = 0.999999;   // planes this close are one face
+    const double KMERGE_COINCIDE_D = 0.001;
+    const int    KMERGE_PIECES  = 512;       // coverage work cap
+
+    struct kmPlane_t { double n[3]; double d; };
+    typedef std::vector<kmPlane_t> kmPoly_t;
+
+    double KmDot( const double *a, const double *b ) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+
+    bool KmPlaneOf( const face_t *f, kmPlane_t *out )
+    {
+        // Face_MakePlane's convention, in double: n = (p0-p1) x (p2-p1), d = n.p1.
+        double a[3], b[3];
+        for ( int k = 0; k < 3; ++k )
+        {
+            a[k] = (double)f->planepts[0][k] - (double)f->planepts[1][k];
+            b[k] = (double)f->planepts[2][k] - (double)f->planepts[1][k];
+        }
+        double n[3] = { a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0] };
+        const double l = sqrt( KmDot( n, n ) );
+        if ( !( l > 1.0e-12 ) )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+            out->n[k] = n[k] / l;
+        double p1[3] = { f->planepts[1][0], f->planepts[1][1], f->planepts[1][2] };
+        out->d = KmDot( out->n, p1 );
+        return true;
+    }
+
+    // One face of a convex polytope: a big square on plane i clipped by the rest.
+    void KmFace( const kmPoly_t &poly, size_t i, std::vector<double> *w )
+    {
+        const kmPlane_t &p = poly[i];
+        int ax = 0;
+        for ( int k = 1; k < 3; ++k )
+            if ( fabs( p.n[k] ) > fabs( p.n[ax] ) ) ax = k;
+        double up[3] = { 0.0, 0.0, 0.0 };
+        up[( ax == 2 ) ? 0 : 2] = 1.0;
+        const double du = KmDot( up, p.n );
+        double v[3], r[3];
+        for ( int k = 0; k < 3; ++k ) v[k] = up[k] - p.n[k] * du;
+        const double lv = sqrt( KmDot( v, v ) );
+        for ( int k = 0; k < 3; ++k ) v[k] /= lv;
+        r[0] = v[1]*p.n[2] - v[2]*p.n[1];
+        r[1] = v[2]*p.n[0] - v[0]*p.n[2];
+        r[2] = v[0]*p.n[1] - v[1]*p.n[0];
+        const double S = 262144.0;
+        static const double SX[4] = { -1, 1, 1, -1 }, SY[4] = { 1, 1, -1, -1 };
+        w->clear();
+        for ( int c = 0; c < 4; ++c )
+            for ( int k = 0; k < 3; ++k )
+                w->push_back( p.n[k] * p.d + ( r[k] * SX[c] + v[k] * SY[c] ) * S );
+
+        std::vector<double> out;
+        for ( size_t j = 0; j < poly.size() && !w->empty(); ++j )
+        {
+            if ( j == i )
+                continue;
+            const kmPlane_t &q = poly[j];
+            // A coincident plane is the same face: the first copy owns it.
+            if ( KmDot( p.n, q.n ) > KMERGE_COINCIDE && fabs( p.d - q.d ) < KMERGE_COINCIDE_D )
+            {
+                if ( j < i )
+                    w->clear();
+                continue;
+            }
+            const size_t m = w->size() / 3;
+            out.clear();
+            for ( size_t a = 0; a < m; ++a )
+            {
+                const double *pa = &(*w)[a * 3];
+                const double *pb = &(*w)[( ( a + 1 ) % m ) * 3];
+                const double da = KmDot( q.n, pa ) - q.d;
+                const double db = KmDot( q.n, pb ) - q.d;
+                if ( da <= 0.0 )
+                    out.insert( out.end(), pa, pa + 3 );
+                if ( ( da < 0.0 && db > 0.0 ) || ( da > 0.0 && db < 0.0 ) )
+                {
+                    const double t = da / ( da - db );
+                    for ( int k = 0; k < 3; ++k )
+                        out.push_back( pa[k] + ( pb[k] - pa[k] ) * t );
+                }
+            }
+            w->swap( out );
+            if ( w->size() < 9 )
+                w->clear();
+        }
+    }
+
+    // Volume and surface area; false = empty or unbounded (a face reaches the seed square).
+    bool KmMeasure( const kmPoly_t &poly, double *outVol, double *outArea )
+    {
+        std::vector< std::vector<double> > faces( poly.size() );
+        double c[3] = { 0.0, 0.0, 0.0 };
+        size_t nc = 0;
+        for ( size_t i = 0; i < poly.size(); ++i )
+        {
+            KmFace( poly, i, &faces[i] );
+            for ( size_t p = 0; p < faces[i].size(); p += 3 )
+            {
+                for ( int k = 0; k < 3; ++k )
+                {
+                    if ( fabs( faces[i][p + k] ) > 131072.0 )
+                        return false;
+                    c[k] += faces[i][p + k];
+                }
+                ++nc;
+            }
+        }
+        if ( nc < 4 )
+            return false;
+        for ( int k = 0; k < 3; ++k ) c[k] /= (double)nc;
+        double vol = 0.0, area = 0.0;
+        int    sides = 0;
+        for ( size_t i = 0; i < poly.size(); ++i )
+        {
+            const std::vector<double> &w = faces[i];
+            const size_t m = w.size() / 3;
+            if ( m < 3 )
+                continue;
+            ++sides;
+            double s[3] = { 0.0, 0.0, 0.0 };
+            for ( size_t a = 1; a + 1 < m; ++a )
+            {
+                double e1[3], e2[3];
+                for ( int k = 0; k < 3; ++k )
+                {
+                    e1[k] = w[a * 3 + k] - w[k];
+                    e2[k] = w[( a + 1 ) * 3 + k] - w[k];
+                }
+                s[0] += e1[1]*e2[2] - e1[2]*e2[1];
+                s[1] += e1[2]*e2[0] - e1[0]*e2[2];
+                s[2] += e1[0]*e2[1] - e1[1]*e2[0];
+            }
+            const double fa = 0.5 * sqrt( KmDot( s, s ) );
+            area += fa;
+            vol  += fa * ( poly[i].d - KmDot( poly[i].n, c ) ) / 3.0;
+        }
+        *outVol  = vol;
+        *outArea = area;
+        return sides >= 4 && vol > 0.0;
+    }
+
+    // A piece that matters: a bounded solid, thicker than the gap tolerance.  Flat
+    // remnants (three faces, no volume) come from coincident planes and are noise.
+    bool KmSolid( const kmPoly_t &poly )
+    {
+        double v = 0.0, a = 0.0;
+        if ( !KmMeasure( poly, &v, &a ) )
+            return false;
+        return v > KMERGE_MIN_VOL && a > 0.0 && 2.0 * v / a > KMERGE_GAP;
+    }
+
+    bool KmIsCaulk( face_t *f )
+    {
+        MaterialDef *md = &f->mtldef[g_qeglobals.current_edit_layer];
+        if ( ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) ) != 1 )
+            return false;
+        const char *name = (const char *)Materialdef_GetName( md );
+        if ( !name )
+            return false;
+        const char *leaf = name;
+        for ( const char *p = name; *p; ++p )
+            if ( *p == '/' || *p == '\\' ) leaf = p + 1;
+        return _stricmp( leaf, "caulk" ) == 0;
+    }
+
+    double KmWindingArea( const winding_t *w )
+    {
+        if ( !w || w->numpoints < 3 )
+            return 0.0;
+        double s[3] = { 0.0, 0.0, 0.0 };
+        for ( int a = 1; a + 1 < w->numpoints; ++a )
+        {
+            double e1[3], e2[3];
+            for ( int k = 0; k < 3; ++k )
+            {
+                e1[k] = (double)w->p[a][k] - (double)w->p[0][k];
+                e2[k] = (double)w->p[a + 1][k] - (double)w->p[0][k];
+            }
+            s[0] += e1[1]*e2[2] - e1[2]*e2[1];
+            s[1] += e1[2]*e2[0] - e1[0]*e2[2];
+            s[2] += e1[0]*e2[1] - e1[1]*e2[0];
+        }
+        return 0.5 * sqrt( KmDot( s, s ) );
+    }
+
+    struct kmPick_t { face_t *face; kmPlane_t plane; bool caulk; double area; };
+
+    // The hull faces of a convex union, or false when the union is not one convex solid.
+    bool KmConvexUnion( selbrush_t *brushList, std::vector<face_t *> *outFaces )
+    {
+        std::vector<double> verts;
+        double mins[3] = { 1e30, 1e30, 1e30 }, maxs[3] = { -1e30, -1e30, -1e30 };
+        std::vector<kmPoly_t> inputs;
+        for ( selbrush_t *n = brushList; n; n = n->next )
+        {
+            brush_t *def = n->def;
+            if ( !def || !def->faces || def->faceCount < 4 )
+                return false;
+            kmPoly_t poly;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                kmPlane_t p;
+                if ( !KmPlaneOf( &def->faces[f], &p ) )
+                    return false;
+                poly.push_back( p );
+                const winding_t *w = def->faces[f].w;
+                for ( int i = 0; w && i < w->numpoints; ++i )
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        const double x = w->p[i][k];
+                        verts.push_back( x );
+                        if ( x < mins[k] ) mins[k] = x;
+                        if ( x > maxs[k] ) maxs[k] = x;
+                    }
+            }
+            inputs.push_back( poly );
+        }
+        if ( verts.empty() )
+            return false;
+
+        std::vector<kmPick_t> picks;
+        for ( selbrush_t *n = brushList; n; n = n->next )
+            for ( int f = 0; f < n->def->faceCount; ++f )
+            {
+                face_t *face = &n->def->faces[f];
+                if ( !face->w )
+                    continue;
+                kmPlane_t p;
+                KmPlaneOf( face, &p );
+                bool behind = true;
+                for ( size_t v = 0; v < verts.size() && behind; v += 3 )
+                    behind = KmDot( p.n, &verts[v] ) - p.d <= KMERGE_EPS;
+                if ( !behind )
+                    continue;
+                const kmPick_t cand = { face, p, KmIsCaulk( face ), KmWindingArea( face->w ) };
+                bool merged = false;
+                for ( size_t k = 0; k < picks.size() && !merged; ++k )
+                {
+                    kmPick_t &o = picks[k];
+                    if ( KmDot( o.plane.n, p.n ) < KMERGE_SAME || fabs( o.plane.d - p.d ) > KMERGE_EPS )
+                        continue;
+                    merged = true;
+                    if ( ( o.caulk && !cand.caulk ) || ( o.caulk == cand.caulk && cand.area > o.area ) )
+                        o = cand;
+                }
+                if ( !merged )
+                    picks.push_back( cand );
+            }
+        if ( picks.size() < 4 )
+            return false;
+
+        kmPoly_t hull;
+        for ( size_t k = 0; k < picks.size(); ++k )
+            hull.push_back( picks[k].plane );
+
+        // The hull may not reach past the inputs: a missing hull facet leaves it open.
+        {
+            std::vector<double> w;
+            for ( size_t i = 0; i < hull.size(); ++i )
+            {
+                KmFace( hull, i, &w );
+                for ( size_t p = 0; p < w.size(); p += 3 )
+                    for ( int k = 0; k < 3; ++k )
+                        if ( w[p + k] < mins[k] - KMERGE_GAP || w[p + k] > maxs[k] + KMERGE_GAP )
+                            return false;
+            }
+        }
+
+        // Coverage: carve every input out of the hull; nothing solid may remain.
+        std::vector<kmPoly_t> pieces( 1, hull ), next;
+        for ( size_t b = 0; b < inputs.size() && !pieces.empty(); ++b )
+        {
+            next.clear();
+            for ( size_t pc = 0; pc < pieces.size(); ++pc )
+            {
+                kmPoly_t inside = pieces[pc];
+                for ( size_t f = 0; f < inputs[b].size(); ++f )
+                {
+                    kmPlane_t flip = inputs[b][f];
+                    for ( int k = 0; k < 3; ++k ) flip.n[k] = -flip.n[k];
+                    flip.d = -flip.d;
+                    kmPoly_t front = inside;
+                    front.push_back( flip );
+                    if ( KmSolid( front ) )
+                        next.push_back( front );
+                    inside.push_back( inputs[b][f] );
+                    if ( !KmSolid( inside ) )
+                        break;
+                }
+                if ( (int)next.size() > KMERGE_PIECES )
+                    return false;
+            }
+            pieces.swap( next );
+        }
+        if ( !pieces.empty() )
+            return false;
+
+        outFaces->clear();
+        for ( size_t k = 0; k < picks.size(); ++k )
+            outFaces->push_back( picks[k].face );
+        return true;
+    }
+}
+
 selbrush_t *Brush_MergeList( selbrush_t *brushList )
 {
     if ( !brushList )
         return nullptr;
 
-
-    // ── Phase 1: convexity check ──────────────────────────────────────────────
-    for ( selbrush_t *node1 = brushList; node1; node1 = node1->next )
+    // KIWI: the convex-union test above replaces the ported phase 1 / phase 2 picks.
+    std::vector<face_t *> hullFaces;
+    if ( !KmConvexUnion( brushList, &hullFaces ) )
+        return nullptr;
     {
-        brush_t *def1 = node1->def;
-        unsigned int fc1 = (unsigned int)def1->faceCount;
+        brush_t *newBrush = (brush_t *)operator new( sizeof(brush_t) );
+        memset( newBrush, 0, sizeof(brush_t) );
+        for ( size_t k = 0; k < hullFaces.size(); ++k )
+            Face_Alloc( newBrush, hullFaces[k] );
 
-        for ( unsigned int fi1 = 0; fi1 < fc1; fi1++ )
-        {
-            face_t *face1   = BrushFaceAt( def1, fi1 );
-            plane_t *plane1 = &face1->plane;
+        extern void Brush_SetLayerString( brush_t *b, const char *str );   // brush.cpp 0x4758A0
+        Brush_SetLayerString( newBrush, g_activeLayer_string );
+        entity_s *listOwner = brushList->owner;
+        Entity_LinkBrush( newBrush, (entity_s *)listOwner->def );
+        iassert( newBrush->owner == brushList->owner->def );   // csg.cpp:190
+        selbrush_t *result = Brush_AddToList( newBrush, listOwner );
+        Brush_BuildWindings( newBrush, 0 );
 
-            // Does face1 touch another brush (flipped-equal plane somewhere else)?
-            selbrush_t *node2;
-            for ( node2 = brushList; node2; node2 = node2->next )
+        // A kept plane that only grazes the hull along an edge has no winding.
+        bool dropped = false;
+        for ( int f = newBrush->faceCount - 1; f >= 0; --f )
+            if ( !newBrush->faces[f].w && newBrush->faceCount > 4 )
             {
-                if ( node2 == node1 )
-                    continue;
-                brush_t *def2 = node2->def;
-                unsigned int fc2 = (unsigned int)def2->faceCount;
-                unsigned int fi2;
-                for ( fi2 = 0; fi2 < fc2; fi2++ )
-                {
-                    face_t *face2 = BrushFaceAt( def2, fi2 );
-                    if ( Plane_Equal( &face2->plane, plane1, 1 ) )
-                        break;
-                }
-                if ( fi2 < fc2 )
-                    break;  // face1 touches node2 → it's an interior face
+                Brush_RemoveFace( newBrush, (unsigned int)f );
+                dropped = true;
             }
-            if ( node2 )
-                continue;  // interior face, skip convexity check
-
-            // face1 is outer — compare it against the outer faces of later brushes.
-            for ( node2 = node1->next; node2; node2 = node2->next )
-            {
-                brush_t *def2 = node2->def;
-                unsigned int fc2 = (unsigned int)def2->faceCount;
-
-                for ( unsigned int fi2 = 0; fi2 < fc2; fi2++ )
-                {
-                    face_t *face2   = BrushFaceAt( def2, fi2 );
-                    plane_t *plane2 = &face2->plane;
-
-                    selbrush_t *node3;
-                    for ( node3 = brushList; node3; node3 = node3->next )
-                    {
-                        if ( node3 == node2 )
-                            continue;
-                        brush_t *def3 = node3->def;
-                        unsigned int fc3 = (unsigned int)def3->faceCount;
-                        unsigned int fi3;
-                        for ( fi3 = 0; fi3 < fc3; fi3++ )
-                        {
-                            face_t *face3 = BrushFaceAt( def3, fi3 );
-                            if ( Plane_Equal( &face3->plane, plane2, 1 ) )
-                                break;
-                        }
-                        if ( fi3 < fc3 )
-                            break;  // face2 touches node3
-                    }
-                    if ( node3 )
-                        continue;  // interior face, skip
-
-                    // Both outer — concavity test (plane@face+0xC0, +0x20 -> face+0xE0 ==
-                    // face.w).  Winding_PlanesConcave is symmetric, but match the binary's order.
-                    if ( Winding_PlanesConcave( face1->w, face2->w,
-                                                plane2->normal, plane1->normal,
-                                                (float)plane1->dist, (float)plane2->dist ) )
-                    {
-                        return nullptr;
-                    }
-                }
-            }
-        }
+        if ( dropped )
+            Brush_BuildWindings( newBrush, 0 );
+        return result;
     }
-
-    // Phase 2: allocate the new brush DEF and collect the outer faces.
-    brush_t *newBrush = (brush_t *)operator new( sizeof(brush_t) );
-    memset( newBrush, 0, sizeof(brush_t) );
-
-    for ( selbrush_t *node1 = brushList; node1; node1 = node1->next )
-    {
-        brush_t *def1    = node1->def;
-        unsigned int fc1 = (unsigned int)def1->faceCount;
-
-        for ( unsigned int fi1 = 0; fi1 < fc1; fi1++ )
-        {
-            face_t *face1   = BrushFaceAt( def1, fi1 );
-            plane_t *plane1 = &face1->plane;
-
-            selbrush_t *node2;
-            for ( node2 = brushList; node2; node2 = node2->next )
-            {
-                if ( node2 == node1 )
-                    continue;
-                brush_t *def2 = node2->def;
-                unsigned int fc2 = (unsigned int)def2->faceCount;
-                unsigned int fi2;
-                for ( fi2 = 0; fi2 < fc2; fi2++ )
-                {
-                    face_t *face2 = BrushFaceAt( def2, fi2 );
-                    if ( Plane_Equal( &face2->plane, plane1, 1 ) )
-                        break;
-                }
-                if ( fi2 < fc2 )
-                    break;
-            }
-            if ( node2 )
-                continue;  // interior face
-
-            // Already in newBrush? (the binary tests both Plane_Equal polarities)
-            unsigned int existCount = (unsigned int)newBrush->faceCount;
-            unsigned int ei;
-            for ( ei = 0; ei < existCount; ei++ )
-            {
-                face_t *ef = BrushFaceAt( newBrush, ei );
-                if ( Plane_Equal( &ef->plane, plane1, 0 ) )
-                    break;
-                if ( Plane_Equal( &ef->plane, plane1, 1 ) )
-                    break;
-            }
-            if ( ei < existCount )
-                continue;  // duplicate
-
-            Face_Alloc( newBrush, face1 );
-        }
-    }
-
-    // Link the new brush to the entity and build its windings.
-    // Brush_SetLayerString holds the brush.cpp:2354 head-check.
-    extern void Brush_SetLayerString( brush_t *b, const char *str );   // brush.cpp 0x4758A0
-    Brush_SetLayerString( newBrush, g_activeLayer_string );
-
-    // Entity_LinkBrush( newBrush, listOwner->def ) — entity.cpp:1190.
-    // A brush DEF's .owner holds the entity_s_def*, not the entity_s* — that is the
-    // "b->owner == owner->def" invariant checked below.
-    entity_s *listOwner = brushList->owner;                  // selbrush_t.owner (entity_s*)
-    Entity_LinkBrush( newBrush, (entity_s *)listOwner->def );
-
-    brush_t *newBrushDef = newBrush;
-    iassert( newBrushDef->owner == brushList->owner->def );   // csg.cpp:190
-
-    selbrush_t *result = Brush_AddToList( newBrush, listOwner );
-    Brush_BuildWindings( newBrush, 0 );
-    return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

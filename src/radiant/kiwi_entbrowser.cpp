@@ -22,6 +22,7 @@
 #include "kiwi_str.h"                // case-insensitive filtering
 #include "kiwi_transform.h"
 #include "kiwi_windows.h"
+#include "mainfrm.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -849,6 +850,33 @@ void KiwiEntBrowser_DrawGhost()
 }
 
 // Command registration and dispatch.
+void KiwiEntBrowser_CreateAtViewCenter( const char *classname, float lift )
+{
+    if ( !classname || !*classname || s_pendHave )
+        return;
+    const camera_s *c = Ed_Camera();
+    const int x = c->width / 2, y = c->height / 2;
+    float mins[3], maxs[3];
+    if ( !ResolveDropBox( Eclass_ForName( 0, classname ), x, y, mins, maxs ) )
+    {
+        Sys_Printf( "Nothing under the camera centre to place %s on.\n", classname );
+        return;
+    }
+    strncpy( s_pendClass, classname, sizeof( s_pendClass ) - 1 );
+    s_pendClass[sizeof( s_pendClass ) - 1] = '\0';
+    s_pendX = x;
+    s_pendY = y;
+    for ( int k = 0; k < 3; ++k )
+    {
+        s_pendMins[k] = mins[k] + ( k == 2 ? lift : 0.0f );
+        s_pendMaxs[k] = maxs[k] + ( k == 2 ? lift : 0.0f );
+    }
+    s_pendPlacement = true;
+    s_pendHave = true;
+    ::PostMessageA( g_qeglobals.d_hwndMain, WM_COMMAND,
+                    (WPARAM)(unsigned int)KIWI_CMD_ENT_DROP, 0 );
+}
+
 void KiwiEntBrowser_RegisterCommands()
 {
     // Register the remappable window toggle, but not KIWI_CMD_ENT_DROP: the latter

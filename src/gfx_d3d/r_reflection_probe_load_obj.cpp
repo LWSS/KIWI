@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "r_reflection_probe.h"
 #include "r_bsp.h"
+#include "r_dvars.h"
 #include <qcommon/com_bsp.h>
 
 void R_CreateDefaultProbes()
@@ -49,11 +50,27 @@ void __cdecl R_LoadReflectionProbes(uint bspVersion)
         s_world.reflectionProbes = (GfxReflectionProbe*)Hunk_Alloc(sizeof(GfxReflectionProbe) * s_world.reflectionProbeCount, "R_LoadReflectionProbes", 20);
         s_world.reflectionProbeTextures = (GfxTexture*)Hunk_Alloc(sizeof(GfxTexture) * s_world.reflectionProbeCount, "R_LoadReflectionProbes", 20);
         R_CreateDefaultProbe();
+        // KIWI: while baking, shiny surfaces must not reflect the probes being replaced
+        // (old magenta probes tinted every new bake); blank them as a fresh compile does.
+        DiskGfxReflectionProbe *blank = nullptr;
+        if (r_reflectionProbeGenerate && r_reflectionProbeGenerate->current.enabled && s_world.reflectionProbeCount > 1)
+        {
+            const uint count = s_world.reflectionProbeCount - 1;
+            blank = (DiskGfxReflectionProbe *)Hunk_AllocateTempMemory(sizeof(DiskGfxReflectionProbe) * count, "R_LoadReflectionProbes");
+            for (i = 0; i < count; ++i)
+            {
+                memcpy(&blank[i], &reflectionProbeRawData[i], sizeof(blank[i]));
+                memset(blank[i].pixels, 0, sizeof(blank[i].pixels));
+            }
+            reflectionProbeRawData = blank;
+        }
         R_GenerateReflectionImages(
             s_world.reflectionProbes + 1,
             reflectionProbeRawData,
             s_world.reflectionProbeCount - 1,
             1);
+        if (blank)
+            Hunk_FreeTempMemory((char *)blank);
     }
     else
     {

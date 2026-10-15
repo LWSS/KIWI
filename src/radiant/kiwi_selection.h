@@ -71,6 +71,18 @@ bool Sel_BrushLive( const selbrush_t *b );
 // Returns a hash of the listed nodes in order, which changes when nodes are added,
 // removed, replaced (undo/redo, map load) or moved between the lists.
 uint64_t Sel_BrushesLive( selbrush_t *const *brushes, int count, bool *live );
+// KIWI (2026-10-11, user: selecting a lot lags): Sel_BrushLive for many lookups inside one
+// span that does not change the lists - the walk happens once, on the first Has().  Each
+// per-item Sel_BrushLive is a walk of the whole map, so a per-frame loop over a big
+// selection was selection x map work every frame.
+class sel_liveSet_t
+{
+public:
+    bool Has( const selbrush_t *b );
+private:
+    std::vector<const selbrush_t *> m_live;     // sorted: one allocation, not one per node
+    bool                            m_built = false;
+};
 
 // patchMesh_t::ctrl is 16x16; reject dimensions that would index past it.
 #define KIWI_PATCH_MAX_DIM 16

@@ -2290,6 +2290,8 @@ static bool Select_FixedSizeOwner( const selbrush_t *b )
     return ent && ent->eclass && *(int *)&ent->eclass->fixedsize;
 }
 
+void Select_FlipAxisAbout( int axis, const float pivot[3], bool fixedSizeOrigins );
+
 void Select_FlipAxis( int axis )
 {
     float rot_around[4][3];
@@ -2314,6 +2316,17 @@ void Select_FlipAxis( int axis )
     for ( int i = 0; i < 3; ++i )
         rot_around[0][i] = ( maxs[i] + mins[i] ) * 0.5f;
 
+    Select_FlipAxisAbout( axis, rot_around[0], true );
+}
+
+// KIWI (2026-10-12): Select_FlipAxis' reflection about a caller's pivot (the Mirror tool,
+// kiwi_dupe.cpp, picks its own and places models itself: fixedSizeOrigins false).
+void Select_FlipAxisAbout( int axis, const float pivot[3], bool fixedSizeOrigins )
+{
+    float rot_around[4][3];
+    for ( int i = 0; i < 3; ++i )
+        rot_around[0][i] = pivot[i];
+
     // identity 3x3, then negate the chosen axis (a reflection)
     float (*m)[3] = &rot_around[1];
     m[0][0] = 1.0f; m[0][1] = 0.0f; m[0][2] = 0.0f;
@@ -2326,7 +2339,7 @@ void Select_FlipAxis( int axis )
     // KIWI (2026-10-05): Select_ApplyMatrix leaves a fixed-size entity where it is on a
     // mirror (deg 0), so a lamp mirrored with its wall stayed on the old side.  Its origin
     // mirrors with the selection; DoFlip still turns the model.
-    for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+    for ( selbrush_t *b = selected_brushes.next; fixedSizeOrigins && b != &selected_brushes; b = b->next )
     {
         if ( !Select_FixedSizeOwner( b ) )
             continue;

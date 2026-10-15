@@ -7,6 +7,7 @@
 #include "qe3.h"
 // Patch-gate diagnostics read preferences, filter lists, and selection mode.
 #include "prefs.h"          // g_PrefsDlg->m_bSelectCurves (prefs.h:86)
+#include <imgui/imgui.h>    // Force Unhide All's confirmation
 
 #include "kiwi_command.h"
 #include "kiwi_ported.h"
@@ -16,6 +17,7 @@
 #include "kiwi_lightcache.h"
 
 #include <string.h>         // _strnicmp
+#include <set>
 #include <vector>
 #include <algorithm>        // std::sort / std::lower_bound
 #include <utility>          // std::pair
@@ -28,6 +30,14 @@ namespace
     inline bool Hidden( const selbrush_t *b )
     {
         return ( (unsigned)b->brushFlags & KVIS_HIDDEN_BIT ) != 0;
+    }
+
+    // Locked hides (the outliner's red eye), by definition like the undo snapshot.
+    std::set<brush_t *> s_locked;
+
+    inline bool Locked( const selbrush_t *b )
+    {
+        return !s_locked.empty() && s_locked.count( b->def ) != 0;
     }
 
     // Keep the selected and active list passes on one implementation.
@@ -55,6 +65,7 @@ namespace
         brush_t *def;       // stable across instance recreation, but not unique
         bool     hidden;
         int      depth;     // selbrush_t::xx5
+        bool     locked;
     };
     typedef std::vector<visEntry_t> visSnap_t;
 
@@ -73,6 +84,7 @@ namespace
             e.def    = b->def;
             e.hidden = Hidden( b );
             e.depth  = b->xx5;
+            e.locked = Locked( b );
             out->push_back( e );
         }
         for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
@@ -81,6 +93,7 @@ namespace
             e.def    = b->def;
             e.hidden = Hidden( b );
             e.depth  = b->xx5;
+            e.locked = Locked( b );
             out->push_back( e );
         }
     }
@@ -102,6 +115,10 @@ namespace
                     else
                         b->brushFlags &= ~(int)KVIS_HIDDEN_BIT;
                     b->xx5 = snap[i].depth;
+                    if ( snap[i].locked )
+                        s_locked.insert( b->def );
+                    else
+                        s_locked.erase( b->def );
                     break;
                 }
             }
@@ -116,7 +133,7 @@ namespace
             return false;
         for ( size_t i = 0; i < a.size(); ++i )
             if ( a[i].def != b[i].def || a[i].hidden != b[i].hidden
-              || a[i].depth != b[i].depth )
+              || a[i].depth != b[i].depth || a[i].locked != b[i].locked )
                 return false;
         return true;
     }
@@ -214,6 +231,7 @@ void KiwiVis_UndoReset()
     s_visPending.clear();
     s_visUndo.clear();
     s_visRedo.clear();
+    s_locked.clear();                     // so are its locks
 }
 
 // Match Select_Hide/ShowHidden: write only the hidden bit and depth.
@@ -235,6 +253,50 @@ void KiwiVis_SetHidden( selbrush_t *b, bool hidden )
     g_nUpdateBits = -1;
 }
 
+bool KiwiVis_Locked( const selbrush_t *b )
+{
+    return b && Locked( b );
+}
+
+void KiwiVis_SetLocked( selbrush_t *b, bool locked )
+{
+    if ( !b )
+        return;
+    if ( locked )
+    {
+        s_locked.insert( b->def );
+        KiwiVis_SetHidden( b, true );
+    }
+    else
+        s_locked.erase( b->def );
+}
+
+void KiwiVis_DefFreed( const brush_t *def )
+{
+    if ( !s_locked.empty() )
+        s_locked.erase( const_cast<brush_t *>( def ) );
+}
+
+void KiwiVis_KeepLockedHidden()
+{
+    for ( int pass = 0; pass < 2 && !s_locked.empty(); ++pass )
+    {
+        selbrush_t *head = pass ? &active_brushes : &selected_brushes;
+        for ( selbrush_t *b = head->next; b != head; b = b->next )
+            if ( Locked( b ) && !Hidden( b ) )
+                KiwiVis_SetHidden( b, true );
+    }
+}
+
+void KiwiVis_ForceUnhideAll()
+{
+    extern void ShowHidden();   // select.cpp 0x493E50
+    KiwiVis_UndoPush( "force unhide all" );
+    s_locked.clear();
+    ShowHidden();
+    KiwiVis_UndoCommit();
+}
+
 // KIWI-owned fourth hide command: invert hidden.
 void KiwiVis_InvertHidden()
 {
@@ -248,6 +310,7 @@ void KiwiVis_InvertHidden()
         InvertOne( b, &nowHidden, &nowShown );
     for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
         InvertOne( b, &nowHidden, &nowShown );
+    KiwiVis_KeepLockedHidden();
 
     KiwiLightCache_VisibilityChanged();
     KiwiVis_UndoCommit();      // compare post-state and commit if changed
@@ -292,7 +355,9 @@ namespace
 
     std::vector<brush_t *> s_saveOrder;        // the enumeration, ordinal == index
     std::vector<int>       s_hiddenOrdinals;   // which of those are hidden (save side)
+    std::vector<bool>      s_hiddenLocked;     // ...and which of those are locked
     std::vector<int>       s_pendingHidden;    // ordinals read back from a sidecar
+    std::vector<bool>      s_pendingLocked;
     int                    s_pendingTotal = -1;// its `hiddenbrushtotal`, -1 = absent
 
     // Sort live instances by definition for per-ordinal binary search during save.
@@ -346,6 +411,7 @@ int KiwiVis_SidecarBuild()
 {
     BuildSaveOrder( &s_saveOrder );
     s_hiddenOrdinals.clear();
+    s_hiddenLocked.clear();
 
     std::vector<defInst_t> idx;
     BuildDefIndex( &idx );
@@ -360,6 +426,7 @@ int KiwiVis_SidecarBuild()
             if ( Hidden( idx[k].second ) )
             {
                 s_hiddenOrdinals.push_back( (int)i );
+                s_hiddenLocked.push_back( Locked( idx[k].second ) );
                 break;
             }
         }
@@ -379,9 +446,15 @@ int KiwiVis_SidecarOrdinal( int i )
     return s_hiddenOrdinals[i];
 }
 
+bool KiwiVis_SidecarOrdinalLocked( int i )
+{
+    return i >= 0 && i < (int)s_hiddenLocked.size() && s_hiddenLocked[i];
+}
+
 void KiwiVis_SidecarLoadBegin()
 {
     s_pendingHidden.clear();
+    s_pendingLocked.clear();
     s_pendingTotal = -1;
 }
 
@@ -390,13 +463,14 @@ void KiwiVis_SidecarLoadTotal( int total )
     s_pendingTotal = total;
 }
 
-void KiwiVis_SidecarLoadNote( int ordinal )
+void KiwiVis_SidecarLoadNote( int ordinal, bool locked )
 {
     if ( ordinal < 0 )
         return;                                          // malformed line is non-fatal
     if ( (int)s_pendingHidden.size() >= KVIS_SIDECAR_MAX_HIDDEN )
         return;
     s_pendingHidden.push_back( ordinal );
+    s_pendingLocked.push_back( locked );
 }
 
 void KiwiVis_SidecarLoadApply()
@@ -418,6 +492,7 @@ void KiwiVis_SidecarLoadApply()
         Sys_Printf( "WARNING: sidecar hidden-brush list is stale (%i brushes recorded, %i in the map) "
                     "— hidden state not restored.\n", s_pendingTotal, total );
         s_pendingHidden.clear();
+        s_pendingLocked.clear();
         s_pendingTotal = -1;
         return;
     }
@@ -443,11 +518,14 @@ void KiwiVis_SidecarLoadApply()
             KiwiVis_SetHidden( idx[k].second, true );
             found = true;
         }
+        if ( found && s_pendingLocked[i] )
+            s_locked.insert( def );
         if ( found ) ++applied;
         else         ++skipped;                          // definition has no live instance
     }
 
     s_pendingHidden.clear();
+    s_pendingLocked.clear();
     s_pendingTotal = -1;
 
     // Loaded visibility is initial state, not an undoable user gesture.
@@ -540,10 +618,46 @@ void KiwiVis_RegisterCommands()
 {
     // Classic leaves this unbound; the modern profile maps Ctrl+H.
     Radiant_RegisterCommand( "KiwiInvertHidden", 0, 0, KIWI_CMD_HIDE_INVERT );
+    Radiant_RegisterCommand( "KiwiForceUnhideAll", 0, 0, KIWI_CMD_FORCE_UNHIDE );
+}
+
+namespace
+{
+    bool s_forceUnhideRequest = false;   // the confirm popup is owed an OpenPopup
+}
+
+// Force Unhide All's confirmation (every frame, imgui_shell).
+void KiwiVis_Draw()
+{
+    const char *title = "Force unhide all?";
+    if ( s_forceUnhideRequest )
+    {
+        ImGui::OpenPopup( title );
+        s_forceUnhideRequest = false;
+    }
+    ImGui::SetNextWindowPos( ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2( 0.5f, 0.5f ) );
+    if ( !ImGui::BeginPopupModal( title, nullptr, ImGuiWindowFlags_AlwaysAutoResize ) )
+        return;
+    ImGui::TextUnformatted( "Show every hidden brush, including locked (red eye) ones,\n"
+                            "and remove every lock? (one undo step)" );
+    if ( ImGui::Button( "Unhide All", ImVec2( 110.0f, 0.0f ) ) )
+    {
+        KiwiVis_ForceUnhideAll();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if ( ImGui::Button( "Cancel", ImVec2( 110.0f, 0.0f ) ) || ImGui::IsKeyPressed( ImGuiKey_Escape ) )
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
 }
 
 bool KiwiVis_DispatchInstant( unsigned int cmdId )
 {
+    if ( cmdId == (unsigned)KIWI_CMD_FORCE_UNHIDE )
+    {
+        s_forceUnhideRequest = true;
+        return true;
+    }
     if ( cmdId != (unsigned)KIWI_CMD_HIDE_INVERT )
         return false;
     KiwiVis_InvertHidden();

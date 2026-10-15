@@ -69,6 +69,10 @@ bool KiwiXform_CanScale();     // ditto
 #define KIWI_XCON_PLANE  2
 
 bool KiwiXform_DominantKind( sel_kind_t *out );
+// KIWI (2026-10-11): a live G/R/S gesture has changed geometry.  Draw passes defer the
+// per-brush GPU vertex rebuild (Brush_MakeFaceVisuals) while it holds; the rebuild runs
+// on the first frame after the gesture ends.
+bool KiwiXform_GeometryInMotion();
 void KiwiXform_PresetMoveConstraint( int con, int axis );
 
 // ActivePivot is the move's live anchor or the rotate's latched pivot; never

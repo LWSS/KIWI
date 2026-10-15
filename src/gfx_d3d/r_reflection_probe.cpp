@@ -32,6 +32,13 @@ char __cdecl R_CopyReflectionsFromLumpData(
             && v5->origin[1] == probeRawData->origin[1]
             && v5->origin[2] == probeRawData->origin[2])
         {
+            // KIWI: a freshly compiled BSP stores each probe's origin with blank pixels;
+            // reusing those meant a bake right after a compile rendered nothing.
+            bool baked = false;
+            for (size_t i = 0; i < sizeof(v5->pixels) && !baked; ++i)
+                baked = v5->pixels[i] != 0;
+            if (!baked)
+                return 0;
             memcpy(probeRawData->pixels, probeRawLumpData[probeIndex].pixels, sizeof(probeRawData->pixels));
             return 1;
         }
@@ -152,6 +159,7 @@ void __cdecl R_GenerateReflectionRawData(DiskGfxReflectionProbe *probeRawData)
 
     for (cubemapShot = CUBEMAPSHOT_RIGHT; cubemapShot < CUBEMAPSHOT_COUNT; ++cubemapShot)
     {
+        R_SyncRenderThread(); // KIWI: the device is ours before the shot's Clear
         R_BeginCubemapShot(256, 1);
         R_BeginFrame();
         R_BeginSharedCmdList();
@@ -169,6 +177,7 @@ void __cdecl R_GenerateReflectionRawData(DiskGfxReflectionProbe *probeRawData)
         R_RenderScene(&dst);
         R_EndFrame();
         R_IssueRenderCommands(0xFFFFFFFF);
+        R_SyncRenderThread(); // KIWI: the render thread drew asynchronously; the copy read only the magenta clear
         R_EndCubemapShot(cubemapShot);
     }
     R_CreateReflectionRawDataFromCubemapShot(probeRawData, 64);

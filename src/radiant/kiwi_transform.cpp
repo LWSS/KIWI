@@ -39,6 +39,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unordered_map>
 #include <vector>
 #include <algorithm>    // std::find (SelectionMedian)
 
@@ -54,6 +55,11 @@ extern bool  Patch_TexFollow( const patchMesh_t *p, int col, int row, const floa
 
 namespace
 {
+    // GetTickCount64 of the last G/R/S geometry apply, and of the live gesture's Begin
+    // (KiwiXform_GeometryInMotion).
+    unsigned long long s_geoMotionTick = 0;
+    unsigned long long s_geoGestureTick = 0;
+
     // Transform tuning. R changes only from ring or numeric input.
     const float KX_SCALE_MIN       = 0.01f;    // S clamp
     // S: the smallest lever (pixels from the pivot at the grab) the factor is measured
@@ -424,9 +430,10 @@ namespace
     {
         const selection_t &sel = KiwiSel();
         int n[SEL_KIND_COUNT] = { 0, 0, 0, 0 };
+        sel_liveSet_t live;                     // one list walk, not one per item
         for ( size_t i = 0; i < sel.items.size(); ++i )
             if ( !checkLive ? ( sel.items[i].brush != 0 )
-                            : Sel_BrushLive( sel.items[i].brush ) )
+                            : live.Has( sel.items[i].brush ) )
                 ++n[ sel.items[i].kind ];
 
         if ( n[SEL_OBJECT] ) { *out = SEL_OBJECT; return true; }
@@ -1162,6 +1169,7 @@ namespace
 
         bool Begin() override
         {
+            s_geoGestureTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             const bool startDrop = m_dropPending;
             selbrush_t *dropAnchor = m_dropPendingNode;
             Reset();
@@ -1503,6 +1511,7 @@ namespace
                 }
             }
 
+            ObjFastLand();                      // exact windings for the translated preview
             Reset();
             if ( deselectAfter )
             {
@@ -1608,7 +1617,9 @@ namespace
             m_verts.clear();
             m_base.clear();
             m_objBase.clear();
+            m_objBaseIdx.clear();
             m_objBaseHave  = false;
+            m_objFastUsed  = false;
             m_haveMapStart = false;
             m_axisWarned   = false;
             m_invalid      = false;
@@ -2516,7 +2527,7 @@ namespace
 
                 }
 
-                // Apply the absolute lattice to owned axes. Grid answers are hard quantization;
+                // Apply the lattice (whole grid steps of travel) to owned axes. Grid answers are hard quantization;
                 // SNAP_FACE keeps its capture band. Named geometry targets are exempt so exact
                 // vertices, midpoints, centers, endpoints, and intersections are never rounded.
                 // KiwiSnap_LatticeAxis also supplies the major-line preference.
@@ -2610,9 +2621,8 @@ namespace
                 }
                 else
                 {
-                    // Axis-aligned pushes snap the moved plane's absolute world coordinate.
-                    // Slanted normals have no single world-axis coordinate, so they quantize
-                    // distance instead. KiwiSnap_LatticeAxis supplies the shared minor/major rule.
+                    // Push distance steps in whole grid cells (KiwiSnap_LatticeAxis supplies
+                    // the shared minor/major rule).
                     bool major = false;
                     dist = KiwiSnap_LatticeAxis( dist, m_ref, m_pushDir, true, &major );
                     if ( major )
@@ -2710,6 +2720,7 @@ namespace
 
         void Apply()
         {
+            s_geoMotionTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             // Construction applies one absolute total from its store baseline.
             if ( m_construct )
             {
@@ -2746,9 +2757,20 @@ namespace
             std::vector<MaterialDef> mtl;          // every face's mtldef[], face order
             entity_s                *ent = nullptr;   // fixed-size: the owner Brush_Move moves
             float                    origin[3] = { 0.0f, 0.0f, 0.0f };
+            // KIWI (2026-10-11, Fable review P2): a plain brush's baseline planes, windings and
+            // bounds.  The drag preview sets them to baseline + total (still absolute: no drift)
+            // instead of re-clipping every brush's windings per frame; Commit rebuilds exactly.
+            bool                     fast = false;
+            std::vector<plane_t>     plane;           // per face
+            std::vector<int>         wn;              // per face winding point count, -1 = none
+            std::vector<float>       wp;              // every winding's points, face order
+            float                    mins[3] = { 0.0f, 0.0f, 0.0f }, maxs[3] = { 0.0f, 0.0f, 0.0f };
         };
         std::vector<objBase_t> m_objBase;
         bool                   m_objBaseHave = false;
+        // def -> m_objBase index (KIWI 2026-10-11: the linear search was selection^2 per
+        // mouse move - 8M compares dragging the kisak_trash building).
+        std::unordered_map<const brush_t *, size_t> m_objBaseIdx;
 
         void ObjBaseCapture()
         {
@@ -2756,13 +2778,12 @@ namespace
                 return;
             m_objBaseHave = true;
             m_objBase.clear();
+            m_objBaseIdx.clear();
             for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
             {
                 if ( !b->def )
                     continue;
-                bool dup = false;
-                for ( size_t i = 0; i < m_objBase.size() && !dup; ++i )
-                    dup = m_objBase[i].geo.def == b->def;
+                const bool dup = m_objBaseIdx.count( b->def ) != 0;
                 objBase_t o;
                 if ( dup || !KiwiValid_Snapshot( b->def, &o.geo ) )
                     continue;
@@ -2777,16 +2798,31 @@ namespace
                 if ( !b->def->patch && b->def->faces )
                     for ( int f = 0; f < b->def->faceCount; ++f )
                         o.mtl.insert( o.mtl.end(), b->def->faces[f].mtldef, b->def->faces[f].mtldef + per );
+                if ( !b->def->patch && !b->patch && b->def->faces && !NodeIsFixedSize( b ) )
+                {
+                    const brush_t *def = b->def;
+                    o.fast = true;
+                    for ( int f = 0; f < def->faceCount; ++f )
+                    {
+                        const face_t    &face = def->faces[f];
+                        const winding_t *w    = face.w;
+                        o.plane.push_back( face.plane );
+                        o.wn.push_back( w ? w->numpoints : -1 );
+                        if ( w )
+                            o.wp.insert( o.wp.end(), &w->p[0][0], &w->p[0][0] + 3 * w->numpoints );
+                    }
+                    Copy3( def->mins, o.mins );
+                    Copy3( def->maxs, o.maxs );
+                }
+                m_objBaseIdx[b->def] = m_objBase.size();
                 m_objBase.push_back( o );
             }
         }
 
         size_t ObjBaseIndex( const brush_t *def ) const
         {
-            for ( size_t i = 0; i < m_objBase.size(); ++i )
-                if ( m_objBase[i].geo.def == def )
-                    return i;
-            return m_objBase.size();
+            const auto it = m_objBaseIdx.find( def );
+            return it != m_objBaseIdx.end() ? it->second : m_objBase.size();
         }
 
         // The baseline back in place (no rebuild); false = the brush changed shape since.
@@ -2803,6 +2839,69 @@ namespace
                     memcpy( def->faces[f].mtldef, &o.mtl[(size_t)f * per], sizeof( MaterialDef ) * per );
             return true;
         }
+
+        // Baseline + total for a plain brush captured `fast` (texture lock and plane points as
+        // TranslateBrushLocked); false = its shape no longer matches the baseline, re-clip.
+        static bool TranslateBrushFast( const objBase_t &o, const float d[3] )
+        {
+            brush_t *def = o.geo.def;
+            if ( !o.fast || (int)o.wn.size() != def->faceCount )
+                return false;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                if ( ( o.wn[f] < 0 ) != ( w == nullptr ) || ( w && w->numpoints != o.wn[f] ) )
+                    return false;
+            }
+            size_t k = 0;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                face_t *face = &def->faces[f];
+                TexLockTranslateFace( face, d );
+                for ( int p = 0; p < 3; ++p )
+                    Add3( face->planepts[p], d, face->planepts[p] );
+                face->plane      = o.plane[f];
+                face->plane.dist = o.plane[f].dist + Dot3( o.plane[f].normal, d );
+                if ( winding_t *w = face->w )
+                    for ( int i = 0; i < w->numpoints; ++i, k += 3 )
+                        for ( int a = 0; a < 3; ++a )
+                            w->p[i][a] = o.wp[k + a] + d[a];
+            }
+            Add3( o.mins, d, def->mins );
+            Add3( o.maxs, d, def->maxs );
+            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
+                SetupVertexSelection();
+            MarkMapModified();
+            ++def->version;
+            return true;
+        }
+
+        // Commit: the drag previewed translated windings; land every fast brush exactly as
+        // the per-frame Brush_BuildWindings used to.
+        void ObjFastLand()
+        {
+            if ( !m_objFastUsed )
+                return;
+            m_objFastUsed = false;
+            std::vector<char> done( m_objBase.size(), 0 );
+            selbrush_t *lists[] = { &selected_brushes, &active_brushes };
+            for ( selbrush_t *head : lists )
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                if ( !b->def || b->def->patch )
+                    continue;
+                const size_t i = ObjBaseIndex( b->def );
+                if ( i >= m_objBase.size() || done[i] || !m_objBase[i].fast )
+                    continue;
+                done[i] = 1;
+                Brush_BuildWindings( b->def, 0 );
+                ++b->def->version;
+            }
+            if ( g_qeglobals.d_select_mode == sel_vertex || g_qeglobals.d_select_mode == sel_edge )
+                SetupVertexSelection();
+            MarkMapModified();
+        }
+        bool m_objFastUsed = false;
 
         void ApplyObjects()
         {
@@ -2834,7 +2933,12 @@ namespace
                 if ( i < m_objBase.size() && !done[i] && ObjBaseRestoreOnly( m_objBase[i] ) )
                 {
                     if ( !b->def->patch )
-                        TranslateBrushLocked( b->def, m_total );   // exact texture lock
+                    {
+                        if ( TranslateBrushFast( m_objBase[i], m_total ) )
+                            m_objFastUsed = true;                  // Commit lands it exactly
+                        else
+                            TranslateBrushLocked( b->def, m_total );   // exact texture lock
+                    }
                     else
                     {
                         Brush_Move( m_total, b->def, 0 );   // bSnap 0: this layer snaps
@@ -3300,6 +3404,7 @@ namespace
 
         bool Begin() override
         {
+            s_geoGestureTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             m_deg = m_applied = 0.0f;
             TurnReset();
             m_chain.clear();
@@ -3609,6 +3714,7 @@ namespace
         {
             if ( fabsf( delta ) <= KX_EPS )
                 return;
+            s_geoMotionTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             if ( m_construct || m_refImage )
             {
                 // Absolute from the store baseline (kiwi_transform.h rule 1); the
@@ -4027,6 +4133,7 @@ namespace
 
         bool Begin() override
         {
+            s_geoGestureTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             m_factor = 1.0f;
             m_applied[0] = m_applied[1] = m_applied[2] = 1.0f;
             GeomBaseReset();
@@ -4297,6 +4404,7 @@ namespace
         // m_applied gates repeats (a ratio of 1 changes nothing).
         void ApplyWanted( float sx, float sy, float sz )
         {
+            s_geoMotionTick = ::GetTickCount64();      // KiwiXform_GeometryInMotion
             const float want[3] = { sx, sy, sz };
             if ( m_construct || m_refImage )
             {
@@ -4550,6 +4658,16 @@ KiwiEditorCommand *KiwiXform_CommandForId( int commandId )
     case KIWI_CMD_SCALE:  return &s_scale;
     default:              return 0;
     }
+}
+
+bool KiwiXform_GeometryInMotion()
+{
+    // The whole live gesture once it has moved geometry - not a settle timer, which turned
+    // every pause mid-drag into a full-selection rebuild (Fable review F3).  The one rebuild
+    // runs on the first frame after Commit / Cancel.
+    const KiwiEditorCommand *c = KiwiCmd_Active();
+    return ( c == &s_move || c == &s_rotate || c == &s_scale )
+        && s_geoMotionTick && s_geoMotionTick >= s_geoGestureTick;
 }
 
 bool KiwiXform_DominantKind( sel_kind_t *out )

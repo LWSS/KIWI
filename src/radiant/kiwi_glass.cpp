@@ -614,10 +614,11 @@ namespace
     {
         const selection_t &sel = KiwiSel();
         std::set<selbrush_t *> seen;
+        sel_liveSet_t live;
         for ( size_t i = 0; i < sel.items.size(); ++i )
         {
             selbrush_t *b = sel.items[i].brush;
-            if ( !b || !Sel_BrushLive( b ) || seen.count( b ) )
+            if ( !live.Has( b ) || seen.count( b ) )
                 continue;
             seen.insert( b );
             entity_s_def *def = NodeDef( b );
@@ -982,6 +983,7 @@ void KiwiGlass_RegisterEclass()
         "\"glassdef\" texture set under raw/glass (pane, cracked and shard materials, health, shard sizes); default default_clear.\n"
         "\"uvscale\" shard texture scale; written from the largest face on every save.\n"
         "\"frameedges\" 1 = the edges are held by a frame (edge pieces stick, then drop), 0 = everything falls.\n"
+        "\"startbroken\" 1 = cracked, 2 = shattered at map start (resetGlass returns to it); 0 or absent = intact.\n"
         "Made with Make Breakable Glass; the Glass window edits the sets.\n"
         "*/";
     eclass_t *ec = Eclass_InitFromText( text );
@@ -1228,6 +1230,40 @@ bool KiwiGlass_ApplySetToSelection()
     s_map.time = -1.0;
     Sys_Printf( "Glass: %i pane(s) set to %s.\n", (int)defs.size(), setName.c_str() );
     ReportPanes( defs );
+    return true;
+}
+
+// "startbroken": 0 intact, 1 cracked, 2 shattered at map start (game GlassState values).
+bool KiwiGlass_SetStartState( int state )
+{
+    glassPick_t p;
+    Gather( p );
+    std::vector<entity_s_def *> defs;
+    for ( size_t i = 0; i < p.brushes.size(); ++i )
+        if ( IsPaneNode( p.brushes[i] ) )
+        {
+            entity_s_def *def = NodeDef( p.brushes[i] );
+            if ( std::find( defs.begin(), defs.end(), def ) == defs.end() )
+                defs.push_back( def );
+        }
+    if ( defs.empty() )
+        return false;
+    static const char *op = "glass start state";
+    Undo_ClearRedo();
+    Undo_GeneralStart( op );
+    for ( size_t i = 0; i < defs.size(); ++i )
+        Undo_AddEntity_W( (entity_s *)defs[i] );
+    for ( size_t i = 0; i < defs.size(); ++i )
+    {
+        if ( state )
+            SetKeyIfChanged( defs[i], "startbroken", std::to_string( state ) );
+        else if ( !Key( defs[i], "startbroken" ).empty() )
+            DeleteKey( &defs[i]->epairs, "startbroken" );
+    }
+    Undo_End();
+    g_nUpdateBits = -1;
+    static const char *names[3] = { "intact", "cracked", "shattered" };
+    Sys_Printf( "Glass: %i pane(s) start %s.\n", (int)defs.size(), names[state] );
     return true;
 }
 
@@ -1594,16 +1630,47 @@ namespace
             char label[96];
             PaneLabel( defs[i], label, sizeof( label ) );
             const std::string set = Key( defs[i], "glassdef" );
+            const int start = atoi( Key( defs[i], "startbroken" ).c_str() );
+            const char *startText = start == 1 ? ", starts cracked" : start == 2 ? ", starts shattered" : "";
             if ( st.errors )
                 ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.35f, 1.0f ), "%s: %s", label, st.text.c_str() );
             else if ( st.warnings )
-                ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.3f, 1.0f ), "%s [%s]: %s", label, set.c_str(), st.text.c_str() );
+                ImGui::TextColored( ImVec4( 1.0f, 0.75f, 0.3f, 1.0f ), "%s [%s%s]: %s", label, set.c_str(), startText, st.text.c_str() );
             else
-                ImGui::Text( "%s [%s]: OK", label, set.empty() ? GLASS_KIWI_DEFAULT_DEF : set.c_str() );
+                ImGui::Text( "%s [%s%s]: OK", label, set.empty() ? GLASS_KIWI_DEFAULT_DEF : set.c_str(), startText );
         }
         ImGui::PopTextWrapPos();
         if ( defs.size() > 12 )
             ImGui::TextDisabled( "and %i more", (int)defs.size() - 12 );
+
+        // state at map start; the shared one is highlighted
+        int shared = -1;
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            const int st = atoi( Key( defs[i], "startbroken" ).c_str() );
+            shared = ( i == 0 || shared == st ) ? st : -2;
+        }
+        static const char *startNames[3] = { "Intact", "Cracked", "Shattered" };
+        static const char *startTips[3] = { "Selected panes start whole",
+                                            "Selected panes start cracked (half health)",
+                                            "Selected panes start shattered: only the edge pieces left in the frame" };
+        ImGui::BeginDisabled( defs.empty() );
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted( "Map start" );
+        for ( int s = 0; s < 3; ++s )
+        {
+            ImGui::SameLine();
+            const bool on = shared == s;
+            if ( on )
+                ImGui::PushStyleColor( ImGuiCol_Button, ImGui::GetStyleColorVec4( ImGuiCol_ButtonActive ) );
+            if ( ImGui::Button( startNames[s], ImVec2( 80.0f, 0.0f ) ) )
+                KiwiGlass_SetStartState( s );
+            if ( on )
+                ImGui::PopStyleColor();
+            if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+                ImGui::SetTooltip( "%s", defs.empty() ? "Select glass panes" : startTips[s] );
+        }
+        ImGui::EndDisabled();
 
         if ( ImGui::Button( "Select Panes Using Set" ) )
             SelectPanes( UsesActive );

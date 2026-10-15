@@ -662,6 +662,8 @@ void Brush_Free_R( brush_t *def )
     vassert( (def->refCount == 0), "(def->refCount) = %i", def->refCount );   // brush.cpp:2423
 
     PhysParsed_Forget( def );   // KIWI
+    extern void KiwiVis_DefFreed( const brush_t *def );   // kiwi_visibility.h
+    KiwiVis_DefFreed( def );    // KIWI: a red-eye lock must not land on a new brush here
     if ( def->patch )
         Patch_Delete( def->patch );
     if ( def->faces )
@@ -4678,9 +4680,26 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end, 
 
     float start[3];
     int   result = 1;
-    int   movefaces[64];
-    int   movefacepoints[66];          // movefacepoints (paired: movefaces[k] <-> movefacepoints[k+1])
-    int   originalFaceIndex[64];
+    // KIWI: were [64]/[66]/[64] stack arrays; splitting a 32-gon cap overran them (crash).
+    std::vector<int> movefaces;
+    std::vector<int> movefacepoints;   // movefacepoints (paired: movefaces[k] <-> movefacepoints[k+1])
+    std::vector<int> originalFaceIndex;
+    // A pass adds at most (points - 2) faces per face it splits, and Phase 2a's loop visits
+    // those new triangles too: size for the worst case.
+    auto reserveFaces = [&]()
+    {
+        size_t points = 0;
+        for ( int fi = 0; fi < b->faceCount; ++fi )
+            if ( winding_t *w = b->faces[fi].w )
+                points += (size_t)w->numpoints;
+        const size_t cap = (size_t)b->faceCount + 2 * points + 2;
+        if ( movefaces.size() < cap )
+        {
+            movefaces.resize( cap );
+            movefacepoints.resize( cap + 2 );
+            originalFaceIndex.resize( cap + 1 );
+        }
+    };
     unsigned int nummovefaces;
     int   settled;
     int   slidefaces[64], slidepoints[64];   // KIWI: faces the vertex slides along (MV_Slides)
@@ -4713,6 +4732,7 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end, 
         return 0;
 
     // Phase 1: originalFaceIndex[i]=i; abort if `end` lands on an existing vertex.
+    reserveFaces();
     if ( b->faceCount )
     {
         for ( unsigned int fi = 0; fi < (unsigned int)b->faceCount; ++fi )
@@ -4783,6 +4803,7 @@ int Brush_MoveVertex( vec3_t delta, brush_t *b, vec3_t move_points, vec3_t end, 
     {
         nummovefaces = 0;
         numslide     = 0;
+        reserveFaces();
         if ( ++passes > 16 )
             creaseOff = true;   // KIWI: the binary's clamps alone from here (they settle)
 
@@ -7299,7 +7320,12 @@ void DrawBrush( selbrush_t *b, const orientation_t *orient, int viewType,
     // (Visuals_InitFaceVis → world-space GfxWorldVertex runs uploaded to the editor VB
     // pool) when the def version advanced.  This is what DrawGeo's FILLED branches and
     // the selection paths consume.
-    Brush_CheckBuildFaceVis( b, (const float *)orient );
+    // KIWI (2026-10-11, user: moving a whole building lagged): a WIREFRAME draw reads only the
+    // windings (DrawGeo's tech-29 branch), yet the white selection outline and every 2D view
+    // rebuilt each moved brush's GPU vertices here, per frame of a drag.  The filled passes
+    // (and Brush_Ray) build them when they read them.
+    if ( technique != TECHNIQUE_WIREFRAME_SHADED )
+        Brush_CheckBuildFaceVis( b, (const float *)orient );
 
     iassert( b->owner->def == b->def->owner );
 

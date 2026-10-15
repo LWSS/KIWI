@@ -1626,8 +1626,67 @@ static void Cam_GatherFace( std::vector< CamSortFace > &out, face_t *f, Material
 // key, and so a one-face pass costs nothing.
 static void Cam_SortGatheredFaces( std::vector< CamSortFace > &faces )
 {
-    if ( faces.size() > 1 )
+    if ( faces.size() <= 1 )
+        return;
+    // KIWI (2026-10-11, profiled: 7% of a frame): keys are small integers and `seq` is the
+    // gather index, so a STABLE counting sort on the key is exactly the qsort's order.
+    int lo = faces[0].key, hi = faces[0].key;
+    for ( const CamSortFace &e : faces )
+    {
+        lo = e.key < lo ? e.key : lo;
+        hi = e.key > hi ? e.key : hi;
+    }
+    if ( hi - lo > 65536 )
+    {
         qsort( faces.data(), faces.size(), sizeof( CamSortFace ), Cam_SortFaceCompare );
+        return;
+    }
+    static std::vector< int >         s_start;
+    static std::vector< CamSortFace > s_out;
+    s_start.assign( (size_t)( hi - lo ) + 2, 0 );
+    for ( const CamSortFace &e : faces )
+        ++s_start[(size_t)( e.key - lo ) + 1];
+    for ( size_t k = 1; k < s_start.size(); ++k )
+        s_start[k] += s_start[k - 1];
+    s_out.resize( faces.size() );
+    for ( const CamSortFace &e : faces )
+        s_out[(size_t)s_start[(size_t)( e.key - lo )]++] = e;
+    faces.swap( s_out );
+}
+
+// World faces of the see-through tool volumes and the sky film, drawn after the main surf
+// flush (they write no depth, so the resident world drawn at that flush covered them).
+struct CamDeferredToolFace
+{
+    face_t *f;
+    float   col[4];   // MATERIAL_COLOR (neutral for a volume's own art; zeros for the film)
+    bool    film;     // sky see-through film instead of a flat volume
+};
+static std::vector< CamDeferredToolFace > s_deferredToolFaces;
+
+// The selected-brush pass's faces: immediate ones (no resident geometry) and resident ones,
+// which wait for the pass's own flush window after the main world flush.
+static std::vector< CamSortFace > s_selFaces;
+static std::vector< CamSortFace > s_selResident;
+
+// Can Cam_DrawFaceResident draw this face?  The same gates, without emitting - the
+// selected-brush pass decides up front which faces wait for its own flush window.
+static bool Cam_FaceResidentReady( const CamSortFace &ent )
+{
+    if ( !Cam_WorldGeoResident() || g_edSunBakeVertColor )
+        return false;
+    const selbrush_t *b = ent.inst;
+    if ( !b || ent.faceIndex < 0 || !b->faces || ent.faceIndex >= b->faceCount )
+        return false;
+    if ( !b->def || b->version != b->def->version )
+        return false;                       // stale: rebuild deferred while a drag moves it
+    const faceVis_s *vis = &( (const faceVis_s *)b->faces )[ent.faceIndex];
+    if ( vis->visCount <= 0 || !vis->visArray || vis->vertcount < 3 )
+        return false;
+    for ( int i = 0; i < vis->visCount; ++i )
+        if ( vis->visArray[i].mtlHandle )
+            return true;
+    return false;
 }
 
 // Emit one gathered world face from its RESIDENT geometry.  false = no resident
@@ -3047,6 +3106,7 @@ void CamWnd_Draw( HWND hwnd )
     // emits ONE RC_DRAW_TRIANGLES, i.e. one draw call per face-layer (rb_backend.cpp:1445).
     {
     PROF_SCOPED( "world submit" );
+    s_deferredToolFaces.clear();
     for ( size_t wi = 0; wi < s_worldFaces.size(); ++wi )
     {
         const CamSortFace &ent = s_worldFaces[wi];
@@ -3214,6 +3274,23 @@ void CamWnd_Draw( HWND hwnd )
                         ecol[3] = 0.0f;
                     }
                     // ── KIWI-UX end ─────────────────────────────────────────────────
+                    // KIWI (2026-10-13, user: "clips aren't rendering"): the see-through
+                    // volumes (clip, trigger, hint...) and the sky film write no depth, and
+                    // the resident world faces draw LATER, at the main surf flush - so the
+                    // world painted over them.  They draw after that flush instead.
+                    if ( g_qeglobals.d_white && ( skySeeThrough || ( !isSky && !losesDepth ) ) )
+                    {
+                        // KIWI (2026-10-13, user: clip_player "shows as pink when not
+                        // highlighted"): a volume wears its own label art at the neutral
+                        // w == 0, exactly as the selected pass draws it, not the flat paint.
+                        static const float s_artNeutral[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+                        CamDeferredToolFace d;
+                        d.f    = f;
+                        d.film = skySeeThrough;
+                        memcpy( d.col, skySeeThrough ? ecol : s_artNeutral, sizeof( d.col ) );
+                        s_deferredToolFaces.push_back( d );
+                        continue;
+                    }
                     if ( Cam_MaterialColorChanged( ecol, lastMC ) )
                     {
                         R_AddCmdSetMaterialColor( ecol );
@@ -3362,8 +3439,10 @@ void CamWnd_Draw( HWND hwnd )
         // CHANGE: a sorted stream can interleave brushes, and RC_SET_MATERIAL_COLOR is CRITICAL.
         const float *tintCol = g_qeglobals.dontDrawSelectedTint
                              ? s_neutral : g_qeglobals.d_savedinfo.colors[11];  // red {1,0.25,0.25}
-        static std::vector< CamSortFace > s_selFaces;
         s_selFaces.clear();
+        s_selResident.clear();
+        extern bool KiwiXform_GeometryInMotion();       // kiwi_transform.h
+        const bool geoInMotion = KiwiXform_GeometryInMotion();
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
         {
             brush_t *def = b->def;
@@ -3383,6 +3462,11 @@ void CamWnd_Draw( HWND hwnd )
             // hides the texture, so the colour is what is dropped — the same split the
             // pass's own !dontDrawSelectedTint gate already makes, applied per brush.
             const bool uvOwns = KiwiUvEd_OverlaySuppressed( def, -1 );
+            // The resident geometry the world pass draws from (version-gated).  Not while a
+            // G/R/S drag is changing it: a stale face takes the immediate path below, and the
+            // rebuild runs once the pose has settled (KiwiXform_GeometryInMotion).
+            if ( Cam_WorldGeoResident() && !geoInMotion )
+                Brush_CheckBuildFaceVis( b, (const float *)world_orient_matrix );
             for ( int fi = 0; fi < def->faceCount; ++fi )
             {
                 face_t *f = &def->faces[fi];
@@ -3391,8 +3475,25 @@ void CamWnd_Draw( HWND hwnd )
                 // `classifySky` is false: a selected sky brush draws its OWN material at
                 // TECHNIQUE_UNLIT, so there is no overlay bucket on this pass.
                 Cam_GatherFace( s_selFaces, f, FaceMaterial( &f->mtldef[layer] ),
-                                &f->mtldef[layer], /*classifySky*/ false, uvOwns );
+                                &f->mtldef[layer], /*classifySky*/ false, uvOwns, b, fi );
             }
+        }
+        // KIWI (2026-10-11, user: moving a whole building ran at 5 fps): faces with resident
+        // geometry wait for their own tinted flush window after the main world flush (the
+        // selected-entity pass's shape), merged into a few draws; this immediate loop -
+        // one CPU-built RC_DRAW_TRIANGLES per face - keeps only the faces that have none.
+        {
+            size_t keep = 0;
+            for ( size_t si = 0; si < s_selFaces.size(); ++si )
+            {
+                if ( Cam_FaceResidentReady( s_selFaces[si] ) )
+                    s_selResident.push_back( s_selFaces[si] );
+                else
+                    s_selFaces[keep++] = s_selFaces[si];
+            }
+            s_selFaces.resize( keep );
+            for ( size_t si = 0; si < s_selFaces.size(); ++si )
+                s_selFaces[si].seq = (int)si;               // the sort's tie-break is the index
         }
         Cam_SortGatheredFaces( s_selFaces );
         const float *lastSelCol = nullptr;
@@ -3683,6 +3784,67 @@ void CamWnd_Draw( HWND hwnd )
             KiwiEdScene_StampSortedPrefix( entSortedFirst, entSortedCount );
         }
         R_AddEditorSurfsCmd();
+    }
+
+    // The see-through tool volumes (own label art) and sky film, over the finished world (deferred in
+    // the world submit), then MATERIAL_COLOR back to the flush neutral the passes below inherit.
+    if ( !s_deferredToolFaces.empty() )
+    {
+        PROF_SCOPED( "tool volume pass" );
+        float lastToolMC[4] = { -1.0f, -1.0f, -1.0f, -1.0f };
+        for ( const CamDeferredToolFace &d : s_deferredToolFaces )
+        {
+            if ( Cam_MaterialColorChanged( d.col, lastToolMC ) )
+            {
+                R_AddCmdSetMaterialColor( d.col );
+                Cam_SetLastMaterialColor( lastToolMC, d.col );
+            }
+            if ( d.film )
+            {
+                // the film's colour and alpha ride in the vertex colour (see the world arm)
+                static const float s_skyFilm[4] = { 0.45f, 0.62f, 0.92f, 0.30f };
+                GfxColor filmCol;
+                Byte4PackPixelColor( const_cast< float * >( s_skyFilm ), &filmCol );
+                Cam_DrawFaceTinted( d.f, g_qeglobals.d_white, (uint)filmCol.packed, 0.0f, TECHNIQUE_UNLIT );
+            }
+            else
+                Cam_DrawFaceFaithfulImmediate( d.f, TECHNIQUE_UNLIT );   // its own art, as when selected
+        }
+        static const float s_toolNeutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        R_AddCmdSetMaterialColor( s_toolNeutral );
+        s_deferredToolFaces.clear();
+    }
+
+    // SELECTED-BRUSH TINT, RESIDENT HALF (KIWI 2026-10-11): the faces the tint pass above
+    // deferred, from the same resident geometry the world pass draws, in self-bracketed flush
+    // windows (the selected-entity pass's shape) so the flush merges them into a few draws
+    // instead of one CPU-built draw per face.  Tinted window, then the UV editor's untinted
+    // faces.  After the main flush: opening a window inside it would discard the world's surfs.
+    if ( !s_selResident.empty() )
+    {
+        PROF_SCOPED( "selected brush resident pass" );
+        static const float s_neutralSel[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        const float *tintCol = g_qeglobals.dontDrawSelectedTint
+                             ? s_neutralSel : g_qeglobals.d_savedinfo.colors[11];
+        for ( int pass = 0; pass < 2; ++pass )
+        {
+            const bool uvPass = ( pass == 1 );
+            bool any = false;
+            for ( size_t si = 0; si < s_selResident.size() && !any; ++si )
+                any = s_selResident[si].uvOwns == uvPass;
+            if ( !any )
+                continue;
+            R_SortMaterials();
+            R_AddCmdSetMaterialColor( uvPass ? s_neutralSel : tintCol );
+            for ( size_t si = 0; si < s_selResident.size(); ++si )
+                if ( s_selResident[si].uvOwns == uvPass )
+                    Cam_DrawFaceResident( s_selResident[si], TECHNIQUE_UNLIT );
+            R_AddEditorSurfsCmd();
+        }
+        // Back to the main flush's neutral: the selected patch / entity passes push their
+        // tint only when the pref is on and otherwise inherit this ({1,1,1,1} = flat white).
+        R_AddCmdSetMaterialColor( s_neutralSel );
+        s_selResident.clear();
     }
 
     // SELECTED PATCH fill/wireframe.  Active patches are already in the main world range above;

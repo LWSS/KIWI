@@ -78,9 +78,19 @@ std::string DefaultTextureFolder(const GameRoot& root);
 bool SaveDefaultTextureFolder(const GameRoot& root, const std::string& folder,
                               std::string& error);
 
+// textures.set value for a multi-material source: one InstaMAT set per source material.
+inline constexpr const char* kAllTextureSets = "*";
+
+// With textures.set "*", `variants`/`setName` are the first set's.
 bool ResolveTextures(const Recipe& recipe, TextureScan& scan,
                      const std::vector<TextureVariant>*& variants, std::string& setName,
                      std::string& error);
+
+// The texture set of each source material ("Default.001" -> set "Default_1"), aligned
+// with `materialNames`. Fails when a material has no set.
+bool MaterialTextureSets(const TextureScan& scan, const std::vector<std::string>& materialNames,
+                         std::vector<const std::vector<TextureVariant>*>& perMaterial,
+                         std::vector<std::string>& setNames, std::string& error);
 
 // Best texture prefix for a source file in a folder ("" when none fits).
 std::string GuessTexturePrefix(const std::filesystem::path& source,

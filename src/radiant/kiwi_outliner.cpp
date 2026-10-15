@@ -320,7 +320,8 @@ koutKind_t EntitySection( entity_s *inst )
     entity_s_def *def = DefOf( inst );
     eclass_t *ec = def ? def->eclass : 0;
     const int classType = ec ? ec->classtype : 0;
-    if ( ( classType & KOUT_CLASS_LIGHT ) != 0 )
+    // Reflection probes are lighting too, though their eclass is not CLASS_LIGHT.
+    if ( ( classType & KOUT_CLASS_LIGHT ) != 0 || !_stricmp( ClassOf( inst ), "reflection_probe" ) )
         return KOUT_SECTION_LIGHTS;
 
     if ( ( classType & ( KOUT_CLASS_MODELCLASS | KOUT_CLASS_PREFAB ) ) != 0 )
@@ -692,9 +693,12 @@ bool BrushHidden( const selbrush_t *b )
 }
 
 // Use the shared writer so the eye and H-family update the same hide state;
-// callers bracket visibility undo around the whole gesture.
+// callers bracket visibility undo around the whole gesture.  A red-eye lock outlives
+// a show (only unlocking that row's eye shows it).
 void SetBrushHidden( selbrush_t *b, bool hidden )
 {
+    if ( !hidden && KiwiVis_Locked( b ) )
+        return;
     KiwiVis_SetHidden( b, hidden );
 }
 
@@ -1450,12 +1454,13 @@ bool ReparentBrushes( std::vector<selbrush_t *> &insts, entity_s *targetInst, co
 void GatherSelectedBrushes( std::vector<selbrush_t *> &out )
 {
     const selection_t &sel = KiwiSel();
+    sel_liveSet_t      live;
     for ( size_t i = 0; i < sel.items.size(); ++i )
     {
         if ( sel.items[i].kind != SEL_OBJECT )
             continue;
         selbrush_t *b = sel.items[i].brush;
-        if ( b && Sel_BrushLive( b ) )
+        if ( live.Has( b ) )
             out.push_back( b );
     }
 }
@@ -1473,8 +1478,9 @@ struct ugUnits_t
 void UGUnitsFrom( const std::vector<selbrush_t *> &picked, ugUnits_t &u )
 {
     std::map<entity_s *, int> pickedOf;
+    sel_liveSet_t             live;
     for ( size_t i = 0; i < picked.size(); ++i )
-        if ( picked[i] && Sel_BrushLive( picked[i] ) && picked[i]->owner )
+        if ( live.Has( picked[i] ) && picked[i]->owner )
             ++pickedOf[picked[i]->owner];
 
     std::map<entity_s *, bool> added;
@@ -1975,8 +1981,10 @@ bool SectionIsBrushBacked( koutKind_t k )
         // KIWI END
 }
 
-// Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden.
-void SectionBrushes( koutKind_t k, int apply, int *n, int *nh )
+// Walk the brushes a section lists.  `apply` < 0 counts (n / hidden), else sets hidden;
+// `collect` also gathers them.
+void SectionBrushes( koutKind_t k, int apply, int *n, int *nh,
+                     std::vector<selbrush_t *> *collect = nullptr )
 {
     if ( n )  *n  = 0;
     if ( nh ) *nh = 0;
@@ -2005,6 +2013,8 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh )
         {
             if ( !PassesFilter( b, filter ) )
                 continue;
+            if ( collect )
+                collect->push_back( b );
             if ( apply < 0 )
             {
                 if ( n )  ++*n;
@@ -2064,6 +2074,48 @@ void SectionSetHidden( koutKind_t k, bool want )
     }
 }
 
+// KIWI (2026-10-11, user: right-click "the eyeball turns red with a slash through it ...
+// Show hidden (unhide all) does NOT unhide this group"): the brushes a row's eye covers;
+// false for rows without brushes (construction, images).
+bool RowBrushes( const koutRow_t &r, std::vector<selbrush_t *> &out )
+{
+    out.clear();
+    if ( r.kind == KOUT_BRUSH )
+    {
+        if ( r.inst )
+            out.push_back( r.inst );
+    }
+    else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY )
+    {
+        for ( selbrush_t *b = r.ent->brushes.ownerNext; b && b != &r.ent->brushes; b = b->ownerNext )
+            out.push_back( b );
+    }
+    else if ( r.kind == KOUT_UGROUP || r.kind == KOUT_UGROUP_TYPE )
+    {
+        std::vector<entity_s *> ents;
+        UGRowEntities( r, ents );
+        for ( size_t k = 0; k < ents.size(); ++k )
+            for ( selbrush_t *b = ents[k]->brushes.ownerNext; b && b != &ents[k]->brushes; b = b->ownerNext )
+                out.push_back( b );
+    }
+    else if ( r.key >= KOUT_KEY_BRUSHES && SectionIsBrushBacked( r.kind ) )
+        SectionBrushes( r.kind, -1, nullptr, nullptr, &out );
+    else
+        return false;
+    return true;
+}
+
+bool RowLocked( const koutRow_t &r )
+{
+    std::vector<selbrush_t *> bs;
+    if ( !RowBrushes( r, bs ) || bs.empty() )
+        return false;
+    for ( size_t i = 0; i < bs.size(); ++i )
+        if ( !KiwiVis_Locked( bs[i] ) )
+            return false;
+    return true;
+}
+
 // Row drawing
 // The shell has no icon atlas, so the eye is drawn directly. Two-argument
 // PathStroke is unambiguous across the vendored ImGui signature swap (imgui.h:3551).
@@ -2102,6 +2154,15 @@ void DrawEye( ImDrawList *dl, ImVec2 c, float r, bool hidden, ImU32 col )
         dl->AddLine( ImVec2( c.x + r * 0.75f, c.y + r * 0.25f ),
                      ImVec2( c.x + r * 1.00f, c.y + r * 0.70f ), col, 1.1f );
     }
+}
+
+// A locked hide: the open eye in red, struck through.
+void DrawLockedEye( ImDrawList *dl, ImVec2 c, float r )
+{
+    const ImU32 red = IM_COL32( 225, 60, 55, 255 );
+    DrawEye( dl, c, r, false, red );
+    dl->AddLine( ImVec2( c.x - r * 1.35f, c.y + r * 1.10f ),
+                 ImVec2( c.x + r * 1.35f, c.y - r * 1.10f ), red, 1.6f );
 }
 
 void DrawArrow( ImDrawList *dl, ImVec2 c, float r, bool open, ImU32 col )
@@ -2503,14 +2564,42 @@ void KiwiOutliner_Draw()
                     break;
                 }
 
+                // Only an all-hidden row can be all-locked (locking hides).
+                const bool locked = hasEye && hidden && RowLocked( r );
+
                 const ImVec2 eyePos = ImGui::GetCursorScreenPos();
-                ImGui::InvisibleButton( "##eye", ImVec2( eyeW, itemH ) );
+                ImGui::InvisibleButton( "##eye", ImVec2( eyeW, itemH ),
+                                        ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight );
                 const bool eyeHover = ImGui::IsItemHovered();
                 if ( hasEye )
                 {
-                    DrawEye( dl, ImVec2( eyePos.x + eyeCx, eyePos.y + itemH * 0.5f ),
-                             glyphR, hidden, ( hidden || !eyeHover ) ? dim : lit );
-                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
+                    const ImVec2 eyeC( eyePos.x + eyeCx, eyePos.y + itemH * 0.5f );
+                    if ( locked )
+                        DrawLockedEye( dl, eyeC, glyphR );
+                    else
+                        DrawEye( dl, eyeC, glyphR, hidden, ( hidden || !eyeHover ) ? dim : lit );
+                    std::vector<selbrush_t *> lockBrushes;
+                    if ( ImGui::IsItemClicked( ImGuiMouseButton_Right ) && RowBrushes( r, lockBrushes ) )
+                    {
+                        // Right click: lock (hide; Show Hidden passes it by) or unlock (stays hidden).
+                        KiwiVis_UndoPush( locked ? "unlock hidden (outliner)" : "lock hidden (outliner)" );
+                        for ( size_t k = 0; k < lockBrushes.size(); ++k )
+                            KiwiVis_SetLocked( lockBrushes[k], !locked );
+                        KiwiVis_UndoCommit();
+                    }
+                    else if ( locked && ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
+                    {
+                        // Left click on a red eye unlocks and shows.
+                        RowBrushes( r, lockBrushes );
+                        KiwiVis_UndoPush( "unlock and show (outliner)" );
+                        for ( size_t k = 0; k < lockBrushes.size(); ++k )
+                        {
+                            KiwiVis_SetLocked( lockBrushes[k], false );
+                            KiwiVis_SetHidden( lockBrushes[k], false );
+                        }
+                        KiwiVis_UndoCommit();
+                    }
+                    else if ( ImGui::IsItemClicked( ImGuiMouseButton_Left ) )
                     {
                         const bool want = !hidden;
                         if ( r.kind == KOUT_BRUSH )

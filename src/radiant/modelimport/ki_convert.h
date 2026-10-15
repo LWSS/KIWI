@@ -149,6 +149,10 @@ struct ConvertRequest {
     int surfaceType = cod4::kSurfaceTypeConcrete;
     std::vector<int> pieceType;               // per piece (BuildPieces order); 0 = surfaceType
     TextureFiles textures;
+    // KIWI: one set per source material (mesh->materialNames order) when the source
+    // has several InstaMAT sets; material k > 0 builds <asset>_m<k> images/materials.
+    // Empty = `textures` for the whole mesh.
+    std::vector<TextureFiles> materialTextures;
     double glassOpacity = 0.35;
     std::filesystem::path outputRoot;         // the raw\ folder
     std::filesystem::path templateRoot;       // stock raw\ holding the template materials

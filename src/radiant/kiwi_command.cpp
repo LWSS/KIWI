@@ -29,6 +29,7 @@
 #include "kiwi_loft.h"
 #include "kiwi_offset.h"
 #include "kiwi_pipe.h"                   // KIWI: Pipe along construction
+#include "kiwi_physdrop.h"               // KIWI: Physics Drop
 #include "kiwi_visibility.h"
 #include "kiwi_conclip.h"
 #include "kiwi_conselect.h"
@@ -438,6 +439,7 @@ namespace
         { 32924, { "Show Hidden (unhide all)",  "View",      0, KiwiVis_HasHidden } },
         { 33246, { "Show Last Hidden",          "View",      0, KiwiVis_HasHidden } },
         { KIWI_CMD_HIDE_INVERT,     { "Invert Hidden",       "View",      0, KiwiVis_CanInvert } },
+        { KIWI_CMD_FORCE_UNHIDE,    { "Force Unhide All...", "View",      0, KiwiVis_HasHidden } },
         { KIWI_CMD_FOCUS_SELECTION, { "Focus On Selection",  "View",      0, KiwiFocus_CanFocus } },
         { KIWI_CMD_VIEW_FACE,       { "View Face Head-on",   "View",      SEL_MASK_FACE, KiwiFocus_CanViewFace } },
         { KIWI_CMD_SECTION_TOGGLE,  { "Section Analysis",    "View",      0, nullptr } },
@@ -449,9 +451,8 @@ namespace
         { 32982, { "CSG: Hollow",               "Modeling",  0, KiwiCsg_CanHollow    } },
         { 32927, { "CSG: Merge",                "Modeling",  0, KiwiCsg_CanMerge     } },
         { 33220, { "CSG: Auto Caulk",           "Modeling",  0, KiwiCsg_CanAutoCaulk } },
-        { 32956, { "Mirror X (Flip)",           "Duplicate", 0, KiwiDupe_CanMirror   } },
-        { 32957, { "Mirror Y (Flip)",           "Duplicate", 0, KiwiDupe_CanMirror   } },
-        { 32958, { "Mirror Z (Flip)",           "Duplicate", 0, KiwiDupe_CanMirror   } },
+        { KIWI_CMD_MIRROR, { "Mirror",          "Duplicate", 0, KiwiDupe_CanMirrorTool } },
+        { KIWI_CMD_PHYS_DROP, { "Physics Drop", "Transform", 0, KiwiPhysDrop_CanExecute } },
         { 33041, { "Surface Inspector",         "Textures",  0, nullptr           } },
         { 33092, { "Patch Inspector",           "Patch",     0, nullptr           } },
         { 33104, { "View Filters",              "View",      0, nullptr           } },
@@ -626,6 +627,8 @@ namespace
             return c;
         if ( KiwiEditorCommand *c = KiwiLoft_CommandForId( id ) )       // L loft
             return c;
+        if ( KiwiEditorCommand *c = KiwiPhysDrop_CommandForId( id ) )   // Physics Drop (models)
+            return c;
         return KiwiUv_CommandForId( id );                               // §26 texture shift/rotate/scale
     }
 
@@ -756,6 +759,7 @@ void KiwiCmd_RegisterCommands()
     KiwiBool_RegisterCommands();
     KiwiLoft_RegisterCommands();
     KiwiPipe_RegisterCommands();        // KIWI: Pipe along construction (unbound)
+    KiwiPhysDrop_RegisterCommands();    // KIWI: Physics Drop (unbound)
     KiwiAutoBool_RegisterCommands();
     KiwiMatch_RegisterCommands();
     KiwiTrim_RegisterCommands();
@@ -876,6 +880,7 @@ namespace
         case KIWI_CMD_VIEW_FACE:
         case KIWI_CMD_SECTION_TOGGLE:
         case KIWI_CMD_HIDE_INVERT:
+        case KIWI_CMD_FORCE_UNHIDE:
         case KIWI_CMD_CONSTRUCT_HIDE:
         case KIWI_CMD_CONSTRUCT_UNHIDE:
         case KIWI_CMD_REPEAT_LAST:                      // edit:repeat-last-command

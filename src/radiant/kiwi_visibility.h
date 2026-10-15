@@ -41,6 +41,15 @@ void KiwiVis_UndoReset();
 // Apply hidden state to one instance through the shared bit/depth writer.
 void KiwiVis_SetHidden( selbrush_t *b, bool hidden );
 
+// Locked hides (KIWI 2026-10-11, the outliner's red eye): Show Hidden, Show Last Hidden
+// and Invert leave them hidden; only unlocking or Force Unhide All shows them.  Keyed by
+// definition, carried by visibility undo, saved as `hiddenbrush N locked`.
+bool KiwiVis_Locked( const selbrush_t *b );
+void KiwiVis_SetLocked( selbrush_t *b, bool locked );   // locking also hides
+void KiwiVis_DefFreed( const brush_t *def );            // Brush_Free_R: drop its lock
+void KiwiVis_KeepLockedHidden();    // re-hide locked brushes after an unhide core
+void KiwiVis_ForceUnhideAll();      // clear every lock and show everything (one undo)
+
 // KIWI-owned fourth member of the family (Ctrl+H).
 void KiwiVis_InvertHidden();
 
@@ -76,10 +85,11 @@ int  KiwiVis_SidecarBuild();
 int  KiwiVis_SidecarTotal();
 // Return -1 when i is outside the hidden-ordinal list.
 int  KiwiVis_SidecarOrdinal( int i );
+bool KiwiVis_SidecarOrdinalLocked( int i );
 // Begin before parsing every sidecar; apply only after map instances are live.
 void KiwiVis_SidecarLoadBegin();
 void KiwiVis_SidecarLoadTotal( int total );
-void KiwiVis_SidecarLoadNote( int ordinal );
+void KiwiVis_SidecarLoadNote( int ordinal, bool locked = false );
 void KiwiVis_SidecarLoadApply();
 
 // Patch-selection diagnostics.
@@ -92,4 +102,5 @@ void KiwiVis_SidecarLoadApply();
 void KiwiVis_ReportPatchGates( bool force );
 
 void KiwiVis_RegisterCommands();
-bool KiwiVis_DispatchInstant( unsigned int cmdId );
+bool KiwiVis_DispatchInstant( unsigned int cmdId );   // Force Unhide All opens the confirm
+void KiwiVis_Draw();                                  // ...drawn here, every frame

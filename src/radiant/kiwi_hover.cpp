@@ -380,6 +380,7 @@ namespace
         const bool activeDrawnElsewhere = KiwiUX_ShowHover();
 
         int budget = KSEL_MAX_SEGMENTS;
+        sel_liveSet_t live;                         // one list walk for every item
         for ( int pass = 0; pass < 2 && budget > 0; ++pass )
         {
             const bool thin = ( pass == 1 );        // THICK first (see the cap note)
@@ -393,7 +394,7 @@ namespace
                     continue;
                 if ( IsThinKind( it ) != thin )
                     continue;
-                if ( !BrushLive( it.brush ) )
+                if ( !live.Has( it.brush ) )
                     continue;                       // never deref a freed node
                 if ( KiwiLines_Remaining() <= 0 )
                     break;
@@ -439,10 +440,11 @@ namespace
         R_AddCmdSetMaterialColor( s_neutral );
 
         // Newest-first makes the fill cap drop the oldest faces.
+        sel_liveSet_t live;                      // one list walk for every face
         for ( int i = (int)sel.items.size() - 1; i >= 0; --i )
         {
             const sel_item_t &it = sel.items[i];
-            if ( it.kind != SEL_FACE || !BrushLive( it.brush ) )
+            if ( it.kind != SEL_FACE || !live.Has( it.brush ) )
                 continue;
             if ( activeIsFace && Sel_ItemEqual( it, active ) )
                 continue;                        // drawn brighter, below
@@ -636,8 +638,8 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
     }
 
     // Construction regions are area targets and yield to aimed-at points/lines or
-    // a nearer brush face, mirroring ClickSelect byte for byte.
-    if ( mask != SEL_MASK_OBJECT )
+    // a nearer brush face, mirroring ClickSelect byte for byte (face mode and mode 5 only).
+    if ( ( mask & SEL_MASK_FACE ) != 0 )
     {
         const int reg = KiwiRegion_PickAt( ray );
         if ( reg >= 0 )

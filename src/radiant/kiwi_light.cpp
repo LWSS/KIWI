@@ -12,6 +12,7 @@
 #include "kiwi_lines.h"
 #include "kiwi_windows.h"
 #include "kiwi_command.h"
+#include "kiwi_entbrowser.h"        // New Light / New Reflection Probe
 #include "kiwi_boxselect.h"
 #include "kiwi_extrude.h"
 #include "kiwi_vec.h"
@@ -953,6 +954,19 @@ void KiwiLight_Draw()
 
     if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_LIGHT ), open ) )
     {
+        // KIWI (2026-10-13, user: "there's no way to do it atm"): create at the camera centre.
+        if ( ImGui::Button( "New Light", ImVec2( 140.0f, 0.0f ) ) )
+            KiwiEntBrowser_CreateAtViewCenter( "light", 64.0f );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A light 64 units above the surface at the camera centre" );
+        ImGui::SameLine();
+        if ( ImGui::Button( "New Reflection Probe", ImVec2( 140.0f, 0.0f ) ) )
+            KiwiEntBrowser_CreateAtViewCenter( "reflection_probe", 64.0f );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "A reflection probe at eye height (64 units) above the surface at the camera centre.\n"
+                               "The Build window's REFLECTIONS stage bakes them after LIGHT." );
+        ImGui::Separator();
+
         if ( lights.empty() )
         {
             ImGui::TextWrapped( "Select a light entity to edit its runtime and bake parameters." );

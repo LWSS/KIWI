@@ -229,6 +229,7 @@ void Scr_GlassSmash(float *pos, float *dir); // BO1 CodeCallback_GlassSmash (opt
 
 Glasses *GlassKiwi_GetGlasses();
 void GlassKiwi_FreeGlasses();
+unsigned int GlassKiwi_StartState(unsigned int index); // "startbroken" key: PRISTINE/CRACKED/SHATTERED
 void GlassKiwi_ResolveClientAssets();
 void GlassKiwi_DrawNames(); // glassShowNames: each pane's glass def above it
 

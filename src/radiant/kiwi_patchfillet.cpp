@@ -255,7 +255,8 @@ namespace
             }
             // Reinstall the mode-specific table and clear the old scalar/focus.
             // KiwiNum_Reset would replace it with the default unnamed field.
-            m_hasNum = false;
+            m_hasNum   = false;
+            m_haveGood = false;                     // the stop scalar changed meaning
             {
                 const kiwiNumField_t *f = 0;
                 const int nf = NumericFields( &f );
@@ -518,6 +519,11 @@ namespace
             m_added     = false;
             m_why       = 0;
             m_undoOpen  = false;
+            m_met       = false;
+            m_atMax     = false;
+            m_haveGood  = false;
+            m_goodS     = 0.0f;
+            m_goodBias  = 0.0f;
             m_hud[0]    = '\0';
         }
 
@@ -842,6 +848,61 @@ namespace
 
             if ( s < 0.0f )
                 s = 0.0f;
+            const float askS    = s;
+            const float askBias = m_biasDeg;
+            const bool  sMoved    = !m_haveGood || fabsf( askS - m_goodS ) > 1.0e-6f;
+            const bool  biasMoved = !m_haveGood || fabsf( askBias - m_goodBias ) > 1.0e-6f;
+
+            // At max depth (chamfers met) an angle change keeps them met.
+            if ( m_atMax && m_haveGood && !m_curve && !m_hasNum && !m_grabbed && biasMoved )
+                s = MeetScalar( askBias, s );
+
+            trial_t st = Trial( s, askBias );
+            if ( st != KPF_TRIAL_OK && m_haveGood )
+            {
+                if ( sMoved && !biasMoved )
+                    s = StopAt( false, m_goodS, s, askBias, &st );
+                else if ( biasMoved && fabsf( s - m_goodS ) <= 1.0e-6f )
+                    StopAt( true, m_goodBias, askBias, s, &st );
+            }
+            if ( st != KPF_TRIAL_BAD )
+            {
+                m_goodS    = s;
+                m_goodBias = m_biasDeg;
+                m_haveGood = true;
+                m_atMax    = ( st == KPF_TRIAL_MET );
+            }
+
+            // A stop rebases its driver so travel back answers at once.
+            if ( m_grabbed && !m_hasNum && fabsf( s - askS ) > 1.0e-6f )
+                ReLatchFor( s );
+            if ( m_angleDrag && fabsf( m_biasDeg - askBias ) > 1.0e-6f )
+            {
+                int x, y;
+                if ( KiwiCmd_LastCursor( &x, &y ) )
+                {
+                    m_angleX0   = x;
+                    m_angleBase = m_biasDeg;
+                }
+            }
+            UpdateHud();
+        }
+
+        // KIWI (2026-10-14, user: "when im beveling opposite edges of a brush and I set the
+        // angle, the angle should stop at the failure point so I can get a perfect bi-sect
+        // if I want.  Also allow continuous manipulation of the angle tool while at max
+        // bevel"): a depth or angle past the first refusal STOPS at it.  Where that refusal
+        // is two chamfers meeting over the face between them (the bisect), the stop lands
+        // on the met side and commit drops the vanished face; at that max depth each new
+        // angle re-solves the depth where the chamfers meet.
+        enum trial_t { KPF_TRIAL_OK = 0, KPF_TRIAL_MET, KPF_TRIAL_BAD };
+        enum { KPF_STOP_ITERS = 24, KPF_MEET_GROW = 16 };
+
+        void SetScalar( float s )
+        {
+            if ( s < 0.0f )
+                s = 0.0f;
+            const filletUnit_t &drv = m_units[0];
             if ( m_curve )
             {
                 m_radius = s;
@@ -853,9 +914,123 @@ namespace
                 const float denom = 1.0f - drv.k * drv.k;   // kept in step for the D toggle
                 m_radius = ( denom > KPF_EPS ) ? ( m_depth * drv.k / denom ) : m_depth;
             }
+        }
+
+        // Builds the preview at (s, bias); an uncut chamfer counts as OK.
+        trial_t Trial( float s, float biasDeg )
+        {
+            SetScalar( s );
+            m_biasDeg = biasDeg;
             ApplyBias();
             Apply();
-            UpdateHud();
+            if ( m_depth < KPF_MIN_RADIUS )
+                return KPF_TRIAL_OK;
+            if ( m_invalid )
+                return KPF_TRIAL_BAD;
+            return m_met ? KPF_TRIAL_MET : KPF_TRIAL_OK;
+        }
+
+        trial_t TrialOn( bool onBias, float v, float fixed )
+        {
+            return onBias ? Trial( fixed, v ) : Trial( v, fixed );
+        }
+
+        // Bisects from the accepted value to the refused one and leaves the preview at
+        // the boundary: its met side when the chamfers meet there, else its good side.
+        float StopAt( bool onBias, float good, float bad, float fixed, trial_t *outState )
+        {
+            float   lo = good, hi = bad;
+            trial_t hiState = TrialOn( onBias, hi, fixed );
+            for ( int it = 0; it < KPF_STOP_ITERS; ++it )
+            {
+                const float   mid = 0.5f * ( lo + hi );
+                const trial_t t   = TrialOn( onBias, mid, fixed );
+                if ( t == KPF_TRIAL_OK )
+                    lo = mid;
+                else
+                {
+                    hi      = mid;
+                    hiState = t;
+                }
+            }
+            const float stop = ( hiState == KPF_TRIAL_MET ) ? hi : lo;
+            *outState = TrialOn( onBias, stop, fixed );
+            return stop;
+        }
+
+        // The scalar where the chamfers meet at this bias; `from` when they never do.
+        float MeetScalar( float biasDeg, float from )
+        {
+            float lo = 0.0f;
+            float hi = ( from > KPF_MIN_RADIUS ) ? from : KPF_MIN_RADIUS;
+            trial_t hiState = Trial( hi, biasDeg );
+            for ( int g = 0; g < KPF_MEET_GROW && hiState == KPF_TRIAL_OK; ++g )
+            {
+                lo = hi;
+                hi *= 2.0f;
+                hiState = Trial( hi, biasDeg );
+            }
+            if ( hiState == KPF_TRIAL_OK )
+                return from;
+            for ( int it = 0; it < KPF_STOP_ITERS; ++it )
+            {
+                const float   mid = 0.5f * ( lo + hi );
+                const trial_t t   = Trial( mid, biasDeg );
+                if ( t == KPF_TRIAL_OK )
+                    lo = mid;
+                else
+                {
+                    hi      = mid;
+                    hiState = t;
+                }
+            }
+            return ( hiState == KPF_TRIAL_MET ) ? hi : lo;
+        }
+
+        static float WindingAreaOf( const winding_t *w )
+        {
+            float sum[3] = { 0.0f, 0.0f, 0.0f };
+            for ( int p = 1; p + 1 < w->numpoints; ++p )
+            {
+                float a[3], b[3], c[3];
+                Sub3( w->p[p], w->p[0], a );
+                Sub3( w->p[p + 1], w->p[0], b );
+                Cross3( a, b, c );
+                for ( int k = 0; k < 3; ++k )
+                    sum[k] += c[k];
+            }
+            return 0.5f * sqrtf( Dot3( sum, sum ) );
+        }
+
+        // The one ORIGINAL face of unit i's brush the chamfers cut away (no winding, or a
+        // remnant under KVALID_MIN_FACE_AREA), -1 for none or several.  Edge slivers are
+        // CollapsedSliver's.
+        int MetFace( size_t i ) const
+        {
+            const brush_t *def = m_units[i].e.def;
+            if ( !def || !def->faces )
+                return -1;
+            int added = 0;
+            for ( size_t k = 0; k < m_units.size(); ++k )
+                if ( m_units[k].e.def == def && m_units[k].faceIndex >= 0 )
+                    ++added;
+            const int base = def->faceCount - added;
+            int found = -1;
+            for ( int f = 0; f < base; ++f )
+            {
+                bool sliver = false;
+                for ( size_t k = 0; k < m_units.size() && !sliver; ++k )
+                    sliver = m_units[k].e.def == def && m_units[k].e.sliver == f;
+                if ( sliver )
+                    continue;
+                const winding_t *w = def->faces[f].w;
+                if ( w && w->numpoints >= 3 && WindingAreaOf( w ) >= KVALID_MIN_FACE_AREA )
+                    continue;
+                if ( found >= 0 )
+                    return -1;
+                found = f;
+            }
+            return found;
         }
 
         // Clamp bias per edge because legal half-angles differ; fillet mode
@@ -883,6 +1058,7 @@ namespace
         // Rebuild the live chamfer from baseline geometry each frame.
         void Apply()
         {
+            m_met = false;
             if ( m_depth < KPF_MIN_RADIUS )
             {
                 if ( m_added )
@@ -923,6 +1099,16 @@ namespace
                 const int sl = CollapsedSliver( i );
                 ok = ( sl >= 0 ) ? KiwiValid_CheckBrushIgnoringFace( m_units[i].e.def, sl, &why )
                                  : KiwiValid_CheckBrush( m_units[i].e.def, &why );
+                // KIWI: chamfers meeting over a face (the bisect) cut it away; it goes on commit.
+                if ( !ok && sl < 0 )
+                {
+                    const int met = MetFace( i );
+                    if ( met >= 0 && KiwiValid_CheckBrushIgnoringFace( m_units[i].e.def, met, 0 ) )
+                    {
+                        ok    = true;
+                        m_met = true;
+                    }
+                }
             }
 
             if ( !ok )
@@ -962,18 +1148,26 @@ namespace
         // the chamfer faces are no longer tracked by index (commit), inside the undo bracket.
         void DropCollapsedSlivers()
         {
-            bool dropped = false;
+            bool dropped = false, droppedMet = false;
             for ( size_t i = 0; i < m_units.size(); ++i )
             {
                 if ( DefFirstIndex( i ) != i || !Sel_BrushLive( m_units[i].e.node ) )
                     continue;
-                const int s = CollapsedSliver( i );
+                int s = CollapsedSliver( i );
+                if ( s < 0 && m_met )
+                {
+                    s = MetFace( i );          // the face the meeting chamfers cut away
+                    droppedMet = droppedMet || s >= 0;
+                }
                 if ( s < 0 )
                     continue;
                 Brush_RemoveFace( m_units[i].e.def, (unsigned int)s );
                 KiwiValid_Rebuild( m_units[i].e.def );
                 dropped = true;
             }
+            if ( droppedMet )
+                Sys_Printf( "Bevel Edge: the chamfers meet - the face between them was cut "
+                            "away and removed.\n" );
             // Removing a face renumbers the later ones: typed edge/face items would now
             // name the wrong face, so let go of them.
             if ( dropped )
@@ -1436,8 +1630,9 @@ namespace
                 char cb[32];
                 KiwiUnits_Format( cb, sizeof( cb ), ChamferDepth( m_units[0], m_radius ) );
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "fillet  %i edge(s)  r %s  chamfer %s  %i-col patch  (D: flat)",
-                           (int)m_units.size(), b, cb, m_units[0].spans * 2 + 1 );
+                           "fillet  %i edge(s)  r %s%s  chamfer %s  %i-col patch  (D: flat)",
+                           (int)m_units.size(), b, m_met ? " MAX" : "", cb,
+                           m_units[0].spans * 2 + 1 );
             }
             else
             {
@@ -1453,8 +1648,8 @@ namespace
                                ( fabsf( applied - m_biasDeg ) > 0.05f ) ? " (clamped)" : "" );
                 }
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "bevel  %i edge(s)  d %s%s  %s",
-                           (int)m_units.size(), b, bias,
+                           "bevel  %i edge(s)  d %s%s%s  %s",
+                           (int)m_units.size(), b, m_met ? " MAX (chamfers meet)" : "", bias,
                            m_angleDrag ? "ANGLE DRAG - move sideways, Ctrl = 5 deg, click or A ends"
                                        : "(D: curve it, A: drag the angle)" );
             }
@@ -1490,6 +1685,13 @@ namespace
         bool                      m_invalid   = false;
         bool                      m_added     = false;
         bool                      m_undoOpen  = false;
+        // The stop rule: the preview's chamfers meet (a face cut away), the last
+        // accepted value (scalar in the current mode, bias degrees), and the max latch.
+        bool                      m_met       = false;
+        bool                      m_atMax     = false;
+        bool                      m_haveGood  = false;
+        float                     m_goodS     = 0.0f;
+        float                     m_goodBias  = 0.0f;
         const char               *m_why       = 0;
         snap_result_t             m_snap;
         char                      m_hud[192]  = { 0 };

@@ -60,6 +60,7 @@ static unsigned int s_glassKiwiMaxDefs;
 static GlassKiwiClientDef *s_glassKiwiClientDefs;
 static unsigned int s_glassKiwiNumClientDefs;
 static float (*s_glassKiwiOutlines)[2];
+static unsigned char *s_glassKiwiStartStates; // per pane: "startbroken" key (GlassState)
 static char s_glassKiwiMapName[64];
 static unsigned int s_glassKiwiChecksum;
 static bool s_glassKiwiBuilt;
@@ -432,8 +433,10 @@ void GlassKiwi_FreeGlasses()
     GlassKiwi_Free(s_glassKiwiOutlines);
     GlassKiwi_Free(s_glassKiwiDefs);
     GlassKiwi_Free(s_glassKiwiClientDefs);
+    GlassKiwi_Free(s_glassKiwiStartStates);
     s_glassKiwiPanes = 0;
     s_glassKiwiOutlines = 0;
+    s_glassKiwiStartStates = 0;
     s_glassKiwiDefs = 0;
     s_glassKiwiClientDefs = 0;
     s_glassKiwiNumDefs = 0;
@@ -502,6 +505,7 @@ static void GlassKiwi_Build()
     s_glassKiwiPanes = (Glass *)GlassKiwi_Alloc(sizeof(Glass) * maxPanes);
     s_glassKiwiOutlines = (float (*)[2])GlassKiwi_Alloc(sizeof(float[2]) * GLASS_KIWI_MAX_OUTLINE * maxPanes);
     s_glassKiwiDefs = (GlassKiwiDef *)GlassKiwi_Alloc(sizeof(GlassKiwiDef) * maxPanes);
+    s_glassKiwiStartStates = (unsigned char *)GlassKiwi_Alloc(maxPanes);
     s_glassKiwiMaxDefs = maxPanes;
 
     numPanes = 0;
@@ -516,6 +520,7 @@ static void GlassKiwi_Build()
         float origin[3] = { 0.0f, 0.0f, 0.0f };
         float uvScale = -1.0f;
         int frameEdges = -1;
+        int startBroken = 0;
         char defName[64] = { 0 };
         Glass *glass;
         GlassKiwiDef *kd;
@@ -546,6 +551,8 @@ static void GlassKiwi_Build()
                 uvScale = (float)atof(value);
             else if (!I_stricmp(key, "frameedges"))
                 frameEdges = atoi(value);
+            else if (!I_stricmp(key, "startbroken"))
+                startBroken = atoi(value);
             else if (!I_stricmp(key, "angles") && I_stricmp(value, "0 0 0"))
                 hasAngles = true;
         }
@@ -566,6 +573,8 @@ static void GlassKiwi_Build()
                 glass->index = numPanes;
                 glass->uvScale = (uvScale > 0.0f) ? uvScale : kd->uvScale;
                 glass->isPlanar = (frameEdges >= 0) ? (frameEdges != 0) : (kd->frameEdges != 0);
+                if (startBroken == GlassState::CRACKED || startBroken == GlassState::SHATTERED)
+                    s_glassKiwiStartStates[numPanes] = (unsigned char)startBroken;
                 ++numPanes;
             }
             else if (brushModel <= 0)
@@ -672,6 +681,14 @@ Glasses *GlassKiwi_GetGlasses()
         GlassKiwi_Build();
 
     return &s_glassKiwiList;
+}
+
+// The pane's state at map start (Radiant "startbroken" key): PRISTINE, CRACKED or SHATTERED.
+unsigned int GlassKiwi_StartState(unsigned int index)
+{
+    if (!s_glassKiwiStartStates || index >= s_glassKiwiList.numGlasses)
+        return GlassState::PRISTINE;
+    return s_glassKiwiStartStates[index];
 }
 
 static const GlassKiwiDef *GlassKiwi_GetKiwiDef(const GlassDef *def)

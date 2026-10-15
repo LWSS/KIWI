@@ -11,9 +11,7 @@
 // If re-enabled, replay CamWnd_OnRButtonDown/Up (camwnd.cpp:3886/3892): down sets
 // cam_was_not_dragged for CamWnd_ContextMenu (:3031); post-present keeps it outside the scene.
 //
-// Alt is latched at MMB press: that whole gesture is a view swipe, never an orbit.
-// Net travel selects KiwiViewCube_SwipeAxisView or KiwiViewCube_StepAxisView; bare MMB
-// still orbits from its first pixel.
+// MMB orbits from its first pixel (Alt+MMB too: the old view-swipe gesture was removed).
 //
 // A replay feeds CamWnd_DropModelsToPlane zero dt to suppress its one-shot camera fly
 // (camwnd.cpp:2550-2553), restoring g_oldtime afterward. CameraMode 1 returns earlier
@@ -85,15 +83,6 @@ namespace
     kgesture_t s_gesture = KG_NONE;
     int        s_gestureBtn = -1;
     int        s_lastX = 0, s_lastY = 0;
-
-    // Alt is latched at MMB press: the whole gesture remains a view action, so
-    // releasing Alt cannot turn it into an orbit. Net travel chooses swipe direction;
-    // under 24 px it falls back to KiwiViewCube_StepAxisView. Bare MMB orbits immediately.
-    const int KVP_SWIPE_PIXELS = 24;
-
-    bool         s_mmbAlt   = false;
-    int          s_mmbTravX = 0, s_mmbTravY = 0;
-    bool         s_mmbDrag  = false;   // bare MMB only: the orbit is live
 
     // Signed deltas give net displacement; s_rmbDrag separately latches a larger excursion.
     int          s_rmbPressX = 0, s_rmbPressY = 0;
@@ -656,14 +645,7 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         }
         else
         {
-            // Latch Alt from the same ImGui IO that supplied Shift/Ctrl.
-            s_mmbAlt   = ImGui::GetIO().KeyAlt;
-            s_mmbTravX = 0;
-            s_mmbTravY = 0;
-            s_mmbDrag  = !s_mmbAlt;           // a BARE MMB orbits from pixel one
-            // Alt+MMB remains a swipe, so it never takes the orbit pivot latch.
-            if ( !s_mmbAlt )
-                KiwiCam_OrbitBegin( imgX, imgY );
+            KiwiCam_OrbitBegin( imgX, imgY );
             s_gesture = KG_ORBIT;
         }
         s_gestureBtn = btn;
@@ -830,19 +812,7 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
     s_lastY = imgY;
 
     if ( s_gesture == KG_ORBIT )
-    {
-        // Alt+MMB tracks net swipe travel without rotating; bare MMB orbits immediately.
-        if ( s_mmbDrag )
-        {
-            KiwiCam_OrbitDrag( dx, dy );
-        }
-        else
-        {
-            s_mmbTravX += dx;
-            s_mmbTravY += dy;
-            // The ImDrawList swipe hint redraws every ImGui tick; no dirty stamp needed.
-        }
-    }
+        KiwiCam_OrbitDrag( dx, dy );
     else if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
         KiwiBox_Update( imgX, imgY );    // one rectangle, selection or command owner
     else if ( s_gesture == KG_PAN )
@@ -896,20 +866,6 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
     // Modern camera input intentionally disables CamWnd_ContextMenu (camwnd.cpp:4434)
     // without changing the ported handler. Any re-enable must use ReplayLegacyRightClick.
     const bool wantMenu    = false && rmbClick && !wantConfirm;
-    // Alt+MMB always changes view: net travel selects directional swipe or ring step.
-    const bool wantViewStep = ( s_gesture == KG_ORBIT && s_mmbAlt && !s_mmbDrag );
-    int        swipeDir     = -1;
-    if ( wantViewStep )
-    {
-        const int ax = ( s_mmbTravX < 0 ) ? -s_mmbTravX : s_mmbTravX;
-        const int ay = ( s_mmbTravY < 0 ) ? -s_mmbTravY : s_mmbTravY;
-        if ( ax >= KVP_SWIPE_PIXELS || ay >= KVP_SWIPE_PIXELS )
-        {
-            // A dead-even diagonal falls to horizontal, which has four destinations.
-            if ( ax >= ay ) swipeDir = ( s_mmbTravX > 0 ) ? 1 : 0;   // right / left
-            else            swipeDir = ( s_mmbTravY > 0 ) ? 3 : 2;   // down  / up
-        }
-    }
 
     if ( s_gesture == KG_GRASS )
         KiwiGrass_HandleUp();
@@ -974,15 +930,6 @@ bool KiwiVP_CameraButtonUp( int btn, int imgX, int imgY )
         s_gestureBtn = 1;
         s_lastX      = s_navX;
         s_lastY      = s_navY;
-    }
-
-    // Apply the view step after closing ownership: re-aiming drops the orbit latch.
-    if ( wantViewStep )
-    {
-        if ( swipeDir >= 0 )
-            KiwiViewCube_SwipeAxisView( swipeDir );
-        else
-            KiwiViewCube_StepAxisView();
     }
 
     if ( wantConfirm )
@@ -1133,48 +1080,6 @@ void KiwiVP_CameraTick( bool cursorOver )
 }
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────
-namespace
-{
-    // Alt+MMB arrows highlight the dominant direction only after swipe threshold.
-    // Pure ImDrawList output cannot claim image hover.
-    void DrawSwipeHint( float imgMinX, float imgMinY, float imgW, float imgH )
-    {
-        if ( s_gesture != KG_ORBIT || !s_mmbAlt || s_mmbDrag )
-            return;
-
-        const float cx = imgMinX + imgW * 0.5f;
-        const float cy = imgMinY + imgH * 0.5f;
-        const float r0 = 30.0f;            // inner gap
-        const float r1 = 58.0f;            // arrow tip
-        const float wg = 15.0f;            // half-width of the arrow base
-
-        const int ax = ( s_mmbTravX < 0 ) ? -s_mmbTravX : s_mmbTravX;
-        const int ay = ( s_mmbTravY < 0 ) ? -s_mmbTravY : s_mmbTravY;
-        int hot = -1;
-        if ( ax >= KVP_SWIPE_PIXELS || ay >= KVP_SWIPE_PIXELS )
-        {
-            if ( ax >= ay ) hot = ( s_mmbTravX > 0 ) ? 1 : 0;
-            else            hot = ( s_mmbTravY > 0 ) ? 3 : 2;
-        }
-
-        // Matches KiwiViewCube_SwipeAxisView: left, right, up, down.
-        static const float DIRV[4][2] = { { -1.0f, 0.0f }, { 1.0f, 0.0f },
-                                          {  0.0f, -1.0f }, { 0.0f, 1.0f } };
-        ImDrawList *dl = ImGui::GetWindowDrawList();
-        for ( int d = 0; d < 4; ++d )
-        {
-            const float ux = DIRV[d][0], uy = DIRV[d][1];
-            const float px = -uy,        py = ux;          // perpendicular
-            const ImVec2 tip ( cx + ux * r1,             cy + uy * r1 );
-            const ImVec2 baseL( cx + ux * r0 + px * wg,  cy + uy * r0 + py * wg );
-            const ImVec2 baseR( cx + ux * r0 - px * wg,  cy + uy * r0 - py * wg );
-            const ImU32  col = ( d == hot ) ? IM_COL32( 255, 226, 110, 235 )
-                                            : IM_COL32( 190, 196, 210, 70 );
-            dl->AddTriangleFilled( tip, baseL, baseR, col );
-        }
-    }
-}
-
 #include "kiwi_perf.h"   // KiwiPerf_Draw - the perf HUD line in the bottom band
 
 bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
@@ -1187,7 +1092,6 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
     KiwiSnap_DrawCylinderOverlay( imgMinX, imgMinY, imgW, imgH );
     DrawMarquee( imgMinX, imgMinY );     // under the chips
-    DrawSwipeHint( imgMinX, imgMinY, imgW, imgH );
 
     // Bottom-band slots grow upward in call order, preventing HUD overlap.
     KiwiHud_BandBegin( imgMinY, imgH );

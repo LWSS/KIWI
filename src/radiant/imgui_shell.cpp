@@ -31,6 +31,7 @@
 #include <universal/profile.h>
 #include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
 #include "kiwi_perf.h"             // KiwiPerf: per-stage frame timers (the "KiwiPerf" HUD)
+#include "kiwi_physdrop.h"         // KiwiPhysDrop_Tick (Physics Drop steps before the camera)
 #include "kiwi_ported.h"
 #include <unordered_set>
 #include <unordered_map>
@@ -1415,6 +1416,7 @@ void ImGuiShell_RenderViewportsToRT()
     // drawing a window, so the size these calls read is 0 and the RT render early-outs;
     // (b) the flag is checked here as well, so even a stale size can never resurrect a
     // hidden viewport.  The CAMERA has no flag — it is always rendered.
+    KiwiPhysDrop_Tick();                    // KIWI: falling models pose before this frame's views
     {
         KiwiPerf_TickBegin( g_nUpdateBits );
         KiwiPerfScope perf( KPERF_CAMERA );
@@ -1979,6 +1981,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     { // KIWI (2026-09-16): the "Barbwire Along Construction..." options dialog - same shape.
         extern void KiwiBarbwire_Draw();        // kiwi_barbwire.cpp
         KiwiBarbwire_Draw();
+    }
+    { // KIWI (2026-10-11): Force Unhide All's confirmation - same shape.
+        extern void KiwiVis_Draw();             // kiwi_visibility.cpp
+        KiwiVis_Draw();
     }
     // KIWI-UX (ROUND BF): the BUILD & RUN dialog.  Also not a dock window — a FLOATING
     // window with its own file-scope open flag, so this round adds no kiwiWindow_t row and

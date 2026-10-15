@@ -251,7 +251,9 @@ namespace
                 double tol = volBefore * KAB_VOLUME_REL_EPS;
                 if ( tol < KAB_VOLUME_ABS_EPS )
                     tol = KAB_VOLUME_ABS_EPS;
-                accept = ( fabs( volAfter - volBefore ) <= tol );
+                // KIWI (2026-10-14): the core now proves hull == union, so overlapping
+                // inputs legitimately come back SMALLER than their summed volume.
+                accept = ( volAfter <= volBefore + tol );
             }
         }
 

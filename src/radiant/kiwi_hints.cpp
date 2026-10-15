@@ -18,6 +18,7 @@
 #include "kiwi_construct.h"
 #include "kiwi_grid.h"
 #include "kiwi_lollipop.h"
+#include "kiwi_physdrop.h"
 #include "kiwi_region.h"
 #include "kiwi_conselect.h"
 #include "kiwi_selection.h"
@@ -185,6 +186,14 @@ namespace
             AddChip( chips, &n, "Esc",  "Cancel" );
             return n;
         }
+        // KIWI: Physics Drop has no drag, axis or typed grammar.
+        if ( KiwiPhysDrop_Active() )
+        {
+            AddChip( chips, &n, "RMB/Enter", KiwiPhysDrop_Resting() ? "Keep" : "Settle + keep" );
+            AddChip( chips, &n, "Esc",       "Cancel" );
+            AddChip( chips, &n, "N",         "New seed" );
+            return n;
+        }
         if ( cmd && cmd->PreemptIdle() )
         {
             AddChip( chips, &n, "LMB",       "Pick" );
@@ -274,11 +283,9 @@ namespace
         AddVerb( chips, &n, KIWI_CMD_DRAW_CIRCLE,   "Circle" );
         AddVerb( chips, &n, KIWI_CMD_PRIM_BOX,      "Box" );
         AddVerb( chips, &n, KIWI_CMD_PRIM_CYLINDER, "Cylinder" );
-        AddVerb( chips, &n, KIWI_CMD_ADD_MENU,      "Add menu" );
+        AddVerb( chips, &n, KIWI_CMD_ADD_MENU,      "Search for..." );
         // With nothing selected, Focus frames the visible world.
         AddVerb( chips, &n, KIWI_CMD_FOCUS_SELECTION, "Frame all" );
-        // Literal: viewport input owns Alt+MMB, so it has no command-table row.
-        AddChip( chips, &n, "Alt+MMB",              "Swipe views" );
         AddVerb( chips, &n, KIWI_CMD_PALETTE,       "Commands" );
         return n;
     }

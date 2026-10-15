@@ -40,6 +40,11 @@
 #include <client/cl_scrn.h>
 #endif
 
+#ifdef KISAK_RADIANT
+// KIWI: an RC_DRAW_TRIANGLES batch is open in tess (RB_DrawTriangles_Internal).
+static bool g_rbTriBatchOpen = false;
+#endif
+
 void(__cdecl *const RB_RenderCommandTable[RC_COUNT])(GfxRenderCommandExecState *) =
 {
   NULL,
@@ -1423,8 +1428,15 @@ void __cdecl RB_DrawTriangles_Internal(
     int index; // [esp+28h] [ebp-4h]
     int indexa; // [esp+28h] [ebp-4h]
 
+#ifdef KISAK_RADIANT
+    // KIWI: consecutive RC_DRAW_TRIANGLES of one material + technique share a batch
+    // (RB_SetTessTechnique closes it on a change); anything else still flushes first.
+    if (tess.indexCount && !g_rbTriBatchOpen)
+        RB_EndTessSurface();
+#else
     if (tess.indexCount)
         RB_EndTessSurface();
+#endif
     R_Set3D(&gfxCmdBufSourceState);
     RB_SetTessTechnique(material, techType);
     R_TrackPrims(&gfxCmdBufState, GFX_PRIM_STATS_DEBUG);
@@ -1446,7 +1458,16 @@ void __cdecl RB_DrawTriangles_Internal(
             (const uint8_t *)&color[indexa]);
     tess.indexCount += indexCount;
     tess.vertexCount += vertexCount;
+#ifdef KISAK_RADIANT
+    // KIWI: left open for the next RC_DRAW_TRIANGLES; RB_ExecuteRenderCommandsLoop closes
+    // it before any other command (the editor drew one face per draw call).
+    if (tess.indexCount)
+        g_rbTriBatchOpen = true;
+    else
+        RB_EndTessSurface();
+#else
     RB_EndTessSurface();
+#endif
 }
 
 void __cdecl RB_DrawProfileCmd(GfxRenderCommandExecState *execState)
@@ -2861,11 +2882,24 @@ void __cdecl RB_ExecuteRenderCommandsLoop(const void *cmds)
 
         iassert(header->id < (sizeof(RB_RenderCommandTable) / (sizeof(RB_RenderCommandTable[0]) * (sizeof(RB_RenderCommandTable) != 4 || sizeof(RB_RenderCommandTable[0]) <= 4))));
         iassert(RB_RenderCommandTable[header->id]);
+#ifdef KISAK_RADIANT
+        // KIWI: an open triangle batch ends before any other command, so every other
+        // command sees exactly the state it did when each RC_DRAW_TRIANGLES drew alone.
+        if (g_rbTriBatchOpen && header->id != RC_DRAW_TRIANGLES)
+        {
+            g_rbTriBatchOpen = false;
+            if (tess.indexCount)
+                RB_EndTessSurface();
+        }
+#endif
         RB_RenderCommandTable[header->id](&execState);
         iassert(execState.cmd != prevCmd);
         prevCmd = execState.cmd;
         iassert(!g_primStats || tess.indexCount);
     }
+#ifdef KISAK_RADIANT
+    g_rbTriBatchOpen = false;
+#endif
     if (tess.indexCount)
         RB_EndTessSurface();
 }

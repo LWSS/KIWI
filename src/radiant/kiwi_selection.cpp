@@ -123,6 +123,22 @@ bool Sel_BrushLive( const selbrush_t *b )
     return false;
 }
 
+bool sel_liveSet_t::Has( const selbrush_t *b )
+{
+    if ( !b )
+        return false;
+    const std::less<const selbrush_t *> before{};   // total order on unrelated pointers
+    if ( !m_built )
+    {
+        m_built = true;
+        for ( selbrush_t *head : { &active_brushes, &selected_brushes } )
+            for ( selbrush_t *i = head->next; i && i != head; i = i->next )
+                m_live.push_back( i );
+        std::sort( m_live.begin(), m_live.end(), before );
+    }
+    return std::binary_search( m_live.begin(), m_live.end(), b, before );
+}
+
 uint64_t Sel_BrushesLive( selbrush_t *const *brushes, int count, bool *live )
 {
     const std::less<const selbrush_t *> before{};   // total order on unrelated pointers

@@ -9,6 +9,7 @@
 #include "kiwi_numeric.h"
 #include "kiwi_command.h"
 #include "kiwi_hints.h"     // Shared HUD band and hint visibility.
+#include "kiwi_lollipop.h"  // KiwiLollipop_Active: typed sign follows the drag.
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
 #include "kiwi_snap.h"
@@ -44,14 +45,56 @@ namespace
         return ValidField( s_focus ) ? s_focus : 0;
     }
 
+    // KIWI (2026-10-14, user: "configure the lollipop tools so the sign is automatically
+    // handled in the text field based on pre-determined lollipop drag direction"): the
+    // first digit typed while a lollipop drag reads negative gets a leading '-' that the
+    // field shows; '-' on that plain number flips the sign instead of subtracting.
+    bool s_autoSign[KNUM_MAX_FIELDS] = { false };
+
     bool Append( int f, char c )
     {
         char *t = s_text[f];
         const size_t n = strlen( t );
+        if ( n == 0 )
+            s_autoSign[f] = false;
         if ( n + 1 >= (size_t)KNUM_TEXT_MAX )
             return true;                 // Consume input even when full.
         t[n]     = c;
         t[n + 1] = '\0';
+        return true;
+    }
+
+    void AutoSign( int f )
+    {
+        if ( s_text[f][0] )
+            return;
+        KiwiEditorCommand *cmd = KiwiCmd_Active();
+        float v = 0.0f;
+        if ( !cmd || !KiwiLollipop_Active() || !cmd->NumericFieldValue( f, &v ) || !( v < 0.0f ) )
+            return;
+        Append( f, '-' );
+        s_autoSign[f] = true;
+    }
+
+    // True when '-' should flip the auto sign: the text is still one bare number.
+    bool FlipAutoSign( int f )
+    {
+        char *t = s_text[f];
+        if ( !s_autoSign[f] || !t[0] )
+            return false;
+        for ( const char *p = ( t[0] == '-' ) ? t + 1 : t; *p; ++p )
+            if ( !( ( *p >= '0' && *p <= '9' ) || *p == '.' ) )
+                return false;
+        if ( t[0] == '-' )
+            memmove( t, t + 1, strlen( t ) );
+        else
+        {
+            const size_t n = strlen( t );
+            if ( n + 1 >= (size_t)KNUM_TEXT_MAX )
+                return true;
+            memmove( t + 1, t, n + 1 );
+            t[0] = '-';
+        }
         return true;
     }
 
@@ -485,20 +528,29 @@ bool KiwiNum_Key( int vk, unsigned int mods )
     }
 
     if ( vk >= '0' && vk <= '9' )
+    {
+        AutoSign( f );
         return Append( f, (char)vk );
+    }
     if ( vk >= 0x60 && vk <= 0x69 )      // VK_NUMPAD0..VK_NUMPAD9
+    {
+        AutoSign( f );
         return Append( f, (char)( '0' + ( vk - 0x60 ) ) );
+    }
 
     if ( vk == 0xBE || vk == 0x6E )      // VK_OEM_PERIOD / VK_DECIMAL
     {
         // Enforce one decimal point per number, not per expression.
         if ( LastNumberHasDot( f ) )
             return true;
+        AutoSign( f );
         return Append( f, '.' );
     }
 
     if ( vk == 0xBD || vk == 0x6D )      // VK_OEM_MINUS / VK_SUBTRACT
     {
+        if ( FlipAutoSign( f ) )
+            return true;
         // Minus is both a leading sign and an operator; a trailing minus is incomplete.
         return Append( f, '-' );
     }

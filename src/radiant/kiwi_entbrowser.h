@@ -25,6 +25,10 @@ bool KiwiEntBrowser_CameraDropTarget( float imgMinX, float imgMinY );
 // never touches the picker or camera basis.
 void KiwiEntBrowser_DrawGhost();
 
+// Queue `classname` onto the surface under the camera centre, raised `lift` units: the
+// drop's deferred, one-undo path, without a drag (Light window's New Light / New Probe).
+void KiwiEntBrowser_CreateAtViewCenter( const char *classname, float lift = 0.0f );
+
 // Registration and instant-command tail used by kiwi_command.cpp.
 void KiwiEntBrowser_RegisterCommands();
 bool KiwiEntBrowser_DispatchInstant( unsigned int cmdId );

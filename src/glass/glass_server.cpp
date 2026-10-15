@@ -42,6 +42,34 @@ void __thiscall GlassServer::SetState(GlassState::State st, float *pos, float *d
     }
 }
 
+// KIWI (GLASS): panes the map marks "startbroken" begin cracked or shattered. Set directly
+// (no SetState): no GlassSmash script callback before the level runs.
+static void GlassSv_ApplyStartState(GlassServer *glass)
+{
+    const unsigned int st = GlassKiwi_StartState(glass->glass->index);
+    int i;
+
+    if ( st == GlassState::State::CRACKED )
+    {
+        glass->health = glass->health * 0.5f;
+    }
+    else if ( st == GlassState::State::SHATTERED )
+    {
+        glass->health = 0.0f;
+        for ( i = 0; i < 3; ++i )
+        {
+            glass->hitPos[i] = (glass->glass->absmin[i] + glass->glass->absmax[i]) * 0.5f;
+            glass->hitDir[i] = -glass->glass->outlineAxis[2][i];
+        }
+    }
+    else
+    {
+        return;
+    }
+    glass->state.val.i = st & 0xF | glass->state.val.i & 0xFFFFFFF0;
+    glass->stateChangeTime = level.time;
+}
+
 cmd_function_s ShatterAllCmd_VAR;
 cmd_function_s ResetAllCmd_VAR;
 
@@ -97,6 +125,7 @@ void __thiscall GlassesServer::Init()
                 this->glasses[i].SetState(GlassState::State::PRISTINE, 0, 0);
                 this->glasses[i].health = (float)this->glasses[i].glass->glassDef->maxHealth;
                 this->glasses[i].stateChangeTime = 0;
+                GlassSv_ApplyStartState(&this->glasses[i]); // KIWI (GLASS): Radiant "startbroken"
             }
         }
         else
@@ -249,6 +278,7 @@ void __thiscall GlassesServer::ResetAll()
             //GlassServer::SetState(&this->glasses[i], PRISTINE, 0, 0);
             this->glasses[i].SetState(GlassState::State::PRISTINE, 0, 0);
             this->glasses[i].health = (float)this->glasses[i].glass->glassDef->maxHealth;
+            GlassSv_ApplyStartState(&this->glasses[i]); // KIWI (GLASS): back to the map's start state
         }
     }
 }

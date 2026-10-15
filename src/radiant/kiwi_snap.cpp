@@ -28,6 +28,8 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <algorithm>
+#include <functional>
 
 namespace
 {
@@ -698,7 +700,11 @@ namespace
     }
 
     // What a live transform must not snap to (PICKF_EXCLUDE_SELECTED): its own brushes.
-    void GatherExcluded( unsigned pickFlags, std::vector<const selbrush_t *> &excluded )
+    // Sorted (KIWI 2026-10-11): every scan asks it once per map brush, and a linear list
+    // made that selection x map per scan while moving a whole building.
+    typedef std::vector<const selbrush_t *> exclSet_t;
+
+    void GatherExcluded( unsigned pickFlags, exclSet_t &excluded )
     {
         if ( !( pickFlags & PICKF_EXCLUDE_SELECTED ) )
             return;
@@ -706,32 +712,29 @@ namespace
             excluded.push_back( b );
         const selection_t &selection = KiwiSel();
         for ( const sel_item_t &item : selection.items ) excluded.push_back( item.brush );
+        std::sort( excluded.begin(), excluded.end(), std::less<const selbrush_t *>() );
     }
 
-    bool Excluded( const std::vector<const selbrush_t *> &excluded, const selbrush_t *b )
+    bool Excluded( const exclSet_t &excluded, const selbrush_t *b )
     {
-        for ( const selbrush_t *x : excluded )
-            if ( x == b )
-                return true;
-        return false;
+        return !excluded.empty()
+            && std::binary_search( excluded.begin(), excluded.end(), b, std::less<const selbrush_t *>() );
     }
 
     // GrowLine's segment sources, one kind each: brush edges never join construction lines.
+    // The brushes that may contribute are gathered ONCE per BrushDivisions into a flat array
+    // (KIWI 2026-10-11, profiled 9% of a drag frame: every growth pass walked the map's list
+    // and re-ran the pickable / proxy / excluded tests on every brush).
     struct BrushSegments
     {
-        const std::vector<const selbrush_t *> *excluded;
+        const std::vector<const brush_t *> *defs;
         template <class G> void operator()( const float *lo, const float *hi, G visit ) const
         {
-            selbrush_t *lists[] = { &active_brushes, &selected_brushes };
-            for ( selbrush_t *head : lists )
-            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            for ( const brush_t *def : *defs )
             {
-                const brush_t *def = b->def;
-                if ( !def || !def->faces || b->patch
-                  || def->maxs[0] < lo[0] || def->mins[0] > hi[0]
+                if ( def->maxs[0] < lo[0] || def->mins[0] > hi[0]
                   || def->maxs[1] < lo[1] || def->mins[1] > hi[1]
-                  || def->maxs[2] < lo[2] || def->mins[2] > hi[2]
-                  || Excluded( *excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
+                  || def->maxs[2] < lo[2] || def->mins[2] > hi[2] )
                     continue;
                 for ( int f = 0; f < def->faceCount; ++f )
                 {
@@ -810,9 +813,11 @@ namespace
     template <class F> void BrushDivisions( const ray_t &ray, float curX, float curY, float reach,
                                             unsigned pickFlags, F fn )
     {
-        std::vector<const selbrush_t *> excluded;
+        exclSet_t excluded;
         GatherExcluded( pickFlags, excluded );
         std::vector<edgeLine_t> lines;
+        std::vector<const brush_t *> segDefs;       // GrowLine's sources (BrushSegments)
+        bool haveSegDefs = false;
         selbrush_t *lists[] = { &active_brushes, &selected_brushes };
         for ( selbrush_t *head : lists )
         for ( selbrush_t *b = head->next; b && b != head; b = b->next )
@@ -822,6 +827,15 @@ namespace
             const brush_t *def = b->def;
             if ( !def || !def->faces || def->faceCount <= 0 || !BoundsNearRay( def, ray, reach * 2.0f ) )
                 continue;
+            if ( !haveSegDefs )
+            {
+                haveSegDefs = true;
+                for ( selbrush_t *h2 : lists )
+                for ( selbrush_t *s = h2->next; s && s != h2; s = s->next )
+                    if ( s->def && s->def->faces && !s->patch && !Excluded( excluded, s )
+                      && Pick_BrushPickable( s ) && !Pick_IsModelProxy( s ) )
+                        segDefs.push_back( s->def );
+            }
             for ( int f = 0; f < def->faceCount; ++f )
             {
                 const winding_t *w = def->faces[f].w;
@@ -836,7 +850,7 @@ namespace
                     if ( !SegmentAimed( p, q, curX, curY, reach ) || Covered( lines, p, q )
                       || !SeedLine( L, p, q ) )
                         continue;
-                    GrowLine( L, BrushSegments{ &excluded } );
+                    GrowLine( L, BrushSegments{ &segDefs } );
                     lines.push_back( L );
                     LineDivisions( lines.back(), curX, curY, reach,
                                    [&]( const divPt_t &d ) { fn( d, b, f, i ); } );
@@ -1051,7 +1065,7 @@ namespace
         if ( nCon == 0 )
             return;
 
-        std::vector<const selbrush_t *> excluded;
+        exclSet_t excluded;
         GatherExcluded( pickFlags, excluded );
         selbrush_t *lists[] = { &active_brushes, &selected_brushes };
         for ( selbrush_t *head : lists )
@@ -1117,6 +1131,105 @@ namespace
                         best->hit  = true;
                         best->dist = d;
                         Copy3( on, best->pos );
+                    }
+                }
+            }
+        }
+    }
+
+    // KIWI (2026-10-11, user: "missing snap points ... where these 2 brushes intersect"): where
+    // an edge of one brush passes through a face of another (a post sunk into a sill).  Flush
+    // faces need no edge x edge case: an edge lying in one face of the other brush crosses the
+    // neighbouring face on its border, which the face test takes with KSNAP_XB_BORDER slack.
+    // An edge ending on the plane is a corner (rank 2), so it must cross by KSNAP_XB_PLANE.
+    // Only edges of faces turned to the eye, and faces turned to it, take part (like the nubs).
+    const float KSNAP_XB_PLANE   = 0.05f;   // WORLD UNITS each end lies past the face plane
+    const float KSNAP_XB_BORDER  = 0.1f;    // WORLD UNITS a crossing may lie outside the face
+    const int   KSNAP_XB_BRUSHES = 64;      // brushes near the ray paired per query
+
+    // Does x, on face's plane, lie inside its winding (within KSNAP_XB_BORDER)?
+    bool InsideFace( const face_t &face, const float *n, const float *x )
+    {
+        const winding_t *w = face.w;
+        float lo = 0.0f, hi = 0.0f;
+        for ( int i = 0; i < w->numpoints; ++i )
+        {
+            float e[3], r[3], c[3];
+            Sub3( w->p[( i + 1 ) % w->numpoints], w->p[i], e );
+            Sub3( x, w->p[i], r );
+            Cross3( e, r, c );
+            const float le = sqrtf( Dot3( e, e ) );
+            if ( le < 1.0e-4f )
+                continue;
+            const float s = Dot3( c, n ) / le;      // signed distance from the edge's line
+            lo = s < lo ? s : lo;
+            hi = s > hi ? s : hi;
+        }
+        return lo >= -KSNAP_XB_BORDER || hi <= KSNAP_XB_BORDER;
+    }
+
+    // fn( pos, px, py ) for each brush edge x brush face crossing whose edge passes within
+    // `reach` pixels of the cursor.
+    template <class F> void BrushCrossings( const ray_t &ray, float curX, float curY, float reach,
+                                            unsigned pickFlags, F fn )
+    {
+        exclSet_t excluded;
+        GatherExcluded( pickFlags, excluded );
+        const brush_t *cands[KSNAP_XB_BRUSHES];
+        int nCands = 0;
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head && nCands < KSNAP_XB_BRUSHES; b = b->next )
+        {
+            if ( b->patch || Excluded( excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
+                continue;
+            const brush_t *def = b->def;
+            if ( def && def->faces && def->faceCount > 0 && BoundsNearRay( def, ray, reach * 2.0f ) )
+                cands[nCands++] = def;
+        }
+        for ( int a = 0; a < nCands; ++a )
+        for ( int b = 0; b < nCands; ++b )
+        {
+            const brush_t *A = cands[a], *B = cands[b];
+            if ( a == b
+              || A->maxs[0] < B->mins[0] || A->mins[0] > B->maxs[0]
+              || A->maxs[1] < B->mins[1] || A->mins[1] > B->maxs[1]
+              || A->maxs[2] < B->mins[2] || A->mins[2] > B->maxs[2] )
+                continue;
+            for ( int f = 0; f < A->faceCount; ++f )
+            {
+                const winding_t *w = A->faces[f].w;
+                if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
+                  || Dot3( A->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                    continue;
+                for ( int i = 0; i < w->numpoints; ++i )
+                {
+                    const float *p = w->p[i];
+                    const float *q = w->p[( i + 1 ) % w->numpoints];
+                    if ( !SegmentAimed( p, q, curX, curY, reach ) )
+                        continue;
+                    for ( int g = 0; g < B->faceCount; ++g )
+                    {
+                        const face_t &face = B->faces[g];
+                        if ( !face.w || face.w->numpoints < 3 || face.w->numpoints > MAX_POINTS_ON_WINDING )
+                            continue;
+                        float n[3];
+                        for ( int k = 0; k < 3; ++k )
+                            n[k] = (float)face.plane.normal[k];
+                        if ( Dot3( n, ray.dir ) >= 0.0f )
+                            continue;
+                        const float d0 = Dot3( n, p ) - (float)face.plane.dist;
+                        const float d1 = Dot3( n, q ) - (float)face.plane.dist;
+                        if ( !( ( d0 > KSNAP_XB_PLANE && d1 < -KSNAP_XB_PLANE )
+                             || ( d0 < -KSNAP_XB_PLANE && d1 > KSNAP_XB_PLANE ) ) )
+                            continue;
+                        const float t = d0 / ( d0 - d1 );
+                        float x[3], px, py;
+                        for ( int k = 0; k < 3; ++k )
+                            x[k] = p[k] + ( q[k] - p[k] ) * t;
+                        if ( InsideFace( face, n, x ) && Pick_WorldToImage( x, &px, &py )
+                          && PixelDist( px, py, curX, curY ) <= reach )
+                            fn( x, px, py );
                     }
                 }
             }
@@ -1446,7 +1559,7 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
     return true;
 }
 float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
-                            bool hard, bool *outMajor )
+                            bool hard, bool *outMajor, bool absolute )
 {
     if ( outMajor )
         *outMajor = false;
@@ -1456,12 +1569,15 @@ float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
     const float g = KiwiUnits_GridSpacingWorld();
     if ( !( g > 0.0f ) || !ref || !axis )
         return d;
-    // World axes snap the absolute coordinate; slanted axes snap signed distance.
+    // KIWI (2026-10-14, user: "when nothing is being snapped to, I want the operations to
+    // be rounded to the nearest gridsize ... it has a weird .342in extension instead of
+    // being an even 6 per"): the gesture DISTANCE steps in whole grid cells.  Only the
+    // absolute ladder (Ctrl depth) still snaps a world-axis coordinate onto the lattice.
     // scale converts a lattice correction back into gesture distance.
     float value = d;
     float scale = 1.0f;                 // d units per `value` unit
     int   worldAxis = -1;
-    for ( int k = 0; k < 3; ++k )
+    for ( int k = 0; k < 3 && absolute; ++k )
         if ( fabsf( axis[k] ) > 0.999f )
             worldAxis = k;
     if ( worldAxis >= 0 )
@@ -1772,14 +1888,28 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[2] = vert.point[2];
         return true;
     }
-    // Point rank 3: a construction line crossing another construction line or a brush edge
-    // (the nearer on screen), 7 px and not occluded.
+    // Point rank 3: a construction line crossing another construction line or a brush edge,
+    // or a brush edge through another brush's face (the nearer on screen), 7 px and not occluded.
     {
+        conBest_t brushX;
+        if ( haveCursorPx )
+            BrushCrossings( ray, curX, curY, KSNAP_R_CON_POINT, pickFlags,
+                            [&]( const float *x, float px, float py )
+            {
+                const float d = PixelDist( px, py, curX, curY );
+                if ( ( brushX.hit && d >= brushX.dist ) || !visible( x ) )
+                    return;
+                brushX.hit  = true;
+                brushX.dist = d;
+                Copy3( x, brushX.pos );
+            } );
         const conBest_t *isect = 0;
         if ( conIsect.hit && visible( conIsect.pos ) )
             isect = &conIsect;
         if ( conXBrush.hit && visible( conXBrush.pos ) && ( !isect || conXBrush.dist < isect->dist ) )
             isect = &conXBrush;
+        if ( brushX.hit && ( !isect || brushX.dist < isect->dist ) )
+            isect = &brushX;
         if ( isect )
         {
             out->valid = true;
@@ -1859,7 +1989,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // hollow patches with no cap face to hit. Moving selections cannot self-snap.
     if ( haveCursorPx )
     {
-        std::vector<const selbrush_t *> excluded;
+        exclSet_t excluded;
         GatherExcluded( pickFlags, excluded );
         float bestPixels = PICK_VERT_PIXELS, bestDepth = 1.0e30f;
         snap_result_t best;
@@ -1867,9 +1997,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         for ( selbrush_t *head : lists )
         for ( selbrush_t *b = head->next; b && b != head; b = b->next )
         {
-            bool skip = false;
-            for ( const selbrush_t *x : excluded ) if ( x == b ) { skip = true; break; }
-            if ( skip || !CylinderUsable( b ) || !BoundsNearRay( b->def, ray, 10.0f ) ) continue;
+            if ( Excluded( excluded, b ) || !CylinderUsable( b ) || !BoundsNearRay( b->def, ray, 10.0f ) ) continue;
             float ends[2][3];
             if ( !KiwiPrim_CylinderAxis( b->def, ends ) ) continue;
             for ( int point = 0; point < 3; ++point )
@@ -2411,6 +2539,18 @@ void KiwiSnap_DrawFaceAccents()
         ConDivisions( curX, curY, KSNAP_DIV_REACH_PX, nub );
         BrushDivisions( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
                         [&]( const divPt_t &d, selbrush_t *, int, int ) { nub( d ); } );
+        // Brush x brush crossings (rank 3) take the midpoint nub's size.
+        BrushCrossings( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
+                        [&]( const float *x, float px, float py )
+        {
+            divPt_t d;
+            Copy3( x, d.pos );
+            d.px      = px;
+            d.py      = py;
+            d.segPx   = KSNAP_NUB_MIN_SEG_PX;
+            d.quarter = false;
+            nub( d );
+        } );
         KiwiLines_Flush();
     }
 
@@ -2579,9 +2719,10 @@ void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, flo
         for ( selbrush_t *existing : nodes ) if ( existing == b ) return;
         nodes.push_back( b );
     };
-    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next ) add( b );
+    // Stop once full: the loops used to run the whole (building-sized) selection every frame.
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes && nodes.size() < 32; b = b->next ) add( b );
     const selection_t &selection = KiwiSel();
-    for ( const sel_item_t &item : selection.items ) add( item.brush );
+    for ( size_t i = 0; i < selection.items.size() && nodes.size() < 32; ++i ) add( selection.items[i].brush );
     const ImVec2 mouse = ImGui::GetMousePos();
     if ( mouse.x >= imgMinX && mouse.x < imgMinX+imgW && mouse.y >= imgMinY && mouse.y < imgMinY+imgH )
     {
