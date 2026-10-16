@@ -9,12 +9,14 @@
 #include "kiwi_command.h"
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
+#include "kiwi_grid.h"      // KiwiGrid_SnapEnabled
 #include "kiwi_lines.h"
 #include "kiwi_numeric.h"
 #include "kiwi_offset.h"
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
 #include "kiwi_region.h"
+#include "kiwi_selection.h"
 #include "kiwi_units.h"
 #include "kiwi_vec.h"     // Dot3/Sub3/...
 
@@ -378,6 +380,62 @@ namespace
         std::vector<float> preview;     // world loop at the current distance (empty = skipped)
     };
 
+    // KIWI (2026-10-15, user: "I want to be able to offset faces similar to how construction
+    // faces can be offset. Add this functionality into the O key"): a selected brush face's
+    // outline on its own plane, the same kind of source loop a construction face gives.
+    bool FaceLoop( const sel_item_t &it, offsetLoop_t *out )
+    {
+        if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) || it.brush->patch || !it.brush->def
+          || !it.brush->def->faces || it.faceIndex < 0 || it.faceIndex >= it.brush->def->faceCount )
+            return false;
+        const face_t &f = it.brush->def->faces[it.faceIndex];
+        const winding_t *w = f.w;
+        if ( !w || w->numpoints < 3 )
+            return false;
+        float c[3] = { 0.0f, 0.0f, 0.0f };
+        for ( int i = 0; i < w->numpoints; ++i )
+            for ( int k = 0; k < 3; ++k )
+                c[k] += w->p[i][k] / (float)w->numpoints;
+        if ( !KiwiCon_MakePlane( c, f.plane.normal, nullptr, &out->plane ) )
+            return false;
+        out->src.clear();
+        for ( int i = 0; i < w->numpoints; ++i )
+        {
+            const float p[3] = { w->p[i][0], w->p[i][1], w->p[i][2] };
+            float uv[2];
+            KiwiCon_WorldToPlane( out->plane, p, uv );
+            const int have = (int)( out->src.size() / 2 );
+            if ( have > 0 )
+            {
+                const float dx = uv[0] - out->src[( (size_t)have - 1 ) * 2 + 0];
+                const float dy = uv[1] - out->src[( (size_t)have - 1 ) * 2 + 1];
+                if ( dx * dx + dy * dy < KOFF_WELD_2D * KOFF_WELD_2D )
+                    continue;
+            }
+            out->src.push_back( uv[0] );
+            out->src.push_back( uv[1] );
+        }
+        const int have = (int)( out->src.size() / 2 );
+        if ( have >= 2 )
+        {
+            const float dx = out->src[0] - out->src[( (size_t)have - 1 ) * 2 + 0];
+            const float dy = out->src[1] - out->src[( (size_t)have - 1 ) * 2 + 1];
+            if ( dx * dx + dy * dy < KOFF_WELD_2D * KOFF_WELD_2D )
+                out->src.resize( ( (size_t)have - 1 ) * 2 );
+        }
+        return out->src.size() >= 6;
+    }
+
+    bool AnyFaceLoop()
+    {
+        const selection_t &sel = KiwiSel();
+        offsetLoop_t tmp;
+        for ( size_t i = 0; i < sel.items.size(); ++i )
+            if ( FaceLoop( sel.items[i], &tmp ) )
+                return true;
+        return false;
+    }
+
     class KiwiOffsetCommand : public KiwiEditorCommand
     {
     public:
@@ -448,10 +506,23 @@ namespace
                             "cancels.\n" );
                 return true;
             }
+            if ( ( !o || !Offsettable( *o ) ) && FaceSource() )
+            {
+                m_object = -1;
+                m_region = true;                 // the same loop path as a construction face
+                m_closed = true;
+                m_have   = true;
+                Recompute();
+                KiwiCmd_Pause();
+                Sys_Printf( "Offset: drag the handle to grow or shrink %s, or type a distance.  "
+                            "RMB/Enter commits (new construction loops on the faces), Esc cancels.\n",
+                            m_extra.empty() ? "the face's outline" : "every selected face's outline" );
+                return true;
+            }
             if ( !o || !Offsettable( *o ) )
             {
                 Sys_Printf( "Offset: select a construction line, polyline, rectangle, "
-                            "circle, arc or construction face first.\n" );
+                            "circle, arc, construction face or brush face first.\n" );
                 return false;
             }
             m_parametric = KiwiCon_IsParametric( *o );
@@ -657,6 +728,30 @@ namespace
             return havePrimary;
         }
 
+        // Every selected brush face's outline; the first carries the handle, the rest ride in
+        // m_extra (one shared distance, as for construction faces).
+        bool FaceSource()
+        {
+            m_extra.clear();
+            bool havePrimary = false;
+            const selection_t &sel = KiwiSel();
+            for ( size_t i = 0; i < sel.items.size(); ++i )
+            {
+                offsetLoop_t e;
+                if ( !FaceLoop( sel.items[i], &e ) )
+                    continue;
+                if ( !havePrimary )
+                {
+                    m_plane = e.plane;
+                    m_src   = e.src;
+                    havePrimary = true;
+                    continue;
+                }
+                m_extra.push_back( e );
+            }
+            return havePrimary;
+        }
+
         // The other regions at the current distance; a loop that cannot take it is skipped
         // (and counted) rather than refusing the whole set.
         void RecomputeExtra()
@@ -754,8 +849,12 @@ namespace
         }
 
         // Quantise the world-unit scalar, never the cursor point.
+        // KIWI (2026-10-15, user: "when doing an offset drag ... it's locked to 6in, even with
+        // ctrl held"): construction rules - snapped by default, Ctrl or grid snap off = free.
         float SnapScalar( float d ) const
         {
+            if ( KiwiCmd_CtrlHeld() || !KiwiGrid_SnapEnabled() )
+                return d;
             const float g = KiwiUnits_GridSpacingWorld();
             if ( g > 0.0f )
                 return floorf( d / g + 0.5f ) * g;
@@ -958,7 +1057,9 @@ bool KiwiOffset_CanOffset()
     if ( o && Offsettable( *o ) )
         return true;
     const int r = KiwiRegion_SelectedIndex();        // a construction face (KIWI 2026-09-28)
-    return r >= 0 && r < (int)KiwiRegion_All().size() && KiwiRegion_All()[r].pts.size() >= 6;
+    if ( r >= 0 && r < (int)KiwiRegion_All().size() && KiwiRegion_All()[r].pts.size() >= 6 )
+        return true;
+    return AnyFaceLoop();                            // a brush face (KIWI 2026-10-15)
 }
 
 void KiwiOffset_RegisterCommands()

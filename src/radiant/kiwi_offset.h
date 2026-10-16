@@ -7,7 +7,9 @@
 // Offset Curve (modern O) adds a parallel construction object; the source survives.
 // Plasticity then transfers selection to the new curve (OffsetCurveCommand.ts:34).
 // It mirrors Plasticity's curve arm and active-plane fallback
-// (OffsetCurveCommand.ts:8-34); face and edge inputs are not implemented.
+// (OffsetCurveCommand.ts:8-34).  Construction faces and (KIWI 2026-10-15) selected brush faces
+// offset their outline on their plane into new closed construction loops, one shared
+// distance for every selected face; edge inputs are not implemented.
 //
 // The first selected construction object is used at any selection granularity.
 // LINE/POLYLINE/RECT are solved in plane space. CIRCLE/ARC remain parametric:

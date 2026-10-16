@@ -116,7 +116,11 @@ std::string s_firstCaptureError;
 // BSP load source; cod4map writes `.errlog` and `.lin` beside this path.
 char s_bspLoadSource[MAX_PATH] = { 0 };
 
-// Resolve once from CPU count; StartLight passes -Threads, which cod4rad clamps to [1,4].
+// cod4rad's ray cache has four per-thread slots (geometry.c g_visCache[4]), so -Threads
+// clamps to [1,4]; offering more in the UI only hid that clamp.
+const int kMaxLightThreads = 4;
+
+// Resolve once from CPU count; StartLight passes -Threads.
 void EnsureThreadDefault()
 {
     if ( s_threads > 0 )
@@ -126,7 +130,7 @@ void EnsureThreadDefault()
     ::GetSystemInfo( &si );
     s_threads = (int)si.dwNumberOfProcessors;
     if ( s_threads < 1 )  s_threads = 1;
-    if ( s_threads > 64 ) s_threads = 64;
+    if ( s_threads > kMaxLightThreads ) s_threads = kMaxLightThreads;
 }
 
 // Log capture.
@@ -1297,7 +1301,7 @@ void DrawStageRows( bool busy )
     if ( ImGui::InputInt( "##threads", &s_threads, 1, 4 ) )
     {
         if ( s_threads < 1 )  s_threads = 1;
-        if ( s_threads > 64 ) s_threads = 64;
+        if ( s_threads > kMaxLightThreads ) s_threads = kMaxLightThreads;
     }
     ImGui::SameLine();
     ImGui::TextUnformatted( "Quality" );

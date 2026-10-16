@@ -586,7 +586,8 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
         return;
 
     // The sun glyph owns its pixel before any world ray, exactly as ClickSelect.
-    if ( KiwiSun_GlyphHit( imgX, imgY ) )
+    const bool linesOnly = KiwiSel_LinesOnly();      // KIWI: construction alone (double-tap 2)
+    if ( !linesOnly && KiwiSun_GlyphHit( imgX, imgY ) )
     {
         s_removePreview = ctrl && KiwiSun_Selected();
         return;
@@ -614,7 +615,7 @@ void KiwiHover_Update( int imgX, int imgY, bool ctrl )
     }
 
     const sel_mask_t mask = KiwiSel_GetModeMask();
-    pick_result_t hit = Pick( ray, mask );
+    pick_result_t hit = linesOnly ? pick_result_t() : Pick( ray, mask );
 
     // Construction targets use the same point/line-over-area arbitration as the
     // click path.  Clearing the brush result when construction wins is important:

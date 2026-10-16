@@ -429,6 +429,7 @@ namespace
             AddVerb( chips, &n, KIWI_CMD_SPLIT_FACE,    "Split brush" );
             AddVerb( chips, &n, KIWI_CMD_MOVE,          "Push/Pull (auto)" );
             AddVerb( chips, &n, KIWI_CMD_INSET_FACE,    "Inset" );
+            AddVerb( chips, &n, KIWI_CMD_OFFSET_CURVE,  "Offset outline" );
             // The Delete funnel owns this unbound row; keep Del explicit in the label.
             AddVerb( chips, &n, KIWI_CMD_REMOVE_FACE,   "Remove face (Del)" );
             AddVerb( chips, &n, KIWI_CMD_SELCONV_EDGE,  "To edges" );

@@ -970,7 +970,20 @@ static bool KiwiCmd_DispatchInner( unsigned int cmdId )
     switch ( cmdId )
     {
     case KIWI_CMD_SELMODE_POINT:  SetModeMask( SEL_MASK_VERTEX );     return true;
-    case KIWI_CMD_SELMODE_EDGE:   SetModeMask( SEL_MASK_EDGE );       return true;
+    case KIWI_CMD_SELMODE_EDGE:
+    {
+        // KIWI (2026-10-15): a DOUBLE TAP of 2 (two Edge-mode presses within 400 ms while
+        // already in plain Edge mode) enters the lines-only sub-mode, as 4 does models-only.
+        static DWORD s_lastEdgeTap = 0;
+        const DWORD now = ::GetTickCount();
+        const bool doubleTap = ( now - s_lastEdgeTap ) < 400u
+                            && KiwiSel_GetModeMask() == SEL_MASK_EDGE
+                            && !KiwiSel_LinesOnly();
+        s_lastEdgeTap = now;
+        KiwiSel_SetLinesOnly( doubleTap );
+        SetModeMask( SEL_MASK_EDGE );
+        return true;
+    }
     case KIWI_CMD_SELMODE_FACE:   SetModeMask( SEL_MASK_FACE );       return true;
     case KIWI_CMD_SELMODE_OBJECT:
     {

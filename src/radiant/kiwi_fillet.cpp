@@ -10,6 +10,7 @@
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
 #include "kiwi_fillet.h"
+#include "kiwi_grid.h"      // KiwiGrid_SnapEnabled
 #include "kiwi_lines.h"
 #include "kiwi_numeric.h"
 #include "kiwi_pick.h"
@@ -546,8 +547,11 @@ namespace
             m_haveStart = true;
         }
 
+        // KIWI (2026-10-15): as Offset - snapped by default, Ctrl or grid snap off = free.
         float SnapScalar( float d ) const
         {
+            if ( KiwiCmd_CtrlHeld() || !KiwiGrid_SnapEnabled() )
+                return d;
             const float g = KiwiUnits_GridSpacingWorld();
             if ( g > 0.0f )
                 return floorf( d / g + 0.5f ) * g;

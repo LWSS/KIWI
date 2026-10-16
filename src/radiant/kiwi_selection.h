@@ -119,6 +119,13 @@ void         KiwiSel_SetModelsOnly( bool on );
 // (kiwi_particles.h).  Any mode change, including the models-only sub-mode, leaves it.
 bool         KiwiSel_ParticlesOnly();
 void         KiwiSel_SetParticlesOnly( bool on );
+// KIWI (2026-10-15, user: "add a double-tap mode to the 2 selection so it will only select
+// construction lines and nothing else"): the "lines only" sub-mode of Edge mode.  Clicks and
+// marquees name construction objects alone; brushes, faces, models, regions and the sun never
+// select.  Entered by a double tap of 2 or the [2 Edge] chip dropdown; a plain 2 or any other
+// mode leaves it.
+bool         KiwiSel_LinesOnly();
+void         KiwiSel_SetLinesOnly( bool on );
 
 // ── selection_t mutation (does NOT sync — call Sel_SyncToLegacy when done) ───
 // Click/marquee grammar: plain replaces, Shift adds, Ctrl removes.  Ctrl wins

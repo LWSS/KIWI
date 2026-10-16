@@ -280,11 +280,17 @@ namespace
             const bool objectChip    = ( KCHIPS[i].mask == SEL_MASK_OBJECT );
             const bool modelsOnly    = objectChip && KiwiSel_ModelsOnly();
             const bool particlesOnly = objectChip && KiwiSel_ParticlesOnly();
-            const char *label = modelsOnly ? "4 Models" : particlesOnly ? "4 Particles" : KCHIPS[i].label;
+            // KIWI (2026-10-15): the [2 Edge] chip carries the "lines only" sub-mode the same way.
+            const bool edgeChip      = ( KCHIPS[i].mask == SEL_MASK_EDGE );
+            const bool linesOnly     = edgeChip && KiwiSel_LinesOnly();
+            const char *label = modelsOnly ? "4 Models" : particlesOnly ? "4 Particles"
+                              : linesOnly ? "2 Lines" : KCHIPS[i].label;
             if ( ImGui::Button( label ) )
             {
                 if ( objectChip )
                     KiwiSel_SetModelsOnly( false );  // a plain click is plain Object mode
+                if ( edgeChip )
+                    KiwiSel_SetLinesOnly( false );   // ...and plain Edge mode
                 KiwiSel_SetModeMask( KCHIPS[i].mask );   // (and leaves particles-only)
             }
             const ImVec2 chipMin = ImGui::GetItemRectMin();
@@ -292,16 +298,46 @@ namespace
             if ( ImGui::IsItemHovered() )
             {
                 anyHovered = true;
-                if ( objectChip )
+                if ( objectChip || edgeChip )
                 {
-                    if ( !ImGui::IsPopupOpen( "kiwiobjfilter" ) )
+                    const char *popup = objectChip ? "kiwiobjfilter" : "kiwiedgefilter";
+                    if ( !ImGui::IsPopupOpen( popup ) )
                     {
                         ImGui::SetNextWindowPos( ImVec2( chipMin.x, chipMax.y + 2.0f ) );
-                        ImGui::OpenPopup( "kiwiobjfilter" );
+                        ImGui::OpenPopup( popup );
                     }
                 }
                 else
                     ImGui::SetTooltip( "%s", KCHIPS[i].tip );
+            }
+            if ( edgeChip && ImGui::BeginPopup( "kiwiedgefilter" ) )
+            {
+                anyHovered = true;
+                ImGui::TextDisabled( "Edge mode picks" );
+                if ( ImGui::Selectable( "Edges: brush edges and construction lines", !linesOnly ) )
+                {
+                    KiwiSel_SetLinesOnly( false );
+                    KiwiSel_SetModeMask( SEL_MASK_EDGE );
+                }
+                if ( ImGui::Selectable( "Construction lines only  (double-tap 2)", linesOnly ) )
+                {
+                    KiwiSel_SetModeMask( SEL_MASK_EDGE );
+                    KiwiSel_SetLinesOnly( true );
+                }
+                {
+                    const float margin = 48.0f;
+                    const ImVec2 popMin = ImGui::GetWindowPos();
+                    const ImVec2 popMax( popMin.x + ImGui::GetWindowSize().x,
+                                         popMin.y + ImGui::GetWindowSize().y );
+                    const ImVec2 lo( ( chipMin.x < popMin.x ? chipMin.x : popMin.x ) - margin,
+                                     ( chipMin.y < popMin.y ? chipMin.y : popMin.y ) - margin );
+                    const ImVec2 hi( ( chipMax.x > popMax.x ? chipMax.x : popMax.x ) + margin,
+                                     ( chipMax.y > popMax.y ? chipMax.y : popMax.y ) + margin );
+                    const ImVec2 m = ImGui::GetIO().MousePos;
+                    if ( m.x < lo.x || m.x > hi.x || m.y < lo.y || m.y > hi.y )
+                        ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
             }
             if ( objectChip && ImGui::BeginPopup( "kiwiobjfilter" ) )
             {

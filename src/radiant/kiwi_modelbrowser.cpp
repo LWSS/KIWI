@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <float.h>
 #include <map>
+#include <random>
 #include <string>
 #include <vector>
 #include <string.h>
@@ -443,6 +444,234 @@ namespace
         if ( swapped == 0 && err )
             _snprintf( err, errSz, "the selected model(s) already use '%s'", name.c_str() );
         return swapped > 0;
+    }
+
+    // KIWI (2026-10-15, user: "randomize variants with a certain name ... I copied and pasted a
+    // lot of triwindows, but only 1 variant. Now I want to assort them so it doesn't look
+    // uniform"): a variant family is <base> plus every listed <base>_<n> (the importer's naming:
+    // variant 1 keeps the bare name).
+    bool HasModel( const std::string &name )
+    {
+        for ( size_t i = 0; i < s_models.size(); ++i )
+            if ( NameEqual( s_models[i].name, name ) )
+                return true;
+        return false;
+    }
+
+    bool AllDigits( const char *s )
+    {
+        if ( !*s )
+            return false;
+        for ( ; *s; ++s )
+            if ( *s < '0' || *s > '9' )
+                return false;
+        return true;
+    }
+
+    std::string FamilyBase( const std::string &name )
+    {
+        const size_t u = name.rfind( '_' );
+        if ( u != std::string::npos && u > 0 && AllDigits( name.c_str() + u + 1 ) && HasModel( name.substr( 0, u ) ) )
+            return name.substr( 0, u );
+        return name;
+    }
+
+    void FamilyMembers( const std::string &base, std::vector<std::string> *out )
+    {
+        out->clear();
+        if ( HasModel( base ) )
+            out->push_back( base );
+        for ( size_t i = 0; i < s_models.size(); ++i )
+        {
+            const std::string &n = s_models[i].name;
+            if ( n.size() > base.size() + 1 && !_strnicmp( n.c_str(), base.c_str(), base.size() )
+              && n[base.size()] == '_' && AllDigits( n.c_str() + base.size() + 1 ) )
+                out->push_back( n );
+        }
+    }
+
+    std::string ModelKey( const entity_s_def *def )
+    {
+        for ( const epair_t *ep = def->epairs; ep; ep = ep->next )
+            if ( ep->key && !_stricmp( ep->key, "model" ) )
+            {
+                std::string name = ep->value ? ep->value : "";
+                NormalizeListedName( name );
+                return name;
+            }
+        return std::string();
+    }
+
+    // Every placed model entity (selected or not), each once.
+    void PlacedModelEntities( std::vector<entity_s_def *> *out )
+    {
+        out->clear();
+        for ( selbrush_t *list : { &active_brushes, &selected_brushes } )
+            for ( selbrush_t *b = list->next; b && b != list; b = b->next )
+            {
+                if ( !b->owner || !b->owner->def || !KiwiDrop_IsModelEntity( b ) )
+                    continue;
+                entity_s_def *def = (entity_s_def *)b->owner->def;
+                if ( def->eclass && ( def->eclass->classtype & 0x10 ) )
+                    continue;
+                if ( std::find( out->begin(), out->end(), def ) == out->end() )
+                    out->push_back( def );
+            }
+    }
+
+    // The selected models, else every placed copy of the picked tile's family: each family gets
+    // its variants dealt out evenly in a random order, so no variant dominates a run of copies.
+    void RandomizeVariants( const std::string &picked )
+    {
+        std::vector<entity_s_def *> defs;
+        const bool fromSelection = SelectedModelEntities( &defs ) > 0;
+        if ( !fromSelection )
+        {
+            if ( picked.empty() )
+            {
+                Sys_Printf( "Models browser: select the models to assort, or click a tile to assort every copy of it.\n" );
+                return;
+            }
+            const std::string base = FamilyBase( picked );
+            std::vector<entity_s_def *> all;
+            PlacedModelEntities( &all );
+            for ( entity_s_def *d : all )
+                if ( NameEqual( FamilyBase( ModelKey( d ) ), base ) )
+                    defs.push_back( d );
+        }
+
+        std::map<std::string, std::vector<entity_s_def *>> families;
+        for ( entity_s_def *d : defs )
+        {
+            std::string base = FamilyBase( ModelKey( d ) );
+            std::transform( base.begin(), base.end(), base.begin(), ::tolower );
+            if ( !base.empty() )
+                families[base].push_back( d );
+        }
+
+        std::mt19937 rng( (unsigned)::GetTickCount() );
+        Undo_ClearRedo();
+        Undo_GeneralStart( "randomize model variants" );
+        int changed = 0, assorted = 0, single = 0;
+        for ( auto &fam : families )
+        {
+            std::vector<std::string> members;
+            FamilyMembers( fam.first, &members );
+            if ( members.size() < 2 )
+            {
+                single += (int)fam.second.size();
+                continue;
+            }
+            std::vector<size_t> deal( fam.second.size() );
+            for ( size_t i = 0; i < deal.size(); ++i )
+                deal[i] = i % members.size();
+            std::shuffle( deal.begin(), deal.end(), rng );
+            for ( size_t i = 0; i < fam.second.size(); ++i )
+            {
+                entity_s_def *d = fam.second[i];
+                ++assorted;
+                const std::string &want = members[deal[i]];
+                if ( NameEqual( ModelKey( d ), want ) )
+                    continue;
+                Undo_AddEntity_W( (entity_s *)d );
+                SetKeyValue( d, "model", want.c_str() );   // Checkkey_Model + EntityAssignModel
+                ++changed;
+            }
+        }
+        Undo_End();
+        if ( changed )
+        {
+            MarkMapModified();
+            g_nUpdateBits = -1;
+        }
+        Sys_Printf( "Models browser: assorted %i model(s) across their variants (%i changed)%s.\n",
+                    assorted, changed, fromSelection ? "" : " - every placed copy of the picked family" );
+        if ( single )
+            Sys_Printf( "Models browser: %i model(s) have no other variants and were left alone.\n", single );
+    }
+
+    // KIWI (2026-10-15, user: "can you show how many # of these variants is in-use on the map
+    // when I select it"): the picked tile's family (else the first selected model's), each
+    // variant's placed count; recounted a few times a second, not every frame.
+    struct variantUsage_t
+    {
+        std::string              base;
+        std::vector<std::string> members;
+        std::vector<int>         placed;
+        std::vector<int>         selected;
+        double                   when = -1.0;
+    };
+    variantUsage_t s_usage;
+
+    void DrawVariantUsage()
+    {
+        std::string source = s_pickedModel;
+        if ( source.empty() )
+        {
+            std::vector<entity_s_def *> sel;
+            if ( SelectedModelEntities( &sel ) > 0 )
+                source = ModelKey( sel[0] );
+        }
+        if ( source.empty() )
+            return;
+        const std::string base = FamilyBase( source );
+        const double now = ImGui::GetTime();
+        if ( !NameEqual( base, s_usage.base ) || now - s_usage.when > 0.25 )
+        {
+            s_usage.base = base;
+            s_usage.when = now;
+            FamilyMembers( base, &s_usage.members );
+            s_usage.placed.assign( s_usage.members.size(), 0 );
+            s_usage.selected.assign( s_usage.members.size(), 0 );
+            std::vector<entity_s_def *> all, sel;
+            PlacedModelEntities( &all );
+            SelectedModelEntities( &sel );
+            for ( entity_s_def *d : all )
+            {
+                const std::string name = ModelKey( d );
+                for ( size_t i = 0; i < s_usage.members.size(); ++i )
+                    if ( NameEqual( name, s_usage.members[i] ) )
+                    {
+                        ++s_usage.placed[i];
+                        if ( std::find( sel.begin(), sel.end(), d ) != sel.end() )
+                            ++s_usage.selected[i];
+                        break;
+                    }
+            }
+        }
+        if ( s_usage.members.size() < 2 )
+            return;                                      // no variants to compare
+        int total = 0, totalSel = 0;
+        for ( size_t i = 0; i < s_usage.members.size(); ++i )
+        {
+            total    += s_usage.placed[i];
+            totalSel += s_usage.selected[i];
+        }
+        ImGui::TextDisabled( "In map: %s  %i placed", s_usage.base.c_str(), total );
+        if ( totalSel )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "(%i selected)", totalSel );
+        }
+        for ( size_t i = 0; i < s_usage.members.size(); ++i )
+        {
+            const std::string &m = s_usage.members[i];
+            const char *label = m.size() > base.size() ? m.c_str() + base.size() : "base";
+            char text[96];
+            if ( s_usage.selected[i] )
+                _snprintf( text, sizeof( text ), "%s: %i (%i sel)", label, s_usage.placed[i], s_usage.selected[i] );
+            else
+                _snprintf( text, sizeof( text ), "%s: %i", label, s_usage.placed[i] );
+            text[sizeof( text ) - 1] = '\0';
+            const float w = ImGui::CalcTextSize( text ).x;
+            if ( i > 0 && ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x * 2.0f + w
+                              < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x )
+                ImGui::SameLine( 0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f );
+            if ( s_usage.placed[i] == 0 )
+                ImGui::TextDisabled( "%s", text );
+            else
+                ImGui::TextUnformatted( text );
+        }
     }
 
     void DeleteModelFromDisk( const char *modelName )
@@ -889,6 +1118,16 @@ void KiwiModelBrowser_Draw()
                     ImGui::SetTooltip( "Select the model(s) to replace in the 3D view, then click a tile\n"
                                        "here to pick the replacement." );
             }
+            ImGui::SameLine();
+            ImGui::BeginDisabled( selectedModels == 0 && s_pickedModel.empty() );
+            if ( ImGui::Button( "Randomize variants" ) )
+                RandomizeVariants( s_pickedModel );
+            ImGui::EndDisabled();
+            if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+                ImGui::SetTooltip( "Deal each model's variants (name, name_2, name_3 ...) out evenly in a\n"
+                                   "random order: the %s. Undoable.",
+                                   selectedModels > 0 ? "selected models"
+                                                      : "every placed copy of the picked tile's model" );
             if ( !s_pickedModel.empty() )
             {
                 ImGui::SameLine();
@@ -897,6 +1136,7 @@ void KiwiModelBrowser_Draw()
                 if ( ImGui::SmallButton( "x##unpick" ) )
                     s_pickedModel.clear();
             }
+            DrawVariantUsage();
         }
         ImGui::Separator();
 

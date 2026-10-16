@@ -26,6 +26,7 @@ namespace
     sel_mask_t  s_modeMask   = SEL_MASK_EVERYTHING;   // "5 Everything" is the start mode
     bool        s_modelsOnly = false;                 // Object mode restricted to models (KIWI 2026-09-09)
     bool        s_particlesOnly = false;              // Object mode restricted to kiwi_fx (KIWI 2026-09-24)
+    bool        s_linesOnly  = false;                 // Edge mode restricted to construction (KIWI 2026-10-15)
     unsigned    s_generation = 1;
 
     // Suppress notifications driven by our own sync and guard rebuild recursion.
@@ -302,6 +303,11 @@ void KiwiSel_SetModeMask( sel_mask_t mask )
         s_particlesOnly = false;         // KIWI: every mode change leaves particles-only (it re-arms itself after)
         ++s_generation;
     }
+    if ( mask != SEL_MASK_EDGE && s_linesOnly )
+    {
+        s_linesOnly = false;             // the sub-mode belongs to Edge mode alone
+        ++s_generation;
+    }
     if ( mask == s_modeMask )
         return;
     s_modeMask = mask;
@@ -311,6 +317,19 @@ void KiwiSel_SetModeMask( sel_mask_t mask )
 bool KiwiSel_ModelsOnly()
 {
     return s_modelsOnly;
+}
+
+bool KiwiSel_LinesOnly()
+{
+    return s_linesOnly && s_modeMask == SEL_MASK_EDGE;
+}
+
+void KiwiSel_SetLinesOnly( bool on )
+{
+    if ( s_linesOnly == on )
+        return;
+    s_linesOnly = on;
+    ++s_generation;
 }
 
 void KiwiSel_SetModelsOnly( bool on )

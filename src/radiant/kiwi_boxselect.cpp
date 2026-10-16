@@ -418,6 +418,8 @@ namespace
         const bool modelsOnly = ( kind == SEL_OBJECT ) && KiwiSel_ModelsOnly();
         // KIWI (2026-09-24): ...and the particles-only sub-mode marquees particles alone.
         const bool particlesOnly = ( kind == SEL_OBJECT ) && KiwiSel_ParticlesOnly();
+        if ( KiwiSel_LinesOnly() )
+            return;                          // KIWI: lines-only marquees construction alone
         selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
         for ( int L = 0; L < 2; ++L )
         {
@@ -572,7 +574,9 @@ namespace
 
         // The screen-space sun glyph arbitrates before geometry and consumes the
         // click; its selection is independent of the geometry selection stores.
-        const bool sunHit = KiwiSun_GlyphHit( imgX, imgY );
+        // KIWI: lines-only (double-tap 2) offers construction alone - no sun, no geometry.
+        const bool linesOnly = KiwiSel_LinesOnly();
+        const bool sunHit = !linesOnly && KiwiSun_GlyphHit( imgX, imgY );
         if ( sunHit )
         {
             if ( ctrl )
@@ -596,7 +600,7 @@ namespace
 
         ray_t ray;
         pick_result_t hit;
-        if ( Pick_RayFromImagePos( imgX, imgY, &ray ) )
+        if ( Pick_RayFromImagePos( imgX, imgY, &ray ) && !linesOnly )
             hit = Pick( ray, KiwiSel_GetModeMask() );
 
         // Construction candidates compete in screen pixels.  They win on a brush
