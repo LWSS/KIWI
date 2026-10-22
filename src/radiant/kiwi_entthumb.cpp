@@ -605,6 +605,7 @@ bool KiwiEntThumb_ModelStats( const char *xmodelName, kiwiModelStats_t *out )
     out->lods      = XModelGetNumLods( model );
     out->bones     = XModelNumBones( model );
     out->collSurfs = model->numCollSurfs;
+    out->collLod   = model->collLod;
     for ( int lod = 0; lod < out->lods && lod < 4; ++lod )
     {
         const int surfCount = (int)XModelGetSurfCount( model, lod );

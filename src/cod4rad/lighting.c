@@ -10,6 +10,9 @@
 
 extern void memcpy_fast(void *dst, const void *src, int size);
 extern void BuildFinalLightmap_PerPixel(int lightmapIdx, int col, int row);
+extern int g_useEmbree;          /* KIWI: embree_trace.cpp */
+extern int g_kiwiEmbreeThreads;  /* KIWI: cmdline.c, -Threads unclamped */
+static int Lighting_InitNativeLightmapBasis(void);
 
 float          g_ambientR;
 float          g_ambientG;
@@ -328,6 +331,54 @@ BuildFinalLightmaps_TripleLoop
 Iterate all lightmap pixels and build final data.
 ================
 */
+/* KIWI: Embree builds fill the final lightmaps on worker threads.  A pixel
+ * only reads the sample field and writes its own output bytes, so rows can
+ * run in any order; the bytes are identical to the serial loop. */
+static volatile LONG s_finalNextRow;
+
+static DWORD WINAPI BuildFinalLightmaps_Worker(LPVOID param)
+{
+    int rowCount = g_lightmapSize * 512;
+    int index, col;
+
+    (void)param;
+    for (;;)
+    {
+        index = (int)InterlockedIncrement(&s_finalNextRow) - 1;
+        if (index >= rowCount)
+            return 0;
+        for (col = 0; col < 512; col++)
+            BuildFinalLightmap_PerPixel(index / 512, col, index % 512);
+    }
+}
+
+static int BuildFinalLightmaps_Threaded(void)
+{
+    HANDLE threads[64];
+    int threadCount = g_kiwiEmbreeThreads;
+    int i;
+
+    if (!g_useEmbree || threadCount < 2)
+        return 0;
+    if (threadCount > 64)
+        threadCount = 64;
+
+    Lighting_InitNativeLightmapBasis();   /* lazily built static table */
+    s_finalNextRow = 0;
+    for (i = 0; i < threadCount; i++)
+    {
+        threads[i] = CreateThread(NULL, 0, BuildFinalLightmaps_Worker, NULL, 0, NULL);
+        if (!threads[i])
+            ErrorMsg("Final lightmaps: CreateThread failed (%lu)\n", GetLastError());
+    }
+    for (i = 0; i < threadCount; i++)
+    {
+        WaitForSingleObject(threads[i], INFINITE);
+        CloseHandle(threads[i]);
+    }
+    return 1;
+}
+
 void BuildFinalLightmaps_TripleLoop(void)
 {
     int lmap, row, col;
@@ -337,13 +388,16 @@ void BuildFinalLightmaps_TripleLoop(void)
 
     Com_Printf("Saving lightmaps...\n");
 
-    for (lmap = 0; lmap < g_lightmapSize; lmap++)
+    if (!BuildFinalLightmaps_Threaded())   /* KIWI: Embree only */
     {
-        for (row = 0; row < 512; row++)
+        for (lmap = 0; lmap < g_lightmapSize; lmap++)
         {
-            for (col = 0; col < 512; col++)
+            for (row = 0; row < 512; row++)
             {
-                BuildFinalLightmap_PerPixel(lmap, col, row);
+                for (col = 0; col < 512; col++)
+                {
+                    BuildFinalLightmap_PerPixel(lmap, col, row);
+                }
             }
         }
     }

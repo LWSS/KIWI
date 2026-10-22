@@ -440,7 +440,84 @@ namespace
         return merges;
     }
 
+    // The brushes of the selection, by owning entity; only owners with 2+ count.
+    void MergeableGroups( std::vector<std::vector<selbrush_t *> > &groups, std::vector<selbrush_t *> &rest )
+    {
+        std::vector<const entity_s *> owners;
+        std::vector<std::vector<selbrush_t *> > all;
+        for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+        {
+            const entity_s *o = Usable( b ) ? OwnerDef( b ) : 0;
+            if ( !o )
+            {
+                rest.push_back( b );
+                continue;
+            }
+            size_t i = 0;
+            while ( i < owners.size() && owners[i] != o )
+                ++i;
+            if ( i == owners.size() )
+            {
+                owners.push_back( o );
+                all.push_back( std::vector<selbrush_t *>() );
+            }
+            all[i].push_back( b );
+        }
+        for ( size_t i = 0; i < all.size(); ++i )
+        {
+            if ( all[i].size() >= 2 )
+                groups.push_back( all[i] );
+            else
+                rest.insert( rest.end(), all[i].begin(), all[i].end() );
+        }
+    }
+
+    void RunAutoBoolOnSelection();
+
+    // KIWI (2026-10-21, user: "when a large amount of mixed objects are selected, the auto bool
+    // option is greyed out and unavailable. Have it function with just the brushes from the
+    // selection instead"): models, patches and other entities are set aside, the brushes run
+    // per owning entity (world, each func_group), and everything ends up selected again.
     void RunAutoBool()
+    {
+        std::vector<std::vector<selbrush_t *> > groups;
+        std::vector<selbrush_t *> rest;
+        MergeableGroups( groups, rest );
+        if ( groups.empty() )
+        {
+            Sys_Printf( "Auto-bool: select 2 or more brushes (models and patches are skipped).\n" );
+            return;
+        }
+        if ( groups.size() == 1 && rest.empty() )
+        {
+            RunAutoBoolOnSelection();                    // the plain case, exactly as before
+            return;
+        }
+
+        std::vector<selbrush_t *> results;
+        for ( size_t g = 0; g < groups.size(); ++g )
+        {
+            Select_Deselect( 1 );
+            for ( size_t i = 0; i < groups[g].size(); ++i )
+                Select_Brush( groups[g][i], 0, 0, 0 );
+            RunAutoBoolOnSelection();
+            for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
+                results.push_back( b );
+        }
+        Select_Deselect( 1 );
+        for ( size_t i = 0; i < results.size(); ++i )
+            Select_Brush( results[i], 0, 0, 0 );
+        for ( size_t i = 0; i < rest.size(); ++i )
+            Select_Brush( rest[i], 0, 0, 0 );
+        Sel_InvalidateFromLegacy();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Auto-bool: ran on the brushes of %i owner%s; %i other object%s left as they were%s.\n",
+                    (int)groups.size(), groups.size() == 1 ? "" : "s", (int)rest.size(),
+                    rest.size() == 1 ? "" : "s",
+                    groups.size() > 1 ? " (one undo step per owner)" : "" );
+    }
+
+    void RunAutoBoolOnSelection()
     {
         // Validate the complete candidate set before mutation.
         std::vector<selbrush_t *> set;
@@ -535,8 +612,11 @@ namespace
 
 bool KiwiAutoBool_CanExecute()
 {
-    // Same >=2, usable, one-owner gate as the handler.
-    return KiwiCsg_SelectionMergeable();
+    // KIWI: any 2+ brushes of one owner in the selection; the rest is set aside.
+    std::vector<std::vector<selbrush_t *> > groups;
+    std::vector<selbrush_t *> rest;
+    MergeableGroups( groups, rest );
+    return !groups.empty();
 }
 
 bool KiwiAutoBool_DispatchInstant( unsigned int commandId )

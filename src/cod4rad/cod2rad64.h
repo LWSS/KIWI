@@ -1855,6 +1855,11 @@ extern void SetLightingSampleAreas_Callback(unsigned int triIndex, unsigned int 
 extern void BuildLightTransfers_Callback(unsigned int triIndex, unsigned int unused);
 extern void SetLightingSampleAreas(int threadCount);
 extern void BuildLightTransfers(int threadCount);
+/* KIWI: Embree MT light transport (compile.c) */
+extern int g_kiwiXferActive;
+extern void KiwiXfer_BeginCell(int areaIndex, const float *pos, const float *basis,
+                               void *sample);
+extern int KiwiXfer_BuildLightTransfers(void);
 extern void ForEachLightmapPixel_Callback(unsigned int triIndex, unsigned int unused);
 extern void ForEachLightmapPixelInPoly(void *callback, int param, int threadCount);
 extern void GramSchmidt(float *v);

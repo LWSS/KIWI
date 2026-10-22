@@ -789,7 +789,8 @@ void __cdecl SV_Init()
     DvarLimits mina; // [esp+4h] [ebp-18h]
 
     SV_AddOperatorCommands();
-    sv_gametype = Dvar_RegisterString("g_gametype", "war", DVAR_SERVERINFO | DVAR_LATCH, "Current game type");
+    //sv_gametype = Dvar_RegisterString("g_gametype", "war", DVAR_SERVERINFO | DVAR_LATCH, "Current game type");
+    sv_gametype = Dvar_RegisterString("g_gametype", "dm", DVAR_SERVERINFO | DVAR_LATCH, "Current game type");
     Dvar_RegisterString("sv_keywords", (char *)"", DVAR_SERVERINFO, "Server keywords");
     // KIWI GLASS
     Dvar_RegisterInt("protocol", PROTOCOL_VERSION, DvarLimits(PROTOCOL_VERSION, PROTOCOL_VERSION), DVAR_SERVERINFO | DVAR_ROM, "Protocol version");

@@ -2,6 +2,11 @@
 #ifndef KISAK_RADIANT
 #error this file is only for Radiant!
 #endif
+
+#include <string>
+
+struct entity_s;
+
 // Plasticity-style outliner: live scene state is flattened into equal-height rows
 // each frame, while collapse state remains a panel-local set of stable ids
 // (FlattenOutline.ts:13; Outliner.tsx:56, :113).
@@ -45,6 +50,12 @@ bool KiwiOutliner_CanSelectGroup();
 bool KiwiOutliner_SelectWholeGroup();
 bool KiwiOutliner_CanUngroup();
 bool KiwiOutliner_UngroupSelection();   // dissolve the selection's groups
+
+// Paste Group In Place (kiwi_pasteplace.cpp): an entity's group path ("" = not grouped;
+// a key-less func_group is its folder name), and re-keying a pasted member from the
+// clipboard's group root to the replaced group's root.
+std::string KiwiOutliner_GroupPathOf( entity_s *inst );
+void KiwiOutliner_RekeyGroup( entity_s *inst, const std::string &fromRoot, const std::string &toRoot );
 
 // Discard document-local collapse keys and transient row identities.
 void KiwiOutliner_ResetForNewMap();

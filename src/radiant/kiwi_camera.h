@@ -5,7 +5,8 @@
 // RADIANT_UX_DESIGN §10 orbit-camera interface. It writes the same camera_s origin
 // and angles consumed by the ported draw; CamWnd_BuildMatrix still owns the basis.
 // Input positions are camera-RTT pixels with a top-left origin.
-// MMB orbits, wheel dollies, RMB/Shift+MMB pans, Alt+RMB looks, and arrows fly.
+// MMB orbits, wheel dollies (ortho; perspective's wheel sets fly speed), RMB/Shift+MMB
+// pans, Alt+RMB looks, and arrows fly.
 
 // Orbit gesture.
 // Latch pivot, eye offset, and angles at press, then rotate that offset by total
@@ -36,7 +37,8 @@ float        KiwiCam_Distance();
 
 // Mouselook matches CamWnd_Rotate2's 0.35 deg/px and signs (camwnd.cpp:4245), with
 // one-sided ±89 pitch bounds. It changes angles only, then re-seats the pivot.
-// The cursor is not recentered, so a drag stops at the screen edge.
+// The cursor is not recentered here, so an Alt+RMB drag stops at the screen edge; the MMB
+// fly look (kiwi_viewport.cpp FlyLookPump) hides and warps the cursor, so it never does.
 void KiwiCam_LookDrag( int dx, int dy );
 
 // Truck-pan moves origin and pivot by -vright*dx*k + vup*dy*k. Cache k at the
@@ -82,15 +84,20 @@ float KiwiCam_WorldPerPixel( const float *world );
 // `arrows` is the bare-arrow hover arm. QPC supplies dt, clamped to 0.1 seconds.
 // Perspective flies in world units; ortho pans along vright/vup at a screen-pixel
 // rate because moving along the view axis is invisible in a parallel projection.
-void KiwiCam_FlyTick( bool lookHeld, bool arrows );
+// KIWI (2026-10-21): `wasd` = the perspective fly keys are live (nothing selected, the
+// camera hovered or looking): W/S forward/back, A/D strafe, Q/E down/up along the
+// camera's own up axis.  Bare keys while hovering; any modifiers while a look is held.
+void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd );
 
-// True while the RMB look owns this vk (the four ARROWS) — the key funnel
-// swallows it so look + arrow cannot also fire a hotkey-table binding.
+// True while the camera owns this vk - the four ARROWS during a look, and W/A/S/D/Q/E
+// while the fly keys are live - so the key funnel swallows it before the hotkey table.
 bool KiwiCam_FlySwallowKey( unsigned int vk );
 
 // Persisted multiplier over classic MoveSpeed; default 4x.
 float KiwiCam_FlySpeedScale();
 void  KiwiCam_SetFlySpeedScale( float mul );
+// Perspective wheel: positive steps speed the fly keys up (1.25x per notch).
+void  KiwiCam_WheelFlySpeed( float wheelSteps );
 
 // Orthographic/perspective toggle.
 // Real orthographic projection with pivot-scale continuity:

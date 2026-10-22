@@ -405,7 +405,8 @@ const dvar_s *G_RegisterDvars()
     Dvar_RegisterString("gamename", "KIWI", DVAR_SERVERINFO | DVAR_ROM, "The name of the game");
     Dvar_RegisterString("gamedate", __DATE__, DVAR_ROM, "The date compiled");
     Dvar_RegisterString("sv_mapname", (char *)"", DVAR_SERVERINFO | DVAR_ROM, "The current map name");
-    g_gametype = Dvar_RegisterString("g_gametype", "war", DVAR_SERVERINFO | DVAR_LATCH, "The current campaign");
+    //g_gametype = Dvar_RegisterString("g_gametype", "war", DVAR_SERVERINFO | DVAR_LATCH, "The current campaign");
+    g_gametype = Dvar_RegisterString("g_gametype", "dm", DVAR_SERVERINFO | DVAR_LATCH, "The current campaign"); // KIWI change
     min.integer.max = Dvar_RegisterInt(
         "ui_maxclients",
         32,

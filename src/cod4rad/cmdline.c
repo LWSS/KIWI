@@ -6,6 +6,7 @@
 
 /* global settings — initialized by ParseCommandLine_Init, modified by switches */
 int g_numThreads;
+int g_kiwiEmbreeThreads; /* KIWI: -Threads unclamped (Embree transport) */
 char g_modelShadows;
 char g_extraVerbose2;
 char g_disableModelShadows;
@@ -156,6 +157,8 @@ void ParseCommandLine_Init(void)
 
     GetSystemInfo(&sysInfo);
     numProcs = (int)sysInfo.dwNumberOfProcessors;
+    /* KIWI: Embree transport tracer default = all processors (max 64) */
+    g_kiwiEmbreeThreads = numProcs < 1 ? 1 : (numProcs > 64 ? 64 : numProcs);
 
     if (numProcs < 1)
         numProcs = 1;
@@ -540,7 +543,11 @@ Parse thread count from command line. Clamp to the four visibility-cache slots.
 */
 int PCL_SetThreadCount(int argc, const char **argv)
 {
-    return PCL_ParseInt(argc, argv, &g_numThreads, 1, 4);
+    /* KIWI: up to 64 for the Embree transport tracers (compile.c); every
+     * other phase stays clamped to the four visibility-cache slots. */
+    int result = PCL_ParseInt(argc, argv, &g_kiwiEmbreeThreads, 1, 64);
+    g_numThreads = g_kiwiEmbreeThreads < 4 ? g_kiwiEmbreeThreads : 4;
+    return result;
 }
 
 int PCL_SetAO(int argc, const char **argv)

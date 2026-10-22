@@ -196,7 +196,13 @@ namespace
     double s_flyPrev     = 0.0;
     bool   s_flyHave     = false;
     bool   s_flyLookHeld = false;
+    bool   s_flyWasd     = false;               // KIWI: the WASD/QE fly keys were live last tick
     float  s_flyScale = -1.0f;                  // <0 = not read from the profile yet
+
+    bool FlyLetter( unsigned int vk )
+    {
+        return vk == 'W' || vk == 'A' || vk == 'S' || vk == 'D' || vk == 'Q' || vk == 'E';
+    }
 
     bool KeyDown( int vk )
     {
@@ -1528,24 +1534,44 @@ void KiwiCam_SetFlySpeedScale( float mul )
     Radiant_ProfileSetInt( KCAM_SECTION, KCAM_FLY_ENTRY, (int)( mul * 100.0f + 0.5f ) );
 }
 
+// KIWI (2026-10-21, user: "no scroll zooming in P camera mode, make it adjust the camera
+// speed instead"): 1.25x per notch, held to the Settings slider's 0.1x..50x range.
+void KiwiCam_WheelFlySpeed( float wheelSteps )
+{
+    float mul = KiwiCam_FlySpeedScale() * powf( 1.25f, wheelSteps );
+    if ( mul < 0.1f )  mul = 0.1f;
+    if ( mul > 50.0f ) mul = 50.0f;
+    KiwiCam_SetFlySpeedScale( mul );
+}
+
 // Keyboard fly uses arrows only. During RMB look they are swallowed from the
 // message path; while hovering, only bare arrows fly so modified bindings remain.
 bool KiwiCam_FlySwallowKey( unsigned int vk )
 {
+    // KIWI (2026-10-21): the WASD/QE fly keys - bare while hovering (Shift+W box,
+    // Shift+A line ... stay theirs), any modifiers while a look is held.
+    if ( s_flyWasd && FlyLetter( vk ) )
+    {
+        if ( s_flyLookHeld )
+            return true;
+        if ( !KeyDown( VK_SHIFT ) && !KeyDown( VK_CONTROL ) && !KeyDown( VK_MENU ) )
+            return true;
+    }
     if ( !s_flyLookHeld )
         return false;
     return vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT;
 }
 
-void KiwiCam_FlyTick( bool lookHeld, bool arrows )
+void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
 {
     const double now = NowSeconds();
     double dt = s_flyHave ? ( now - s_flyPrev ) : 0.0;
     s_flyPrev     = now;
     s_flyHave     = true;
     s_flyLookHeld = lookHeld;
+    s_flyWasd     = wasd;
 
-    if ( !lookHeld && !arrows )
+    if ( !lookHeld && !arrows && !wasd )
         return;
     if ( !( dt > 0.0 ) )
         return;
@@ -1559,7 +1585,7 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows )
     // RMB look ignores modifiers so Shift can boost; hover requires bare arrows,
     // preserving classic modified-arrow bindings. There is deliberately no Q/E
     // vertical term.
-    int fwd = 0, side = 0;
+    int fwd = 0, side = 0, rise = 0;
     const bool anyMod = KeyDown( VK_SHIFT ) || KeyDown( VK_CONTROL ) || KeyDown( VK_MENU );
     if ( lookHeld || ( arrows && !anyMod ) )
     {
@@ -1568,7 +1594,22 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows )
         if ( KeyDown( VK_RIGHT ) ) ++side;
         if ( KeyDown( VK_LEFT  ) ) --side;
     }
-    if ( !fwd && !side )
+    // KIWI (2026-10-21, user: "WASD works how you'd expect, Q lowers (relative to camera
+    // angle), E Raises ... while nothing is selected").
+    if ( wasd && ( lookHeld || !anyMod ) )
+    {
+        if ( KeyDown( 'W' ) ) ++fwd;
+        if ( KeyDown( 'S' ) ) --fwd;
+        if ( KeyDown( 'D' ) ) ++side;
+        if ( KeyDown( 'A' ) ) --side;
+        if ( KeyDown( 'E' ) ) ++rise;
+        if ( KeyDown( 'Q' ) ) --rise;
+    }
+    if ( fwd > 1 ) fwd = 1;
+    if ( fwd < -1 ) fwd = -1;
+    if ( side > 1 ) side = 1;
+    if ( side < -1 ) side = -1;
+    if ( !fwd && !side && !rise )
         return;
 
     camera_s *c = Ed_Camera();
@@ -1602,7 +1643,8 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows )
         const float step = speed * (float)dt;
         for ( int i = 0; i < 3; ++i )
             d[i] = c->vpn[i]    * ( (float)fwd  * step )
-                 + c->vright[i] * ( (float)side * step );
+                 + c->vright[i] * ( (float)side * step )
+                 + c->vup[i]    * ( (float)rise * step );
     }
 
     // The pivot rides along, so a fly followed by an orbit does not swing the view

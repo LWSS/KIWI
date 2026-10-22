@@ -77,3 +77,27 @@ void KiwiSection_DrawWorld();
 // screen-space pass rejects a hidden vertex/edge winner. Both require Cutting().
 void KiwiSection_ClampRayStart( float *start, const float *dir );
 bool KiwiSection_PointVisible( const float *p );
+
+// ── Camera view modes beside the section button (RADIANT_UX_DESIGN D-EDGEOUTLINE / D-XRAY) ──
+// Both are persisted view state ("KiwiUX" EdgeOutline / XRay), toggled by the view-cube
+// chips, the palette (KIWI_CMD_VIEW_EDGE_OUTLINE / KIWI_CMD_VIEW_XRAY) and the View menu.
+//
+// EDGE OUTLINE: every unselected brush edge and patch border in the 3D camera draws as a
+// thin dark line, depth-tested against the shaded scene.  Endpoints are pulled toward the
+// eye along their own view ray (same pixel, nearer depth), so edges on visible faces win
+// the depth test and edges behind other geometry do not.  Per-brush edge lists are cached
+// on the def's version; coplanar seams (inside a brush, and edges two brushes/patches
+// share where the faces they leave behind are coplanar) are merged away.
+//
+// X-RAY: the same edges also draw WITHOUT a depth test in a light tone, so hidden edges
+// read through walls (visible ones keep a dark rim, see the design note), and the snap
+// engine stops testing line of sight: every snap point is offered.  With x-ray OFF the
+// snap engine (kiwi_snap.cpp) offers only points the camera can see.
+bool KiwiView_EdgeOutline();
+void KiwiView_SetEdgeOutline( bool on );
+bool KiwiView_XRay();
+void KiwiView_SetXRay( bool on );
+
+// Camera pass, from CamWnd_Draw after the world/selected passes and BEFORE the selected-
+// outline depth clear (the visible test needs the scene's depth).  No-op when both are off.
+void KiwiView_DrawEdges();

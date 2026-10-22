@@ -1832,6 +1832,16 @@ static char TryPlugNotch(TriSurf_t *ts, int pointIndex, unsigned int endIndex,
   determinant = dotAA * dotBB - dotAB * dotAB;
   if (determinant <= 1.0f)
     return 0;
+  /* KIWI: parallel edges.  The float determinant of ~1e8-sized terms cancels
+     to rounding noise (8, 16...) and passed the absolute test above, so a
+     parallel pair (e.g. both sides of a doorway) got a bogus plug point. */
+  {
+    double dAA = (double)edgeA[0] * edgeA[0] + (double)edgeA[1] * edgeA[1] + (double)edgeA[2] * edgeA[2];
+    double dAB = (double)edgeA[0] * edgeB[0] + (double)edgeA[1] * edgeB[1] + (double)edgeA[2] * edgeB[2];
+    double dBB = (double)edgeB[0] * edgeB[0] + (double)edgeB[1] * edgeB[1] + (double)edgeB[2] * edgeB[2];
+    if (dAA * dBB - dAB * dAB <= 1.0e-6 * dAA * dBB)
+      return 0;
+  }
 
   VectorSubtract(winding->points[end], winding->points[pointIndex], toEnd);
   alongA = (DotProduct(edgeA, toEnd) * dotBB - DotProduct(edgeB, toEnd) * dotAB)
@@ -1845,6 +1855,12 @@ static char TryPlugNotch(TriSurf_t *ts, int pointIndex, unsigned int endIndex,
 
   VectorMA(winding->points[pointIndex], alongA, edgeA, candidateA);
   VectorMA(winding->points[end], -alongB, edgeB, candidateB);
+  /* KIWI: the plug must be the two edge lines' intersection.  Only then does
+     previous->candidate run through pointIndex, so the tested triangle is all
+     the area added; otherwise the untested (previous, pointIndex, candidate)
+     region is filled too (kisak_trash doorway wedge). */
+  if (DistanceSquared(candidateA, candidateB) > 0.25 * 0.25)
+    return 0;
   candidate[0] = (candidateA[0] + candidateB[0]) * 0.5f;
   candidate[1] = (candidateA[1] + candidateB[1]) * 0.5f;
   candidate[2] = (candidateA[2] + candidateB[2]) * 0.5f;

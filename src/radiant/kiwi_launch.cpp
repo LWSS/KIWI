@@ -58,7 +58,17 @@ bool s_buildSkipFragileStop = false;
 bool s_modelCollMaps = true;
 
 int  s_threads     = 0;         // cod4rad -Threads N  (0 = "not resolved yet")
-int  s_quality     = 1;         // 0 = -Fast, 1 = (neither), 2 = -Extra
+// KIWI (2026-10-15): Embree = Normal settings traced with Embree (-Embree): ~5x
+// faster than Normal, near-identical lightmaps.  Needs cod4rad built with Embree.
+enum lightQuality_t
+{
+    LQUALITY_EMBREE = 0,
+    LQUALITY_EMBREE_PLUS,   // KIWI (2026-10-21, user): Extra settings traced with Embree
+    LQUALITY_FAST,
+    LQUALITY_NORMAL,
+    LQUALITY_EXTRA
+};
+int  s_quality     = LQUALITY_EMBREE;   // KIWI (2026-10-21, user): Embree is the default
 bool s_noRelight   = true;
 
 // 256 KiB retains roughly a full verbose compile (~3000 lines).
@@ -119,6 +129,19 @@ char s_bspLoadSource[MAX_PATH] = { 0 };
 // cod4rad's ray cache has four per-thread slots (geometry.c g_visCache[4]), so -Threads
 // clamps to [1,4]; offering more in the UI only hid that clamp.
 const int kMaxLightThreads = 4;
+// KIWI (2026-10-21): with -Embree the transport tracers and final-lightmap workers take
+// more threads (cod4rad compile.c KiwiXfer_*); gains stop near 16 on a 13900KF.
+const int kMaxEmbreeThreads = 16;
+
+bool EmbreeQuality() { return s_quality == LQUALITY_EMBREE || s_quality == LQUALITY_EMBREE_PLUS; }
+int  LightThreadCap() { return EmbreeQuality() ? kMaxEmbreeThreads : kMaxLightThreads; }
+
+// s_threads keeps the wanted count; the stock modes use at most 4 of it.
+int EffectiveThreads()
+{
+    const int cap = LightThreadCap();
+    return s_threads > cap ? cap : s_threads;
+}
 
 // Resolve once from CPU count; StartLight passes -Threads.
 void EnsureThreadDefault()
@@ -130,7 +153,7 @@ void EnsureThreadDefault()
     ::GetSystemInfo( &si );
     s_threads = (int)si.dwNumberOfProcessors;
     if ( s_threads < 1 )  s_threads = 1;
-    if ( s_threads > kMaxLightThreads ) s_threads = kMaxLightThreads;
+    if ( s_threads > kMaxEmbreeThreads ) s_threads = kMaxEmbreeThreads;
 }
 
 // Log capture.
@@ -878,12 +901,21 @@ bool StartLight( const launchPaths_t &p )
     cmd += " -Platform pc";
     {
         char t[64];
-        _snprintf( t, sizeof( t ), " -Threads %d", s_threads );
+        _snprintf( t, sizeof( t ), " -Threads %d", EffectiveThreads() );
         t[sizeof( t ) - 1] = '\0';
         cmd += t;
     }
-    if ( s_quality == 0 ) cmd += " -Fast";
-    if ( s_quality == 2 ) cmd += " -Extra";
+    if ( s_quality == LQUALITY_EMBREE || s_quality == LQUALITY_EMBREE_PLUS )
+    {
+        // The stub build accepts -Embree and silently traces natively.
+        char dll[MAX_PATH];
+        ToolPath( p, "embree4.dll", dll, sizeof( dll ) );
+        if ( !FileExists( dll ) )
+            LogLine( "WARNING: %s is missing -- cod4rad was built without Embree, so Embree runs at Normal speed.", dll );
+        cmd += " -Embree";
+    }
+    if ( s_quality == LQUALITY_FAST )  cmd += " -Fast";
+    if ( s_quality == LQUALITY_EXTRA || s_quality == LQUALITY_EMBREE_PLUS ) cmd += " -Extra";
     if ( s_noRelight )    cmd += " -NoRelight";
     // cmdline.c:755,794-814 requires an extensionless map name last.
     cmd += " \"";
@@ -1259,7 +1291,7 @@ void DrawStatusBanner()
 
 void DrawStageRows( bool busy )
 {
-    static const char *const kQuality[] = { "Fast", "Normal", "Extra" };
+    static const char *const kQuality[] = { "Embree", "Embree+", "Fast", "Normal", "Extra" };
 
     ImGui::BeginDisabled( busy );
 
@@ -1298,16 +1330,23 @@ void DrawStageRows( bool busy )
     ImGui::TextUnformatted( "Threads" );
     ImGui::SameLine();
     ImGui::SetNextItemWidth( 74.0f );
-    if ( ImGui::InputInt( "##threads", &s_threads, 1, 4 ) )
+    int threads = EffectiveThreads();
+    if ( ImGui::InputInt( "##threads", &threads, 1, 4 ) )
     {
-        if ( s_threads < 1 )  s_threads = 1;
-        if ( s_threads > kMaxLightThreads ) s_threads = kMaxLightThreads;
+        if ( threads < 1 )  threads = 1;
+        if ( threads > LightThreadCap() ) threads = LightThreadCap();
+        s_threads = threads;
     }
     ImGui::SameLine();
     ImGui::TextUnformatted( "Quality" );
     ImGui::SameLine();
     ImGui::SetNextItemWidth( 92.0f );
     ImGui::Combo( "##quality", &s_quality, kQuality, IM_ARRAYSIZE( kQuality ) );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "Embree: Normal quality traced with Embree (-Embree), about 5x faster.\n"
+                           "Lightmaps match Normal almost exactly.\n"
+                           "Embree+: Extra quality traced with Embree; less noise on fine lightmaps.\n"
+                           "Fast: fewer rays and no model shadows; visibly lower quality." );
     ImGui::SameLine();
     ImGui::Checkbox( "No relight (-NoRelight)", &s_noRelight );
     ImGui::EndDisabled();

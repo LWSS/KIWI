@@ -19,6 +19,7 @@
 #include "kiwi_transform.h" // pivot placement and snap-dot state
 #include "kiwi_grid.h"
 #include "kiwi_region.h"      // KREG_JOIN_DIST weld tolerance
+#include "kiwi_section.h"     // KIWI: KiwiView_XRay, section clamp/visibility (line of sight)
 #include "kiwi_lines.h"
 #include "kiwi_ported.h"
 #include "kiwi_primitive.h"
@@ -721,6 +722,364 @@ namespace
             && std::binary_search( excluded.begin(), excluded.end(), b, std::less<const selbrush_t *>() );
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  KIWI (2026-10-21, D-XRAY) — LINE OF SIGHT
+    // ═════════════════════════════════════════════════════════════════════════
+    // User: "the snapping points will only snap to points visible unless x-ray is turned
+    // on, then anything."  The query's surface gate (CandGate below) only compares a
+    // candidate with the ONE surface under the cursor: a corner hidden behind a pillar
+    // that is not under the cursor, or any point while the cursor is over the void,
+    // passed it.  So with x-ray OFF every candidate also needs a clear line from the eye.
+    //
+    // Cost: candidates all lie within a few pixels of the cursor ray, so anything that can
+    // hide one lies in a narrow cone around that ray.  The cone's occluders are gathered
+    // ONCE per query (lazily - a query that returns early pays nothing) and each test is a
+    // segment against those few: convex brush slabs, patch render triangles (row boxes
+    // first), xmodel meshes through the drop trace's cached trees.  Callers only test a
+    // candidate that would beat the current best, so a query makes a handful of tests.
+    const float KSNAP_LOS_PAD_PX   = 14.0f;  // cone half-width beyond a candidate's reach, px
+    const float KSNAP_LOS_SLOP_PX  = 2.5f;   // a hit this close in front of the point still sees it
+    const float KSNAP_LOS_SLOP_MIN = 0.25f;  // WORLD UNITS floor of that slack
+    const float KSNAP_LOS_INSET    = 0.01f;  // WORLD UNITS a brush is shrunk by (grazing rays)
+    const int   KSNAP_LOS_MAX      = 1024;   // occluders kept per gather
+
+    struct losOcc_t
+    {
+        selbrush_t *node;
+        int         kind;                    // 0 convex brush, 1 patch, 2 xmodel
+        float       mins[3], maxs[3];
+        int         rowFirst;                // patch: first row box in s_los.rows
+    };
+
+    struct losState_t
+    {
+        bool     armed     = false;          // this query tests line of sight
+        bool     built     = false;
+        ray_t    ray;
+        unsigned pickFlags = 0;
+        float    padPx     = 0.0f;
+        std::vector<losOcc_t> occ;
+        std::vector<float>    rows;          // 6 floats (mins, maxs) per patch cell row
+    };
+    losState_t s_los;
+
+    // Pad from the box's FARTHEST corner: perspective world-per-pixel grows with depth, so
+    // this never undercuts a candidate ray that clips the box's far end.
+    bool BoxNearRay( const float *mins, const float *maxs, const ray_t &ray, float padPx )
+    {
+        float farC[3];
+        for ( int k = 0; k < 3; ++k )
+            farC[k] = ray.dir[k] >= 0.0f ? maxs[k] : mins[k];
+        const float pad = padPx * KiwiCam_WorldPerPixel( farC );
+        float lo = 0.0f, hi = 1.0e30f;
+        for ( int k = 0; k < 3; ++k )
+        {
+            const float a = mins[k] - pad, b = maxs[k] + pad;
+            if ( fabsf( ray.dir[k] ) < 1.0e-8f )
+            {
+                if ( ray.origin[k] < a || ray.origin[k] > b ) return false;
+                continue;
+            }
+            float t0 = ( a - ray.origin[k] ) / ray.dir[k], t1 = ( b - ray.origin[k] ) / ray.dir[k];
+            if ( t0 > t1 ) { const float t = t0; t0 = t1; t1 = t; }
+            if ( t0 > lo ) lo = t0;
+            if ( t1 < hi ) hi = t1;
+            if ( lo > hi ) return false;
+        }
+        return true;
+    }
+
+    // Does the segment s + dir * (0..len) touch the box?
+    bool SegBox( const float *s, const float *dir, float len, const float *mins, const float *maxs )
+    {
+        float lo = 0.0f, hi = len;
+        for ( int k = 0; k < 3; ++k )
+        {
+            if ( fabsf( dir[k] ) < 1.0e-8f )
+            {
+                if ( s[k] < mins[k] || s[k] > maxs[k] ) return false;
+                continue;
+            }
+            float t0 = ( mins[k] - s[k] ) / dir[k], t1 = ( maxs[k] - s[k] ) / dir[k];
+            if ( t0 > t1 ) { const float t = t0; t0 = t1; t1 = t; }
+            if ( t0 > lo ) lo = t0;
+            if ( t1 < hi ) hi = t1;
+            if ( lo > hi ) return false;
+        }
+        return true;
+    }
+
+    // The camera draws these tool volumes see-through (camwnd.cpp's editor-colour table
+    // minus the two SOLID tools, caulk and nodraw, and sky), so they hide nothing.
+    bool FaceSeeThrough( const face_t &f )
+    {
+        const qtexture_s *t = f.mtldef[g_qeglobals.current_edit_layer].radMtl;
+        const char *name = t ? t->name : nullptr;
+        if ( !name )
+            return false;
+        const char *slash = strrchr( name, '/' );
+        const char *n = slash ? slash + 1 : name;
+        static const char *const kSeeThrough[] =
+            { "portal", "hint", "skip", "clip", "trigger", "origin", "volume", "lightgrid" };
+        for ( const char *key : kSeeThrough )
+            if ( strstr( n, key ) )
+                return true;
+        return false;
+    }
+
+    // Slab clip against every face plane of the brush shrunk by KSNAP_LOS_INSET.  A start
+    // already inside (the eye in a brush) never occludes: the camera sees out of it.
+    bool LosHitsBrush( const brush_t *def, const float *s, const float *dir, float len )
+    {
+        float t0 = 0.0f, t1 = len;
+        int   enter = -1;
+        for ( int f = 0; f < def->faceCount; ++f )
+        {
+            const plane_t &pl = def->faces[f].plane;
+            const float num = Dot3( pl.normal, s ) - pl.dist + KSNAP_LOS_INSET;   // > 0 = outside
+            const float den = Dot3( pl.normal, dir );
+            if ( fabsf( den ) < 1.0e-9f )
+            {
+                if ( num > 0.0f )
+                    return false;                    // parallel and outside this plane
+                continue;
+            }
+            const float t = -num / den;
+            if ( den < 0.0f )
+            {
+                if ( t > t0 ) { t0 = t; enter = f; }
+            }
+            else if ( t < t1 )
+                t1 = t;
+            if ( t0 >= t1 )
+                return false;
+        }
+        return enter >= 0 && !FaceSeeThrough( def->faces[enter] );
+    }
+
+    // Two-sided: a patch is drawn from both sides.
+    bool SegTri( const float *s, const float *dir, float len,
+                 const float *v0, const float *v1, const float *v2 )
+    {
+        float e1[3], e2[3], p[3], q[3], tv[3];
+        Sub3( v1, v0, e1 );
+        Sub3( v2, v0, e2 );
+        Cross3( dir, e2, p );
+        const float det = Dot3( e1, p );
+        if ( fabsf( det ) < 1.0e-9f )
+            return false;
+        const float inv = 1.0f / det;
+        Sub3( s, v0, tv );
+        const float u = Dot3( tv, p ) * inv;
+        if ( u < 0.0f || u > 1.0f )
+            return false;
+        Cross3( tv, e1, q );
+        const float v = Dot3( dir, q ) * inv;
+        if ( v < 0.0f || u + v > 1.0f )
+            return false;
+        const float t = Dot3( e2, q ) * inv;
+        return t > 1.0e-3f && t < len;
+    }
+
+    bool LosHitsPatch( const losOcc_t &o, const float *s, const float *dir, float len )
+    {
+        const patchMesh_t *pm = o.node->def->patch;
+        const curvePatchDef_t *g = pm ? pm->curveDef : nullptr;
+        if ( !g || !g->verts || g->width < 2 || g->height < 2 )
+            return false;
+        for ( int y = 0; y + 1 < g->height; ++y )
+        {
+            const float *rb = &s_los.rows[(size_t)( o.rowFirst + y ) * 6];
+            if ( !SegBox( s, dir, len, rb, rb + 3 ) )
+                continue;
+            for ( int x = 0; x + 1 < g->width; ++x )
+            {
+                const float *v00 = g->verts[y * g->width + x].xyz;
+                const float *v10 = g->verts[y * g->width + x + 1].xyz;
+                const float *v01 = g->verts[( y + 1 ) * g->width + x].xyz;
+                const float *v11 = g->verts[( y + 1 ) * g->width + x + 1].xyz;
+                if ( SegTri( s, dir, len, v00, v10, v11 ) || SegTri( s, dir, len, v00, v11, v01 ) )
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    // Arm (or disarm) the test for one query / one accent frame.  Cheap: the gather waits for
+    // the first candidate that needs it.
+    void LosBegin( const ray_t &ray, unsigned pickFlags, float reachPx )
+    {
+        s_los.armed     = !KiwiView_XRay();
+        s_los.built     = false;
+        s_los.ray       = ray;
+        s_los.pickFlags = pickFlags;
+        s_los.padPx     = reachPx + KSNAP_LOS_PAD_PX;
+    }
+
+    // What can hide a snap point is what the camera draws: unfiltered brushes and patches,
+    // and xmodels by their mesh (point-entity boxes, prefab proxies and the geometry a live
+    // transform is moving do not occlude).
+    void LosBuild()
+    {
+        s_los.built = true;
+        s_los.occ.clear();
+        s_los.rows.clear();
+        exclSet_t excluded;
+        GatherExcluded( s_los.pickFlags, excluded );
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( (int)s_los.occ.size() >= KSNAP_LOS_MAX )
+                return;
+            if ( !b->def || !b->owner || FilterBrush( b, 0 ) || Excluded( excluded, b ) )
+                continue;
+            losOcc_t o;
+            o.node     = b;
+            o.rowFirst = 0;
+            if ( b->owner != world_entity )
+            {
+                const entity_s *od = b->owner->def;
+                if ( !od || !od->eclass || ( od->eclass->classtype & ECLASS_PREFAB ) != 0 )
+                    continue;
+                if ( od->eclass->fixedsize )
+                {
+                    if ( !KiwiDrop_IsModelEntity( b ) || b->owner->prefab )
+                        continue;
+                    float mins[3], maxs[3], angles[3], origin[3], scale = 1.0f, rmin[3], rmax[3];
+                    XModel *model = 0;
+                    if ( !KiwiDrop_GetModelInfo( b, mins, maxs, angles, &scale, origin, &model ) || !model
+                      || !KiwiDrop_TransformBounds( mins, maxs, angles, scale, rmin, rmax ) )
+                        continue;
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        o.mins[k] = origin[k] + rmin[k];
+                        o.maxs[k] = origin[k] + rmax[k];
+                    }
+                    if ( !BoxNearRay( o.mins, o.maxs, s_los.ray, s_los.padPx ) )
+                        continue;
+                    o.kind = 2;
+                    s_los.occ.push_back( o );
+                    continue;
+                }
+            }
+            const brush_t *def = b->def;
+            Copy3( def->mins, o.mins );
+            Copy3( def->maxs, o.maxs );
+            if ( !BoxNearRay( o.mins, o.maxs, s_los.ray, s_los.padPx ) )
+                continue;
+            if ( def->patch )
+            {
+                const curvePatchDef_t *g = def->patch->curveDef;
+                if ( !g || !g->verts || g->width < 2 || g->height < 2 )
+                    continue;
+                o.kind     = 1;
+                o.rowFirst = (int)( s_los.rows.size() / 6 );
+                for ( int y = 0; y + 1 < g->height; ++y )
+                {
+                    float lo[3] = {  1.0e30f,  1.0e30f,  1.0e30f };
+                    float hi[3] = { -1.0e30f, -1.0e30f, -1.0e30f };
+                    for ( int r = y; r <= y + 1; ++r )
+                        for ( int x = 0; x < g->width; ++x )
+                        {
+                            const float *p = g->verts[r * g->width + x].xyz;
+                            for ( int k = 0; k < 3; ++k )
+                            {
+                                lo[k] = p[k] < lo[k] ? p[k] : lo[k];
+                                hi[k] = p[k] > hi[k] ? p[k] : hi[k];
+                            }
+                        }
+                    for ( int k = 0; k < 3; ++k )
+                        s_los.rows.push_back( lo[k] - 0.01f );
+                    for ( int k = 0; k < 3; ++k )
+                        s_los.rows.push_back( hi[k] + 0.01f );
+                }
+                s_los.occ.push_back( o );
+                continue;
+            }
+            if ( !def->faces || def->faceCount <= 0 )
+                continue;
+            o.kind = 0;
+            s_los.occ.push_back( o );
+        }
+    }
+
+    // Can the camera see p?  `ignore` never occludes (a cylinder's own shell around its
+    // axis centre).  True whenever the test is not armed (x-ray, or no query context).
+    bool LosVisible( const float *p, const selbrush_t *ignore = nullptr )
+    {
+        if ( !s_los.armed || !p )
+            return true;
+        if ( !KiwiSection_PointVisible( p ) )
+            return false;                            // cut away by the section
+        float s[3], dir[3], dist;
+        if ( KiwiCam_Ortho() )
+        {
+            // Parallel rays: the point's own pixel ray, from the pick plane.
+            Copy3( s_los.ray.dir, dir );
+            float rel[3];
+            Sub3( p, s_los.ray.origin, rel );
+            dist = Dot3( rel, dir );
+            if ( !( dist > 0.0f ) )
+                return true;
+            Mad3( p, dir, -dist, s );
+        }
+        else
+        {
+            Copy3( s_los.ray.origin, s );            // the eye
+            Sub3( p, s, dir );
+            dist = sqrtf( Dot3( dir, dir ) );
+            if ( !( dist > 1.0e-4f ) )
+                return true;
+            for ( int k = 0; k < 3; ++k )
+                dir[k] /= dist;
+        }
+        const float slopPx = KSNAP_LOS_SLOP_PX * KiwiCam_WorldPerPixel( p );
+        float len = dist - ( slopPx > KSNAP_LOS_SLOP_MIN ? slopPx : KSNAP_LOS_SLOP_MIN );
+        {
+            // Geometry above an active section cut is not drawn, so it hides nothing.
+            float s0[3];
+            Copy3( s, s0 );
+            KiwiSection_ClampRayStart( s, dir );
+            float moved[3];
+            Sub3( s, s0, moved );
+            len -= Dot3( moved, dir );
+        }
+        if ( !( len > 0.0f ) )
+            return true;
+        if ( !s_los.built )
+            LosBuild();
+        for ( const losOcc_t &o : s_los.occ )
+        {
+            if ( o.node == ignore || !SegBox( s, dir, len, o.mins, o.maxs ) )
+                continue;
+            if ( o.kind == 0 )
+            {
+                if ( LosHitsBrush( o.node->def, s, dir, len ) )
+                    return false;
+            }
+            else if ( o.kind == 1 )
+            {
+                if ( LosHitsPatch( o, s, dir, len ) )
+                    return false;
+            }
+            else
+            {
+                float d = 0.0f;
+                if ( KiwiDrop_TraceModelCached( o.node, s, dir, &d, nullptr ) == 1 && d > 1.0e-3f && d < len )
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    // Faces turned away from the eye seed no edge targets (a brush's own back edges), except
+    // in x-ray, where hidden geometry is fair game.
+    inline bool BackFacing( const float *normal, const float *dir )
+    {
+        return Dot3( normal, dir ) >= 0.0f && !KiwiView_XRay();
+    }
+
     // GrowLine's segment sources, one kind each: brush edges never join construction lines.
     // The brushes that may contribute are gathered ONCE per BrushDivisions into a flat array
     // (KIWI 2026-10-11, profiled 9% of a drag frame: every growth pass walked the map's list
@@ -840,7 +1199,7 @@ namespace
             {
                 const winding_t *w = def->faces[f].w;
                 if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
-                  || Dot3( def->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                  || BackFacing( def->faces[f].plane.normal, ray.dir ) )   // KIWI: x-ray takes back faces
                     continue;
                 for ( int i = 0; i < w->numpoints; ++i )
                 {
@@ -1081,7 +1440,7 @@ namespace
             {
                 const winding_t *w = def->faces[f].w;
                 if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
-                  || Dot3( def->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                  || BackFacing( def->faces[f].plane.normal, ray.dir ) )   // KIWI: x-ray takes back faces
                     continue;
                 for ( int i = 0; i < w->numpoints; ++i )
                 {
@@ -1200,7 +1559,7 @@ namespace
             {
                 const winding_t *w = A->faces[f].w;
                 if ( !w || w->numpoints < 2 || w->numpoints > MAX_POINTS_ON_WINDING
-                  || Dot3( A->faces[f].plane.normal, ray.dir ) >= 0.0f )
+                  || BackFacing( A->faces[f].plane.normal, ray.dir ) )   // KIWI: x-ray takes back faces
                     continue;
                 for ( int i = 0; i < w->numpoints; ++i )
                 {
@@ -1216,7 +1575,7 @@ namespace
                         float n[3];
                         for ( int k = 0; k < 3; ++k )
                             n[k] = (float)face.plane.normal[k];
-                        if ( Dot3( n, ray.dir ) >= 0.0f )
+                        if ( BackFacing( n, ray.dir ) )            // KIWI: x-ray takes back faces
                             continue;
                         const float d0 = Dot3( n, p ) - (float)face.plane.dist;
                         const float d1 = Dot3( n, q ) - (float)face.plane.dist;
@@ -1460,6 +1819,118 @@ namespace
         }
         return count;
     }
+    // KIWI (2026-10-21, D-XRAY): the nearest brush corner / patch control point (edges ==
+    // false) or nearest brush-edge point (edges == true) within Pick's own radius that
+    // `visible` passes.  Pick() keeps ONE winner per kind, so once line of sight rejects a
+    // hidden winner nothing would be left; this ranks the alternatives nearest-on-screen
+    // first with Pick's admission rules and tests at most KSNAP_ALT_TRY of them.
+    enum { KSNAP_ALT_TRY = 24 };
+    template <class G>
+    bool NearestVisiblePoint( const ray_t &ray, float curX, float curY, unsigned pickFlags,
+                              bool edges, const G &visible, pick_result_t *out )
+    {
+        struct altCand_t
+        {
+            float      d;
+            float      p[3];
+            sel_item_t item;
+        };
+        altCand_t c[KSNAP_ALT_TRY];
+        int n = 0;
+        const float reach = edges ? PICK_EDGE_PIXELS : PICK_VERT_PIXELS;
+        auto offer = [&]( float d, const float *p, const sel_item_t &item )
+        {
+            if ( d > reach )
+                return;
+            int at = n;
+            while ( at > 0 && c[at - 1].d > d )
+                --at;
+            if ( at >= KSNAP_ALT_TRY )
+                return;
+            const int last = n < KSNAP_ALT_TRY ? n : KSNAP_ALT_TRY - 1;
+            for ( int i = last; i > at; --i )
+                c[i] = c[i - 1];
+            c[at].d = d;
+            Copy3( p, c[at].p );
+            c[at].item = item;
+            if ( n < KSNAP_ALT_TRY )
+                ++n;
+        };
+        if ( !Pick_ProjectBegin() )
+            return false;
+        exclSet_t excluded;
+        GatherExcluded( pickFlags, excluded );
+        selbrush_t *lists[] = { &active_brushes, &selected_brushes };
+        for ( selbrush_t *head : lists )
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            if ( Excluded( excluded, b ) || !Pick_BrushPickable( b ) || Pick_IsModelProxy( b ) )
+                continue;
+            const brush_t *def = b->def;
+            if ( !def || !BoundsNearRay( def, ray, reach * 2.0f ) )
+                continue;
+            if ( b->patch )
+            {
+                // Patches offer their control points only (kiwi_pick.cpp ScanList).
+                const patchMesh_t *pm = def->patch;
+                if ( edges || !pm || pm->width <= 0 || pm->height <= 0 || pm->width > 16 || pm->height > 16 )
+                    continue;
+                for ( int col = 0; col < pm->width; ++col )
+                    for ( int row = 0; row < pm->height; ++row )
+                    {
+                        const float *xyz = pm->ctrl[col][row].xyz;
+                        float sx, sy;
+                        if ( Pick_Project( xyz, &sx, &sy ) )
+                            offer( PixelDist( sx, sy, curX, curY ), xyz,
+                                   Sel_MakePatchPoint( b, col * pm->height + row ) );
+                    }
+                continue;
+            }
+            if ( !def->faces )
+                continue;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                if ( !w || w->numpoints < 1 || w->numpoints > MAX_POINTS_ON_WINDING )
+                    continue;
+                for ( int i = 0; i < w->numpoints; ++i )
+                {
+                    float ax, ay;
+                    if ( !Pick_Project( w->p[i], &ax, &ay ) )
+                        continue;
+                    if ( !edges )
+                    {
+                        offer( PixelDist( ax, ay, curX, curY ), w->p[i], Sel_MakeVertex( b, f, i ) );
+                        continue;
+                    }
+                    if ( w->numpoints < 3 )
+                        continue;
+                    const int j = ( i + 1 ) % w->numpoints;
+                    float bx, by, t = 0.0f;
+                    if ( !Pick_Project( w->p[j], &bx, &by ) )
+                        continue;
+                    const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t );
+                    float mid[3];
+                    for ( int k = 0; k < 3; ++k )
+                        mid[k] = w->p[i][k] + ( w->p[j][k] - w->p[i][k] ) * t;
+                    offer( d, mid, Sel_MakeEdge( b, f, i ) );
+                }
+            }
+        }
+        for ( int i = 0; i < n; ++i )
+        {
+            if ( !visible( c[i].p ) )
+                continue;
+            out->valid      = true;
+            out->item       = c[i].item;
+            out->screenDist = c[i].d;
+            out->haveNormal = false;
+            Copy3( c[i].p, out->point );
+            return true;
+        }
+        return false;
+    }
+
     // Single un-aimed incident direction used as the planar relative-angle base.
     bool AnchorLineDir( const float anchor[3], float outDir[3] )
     {
@@ -1756,13 +2227,18 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         if ( t > surfT )
             surfT = t;
     }
-    // This occlusion test is the only candidate depth gate.
+    // The candidate depth gates: the surface under the cursor, then (KIWI 2026-10-21,
+    // D-XRAY) a clear line of sight from the eye.  X-ray lifts both: "then anything".
+    // Construction geometry draws on top of the scene (the camera's overlay tail, after its
+    // depth clear), so it is never hidden by a wall: construction candidates take Surf()
+    // only, exactly as before.  Scene geometry (brush, patch, model points) takes the call.
     struct CandGate
     {
         bool         on;                 // surface occlusion enabled
+        bool         los;                // line-of-sight test armed (x-ray off)
         float        surfT;
         const ray_t *ray;
-        bool operator()( const float *p ) const
+        bool Surf( const float *p ) const
         {
             if ( !p )
                 return true;
@@ -1781,9 +2257,27 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             }
             return true;
         }
+        // `ignore` neither occludes in the line-of-sight test; `skipSurf` drops the surface
+        // gate (a cylinder's own shell under the cursor must not hide its axis centre).
+        bool Scene( const float *p, const selbrush_t *ignore, bool skipSurf ) const
+        {
+            if ( !p )
+                return true;
+            if ( !skipSurf && !Surf( p ) )
+                return false;
+            return !los || LosVisible( p, ignore );
+        }
+        bool operator()( const float *p ) const
+        {
+            return Scene( p, nullptr, false );
+        }
     };
+    const bool xray = KiwiView_XRay();
+    // Every candidate lies within PICK_VERT_PIXELS (8 px) of the query ray.
+    LosBegin( ray, pickFlags, PICK_VERT_PIXELS );
     CandGate visible;
-    visible.on      = haveSurfDepth;
+    visible.on      = haveSurfDepth && !xray;
+    visible.los     = !xray;
     visible.surfT   = surfT;
     visible.ray     = &ray;
     // Gather each construction candidate class once.
@@ -1821,7 +2315,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         }
     }
     // Point rank 1: construction anchor, 7 px and not occluded.
-    if ( conAnchor.hit && visible( conAnchor.pos ) )
+    if ( conAnchor.hit && visible.Surf( conAnchor.pos ) )
     {
         out->valid = true;
         out->type  = SNAP_ENDPOINT;
@@ -1832,8 +2326,19 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
     // Point rank 2: brush corner, patch control point or xmodel mesh vertex (KIWI 2026-10-03),
     // 8 px and not occluded; the nearer on screen wins.
-    const pick_result_t vert = Pick( ray, SEL_MASK_VERTEX, pickFlags );
-    const bool brushVert = vert.valid && visible( vert.point );
+    pick_result_t vert = Pick( ray, SEL_MASK_VERTEX, pickFlags );
+    bool brushVert = vert.valid && visible( vert.point );
+    // KIWI (D-XRAY): Pick names only the NEAREST corner on screen; when that one is hidden,
+    // the nearest one the camera can see within the same radius takes its place.
+    if ( vert.valid && !brushVert && haveCursorPx )
+    {
+        pick_result_t alt;
+        if ( NearestVisiblePoint( ray, curX, curY, pickFlags, false, visible, &alt ) )
+        {
+            vert      = alt;
+            brushVert = true;
+        }
+    }
     kiwiModelVert_t modelVerts[KSNAP_MODEL_VERT_TRY];
     const int modelVertCount = haveCursorPx
         ? KiwiDrop_ModelVertsNear( curX, curY, KSNAP_R_VERTEX, ( pickFlags & PICKF_EXCLUDE_SELECTED ) != 0,
@@ -1846,7 +2351,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         // sees every resident mesh, so model vertices answer to the nearer of the two.
         CandGate modelVisible = visible;
         float solidDist = 0.0f;
-        if ( Pick_TraceSolid( ray.origin, ray.dir, &solidDist ) )
+        if ( !xray && Pick_TraceSolid( ray.origin, ray.dir, &solidDist ) )   // KIWI: x-ray = no gate
         {
             modelVisible.on    = true;
             modelVisible.surfT = haveSurfDepth && visible.surfT < solidDist ? visible.surfT : solidDist;
@@ -1904,7 +2409,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 Copy3( x, brushX.pos );
             } );
         const conBest_t *isect = 0;
-        if ( conIsect.hit && visible( conIsect.pos ) )
+        if ( conIsect.hit && visible.Surf( conIsect.pos ) )
             isect = &conIsect;
         if ( conXBrush.hit && visible( conXBrush.pos ) && ( !isect || conXBrush.dist < isect->dist ) )
             isect = &conXBrush;
@@ -1921,7 +2426,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         }
     }
     // Point rank 3b: construction midpoint or quarter point, 7 px and not occluded.
-    if ( conMid.hit && visible( conMid.pos ) )
+    if ( conMid.hit && visible.Surf( conMid.pos ) )
     {
         out->valid = true;
         out->type  = conMid.quarter ? SNAP_EDGE_QUARTER : SNAP_EDGE_MID;
@@ -1935,7 +2440,14 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         return true;                     // `source` stays null — see the header
     }
     // One brush-edge Pick supplies the line-rank point and its direction.
-    const pick_result_t edge = Pick( ray, SEL_MASK_EDGE, pickFlags );
+    pick_result_t edge = Pick( ray, SEL_MASK_EDGE, pickFlags );
+    // KIWI (D-XRAY): as for corners, a hidden nearest edge yields to the nearest visible one.
+    if ( edge.valid && haveCursorPx && !visible( edge.point ) )
+    {
+        pick_result_t alt;
+        if ( NearestVisiblePoint( ray, curX, curY, pickFlags, true, visible, &alt ) )
+            edge = alt;
+    }
     if ( edge.valid )
     {
         float ea[3], eb[3];
@@ -2013,7 +2525,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
                 if ( pixels > bestPixels || ( fabsf( pixels-bestPixels ) < 0.01f && depth >= bestDepth ) ) continue;
                 // A cylinder's own shell must not hide its centre; unrelated
                 // foreground geometry still occludes this target normally.
-                if ( surf.item.brush != b && !visible( pos ) ) continue;
+                if ( !visible.Scene( pos, b, surf.item.brush == b ) ) continue;   // KIWI: own shell skips LOS too
                 best.valid = true;
                 best.type = SNAP_FACE_CENTER;
                 best.source = Sel_MakeObject( b );
@@ -2114,7 +2626,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // Line rank: visible brush edge, visible construction segment, and axis guide
     // compete by SCREEN-PIXEL distance. Axis guides are exempt from surface occlusion.
     const bool edgeVis = edge.valid && visible( edge.point );
-    const bool conSegVis = conSeg.hit && visible( conSeg.pos );
+    const bool conSegVis = conSeg.hit && visible.Surf( conSeg.pos );
     if ( edgeVis || conSegVis || axisBest.hit )
     {
         const bool useCon = conSegVis && ( !edgeVis || conSeg.dist < edge.screenDist );
@@ -2515,19 +3027,25 @@ void KiwiSnap_DrawFaceAccents()
     // (brush and construction), the targets snap rank 3b/4 locks onto.  Independent of the
     // face under the cursor, so a roof edge shows its nubs with the pointer just outside it.
     // Width-2 lines so a 3 px nub reads solid; one nub per spot (edges are shared).
+    // KIWI (D-XRAY): advertise only what snapping would take - with x-ray off, scene nubs and
+    // model dots the camera cannot see are not drawn (construction nubs always are: their
+    // lines draw on top of the scene).
+    LosBegin( ray, cmd->PickFlags(), KSNAP_DIV_REACH_PX );
     {
         const float curX = (float)x, curY = (float)y;
         float drawn[KSNAP_DIV_DRAW_MAX][2];
         int   count = 0;
         KiwiLines_Begin( KSNAP_DIV_DRAW_MAX * ( KSNAP_ACCENT_SEGS + KSNAP_ACCENT_SEGS / 2 ), 2 );
         KiwiLines_Color( KSNAP_COL_MARK[0], KSNAP_COL_MARK[1], KSNAP_COL_MARK[2] );
-        auto nub = [&]( const divPt_t &d )
+        auto nubOf = [&]( const divPt_t &d, bool scene )
         {
             if ( count >= KSNAP_DIV_DRAW_MAX || d.segPx < KSNAP_NUB_MIN_SEG_PX )
                 return;
             for ( int i = 0; i < count; ++i )
                 if ( fabsf( drawn[i][0] - d.px ) < 1.5f && fabsf( drawn[i][1] - d.py ) < 1.5f )
                     return;
+            if ( scene && !LosVisible( d.pos ) )
+                return;
             drawn[count][0] = d.px;
             drawn[count][1] = d.py;
             ++count;
@@ -2536,9 +3054,10 @@ void KiwiSnap_DrawFaceAccents()
             EmitDisc( c, p, ( d.quarter ? KSNAP_QUARTER_NUB_PX : KSNAP_MID_NUB_PX ) * WorldPerPixel( c, d.pos ),
                       KSNAP_ACCENT_SEGS, true );
         };
+        auto nub = [&]( const divPt_t &d ) { nubOf( d, false ); };   // construction
         ConDivisions( curX, curY, KSNAP_DIV_REACH_PX, nub );
         BrushDivisions( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
-                        [&]( const divPt_t &d, selbrush_t *, int, int ) { nub( d ); } );
+                        [&]( const divPt_t &d, selbrush_t *, int, int ) { nubOf( d, true ); } );
         // Brush x brush crossings (rank 3) take the midpoint nub's size.
         BrushCrossings( ray, curX, curY, KSNAP_DIV_REACH_PX, PICKF_NONE,
                         [&]( const float *x, float px, float py )
@@ -2549,7 +3068,7 @@ void KiwiSnap_DrawFaceAccents()
             d.py      = py;
             d.segPx   = KSNAP_NUB_MIN_SEG_PX;
             d.quarter = false;
-            nub( d );
+            nubOf( d, true );
         } );
         KiwiLines_Flush();
     }
@@ -2570,6 +3089,8 @@ void KiwiSnap_DrawFaceAccents()
             KiwiLines_Color( KSNAP_COL_MARK[0], KSNAP_COL_MARK[1], KSNAP_COL_MARK[2] );
             for ( int i = 0; i < n; ++i )
             {
+                if ( !LosVisible( mv[i].pos ) )          // KIWI (D-XRAY): hidden: no dot
+                    continue;
                 float p[3];
                 Nudge( c, mv[i].pos, p );
                 EmitDisc( c, p, KSNAP_ACCENT_PIX * WorldPerPixel( c, mv[i].pos ), KSNAP_ACCENT_SEGS, true );

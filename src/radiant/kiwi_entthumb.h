@@ -36,6 +36,7 @@ struct kiwiModelStats_t
     int  lod0Verts;
     int  totalTris;          // every LOD
     int  collSurfs;
+    int  collLod;            // KIWI: -1 = none (a dyn_model then fails the map load)
     int  materialCount;      // LOD 0 skins, deduplicated
     char materials[8][64];
 };

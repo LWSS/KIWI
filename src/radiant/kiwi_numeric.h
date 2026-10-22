@@ -62,6 +62,10 @@ bool KiwiNum_TabLive();
 // First call activates focus; later calls cycle it. False only when none is editable.
 bool KiwiNum_TabCycle( bool backwards );
 
+// KIWI: focus one editable field directly, as if Tab had landed on it (the options
+// panel's Tab ring visits HUD fields it has no row for).  False when not editable.
+bool KiwiNum_FocusField( int field );
+
 // Key input
 // Feed one key.  True = CONSUMED by the numeric entry.
 bool KiwiNum_Key( int vk, unsigned int mods );

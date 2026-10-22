@@ -10,9 +10,11 @@
 #include "kiwi_command.h"
 #include "kiwi_numeric.h"
 #include "kiwi_ported.h"
+#include "kiwi_str.h"
 #include "kiwi_units.h"
 
 #include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>   // KIWI: ActiveIdWindow / ClearActiveID / NavMoveRequestCancel
 
 #include <math.h>
 #include <stdio.h>
@@ -32,6 +34,7 @@ namespace
     const void *s_forCmd     = nullptr;  // the command these indices belong to
     int         s_tabRow     = -1;
     int         s_pendingRow = -1;
+    int         s_hudField   = -1;       // KIWI: the HUD field Tab last landed on, or -1
 
     bool NumericRow( const kiwiOption_t &o ) { return o.kind == KOPT_INT || o.kind == KOPT_NUMFIELD; }
 
@@ -39,6 +42,93 @@ namespace
     {
         const kiwiOption_t &o = opts[i];
         return !( o.enabledBy >= 0 && o.enabledBy < count ) || cmd->OptionValue( o.enabledBy ) != 0;
+    }
+
+    // KIWI (2026-10-19, user: "i cant type in diameter, only the thickness and density"):
+    // Tab with a panel used to walk only the panel rows, so a HUD field with no row (patch
+    // cylinder radius, patch extrude length) was unreachable.  The ring is now the HUD fields
+    // the panel does not already show, then the panel's numeric rows.  A field counts as
+    // shown by a NUMFIELD row bound to it, a row whose label names it ("Density" / density,
+    // "Angle (degrees)" / angle), or - for a count - any integer row (pipe sides = vertex count).
+    struct tabStop_t { bool hud; int index; };
+    const int KOPT_MAX_STOPS = KNUM_MAX_FIELDS + 32;
+
+    bool HudFieldShown( const kiwiOption_t *opts, int count, int f, const kiwiNumField_t &def )
+    {
+        for ( int i = 0; i < count; ++i )
+        {
+            const kiwiOption_t &o = opts[i];
+            if ( !NumericRow( o ) )
+                continue;
+            if ( o.kind == KOPT_NUMFIELD && o.field == f )
+                return true;
+            if ( o.label && KiwiStr_ContainsNoCase( o.label, def.label ) )
+                return true;
+            if ( o.kind == KOPT_INT && def.kind == KNUM_COUNT )
+                return true;
+        }
+        return false;
+    }
+
+    int TabStops( KiwiEditorCommand *cmd, const kiwiOption_t *opts, int count, tabStop_t *out )
+    {
+        int n = 0;
+        bool anyRow = false;
+        for ( int f = 0; f < KiwiNum_FieldCount() && n < KOPT_MAX_STOPS; ++f )
+        {
+            const kiwiNumField_t *def = KiwiNum_Field( f );
+            if ( def && !def->readOnly && def->label && def->label[0]   // unnamed = the default slot
+              && !HudFieldShown( opts, count, f, *def ) )
+                out[n++] = { true, f };
+        }
+        for ( int i = 0; i < count && n < KOPT_MAX_STOPS; ++i )
+            if ( NumericRow( opts[i] ) && RowEnabled( cmd, opts, count, i ) )
+            {
+                out[n++] = { false, i };
+                anyRow = true;
+            }
+        return anyRow ? n : 0;         // no numeric row: no panel ring, the caller keeps Tab
+    }
+
+    // Step the ring.  `panelInput` = a panel slider is open for typing right now (Tab reached
+    // us through ImGui, not the key funnel), so leaving for a HUD field must close it.
+    bool StepRing( KiwiEditorCommand *cmd, const kiwiOption_t *opts, int count, bool backwards,
+                   bool panelInput )
+    {
+        tabStop_t stops[KOPT_MAX_STOPS];
+        const int n = TabStops( cmd, opts, count, stops );
+        if ( n <= 0 )
+            return false;
+
+        int cur = -1;
+        for ( int k = 0; k < n && cur < 0; ++k )
+        {
+            if ( s_pendingRow >= 0 )
+                { if ( !stops[k].hud && stops[k].index == s_pendingRow ) cur = k; }
+            else if ( s_hudField >= 0 )
+                { if ( stops[k].hud && stops[k].index == s_hudField ) cur = k; }
+            else if ( s_tabRow >= 0 && !stops[k].hud && stops[k].index == s_tabRow )
+                cur = k;
+        }
+        const int next = ( cur < 0 ) ? ( backwards ? n - 1 : 0 )
+                                     : ( ( cur + ( backwards ? -1 : 1 ) ) % n + n ) % n;
+
+        if ( stops[next].hud )
+        {
+            if ( panelInput )
+                ImGui::ClearActiveID();    // the slider applies its typed text as it closes
+            s_hudField   = stops[next].index;
+            s_tabRow     = -1;
+            s_pendingRow = -1;
+            KiwiNum_FocusField( s_hudField );
+        }
+        else
+        {
+            s_hudField   = -1;
+            s_pendingRow = stops[next].index;
+        }
+        g_nUpdateBits |= 1;
+        return true;
     }
 
     // Open this row for typing on the draw about to submit it; a double-click asks again.
@@ -55,7 +145,10 @@ namespace
     {
         if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenBlockedByActiveItem )
           && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+        {
             s_pendingRow = row;
+            s_hudField   = -1;
+        }
     }
 
     // ImGui has no segmented widget; active-styled buttons emulate one.
@@ -91,8 +184,9 @@ namespace
     }
 
     // Slider with steppers.  KIWI (2026-09-28): typeable - double-click, Ctrl+click or Tab
-    // opens it as a text field (it was drag-only); the steppers are not Tab stops, so Tab
-    // inside a typed field goes straight to the next numeric row.
+    // opens it as a text field (it was drag-only).  KIWI (2026-10-19): no part of a row is an
+    // ImGui Tab stop; Tab inside a typed field steps StepRing (KiwiCmdOpts_Draw), which can
+    // also leave the panel for a HUD field.
     bool IntRow( int row, int cur, int lo, int hi, int *outValue, bool enabled )
     {
         bool changed = false;
@@ -108,6 +202,7 @@ namespace
         ImGui::SetNextItemWidth( -( bw + ImGui::GetStyle().ItemSpacing.x ) );
         int v = cur;
         BeforeNumeric( row );
+        ImGui::PushItemFlag( ImGuiItemFlags_NoTabStop, true );   // SetKeyboardFocusHere still lands
         if ( ImGui::SliderInt( "##i", &v, lo, hi, "%d",
                                ImGuiSliderFlags_AlwaysClamp ) && enabled && v != cur )
         {
@@ -116,6 +211,7 @@ namespace
             *outValue = v;
             changed   = true;
         }
+        ImGui::PopItemFlag();
         AfterNumeric( row );
         ImGui::SameLine();
         ImGui::PushItemFlag( ImGuiItemFlags_NoTabStop, true );
@@ -143,6 +239,7 @@ void KiwiCmdOpts_Draw()
         s_forCmd     = cmd;              // a new command: its rows are not the old indices
         s_tabRow     = -1;
         s_pendingRow = -1;
+        s_hudField   = -1;
     }
 
     float ix, iy, iw, ih;
@@ -173,6 +270,20 @@ void KiwiCmdOpts_Draw()
     {
         ImGui::End();
         return;
+    }
+
+    // KIWI (2026-10-19): Tab while a row is open for typing reaches ImGui, not the key funnel
+    // (WantTextInput).  Step the shared ring here, before the rows submit, and drop ImGui's
+    // own tabbing request so it cannot reopen a row behind us.
+    {
+        ImGuiContext &g = *ImGui::GetCurrentContext();
+        const ImGuiIO &io = ImGui::GetIO();
+        if ( g.ActiveId != 0 && g.ActiveIdWindow == ImGui::GetCurrentWindow()
+          && !io.KeyCtrl && !io.KeyAlt && ImGui::IsKeyPressed( ImGuiKey_Tab, false ) )
+        {
+            ImGui::NavMoveRequestCancel();
+            StepRing( cmd, opts, count, io.KeyShift, true );
+        }
     }
 
     for ( int i = 0; i < count; ++i )
@@ -234,6 +345,7 @@ void KiwiCmdOpts_Draw()
             float shown = length ? Units_ToDisplay( world ) : world;
             ImGui::SetNextItemWidth( -1.0f );
             BeforeNumeric( i );
+            ImGui::PushItemFlag( ImGuiItemFlags_NoTabStop, true );
             if ( ImGui::SliderFloat( "##n", &shown, o.lo, o.hi, "%.2f",
                                      ImGuiSliderFlags_AlwaysClamp ) && enabled )
             {
@@ -243,6 +355,7 @@ void KiwiCmdOpts_Draw()
                 cmd->NumericFieldChanged( o.field, true, Units_FromDisplay( shown ) );
                 g_nUpdateBits |= 1;
             }
+            ImGui::PopItemFlag();
             AfterNumeric( i );
             break;
         }
@@ -292,21 +405,7 @@ bool KiwiCmdOpts_TabFocus( bool backwards )
     if ( s_forCmd != (const void *)cmd )
     {
         s_forCmd = cmd;
-        s_tabRow = s_pendingRow = -1;
+        s_tabRow = s_pendingRow = s_hudField = -1;
     }
-    const int from = ( s_pendingRow >= 0 ) ? s_pendingRow : s_tabRow;
-    for ( int step = 1; step <= count; ++step )
-    {
-        int i = backwards ? from - step : from + step;
-        i = ( ( i % count ) + count ) % count;
-        if ( from < 0 && !backwards )
-            i = step - 1;                 // first Tab: the first numeric row
-        if ( NumericRow( opts[i] ) && RowEnabled( cmd, opts, count, i ) )
-        {
-            s_pendingRow = i;
-            g_nUpdateBits |= 1;
-            return true;
-        }
-    }
-    return false;
+    return StepRing( cmd, opts, count, backwards, false );   // first Tab: the first stop
 }

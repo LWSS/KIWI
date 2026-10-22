@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34171, modal none (block full).
+// 34100..34199 the second instant block. Next free: instant 34173, modal none (block full).
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -136,6 +136,9 @@
 #define KIWI_CMD_CAULK_FACES        34131   // "Caulk Selection" (End, modern profile)
 #define KIWI_CMD_UNCAULK_FACES      34169   // "Uncaulk Selection" (Shift+End, modern profile)
 #define KIWI_CMD_FORCE_UNHIDE       34170   // "Force Unhide All..." (clears red-eye locks; confirms)
+// Persistent camera view modes beside the view cube (kiwi_section.h, D-EDGEOUTLINE / D-XRAY).
+#define KIWI_CMD_VIEW_EDGE_OUTLINE  34171   // "Edge Outlines" (dark visible-edge lines, view-cube chip)
+#define KIWI_CMD_VIEW_XRAY          34172   // "X-ray" (edges through walls + snap through walls)
 #define KIWI_CMD_MIRROR             34068   // MODAL: Mirror (X / Y / Z previews the flip; kiwi_dupe.cpp)
 #define KIWI_CMD_PHYS_DROP          34069   // MODAL: Physics Drop - selected models fall and rest (kiwi_physdrop)
 

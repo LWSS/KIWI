@@ -386,6 +386,55 @@ namespace
         return hot;
     }
 
+    // KIWI (2026-10-21): the edge-outline and x-ray chips, left of the grid chip.
+    const float KVC_MODE_W   = 20.0f;
+    const float KVC_MODE_GAP = 5.0f;
+
+    // One 20-pixel view-mode chip in the grid chip's style: an iso-cube glyph whose front
+    // edges are always drawn; the x-ray glyph adds the three hidden back edges in a dimmer
+    // ink.  Returns hover; the caller owns tooltip and click.
+    bool DrawModeChip( float x0, float y0, float x1, float y1, bool on, bool xray )
+    {
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const bool   over  = ImGui::IsWindowHovered( ImGuiHoveredFlags_ChildWindows )
+                          && mouse.x >= x0 && mouse.x <= x1
+                          && mouse.y >= y0 && mouse.y <= y1;
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                           over ? IM_COL32( 62, 66, 78, 225 ) : IM_COL32( 18, 18, 22, 175 ), 4.0f );
+        dl->AddRect( ImVec2( x0, y0 ), ImVec2( x1, y1 ),
+                     IM_COL32( 80, 84, 96, 150 ), 4.0f, 0, 1.0f );
+
+        const ImU32 ink    = on ? IM_COL32( 255, 226, 110, 255 ) : IM_COL32( 120, 126, 138, 220 );
+        const ImU32 hidden = on ? IM_COL32( 255, 226, 110, 130 ) : IM_COL32( 120, 126, 138, 110 );
+        const float cx = ( x0 + x1 ) * 0.5f;
+        const float cy = ( y0 + y1 ) * 0.5f;
+        const float r  = 6.0f;
+        // Hexagon corners at 90 + 60k degrees (screen y is down).
+        ImVec2 h[6];
+        for ( int k = 0; k < 6; ++k )
+        {
+            const float th = (float)( ( 90.0 + 60.0 * k ) * KIWI_PI / 180.0 );
+            h[k] = ImVec2( cx + cosf( th ) * r, cy - sinf( th ) * r );
+        }
+        const ImVec2 c( cx, cy );
+        if ( xray )
+        {
+            // Back corner sits where the front one does in a flat drawing: the hidden Y
+            // runs from the centre to the top, lower-left and lower-right corners.
+            dl->AddLine( c, h[0], hidden, 1.0f );
+            dl->AddLine( c, h[2], hidden, 1.0f );
+            dl->AddLine( c, h[4], hidden, 1.0f );
+        }
+        for ( int k = 0; k < 6; ++k )
+            dl->AddLine( h[k], h[( k + 1 ) % 6], ink, 1.0f );
+        // Front Y: centre to upper-left, bottom and upper-right.
+        dl->AddLine( c, h[1], ink, 1.0f );
+        dl->AddLine( c, h[3], ink, 1.0f );
+        dl->AddLine( c, h[5], ink, 1.0f );
+        return over;
+    }
+
     // Projection pill; returned hover is claimed from the camera image.
     bool DrawProjButton( float imgMinX, float imgMinY, float imgW, float imgH )
     {
@@ -476,7 +525,40 @@ namespace
                                        "nothing.  Ortho has its own switch." );
             }
         }
-        return hot || pgHot;
+
+        // KIWI (2026-10-21, D-EDGEOUTLINE / D-XRAY): the two view-mode chips continue the
+        // row leftward - [x-ray][edges][grid][O/P] - same box, same ink states as the grid
+        // chip, and each is omitted on its own when it would cross the image inset.
+        bool modeHot = false;
+        {
+            const float ex1 = x0 - KVC_PGRID_GAP - KVC_PGRID_W - KVC_MODE_GAP;
+            const float ex0 = ex1 - KVC_MODE_W;
+            const float xx1 = ex0 - KVC_MODE_GAP;
+            const float xx0 = xx1 - KVC_MODE_W;
+            if ( ex0 >= imgMinX + KVC_MARGIN )
+            {
+                const bool on = KiwiView_EdgeOutline();
+                if ( DrawModeChip( ex0, y0, ex1, y1, on, false ) )
+                {
+                    modeHot = true;
+                    ImGui::SetTooltip( "Edge outlines" );
+                    if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                        KiwiView_SetEdgeOutline( !on );
+                }
+            }
+            if ( xx0 >= imgMinX + KVC_MARGIN )
+            {
+                const bool on = KiwiView_XRay();
+                if ( DrawModeChip( xx0, y0, xx1, y1, on, true ) )
+                {
+                    modeHot = true;
+                    ImGui::SetTooltip( "X-ray" );
+                    if ( ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+                        KiwiView_SetXRay( !on );
+                }
+            }
+        }
+        return hot || pgHot || modeHot;
     }
 
     // Grid readout and stepper; returned hover is claimed from the camera image.

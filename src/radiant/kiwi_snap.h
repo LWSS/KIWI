@@ -56,6 +56,13 @@
 // and axis guides are deliberately exempt. Planar placers may extend the reference
 // depth to their own plane.
 //
+// KIWI (2026-10-21, D-XRAY): with X-RAY OFF (kiwi_section.h KiwiView_XRay) every
+// brush / patch / model candidate must also be in the camera's line of sight - nothing
+// drawn may lie between the eye and it, beyond 2.5 SCREEN PIXELS (min 0.25 WORLD UNITS)
+// of slack - and a hidden Pick winner yields to the nearest visible point in its radius.
+// Construction candidates draw on top of the scene and keep the surface test only. With
+// X-RAY ON neither test runs and back faces seed edge targets: every point is offered.
+//
 // With snapping disengaged, SNAP_NONE is a valid raw answer. Raw resolution is the
 // planar placer's plane, else the surface hit, else ray intersection with Z=0, else
 // a view-aligned plane through the tool anchor (or KSNAP_FALLBACK_DIST down the ray).

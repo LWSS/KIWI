@@ -1379,7 +1379,10 @@ void BuildLightTransfers(int threadCount)
     }
     else
     {
-        ForEachQuantum(g_triCount, BuildLightTransfers_Callback, threadCount);
+        /* KIWI: with Embree the transport rays are traced ahead on worker
+         * threads; the ordered pass itself is unchanged (compile.c). */
+        if (!KiwiXfer_BuildLightTransfers())
+            ForEachQuantum(g_triCount, BuildLightTransfers_Callback, threadCount);
     }
 }
 
@@ -2424,6 +2427,8 @@ void ProcessLightingSampleArea(float areaX2, float *centroid,
      * `subAreaFactor > 0` sanity checks rely on.  skyFactor is the TOTAL
      * clamp scaling the energy colors that NormalizeLightTransfers divides
      * by sample->areaX2. */
+    if (g_kiwiXferActive)
+        KiwiXfer_BeginCell(areaIndex, worldPos, basis, sampleResult.lock); /* KIWI: Embree MT hits */
     if (!FindLightingTransfers_inner(mapping->param, worldPos, basis,
                                      subAreaWeight, areaWeight,
                                      mapping->primaryLightIndex,

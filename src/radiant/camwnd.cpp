@@ -4042,6 +4042,15 @@ void CamWnd_Draw( HWND hwnd )
     //  pass.  They now run BEFORE the world — see the hook near the top of this
     //  function for the whole argument.  Nothing else moved.)
 
+    // KIWI: EDGE OUTLINE / X-RAY view modes (kiwi_section.h, D-EDGEOUTLINE / D-XRAY).  Here,
+    // after every world/entity/patch/selected pass and BEFORE the depth clear below, because
+    // the visible-edge pass is depth-tested against the finished scene.  Immediate line
+    // commands only (no surf accumulation is open here); no-op while both modes are off.
+    {
+        extern void KiwiView_DrawEdges();     // kiwi_section.cpp
+        KiwiView_DrawEdges();
+    }
+
     // SELECTED-BRUSH WHITE OUTLINE (!dontDrawSelectedOutlines), as in the binary:
     // R_AddClearCmd(6 = depth+stencil) -> DrawRegions -> pack colorWhite ->
     // each selected non-patch brush at WIREFRAME tech 29 through the SAME DrawBrush the world

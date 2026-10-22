@@ -5,6 +5,7 @@
 #include "kiwi_fmt.h"
 // KIWI GLASS
 #include "kiwi_glass.h"
+#include "kiwi_modelbrowser.h"   // KiwiModelBrowser_DrawSelectedModelInfo
 // KIWI END
 #include "kiwi_ported.h"
 #include "kiwi_windows.h"
@@ -1213,6 +1214,9 @@ void ImGuiPanel_Entity_Draw()
                 return;
             }
             DrawOwnedSettingsLink();
+            // KIWI (2026-10-21, user: "I want this in the inspector as well if a model is
+            // selected to edit existing models"): the Models window's model section.
+            KiwiModelBrowser_DrawSelectedModelInfo( true );
 
             const KiwiEntSchema &schema = KiwiEntInspect_GetSchema(
                 edit_entity->eclass, eclasses.size() );

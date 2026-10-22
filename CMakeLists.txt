@@ -112,8 +112,20 @@ endif()
 
 option(KIWI_BUILD_COD4MAP "Build or expose the CoD4Map tool target" ON)
 option(KIWI_BUILD_COD4RAD "Build or expose the CoD4Rad tool target" ON)
-option(KIWI_COD4RAD_WITH_EMBREE "Build the optional Embree 4 ray-tracing extension" OFF)
-set(COD4RAD_EMBREE_ROOT "$ENV{EMBREEDIR}" CACHE PATH "Root of an Embree 4 x64 Windows SDK")
+# KIWI (2026-10-15): Embree backs the editor's Embree light quality; default it on
+# when the SDK is present (EMBREEDIR, else the gitignored .cod4rad-reference copy).
+set(_cod4rad_embree_default_root "$ENV{EMBREEDIR}")
+if(NOT _cod4rad_embree_default_root
+   AND EXISTS "${CMAKE_SOURCE_DIR}/.cod4rad-reference/embree-4.4.1.x64.windows/include/embree4/rtcore.h")
+    set(_cod4rad_embree_default_root "${CMAKE_SOURCE_DIR}/.cod4rad-reference/embree-4.4.1.x64.windows")
+endif()
+if(_cod4rad_embree_default_root)
+    set(_cod4rad_embree_default ON)
+else()
+    set(_cod4rad_embree_default OFF)
+endif()
+option(KIWI_COD4RAD_WITH_EMBREE "Build the optional Embree 4 ray-tracing extension" ${_cod4rad_embree_default})
+set(COD4RAD_EMBREE_ROOT "${_cod4rad_embree_default_root}" CACHE PATH "Root of an Embree 4 x64 Windows SDK")
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     if(KIWI_BUILD_COD4MAP)

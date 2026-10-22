@@ -15,11 +15,13 @@
 #include "kiwi_hints.h"
 #include "radiant_frame.h"
 #include "kiwi_command.h"
+#include "kiwi_camera.h"      // KiwiCam_Ortho - the perspective fly chips
 #include "kiwi_construct.h"
 #include "kiwi_grid.h"
 #include "kiwi_lollipop.h"
 #include "kiwi_physdrop.h"
 #include "kiwi_region.h"
+#include "kiwi_section.h"     // KiwiView_XRay - the snap-through-walls chip
 #include "kiwi_conselect.h"
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"
@@ -267,6 +269,10 @@ namespace
                 AddChip( chips, &n, extra[i].key ? extra[i].key : "?",
                                     extra[i].label ? extra[i].label : "" );
         }
+        // KIWI (D-XRAY): x-ray lifts the snap engine's line-of-sight test, so a snapping
+        // tool says so, like a disabled grid above.  Last: the tool's own keys come first.
+        if ( cmd && cmd->ShowsSnap() && KiwiView_XRay() )
+            AddChip( chips, &n, "X-ray", "Snaps through walls" );
         return n;
     }
 
@@ -278,6 +284,17 @@ namespace
         AddChip( chips, &n, "LMB",   "Pick" );
         AddChip( chips, &n, "Shift", "Add" );
         AddChip( chips, &n, "Ctrl",  "Remove" );
+        if ( !KiwiCam_Ortho() )
+        {
+            // KIWI (2026-10-21): perspective fly controls while nothing is selected.
+            AddChip( chips, &n, "WASD", "Fly" );
+            AddChip( chips, &n, "Q / E", "Down / Up" );
+            AddChip( chips, &n, "MMB",  "Look" );
+            char speed[40];
+            _snprintf( speed, sizeof( speed ), "Speed %.1fx", KiwiCam_FlySpeedScale() );
+            speed[sizeof( speed ) - 1] = '\0';
+            AddChip( chips, &n, "Wheel", speed );
+        }
         AddVerb( chips, &n, KIWI_CMD_DRAW_LINE,     "Line" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_RECT,     "Rect" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_CIRCLE,   "Circle" );

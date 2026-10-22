@@ -8,6 +8,7 @@
 // shortest repeated head/tail" (the first version) invented phantom prefixes such as
 // "cementpost_white" out of "cementpost_white_2_Default_2_Default" (critic review
 // 2026-09-30); the set name must look like a set name, not like "2_Default".
+// Newer exports may also use <prefix>_<Set>[_<variant>]_<Map>, with no repeat (see Decompose).
 
 #include "ki_textures.h"
 
@@ -145,6 +146,20 @@ struct Decomposed {
 // (scanning for a known prefix); otherwise the rightmost valid head is taken.
 bool Decompose(const std::vector<std::string>& t, std::size_t prefixTokens, Decomposed& out) {
     const std::size_t n = t.size();
+    // KIWI: InstaMAT's "<prefix>_<Set>[_<variant>]_<Map>" template (fakedoor, 2026-10-20)
+    // does not repeat the set, so the body ends in '_' (an empty last token). The set is
+    // one word; trailing digits are the variant, as in the repeated form.
+    if (n >= 3 && t[n - 1].empty()) {
+        std::size_t set = n - 2;
+        std::string variant;
+        if (AllDigits(t[set])) variant = t[set--];
+        if (set < 1 || !IsWord(t[set])) return false;
+        if (prefixTokens > 0 && set != prefixTokens) return false;
+        out.prefix = Join(t, 0, set);
+        out.set = t[set];
+        out.variant = variant;
+        return true;
+    }
     for (std::size_t k : {std::size_t{2}, std::size_t{1}}) {
         if (n < 2 * k + 1 || !IsSetName(t, n - k, k)) continue;
         auto headMatches = [&](std::size_t h) {

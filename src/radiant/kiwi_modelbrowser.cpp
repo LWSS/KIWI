@@ -21,6 +21,11 @@
 #include "kiwi_str.h"
 #include "kiwi_transform.h"
 #include "kiwi_windows.h"
+#include "radiant_registry.h"   // the dyn_model checkbox's remembered state
+#include <xanim/xmodel.h>       // XModel collision surfaces (hitbox view)
+#include "modelimport/ki_autocollide.h"   // player hulls from the mesh (match collision)
+#include "modelimport/ki_collision.h"     // WriteCollmap
+#include <filesystem>
 
 #include <algorithm>
 #include <float.h>
@@ -884,6 +889,21 @@ namespace
         return BoundsValid( mins, maxs );
     }
 
+    // The "Physics (dyn_model)" checkbox, remembered across runs.
+    int s_placeDyn = -1;
+    bool PlaceDynModel()
+    {
+        if ( s_placeDyn < 0 )
+            s_placeDyn = Radiant_ProfileGetInt( "KiwiUX", "ModelsPlaceDynModel", 0 ) != 0 ? 1 : 0;
+        return s_placeDyn != 0;
+    }
+    void SetPlaceDynModel( bool on )
+    {
+        s_placeDyn = on ? 1 : 0;
+        Radiant_ProfileSetInt( "KiwiUX", "ModelsPlaceDynModel", s_placeDyn );
+    }
+    const std::string &PlacePreset();   // the physPreset combo, below
+
     bool ResolvePlacement( const char *modelName, int imgX, int imgY,
                            float outOrigin[3], float outMins[3], float outMaxs[3] )
     {
@@ -971,7 +991,21 @@ namespace
             }
         }
 
-        const char *className = prefab ? "misc_prefab" : "misc_model";
+        // KIWI (2026-10-21, user: "Add a checkbox in the Models Window that creates a model as
+        // dyn_model (so it has physics)").  The game drops the whole map on a dyn_model whose
+        // xmodel has no collision LOD (DynEntity_load_obj.cpp), so those stay misc_model.
+        bool dyn = !prefab && PlaceDynModel();
+        if ( dyn )
+        {
+            kiwiModelStats_t stats;
+            if ( KiwiEntThumb_ModelStats( modelName, &stats ) && stats.collLod < 0 )
+            {
+                Sys_Printf( "Models browser: '%s' has no collision LOD, which a dyn_model needs - "
+                            "placed as misc_model instead.\n", modelName );
+                dyn = false;
+            }
+        }
+        const char *className = prefab ? "misc_prefab" : dyn ? "dyn_model" : "misc_model";
         eclass_t *miscModel = Eclass_ForName( 0, className );
         if ( !miscModel || *(int *)&miscModel->fixedsize == 0 )
         {
@@ -1019,7 +1053,11 @@ namespace
         }
         // No angles epair is authored; absence means zero rotation.
         if ( created )
+        {
             SetKeyValue( created, "model", modelName );
+            if ( dyn )
+                SetKeyValue( created, "physPreset", PlacePreset().c_str() );   // else the game logs an error per prop
+        }
         Undo_End();
 
         if ( !created )
@@ -1051,6 +1089,713 @@ namespace
             return false;
         out.assign( data, (size_t)length );
         return true;
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════
+    //  SELECTED MODEL: info, physPreset, hitboxes  (KIWI 2026-10-21, user: "for dyn_models
+    //  (and similar), I want a dropdown for the physPreset selector. I want more information
+    //  accessible in the models tab when a model is selected, also a visualization of their
+    //  3d hitboxes would be nice too.")
+    // ═════════════════════════════════════════════════════════════════════════════════
+
+    std::string ExeDir()
+    {
+        char path[MAX_PATH] = { 0 };
+        ::GetModuleFileNameA( nullptr, path, MAX_PATH );
+        char *slash = strrchr( path, '\\' );
+        if ( slash )
+            *slash = '\0';
+        return path;
+    }
+
+    // physic\<name> presets: "PHYSIC\key\value\key\value..."; raw\ first, then main\.
+    struct physPreset_t
+    {
+        std::string name;
+        std::string text;
+    };
+    std::vector<physPreset_t> s_presets;
+    bool                      s_presetsScanned = false;
+
+    void ScanPresets()
+    {
+        s_presetsScanned = true;
+        s_presets.clear();
+        const char *dirs[] = { "raw\\physic", "main\\physic" };
+        for ( int d = 0; d < 2; ++d )
+        {
+            const std::string dir = ExeDir() + "\\" + dirs[d];
+            WIN32_FIND_DATAA fd;
+            HANDLE h = ::FindFirstFileA( ( dir + "\\*" ).c_str(), &fd );
+            if ( h == INVALID_HANDLE_VALUE )
+                continue;
+            do
+            {
+                if ( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+                    continue;
+                bool dup = false;
+                for ( size_t i = 0; i < s_presets.size() && !dup; ++i )
+                    dup = !_stricmp( s_presets[i].name.c_str(), fd.cFileName );
+                if ( dup || fd.nFileSizeLow > 4096 )
+                    continue;
+                physPreset_t p;
+                p.name = fd.cFileName;
+                if ( FILE *f = fopen( ( dir + "\\" + fd.cFileName ).c_str(), "rb" ) )
+                {
+                    char buf[4097];
+                    const size_t n = fread( buf, 1, 4096, f );
+                    buf[n] = '\0';
+                    fclose( f );
+                    p.text = buf;
+                }
+                if ( p.text.compare( 0, 6, "PHYSIC" ) != 0 )
+                    continue;
+                s_presets.push_back( p );
+            } while ( ::FindNextFileA( h, &fd ) );
+            ::FindClose( h );
+        }
+        std::sort( s_presets.begin(), s_presets.end(), []( const physPreset_t &a, const physPreset_t &b )
+        { return _stricmp( a.name.c_str(), b.name.c_str() ) < 0; } );
+    }
+
+    const physPreset_t *PresetNamed( const std::string &name )
+    {
+        if ( !s_presetsScanned )
+            ScanPresets();
+        for ( size_t i = 0; i < s_presets.size(); ++i )
+            if ( !_stricmp( s_presets[i].name.c_str(), name.c_str() ) )
+                return &s_presets[i];
+        return nullptr;
+    }
+
+    std::string PresetField( const physPreset_t *p, const char *key )
+    {
+        if ( !p )
+            return std::string();
+        std::vector<std::string> parts;
+        size_t at = 0;
+        for ( ;; )
+        {
+            const size_t bs = p->text.find( '\\', at );
+            parts.push_back( p->text.substr( at, bs == std::string::npos ? std::string::npos : bs - at ) );
+            if ( bs == std::string::npos )
+                break;
+            at = bs + 1;
+        }
+        for ( size_t i = 1; i + 1 < parts.size(); i += 2 )
+            if ( !_stricmp( parts[i].c_str(), key ) )
+                return parts[i + 1];
+        return std::string();
+    }
+
+    const char *KeyOfDef( const entity_s_def *def, const char *key )
+    {
+        for ( const epair_t *ep = def ? def->epairs : nullptr; ep; ep = ep->next )
+            if ( ep->key && !_stricmp( ep->key, key ) )
+                return ep->value ? ep->value : "";
+        return "";
+    }
+
+    // dyn_model, or anything already carrying a physPreset key.
+    bool UsesPhysPreset( const entity_s_def *def )
+    {
+        if ( !def )
+            return false;
+        const char *cn = def->eclass && def->eclass->name ? def->eclass->name : "";
+        return !_stricmp( cn, "dyn_model" ) || KeyOfDef( def, "physPreset" )[0];
+    }
+
+    // The preset newly placed dyn_models get (Models window combo).
+    std::string s_placePreset;
+    bool        s_placePresetLoaded = false;
+    const std::string &PlacePreset()
+    {
+        if ( !s_placePresetLoaded )
+        {
+            s_placePresetLoaded = true;
+            s_placePreset = Radiant_ProfileGetString( "KiwiUX", "ModelsPlacePhysPreset", "default" );
+            if ( s_placePreset.empty() )
+                s_placePreset = "default";
+        }
+        return s_placePreset;
+    }
+
+    // Preset picker; `current` "" = mixed.  Hovering a row shows its values.
+    bool PresetCombo( const char *id, const std::string &current, std::string *picked )
+    {
+        if ( !s_presetsScanned )
+            ScanPresets();
+        bool changed = false;
+        ImGui::SetNextItemWidth( 170.0f );
+        if ( ImGui::BeginCombo( id, current.empty() ? "(mixed)" : current.c_str() ) )
+        {
+            for ( size_t i = 0; i < s_presets.size(); ++i )
+            {
+                const physPreset_t &p = s_presets[i];
+                if ( ImGui::Selectable( p.name.c_str(), !_stricmp( p.name.c_str(), current.c_str() ) ) )
+                {
+                    *picked = p.name;
+                    changed = true;
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "mass %s, friction %s, bounce %s\nbullet force x%s, explosion force x%s%s%s",
+                                       PresetField( &p, "mass" ).c_str(), PresetField( &p, "friction" ).c_str(),
+                                       PresetField( &p, "bounce" ).c_str(), PresetField( &p, "bulletForceScale" ).c_str(),
+                                       PresetField( &p, "explosiveForceScale" ).c_str(),
+                                       PresetField( &p, "tempDefaultToCylinder" ) == "1" ? "\nshape: cylinder" : "",
+                                       PresetField( &p, "sndAliasPrefix" ).empty() ? ""
+                                           : ( "\nsounds: " + PresetField( &p, "sndAliasPrefix" ) ).c_str() );
+            }
+            if ( s_presets.empty() )
+                ImGui::TextDisabled( "no presets in raw\\physic or main\\physic" );
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+
+    void SetPresetOnSelected( const std::string &preset )
+    {
+        std::vector<entity_s_def *> defs;
+        SelectedModelEntities( &defs );
+        Undo_ClearRedo();
+        Undo_GeneralStart( "set physPreset" );
+        int n = 0;
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            if ( !UsesPhysPreset( defs[i] ) || !_stricmp( KeyOfDef( defs[i], "physPreset" ), preset.c_str() ) )
+                continue;
+            Undo_AddEntity_W( (entity_s *)defs[i] );
+            SetKeyValue( defs[i], "physPreset", preset.c_str() );
+            ++n;
+        }
+        Undo_End();
+        if ( n )
+            MarkMapModified();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Models browser: physPreset '%s' on %i model(s).\n", preset.c_str(), n );
+    }
+
+    // ── player collision hulls: collmaps\<model>.map, model space, edges cached ──
+    struct hullEdges_t
+    {
+        bool               loaded = false;
+        int                hulls  = 0;
+        std::vector<float> seg;          // x0 y0 z0 x1 y1 z1 ...
+    };
+    std::map<std::string, hullEdges_t> s_hullCache;
+
+    void HullEdgesOfBrush( const std::vector<double> &pl, hullEdges_t &out )
+    {
+        // pl: n0 n1 n2 d per plane (outward); corners = triples inside all, edges = 2 shared planes
+        const size_t np = pl.size() / 4;
+        struct corner_t { double p[3]; int a, b, c; };
+        std::vector<corner_t> cs;
+        for ( size_t i = 0; i < np; ++i )
+            for ( size_t j = i + 1; j < np; ++j )
+                for ( size_t k = j + 1; k < np; ++k )
+                {
+                    const double *A = &pl[i * 4], *B = &pl[j * 4], *C = &pl[k * 4];
+                    const double bc[3] = { B[1] * C[2] - B[2] * C[1], B[2] * C[0] - B[0] * C[2], B[0] * C[1] - B[1] * C[0] };
+                    const double ca[3] = { C[1] * A[2] - C[2] * A[1], C[2] * A[0] - C[0] * A[2], C[0] * A[1] - C[1] * A[0] };
+                    const double ab[3] = { A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0] };
+                    const double det = A[0] * bc[0] + A[1] * bc[1] + A[2] * bc[2];
+                    if ( fabs( det ) < 1e-9 )
+                        continue;
+                    corner_t c;
+                    for ( int t = 0; t < 3; ++t )
+                        c.p[t] = ( A[3] * bc[t] + B[3] * ca[t] + C[3] * ab[t] ) / det;
+                    bool inside = true;
+                    for ( size_t q = 0; q < np && inside; ++q )
+                        inside = pl[q * 4] * c.p[0] + pl[q * 4 + 1] * c.p[1] + pl[q * 4 + 2] * c.p[2] - pl[q * 4 + 3] <= 0.01;
+                    if ( !inside )
+                        continue;
+                    c.a = (int)i; c.b = (int)j; c.c = (int)k;
+                    cs.push_back( c );
+                }
+        if ( cs.size() < 4 )
+            return;
+        ++out.hulls;
+        for ( size_t i = 0; i < cs.size(); ++i )
+            for ( size_t j = i + 1; j < cs.size(); ++j )
+            {
+                const double *p = cs[i].p, *q = cs[j].p;
+                if ( fabs( p[0] - q[0] ) + fabs( p[1] - q[1] ) + fabs( p[2] - q[2] ) < 0.01 )
+                    continue;
+                const int ci[3] = { cs[i].a, cs[i].b, cs[i].c }, cj[3] = { cs[j].a, cs[j].b, cs[j].c };
+                int shared = 0;
+                for ( int a = 0; a < 3; ++a )
+                    for ( int b = 0; b < 3; ++b )
+                        shared += ( ci[a] == cj[b] );
+                if ( shared < 2 )
+                    continue;
+                for ( int t = 0; t < 3; ++t ) out.seg.push_back( (float)p[t] );
+                for ( int t = 0; t < 3; ++t ) out.seg.push_back( (float)q[t] );
+            }
+    }
+
+    const hullEdges_t &HullEdges( const std::string &model )
+    {
+        hullEdges_t &h = s_hullCache[model];
+        if ( h.loaded )
+            return h;
+        h.loaded = true;
+        std::string file = model;
+        for ( size_t i = 0; i < file.size(); ++i )
+            if ( file[i] == '/' ) file[i] = '\\';
+        FILE *f = fopen( ( ExeDir() + "\\collmaps\\" + file + ".map" ).c_str(), "rb" );
+        if ( !f )
+            return h;
+        std::string text;
+        char buf[8192];
+        size_t n;
+        while ( ( n = fread( buf, 1, sizeof( buf ), f ) ) > 0 )
+            text.append( buf, n );
+        fclose( f );
+
+        // brushes are the depth-2 blocks; patches inside are skipped
+        std::vector<double> planes;
+        int depth = 0;
+        bool patch = false;
+        size_t at = 0;
+        while ( at < text.size() )
+        {
+            size_t eol = text.find( '\n', at );
+            if ( eol == std::string::npos ) eol = text.size();
+            const std::string line = text.substr( at, eol - at );
+            at = eol + 1;
+            size_t s = line.find_first_not_of( " \t\r" );
+            if ( s == std::string::npos ) continue;
+            const char c = line[s];
+            if ( c == '{' ) { if ( ++depth == 2 ) { planes.clear(); patch = false; } continue; }
+            if ( c == '}' )
+            {
+                if ( depth == 2 && !patch && planes.size() >= 16 )
+                    HullEdgesOfBrush( planes, h );
+                --depth;
+                continue;
+            }
+            if ( depth == 2 && ( !line.compare( s, 5, "curve" ) || !line.compare( s, 4, "mesh" ) ) )
+                patch = true;
+            if ( depth != 2 || c != '(' || patch )
+                continue;
+            double v[9];
+            if ( sscanf( line.c_str() + s, " ( %lf %lf %lf ) ( %lf %lf %lf ) ( %lf %lf %lf )",
+                         &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8] ) != 9 )
+                continue;
+            // outward normal: (p2 - p0) x (p1 - p0), the editor's planept winding
+            const double e1[3] = { v[6] - v[0], v[7] - v[1], v[8] - v[2] };
+            const double e2[3] = { v[3] - v[0], v[4] - v[1], v[5] - v[2] };
+            double nn[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+            const double l = sqrt( nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2] );
+            if ( l < 1e-9 ) continue;
+            for ( int t = 0; t < 3; ++t ) nn[t] /= l;
+            planes.push_back( nn[0] ); planes.push_back( nn[1] ); planes.push_back( nn[2] );
+            planes.push_back( nn[0] * v[0] + nn[1] * v[1] + nn[2] * v[2] );
+        }
+        return h;
+    }
+
+    int s_showHitboxes = -1;
+    bool ShowHitboxes()
+    {
+        if ( s_showHitboxes < 0 )
+            s_showHitboxes = Radiant_ProfileGetInt( "KiwiUX", "ModelsShowHitboxes", 1 ) ? 1 : 0;
+        return s_showHitboxes != 0;
+    }
+    void SetShowHitboxes( bool on )
+    {
+        s_showHitboxes = on ? 1 : 0;
+        Radiant_ProfileSetInt( "KiwiUX", "ModelsShowHitboxes", s_showHitboxes );
+    }
+
+    // KIWI (2026-10-21, user: "add the ability to force match player physics to one of the
+    // other hitboxes (bullet set or physics set)"): rewrite collmaps\<model>.map - the player
+    // hulls cod4map stamps on EVERY copy of the model - from the mesh (the importer's automatic
+    // hulls: what bullets hit) or from the physics shape (bounds box / upright 16-sided
+    // cylinder).  The old file is kept as .map.bak.
+    enum matchShape_t { MATCH_BULLET, MATCH_PHYSICS };
+
+    std::string CollmapPath( const std::string &model )
+    {
+        std::string file = model;
+        for ( size_t i = 0; i < file.size(); ++i )
+            if ( file[i] == '/' ) file[i] = '\\';
+        return ExeDir() + "\\collmaps\\" + file + ".map";
+    }
+
+    bool MatchPlayerCollision( const std::string &model, matchShape_t shape, bool cylinder )
+    {
+        std::vector<kimport::Hull> hulls;
+        kimport::CollisionSettings settings;
+        const kimport::LogFn log = []( const std::string &s ) { Sys_Printf( "  %s\n", s.c_str() ); };
+        std::string note;
+        if ( shape == MATCH_BULLET )
+        {
+            kimport::RawXModel raw;
+            std::string err;
+            if ( !kimport::ReadRawXModel( std::filesystem::path( ExeDir() ) / "raw", model, raw, err ) )
+            {
+                Sys_Printf( "Models: cannot read raw\\xmodel\\%s - %s\n", model.c_str(), err.c_str() );
+                return false;
+            }
+            kimport::TrunkSettings trunk;
+            kimport::AutoHullsForXModel( raw, kimport::AutoClass::Prop, settings, trunk, hulls, note, log );
+            note = "matched to the bullet (mesh) shape";
+        }
+        else
+        {
+            float mins[3], maxs[3];
+            if ( !KiwiEntThumb_GetModelBounds( model.c_str(), mins, maxs ) )
+            {
+                Sys_Printf( "Models: '%s' has no bounds to build a physics shape from.\n", model.c_str() );
+                return false;
+            }
+            kimport::Hull h;
+            h.kind = cylinder ? "kdop" : "box";
+            if ( cylinder )
+            {
+                const double cx = 0.5 * ( mins[0] + maxs[0] ), cy = 0.5 * ( mins[1] + maxs[1] );
+                const double r = 0.5 * ( ( maxs[0] - mins[0] ) > ( maxs[1] - mins[1] ) ? ( maxs[0] - mins[0] ) : ( maxs[1] - mins[1] ) );
+                for ( int k = 0; k < 16; ++k )
+                {
+                    const double a = k * ( 6.283185307179586 / 16 ), nx = cos( a ), ny = sin( a );
+                    h.planes.push_back( { nx, ny, 0.0, nx * cx + ny * cy + r } );
+                }
+            }
+            else
+            {
+                h.planes.push_back( { 1, 0, 0, maxs[0] } );
+                h.planes.push_back( { -1, 0, 0, -mins[0] } );
+                h.planes.push_back( { 0, 1, 0, maxs[1] } );
+                h.planes.push_back( { 0, -1, 0, -mins[1] } );
+            }
+            h.planes.push_back( { 0, 0, 1, maxs[2] } );
+            h.planes.push_back( { 0, 0, -1, -mins[2] } );
+            hulls.push_back( h );
+            note = cylinder ? "matched to the physics cylinder" : "matched to the physics box";
+        }
+        if ( hulls.empty() )
+        {
+            Sys_Printf( "Models: no hull came out for '%s'; the collmap was left alone.\n", model.c_str() );
+            return false;
+        }
+        const std::string path = CollmapPath( model );
+        if ( GetFileAttributesA( path.c_str() ) != INVALID_FILE_ATTRIBUTES )
+            CopyFileA( path.c_str(), ( path + ".bak" ).c_str(), FALSE );
+        std::string err;
+        if ( !kimport::WriteCollmap( path, hulls, "clip", err, note ) )
+        {
+            Sys_Printf( "Models: writing %s failed - %s\n", path.c_str(), err.c_str() );
+            return false;
+        }
+        s_hullCache.erase( model );
+        Sys_Printf( "Models: collmaps\\%s.map now holds %d hull%s (%s); previous kept as .map.bak. "
+                    "Every copy of the model gets it at the next BSP compile.\n",
+                    model.c_str(), (int)hulls.size(), hulls.size() == 1 ? "" : "s", note.c_str() );
+        const std::string recipe = ExeDir() + "\\model_source\\" + model + ".kimport";
+        if ( GetFileAttributesA( recipe.c_str() ) != INVALID_FILE_ATTRIBUTES )
+            Sys_Printf( "Models: '%s' has an import recipe - set its collision mode to manual, or a "
+                        "rebuild will write its own hulls over this.\n", model.c_str() );
+        g_nUpdateBits = -1;
+        return true;
+    }
+
+    // KIWI (2026-10-21, user: "a none button for player collision ... that removes all player
+    // collision from a model"): the collmap goes to .map.bak, so cod4map stamps no hulls.
+    bool RemovePlayerCollision( const std::string &model )
+    {
+        const std::string path = CollmapPath( model );
+        if ( GetFileAttributesA( path.c_str() ) == INVALID_FILE_ATTRIBUTES )
+        {
+            Sys_Printf( "Models: '%s' already has no player collision.\n", model.c_str() );
+            return false;
+        }
+        if ( !MoveFileExA( path.c_str(), ( path + ".bak" ).c_str(), MOVEFILE_REPLACE_EXISTING ) )
+        {
+            Sys_Printf( "Models: could not remove %s (error %lu).\n", path.c_str(), GetLastError() );
+            return false;
+        }
+        s_hullCache.erase( model );
+        Sys_Printf( "Models: collmaps\\%s.map removed (kept as .map.bak); players and AI walk "
+                    "through every copy after the next BSP compile.\n", model.c_str() );
+        const std::string recipe = ExeDir() + "\\model_source\\" + model + ".kimport";
+        if ( GetFileAttributesA( recipe.c_str() ) != INVALID_FILE_ATTRIBUTES )
+            Sys_Printf( "Models: '%s' has an import recipe - set its collision mode to none, or a "
+                        "rebuild will write its hulls back.\n", model.c_str() );
+        g_nUpdateBits = -1;
+        return true;
+    }
+
+    // Colours: player hulls green, bullet collision orange, physics shape yellow.
+    void DrawSelectedModelInfo( bool inspector )
+    {
+        std::vector<entity_s_def *> defs;
+        const int count = SelectedModelEntities( &defs );
+        if ( count == 0 )
+            return;
+
+        if ( inspector )
+            ImGui::SeparatorText( "Model" );
+        else
+            ImGui::Separator();
+        const entity_s_def *def = defs[0];
+        const char *model = KeyOfDef( def, "model" );
+        bool sameModel = true;
+        for ( size_t i = 1; i < defs.size() && sameModel; ++i )
+            sameModel = !_stricmp( KeyOfDef( defs[i], "model" ), model );
+        if ( count == 1 )
+            ImGui::Text( "Selected: %s  (%s)", model, def->eclass && def->eclass->name ? def->eclass->name : "?" );
+        else
+            ImGui::Text( "Selected: %i models%s%s", count, sameModel ? ", all " : "", sameModel ? model : "" );
+
+        if ( count == 1 )
+        {
+            const char *ang = KeyOfDef( def, "angles" );
+            const char *sc  = KeyOfDef( def, "modelscale" );
+            ImGui::TextDisabled( "origin %.1f %.1f %.1f   angles %s   scale %s",
+                                 def->origin[0], def->origin[1], def->origin[2],
+                                 ang[0] ? ang : "0 0 0", sc[0] ? sc : "1" );
+        }
+
+        if ( sameModel )
+        {
+            kiwiModelStats_t st;
+            if ( KiwiEntThumb_ModelStats( model, &st ) )
+            {
+                ImGui::TextDisabled( "%d LOD%s, LOD0 %d tris / %d verts, %d tris all LODs, %d bone%s",
+                                     st.lods, st.lods == 1 ? "" : "s", st.lod0Tris, st.lod0Verts, st.totalTris,
+                                     st.bones, st.bones == 1 ? "" : "s" );
+                std::string mats;
+                for ( int m = 0; m < st.materialCount && m < 8; ++m )
+                    mats += ( m ? ", " : "" ) + std::string( st.materials[m] );
+                ImGui::TextDisabled( "materials: %s", mats.empty() ? "-" : mats.c_str() );
+                ImGui::TextDisabled( "bullet collision: %s", st.collLod < 0 ? "none (no collision LOD)"
+                                     : ( std::to_string( st.collSurfs ) + " surface(s), LOD " + std::to_string( st.collLod ) ).c_str() );
+            }
+            const hullEdges_t &h = HullEdges( model );
+            if ( h.hulls )
+                ImGui::TextDisabled( "player collision: %d hull%s (collmaps\\%s.map, stamped at compile)",
+                                     h.hulls, h.hulls == 1 ? "" : "s", model );
+            else
+                ImGui::TextDisabled( "player collision: none - players and AI walk through it" );
+
+            // physics shape of this model: a cylinder preset on a dyn_model, else its box
+            bool cylinder = false;
+            if ( UsesPhysPreset( def ) )
+            {
+                const std::string pn = KeyOfDef( def, "physPreset" );
+                const physPreset_t *p = PresetNamed( pn.empty() ? "default" : pn );
+                cylinder = p && PresetField( p, "tempDefaultToCylinder" ) == "1";
+            }
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( "Player collision =" );
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "bullet shape" ) )
+                MatchPlayerCollision( model, MATCH_BULLET, false );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Rebuild collmaps\\%s.map from the mesh (convex hulls around its pieces).\n"
+                                   "Applies to every copy of this model at the next compile.", model );
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( cylinder ? "physics cylinder" : "physics box" ) )
+                MatchPlayerCollision( model, MATCH_PHYSICS, cylinder );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Rebuild collmaps\\%s.map as the physics %s.\n"
+                                   "Applies to every copy of this model at the next compile.",
+                                   model, cylinder ? "cylinder" : "box" );
+            ImGui::SameLine();
+            ImGui::BeginDisabled( h.hulls == 0 );
+            if ( ImGui::SmallButton( "none" ) )
+                RemovePlayerCollision( model );
+            ImGui::EndDisabled();
+            if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+                ImGui::SetTooltip( "Remove collmaps\\%s.map (kept as .map.bak): no player collision.\n"
+                                   "Applies to every copy of this model at the next compile.", model );
+        }
+
+        // physPreset for dyn_models (and anything already carrying the key)
+        int physCount = 0;
+        std::string cur;
+        bool mixed = false;
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            if ( !UsesPhysPreset( defs[i] ) )
+                continue;
+            std::string p = KeyOfDef( defs[i], "physPreset" );
+            if ( p.empty() )
+                p = "default";
+            if ( physCount++ == 0 )
+                cur = p;
+            else if ( _stricmp( cur.c_str(), p.c_str() ) )
+                mixed = true;
+        }
+        if ( physCount )
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted( "physPreset" );
+            ImGui::SameLine();
+            std::string picked;
+            if ( PresetCombo( "##selpreset", mixed ? std::string() : cur, &picked ) )
+                SetPresetOnSelected( picked );
+            if ( !mixed )
+            {
+                const physPreset_t *p = PresetNamed( cur );
+                ImGui::SameLine();
+                if ( p )
+                    ImGui::TextDisabled( "mass %s  friction %s  bounce %s%s", PresetField( p, "mass" ).c_str(),
+                                         PresetField( p, "friction" ).c_str(), PresetField( p, "bounce" ).c_str(),
+                                         PresetField( p, "tempDefaultToCylinder" ) == "1" ? "  cylinder" : "" );
+                else
+                    ImGui::TextDisabled( "(not found - the game falls back to default)" );
+            }
+            ImGui::TextDisabled( "dyn_model: knocked around by bullets and explosions; players walk through it" );
+        }
+
+        if ( !ShowHitboxes() )
+            return;
+        ImGui::TextDisabled( "hitboxes:" );
+        ImGui::SameLine();
+        ImGui::TextColored( ImVec4( 0.3f, 1.0f, 0.3f, 1.0f ), "player" );
+        ImGui::SameLine();
+        ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.1f, 1.0f ), "bullets" );
+        ImGui::SameLine();
+        ImGui::TextColored( ImVec4( 1.0f, 0.95f, 0.2f, 1.0f ), "physics" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Drawn on the selected models in the 3D view.\n"
+                               "player: the collmaps hulls cod4map stamps as clip (players / AI collide)\n"
+                               "bullets: the xmodel's collision triangles (bullet impacts, surface type)\n"
+                               "physics: a dyn_model's physics shape (box, or cylinder for cylinder presets)" );
+    }
+
+    // World point of a model-space point.
+    void ModelToWorld( float axis[3][3], const float *origin, float scale, const float *v, float *out )
+    {
+        for ( int k = 0; k < 3; ++k )
+            out[k] = origin[k] + scale * ( v[0] * axis[0][k] + v[1] * axis[1][k] + v[2] * axis[2][k] );
+    }
+
+    // XModelCollTri_s planes back to corners (cod4rad embree_trace.cpp ReconstructTriVerts).
+    bool CollTriVerts( const XModelCollTri_s &t, float v[3][3] )
+    {
+        const float *n = t.plane, *a = t.svec, *b = t.tvec;
+        const float det = n[0] * ( a[1] * b[2] - a[2] * b[1] ) - n[1] * ( a[0] * b[2] - a[2] * b[0] )
+                        + n[2] * ( a[0] * b[1] - a[1] * b[0] );
+        if ( fabsf( det ) < 1e-10f )
+            return false;
+        const float inv = 1.0f / det;
+        const float i00 = ( a[1] * b[2] - a[2] * b[1] ) * inv, i01 = ( n[2] * b[1] - n[1] * b[2] ) * inv, i02 = ( n[1] * a[2] - n[2] * a[1] ) * inv;
+        const float i10 = ( a[2] * b[0] - a[0] * b[2] ) * inv, i11 = ( n[0] * b[2] - n[2] * b[0] ) * inv, i12 = ( n[2] * a[0] - n[0] * a[2] ) * inv;
+        const float i20 = ( a[0] * b[1] - a[1] * b[0] ) * inv, i21 = ( n[1] * b[0] - n[0] * b[1] ) * inv, i22 = ( n[0] * a[1] - n[1] * a[0] ) * inv;
+        v[0][0] = i00 * n[3] + i01 * a[3] + i02 * b[3];
+        v[0][1] = i10 * n[3] + i11 * a[3] + i12 * b[3];
+        v[0][2] = i20 * n[3] + i21 * a[3] + i22 * b[3];
+        v[1][0] = v[0][0] + i01; v[1][1] = v[0][1] + i11; v[1][2] = v[0][2] + i21;
+        v[2][0] = v[0][0] + i02; v[2][1] = v[0][1] + i12; v[2][2] = v[0][2] + i22;
+        return true;
+    }
+
+    void DrawHitboxes()
+    {
+        if ( !ShowHitboxes() || selected_brushes.next == &selected_brushes )
+            return;
+        const int budget = 24000;
+        KiwiLines_Begin( budget, 2 );
+        int models = 0;
+        for ( int pass = 0; pass < 3; ++pass )
+        {
+            if ( pass == 0 ) KiwiLines_Color( 0.3f, 1.0f, 0.3f );     // player hulls
+            if ( pass == 1 ) KiwiLines_Color( 1.0f, 0.55f, 0.1f );    // bullet collision
+            if ( pass == 2 ) KiwiLines_Color( 1.0f, 0.95f, 0.2f );    // physics shape
+            models = 0;
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes && models < 64; b = b->next )
+            {
+                if ( !b->owner || !b->owner->def || !KiwiDrop_IsModelEntity( b ) )
+                    continue;
+                const entity_s_def *def = (const entity_s_def *)b->owner->def;
+                if ( def->eclass && ( def->eclass->classtype & 0x10 ) )
+                    continue;                                       // prefabs: no xmodel
+                float mins[3], maxs[3], ang[3], scale, org[3];
+                XModel *xm = nullptr;
+                if ( !KiwiDrop_GetModelInfo( b, mins, maxs, ang, &scale, org, &xm ) )
+                    continue;
+                ++models;
+                float axis[3][3];
+                AnglesToAxis( ang, axis );
+                if ( pass == 0 )
+                {
+                    const hullEdges_t &h = HullEdges( KeyOfDef( def, "model" ) );
+                    for ( size_t i = 0; i + 5 < h.seg.size(); i += 6 )
+                    {
+                        float a[3], c[3];
+                        ModelToWorld( axis, org, scale, &h.seg[i], a );
+                        ModelToWorld( axis, org, scale, &h.seg[i + 3], c );
+                        if ( !KiwiLines_Add( a, c ) ) break;
+                    }
+                }
+                else if ( pass == 1 && xm )
+                {
+                    for ( int s = 0; s < xm->numCollSurfs; ++s )
+                    {
+                        const XModelCollSurf_s &cs = xm->collSurfs[s];
+                        if ( cs.numCollTris * 3 > KiwiLines_Remaining() )
+                        {
+                            // over budget: the surface's bounds instead of its triangles
+                            float c8[KIWI_BOX_CORNERS][3], w8[KIWI_BOX_CORNERS][3];
+                            KiwiBox_Corners( cs.mins, cs.maxs, c8 );
+                            for ( int k = 0; k < KIWI_BOX_CORNERS; ++k )
+                                ModelToWorld( axis, org, scale, c8[k], w8[k] );
+                            for ( int e = 0; e < KIWI_BOX_EDGES; ++e )
+                                KiwiLines_Add( w8[KIWI_BOX_EDGE[e][0]], w8[KIWI_BOX_EDGE[e][1]] );
+                            continue;
+                        }
+                        for ( int t = 0; t < cs.numCollTris; ++t )
+                        {
+                            float v[3][3], w[3][3];
+                            if ( !CollTriVerts( cs.collTris[t], v ) )
+                                continue;
+                            for ( int k = 0; k < 3; ++k )
+                                ModelToWorld( axis, org, scale, v[k], w[k] );
+                            KiwiLines_Add( w[0], w[1] );
+                            KiwiLines_Add( w[1], w[2] );
+                            KiwiLines_Add( w[2], w[0] );
+                        }
+                    }
+                }
+                else if ( pass == 2 && UsesPhysPreset( def ) )
+                {
+                    std::string pn = KeyOfDef( def, "physPreset" );
+                    const physPreset_t *p = PresetNamed( pn.empty() ? "default" : pn );
+                    if ( p && PresetField( p, "tempDefaultToCylinder" ) == "1" )
+                    {
+                        // upright cylinder fitted to the bounds
+                        const float cx = 0.5f * ( mins[0] + maxs[0] ), cy = 0.5f * ( mins[1] + maxs[1] );
+                        const float r = 0.5f * ( ( maxs[0] - mins[0] ) > ( maxs[1] - mins[1] ) ? ( maxs[0] - mins[0] ) : ( maxs[1] - mins[1] ) );
+                        const int segs = 16;
+                        for ( int k = 0; k < segs; ++k )
+                        {
+                            const float a0 = (float)k / segs * 6.2831853f, a1 = (float)( k + 1 ) / segs * 6.2831853f;
+                            const float lo0[3] = { cx + r * cosf( a0 ), cy + r * sinf( a0 ), mins[2] };
+                            const float lo1[3] = { cx + r * cosf( a1 ), cy + r * sinf( a1 ), mins[2] };
+                            const float hi0[3] = { lo0[0], lo0[1], maxs[2] }, hi1[3] = { lo1[0], lo1[1], maxs[2] };
+                            float A[3], B[3], C[3], D[3];
+                            ModelToWorld( axis, org, scale, lo0, A ); ModelToWorld( axis, org, scale, lo1, B );
+                            ModelToWorld( axis, org, scale, hi0, C ); ModelToWorld( axis, org, scale, hi1, D );
+                            KiwiLines_Add( A, B ); KiwiLines_Add( C, D );
+                            if ( k % 4 == 0 ) KiwiLines_Add( A, C );
+                        }
+                    }
+                    else
+                    {
+                        float c8[KIWI_BOX_CORNERS][3], w8[KIWI_BOX_CORNERS][3];
+                        KiwiBox_Corners( mins, maxs, c8 );
+                        for ( int k = 0; k < KIWI_BOX_CORNERS; ++k )
+                            ModelToWorld( axis, org, scale, c8[k], w8[k] );
+                        for ( int e = 0; e < KIWI_BOX_EDGES; ++e )
+                            KiwiLines_Add( w8[KIWI_BOX_EDGE[e][0]], w8[KIWI_BOX_EDGE[e][1]] );
+                    }
+                }
+            }
+        }
+        KiwiLines_Flush();
     }
 }
 
@@ -1096,6 +1841,36 @@ void KiwiModelBrowser_Draw()
             KiwiThumbCache_InvalidateAll();
         if ( ImGui::IsItemHovered() )
             ImGui::SetTooltip( "Delete cached model/entity thumbnails; visible tiles reload lazily" );
+        ImGui::SameLine();
+        {
+            bool show = ShowHitboxes();
+            if ( ImGui::Checkbox( "Hitboxes", &show ) )
+                SetShowHitboxes( show );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Draw the selected models' collision in the 3D view" );
+        }
+        ImGui::SameLine();
+        {
+            bool dyn = PlaceDynModel();
+            if ( ImGui::Checkbox( "Physics (dyn_model)", &dyn ) )
+                SetPlaceDynModel( dyn );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Place models as dyn_model: a physics prop that bullets and explosions\n"
+                                   "knock around in game. It does not block players or AI (dynamic\n"
+                                   "entities are client-side; player movement never traces them)." );
+            if ( dyn )
+            {
+                ImGui::SameLine();
+                std::string picked;
+                if ( PresetCombo( "##placepreset", PlacePreset(), &picked ) )
+                {
+                    s_placePreset = picked;
+                    Radiant_ProfileSetString( "KiwiUX", "ModelsPlacePhysPreset", picked.c_str() );
+                }
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "physPreset for newly placed dyn_models (mass, friction, bounce, sounds)" );
+            }
+        }
 
         {
             const int selectedModels = SelectedModelEntities( nullptr );
@@ -1137,6 +1912,7 @@ void KiwiModelBrowser_Draw()
                     s_pickedModel.clear();
             }
             DrawVariantUsage();
+            DrawSelectedModelInfo( false );
         }
         ImGui::Separator();
 
@@ -1257,8 +2033,14 @@ bool KiwiModelBrowser_CameraDropTarget( float imgMinX, float imgMinY )
     return took;
 }
 
+void KiwiModelBrowser_DrawSelectedModelInfo( bool inspector )
+{
+    DrawSelectedModelInfo( inspector );
+}
+
 void KiwiModelBrowser_DrawGhost()
 {
+    DrawHitboxes();                     // KIWI: the selected models' collision, every frame
     if ( !s_ghostHave )
         return;
     float corners[KIWI_BOX_CORNERS][3];

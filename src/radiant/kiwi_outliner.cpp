@@ -3563,6 +3563,22 @@ bool KiwiOutliner_SelectWholeGroup()
     return added > 0;
 }
 
+// KIWI (2026-10-19): Paste Group In Place lines up and re-keys brush groups.
+std::string KiwiOutliner_GroupPathOf( entity_s *inst )
+{
+    return UGPathOf( inst );
+}
+
+// Moves `inst` (and what sits below `fromRoot`) under `toRoot`; the caller owns the record.
+void KiwiOutliner_RekeyGroup( entity_s *inst, const std::string &fromRoot, const std::string &toRoot )
+{
+    entity_s_def *def = DefOf( inst );
+    const std::string p = UGPathOf( inst );
+    if ( !def || p.empty() || fromRoot.empty() || toRoot.empty() || !UGIsUnder( p, fromRoot ) )
+        return;
+    SetKeyValue( def, KOUT_UG_KEY, UGJoin( toRoot, UGBelow( p, fromRoot ) ).c_str() );
+}
+
 // Test DSL exports (kiwi_test.cpp).
 int KiwiOutliner_TestGroupCount()
 {

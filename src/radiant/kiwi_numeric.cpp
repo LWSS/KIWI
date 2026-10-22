@@ -454,6 +454,15 @@ bool KiwiNum_TabLive()
     return s_tabLive;
 }
 
+bool KiwiNum_FocusField( int field )
+{
+    if ( !ValidField( field ) || s_fields[field].readOnly )
+        return false;
+    s_focus   = field;
+    s_tabLive = true;
+    return true;
+}
+
 bool KiwiNum_TabCycle( bool backwards )
 {
     int editable = 0;

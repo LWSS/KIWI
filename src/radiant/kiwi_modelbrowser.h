@@ -15,6 +15,9 @@ void KiwiModelBrowser_RegisterCommands();
 bool KiwiModelBrowser_DispatchInstant( unsigned int cmdId );
 bool KiwiModelBrowser_CameraDropTarget( float imgMinX, float imgMinY );
 void KiwiModelBrowser_DrawGhost();
+// KIWI: the selected models' info / physPreset / collision section (Models window and
+// Inspector).  Draws nothing when no model is selected.
+void KiwiModelBrowser_DrawSelectedModelInfo( bool inspector );
 void KiwiModelBrowser_ResetForNewMap();
 // Re-list raw\xmodel on the next draw (the Model Import window just built models).
 void KiwiModelBrowser_RequestRefresh();

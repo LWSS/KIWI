@@ -3561,6 +3561,137 @@ namespace
         UndoCommit();
     }
 
+    // KIWI (2026-10-21, user: "In the UV editor, add a button that randomizes the UV layout
+    // (placement) without breaking the seams"): the targeted faces fall into ISLANDS - faces
+    // that share a world edge whose texture already runs across it (ST equal along the edge,
+    // whole tiles apart allowed) - and each island slides by its own random whole-texture
+    // offset.  One shift for a whole island keeps every seam inside it continuous; separate
+    // islands stop repeating the same patch of texture.  Patches each get their own shift.
+    void RandomizePlacement()
+    {
+        if ( !AnythingSelected() )
+            return;
+
+        struct rpFace_t
+        {
+            size_t idx;                                   // into s_faces
+            int    n;
+            float  p[KUVE_MAX_WINDING][3];
+            float  st[KUVE_MAX_WINDING][2];
+        };
+        std::vector<rpFace_t> faces;
+        for ( size_t i = 0; i < s_faces.size(); ++i )
+        {
+            if ( !FaceIsTarget( i ) )
+                continue;
+            face_t *fd = FaceOf( s_faces[i] );
+            if ( !fd || !fd->w )
+                continue;
+            rpFace_t f;
+            f.idx = i;
+            f.n   = FaceStPoints( s_faces[i], f.st, nullptr );
+            if ( f.n < 3 )
+                continue;
+            for ( int k = 0; k < f.n; ++k )
+                for ( int a = 0; a < 3; ++a )
+                    f.p[k][a] = fd->w->p[k][a];
+            faces.push_back( f );
+        }
+
+        // islands: union-find over "shares an edge and the texture runs across it"
+        std::vector<int> parent( faces.size() );
+        for ( size_t i = 0; i < faces.size(); ++i )
+            parent[i] = (int)i;
+        auto root = [&]( int i ) { while ( parent[i] != i ) i = parent[i] = parent[parent[i]]; return i; };
+        auto tileEqual = []( float a, float b )
+        {
+            const float d = a - b;
+            return fabsf( d - floorf( d + 0.5f ) ) < 0.002f;
+        };
+        for ( size_t a = 0; a < faces.size(); ++a )
+            for ( size_t b = a + 1; b < faces.size(); ++b )
+            {
+                int shared = 0;
+                bool continuous = true;
+                for ( int i = 0; i < faces[a].n && continuous; ++i )
+                    for ( int j = 0; j < faces[b].n; ++j )
+                    {
+                        const float *pa = faces[a].p[i], *pb = faces[b].p[j];
+                        if ( fabsf( pa[0] - pb[0] ) > 0.05f || fabsf( pa[1] - pb[1] ) > 0.05f
+                          || fabsf( pa[2] - pb[2] ) > 0.05f )
+                            continue;
+                        ++shared;
+                        if ( !tileEqual( faces[a].st[i][0], faces[b].st[j][0] )
+                          || !tileEqual( faces[a].st[i][1], faces[b].st[j][1] ) )
+                            continuous = false;
+                        break;
+                    }
+                if ( shared >= 2 && continuous )
+                    parent[root( (int)a )] = root( (int)b );
+            }
+
+        static unsigned s_seed = 0;
+        s_seed = s_seed * 1664525u + 1013904223u + (unsigned)GetTickCount();
+        unsigned rng = s_seed | 1u;
+        auto rnd = [&]() { rng = rng * 1664525u + 1013904223u; return (float)( rng >> 8 ) / 16777216.0f; };
+
+        UndoOpen( "uv randomize" );
+        std::vector<int>   islandOf;
+        std::vector<float> shift;                         // per island root: ds, dt
+        int islands = 0;
+        for ( size_t i = 0; i < faces.size(); ++i )
+        {
+            const int r = root( (int)i );
+            size_t k = 0;
+            while ( k < islandOf.size() && islandOf[k] != r )
+                ++k;
+            if ( k == islandOf.size() )
+            {
+                islandOf.push_back( r );
+                shift.push_back( rnd() );
+                shift.push_back( rnd() );
+                ++islands;
+            }
+            const uvFace_t &uf = s_faces[faces[i].idx];
+            face_t *fd = FaceOf( uf );
+            MaterialDef  *md = nullptr;
+            texdef_sub_t *td = KiwiUv_FaceTexdef( s_brushes[uf.brushIdx].def, uf.faceIndex, &md );
+            if ( !fd || !td || !md )
+                continue;
+            const texdef_sub_t td0 = *td;
+            texdef_sub_t out = td0;
+            TransformFace( fd, &td0, XfTranslate( shift[k * 2], shift[k * 2 + 1] ), &out );
+            td->size[0]   = out.size[0];
+            td->size[1]   = out.size[1];
+            td->shift[0]  = out.shift[0];
+            td->shift[1]  = out.shift[1];
+            td->rotate    = out.rotate;
+            td->crossterm = out.crossterm;
+            TexMatToFakeTexCoords( md, td );
+        }
+        int patches = 0;
+        for ( size_t i = 0; i < s_patches.size(); ++i )
+        {
+            if ( !PatchIsTarget( i ) )
+                continue;
+            patchMesh_t *p = s_brushes[s_patches[i]].pm;
+            if ( !p )
+                continue;
+            float st[16][16][2];
+            SnapshotPatch( p, st );
+            TransformPatch( p, st, XfTranslate( rnd(), rnd() ) );
+            ++patches;
+        }
+        RebuildAll();
+        UndoCommit();
+        s_chainBuilt = false;                             // re-fold from the new positions
+
+        _snprintf( s_status, sizeof( s_status ), "randomized %d island%s of %d face%s%s",
+                   islands, islands == 1 ? "" : "s", (int)faces.size(), faces.size() == 1 ? "" : "s",
+                   patches ? " (and each patch)" : "" );
+        s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
     // "Texture +" (bigger = the footprint covers fewer cells) / "Texture -": the nearest
     // crisp uniform step about the grid point nearest the pivot - one GCD-run of cells, or
     // with `big` half / double the run.  Every edge that was on a grid line stays on one.
@@ -3675,6 +3806,16 @@ namespace
                                "instead of swinging around the texture origin.  The pivot sits\n"
                                "at the centre of whatever is targeted until you drag it, so by\n"
                                "default these turn the target set about its own centre." );
+
+        ImGui::SameLine();
+        ImGui::BeginDisabled( !canAny );
+        if ( ImGui::Button( "Randomize" ) )
+            RandomizePlacement();
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Slide the texture to a random spot: faces whose texture already runs\n"
+                               "across a shared edge move together, so no seam breaks; separate\n"
+                               "pieces each get their own spot.  Size and rotation are kept." );
 
         ImGui::SameLine();
         if ( ImGui::Checkbox( "Chain", &s_chain ) )

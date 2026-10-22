@@ -10,6 +10,7 @@
 #include "kiwi_command.h"          // KIWI_CMD_WINDOW_* (the reserved instant ids)
 #include "kiwi_ux.h"               // KiwiUX_ShowGrid / KiwiUX_ShowAxes
 #include "kiwi_camera.h"           // KiwiCam_Ortho / KiwiCam_SetOrtho
+#include "kiwi_section.h"          // KiwiView_EdgeOutline / KiwiView_XRay (View menu checks)
 #include "kiwi_ported.h"
 #include "radiant_registry.h"      // Radiant_ProfileGetInt/SetInt
 
@@ -261,6 +262,8 @@ void KiwiWindows_BuildViewMenu( void *frameMenu )
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_AXES, "Show &Axes" );
     // Checked means orthographic.
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_ORTHO,     "&Orthographic Camera" );
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_EDGE_OUTLINE, "&Edge Outlines" );   // KIWI: D-EDGEOUTLINE
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_XRAY,      "&X-ray" );              // KIWI: D-XRAY
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_TRIS, "Show &Triangle Count" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_FACING, "Show &Facing Arrows" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_LEAK_BG, "&Leak Finder Background (strobing)" );
@@ -278,6 +281,8 @@ void KiwiWindows_SyncViewMenu()
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_GRID, KiwiUX_ShowGrid() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_AXES, KiwiUX_ShowAxes() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_ORTHO,     KiwiCam_Ortho() );   // projection check state
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_EDGE_OUTLINE, KiwiView_EdgeOutline() );
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_XRAY,      KiwiView_XRay() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_TRIS, KiwiUX_ShowTriCount() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_FACING, KiwiUX_ShowFacingArrows() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_LEAK_BG, KiwiUX_LeakBackground() );

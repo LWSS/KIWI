@@ -443,7 +443,9 @@ namespace
         { KIWI_CMD_FOCUS_SELECTION, { "Focus On Selection",  "View",      0, KiwiFocus_CanFocus } },
         { KIWI_CMD_VIEW_FACE,       { "View Face Head-on",   "View",      SEL_MASK_FACE, KiwiFocus_CanViewFace } },
         { KIWI_CMD_SECTION_TOGGLE,  { "Section Analysis",    "View",      0, nullptr } },
-        { KIWI_CMD_PLACE_SUN,       { "Place Sun",           "Lighting",  0, KiwiSun_CanPlace } },
+        { KIWI_CMD_VIEW_EDGE_OUTLINE, { "Edge Outlines (toggle)", "View", 0, nullptr } },   // KIWI: D-EDGEOUTLINE
+        { KIWI_CMD_VIEW_XRAY,       { "X-ray (toggle)",      "View",      0, nullptr } },   // KIWI: D-XRAY
+        { KIWI_CMD_PLACE_SUN,      { "Place Sun",           "Lighting",  0, KiwiSun_CanPlace } },
         { KIWI_CMD_REPEAT_LAST,     { "Repeat Last Command", "Edit",      0, KiwiCmd_HasRepeatable } },
         { KIWI_CMD_CLIP_CUT,        { "Cut to Clipboard",    "Edit",      SEL_MASK_OBJECT, CanClipCut } },
         { KIWI_CMD_REMOVE_FACE,     { "Remove Face (restore edge)", "Modeling",
@@ -879,6 +881,8 @@ namespace
         case KIWI_CMD_FOCUS_SELECTION:                  // viewport:focus
         case KIWI_CMD_VIEW_FACE:
         case KIWI_CMD_SECTION_TOGGLE:
+        case KIWI_CMD_VIEW_EDGE_OUTLINE:                // view-mode toggles, not verbs
+        case KIWI_CMD_VIEW_XRAY:
         case KIWI_CMD_HIDE_INVERT:
         case KIWI_CMD_FORCE_UNHIDE:
         case KIWI_CMD_CONSTRUCT_HIDE:

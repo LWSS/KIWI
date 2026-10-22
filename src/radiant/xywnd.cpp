@@ -1811,15 +1811,11 @@ static void Ed_XY_MouseMoved( xywndState_t *wnd, int x, int y, unsigned int butt
 
     // ── NEW-BRUSH drag: plain LMB held, nothing selected at press, sel_brush mode ──
     // (XY_MouseMoved's first dispatch arm — must precede the generic LMB-drag path.)
+    // KIWI (2026-10-21, user: "Disable the 2D view's click drag brush creation. It only
+    // griefs you now."): the arm still swallows the drag, but creates nothing; brushes are
+    // made with the creation tools in the camera.
     if ( wnd->m_nButtonstate == MK_LBUTTON && !wnd->m_bPress_selection && sel_mode == sel_brush )
-    {
-        Ed_NewBrushDrag( wnd, x, y );
-        // == CWnd::Invalidate( FALSE ) + CWnd::UpdateWindow() on this view.
-        ::InvalidateRect( wnd->m_hWnd, nullptr, FALSE );
-        ::UpdateWindow( wnd->m_hWnd );
-        Ed_InvalidateAllViews();   // the new/resized brush appears in XY + camera + Z
         return;
-    }
 
     const bool alt = ( GetAsyncKeyState( VK_MENU ) < 0 );
 

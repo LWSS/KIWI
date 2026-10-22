@@ -26,6 +26,7 @@
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
 #include "kiwi_construct.h"
+#include "kiwi_conselect.h"     // KiwiConSel_Empty (the fly-controls gate)
 #include "kiwi_gizmo.h"
 #include "kiwi_grass.h"
 #include "kiwi_terrain.h"
@@ -69,7 +70,21 @@ namespace
     enum kgesture_t { KG_NONE = 0, KG_ORBIT, KG_MARQUEE, KG_COMMAND, KG_CONSUMED,
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
                       KG_SUN, KG_DROP, KG_GRASS, KG_REFIMG, KG_TERRAIN, KG_DECAL,
-                      KG_DROP_ARM, KG_DROP_DONE };
+                      KG_DROP_ARM, KG_DROP_DONE,
+                      KG_FLYLOOK };              // KIWI: MMB mouselook (perspective, nothing selected)
+
+    // KIWI (2026-10-21, user: "This all works while nothing is selected, if something is
+    // selected, all the regular keybinds take precedence!"): the fly controls' gate.
+    bool NothingSelected()
+    {
+        return selected_brushes.next == &selected_brushes
+            && g_SelectedFaces.GetSize() == 0
+            && KiwiConSel_Empty()
+            && !KiwiRegion_HasSelection()
+            && !KiwiSun_Selected()
+            && KiwiRefImage_SelectedCount() == 0
+            && !KiwiCmd_Active();
+    }
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -109,8 +124,36 @@ namespace
     bool         s_navPan  = false;
     int          s_navX = 0, s_navY = 0;
 
+    // KIWI (2026-10-21, user: "leave it on MMB, but suck the mouse up so we dont get
+    // constrained by the window-size"): the MMB look hides the cursor and warps it back to
+    // its press point after every read, so the look reads endless screen-pixel deltas; the
+    // cursor reappears where the press was.
+    bool  s_flyCaptured = false;
+    POINT s_flyAnchor   = { 0, 0 };
+
+    void FlyLookCapture()
+    {
+        s_flyCaptured = ::GetCursorPos( &s_flyAnchor ) != FALSE;
+    }
+
+    void FlyLookPump()
+    {
+        POINT p;
+        if ( !s_flyCaptured || !::GetCursorPos( &p ) )
+            return;
+        const int dx = p.x - s_flyAnchor.x;
+        const int dy = p.y - s_flyAnchor.y;
+        if ( !dx && !dy )
+            return;
+        ::SetCursorPos( s_flyAnchor.x, s_flyAnchor.y );
+        KiwiCam_LookDrag( dx, dy );
+    }
+
     void EndGesture()
     {
+        if ( s_gesture == KG_FLYLOOK && s_flyCaptured )
+            ::SetCursorPos( s_flyAnchor.x, s_flyAnchor.y );
+        s_flyCaptured = false;
         s_gesture    = KG_NONE;
         s_gestureBtn = -1;
         s_sunCtrl    = false;
@@ -125,7 +168,7 @@ namespace
             return false;
         switch ( s_gesture )
         {
-        case KG_NONE: case KG_ORBIT: case KG_PAN: case KG_LOOK:
+        case KG_NONE: case KG_ORBIT: case KG_PAN: case KG_LOOK: case KG_FLYLOOK:
         case KG_DROP: case KG_DROP_ARM: case KG_DROP_DONE:
             return false;
         default:
@@ -679,6 +722,13 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
             KiwiCam_PanBegin( imgX, imgY );   // anchor pan scale for this gesture
             s_gesture = KG_PAN;
         }
+        else if ( !KiwiCam_Ortho() && NothingSelected() )
+        {
+            // KIWI (2026-10-21, user: "MMB will instead do a 'mouselook' in place of the
+            // pivot rotation"): with a selection MMB still orbits it.
+            s_gesture = KG_FLYLOOK;
+            FlyLookCapture();
+        }
         else
         {
             KiwiCam_OrbitBegin( imgX, imgY );
@@ -849,6 +899,8 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
 
     if ( s_gesture == KG_ORBIT )
         KiwiCam_OrbitDrag( dx, dy );
+    else if ( s_gesture == KG_FLYLOOK )
+        FlyLookPump();                   // screen deltas from the captured anchor
     else if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
         KiwiBox_Update( imgX, imgY );    // one rectangle, selection or command owner
     else if ( s_gesture == KG_PAN )
@@ -988,7 +1040,12 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
         if ( KiwiTerrain_HandleWheel( steps, shift, ctrl, alt ) || KiwiDecal_HandleWheel( steps, shift, ctrl ) )
             return true;
     }
-    KiwiCam_Dolly( steps, imgX, imgY );
+    // KIWI (2026-10-21): perspective never wheel-zooms - the wheel sets the fly speed.
+    // Ortho keeps the dolly, its only zoom.
+    if ( KiwiCam_Ortho() )
+        KiwiCam_Dolly( steps, imgX, imgY );
+    else
+        KiwiCam_WheelFlySpeed( steps );
     return true;
 }
 
@@ -1106,13 +1163,20 @@ void KiwiVP_CameraTick( bool cursorOver )
     if ( !KiwiUX_ModernInput() )
     {
         // Tick disabled arms to reset dt and clear the key-funnel ownership latch.
-        KiwiCam_FlyTick( false, false );
+        KiwiCam_FlyTick( false, false, false );
         return;
     }
-    const bool lookHeld = ( s_gesture == KG_LOOK );
+    // A still mouse sends no moves; the tick drains the captured look anyway.
+    if ( s_gesture == KG_FLYLOOK )
+        FlyLookPump();
+    const bool lookHeld = ( s_gesture == KG_LOOK || s_gesture == KG_FLYLOOK );
     const bool arrows   = cursorOver && !ImGuiShell_WantsKeyboard()
                        && s_gesture == KG_NONE;
-    KiwiCam_FlyTick( lookHeld, arrows );
+    // KIWI (2026-10-21): WASD / Q E fly in perspective while nothing is selected - hovering
+    // the camera, or during either mouselook.
+    const bool wasd = !KiwiCam_Ortho() && !ImGuiShell_WantsKeyboard() && NothingSelected()
+                   && ( ( cursorOver && s_gesture == KG_NONE ) || lookHeld );
+    KiwiCam_FlyTick( lookHeld, arrows, wasd );
 }
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────
@@ -1124,6 +1188,10 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     // This ImDrawList-only fallback complements the engine route without claiming hover;
     // its depth limitation is documented by the declaration.
     KiwiRegion_DrawFillsOverlay( imgMinX, imgMinY, imgW, imgH );   // kiwi_region.h:377
+
+    // KIWI: the captured MMB look hides the cursor (it is warped back every read).
+    if ( s_gesture == KG_FLYLOOK )
+        ImGui::SetMouseCursor( ImGuiMouseCursor_None );
 
     DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
     KiwiSnap_DrawCylinderOverlay( imgMinX, imgMinY, imgW, imgH );

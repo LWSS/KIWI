@@ -113,14 +113,16 @@ extern LayerMaterialDef *Patch_GetTextureName();                // pmesh.cpp 0x4
 
 // SurfaceDlg_GetMaterialSize (0x456F50) — the face's proportional texel scale
 // (size[0]/width) when the scale is isotropic (size[1]*width == height*size[0]), else 0.
+// KIWI: read the lightmap channel, the one Face_SetSampleSize writes; reading channel 0
+// showed the colour texture's stretch (0.167) instead of the sample size (16 default).
 float SurfaceDlg_GetMaterialSize( face_t *f )
 {
     iassert( f );   // SurfaceDlg.cpp:166
-    MaterialDef *md = &f->mtldef[ LayerMat::GetCurrentLayer( &f->mtldef[0] ) ];
-    qtexture_s *lm = MaterialDef_GetLayeredMaterial( &f->mtldef[0] );
+    MaterialDef *md = &f->mtldef[1];
+    qtexture_s *lm = MaterialDef_GetLayeredMaterial( md );
     int width  = lm ? lm->width  : 512;
     int height = lm ? lm->height : 512;
-    float *size = md->mat_texDef.size;
+    float *size = &md->mat_texDef.size[ 7 * LayerMat::GetCurrentLayer( md ) ];
     if ( size[1] * (float)width != (double)height * size[0] )
         return 0.0f;
     iassert( width );   // SurfaceDlg.cpp:173

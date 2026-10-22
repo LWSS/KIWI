@@ -6,6 +6,7 @@
 #include "zlib/zlib.h"
 #include <stdlib.h>
 #include <math.h>
+#include <xmmintrin.h> /* KIWI: _mm_prefetch (Embree MT transport) */
 
 /*
  * Tetrahedral SH basis constants for 4-band directional lighting.
@@ -22,6 +23,32 @@ static const float k_randScale = 0.000061037019f;  /* approx 2.0/32767.0 */
 static const float k_largeRadius = 0.999f;
 static const float k_initialMaxEnergy = 3.402823e+38f; /* FLT_MAX */
 static const float k_divergeThreshold = 2.0f;
+
+/* KIWI: Embree MT transport - one hemisphere ray traced and classified ahead
+ * by a worker (FindLightingSamplesAndNormalMode up to the sample weight
+ * test, which reads state the ordered pass mutates). */
+typedef struct KiwiXferRay_s {
+    unsigned char kind;            /* 0 none, 1/2 opposing face, 3 sky, 4 lightmap */
+    unsigned char count;           /* kind 4: candidate samples */
+    LightmapSample_t *sample[4];   /* kind 4: candidates in the serial order */
+    float weight[4];               /* kind 4: their raw filter weights */
+} KiwiXferRay_t;
+
+int g_kiwiXferActive;                           /* KIWI: replay running (main thread) */
+static uint32_t g_kiwiXferRng;                  /* KIWI: CRT rand() state while active */
+static const unsigned char *g_kiwiXferCellRays; /* KIWI: current cell's records, NULL = live */
+/* KIWI: the default point filter stores a ray as one word, sample | kind
+ * (samples are 16-byte aligned); -TraceFilterLinear keeps KiwiXferRay_t. */
+static int g_kiwiXferPacked;
+static size_t g_kiwiXferStride;                 /* bytes per stored ray */
+static int g_kiwiXferCellSky = -1;              /* KIWI: cell's sun ray result, -1 = trace */
+
+/* KIWI: the MSVC CRT rand() step (per-thread state, srand sets it). */
+static __forceinline int KiwiXfer_Rand(uint32_t *state)
+{
+    *state = *state * 214013u + 2531011u;
+    return (int)((*state >> 16) & 0x7fff);
+}
 
 /*
 ================
@@ -148,6 +175,133 @@ static unsigned int TransferHash(void *fromSample, void *toSample, int lightIdx)
           ^ (unsigned int)lightIdx * 3266489917u) & TRANSFER_HT_MASK;
 }
 
+/* KIWI: Embree MT replay - exact (fromSample, toSample, lightIdx) index.
+ * A sample is indexed whole (its chain scanned once per index epoch), so an
+ * index miss means "not in the chain": the O(chain) walk for every new key
+ * goes away.  Same entries, same order, same sums as the chain walk. */
+typedef struct KiwiXferIndexSlot_s {
+    Sample_t *from;
+    void *to;
+    int lightIdx;
+    TransferEntry_t *entry;
+} KiwiXferIndexSlot_t;
+
+#define KIWI_XFER_INDEX_BITS 18
+#define KIWI_XFER_INDEX_SIZE (1u << KIWI_XFER_INDEX_BITS)
+#define KIWI_XFER_INDEX_MAX  (KIWI_XFER_INDEX_SIZE / 2)
+
+static KiwiXferIndexSlot_t *g_kxIndex;
+static uint32_t g_kxIndexUsed;
+static uint32_t g_kxIndexEpoch;
+static uint32_t *g_kxSampleEpoch;   /* per lightmap sample: epoch it was indexed in */
+
+static __forceinline uint32_t KiwiXfer_IndexHash(const void *from, const void *to,
+                                                 int lightIdx)
+{
+    uint64_t h = (uint64_t)(uintptr_t)from * 0x9E3779B97F4A7C15ull
+               ^ (uint64_t)(uintptr_t)to * 0xC2B2AE3D27D4EB4Full
+               ^ (uint64_t)(uint32_t)lightIdx * 0x165667B19E3779F9ull;
+    h ^= h >> 32;
+    h *= 0xD6E8FEB86659FD93ull;
+    return (uint32_t)(h >> (64 - KIWI_XFER_INDEX_BITS));
+}
+
+static void KiwiXfer_IndexClear(void)
+{
+    memset(g_kxIndex, 0, KIWI_XFER_INDEX_SIZE * sizeof(*g_kxIndex));
+    g_kxIndexUsed = 0;
+    g_kxIndexEpoch++;
+}
+
+static void KiwiXfer_IndexInsert(Sample_t *from, TransferEntry_t *entry)
+{
+    uint32_t i = KiwiXfer_IndexHash(from, entry->toSample, entry->lightIdx);
+
+    while (g_kxIndex[i].from)
+        i = (i + 1) & (KIWI_XFER_INDEX_SIZE - 1);
+    g_kxIndex[i].from = from;
+    g_kxIndex[i].to = entry->toSample;
+    g_kxIndex[i].lightIdx = entry->lightIdx;
+    g_kxIndex[i].entry = entry;
+    g_kxIndexUsed++;
+}
+
+/* Index from's whole chain for this epoch; 0 = too long, walk the chain. */
+static int KiwiXfer_IndexSample(Sample_t *from)
+{
+    long long si = (LightmapSample_t *)from - (LightmapSample_t *)g_lightingSamples;
+    TransferBlock_t *cur;
+    uint32_t n = 0;
+    int i;
+
+    if (g_kxSampleEpoch[si] == g_kxIndexEpoch)
+        return 1;
+    for (cur = from->vars->transferHead; cur; cur = (TransferBlock_t *)cur->next)
+    {
+        for (i = 0; i < TRANSFERS_PER_BLOCK && cur->entries[i].toSample; i++)
+            n++;
+    }
+    if (n + 1 > KIWI_XFER_INDEX_MAX)
+        return 0;
+    if (g_kxIndexUsed + n + 1 > KIWI_XFER_INDEX_MAX)
+        KiwiXfer_IndexClear();
+    for (cur = from->vars->transferHead; cur; cur = (TransferBlock_t *)cur->next)
+    {
+        for (i = 0; i < TRANSFERS_PER_BLOCK && cur->entries[i].toSample; i++)
+            KiwiXfer_IndexInsert(from, &cur->entries[i]);
+    }
+    g_kxSampleEpoch[si] = g_kxIndexEpoch;
+    return 1;
+}
+
+static TransferEntry_t *KiwiXfer_IndexFind(Sample_t *from, void *to, int lightIdx)
+{
+    uint32_t i = KiwiXfer_IndexHash(from, to, lightIdx);
+
+    while (g_kxIndex[i].from)
+    {
+        if (g_kxIndex[i].from == from && g_kxIndex[i].to == to
+            && g_kxIndex[i].lightIdx == lightIdx)
+            return g_kxIndex[i].entry;
+        i = (i + 1) & (KIWI_XFER_INDEX_SIZE - 1);
+    }
+    return NULL;
+}
+
+#define KIWI_XFER_PREFETCH_SLOT  6   /* rays ahead: index slot + hit sample */
+
+/* KIWI: Embree MT replay - warm the lines the merge touches for a ray. */
+static __forceinline void KiwiXfer_PrefetchRay(Sample_t *from, const unsigned char *rec,
+                                               int dirIdx)
+{
+    const KiwiXferRay_t *ray = (const KiwiXferRay_t *)rec;
+    LightmapSample_t *packedSample = NULL;
+    int count, c;
+
+    if (g_kiwiXferPacked)
+    {
+        uintptr_t word = *(const uintptr_t *)rec;
+        if ((word & 15) != 4)
+            return;
+        packedSample = (LightmapSample_t *)(word & ~(uintptr_t)15);
+        count = 1;
+    }
+    else
+    {
+        if (ray->kind != 4)
+            return;
+        count = ray->count;
+    }
+    for (c = 0; c < count; c++)
+    {
+        LightmapSample_t *to = packedSample ? packedSample : ray->sample[c];
+
+        _mm_prefetch((const char *)&g_kxIndex[KiwiXfer_IndexHash(from, to, dirIdx)],
+                     _MM_HINT_T0);
+        _mm_prefetch((const char *)&to->weight, _MM_HINT_T0);
+    }
+}
+
 void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx,
                            float weight)
 {
@@ -167,6 +321,22 @@ void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx,
 
     if (weight <= 0.0f)
         return;
+
+    /* KIWI: Embree MT replay - exact index instead of the chain walk.  The
+     * add is the same IEEE sum (old + new == new + old). */
+    if (g_kiwiXferActive && KiwiXfer_IndexSample(fromSample))
+    {
+        entry = KiwiXfer_IndexFind(fromSample, toSample, lightIdx);
+        if (entry)
+        {
+            entry->weight += weight;
+            return;
+        }
+        slot = NULL;
+        AcquireThreadLock((unsigned int)(uintptr_t)fromSample);
+        block = vars->transferHead;
+        goto find_free;
+    }
 
     /* O(1) hash table lookup — handles both existing and previously-inserted entries */
     htIdx = TransferHash(fromSample, toSample, lightIdx);
@@ -210,6 +380,7 @@ void AllocLightingTransfer(Sample_t *fromSample, void *toSample, int lightIdx,
         }
     }
 
+find_free:
     if (block)
     {
         if (block->entries[TRANSFERS_PER_BLOCK - 1].toSample == 0)
@@ -272,10 +443,21 @@ insert:
     entry->toSample = toSample;
     entry->lightIdx = lightIdx;
 
-    slot->fromSample = fromSample;
-    slot->toSample = toSample;
-    slot->lightIdx = lightIdx;
-    slot->entry = entry;
+    if (!slot)
+    {
+        /* KIWI: Embree MT replay index (a full index restarts the epoch) */
+        if (g_kxIndexUsed + 1 > KIWI_XFER_INDEX_MAX)
+            KiwiXfer_IndexClear();
+        else
+            KiwiXfer_IndexInsert(fromSample, entry);
+    }
+    else
+    {
+        slot->fromSample = fromSample;
+        slot->toSample = toSample;
+        slot->lightIdx = lightIdx;
+        slot->entry = entry;
+    }
 
 done:
     entry->weight = weight;
@@ -865,6 +1047,91 @@ void NormalizeLightTransfers(Sample_t *sample)
 /* g_vertexData — view into g_vertData[0].lmCoord (stride sizeof(DrawVert_t)=0x44). */
 unsigned char *g_vertexData = (unsigned char *)&g_vertData[0].lmCoord;
 
+/* KIWI: Embree MT transport - the state-dependent tail of
+ * FindLightingSamplesAndNormalMode for a worker-classified ray: the
+ * sample->weight tests and the filter normalization, in the same order. */
+static int KiwiXfer_ResolveRay(const void *rec, void *outputLighting,
+                               int nearestSample, int *outTraceClass)
+{
+    const KiwiXferRay_t *ray = (const KiwiXferRay_t *)rec;
+    LightmapSample_t *sample0;
+    int kind;
+
+    if (g_kiwiXferPacked)
+    {
+        uintptr_t word = *(const uintptr_t *)rec;
+        kind = (int)(word & 15);
+        sample0 = (LightmapSample_t *)(word & ~(uintptr_t)15);
+    }
+    else
+    {
+        kind = ray->kind;
+        sample0 = ray->sample[0];
+    }
+
+    if (kind == 0)
+        return 0;
+    if (kind < 3)
+    {
+        if (outTraceClass)
+            *outTraceClass = kind;
+        return 0;
+    }
+    if (kind == 3)
+    {
+        if (outTraceClass)
+            *outTraceClass = 3;
+        return -1;
+    }
+
+    if (nearestSample)
+    {
+        LightingHit_t *hit = (LightingHit_t *)outputLighting;
+        LightmapSample_t *sample = sample0;
+
+        if (!sample || sample->weight <= 0.0f)
+            return 0;
+        hit->sample = (LightingSample_t *)sample;
+        hit->weight = 1.0f;
+        hit->_pad = 0;
+        if (outTraceClass)
+            *outTraceClass = 4;
+        return 1;
+    }
+
+    {
+        LightingHit_t *hits = (LightingHit_t *)outputLighting;
+        float totalWeight = 0.0f;
+        int hitCount = 0;
+        int c;
+
+        for (c = 0; c < ray->count; c++)
+        {
+            LightmapSample_t *sample = ray->sample[c];
+            float weight = ray->weight[c];
+
+            if (!sample || sample->weight <= 0.0f)
+                continue;
+            hits[hitCount].sample = (LightingSample_t *)sample;
+            hits[hitCount].weight = weight;
+            hits[hitCount]._pad = 0;
+            totalWeight += weight;
+            hitCount++;
+        }
+
+        if (hitCount && totalWeight > 0.0f && totalWeight < 0.9990000129f)
+        {
+            float scale = 1.0f / totalWeight;
+            int i;
+            for (i = 0; i < hitCount; i++)
+                hits[i].weight *= scale;
+        }
+        if (hitCount && outTraceClass)
+            *outTraceClass = 4;
+        return hitCount;
+    }
+}
+
 /*
 ================
 FindLightingSamplesAndNormal
@@ -1188,6 +1455,14 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     if (skyDir <= 0.0f)
         return;
 
+    /* KIWI: Embree MT replay - a worker traced this cell's sun ray */
+    if (g_kiwiXferCellSky >= 0)
+    {
+        if (!g_kiwiXferCellSky)
+            return;
+        goto sun_visible;
+    }
+
     /* compute ray start (offset along normal) and end (further along sky direction) */
     rayLen = k_skyRayLength; /* sky ray length constant */
 
@@ -1213,6 +1488,8 @@ void GatherSkyLighting(int sampleIdx, float *position, float *basis,
     /* backface check */
     if (TraceStaticModels(startPos, endPos))
         return;
+
+sun_visible:
 
     /* Native 0x407770 derives a fractional sun visibility from a jittered
      * multi-sample hit mask (popcount/sampleCount, 0x409B60), where alpha-
@@ -1896,8 +2173,17 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
         int rej = 0;
         do {
             extern int rand_int(void);
-            rx = (float)rand_int() * randScale - 1.0f;
-            ry = (float)rand_int() * randScale - 1.0f;
+            /* KIWI: replay walks the CRT stream itself (same values) */
+            if (g_kiwiXferActive)
+            {
+                rx = (float)KiwiXfer_Rand(&g_kiwiXferRng) * randScale - 1.0f;
+                ry = (float)KiwiXfer_Rand(&g_kiwiXferRng) * randScale - 1.0f;
+            }
+            else
+            {
+                rx = (float)rand_int() * randScale - 1.0f;
+                ry = (float)rand_int() * randScale - 1.0f;
+            }
             lenSq = rx * rx + ry * ry;
             rej++;
         } while (lenSq > 1.0f);
@@ -1981,6 +2267,59 @@ int FindLightingTransfersForDirection(int sampleIdx, Sample_t *sample,
     return 0;
 }
 
+/* KIWI: Embree MT replay - FindLightingTransfersForDirection over all
+ * g_traces rays of a worker-traced cell in one loop (same order, same
+ * float math; the per-ray call chain was a third of the merge thread). */
+static void KiwiXfer_ReplayDirections(Sample_t *sample, float subAreaFactor,
+                                      int *hasClassOne, int *hasUsefulDirection)
+{
+    const unsigned char *rec = g_kiwiXferCellRays;
+    SampleVars_t *sampleVars = sample->vars;
+    int nearestSample = g_traceFilter == 1;
+    int dirIdx;
+
+    for (dirIdx = 0; dirIdx < g_traces; dirIdx++, rec += g_kiwiXferStride)
+    {
+        LightingHit_t hitResults[4];
+        int traceClass = 0;
+        int result, i;
+        float factor;
+
+        if (dirIdx + KIWI_XFER_PREFETCH_SLOT < g_traces)
+            KiwiXfer_PrefetchRay(sample, rec + KIWI_XFER_PREFETCH_SLOT * g_kiwiXferStride,
+                                 dirIdx + KIWI_XFER_PREFETCH_SLOT);
+
+        result = KiwiXfer_ResolveRay(rec, hitResults, nearestSample, &traceClass);
+        if (traceClass <= 2)
+        {
+            if (traceClass == 1)
+                *hasClassOne = 1;
+            continue;
+        }
+
+        *hasUsefulDirection = 1;
+        factor = g_invTraces * subAreaFactor;
+
+        if (traceClass == 3)
+        {
+            if (!sampleVars->skyInfluences)
+                sampleVars->skyInfluences = (float *)calloc((size_t)g_traces,
+                                                            sizeof(float));
+            if (!sampleVars->skyInfluences)
+                Error("Out of memory allocating sky influences\n");
+            sampleVars->skyInfluences[dirIdx] += factor;
+            continue;
+        }
+
+        for (i = 0; i < result; i++)
+        {
+            void *toSample = hitResults[i].sample;
+            float weight = factor * hitResults[i].weight;
+            AllocLightingTransfer(sample, toSample, dirIdx, weight);
+        }
+    }
+}
+
 /*
 ================
 FindLightingTransfers_inner
@@ -2006,6 +2345,10 @@ int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
         if (!g_relightCacheLoaded)
         {
             /* Native transport dispatcher 0x40C700. */
+            if (g_kiwiXferCellRays)   /* KIWI: Embree MT replay, same result */
+                KiwiXfer_ReplayDirections(sample, subAreaFactor,
+                                          &hasClassOne, &hasUsefulDirection);
+            else
             for (i = 0; i < g_traces; i++)
             {
                 int traceClass = FindLightingTransfersForDirection(
@@ -2048,5 +2391,974 @@ int FindLightingTransfers_inner(int sampleIdx, float *position, float *normal,
                                        subAreaFactor, primaryLightIndex,
                                        subSample);
     }
+    return 1;
+}
+
+/*
+================
+KIWI: Embree multithreaded light transport
+
+"Building light transport for everything" stays one ordered pass on the
+main thread (sample chains, drain and float sums are order dependent).
+With Embree on, worker threads trace and classify every cell's hemisphere
+rays and its sun ray AHEAD of that pass; the pass then runs unchanged and
+takes each cell's results instead of tracing (KiwiXfer_ReplayDirections,
+GatherSkyLighting).  Only the tests that read state the pass mutates (hit
+sample weights, the area gate) stay in the pass.
+
+The rays depend on the CRT rand() stream, so the plan replays it: the main
+thread's rand state is recovered, a positioner thread walks the same LCG
+(g_traces disk points per cell that passes the area gate at pass start)
+and cuts each work item into trace tasks with their start states.  The
+pass uses a cell's results only when its area index, RNG state, position
+and basis all match exactly; otherwise it traces live and the plan
+restarts after that item (a drained gate; ~10 times per map).  The result
+is byte-identical to the one-thread pass.  -Threads 1, relight loads and
+AO keep the original path.
+================
+*/
+#define KIWI_XFER_MAX_THREADS 64
+#define KIWI_XFER_MAX_AHEAD   4096                  /* items traced ahead */
+#define KIWI_XFER_BYTE_BUDGET ((size_t)512 << 20)   /* hit memory ahead */
+
+extern int g_useEmbree;          /* embree_trace.cpp */
+extern int g_kiwiEmbreeThreads;  /* cmdline.c */
+extern void BuildLightTransfers_Callback(unsigned int triIndex, unsigned int unused);
+
+typedef struct KiwiXferCell_s {
+    int areaIndex;
+    uint32_t rngStart;
+    uint32_t rngEnd;
+    float pos[3];
+    float basis[9];
+    int sky;            /* GatherSkyLighting's sun ray reached the sky */
+} KiwiXferCell_t;
+
+typedef struct KiwiXferItem_s {
+    int stage;          /* 0 free, 1 claimed, 2 rastered, 3 traced */
+    int rngKnown;
+    uint32_t rngStart;
+    int cellCount;
+    KiwiXferCell_t *cells;
+    unsigned char *rays;            /* cellCount * traces records, g_kiwiXferStride each */
+    size_t bytes;
+    int chunkCount;                 /* trace tasks queued by the positioner */
+    int chunksDone;
+} KiwiXferItem_t;
+
+/* One trace task: a run of an item's cells with its RNG start state. */
+#define KIWI_XFER_CHUNK_CELLS 128
+typedef struct KiwiXferTask_s {
+    int item;
+    int cellStart;
+    int cellEnd;
+    uint32_t rng;
+} KiwiXferTask_t;
+
+typedef struct KiwiXferRaster_s {
+    LightTransferMapping_t mapping;
+    KiwiXferCell_t *cells;
+    int count;
+    int capacity;
+} KiwiXferRaster_t;
+
+static struct {
+    SRWLOCK lock;
+    CONDITION_VARIABLE cvRaster;   /* positioner: an item was rastered */
+    CONDITION_VARIABLE cvWork;     /* tracers: tasks queued or the merge advanced */
+    CONDITION_VARIABLE cvTraced;   /* merge: an item is traced */
+    KiwiXferItem_t *items;
+    int itemCount;
+    int nextClaim;
+    int merged;
+    KiwiXferTask_t *tasks;         /* FIFO, in work order */
+    int taskHead;
+    int taskTail;
+    int taskCap;
+    int positionerDone;
+    size_t outstanding;
+    volatile LONG abort;
+    float *snap;                   /* channelWeight[4] per sample at pass start */
+    int traces;
+    int tracerCount;
+    HANDLE threads[KIWI_XFER_MAX_THREADS + 1];
+    int threadCount;
+    /* merge side (main thread) */
+    KiwiXferItem_t *curItem;
+    int cursor;
+    int desync;
+    long long cellsReplayed;
+    long long cellsLive;
+    int restarts;
+    long long waitTicks;           /* merge stalled on the tracers */
+    void **garbage;                /* merged buffers, freed by the tracers */
+    int garbageCount;
+    int garbageCap;
+} g_kx;
+
+/* All plan memory lives in a private heap: the CRT heap then sees exactly
+ * the serial pass's allocations, so the transfer pool stays as compact as
+ * before (interleaving it with plan buffers made the later chain walks of
+ * "Building final lightmaps" ~2x slower). */
+static HANDLE g_kxHeap;
+
+static void *KiwiXfer_Alloc(size_t size, int zero)
+{
+    void *p = HeapAlloc(g_kxHeap, zero ? HEAP_ZERO_MEMORY : 0, size ? size : 1);
+    if (!p)
+        ErrorMsg("Out of memory for traced-ahead light transport\n");
+    return p;
+}
+
+static void *KiwiXfer_Realloc(void *p, size_t size)
+{
+    void *q = p ? HeapReAlloc(g_kxHeap, 0, p, size) : HeapAlloc(g_kxHeap, 0, size);
+    if (!q)
+        ErrorMsg("Out of memory for traced-ahead light transport\n");
+    return q;
+}
+
+static void KiwiXfer_Free(void *p)
+{
+    if (p)
+        HeapFree(g_kxHeap, 0, p);
+}
+
+/* g_kx.lock held. */
+static void KiwiXfer_AddGarbage(void *p)
+{
+    if (!p)
+        return;
+    if (g_kx.garbageCount == g_kx.garbageCap)
+    {
+        g_kx.garbageCap = g_kx.garbageCap ? g_kx.garbageCap * 2 : 256;
+        g_kx.garbage = (void **)KiwiXfer_Realloc(g_kx.garbage,
+            (size_t)g_kx.garbageCap * sizeof(void *));
+    }
+    g_kx.garbage[g_kx.garbageCount++] = p;
+}
+
+/* Frees a list taken from g_kx.garbage (lock not held). */
+static void KiwiXfer_FreeGarbage(void **list, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++)
+        KiwiXfer_Free(list[i]);
+    KiwiXfer_Free(list);
+}
+
+static float KiwiXfer_ClampArea(float areaX2, float weight)
+{
+    /* geometry.c ClampAreaToWeight */
+    float val = (weight - areaX2 < 0.0f) ? weight : areaX2;
+    return (0.0f - val < 0.0f) ? val : 0.0f;
+}
+
+/* Same rejection loop and float math as FindLightingTransfersForDirection. */
+static __forceinline void KiwiXfer_Disk(uint32_t *rng, float *outX, float *outY)
+{
+    float randScale = k_randScale;
+    float rx, ry, lenSq;
+
+    do {
+        rx = (float)KiwiXfer_Rand(rng) * randScale - 1.0f;
+        ry = (float)KiwiXfer_Rand(rng) * randScale - 1.0f;
+        lenSq = rx * rx + ry * ry;
+    } while (lenSq > 1.0f);
+    *outX = rx;
+    *outY = ry;
+}
+
+/* FindLightingSamplesAndNormalMode's opposing-upward probe (1 = sky below). */
+static int KiwiXfer_ProbeClass(Triangle_t *tri)
+{
+    float probe[3];
+    float end[3];
+    RayHitResult_t verticalHit;
+    MaterialDef_t *verticalMaterial;
+
+    probe[0] = (g_vertData[tri->vertIndex[0]].pos[0]
+              + g_vertData[tri->vertIndex[1]].pos[0]
+              + g_vertData[tri->vertIndex[2]].pos[0])
+             * 0.3333333432674408f - tri->normal[0] * 0.1f;
+    probe[1] = (g_vertData[tri->vertIndex[0]].pos[1]
+              + g_vertData[tri->vertIndex[1]].pos[1]
+              + g_vertData[tri->vertIndex[2]].pos[1])
+             * 0.3333333432674408f - tri->normal[1] * 0.1f;
+    probe[2] = (g_vertData[tri->vertIndex[0]].pos[2]
+              + g_vertData[tri->vertIndex[1]].pos[2]
+              + g_vertData[tri->vertIndex[2]].pos[2])
+             * 0.3333333432674408f - tri->normal[2] * 0.1f;
+    end[0] = probe[0];
+    end[1] = probe[1];
+    end[2] = probe[2] - 262144.0f;
+    TraceSetup_and_Dispatch(0, probe, end, &verticalHit);
+    if (!verticalHit.triangle)
+        return 1;
+    verticalMaterial = verticalHit.triangle->material;
+    if ((verticalMaterial->surfaceFlags & SURF_SKY)
+     || (verticalMaterial->contents == 1
+      && (verticalMaterial->surfaceFlags & 0x80)))
+        return 1;
+    return 2;
+}
+
+/* FindLightingSamplesAndNormalMode after its trace, minus the weight tests
+ * (outputNormal is NULL in transport, so no static-model trace). */
+static void KiwiXfer_ClassifyHit(const RayHitResult_t *hitResult,
+                                 const float *normal, int nearestSample,
+                                 KiwiXferRay_t *ray)
+{
+    Triangle_t *tri = hitResult->triangle;
+    MaterialDef_t *material;
+    float baryU, baryV, baryW;
+    float u, v;
+    float uvScale = 512.0f;
+    int vertIdx0, vertIdx1, vertIdx2;
+
+    ray->kind = 0;
+    ray->count = 0;
+    if (!tri)
+        return;
+
+    material = tri->material;
+    if (material->surfaceFlags & SURF_SKY)
+    {
+        if (normal[2] < 0.0f)
+            return;
+        ray->kind = 3;
+        return;
+    }
+
+    if (DotProduct(tri->normal, normal) >= 0.0f)
+    {
+        ray->kind = 2;
+        if (tri->normal[2] >= 0.5f)
+            ray->kind = (unsigned char)KiwiXfer_ProbeClass(tri);
+        return;
+    }
+
+    if (tri->lightmapIdx == LIGHTMAP_NONE)
+        return;
+
+    baryU = hitResult->baryU;
+    baryV = hitResult->baryV;
+    baryW = 1.0f - baryU - baryV;
+
+    vertIdx0 = tri->vertIndex[0];
+    vertIdx1 = tri->vertIndex[1];
+    vertIdx2 = tri->vertIndex[2];
+
+    u = baryW * *(float *)&g_vertexData[vertIdx0 * 0x44]
+      + baryU * *(float *)&g_vertexData[vertIdx1 * 0x44]
+      + baryV * *(float *)&g_vertexData[vertIdx2 * 0x44];
+    v = baryW * *(float *)&g_vertexData[vertIdx0 * 0x44 + 4]
+      + baryU * *(float *)&g_vertexData[vertIdx1 * 0x44 + 4]
+      + baryV * *(float *)&g_vertexData[vertIdx2 * 0x44 + 4];
+    u *= uvScale;
+    v *= uvScale;
+
+    ray->kind = 4;
+    if (nearestSample)
+    {
+        LightmapSample_t *sample;
+        int s = (int)floorf(u);
+        int t = (int)floorf(v);
+
+        if (s < 0) s = 0;
+        else if (s > 511) s = 511;
+        if (t < 0) t = 0;
+        else if (t > 511) t = 511;
+
+        GetLightingSample((int)tri->lightmapIdx, (float)s, (float)t,
+                          (void **)&sample);
+        ray->sample[0] = sample;
+        ray->weight[0] = 1.0f;
+        ray->count = 1;
+        return;
+    }
+
+    {
+        int baseS = (int)floorf(u - 0.5f);
+        int baseT = (int)floorf(v - 0.5f);
+        float fracS = (u - 0.5f) - (float)baseS;
+        float fracT = (v - 0.5f) - (float)baseT;
+        float sWeights[2] = { 1.0f - fracS, fracS };
+        float tWeights[2] = { 1.0f - fracT, fracT };
+        int dy, dx;
+
+        for (dy = 0; dy < 2; dy++)
+        {
+            int t = baseT + dy;
+            if (t < 0 || t >= 512 || tWeights[dy] == 0.0f)
+                continue;
+            for (dx = 0; dx < 2; dx++)
+            {
+                int s = baseS + dx;
+                LightmapSample_t *sample;
+                float weight = sWeights[dx] * tWeights[dy];
+                if (s < 0 || s >= 512 || weight == 0.0f)
+                    continue;
+
+                GetLightingSample((int)tri->lightmapIdx, (float)s, (float)t,
+                                  (void **)&sample);
+                ray->sample[ray->count] = sample;
+                ray->weight[ray->count] = weight;
+                ray->count++;
+            }
+        }
+    }
+}
+
+/* GatherSkyLighting's sun visibility test for a cell (no state read). */
+static int KiwiXfer_SunVisible(float *position, float *basis)
+{
+    float startPos[3], endPos[3];
+    float smallOffset = 0.125f;
+    float rayLen = k_skyRayLength;
+    float skyDir;
+    RayHitResult_t hitResult;
+
+    skyDir = g_sunDirY * basis[7] + g_sunDirX * basis[6] + g_sunDirZ * basis[8];
+    if (skyDir <= 0.0f)
+        return 0;
+
+    startPos[0] = basis[6] * smallOffset + position[0];
+    startPos[1] = basis[7] * smallOffset + position[1];
+    startPos[2] = basis[8] * smallOffset + position[2];
+
+    endPos[0] = g_sunDirX * rayLen + startPos[0];
+    endPos[1] = g_sunDirY * rayLen + startPos[1];
+    endPos[2] = g_sunDirZ * rayLen + startPos[2];
+
+    TraceSetup_and_Dispatch(0, startPos, endPos, &hitResult);
+    if (!hitResult.triangle)
+        return 0;
+    if (!(hitResult.triangle->material->contents & (CONTENTS_NONCOLLIDING | CONTENTS_SKY)))
+        return 0;
+    if (TraceStaticModels(startPos, endPos))
+        return 0;
+    return 1;
+}
+
+/* Trace one cell's g_traces rays exactly as the serial pass would. */
+static void KiwiXfer_TraceCell(uint32_t *rng, float *position, float *normal,
+                               unsigned char *out)
+{
+    int nearestSample = g_traceFilter == 1;
+    int dirIdx;
+
+    for (dirIdx = 0; dirIdx < g_traces; dirIdx++)
+    {
+        float *dirEntry = (float *)&((LightDirEntry_t *)g_lightDirArray)[dirIdx];
+        unsigned char *rec = out + (size_t)dirIdx * g_kiwiXferStride;
+        KiwiXferRay_t ray;
+        float rx, ry, lenSq;
+        float pertDir[3];
+        float worldDir[3];
+        float startPos[3], endPos[3];
+        float smallOffset = 0.125f;
+        float offset = k_skyRayLength;
+        RayHitResult_t hit;
+
+        KiwiXfer_Disk(rng, &rx, &ry);
+        {
+            float radius = dirEntry[3];
+            pertDir[0] = dirEntry[0] + radius * rx;
+            pertDir[1] = dirEntry[1] + radius * ry;
+
+            lenSq = pertDir[0] * pertDir[0] + pertDir[1] * pertDir[1];
+            if (lenSq <= 1.0f)
+            {
+                pertDir[2] = sqrtf(1.0f - lenSq);
+            }
+            else
+            {
+                Vec2Normalize(pertDir);
+                pertDir[2] = k_smallEpsilon;
+            }
+        }
+
+        worldDir[0] = pertDir[0] * normal[0] + pertDir[1] * normal[3] + pertDir[2] * normal[6];
+        worldDir[1] = pertDir[0] * normal[1] + pertDir[1] * normal[4] + pertDir[2] * normal[7];
+        worldDir[2] = pertDir[0] * normal[2] + pertDir[1] * normal[5] + pertDir[2] * normal[8];
+
+        startPos[0] = worldDir[0] * smallOffset + position[0];
+        startPos[1] = worldDir[1] * smallOffset + position[1];
+        startPos[2] = worldDir[2] * smallOffset + position[2];
+        endPos[0] = worldDir[0] * offset + startPos[0];
+        endPos[1] = worldDir[1] * offset + startPos[1];
+        endPos[2] = worldDir[2] * offset + startPos[2];
+
+        TraceSetup_and_Dispatch(0, startPos, endPos, &hit);
+        KiwiXfer_ClassifyHit(&hit, worldDir, nearestSample, &ray);
+        if (g_kiwiXferPacked)
+            *(uintptr_t *)rec = (ray.kind == 4 ? (uintptr_t)ray.sample[0] : 0) | ray.kind;
+        else
+            memcpy(rec, &ray, sizeof(ray));
+    }
+}
+
+/* ProcessLightingSampleArea up to GramSchmidt, gated on the pass-start weights. */
+static void KiwiXfer_RasterCell(float areaX2, float *centroid,
+                                float *polyVerts, int vertCount,
+                                void *userData, int areaIndex)
+{
+    KiwiXferRaster_t *r = (KiwiXferRaster_t *)userData;
+    LightTransferMapping_t *mapping = &r->mapping;
+    SubSample_t sub;
+    long long pixel;
+    KiwiXferCell_t *cell;
+    float *basis;
+    float u, v;
+
+    (void)polyVerts;
+    (void)vertCount;
+
+    GetLightingSubSample(mapping->lightmapIdx,
+                         centroid[0] * 2.0f, centroid[1] * 2.0f, &sub);
+    pixel = (LightmapSample_t *)sub.sample - (LightmapSample_t *)g_lightingSamples;
+    if (KiwiXfer_ClampArea(areaX2, g_kx.snap[pixel * 4 + sub.s + sub.t * 2]) == 0.0f)
+        return;
+
+    if (r->count == r->capacity)
+    {
+        int newCapacity = r->capacity ? r->capacity * 2 : 64;
+        KiwiXferCell_t *newCells = (KiwiXferCell_t *)KiwiXfer_Realloc(r->cells,
+            (size_t)newCapacity * sizeof(*newCells));
+        r->cells = newCells;
+        r->capacity = newCapacity;
+    }
+    cell = &r->cells[r->count++];
+    cell->areaIndex = areaIndex;
+
+    u = centroid[0];
+    v = centroid[1];
+
+    cell->pos[0] = mapping->posConst[0] + u * mapping->posUCoeff[0] + v * mapping->posVCoeff[0];
+    cell->pos[1] = mapping->posConst[1] + u * mapping->posUCoeff[1] + v * mapping->posVCoeff[1];
+    cell->pos[2] = mapping->posConst[2] + u * mapping->posUCoeff[2] + v * mapping->posVCoeff[2];
+
+    basis = cell->basis;
+    basis[0] = mapping->tanConst[0] + u * mapping->tanUCoeff[0] + v * mapping->tanVCoeff[0];
+    basis[1] = mapping->tanConst[1] + u * mapping->tanUCoeff[1] + v * mapping->tanVCoeff[1];
+    basis[2] = mapping->tanConst[2] + u * mapping->tanUCoeff[2] + v * mapping->tanVCoeff[2];
+
+    basis[3] = mapping->binConst[0] + u * mapping->binUCoeff[0] + v * mapping->binVCoeff[0];
+    basis[4] = mapping->binConst[1] + u * mapping->binUCoeff[1] + v * mapping->binVCoeff[1];
+    basis[5] = mapping->binConst[2] + u * mapping->binUCoeff[2] + v * mapping->binVCoeff[2];
+
+    basis[6] = mapping->normConst[0] + u * mapping->normUCoeff[0] + v * mapping->normVCoeff[0];
+    basis[7] = mapping->normConst[1] + u * mapping->normUCoeff[1] + v * mapping->normVCoeff[1];
+    basis[8] = mapping->normConst[2] + u * mapping->normUCoeff[2] + v * mapping->normVCoeff[2];
+
+    GramSchmidt(basis);
+}
+
+/* BuildLightTransfers_PerTri's checks, then the cell list of one triangle. */
+static void KiwiXfer_RasterItem(int triIndex, KiwiXferItem_t *item)
+{
+    Triangle_t *tri = &g_triangles[triIndex];
+    KiwiXferRaster_t r;
+    float *lm0, *lm1, *lm2;
+
+    item->cells = NULL;
+    item->cellCount = 0;
+
+    if (tri->lightmapIdx == 0x1F)
+        return;
+
+    lm0 = g_vertData[tri->vertIndex[0]].lmCoord;
+    lm1 = g_vertData[tri->vertIndex[1]].lmCoord;
+    lm2 = g_vertData[tri->vertIndex[2]].lmCoord;
+    if (lm0[0] == lm1[0] && lm0[1] == lm1[1])
+        return;
+    if (lm1[0] == lm2[0] && lm1[1] == lm2[1])
+        return;
+    if (lm2[0] == lm0[0] && lm2[1] == lm0[1])
+        return;
+
+    if (!ComputeLinearMappingForTriangle(tri, &r.mapping))
+        return;
+    r.mapping.param = 0;
+    r.mapping.lightmapIdx = (int)tri->lightmapIdx;
+    r.mapping.triangleIndex = triIndex;
+    r.mapping.primaryLightIndex = tri->primaryLightIndex;
+    r.cells = NULL;
+    r.count = 0;
+    r.capacity = 0;
+
+    ForEachLightingSampleInTriangle(tri, g_superSample,
+                                    (void *)KiwiXfer_RasterCell, &r);
+    item->cells = r.cells;
+    item->cellCount = r.count;
+}
+
+static DWORD WINAPI KiwiXfer_TracerThread(LPVOID param)
+{
+    (void)param;
+
+    /* Trace tasks first (oldest item first, so the merge is fed), else
+     * raster the next item while the window allows. */
+    AcquireSRWLockExclusive(&g_kx.lock);
+    for (;;)
+    {
+        KiwiXferItem_t *item;
+        int j, c;
+
+        if (g_kx.abort)
+            break;
+
+        if (g_kx.taskHead < g_kx.taskTail)
+        {
+            KiwiXferTask_t task = g_kx.tasks[g_kx.taskHead++];
+            uint32_t rng = task.rng;
+
+            item = &g_kx.items[task.item];
+            ReleaseSRWLockExclusive(&g_kx.lock);
+
+            for (c = task.cellStart; c < task.cellEnd && !g_kx.abort; c++)
+            {
+                KiwiXferCell_t *cell = &item->cells[c];
+                cell->rngStart = rng;
+                KiwiXfer_TraceCell(&rng, cell->pos, cell->basis,
+                                   item->rays + (size_t)c * g_kx.traces * g_kiwiXferStride);
+                cell->rngEnd = rng;
+                cell->sky = KiwiXfer_SunVisible(cell->pos, cell->basis);
+            }
+
+            AcquireSRWLockExclusive(&g_kx.lock);
+            if (g_kx.abort)
+                break;
+            if (++item->chunksDone == item->chunkCount)
+            {
+                item->stage = 3;
+                WakeAllConditionVariable(&g_kx.cvTraced);
+            }
+            continue;
+        }
+
+        if (g_kx.nextClaim < g_kx.itemCount
+            && g_kx.nextClaim - g_kx.merged < KIWI_XFER_MAX_AHEAD
+            && g_kx.outstanding <= KIWI_XFER_BYTE_BUDGET)
+        {
+            void **garbage = g_kx.garbage;
+            int garbageCount = g_kx.garbageCount;
+
+            j = g_kx.nextClaim++;
+            item = &g_kx.items[j];
+            item->stage = 1;
+            g_kx.garbage = NULL;
+            g_kx.garbageCount = 0;
+            g_kx.garbageCap = 0;
+            ReleaseSRWLockExclusive(&g_kx.lock);
+
+            KiwiXfer_FreeGarbage(garbage, garbageCount);
+            KiwiXfer_RasterItem(j, item);
+
+            AcquireSRWLockExclusive(&g_kx.lock);
+            item->bytes = (size_t)item->cellCount
+                        * (sizeof(KiwiXferCell_t) + (size_t)g_kx.traces * g_kiwiXferStride);
+            g_kx.outstanding += item->bytes;
+            item->stage = 2;
+            WakeAllConditionVariable(&g_kx.cvRaster);
+            continue;
+        }
+
+        if (g_kx.nextClaim >= g_kx.itemCount && g_kx.positionerDone)
+            break;
+        SleepConditionVariableSRW(&g_kx.cvWork, &g_kx.lock, INFINITE, 0);
+    }
+    ReleaseSRWLockExclusive(&g_kx.lock);
+    return 0;
+}
+
+/* g_kx.lock held. */
+static void KiwiXfer_PushTask(int item, int cellStart, int cellEnd, uint32_t rng)
+{
+    KiwiXferTask_t *task;
+
+    if (g_kx.taskTail == g_kx.taskCap)
+    {
+        if (g_kx.taskHead > 0)
+        {
+            memmove(g_kx.tasks, g_kx.tasks + g_kx.taskHead,
+                    (size_t)(g_kx.taskTail - g_kx.taskHead) * sizeof(*g_kx.tasks));
+            g_kx.taskTail -= g_kx.taskHead;
+            g_kx.taskHead = 0;
+        }
+        if (g_kx.taskTail == g_kx.taskCap)
+        {
+            g_kx.taskCap = g_kx.taskCap ? g_kx.taskCap * 2 : 1024;
+            g_kx.tasks = (KiwiXferTask_t *)KiwiXfer_Realloc(g_kx.tasks,
+                (size_t)g_kx.taskCap * sizeof(*g_kx.tasks));
+        }
+    }
+    task = &g_kx.tasks[g_kx.taskTail++];
+    task->item = item;
+    task->cellStart = cellStart;
+    task->cellEnd = cellEnd;
+    task->rng = rng;
+}
+
+/* Walks the RNG over each rastered item's disk points, in work order, and
+ * queues the item as trace tasks of KIWI_XFER_CHUNK_CELLS cells. */
+static DWORD WINAPI KiwiXfer_PositionerThread(LPVOID param)
+{
+    int p = (int)(intptr_t)param;
+    KiwiXferTask_t *local = NULL;
+    int localCap = 0;
+
+    AcquireSRWLockExclusive(&g_kx.lock);
+    while (p < g_kx.itemCount)
+    {
+        KiwiXferItem_t *item = &g_kx.items[p];
+        unsigned char *rays = NULL;
+        uint32_t rng;
+        int count, chunks, c, k;
+
+        while (!g_kx.abort && item->stage < 2)
+            SleepConditionVariableSRW(&g_kx.cvRaster, &g_kx.lock, INFINITE, 0);
+        if (g_kx.abort)
+            break;
+        rng = item->rngStart;
+        count = item->cellCount;
+        ReleaseSRWLockExclusive(&g_kx.lock);
+
+        chunks = (count + KIWI_XFER_CHUNK_CELLS - 1) / KIWI_XFER_CHUNK_CELLS;
+        if (chunks > localCap)
+        {
+            localCap = chunks * 2;
+            local = (KiwiXferTask_t *)KiwiXfer_Realloc(local,
+                (size_t)localCap * sizeof(*local));
+        }
+        if (count)
+            rays = (unsigned char *)KiwiXfer_Alloc((size_t)count
+                                       * g_kx.traces * g_kiwiXferStride, 0);
+        for (k = 0, c = 0; c < count; k++)
+        {
+            int end = c + KIWI_XFER_CHUNK_CELLS < count ? c + KIWI_XFER_CHUNK_CELLS : count;
+            long long n = (long long)(end - c) * g_kx.traces;
+
+            local[k].item = p;
+            local[k].cellStart = c;
+            local[k].cellEnd = end;
+            local[k].rng = rng;
+            while (n-- > 0)
+            {
+                float rx, ry;
+                KiwiXfer_Disk(&rng, &rx, &ry);
+            }
+            c = end;
+        }
+
+        AcquireSRWLockExclusive(&g_kx.lock);
+        item->rays = rays;
+        item->chunkCount = chunks;
+        item->chunksDone = 0;
+        if (g_kx.abort)
+            break;
+        if (!chunks)
+        {
+            item->stage = 3;
+            WakeAllConditionVariable(&g_kx.cvTraced);
+        }
+        for (k = 0; k < chunks; k++)
+            KiwiXfer_PushTask(local[k].item, local[k].cellStart, local[k].cellEnd, local[k].rng);
+        if (chunks)
+            WakeAllConditionVariable(&g_kx.cvWork);
+        if (p + 1 < g_kx.itemCount)
+        {
+            g_kx.items[p + 1].rngStart = rng;
+            g_kx.items[p + 1].rngKnown = 1;
+        }
+        p++;
+    }
+    g_kx.positionerDone = 1;
+    WakeAllConditionVariable(&g_kx.cvWork);
+    ReleaseSRWLockExclusive(&g_kx.lock);
+    KiwiXfer_Free(local);
+    return 0;
+}
+
+static void KiwiXfer_StartPipeline(int startItem, uint32_t rng)
+{
+    int i;
+
+    g_kx.abort = 0;
+    g_kx.nextClaim = startItem;
+    g_kx.merged = startItem;
+    g_kx.outstanding = 0;
+    g_kx.taskHead = 0;
+    g_kx.taskTail = 0;
+    g_kx.positionerDone = 0;
+    g_kx.items[startItem].rngStart = rng;
+    g_kx.items[startItem].rngKnown = 1;
+
+    g_kx.threadCount = 0;
+    g_kx.threads[g_kx.threadCount++] = CreateThread(NULL, 0,
+        KiwiXfer_PositionerThread, (LPVOID)(intptr_t)startItem, 0, NULL);
+    for (i = 0; i < g_kx.tracerCount; i++)
+        g_kx.threads[g_kx.threadCount++] = CreateThread(NULL, 0,
+            KiwiXfer_TracerThread, NULL, 0, NULL);
+    for (i = 0; i < g_kx.threadCount; i++)
+    {
+        if (!g_kx.threads[i])
+            ErrorMsg("Light transport: CreateThread failed (%lu)\n", GetLastError());
+    }
+}
+
+/* Joins the threads and drops every plan from firstItem on. */
+static void KiwiXfer_StopPipeline(int firstItem)
+{
+    int i;
+
+    AcquireSRWLockExclusive(&g_kx.lock);
+    g_kx.abort = 1;
+    WakeAllConditionVariable(&g_kx.cvRaster);
+    WakeAllConditionVariable(&g_kx.cvWork);
+    WakeAllConditionVariable(&g_kx.cvTraced);
+    ReleaseSRWLockExclusive(&g_kx.lock);
+
+    for (i = 0; i < g_kx.threadCount; i++)
+    {
+        WaitForSingleObject(g_kx.threads[i], INFINITE);
+        CloseHandle(g_kx.threads[i]);
+    }
+    g_kx.threadCount = 0;
+
+    for (i = firstItem; i < g_kx.itemCount; i++)
+    {
+        KiwiXfer_Free(g_kx.items[i].cells);
+        KiwiXfer_Free(g_kx.items[i].rays);
+        memset(&g_kx.items[i], 0, sizeof(g_kx.items[i]));
+    }
+    g_kx.outstanding = 0;
+    g_kx.taskHead = 0;
+    g_kx.taskTail = 0;
+    KiwiXfer_FreeGarbage(g_kx.garbage, g_kx.garbageCount);
+    g_kx.garbage = NULL;
+    g_kx.garbageCount = 0;
+    g_kx.garbageCap = 0;
+}
+
+/* geometry.c ProcessLightingSampleArea: a cell passed the gate. */
+void KiwiXfer_BeginCell(int areaIndex, const float *pos, const float *basis,
+                        void *sample)
+{
+    KiwiXferItem_t *item = g_kx.curItem;
+
+    g_kiwiXferCellRays = NULL;
+    g_kiwiXferCellSky = -1;
+    while (g_kx.cursor < item->cellCount
+           && item->cells[g_kx.cursor].areaIndex < areaIndex)
+    {
+        g_kx.cursor++;       /* planned cell the drained gate skipped */
+        g_kx.desync = 1;
+    }
+    if (g_kx.cursor < item->cellCount
+        && item->cells[g_kx.cursor].areaIndex == areaIndex)
+    {
+        int idx = g_kx.cursor++;
+        const KiwiXferCell_t *cell = &item->cells[idx];
+
+        if (cell->rngStart == g_kiwiXferRng
+            && !memcmp(cell->pos, pos, sizeof(cell->pos))
+            && !memcmp(cell->basis, basis, sizeof(cell->basis)))
+        {
+            int d;
+
+            g_kiwiXferCellRays = item->rays + (size_t)idx * g_kx.traces * g_kiwiXferStride;
+            g_kiwiXferRng = cell->rngEnd;
+            g_kiwiXferCellSky = cell->sky;
+            g_kx.cellsReplayed++;
+            for (d = 0; d < KIWI_XFER_PREFETCH_SLOT && d < g_kx.traces; d++)
+                KiwiXfer_PrefetchRay((Sample_t *)sample,
+                                     g_kiwiXferCellRays + d * g_kiwiXferStride, d);
+            return;
+        }
+    }
+    g_kx.desync = 1;         /* trace this cell live */
+    g_kx.cellsLive++;
+}
+
+/* ForEachQuantum(…, 1) work function: the original pass, item by item. */
+static void KiwiXfer_MergeItem(unsigned int j, unsigned int threadId)
+{
+    KiwiXferItem_t *item = &g_kx.items[j];
+    LARGE_INTEGER t0, t1;
+
+    QueryPerformanceCounter(&t0);
+    AcquireSRWLockExclusive(&g_kx.lock);
+    while (item->stage < 3)
+        SleepConditionVariableSRW(&g_kx.cvTraced, &g_kx.lock, INFINITE, 0);
+    ReleaseSRWLockExclusive(&g_kx.lock);
+    QueryPerformanceCounter(&t1);
+    g_kx.waitTicks += t1.QuadPart - t0.QuadPart;
+
+    g_kx.curItem = item;
+    g_kx.cursor = 0;
+    g_kx.desync = 0;
+    BuildLightTransfers_Callback(j, threadId);
+    g_kiwiXferCellRays = NULL;
+    g_kiwiXferCellSky = -1;
+    if (g_kx.cursor != item->cellCount)
+        g_kx.desync = 1;
+
+    AcquireSRWLockExclusive(&g_kx.lock);
+    /* the tracers free it (big frees decommit; keep them off this thread) */
+    KiwiXfer_AddGarbage(item->cells);
+    KiwiXfer_AddGarbage(item->rays);
+    g_kx.outstanding -= item->bytes;
+    item->cells = NULL;
+    item->rays = NULL;
+    item->bytes = 0;
+    g_kx.merged = (int)j + 1;
+    WakeAllConditionVariable(&g_kx.cvWork);
+    ReleaseSRWLockExclusive(&g_kx.lock);
+
+    if (g_kx.desync && (int)j + 1 < g_kx.itemCount)
+    {
+        /* The plan's RNG offsets are off from here on: re-plan. */
+        KiwiXfer_StopPipeline((int)j + 1);
+        g_kx.restarts++;
+        KiwiXfer_StartPipeline((int)j + 1, g_kiwiXferRng);
+    }
+}
+
+static DWORD WINAPI KiwiXfer_RandCheckThread(LPVOID param)
+{
+    uint32_t s = 0x2545F491u;
+    int i;
+
+    srand(s);
+    for (i = 0; i < 16; i++)
+    {
+        if (rand() != KiwiXfer_Rand(&s))
+            return 0;
+    }
+    *(int *)param = 1;
+    return 0;
+}
+
+/* Is rand() the per-thread MSVC LCG?  Tested on a scratch thread. */
+static int KiwiXfer_CrtRandIsLcg(void)
+{
+    int ok = 0;
+    HANDLE h = CreateThread(NULL, 0, KiwiXfer_RandCheckThread, &ok, 0, NULL);
+
+    if (!h)
+        return 0;
+    WaitForSingleObject(h, INFINITE);
+    CloseHandle(h);
+    return ok;
+}
+
+/* Reads this thread's rand() state from 12 outputs, then restores it. */
+static uint32_t KiwiXfer_RecoverRandState(void)
+{
+    int r[12];
+    int i, found = 0;
+    uint32_t low, cand = 0, inv, s;
+
+    for (i = 0; i < 12; i++)
+        r[i] = rand();
+    for (low = 0; low < 65536u; low++)
+    {
+        uint32_t t = ((uint32_t)r[0] << 16) | low;
+        for (i = 1; i < 12; i++)
+        {
+            if (KiwiXfer_Rand(&t) != r[i])
+                break;
+        }
+        if (i == 12)
+        {
+            cand = ((uint32_t)r[0] << 16) | low;
+            found++;
+        }
+    }
+    if (found != 1)
+        ErrorMsg("Light transport: rand() state recovery failed (%i)\n", found);
+
+    /* step back over r[0]; bit 31 is never observable */
+    inv = 214013u;
+    for (i = 0; i < 5; i++)
+        inv *= 2u - 214013u * inv;
+    s = (cand - 2531011u) * inv;
+    srand(s);
+    return s;
+}
+
+/* geometry.c BuildLightTransfers: returns 0 to run the original pass. */
+int KiwiXfer_BuildLightTransfers(void)
+{
+    long long sampleCount, k;
+    int threads;
+    LARGE_INTEGER freq, t0, t1;
+
+    if (!g_useEmbree || !g_lightingTransportPass || g_lightingSeedSkyPass
+        || g_relightCacheLoaded || g_aoEnabled || g_triCount <= 0
+        || g_traces <= 0 || g_kiwiEmbreeThreads < 2)
+        return 0;
+    if (!KiwiXfer_CrtRandIsLcg())
+        return 0;
+
+    threads = g_kiwiEmbreeThreads;
+    if (threads > KIWI_XFER_MAX_THREADS)
+        threads = KIWI_XFER_MAX_THREADS;
+
+    memset(&g_kx, 0, sizeof(g_kx));
+    InitializeSRWLock(&g_kx.lock);
+    InitializeConditionVariable(&g_kx.cvRaster);
+    InitializeConditionVariable(&g_kx.cvWork);
+    InitializeConditionVariable(&g_kx.cvTraced);
+    g_kx.traces = g_traces;
+    g_kx.tracerCount = threads;
+    g_kx.itemCount = g_triCount;
+
+    g_kxHeap = HeapCreate(0, 0, 0);
+    if (!g_kxHeap)
+        ErrorMsg("Out of memory for traced-ahead light transport\n");
+    sampleCount = (long long)g_lightmapSize * 512 * 512;
+    g_kx.items = (KiwiXferItem_t *)KiwiXfer_Alloc((size_t)g_triCount * sizeof(KiwiXferItem_t), 1);
+    g_kx.snap = (float *)KiwiXfer_Alloc((size_t)sampleCount * 4 * sizeof(float), 0);
+    g_kxIndex = (KiwiXferIndexSlot_t *)KiwiXfer_Alloc(KIWI_XFER_INDEX_SIZE * sizeof(KiwiXferIndexSlot_t), 1);
+    g_kxSampleEpoch = (uint32_t *)KiwiXfer_Alloc((size_t)sampleCount * sizeof(uint32_t), 1);
+    g_kxIndexUsed = 0;
+    g_kxIndexEpoch = 1;
+    for (k = 0; k < sampleCount; k++)
+        memcpy(&g_kx.snap[k * 4],
+               ((LightmapSample_t *)g_lightingSamples)[k].channelWeight,
+               4 * sizeof(float));
+
+    g_kiwiXferPacked = g_traceFilter == 1
+                    && !((uintptr_t)g_lightingSamples & 15);
+    g_kiwiXferStride = g_kiwiXferPacked ? sizeof(uintptr_t) : sizeof(KiwiXferRay_t);
+
+    g_kiwiXferRng = KiwiXfer_RecoverRandState();
+    g_kiwiXferCellRays = NULL;
+    g_kiwiXferActive = 1;
+
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+    KiwiXfer_StartPipeline(0, g_kiwiXferRng);
+    ForEachQuantum((unsigned int)g_triCount, KiwiXfer_MergeItem, 1);
+    KiwiXfer_StopPipeline(g_triCount);
+    QueryPerformanceCounter(&t1);
+
+    g_kiwiXferActive = 0;
+    g_kiwiXferCellRays = NULL;
+    srand(g_kiwiXferRng);    /* the CRT stream continues as if serial */
+
+    Com_Printf("Embree transport: %i tracer threads, %lld cells traced ahead, "
+               "%lld live, %i re-plans, %.1f s (merge waited %.1f s)\n",
+               threads, g_kx.cellsReplayed, g_kx.cellsLive, g_kx.restarts,
+               (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart,
+               (double)g_kx.waitTicks / (double)freq.QuadPart);    HeapDestroy(g_kxHeap);
+    g_kxHeap = NULL;
+    g_kxIndex = NULL;
+    g_kxSampleEpoch = NULL;
+    memset(&g_kx, 0, sizeof(g_kx));
     return 1;
 }
