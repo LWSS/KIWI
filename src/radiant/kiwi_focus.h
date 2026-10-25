@@ -30,5 +30,10 @@ bool KiwiFocus_CanViewFace();      // Palette predicate.
 struct selbrush_t;
 void KiwiFocus_NoteObjectClick( selbrush_t *brush, const float point[3], const float *normal );
 
+// KIWI (2026-10-22): the selected brush face Space would aim at - the face the selecting click
+// landed on, else the selected brushes' nearest camera-facing face.  Ctrl+R's brush mode
+// splits along it.  False with no selected brush face.
+bool KiwiFocus_ClickedOrNearestFace( selbrush_t **outBrush, int *outFace );
+
 void KiwiFocus_RegisterCommands();
 bool KiwiFocus_DispatchInstant( unsigned int cmdId );

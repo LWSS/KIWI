@@ -3970,26 +3970,10 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     if ( !SidecarPath( mapPath, path, sizeof( path ) ) )
         return false;
 
-    // Enumerate hidden solids before deciding whether a sidecar is needed.
+    // Enumerate hidden solids; the ordinals are written below.
+    // KIWI (2026-10-24): every saved map now keeps its sidecar - the `view` records (camera,
+    // section) always have something to say, so the old "empty sidecar is deleted" rule went.
     const int hiddenCount = KiwiVis_SidecarBuild();
-
-    if ( s_objects.empty() && hiddenCount == 0 && s_groups.empty()
-      && KiwiRefImage_Count() == 0 // KIWI (REFIMG): sidecar-only planes keep the file.
-      && KiwiRefImage_GroupCount() == 0 ) // ...and so do declared (even empty) image groups
-    {
-        // With no objects, hidden solids or groups, remove any existing sidecar.
-        // (Groups are serialized below, so an empty-groups-only map must keep its file.)
-        if ( !::DeleteFileA( path ) )
-        {
-            const DWORD error = ::GetLastError();
-            if ( error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND )
-            {
-                Sys_Printf( "WARNING: could not remove empty construction sidecar %s (%lu)\n", path, error );
-                return false;
-            }
-        }
-        return true;
-    }
 
     // Write to a temporary file so failure cannot destroy the previous sidecar.
     char tmp[1120];
@@ -4006,6 +3990,7 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     fprintf( f, "KIWI2\n" );
     fprintf( f, "# KIWI construction geometry (RADIANT_UX_DESIGN section 7).\n" );
     fprintf( f, "# Editor-only: nothing here is map data and nothing here is compiled.\n" );
+    KiwiCamView_WriteSidecar( f );      // KIWI: `view` records (older readers skip them)
 
     // Hidden-brush ordinals index the adjacent map's save-order walk.
     // `hiddenbrushtotal` guards against stale ordinals after external map edits;
@@ -4112,6 +4097,62 @@ bool KiwiCon_SaveSidecar( const char *mapPath )
     return true;
 }
 
+// KIWI (2026-10-24, user: "start saving the camera position/settings/mode/sectionview when
+// the map is closed so you dont have to re-orient each time you re-open a map"): closing
+// a map need not save it, so only the `view` records are refreshed here.  Construction and
+// hidden-brush records must keep pairing with the .map on disk, so they are copied through
+// verbatim.  Same tmp + rename as the full save.
+bool KiwiCon_SaveViewOnClose( const char *mapPath )
+{
+    char path[1100];
+    if ( !SidecarPath( mapPath, path, sizeof( path ) ) )
+        return false;
+    if ( ::GetFileAttributesA( mapPath ) == INVALID_FILE_ATTRIBUTES )
+        return false;                       // never saved: there is no .map to sit beside
+
+    std::vector<std::string> keep;
+    if ( FILE *in = fopen( path, "rb" ) )
+    {
+        char line[4096];
+        bool atStart = true;                // fgets splits over-long lines; test line starts only
+        while ( fgets( line, sizeof( line ), in ) )
+        {
+            const bool ours = atStart && ( !strncmp( line, "view ", 5 )
+                                        || !strncmp( line, "# Editor view when", 18 ) );
+            if ( !ours )
+                keep.push_back( line );
+            const size_t n = strlen( line );
+            atStart = n > 0 && line[n - 1] == '\n';
+        }
+        fclose( in );
+        if ( keep.empty() || ( strncmp( keep[0].c_str(), "KIWI1", 5 ) != 0
+                            && strncmp( keep[0].c_str(), "KIWI2", 5 ) != 0 ) )
+            return false;                   // not a sidecar this build writes: leave it alone
+    }
+    else
+        keep.push_back( "KIWI2\n" );
+
+    char tmp[1120];
+    _snprintf( tmp, sizeof( tmp ), "%s.tmp", path );
+    tmp[sizeof( tmp ) - 1] = '\0';
+    FILE *f = fopen( tmp, "wb" );
+    if ( !f )
+        return false;
+    fputs( keep[0].c_str(), f );            // the header, then the view, then the rest as it was
+    KiwiCamView_WriteSidecar( f );
+    for ( size_t i = 1; i < keep.size(); ++i )
+        fputs( keep[i].c_str(), f );
+    const bool writeFailed = ferror( f ) != 0;
+    const bool closeFailed = fclose( f ) != 0;
+    if ( writeFailed || closeFailed || !::MoveFileExA( tmp, path, MOVEFILE_REPLACE_EXISTING ) )
+    {
+        ::DeleteFileA( tmp );
+        Sys_Printf( "WARNING: could not save the view to %s\n", path );
+        return false;
+    }
+    return true;
+}
+
 bool KiwiCon_LoadSidecar( const char *mapPath )
 {
     KiwiRefImage_ResetForNewMap(); // KIWI (REFIMG): map replacement owns this store too.
@@ -4124,6 +4165,7 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
     KiwiUndo_Reset();
     // Clear pending hidden ordinals before every early return to prevent cross-map state.
     KiwiVis_SidecarLoadBegin();
+    KiwiCamView_ResetPending();         // KIWI: ...and the pending per-map view
     Touch();
 
     char path[1100];
@@ -4161,6 +4203,9 @@ bool KiwiCon_LoadSidecar( const char *mapPath )
 
         // KIWI (REFIMG): its block parser consumes only refimage records/extensions.
         if ( KiwiRefImage_ParseSidecarLine( line ) )
+            continue;
+        // KIWI: `view` records (camera, section) - applied at the tail of the map load.
+        if ( KiwiCamView_ParseSidecarLine( line ) )
             continue;
 
         if ( !strcmp( kw, "object" ) )

@@ -3070,6 +3070,14 @@ namespace
         {
             ImGui::EndChild(); return;
         }
+        // KIWI (2026-10-22, user wording): the empty state says how images get in.
+        if ( s_images.empty() )
+        {
+            ImGui::PushTextWrapPos( 0.0f );
+            ImGui::TextDisabled( "Simply Drag or Paste an image (png/jpeg/webp) into the program and "
+                                 "it'll appear in 3d as a reference image" );
+            ImGui::PopTextWrapPos();
+        }
         for ( int i = 0; i < (int)s_images.size(); ++i )
         {
             krefImage_t &r = s_images[i];

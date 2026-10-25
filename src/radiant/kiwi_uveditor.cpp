@@ -504,50 +504,17 @@ namespace
             }
         }
 
-        // Any 3D selection change replaces stale local keys: explicit faces seed that
-        // subset; explicit faces covering every shape and whole-brush-only selections use
-        // plain "all". Local targeting survives only gathers with the same generation.
+        // Any 3D selection change replaces stale local keys with plain "all". Local targeting
+        // survives only gathers with the same generation.
+        // KIWI (2026-10-22, user: "when I have a mixed selection of faces and brushes in the UV
+        // editor, it no longer works"): every gathered shape IS selected (whole brushes, their
+        // patches, explicit faces), so all of them are targets.  Seeding only the explicit
+        // faces left a mixed selection's whole brushes drawn but never edited.
         if ( !s_tgtSeeded )
         {
             s_tgtSeeded = true;
-            const int nExplicit = g_SelectedFaces.GetSize();
-            const int nShapes   = (int)( s_faces.size() + s_patches.size() );
-            if ( nExplicit <= 0 && nShapes > 0 )
-            {
+            if ( !s_faces.empty() || !s_patches.empty() )
                 TargetAll();
-            }
-            else if ( nExplicit > 0 && nShapes > 0 )
-            {
-                std::vector<char> ft( s_faces.size(), 0 );
-                int hits = 0;
-                for ( size_t i = 0; i < s_faces.size(); ++i )
-                {
-                    brush_t *def = s_brushes[s_faces[i].brushIdx].def;
-                    for ( int k = 0; k < nExplicit; ++k )
-                    {
-                        const selface_t &sf = g_SelectedFaces.GetAt( k );
-                        if ( sf.brush && sf.brush->def == def
-                             && sf.index == s_faces[i].faceIndex )
-                        {
-                            ft[i] = 1;
-                            ++hits;
-                            break;
-                        }
-                    }
-                }
-                // Avoid a redundant subset covering all; Probe treats s_targetAll as a mode.
-                if ( hits > 0 && hits < nShapes )
-                {
-                    s_faceTgt = ft;
-                    s_patchTgt.assign( s_patches.size(), 0 );
-                    s_targetAll = false;
-                    StoreTargetKeys();
-                }
-                else if ( hits > 0 )
-                {
-                    TargetAll();
-                }
-            }
         }
     }
 

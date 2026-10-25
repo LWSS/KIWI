@@ -30,6 +30,14 @@
 #include "kiwi_mathdrcache.h"       // KIWI: boot-time material header cache (cold-start fix)
 #include "kiwi_floatsnap.h"         // KIWI: KiwiRound_Fistp
 #include "kiwi_ported.h"            // KIWI: shared engine/editor externs
+#include "kiwi_texcolor.h"          // KIWI: colour filter + In Use & View filter
+#include "kiwi_matwriter.h"         // KIWI: KiwiMat_ReadSource (colour filter's colour map name)
+#include "kiwi_camera.h"            // KIWI: KiwiCam_Ortho / OrthoHalfHeight (In Use & View)
+#include "kiwi_section.h"           // KIWI: a live section cut hides faces above it
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include <gfx_d3d/r_image.h>
 #include <gfx_d3d/r_material.h>
@@ -872,11 +880,14 @@ static int TexWnd_SetupIter( MaterialIter_t *it, Font_s *font )
 // "reject lightmap_/smoothing_/usage_index==0, else accept iff is_in_use" — every in-use
 // material with a real usage (i.e. every browsable world material) is accepted, so the default
 // view is NOT emptied.
-static bool TexWnd_FilterAccept( const qtexture_s *tex )
+static bool TexWnd_FilterAcceptBase( const qtexture_s *tex )   // KIWI: the colour filter wraps it below
 {
     if ( !tex || !tex->name )
         return false;
     if ( _strnicmp( tex->name, "kiwi_refimg_", 12 ) == 0 ) return false; // KIWI (REFIMG): generated editor assets never enter the browser.
+    // KIWI (2026-10-24, user: "i want the kglass removed from the textures window. They're
+    // useless and will never be chosen"): the glass system's own materials stay loadable.
+    if ( _strnicmp( tex->name, "kglass_", 7 ) == 0 ) return false;
 
     const int layer = g_qeglobals.current_edit_layer;
     if ( layer == 1 )                                          // Lightmap render-method
@@ -928,6 +939,418 @@ static bool TexWnd_FilterAccept( const qtexture_s *tex )
 
     // base predicate: show the textures the map actually references.
     return tex->is_in_use;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI (2026-10-22): COLOUR FILTER
+// ═════════════════════════════════════════════════════════════════════════════
+// User: "add color sort buttons on the textures window, so if I want a "green" texture, I
+// click a green button and it shows only green.  Make it a radio style set of buttons."
+//
+// A material's colour is the mean of its colour map, read from the small mips at the FRONT
+// of the .iwi (mips are stored smallest first), so the header and a few hundred bytes are
+// all that is read.  The mean is classified into one bucket.  Classification is lazy: the
+// Textures toolbar pumps it under a time budget while a colour is picked, and a material
+// not classified yet is hidden until it is.  Results are cached by material name.
+static const kiwiTexColor_t s_texColors[KTEXCOL_COUNT] = {
+    { "All",    0.00f, 0.00f, 0.00f },
+    { "Red",    0.85f, 0.18f, 0.16f },
+    { "Orange", 0.95f, 0.55f, 0.12f },
+    { "Yellow", 0.95f, 0.85f, 0.20f },
+    { "Green",  0.30f, 0.70f, 0.25f },
+    { "Cyan",   0.25f, 0.75f, 0.80f },
+    { "Blue",   0.22f, 0.40f, 0.85f },
+    { "Purple", 0.55f, 0.30f, 0.80f },
+    { "Pink",   0.92f, 0.50f, 0.70f },
+    { "Brown",  0.50f, 0.34f, 0.20f },
+    { "White",  0.93f, 0.93f, 0.93f },
+    { "Grey",   0.50f, 0.50f, 0.50f },
+    { "Black",  0.08f, 0.08f, 0.08f },
+};
+
+static int s_texColorFilter = KTEXCOL_ALL;
+static std::unordered_map<std::string, signed char> s_texColorOf;   // 0 = no readable colour map
+
+const kiwiTexColor_t *TexWnd_ColorInfo( int bucket )
+{
+    return ( bucket >= 0 && bucket < KTEXCOL_COUNT ) ? &s_texColors[bucket] : nullptr;
+}
+
+int TexWnd_GetColorFilter() { return s_texColorFilter; }
+
+void TexWnd_SetColorFilter( int bucket )
+{
+    if ( bucket < 0 || bucket >= KTEXCOL_COUNT || bucket == s_texColorFilter )
+        return;
+    s_texColorFilter = bucket;
+    TexWnd_CheckScroll( 0 );
+}
+
+// Mean RGB (0..1) -> bucket.  Hue bands in degrees; dull oranges/yellows are Brown.
+static int TexWnd_ClassifyMean( float r, float g, float b )
+{
+    const float mx = r > g ? ( r > b ? r : b ) : ( g > b ? g : b );
+    const float mn = r < g ? ( r < b ? r : b ) : ( g < b ? g : b );
+    const float c  = mx - mn;
+    if ( mx < 0.12f )
+        return KTEXCOL_BLACK;
+    if ( c < 0.05f || c / mx < 0.12f )
+        return mx > 0.78f ? KTEXCOL_WHITE : ( mx < 0.20f ? KTEXCOL_BLACK : KTEXCOL_GREY );
+    float h;
+    if ( mx == r )      h = 60.0f * fmodf( ( g - b ) / c + 6.0f, 6.0f );
+    else if ( mx == g ) h = 60.0f * ( ( b - r ) / c + 2.0f );
+    else                h = 60.0f * ( ( r - g ) / c + 4.0f );
+    const float s = c / mx;
+    if ( h >= 12.0f && h < 55.0f && ( mx < 0.65f || s < 0.45f ) )
+        return KTEXCOL_BROWN;
+    if ( h < 12.0f || h >= 340.0f ) return KTEXCOL_RED;
+    if ( h < 42.0f )                return KTEXCOL_ORANGE;
+    if ( h < 70.0f )                return KTEXCOL_YELLOW;
+    if ( h < 165.0f )               return KTEXCOL_GREEN;
+    if ( h < 200.0f )               return KTEXCOL_CYAN;
+    if ( h < 255.0f )               return KTEXCOL_BLUE;
+    if ( h < 290.0f )               return KTEXCOL_PURPLE;
+    return KTEXCOL_PINK;
+}
+
+static void TexWnd_Rgb565( unsigned v, float *out )
+{
+    out[0] = (float)( ( v >> 11 ) & 31 ) / 31.0f;
+    out[1] = (float)( ( v >> 5 ) & 63 ) / 63.0f;
+    out[2] = (float)( v & 31 ) / 31.0f;
+}
+
+// Mean colour of one DXT colour block (the 8 colour bytes): its 16 palette picks.
+static void TexWnd_DxtBlockSum( const unsigned char *p, bool dxt1, float *sum )
+{
+    const unsigned c0 = p[0] | ( p[1] << 8 ), c1 = p[2] | ( p[3] << 8 );
+    float pal[4][3];
+    TexWnd_Rgb565( c0, pal[0] );
+    TexWnd_Rgb565( c1, pal[1] );
+    const bool four = !dxt1 || c0 > c1;
+    for ( int k = 0; k < 3; ++k )
+    {
+        pal[2][k] = four ? ( 2.0f * pal[0][k] + pal[1][k] ) / 3.0f : ( pal[0][k] + pal[1][k] ) * 0.5f;
+        pal[3][k] = four ? ( pal[0][k] + 2.0f * pal[1][k] ) / 3.0f : 0.0f;
+    }
+    const unsigned idx = p[4] | ( p[5] << 8 ) | ( p[6] << 16 ) | ( (unsigned)p[7] << 24 );
+    for ( int i = 0; i < 16; ++i )
+        for ( int k = 0; k < 3; ++k )
+            sum[k] += pal[( idx >> ( 2 * i ) ) & 3][k];
+}
+
+// Bucket of one material, 0 when its colour map cannot be read.
+static int TexWnd_ClassifyMaterial( const char *name )
+{
+    kiwiMatSource_t src;
+    char err[128];
+    if ( !KiwiMat_ReadSource( name, &src, err, sizeof( err ) ) || src.colorMapImage[0] == '$' )
+        return 0;
+
+    char qpath[128];
+    _snprintf( qpath, sizeof( qpath ), "images/%s.iwi", src.colorMapImage );
+    qpath[sizeof( qpath ) - 1] = '\0';
+    int fh = 0;
+    com_fileAccessed = 1;
+    const int fileSize = (int)FS_FOpenFileRead( qpath, &fh );
+    if ( !fh )
+        return 0;
+    unsigned char hdr[28];
+    if ( fileSize < 28 || FS_Read( hdr, 28, fh ) != 28 || hdr[0] != 'I' || hdr[1] != 'W' || hdr[2] != 'i'
+      || ( hdr[5] & 0x0C ) )                                    // cube / volume
+    {
+        FS_FCloseFile( fh );
+        return 0;
+    }
+    const int fmt = hdr[4];
+    const int w   = hdr[6] | ( hdr[7] << 8 );
+    const int h   = hdr[8] | ( hdr[9] << 8 );
+    int bpb = 0, bpp = 0;                                       // bytes per DXT block / pixel
+    switch ( fmt )
+    {
+    case 0x0B: bpb = 8;  break;                                 // DXT1
+    case 0x0C: case 0x0D: bpb = 16; break;                      // DXT3 / DXT5
+    case 0x01: bpp = 4;  break;                                 // ARGB8 (B,G,R,A in memory)
+    case 0x02: bpp = 3;  break;                                 // RGB8  (B,G,R)
+    case 0x05: bpp = 1;  break;                                 // L8
+    default:
+        FS_FCloseFile( fh );
+        return 0;
+    }
+    if ( w < 1 || h < 1 )
+    {
+        FS_FCloseFile( fh );
+        return 0;
+    }
+    int levels = 1;
+    if ( !( hdr[5] & 0x02 ) )                                   // has mips: down to 1x1
+        for ( int m = w > h ? w : h; m > 1; m >>= 1 )
+            ++levels;
+    auto levelSize = [&]( int l, int *lw, int *lh ) {
+        *lw = ( w >> l ) > 0 ? ( w >> l ) : 1;
+        *lh = ( h >> l ) > 0 ? ( h >> l ) : 1;
+        return bpb ? bpb * ( ( *lw + 3 ) >> 2 ) * ( ( *lh + 3 ) >> 2 ) : bpp * *lw * *lh;
+    };
+    // The deepest level at least 8 px on its short side (or level 0 for a tiny image).
+    int target = 0;
+    for ( int l = levels - 1; l >= 0; --l )
+    {
+        int lw, lh;
+        levelSize( l, &lw, &lh );
+        if ( lw >= 8 && lh >= 8 )
+        {
+            target = l;
+            break;
+        }
+    }
+    int skip = 0, lw = 0, lh = 0;
+    for ( int l = levels - 1; l > target; --l )
+        skip += levelSize( l, &lw, &lh );
+    const int need = levelSize( target, &lw, &lh );
+    if ( 28 + skip + need > fileSize || need > ( 1 << 20 ) )
+    {
+        FS_FCloseFile( fh );
+        return 0;
+    }
+    std::vector<unsigned char> data( (size_t)( skip + need ) );
+    const unsigned got = FS_Read( data.data(), (unsigned)data.size(), fh );
+    FS_FCloseFile( fh );
+    if ( got != (unsigned)data.size() )
+        return 0;
+
+    const unsigned char *px = data.data() + skip;
+    float sum[3] = { 0.0f, 0.0f, 0.0f };
+    float n = 0.0f;
+    if ( bpb )
+    {
+        const int blocks = need / bpb;
+        for ( int i = 0; i < blocks; ++i )
+            TexWnd_DxtBlockSum( px + i * bpb + ( bpb - 8 ), fmt == 0x0B, sum );
+        n = 16.0f * (float)blocks;
+    }
+    else
+    {
+        for ( int i = 0; i < lw * lh; ++i, px += bpp )
+        {
+            if ( bpp == 1 )
+            {
+                const float v = (float)px[0] / 255.0f;
+                sum[0] += v; sum[1] += v; sum[2] += v;
+            }
+            else
+            {
+                sum[0] += (float)px[2] / 255.0f;
+                sum[1] += (float)px[1] / 255.0f;
+                sum[2] += (float)px[0] / 255.0f;
+            }
+        }
+        n = (float)( lw * lh );
+    }
+    if ( !( n > 0.0f ) )
+        return 0;
+    return TexWnd_ClassifyMean( sum[0] / n, sum[1] / n, sum[2] / n );
+}
+
+// Classify the not-yet-seen materials the other filters accept, for up to budgetMs.
+// Reports how many of those are classified; true when the pass is complete.
+bool TexWnd_PumpColorFilter( double budgetMs, int *outDone, int *outTotal )
+{
+    LARGE_INTEGER f, t0, t;
+    ::QueryPerformanceFrequency( &f );
+    ::QueryPerformanceCounter( &t0 );
+    bool out = false;
+    int  done = 0, total = 0;
+    const int count = texWndGlob_textureOffset.materialCount;
+    for ( int i = 0; i < count; ++i )
+    {
+        const qtexture_s *tex = texWndGlob_textureOffset.sorted_materials[i];
+        if ( !TexWnd_FilterAcceptBase( tex ) )
+            continue;
+        ++total;
+        if ( s_texColorOf.count( tex->name ) )
+        {
+            ++done;
+            continue;
+        }
+        if ( out )
+            continue;
+        ::QueryPerformanceCounter( &t );
+        if ( (double)( t.QuadPart - t0.QuadPart ) * 1000.0 / (double)f.QuadPart > budgetMs )
+        {
+            out = true;
+            continue;
+        }
+        s_texColorOf[tex->name] = (signed char)TexWnd_ClassifyMaterial( tex->name );
+        ++done;
+    }
+    if ( outDone )  *outDone  = done;
+    if ( outTotal ) *outTotal = total;
+    return done == total;
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  KIWI (2026-10-22): "IN USE & VIEW" FILTER
+// ═════════════════════════════════════════════════════════════════════════════
+// User: "add another fliter for textures that is (In Use & View) that shows textures that are
+// currently visible in the 3d view."  Visible = a brush face or patch that is not filtered,
+// faces the camera, lies (as a bounding sphere) inside the camera frustum and is not wholly
+// above a section cut.  Nothing occludes: a face behind a wall still counts.  The set is
+// refreshed a few times a second while the filter is on.
+static bool s_viewFilter = false;
+static std::unordered_set<const qtexture_s *> s_inView, s_inViewNext;
+static DWORD s_inViewTick = 0;
+static const unsigned KTEXVIEW_REFRESH_MS = 200;
+
+bool TexWnd_GetViewFilter() { return s_viewFilter; }
+
+void TexWnd_SetViewFilter( bool on )
+{
+    if ( s_viewFilter == on )
+        return;
+    s_viewFilter = on;
+    s_inView.clear();
+    s_inViewTick = 0;
+    TexWnd_CheckScroll( 0 );
+}
+
+static int TexWnd_NoteInView( qtexture_s *q )
+{
+    if ( q )
+        s_inViewNext.insert( q );
+    return 0;
+}
+
+struct texViewCam_t
+{
+    bool  ortho;
+    float eye[3], fwd[3], right[3], up[3];
+    float tanX, tanY, halfW, halfH;
+};
+
+static bool TexWnd_SphereInView( const texViewCam_t &v, const float *c, float r )
+{
+    const float d[3] = { c[0] - v.eye[0], c[1] - v.eye[1], c[2] - v.eye[2] };
+    const float x = fabsf( d[0] * v.right[0] + d[1] * v.right[1] + d[2] * v.right[2] );
+    const float y = fabsf( d[0] * v.up[0] + d[1] * v.up[1] + d[2] * v.up[2] );
+    if ( v.ortho )
+        return x - r <= v.halfW && y - r <= v.halfH;
+    const float z = d[0] * v.fwd[0] + d[1] * v.fwd[1] + d[2] * v.fwd[2];
+    if ( z < -r )
+        return false;
+    return x - r * sqrtf( 1.0f + v.tanX * v.tanX ) <= z * v.tanX
+        && y - r * sqrtf( 1.0f + v.tanY * v.tanY ) <= z * v.tanY;
+}
+
+// Faces the camera, inside the frustum, and (with a live section cut) not wholly above it.
+static bool TexWnd_PolyInView( const texViewCam_t &v, const float (*pts)[3], int n, int stride,
+                               const float *normal, float dist )
+{
+    if ( n < 1 )
+        return false;
+    if ( normal )
+    {
+        const float facing = v.ortho
+            ? -( normal[0] * v.fwd[0] + normal[1] * v.fwd[1] + normal[2] * v.fwd[2] )
+            : normal[0] * v.eye[0] + normal[1] * v.eye[1] + normal[2] * v.eye[2] - dist;
+        if ( facing <= 0.0f )
+            return false;
+    }
+    float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+    for ( int i = 0; i < n; ++i )
+    {
+        const float *p = (const float *)( (const char *)pts + (size_t)i * stride );
+        for ( int k = 0; k < 3; ++k )
+        {
+            lo[k] = p[k] < lo[k] ? p[k] : lo[k];
+            hi[k] = p[k] > hi[k] ? p[k] : hi[k];
+        }
+    }
+    if ( KiwiSection_Cutting() && lo[2] > KiwiSection_Level() )
+        return false;
+    const float c[3] = { ( lo[0] + hi[0] ) * 0.5f, ( lo[1] + hi[1] ) * 0.5f, ( lo[2] + hi[2] ) * 0.5f };
+    const float e[3] = { hi[0] - c[0], hi[1] - c[1], hi[2] - c[2] };
+    return TexWnd_SphereInView( v, c, sqrtf( e[0] * e[0] + e[1] * e[1] + e[2] * e[2] ) );
+}
+
+static void TexWnd_CollectInView( const texViewCam_t &v, selbrush_t *list )
+{
+    for ( selbrush_t *b = list->next; b && b != list; b = b->next )
+    {
+        brush_t *def = b->def;
+        if ( !def || FilterBrush( b, 0 ) )
+            continue;
+        if ( def->patch )
+        {
+            const curvePatchDef_t *g = def->patch->curveDef;
+            if ( g && g->verts && g->width > 0 && g->height > 0
+              && TexWnd_PolyInView( v, (const float (*)[3])&g->verts[0].xyz, g->width * g->height,
+                                    (int)sizeof( curveVert_t ), nullptr, 0.0f ) )
+                MaterialDef_02( (MaterialDef *)&def->patch->texture, TexWnd_NoteInView );
+            continue;
+        }
+        if ( !def->faces )
+            continue;
+        for ( int i = 0; i < def->faceCount; ++i )
+        {
+            const face_t &f = def->faces[i];
+            if ( !f.w || f.w->numpoints < 3 )
+                continue;
+            if ( TexWnd_PolyInView( v, (const float (*)[3])f.w->p[0], f.w->numpoints,
+                                    (int)sizeof( f.w->p[0] ), f.plane.normal, f.plane.dist ) )
+                MaterialDef_02( (MaterialDef *)&f.mtldef[0], TexWnd_NoteInView );
+        }
+    }
+}
+
+// Refreshes the visible set on its interval; re-clamps the scroll when it changes.
+void TexWnd_PumpViewFilter()
+{
+    if ( !s_viewFilter )
+        return;
+    const DWORD now = ::GetTickCount();
+    if ( s_inViewTick && now - s_inViewTick < KTEXVIEW_REFRESH_MS )
+        return;
+    s_inViewTick = now ? now : 1;
+
+    const camera_s *c = Ed_Camera();
+    if ( c->width < 1 || c->height < 1 )
+        return;
+    texViewCam_t v;
+    v.ortho = KiwiCam_Ortho();
+    for ( int k = 0; k < 3; ++k )
+    {
+        v.eye[k]   = c->origin[k];
+        v.fwd[k]   = c->vpn[k];
+        v.right[k] = c->vright[k];
+        v.up[k]    = c->vup[k];
+    }
+    // CamWnd_SetupScene's frustum: tanY = tan(fov/2) * 0.75, tanX by aspect.
+    v.tanY  = tanf( (float)DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5f ) * 0.75f;
+    v.tanX  = v.tanY * (float)c->width / (float)c->height;
+    v.halfH = KiwiCam_OrthoHalfHeight();
+    v.halfW = v.halfH * (float)c->width / (float)c->height;
+
+    s_inViewNext.clear();
+    TexWnd_CollectInView( v, &active_brushes );
+    TexWnd_CollectInView( v, &selected_brushes );
+    if ( s_inViewNext != s_inView )
+    {
+        s_inView.swap( s_inViewNext );
+        TexWnd_CheckScroll( Ed_TexWnd()->m_scrollY );
+        g_nUpdateBits |= W_TEXTURE;
+    }
+}
+
+static bool TexWnd_FilterAccept( const qtexture_s *tex )
+{
+    if ( !TexWnd_FilterAcceptBase( tex ) )
+        return false;
+    if ( s_viewFilter && !s_inView.count( tex ) )
+        return false;
+    if ( s_texColorFilter == KTEXCOL_ALL )
+        return true;
+    const auto it = s_texColorOf.find( tex->name );
+    return it != s_texColorOf.end() && it->second == s_texColorFilter;
 }
 
 // TexWnd_IterateMaterials (0x45ba70) — advance to the next accepted material and

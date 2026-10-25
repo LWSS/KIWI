@@ -202,6 +202,15 @@ void Brush_FreeMapBrushes()
 // 0x486110  Map_NewMap — reset title, free all brushes, re-init the sentinel lists.
 void Map_NewMap()
 {
+    // KIWI (2026-10-24, user: "start saving the camera position/settings/mode/sectionview
+    // when the map is closed"): File->New and every map load pass through here, so the map
+    // being closed records its view in its .kiwi first (only the `view` records; no-op for an
+    // unsaved map or a prefab level).
+    if ( currentmap[0] && _stricmp( currentmap, "unnamed.map" ) != 0 && !Map_EditingPrefab() )
+    {
+        extern bool KiwiCon_SaveViewOnClose( const char *mapPath );   // kiwi_construct.cpp
+        KiwiCon_SaveViewOnClose( currentmap );
+    }
     strcpy( currentmap, "unnamed.map" );
     Pointfile_ResetPoints();            // s_num_points = 0
     SetWindowTextA( g_qeglobals.d_hwndMain, currentmap );
@@ -639,6 +648,11 @@ void Map_LoadFromFile( const char *path )
         // round.  Design + the honest limits: kiwi_visibility.h ROUND AO.
         extern void KiwiVis_SidecarLoadApply();                   // kiwi_visibility.h:261
         KiwiVis_SidecarLoadApply();
+
+        // KIWI (2026-10-24): the view this map was closed with (camera, projection, section),
+        // over the player-start / default-spawn placement above.  No `view` records = no-op.
+        extern void KiwiCamView_ApplyPending();                   // kiwi_camera.h
+        KiwiCamView_ApplyPending();
 
         // KIWI-UX — HEAL DEAD MATERIAL LAYERS.  A face or patch whose LIGHTMAP (or
         // smoothing) channel is missing, unnamed or zero-scaled is invisible in the

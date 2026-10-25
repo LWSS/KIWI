@@ -219,6 +219,9 @@ void __cdecl Phys_Init()
             0,
             DVAR_NOFLAG,
             "Make all contacts joints between an object and the world: no object-object contacts");
+        // LWSS(KIWI): this was experimented with, and bodies in contact with each other stay awake forever in some cases.
+        // Needs a more comprehensive redo if one wishes to have physics bodies collide with each other (KIWITODO)
+        // (Probably the reason why the original cod4 devs turned it off, also its a big optimization)
         phys_interBodyCollision = Dvar_RegisterBool(
             "phys_interBodyCollision",
             0,
@@ -2011,12 +2014,15 @@ void __cdecl Phys_RunFrame(int localClientNum, PhysWorld worldIndex, float secon
     dWorldSetGravity(world, down[0], down[1], down[2]);
     {
         PROF_SCOPED("Phys_Collide");
-        if (phys_interBodyCollision->current.enabled)
-            dSpaceCollide(physGlob.space[worldIndex], &worldIndex, Phys_NearCallback);
-        if (physGlob.worldData[worldIndex].collisionCallback)
-            physGlob.worldData[worldIndex].collisionCallback();
+        // KIWI: Phys_NearCallback reads its userData as a FrameInfo; the port passed the bare
+        // worldIndex, so the callback took the next stack word as the world index.  Fill it
+        // first and pass it to both.
         frameInfo.localClientNum = localClientNum;
         frameInfo.worldIndex = worldIndex;
+        if (phys_interBodyCollision->current.enabled)
+            dSpaceCollide(physGlob.space[worldIndex], &frameInfo, Phys_NearCallback);
+        if (physGlob.worldData[worldIndex].collisionCallback)
+            physGlob.worldData[worldIndex].collisionCallback();
         ODE_CollideSimpleSpaceWithGeomNoAABBTest(physGlob.space[worldIndex], physGlob.worldGeom, &frameInfo);
     }
     {

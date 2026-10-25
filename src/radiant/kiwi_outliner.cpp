@@ -26,6 +26,7 @@
 #include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
+#include "kiwi_str.h"           // KiwiStr_ContainsNoCase - the lightgrid brush test
 #include "kiwi_visibility.h"    // shared hidden state and undo
 #include "kiwi_windows.h"
 
@@ -85,6 +86,11 @@ enum koutKind_t
     // KIWI GLASS
     KOUT_SECTION_GLASS,         // breakable glass panes (kiwi_glass.h)
     // KIWI END
+    // KIWI (2026-10-24, user: "brushes with Lightgrid textures need to go in the Lights ->
+    // section of the outliner under a LightGrid-> sub-section"): a fixed folder inside Lights
+    // listing worldspawn's lightgrid brushes (they leave "Brushes").  Like the Barbwire folder
+    // it is not a drop target and cannot be renamed.
+    KOUT_LIGHTGRID_FOLDER,
 };
 
 struct koutRow_t
@@ -123,21 +129,46 @@ const unsigned KOUT_KEY_PARTICLES = 0xF000000Au;  // the Particles section
 // KIWI GLASS
 const unsigned KOUT_KEY_GLASS     = 0xF000000Bu;  // the Glass section
 // KIWI END
+const unsigned KOUT_KEY_LIGHTGRID = 0xF000000Cu;  // the LightGrid folder inside Lights
 
-// Which of an entity's brushes a section lists: worldspawn splits its terrain meshes
-// out of "Brushes" into "Terrain"; every other entity folder lists all of its own.
-enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TERRAIN };
+// Which of an entity's brushes a section lists: worldspawn splits its terrain meshes out
+// of "Brushes" into "Terrain" and its lightgrid brushes into Lights > LightGrid; every other
+// entity folder lists all of its own.  KOUT_FILTER_NOT_TERRAIN = worldspawn's "Brushes".
+enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TERRAIN,
+                    KOUT_FILTER_LIGHTGRID };
 
 bool IsTerrainNode( const selbrush_t *b )
 {
     return b && b->def && b->def->patch && ( b->def->patch->type & PATCH_TERRAIN ) != 0;
 }
 
+// A brush with any lightgrid face (lightgrid_volume and friends; the same substring the
+// camera's tool colours and kiwi_material.cpp's tool list use).
+bool IsLightGridNode( const selbrush_t *b )
+{
+    if ( !b || !b->def || b->def->patch || !b->def->faces )
+        return false;
+    for ( int f = 0; f < b->def->faceCount; ++f )
+    {
+        MaterialDef *md = const_cast<MaterialDef *>( &b->def->faces[f].mtldef[0] );
+        if ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) != 1 )
+            continue;                       // a half-built face has no name to read
+        const char *name = (const char *)Materialdef_GetName( md );
+        if ( name && KiwiStr_ContainsNoCase( name, "lightgrid" ) )
+            return true;
+    }
+    return false;
+}
+
 bool PassesFilter( const selbrush_t *b, koutFilter_t filter )
 {
-    if ( filter == KOUT_FILTER_ALL )
-        return true;
-    return IsTerrainNode( b ) == ( filter == KOUT_FILTER_TERRAIN );
+    switch ( filter )
+    {
+    case KOUT_FILTER_TERRAIN:     return IsTerrainNode( b );
+    case KOUT_FILTER_LIGHTGRID:   return IsLightGridNode( b );
+    case KOUT_FILTER_NOT_TERRAIN: return !IsTerrainNode( b ) && !IsLightGridNode( b );
+    default:                      return true;
+    }
 }
 
 const int KOUT_CLASS_LIGHT      = 0x01;
@@ -760,10 +791,21 @@ void FlattenEntitySection( koutKind_t sectionKind )
     }
     if ( sectionKind == KOUT_SECTION_BRUSHES && world_entity )
         count += EntityBrushCount( world_entity, KOUT_FILTER_NOT_TERRAIN );
-    s_rows[sectionRow].count = count;
+    const int grid = ( sectionKind == KOUT_SECTION_LIGHTS && world_entity )
+                   ? EntityBrushCount( world_entity, KOUT_FILTER_LIGHTGRID ) : 0;
+    s_rows[sectionRow].count = count + grid;
 
     if ( Collapsed( sectionKey ) )
         return;
+
+    // KIWI (2026-10-24): the LightGrid folder comes first inside Lights.
+    if ( grid )
+    {
+        PushRow( KOUT_LIGHTGRID_FOLDER, 1, KOUT_KEY_LIGHTGRID );
+        s_rows.back().count = grid;
+        if ( !Collapsed( KOUT_KEY_LIGHTGRID ) )
+            FlattenEntityBrushes( world_entity, 2, KOUT_FILTER_LIGHTGRID );
+    }
 
     // KIWI (2026-09-16): the Barbwire folder comes first inside Models; its members are
     // listed one level deeper and skipped by the flat pass below.
@@ -1067,24 +1109,29 @@ void MarkSelectionFolders( bool force )
 
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
-        bool anyTerrain = false, anyOther = false;
+        bool anyTerrain = false, anyOther = false, anyGrid = false;
         for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
         {
             if ( !BrushSelected( b ) )
                 continue;
-            if ( IsTerrainNode( b ) ) anyTerrain = true;
-            else                      anyOther   = true;
-            if ( anyTerrain && anyOther )
-                break;
+            if ( IsTerrainNode( b ) )                               anyTerrain = true;
+            else if ( e == world_entity && IsLightGridNode( b ) )   anyGrid    = true;
+            else                                                    anyOther   = true;
         }
-        if ( !anyTerrain && !anyOther )
+        if ( !anyTerrain && !anyOther && !anyGrid )
             continue;
 
         if ( e == world_entity )
         {
-            // Worldspawn lists its terrain under "Terrain", the rest under "Brushes".
+            // Worldspawn lists its terrain under "Terrain", its lightgrid brushes under
+            // Lights > LightGrid, the rest under "Brushes".
             if ( anyOther )   AddFolderKey( s_selFolders, KOUT_KEY_BRUSHES );
             if ( anyTerrain ) AddFolderKey( s_selFolders, KOUT_KEY_TERRAIN );
+            if ( anyGrid )
+            {
+                AddFolderKey( s_selFolders, KOUT_KEY_LIGHTS );
+                AddFolderKey( s_selFolders, KOUT_KEY_LIGHTGRID );
+            }
             continue;
         }
 
@@ -1975,7 +2022,7 @@ bool SectionIsBrushBacked( koutKind_t k )
 {
     return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
         || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER
-        || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES
+        || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES || k == KOUT_LIGHTGRID_FOLDER
         // KIWI GLASS
         || k == KOUT_SECTION_GLASS;
         // KIWI END
@@ -1995,8 +2042,12 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh,
         {
             if ( k == KOUT_SECTION_BRUSHES )      filter = KOUT_FILTER_NOT_TERRAIN;
             else if ( k == KOUT_SECTION_TERRAIN ) filter = KOUT_FILTER_TERRAIN;
+            else if ( k == KOUT_SECTION_LIGHTS || k == KOUT_LIGHTGRID_FOLDER )
+                                                  filter = KOUT_FILTER_LIGHTGRID;
             else                                  continue;
         }
+        else if ( k == KOUT_LIGHTGRID_FOLDER )
+            continue;                               // worldspawn's lightgrid brushes only
         else if ( k == KOUT_BARBWIRE_FOLDER )
         {
             if ( !IsBarbwireEntity( e ) || EntitySection( e ) != KOUT_SECTION_MODELS )
@@ -2535,6 +2586,7 @@ void KiwiOutliner_Draw()
                 case KOUT_SECTION_MODELS:
                 case KOUT_SECTION_IMAGES:
                 case KOUT_BARBWIRE_FOLDER:
+                case KOUT_LIGHTGRID_FOLDER:
                 case KOUT_SECTION_GROUPS:
                 case KOUT_SECTION_PARTICLES:
                 // KIWI GLASS
@@ -2714,6 +2766,9 @@ void KiwiOutliner_Draw()
                     break;
                 case KOUT_BARBWIRE_FOLDER:
                     _snprintf( label, sizeof( label ), "Barbwire (%i)", r.count );
+                    break;
+                case KOUT_LIGHTGRID_FOLDER:
+                    _snprintf( label, sizeof( label ), "LightGrid (%i)", r.count );
                     break;
                 case KOUT_SECTION_GROUPS:
                     _snprintf( label, sizeof( label ), "Groups (%i)", r.count );
@@ -2987,6 +3042,38 @@ void KiwiOutliner_Draw()
                                 else
                                     KiwiRefImage_SelectAdd( k );
                             }
+                            g_nUpdateBits = -1;
+                        }
+                        else if ( r.kind == KOUT_LIGHTGRID_FOLDER )
+                        {
+                            // KIWI: the LightGrid folder selects its brushes; Shift adds them,
+                            // Ctrl on a fully selected folder removes them.
+                            std::vector<selbrush_t *> brushes;
+                            SectionBrushes( KOUT_LIGHTGRID_FOLDER, -1, nullptr, nullptr, &brushes );
+                            selection_t &sel = KiwiSel();
+                            bool any = false, all = true;
+                            for ( size_t k = 0; k < brushes.size(); ++k )
+                            {
+                                if ( !Sel_BrushLive( brushes[k] ) )
+                                    continue;
+                                any = true;
+                                if ( !BrushSelected( brushes[k] ) )
+                                    all = false;
+                            }
+                            const bool remove = io.KeyCtrl && !io.KeyShift && any && all;
+                            if ( !io.KeyShift && !io.KeyCtrl )
+                            {
+                                Sel_Clear( sel );
+                                KiwiConSel_Clear();
+                            }
+                            for ( size_t k = 0; k < brushes.size(); ++k )
+                            {
+                                if ( !Sel_BrushLive( brushes[k] ) )
+                                    continue;
+                                if ( remove ) Sel_Remove( sel, Sel_MakeObject( brushes[k] ) );
+                                else          Sel_Add   ( sel, Sel_MakeObject( brushes[k] ) );
+                            }
+                            Sel_SyncToLegacy();
                             g_nUpdateBits = -1;
                         }
                         else if ( r.kind == KOUT_GROUP_ENTITY || r.kind == KOUT_ENTITY

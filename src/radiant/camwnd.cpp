@@ -32,6 +32,7 @@
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
 #include "kiwi_surfcache.h"         // the camera's pose-invariant draw list
 #include "kiwi_vec.h"               // KIWI_PI
+#include "kiwi_str.h"               // KiwiStr_ContainsNoCase (see-through lightgrid volumes)
 #include "kiwi_ported.h"            // KIWI: shared engine/editor externs
 extern int g_svNodesWalked;         // shadowvolume.cpp:28
 extern int g_svCastersDrawn;        // shadowvolume.cpp:29
@@ -1495,7 +1496,10 @@ static bool Cam_WorldGeoResident()
 // brush.cpp:2499 — int g_edSunBakeVertColor  (the per-vertex sun bake gate)
 extern int  g_edSunBakeVertColor;
 
-static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech )
+// KIWI: `ownBlend` draws the face's own (alpha-blended) material, skipping the opaque
+// tool-art twin - only for passes drawn after the world flush (lightgrid volumes).
+static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech,
+                                           bool ownBlend = false )
 {
     int layerCount = MaterialDef_11( &f->mtldef[g_qeglobals.current_edit_layer] );
     for ( int L = 0; L < layerCount; ++L )
@@ -1507,7 +1511,7 @@ static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech
         // KIWI-UX (ROUND O): substitute BEFORE choosing the technique — the broken
         // material's techset carries only "unlit", the substitute's carries the whole
         // set, so asking the substitute is what lets draw_mode 2/3 keep FAKELIGHT.
-        Material *drawMtl = Cam_DrawMaterial( g.material );
+        Material *drawMtl = ownBlend ? g.material : Cam_DrawMaterial( g.material );
         MaterialTechniqueType useTech = Cam_TechAvailable( drawMtl, tech );
 
         float    xyzw[CAM_MAXFACEVERTS][4];
@@ -1522,7 +1526,6 @@ static void Cam_DrawFaceFaithfulImmediate( face_t *f, MaterialTechniqueType tech
         {
             indices[ic++] = 0; indices[ic++] = (uint16_t)i; indices[ic++] = (uint16_t)( i + 1 );
         }
-
         R_AddRenderCmdDrawTris( drawMtl, useTech, (short)ic, indices,
                                 (short)g.vertcount, xyzw, g.normal, (float *)g.color, g.st );
     }
@@ -1661,6 +1664,7 @@ struct CamDeferredToolFace
     face_t *f;
     float   col[4];   // MATERIAL_COLOR (neutral for a volume's own art; zeros for the film)
     bool    film;     // sky see-through film instead of a flat volume
+    bool    ownBlend; // KIWI: blend the material's own art (lightgrid) instead of the twin
 };
 static std::vector< CamDeferredToolFace > s_deferredToolFaces;
 
@@ -3285,8 +3289,14 @@ void CamWnd_Draw( HWND hwnd )
                         // w == 0, exactly as the selected pass draws it, not the flat paint.
                         static const float s_artNeutral[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
                         CamDeferredToolFace d;
-                        d.f    = f;
-                        d.film = skySeeThrough;
+                        d.f     = f;
+                        d.film  = skySeeThrough;
+                        // KIWI (2026-10-24, user: "make lightgrid textures transparent like
+                        // they are in real cod radiant"): Cam_DrawMaterial swaps tool art for
+                        // its opaque SrcAlpha/Zero twin (art over black, depth-writing), so a
+                        // volume around a building hid it.  This pass runs after the world
+                        // flush, so lightgrid blends its own art (DXT3 alpha ~60%) instead.
+                        d.ownBlend = mn && KiwiStr_ContainsNoCase( mn, "lightgrid" );
                         memcpy( d.col, skySeeThrough ? ecol : s_artNeutral, sizeof( d.col ) );
                         s_deferredToolFaces.push_back( d );
                         continue;
@@ -3808,7 +3818,7 @@ void CamWnd_Draw( HWND hwnd )
                 Cam_DrawFaceTinted( d.f, g_qeglobals.d_white, (uint)filmCol.packed, 0.0f, TECHNIQUE_UNLIT );
             }
             else
-                Cam_DrawFaceFaithfulImmediate( d.f, TECHNIQUE_UNLIT );   // its own art, as when selected
+                Cam_DrawFaceFaithfulImmediate( d.f, TECHNIQUE_UNLIT, d.ownBlend );   // its own art, as when selected
         }
         static const float s_toolNeutral[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         R_AddCmdSetMaterialColor( s_toolNeutral );

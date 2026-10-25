@@ -50,6 +50,7 @@ json ToJson(const Recipe& recipe) {
         {"origin", recipe.origin},
         {"flipWinding", recipe.flipWinding},
         {"uvFlip", recipe.uvFlip},
+        {"cullFacing", recipe.cullFacing},
         {"normalGreen", recipe.normalGreen},
         {"surface", recipe.surface},
         {"pieces", pieces},
@@ -67,7 +68,8 @@ json ToJson(const Recipe& recipe) {
           {"minThickness", s.minThickness},
           {"kdopRatio", s.kdopRatio},
           {"splitGain", s.splitGain},
-          {"maxDepth", s.maxDepth}}},
+          {"maxDepth", s.maxDepth},
+          {"wholeBox", s.wholeBox}}},
     };
 }
 
@@ -81,6 +83,7 @@ void FromJson(const json& root, Recipe& recipe) {
     Read(root, "origin", recipe.origin);
     Read(root, "flipWinding", recipe.flipWinding);
     Read(root, "uvFlip", recipe.uvFlip);
+    Read(root, "cullFacing", recipe.cullFacing);
     Read(root, "normalGreen", recipe.normalGreen);
     Read(root, "surface", recipe.surface);
     if (const auto pieces = root.find("pieces"); pieces != root.end() && pieces->is_array())
@@ -115,6 +118,7 @@ void FromJson(const json& root, Recipe& recipe) {
         Read(*collision, "kdopRatio", recipe.collision.settings.kdopRatio);
         Read(*collision, "splitGain", recipe.collision.settings.splitGain);
         Read(*collision, "maxDepth", recipe.collision.settings.maxDepth);
+        Read(*collision, "wholeBox", recipe.collision.settings.wholeBox);
     }
 }
 

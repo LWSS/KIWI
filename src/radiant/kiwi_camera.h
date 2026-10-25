@@ -76,6 +76,11 @@ void KiwiCam_DefaultSpawn();
 // Caller rejects degenerate boxes; tiny radii are floored for near-plane clearance.
 void KiwiCam_FrameBounds( const float mins[3], const float maxs[3] );
 
+// KIWI: perspective only, after a head-on frame of a surface: trace from `surface` along
+// `normal` (toward the eye) and bring the eye in front of the first thing nearer than it.
+// True when the eye moved.
+bool KiwiCam_PullInFrontOf( const float surface[3], const float normal[3] );
+
 // World units per screen pixel at `world`. Caller must have run CamWnd_BuildMatrix
 // this frame because perspective scaling reads camera.vpn.
 float KiwiCam_WorldPerPixel( const float *world );
@@ -111,6 +116,11 @@ void  KiwiCam_WheelFlySpeed( float wheelSteps );
 bool  KiwiCam_Ortho();
 void  KiwiCam_SetOrtho( bool on );
 
+// KIWI: a tool handle's display anchor, kept at least marginPx inside the camera image.
+// Copies `world` and returns false when it is already there; otherwise writes the pinned
+// point (same view depth) and returns true.  Presentation only: drags rebase at the press.
+bool  KiwiCam_KeepOnScreen( const float *world, float marginPx, float *out );
+
 // Positive ortho half-height in world units; matrix, rays, inverse, and screen
 // scale all derive from this function.
 float KiwiCam_OrthoHalfHeight();
@@ -131,3 +141,13 @@ bool  KiwiCam_RayAxis( const ray_t &ray, const float *pt, const float *axis, flo
 // Whether the view can portray motion along `axis`; outDot receives |vpn·axis|.
 // Ortho uses the same test because its end-on rays have the same degeneracy.
 bool  KiwiCam_AxisPortrayable( const float *axis, float *outDot = 0 );
+
+// KIWI (2026-10-24, user: "start saving the camera position/settings/mode/sectionview when
+// the map is closed so you dont have to re-orient each time you re-open a map.  Save it in
+// the kiwi custom stuff"): the per-map view, as `view ...` records in the .kiwi sidecar -
+// camera pose, orbit pivot + distance, ortho/perspective, and the section cut.  Render
+// method, x-ray and edge outline stay editor-wide profile settings.
+void KiwiCamView_WriteSidecar( void *file );              // FILE *: the `view` records
+bool KiwiCamView_ParseSidecarLine( const char *line );   // true = a `view` record, consumed
+void KiwiCamView_ResetPending();                          // KiwiCon_LoadSidecar's start
+void KiwiCamView_ApplyPending();                          // tail of the map load

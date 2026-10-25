@@ -215,6 +215,7 @@ static void LightGrid_StoreProducerVector(int gridIndex, const float *producer)
 typedef struct Cod4LightGridCluster_s {
     int first, count, splitDimension;
     float splitValue, maxStdDev;
+    int statsValid; /* KIWI: split stats still match this member range */
 } Cod4LightGridCluster_t;
 
 static void LightGrid_QuantizeVectors(void)
@@ -246,8 +247,15 @@ static void LightGrid_QuantizeVectors(void)
         indices[i] = i;
     clusters[0].first = 0;
     clusters[0].count = vectorCount;
+    clusters[0].statsValid = 0;
     clusterCount = 1;
 
+    /* KIWI (2026-10-24, the native loop
+     * recomputed every cluster's 168-dimension variance after each split -
+     * quadratic, 188 s of a 196 s compile at 7,788 colours.  A split only
+     * changes the two clusters it touches; every other cluster keeps its member
+     * range and member order, so its cached stats are bit-identical to a
+     * recomputation.  Same output, one stats pass per new cluster. */
     for (;;)
     {
         int bestCluster = 0;
@@ -259,6 +267,13 @@ static void LightGrid_QuantizeVectors(void)
             float greatestVariance = -1.0f;
             int dimension;
 
+            if (cluster->statsValid)
+            {
+                if (cluster->maxStdDev > clusters[bestCluster].maxStdDev)
+                    bestCluster = clusterIndex;
+                continue;
+            }
+            cluster->statsValid = 1;
             cluster->splitDimension = 0;
             cluster->splitValue = 0.0f;
             for (dimension = 0; dimension < 168; ++dimension)
@@ -354,7 +369,9 @@ static void LightGrid_QuantizeVectors(void)
                 head = cluster->first + ((cluster->count + 1) >> 1);
             clusters[clusterCount].first = head;
             clusters[clusterCount].count = end - head;
+            clusters[clusterCount].statsValid = 0;
             cluster->count = head - cluster->first;
+            cluster->statsValid = 0;    /* KIWI: both halves re-derive */
             ++clusterCount;
         }
     }

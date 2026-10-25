@@ -62,6 +62,14 @@ struct kiwiModelVert_t
 int KiwiDrop_ModelVertsNear( float curX, float curY, float reachPx, bool excludeSelected,
                              kiwiModelVert_t *out, int maxOut );
 
+// KIWI (2026-10-22, Plasticity 2026.2 "mesh snapping highlights the snapped mesh face with a
+// partial wireframe showing the triangle"): the world triangle of `node`'s mesh that owns the
+// snapped vertex `pos` (UV-seam copies included) and that the cursor is on - the one whose
+// screen projection holds (curX, curY), else the nearest on screen - among the triangles the
+// model itself does not hide from the eye.  False when none qualifies.
+bool KiwiDrop_ModelVertTriangle( selbrush_t *node, const float pos[3], float curX, float curY,
+                                 float outTri[3][3] );
+
 // KIWI (2026-09-09): the pick-side model test — the node whose MESH the ray hits first
 // within `maxDist` (the occluding brush hit, or FLT_MAX), or false.  Same bounded
 // candidate gather as KiwiDrop_Trace; the ray must already be section-clamped.

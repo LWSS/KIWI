@@ -86,9 +86,16 @@ namespace
     // The bias field's guard band: the chamfer plane must stay strictly between
     // the two faces, so |bias| is clamped this far inside the half-angle.
     const float KPF_BIAS_GUARD_DEG = 2.0f;
-    // A-key angle drag: degrees per pixel of sideways cursor travel, and the Ctrl step.
-    const float KPF_ANGLE_DEG_PER_PIX = 0.25f;
+    // A-key angle drag (the angle pie): the Ctrl step.
     const float KPF_ANGLE_SNAP_DEG    = 5.0f;
+    // KIWI (2026-10-22): edges along one face whose corner angles differ by more than this
+    // are turned to the majority (ComputeConform); "one face" = normals and distances this
+    // close; a brush "touches" a point / lies "behind" a plane within KPF_TOUCH_EPS.
+    const float KPF_CONFORM_TOL_DEG  = 0.5f;
+    const float KPF_SAME_PLANE_DOT   = 0.9999f;
+    const float KPF_SAME_PLANE_DIST  = 0.05f;
+    const float KPF_TOUCH_EPS        = 0.1f;
+    const int   KPF_MAX_SHARES       = 256;
 
     // One selected edge and its baseline-derived fillet frame.
     struct filletUnit_t
@@ -110,6 +117,12 @@ namespace
         // Resolve the sign once from the adjacent normals.
         float biasSign;
         float biasLimit;            // radians; |bias| must stay under this
+
+        // KIWI (2026-10-22): ComputeConform.  refSide = the adj face other selected edges
+        // also run along (-1 none); lead = the unit whose angle to that face this one takes
+        // (-1 = keeps its own bisector + bias).
+        int   refSide;
+        int   lead;
     };
 
     // Cross-section point at the edge midpoint:
@@ -230,7 +243,7 @@ namespace
                 return false;
             if ( m_units.empty() )
                 return true;
-            m_angleDrag = false;                    // D re-latches the depth; one owner at a time
+            EndAngleDrag();                         // D re-latches the depth; one owner at a time
 
             const filletUnit_t &drv = m_units[0];
             if ( !m_curve )
@@ -289,7 +302,7 @@ namespace
         void HandleGrab( bool held ) override
         {
             if ( held )
-                m_angleDrag = false;        // the ball is depth: taking it ends the angle drag
+                EndAngleDrag();             // the ball is depth: taking it ends the angle drag
             if ( m_grabbed == held )
                 return;
             m_grabbed = held;
@@ -302,6 +315,12 @@ namespace
             Reset();
             if ( !Gather() )
                 return false;
+            ComputeConform();
+            ComputeShares();
+            if ( m_conformed || !m_shares.empty() )
+                Sys_Printf( "Bevel Edge: %i edge(s) turned to the majority angle along their "
+                            "shared face, %i joint(s) between pieces share their cuts.\n",
+                            m_conformed, (int)m_shares.size() );
             LatchStart();
             UpdateHud();
             // Start parked at zero deformation; chamfer is always the initial mode.
@@ -408,7 +427,7 @@ namespace
             (void)imgX; (void)imgY;
             if ( !m_angleDrag )
                 return false;
-            m_angleDrag = false;
+            EndAngleDrag();
             KiwiCmd_Pause();
             UpdateHud();
             g_nUpdateBits |= 1;
@@ -503,14 +522,14 @@ namespace
         void Reset()
         {
             m_units.clear();
+            m_shares.clear();
+            m_conformed = 0;
             m_radius    = 0.0f;
             m_depth     = 0.0f;
             m_curve     = false;        // chamfer is always the initial mode
             m_biasDeg   = 0.0f;
             m_hasBias   = false;
-            m_angleDrag = false;
-            m_angleX0   = 0;
-            m_angleBase = 0.0f;
+            EndAngleDrag();
             m_start     = 0.0f;
             m_haveStart = false;
             m_hasNum    = false;
@@ -712,17 +731,20 @@ namespace
 
         // KIWI (2026-09-21, user: "pressing A while doing a bevel should allow dynamic
         // angle change during the tool operation. (like in plasticity)").  A hands the
-        // MOUSE to the chamfer's angle bias - the Tab field's value, driven live: sideways
-        // cursor travel, KPF_ANGLE_DEG_PER_PIX per pixel, depth frozen where it stands.
-        // No button is held (the command is resumed so moves arrive); a click, A again,
-        // taking the depth ball, D, Enter or Esc all end it.  Ctrl steps by 5 degrees.
+        // MOUSE to the chamfer's angle bias - the Tab field's value, driven live, depth
+        // frozen where it stands.  KIWI (2026-10-22, user: "It works like a pie and when
+        // ctrl is held it snaps to 5deg increments"): the cursor turns around the driving
+        // edge's midpoint on Plasticity 2026.2's angle pie (kiwi_numeric.h KiwiAnglePie_*)
+        // instead of sliding sideways.  No button is held (the command is resumed so moves
+        // arrive); a click, A again, taking the depth ball, D, Enter or Esc all end it.
+        // Ctrl steps by 5 degrees.
         bool ToggleAngleDrag()
         {
             if ( m_units.empty() )
                 return true;
             if ( m_angleDrag )
             {
-                m_angleDrag = false;
+                EndAngleDrag();
                 KiwiCmd_Pause();
                 UpdateHud();
                 return true;
@@ -753,14 +775,19 @@ namespace
             return true;
         }
 
-        // The current cursor column keeps the current bias.
+        // The cursor's current direction around the pie keeps the current bias.
         void LatchAngle()
         {
             int x, y;
-            if ( !m_angleDrag || !KiwiCmd_LastCursor( &x, &y ) )
+            if ( !m_angleDrag || m_units.empty() || !KiwiCmd_LastCursor( &x, &y ) )
                 return;
-            m_angleX0   = x;
-            m_angleBase = m_biasDeg;
+            KiwiAnglePie_Begin( m_units[0].e.mid, x, y, m_biasDeg );
+        }
+
+        void EndAngleDrag()
+        {
+            m_angleDrag = false;
+            KiwiAnglePie_End();
         }
 
         // Keep the requested value inside what the DRIVING edge can show, so dragging
@@ -771,7 +798,7 @@ namespace
             if ( !m_angleDrag || m_curve || m_hasBias || m_units.empty()
               || !KiwiCmd_LastCursor( &x, &y ) )
                 return;
-            float deg = m_angleBase + (float)( x - m_angleX0 ) * KPF_ANGLE_DEG_PER_PIX;
+            float deg = KiwiAnglePie_Drag( x, y );
             if ( KiwiCmd_SnapEngaged() )
                 deg = floorf( deg / KPF_ANGLE_SNAP_DEG + 0.5f ) * KPF_ANGLE_SNAP_DEG;
             const float lim = m_units[0].biasLimit * ( 180.0f / (float)KIWI_PI )
@@ -781,11 +808,7 @@ namespace
             else if ( deg >  lim )  deg =  lim;
             else if ( deg < -lim )  deg = -lim;
             else                    clamped = false;
-            if ( clamped )
-            {
-                m_angleX0   = x;            // this column IS the limit from now on
-                m_angleBase = deg;
-            }
+            KiwiAnglePie_Show( deg, clamped );   // a clamp: this direction IS the limit now
             m_biasDeg = deg;
         }
 
@@ -876,15 +899,8 @@ namespace
             // A stop rebases its driver so travel back answers at once.
             if ( m_grabbed && !m_hasNum && fabsf( s - askS ) > 1.0e-6f )
                 ReLatchFor( s );
-            if ( m_angleDrag && fabsf( m_biasDeg - askBias ) > 1.0e-6f )
-            {
-                int x, y;
-                if ( KiwiCmd_LastCursor( &x, &y ) )
-                {
-                    m_angleX0   = x;
-                    m_angleBase = m_biasDeg;
-                }
-            }
+            if ( m_angleDrag )
+                KiwiAnglePie_Show( m_biasDeg, fabsf( m_biasDeg - askBias ) > 1.0e-6f );
             UpdateHud();
         }
 
@@ -1014,6 +1030,9 @@ namespace
             for ( size_t k = 0; k < m_units.size(); ++k )
                 if ( m_units[k].e.def == def && m_units[k].faceIndex >= 0 )
                     ++added;
+            for ( size_t s = 0; s < m_shares.size(); ++s )
+                if ( m_units[m_shares[s].to].e.def == def && m_shares[s].faceIndex >= 0 )
+                    ++added;
             const int base = def->faceCount - added;
             int found = -1;
             for ( int f = 0; f < base; ++f )
@@ -1053,6 +1072,216 @@ namespace
                 if ( want < -lim ) want = -lim;
                 u.e.bias = want;
             }
+
+            // Nonconforming edges take their lead's angle to the shared face, so one depth
+            // gives one setback on it (ComputeConform).  b is toward adj[1], which turns the
+            // cut away from n1: its angle to n1 is phi/2 + b, to n2 phi/2 - b.
+            for ( size_t i = 0; i < m_units.size() && !m_curve; ++i )
+            {
+                filletUnit_t &u = m_units[i];
+                if ( u.lead < 0 )
+                    continue;
+                const filletUnit_t &l = m_units[u.lead];
+                const float bl    = l.e.bias * l.biasSign;
+                const float alpha = 0.5f * l.phi + ( l.refSide == 0 ? bl : -bl );
+                const float b     = ( u.refSide == 0 ) ? alpha - 0.5f * u.phi
+                                                       : 0.5f * u.phi - alpha;
+                float want = b * u.biasSign;
+                const float lim = u.biasLimit - KPF_BIAS_GUARD_DEG * toRad;
+                if ( !( lim > 0.0f ) )      { u.e.bias = 0.0f; continue; }
+                if ( want >  lim ) want =  lim;
+                if ( want < -lim ) want = -lim;
+                u.e.bias = want;
+            }
+        }
+
+        const face_t &AdjFace( const filletUnit_t &u, int side ) const
+        {
+            return u.e.def->faces[u.e.adj[side]];
+        }
+
+        static bool SamePlane( const face_t &a, const face_t &b )
+        {
+            return Dot3( a.plane.normal, b.plane.normal ) > KPF_SAME_PLANE_DOT
+                && fabsf( a.plane.dist - b.plane.dist ) < KPF_SAME_PLANE_DIST;
+        }
+
+        // KIWI (2026-10-22, user: "when using the bevel tool on this doorway, the bevels dont
+        // line up ... fix nonconforming parts to adjust to the majority angle"): edges running
+        // along one face (a door frame's front) chamfer as one even band only when every cut
+        // meets that face at the same angle - then one depth is one setback on it.  A bisector
+        // cut does that only where the corner angles agree, so an edge whose corner differs
+        // from the majority of the edges on that face takes the majority's angle to it
+        // (ApplyBias).  Baseline geometry, once per gesture.
+        void ComputeConform()
+        {
+            const size_t n = m_units.size();
+            for ( size_t i = 0; i < n; ++i )
+            {
+                filletUnit_t &u = m_units[i];
+                u.refSide = -1;
+                u.lead    = -1;
+                int hits[2] = { 0, 0 };
+                for ( int s = 0; s < 2; ++s )
+                    for ( size_t j = 0; j < n; ++j )
+                        if ( j != i && ( SamePlane( AdjFace( u, s ), AdjFace( m_units[j], 0 ) )
+                                      || SamePlane( AdjFace( u, s ), AdjFace( m_units[j], 1 ) ) ) )
+                            ++hits[s];
+                // Both faces equally shared (a box's corner edge): no single reference.
+                if ( hits[0] != hits[1] )
+                    u.refSide = ( hits[0] > hits[1] ) ? 0 : 1;
+            }
+
+            m_conformed = 0;
+            const float tol = KPF_CONFORM_TOL_DEG * ( KPF_PI / 180.0f );
+            for ( size_t i = 0; i < n; ++i )
+            {
+                filletUnit_t &u = m_units[i];
+                if ( u.refSide < 0 )
+                    continue;
+                const face_t &ref = AdjFace( u, u.refSide );
+                // The corner angle most edges on this face share; a tie keeps the earlier unit.
+                int best = -1, bestVotes = 0;
+                for ( size_t a = 0; a < n; ++a )
+                {
+                    const filletUnit_t &ua = m_units[a];
+                    if ( ua.refSide < 0 || !SamePlane( AdjFace( ua, ua.refSide ), ref ) )
+                        continue;
+                    int votes = 0;
+                    for ( size_t b = 0; b < n; ++b )
+                    {
+                        const filletUnit_t &ub = m_units[b];
+                        if ( ub.refSide >= 0 && SamePlane( AdjFace( ub, ub.refSide ), ref )
+                          && fabsf( ub.phi - ua.phi ) < tol )
+                            ++votes;
+                    }
+                    if ( votes > bestVotes )
+                    {
+                        best      = (int)a;
+                        bestVotes = votes;
+                    }
+                }
+                if ( best >= 0 && fabsf( m_units[best].phi - u.phi ) >= tol )
+                {
+                    u.lead = best;
+                    ++m_conformed;
+                }
+            }
+        }
+
+        // def inside (or on) every face plane, near `p`: the point lies on this brush.
+        static bool Touches( const brush_t *def, const float *p )
+        {
+            for ( int f = 0; f < def->faceCount; ++f )
+                if ( Dot3( def->faces[f].plane.normal, p ) - def->faces[f].plane.dist > KPF_TOUCH_EPS )
+                    return false;
+            return true;
+        }
+
+        // Every vertex of def on or behind `face`'s plane.
+        static bool Behind( const brush_t *def, const face_t &face )
+        {
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                for ( int p = 0; w && p < w->numpoints; ++p )
+                    if ( Dot3( face.plane.normal, w->p[p] ) - face.plane.dist > KPF_TOUCH_EPS )
+                        return false;
+            }
+            return true;
+        }
+
+        // KIWI (2026-10-22, same report): a frame built from separate brushes is split at
+        // seams (a jamb's flat top under a 45-degree corner block) that are not where two
+        // chamfers meet, so each piece's own cut ended in a step at the seam.  On one solid a
+        // chamfered CONVEX corner is the solid inside every chamfer plane, so a selected brush
+        // that touches another unit's edge and lies wholly behind both of that edge's faces
+        // (convex there) also takes that unit's chamfer plane.  A borrowed plane that cuts
+        // nothing is dropped after each rebuild (PruneShares).  Chamfer mode only.
+        void ComputeShares()
+        {
+            m_shares.clear();
+            for ( size_t i = 0; i < m_units.size(); ++i )
+            {
+                if ( DefFirstIndex( i ) != i )
+                    continue;
+                const brush_t *to = m_units[i].e.def;
+                for ( size_t j = 0; j < m_units.size(); ++j )
+                {
+                    const filletUnit_t &src = m_units[j];
+                    if ( src.e.def == to )
+                        continue;
+                    // A selected edge of this brush must meet src's edge end to end (the
+                    // chain's corner), and src's edge must not carry straight on along this
+                    // brush - that would chamfer an edge of it nobody selected.
+                    bool corner = false;
+                    for ( int end = 0; end < 2 && !corner; ++end )
+                    {
+                        const float *p = end ? src.e.e1 : src.e.e0;
+                        const float *o = end ? src.e.e0 : src.e.e1;
+                        bool meets = false;
+                        for ( size_t k = 0; k < m_units.size() && !meets; ++k )
+                            meets = m_units[k].e.def == to
+                                 && ( Dist3( p, m_units[k].e.e0 ) < KPF_TOUCH_EPS
+                                   || Dist3( p, m_units[k].e.e1 ) < KPF_TOUCH_EPS );
+                        if ( !meets )
+                            continue;
+                        float dir[3], beyond[3];
+                        Sub3( p, o, dir );
+                        if ( !Norm3( dir ) )
+                            continue;
+                        Mad3( p, dir, 1.0f, beyond );
+                        corner = !Touches( to, beyond );
+                    }
+                    if ( !corner )
+                        continue;
+                    if ( !Behind( to, AdjFace( src, 0 ) ) || !Behind( to, AdjFace( src, 1 ) ) )
+                        continue;
+                    // A straight run split in two: this brush already cuts that plane itself.
+                    bool own = false;
+                    for ( size_t k = 0; k < m_units.size() && !own; ++k )
+                    {
+                        const filletUnit_t &o = m_units[k];
+                        if ( o.e.def != to || Dot3( o.e.n, src.e.n ) < KPF_SAME_PLANE_DOT )
+                            continue;
+                        float rel[3], along[3];
+                        Sub3( src.e.mid, o.e.mid, rel );
+                        Mad3( rel, o.e.u, -Dot3( rel, o.e.u ), along );
+                        own = Dot3( along, along ) < KPF_SAME_PLANE_DIST * KPF_SAME_PLANE_DIST;
+                    }
+                    if ( own )
+                        continue;
+                    share_t sh = { i, j, -1 };
+                    m_shares.push_back( sh );
+                    if ( (int)m_shares.size() >= KPF_MAX_SHARES )
+                        return;
+                }
+            }
+        }
+
+        // Borrowed planes that cut nothing (no winding, or a remnant under the validity
+        // gate's area) come off again; later shares on the same brush renumber down.
+        void PruneShares()
+        {
+            bool any = false;
+            for ( size_t s = m_shares.size(); s-- > 0; )
+            {
+                share_t &sh = m_shares[s];
+                brush_t *def = m_units[sh.to].e.def;
+                if ( sh.faceIndex < 0 || !def || !def->faces || sh.faceIndex >= def->faceCount )
+                    continue;
+                const winding_t *w = def->faces[sh.faceIndex].w;
+                if ( w && w->numpoints >= 3 && WindingAreaOf( w ) >= KVALID_MIN_FACE_AREA )
+                    continue;
+                Brush_RemoveFace( def, (unsigned int)sh.faceIndex );
+                for ( size_t t = s + 1; t < m_shares.size(); ++t )
+                    if ( m_units[m_shares[t].to].e.def == def && m_shares[t].faceIndex > sh.faceIndex )
+                        --m_shares[t].faceIndex;
+                sh.faceIndex = -1;
+                any = true;
+            }
+            if ( any )
+                RebuildAll();
         }
 
         // Rebuild the live chamfer from baseline geometry each frame.
@@ -1085,9 +1314,21 @@ namespace
                 const float d = m_curve ? ChamferDepth( u, m_radius ) : m_depth;
                 u.faceIndex = KiwiBevel_AppendFace( u.e.def, u.e, d );
             }
+            // KIWI: the neighbours' borrowed cuts go after every unit's own (ComputeShares),
+            // carrying the receiving brush's material.
+            for ( size_t s = 0; s < m_shares.size() && !m_curve; ++s )
+            {
+                share_t &sh = m_shares[s];
+                const filletUnit_t &to = m_units[sh.to];
+                kiwiBevelEdge_t e = m_units[sh.from].e;
+                e.srcFace = to.e.srcFace;
+                sh.faceIndex = Sel_BrushLive( to.e.node )
+                             ? KiwiBevel_AppendFace( to.e.def, e, m_depth ) : -1;
+            }
             m_added = true;
 
             RebuildAll();
+            PruneShares();
             const char *why = 0;
             bool ok = true;
             for ( size_t i = 0; i < m_units.size() && ok; ++i )
@@ -1191,7 +1432,17 @@ namespace
         {
             if ( !m_added )
                 return;
-            // Remove appended tail faces in reverse order so later indices never shift.
+            // Remove appended tail faces in reverse order so later indices never shift:
+            // the borrowed cuts went on last.
+            for ( size_t s = m_shares.size(); s-- > 0; )
+            {
+                share_t &sh = m_shares[s];
+                const filletUnit_t &to = m_units[sh.to];
+                if ( sh.faceIndex >= 0 && Sel_BrushLive( to.e.node ) && to.e.def->faces
+                  && sh.faceIndex < to.e.def->faceCount )
+                    Brush_RemoveFace( to.e.def, (unsigned int)sh.faceIndex );
+                sh.faceIndex = -1;
+            }
             for ( size_t i = m_units.size(); i-- > 0; )
             {
                 filletUnit_t &u = m_units[i];
@@ -1650,7 +1901,7 @@ namespace
                 _snprintf( m_hud, sizeof( m_hud ),
                            "bevel  %i edge(s)  d %s%s%s  %s",
                            (int)m_units.size(), b, m_met ? " MAX (chamfers meet)" : "", bias,
-                           m_angleDrag ? "ANGLE DRAG - move sideways, Ctrl = 5 deg, click or A ends"
+                           m_angleDrag ? "ANGLE DRAG - circle the pie, Ctrl = 5 deg, click or A ends"
                                        : "(D: curve it, A: drag the angle)" );
             }
             m_hud[sizeof( m_hud ) - 1] = '\0';
@@ -1666,16 +1917,19 @@ namespace
         landSkips_t               m_skips;
 
         std::vector<filletUnit_t> m_units;
+        // KIWI (2026-10-22): unit `from`'s chamfer plane borrowed by unit `to`'s brush
+        // (ComputeShares), and its appended face (-1 = absent).
+        struct share_t { size_t to; size_t from; int faceIndex; };
+        std::vector<share_t>      m_shares;
+        int                       m_conformed = 0;   // units following a lead's angle
         float                     m_radius    = 0.0f;
         // m_depth is world-space chamfer depth; m_biasDeg is requested degrees.
         float                     m_depth     = 0.0f;
         bool                      m_curve     = false;
         float                     m_biasDeg   = 0.0f;
         bool                      m_hasBias   = false;
-        // A: the cursor column drives m_biasDeg (ToggleAngleDrag).
+        // A: the cursor's turn around the angle pie drives m_biasDeg (ToggleAngleDrag).
         bool                      m_angleDrag = false;
-        int                       m_angleX0   = 0;
-        float                     m_angleBase = 0.0f;
         float                     m_start     = 0.0f;
         bool                      m_haveStart = false;
         bool                      m_hasNum    = false;

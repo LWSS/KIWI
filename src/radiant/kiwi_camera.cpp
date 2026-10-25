@@ -147,6 +147,27 @@ namespace
         return KiwiCam_Ortho() ? KCAM_ORIGIN_BOUND_ORTHO : KCAM_ORIGIN_BOUND_PERSP;
     }
 
+    // KIWI (2026-10-22, user: "After a while, the camera gets into a really annoying state
+    // where the MMB pivot traces never hit and the camera speed is insanely high"): the ortho
+    // pseudo-eye sat s_dist behind the view centre, so zooming out parked it tens of thousands
+    // of units back, and an orbit then swung it that far out past the far side of the map.
+    // Everything on screen was behind it by more than the ortho pick lead (camwnd.cpp
+    // KCAM_ORTHO_PICK_LEAD, 16384): every pivot probe missed, and the fallback pivot (s_dist
+    // down the axis) sat far beyond the work, so each orbit swept the view across the screen.
+    // Sliding the pseudo-eye along its own axis changes nothing in an ortho image, so in ortho
+    // the eye keeps within this reach of its pivot (half the pick lead: a full turn about the
+    // pivot still leaves the work within the lead) and zoom no longer moves it along the axis.
+    const float KCAM_ORTHO_EYE_REACH = 8192.0f;
+
+    // How far down the view axis the pivot / standoff point sits: s_dist, held to the reach
+    // in ortho, where s_dist is only the zoom.
+    float KCam_AxisDepth( float dist )
+    {
+        if ( KiwiCam_Ortho() && dist > KCAM_ORTHO_EYE_REACH )
+            return KCAM_ORTHO_EYE_REACH;
+        return dist;
+    }
+
     // The modern profile starts at (0,-160,96), yaw +90 and pitch -31: a human-scale
     // three-quarter view of the origin. Frame margin leaves about 7% on the tight
     // axis; the radius floor avoids parking inside the near plane.
@@ -258,8 +279,9 @@ namespace
     {
         float f[3];
         ViewForward( c, f );
+        const float depth = KCam_AxisDepth( s_dist );
         for ( int i = 0; i < 3; ++i )
-            s_lookAt[i] = c->origin[i] + f[i] * s_dist;
+            s_lookAt[i] = c->origin[i] + f[i] * depth;
         s_have = true;
     }
 
@@ -382,6 +404,22 @@ namespace
     // Also the re-latch a mid-gesture dolly runs (see KiwiCam_Dolly).
     void LatchOrbit( camera_s *c )
     {
+        // KIWI: in ortho, seat the pseudo-eye KCam_AxisDepth in front of the pivot along its
+        // own axis (an invisible move) so the turn cannot carry it out past the work.
+        if ( KiwiCam_Ortho() )
+        {
+            float f[3];
+            ViewForward( c, f );
+            const float rel0[3] = { s_lookAt[0] - c->origin[0], s_lookAt[1] - c->origin[1],
+                                    s_lookAt[2] - c->origin[2] };
+            const float slide = Dot3( rel0, f ) - KCam_AxisDepth( s_dist );
+            if ( slide == slide && slide != 0.0f )
+            {
+                for ( int i = 0; i < 3; ++i )
+                    c->origin[i] += f[i] * slide;
+                Commit( c );
+            }
+        }
         float rel[3] = { c->origin[0] - s_lookAt[0],
                          c->origin[1] - s_lookAt[1],
                          c->origin[2] - s_lookAt[2] };
@@ -446,6 +484,12 @@ namespace
         ray_t ray;
         if ( !Pick_RayFromImagePos( x, y, &ray ) )
             return false;
+        // KIWI: a hit counts past the ray's own start.  That is the eye in perspective; an
+        // ortho ray starts KCAM_ORTHO_PICK_LEAD behind the pseudo-eye, and the surfaces it
+        // draws behind the eye are on screen too (negative depth is fine there).
+        const float relS[3] = { ray.origin[0] - c->origin[0], ray.origin[1] - c->origin[1],
+                                ray.origin[2] - c->origin[2] };
+        const float minDepth = Dot3( relS, fwd ) + 1.0f;
         bool  have = false;
         float best = 0.0f;
         float bestPt[3] = { 0.0f, 0.0f, 0.0f };
@@ -456,7 +500,7 @@ namespace
             const float rel[3] = { r.point[0] - c->origin[0], r.point[1] - c->origin[1],
                                    r.point[2] - c->origin[2] };
             best = Dot3( rel, fwd );
-            have = best > 1.0f;
+            have = best > minDepth;
             Copy3( r.point, bestPt );
         }
         // Models by mesh, as Pick_TraceSolid does (section-clamped start).
@@ -471,7 +515,7 @@ namespace
             const float rel[3] = { pt[0] - c->origin[0], pt[1] - c->origin[1],
                                    pt[2] - c->origin[2] };
             const float d = Dot3( rel, fwd );
-            if ( d > 1.0f && ( !have || d < best ) )
+            if ( d > minDepth && ( !have || d < best ) )
             {
                 best = d;
                 have = true;
@@ -946,9 +990,11 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
 
         float f[3];
         ViewForward( c, f );
-        float toAnchor[3];
-        for ( int i = 0; i < 3; ++i )
-            toAnchor[i] = f[i] * d0;          // old eye -> old view centre
+        // KIWI (2026-10-22): only the cursor's sideways offset.  The axial part (old eye ->
+        // old view centre) moved the pseudo-eye d0*(1-k) along an axis the ortho image cannot
+        // show, which is how a zoom out-and-in walked it out past the map
+        // (KCAM_ORTHO_EYE_REACH).
+        float toAnchor[3] = { 0.0f, 0.0f, 0.0f };
 
         ray_t oray;
         if ( Pick_RayFromImagePos( imgX, imgY, &oray ) )
@@ -978,12 +1024,13 @@ void KiwiCam_Dolly( float wheelSteps, int imgX, int imgY )
         }
 
         // Outside orbit, rebase from the eye; during orbit, keep the world pivot.
+        s_dist = newDist;
         if ( !s_orbActive )
         {
+            const float depth = KCam_AxisDepth( newDist );
             for ( int i = 0; i < 3; ++i )
-                s_lookAt[i] = c->origin[i] + f[i] * newDist;
+                s_lookAt[i] = c->origin[i] + f[i] * depth;
         }
-        s_dist = newDist;
         s_have = true;
 
         Commit( c );
@@ -1173,6 +1220,31 @@ void KiwiCam_SetOrtho( bool on )
     s_ortho = v;
     Radiant_ProfileSetInt( KCAM_SECTION, KCAM_ORTHO_ENTRY, v );
 
+    // KIWI (2026-10-22): into perspective, the eye takes its place s_dist (clamped) in front
+    // of the pivot's depth, so the perspective scale at the pivot is the ortho zoom.  The
+    // ortho pseudo-eye now stays within KCAM_ORTHO_EYE_REACH of its pivot, wherever the zoom
+    // is (a move along the view axis, so nothing slides sideways).
+    if ( !on && s_have )
+    {
+        camera_s   *c    = Ed_Camera();
+        const float maxd = KCam_MaxDist();
+        if ( s_dist > maxd )
+            s_dist = maxd;
+        float f[3];
+        ViewForward( c, f );
+        const float rel[3] = { s_lookAt[0] - c->origin[0], s_lookAt[1] - c->origin[1],
+                               s_lookAt[2] - c->origin[2] };
+        const float slide = Dot3( rel, f ) - s_dist;
+        if ( slide == slide && slide != 0.0f )
+        {
+            for ( int i = 0; i < 3; ++i )
+                c->origin[i] += f[i] * slide;
+            s_orbActive = false;
+            s_panHave   = false;
+            Commit( c );
+        }
+    }
+
     // If the new projection has a lower distance ceiling, preserve the current
     // eye-derived view center and shorten standoff on-axis; an off-axis cached
     // pivot must not add lateral motion to this clamp.
@@ -1237,6 +1309,68 @@ bool KiwiCam_AxisPortrayable( const float *axis, float *outDot )
     if ( outDot )
         *outDot = d;
     return d < KCAM_AXIS_PORTRAY_DOT;
+}
+
+// KIWI (2026-10-22, user: "make it so that when a tool is being used or activated, the
+// gizmo/lollipop can never be out of view. its annoying"): a handle's DISPLAY anchor.  On
+// screen (in front of the eye, at least marginPx inside every edge) it is the point itself;
+// otherwise it is pinned to that inset rectangle at the point's own view depth (a point behind
+// the eye takes the orbit distance and the edge its lateral offset points at).  Handles
+// rebase their drags at the press pixel, so grabbing a pinned handle drives the tool by
+// the cursor's travel from there.
+bool KiwiCam_KeepOnScreen( const float *world, float marginPx, float *out )
+{
+    const camera_s *c = Ed_Camera();
+    for ( int k = 0; k < 3; ++k )
+        out[k] = world[k];
+    if ( c->width < 1 || c->height < 1 )
+        return false;
+    // The margin never takes more than a third of the view.
+    const float mx = fminf( 2.0f * marginPx / (float)c->width, 0.66f );
+    const float my = fminf( 2.0f * marginPx / (float)c->height, 0.66f );
+    const float rel[3] = { world[0] - c->origin[0], world[1] - c->origin[1], world[2] - c->origin[2] };
+    const float x = Dot3( rel, c->vright ), y = Dot3( rel, c->vup );
+    float z = Dot3( rel, c->vpn );
+    float halfW, halfH;                       // view half-extents at depth z (world units)
+    const bool ortho = KiwiCam_Ortho();
+    const float tanY = (float)( tan( DEG2RAD( g_PrefsDlg->camera_fov ) * 0.5 ) * 0.75 );
+    const float tanX = tanY * (float)c->width / (float)c->height;
+    float u, v;                               // -1..1 across the view
+    if ( ortho )
+    {
+        halfH = KiwiCam_OrthoHalfHeight();
+        halfW = halfH * (float)c->width / (float)c->height;
+        u = x / halfW;
+        v = y / halfH;
+    }
+    else
+    {
+        const float minZ = 1.0f;
+        if ( z < minZ )
+        {
+            // Behind (or at) the eye: the edge the point lies toward, at the orbit distance.
+            z = fmaxf( s_dist, 64.0f );
+            const float m = fmaxf( fabsf( x ) / tanX, fabsf( y ) / tanY );
+            u = m > 1.0e-6f ? x / ( m * tanX ) : 0.0f;
+            v = m > 1.0e-6f ? y / ( m * tanY ) : 0.0f;
+        }
+        else
+        {
+            u = x / ( z * tanX );
+            v = y / ( z * tanY );
+        }
+        halfW = z * tanX;
+        halfH = z * tanY;
+    }
+    const float lu = 1.0f - mx, lv = 1.0f - my;
+    const bool inside = ( ortho || Dot3( rel, c->vpn ) >= 1.0f ) && fabsf( u ) <= lu && fabsf( v ) <= lv;
+    if ( inside )
+        return false;
+    u = fmaxf( -lu, fminf( lu, u ) );
+    v = fmaxf( -lv, fminf( lv, v ) );
+    for ( int k = 0; k < 3; ++k )
+        out[k] = c->origin[k] + c->vpn[k] * z + c->vright[k] * ( u * halfW ) + c->vup[k] * ( v * halfH );
+    return true;
 }
 
 // Screen scale.
@@ -1355,7 +1489,7 @@ void KiwiCam_MarkerViewpoint( float out3[3] )
     // this remains the on-axis point at the same depth.
     float f[3];
     ViewForward( c, f );
-    Mad3( out3, f, s_dist, out3 );
+    Mad3( out3, f, KCam_AxisDepth( s_dist ), out3 );   // KIWI: the reach-held standoff
 }
 
 // Pose signature.
@@ -1429,8 +1563,9 @@ void KiwiCam_LookAlong( float pitch, float yaw )
 
     float f[3];
     ViewForward( c, f );
+    const float depth = KCam_AxisDepth( s_dist );     // KIWI: ortho keeps the eye in reach
     for ( int i = 0; i < 3; ++i )
-        c->origin[i] = s_lookAt[i] - f[i] * s_dist;
+        c->origin[i] = s_lookAt[i] - f[i] * depth;
 
     Commit( c );
 }
@@ -1461,6 +1596,144 @@ void KiwiCam_DefaultSpawn()
     s_orbActive = false;                  // discard any latched orbit frame
 
     Commit( c );
+}
+
+// KIWI (2026-10-24): per-map view records (kiwi_camera.h), one line each, floats as %.9g
+// so they round-trip exactly:
+//   view camera  <origin x y z> <pitch yaw roll>
+//   view pivot   <x y z> <distance>
+//   view ortho   <0|1>
+//   view section <on 0|1> <kept level 0|1> <level> <handle x y z>
+namespace
+{
+    struct camViewPending_t
+    {
+        bool  haveCam = false, havePivot = false, haveOrtho = false, haveSection = false;
+        float origin[3] = {}, angles[3] = {}, pivot[3] = {}, dist = 0.0f;
+        int   ortho = 0, secOn = 0, secKept = 0;
+        float secLevel = 0.0f, secAnchor[3] = {};
+    };
+    camViewPending_t s_viewPending;
+
+    // A hand-edited or damaged record must not throw the camera into NaN or the far void.
+    bool ViewFinite( const float *v, int n )
+    {
+        for ( int i = 0; i < n; ++i )
+            if ( !( v[i] == v[i] ) || fabsf( v[i] ) > 1.0e7f )
+                return false;
+        return true;
+    }
+}
+
+void KiwiCamView_WriteSidecar( void *file )
+{
+    FILE *f = (FILE *)file;
+    if ( !f )
+        return;
+    const camera_s *c = Ed_Camera();
+    const float    *p = KiwiCam_LookAt();
+    fprintf( f, "# Editor view when the map was last saved or closed.\n" );
+    fprintf( f, "view camera %.9g %.9g %.9g %.9g %.9g %.9g\n",
+             c->origin[0], c->origin[1], c->origin[2], c->angles[0], c->angles[1], c->angles[2] );
+    fprintf( f, "view pivot %.9g %.9g %.9g %.9g\n", p[0], p[1], p[2], s_dist );
+    fprintf( f, "view ortho %i\n", KiwiCam_Ortho() ? 1 : 0 );
+    bool  on = false, kept = false;
+    float level = 0.0f, anchor[3] = { 0.0f, 0.0f, 0.0f };
+    KiwiSection_GetState( &on, &kept, &level, anchor );
+    fprintf( f, "view section %i %i %.9g %.9g %.9g %.9g\n",
+             on ? 1 : 0, kept ? 1 : 0, level, anchor[0], anchor[1], anchor[2] );
+}
+
+bool KiwiCamView_ParseSidecarLine( const char *line )
+{
+    char kw[16] = { 0 }, sub[16] = { 0 };
+    if ( !line || sscanf( line, "%15s %15s", kw, sub ) != 2 || strcmp( kw, "view" ) != 0 )
+        return false;
+    camViewPending_t &p = s_viewPending;
+    float v[7];
+    int   a = 0, b = 0;
+    if ( !strcmp( sub, "camera" ) )
+    {
+        if ( sscanf( line, "%*s %*s %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5] ) == 6
+          && ViewFinite( v, 6 ) )
+        {
+            for ( int k = 0; k < 3; ++k ) { p.origin[k] = v[k]; p.angles[k] = v[3 + k]; }
+            p.haveCam = true;
+        }
+    }
+    else if ( !strcmp( sub, "pivot" ) )
+    {
+        if ( sscanf( line, "%*s %*s %f %f %f %f", &v[0], &v[1], &v[2], &v[3] ) == 4
+          && ViewFinite( v, 4 ) && v[3] > 0.0f )
+        {
+            for ( int k = 0; k < 3; ++k ) p.pivot[k] = v[k];
+            p.dist      = v[3];
+            p.havePivot = true;
+        }
+    }
+    else if ( !strcmp( sub, "ortho" ) )
+    {
+        if ( sscanf( line, "%*s %*s %i", &a ) == 1 )
+        {
+            p.ortho     = a;
+            p.haveOrtho = true;
+        }
+    }
+    else if ( !strcmp( sub, "section" ) )
+    {
+        if ( sscanf( line, "%*s %*s %i %i %f %f %f %f", &a, &b, &v[0], &v[1], &v[2], &v[3] ) == 6
+          && ViewFinite( v, 4 ) )
+        {
+            p.secOn       = a;
+            p.secKept     = b;
+            p.secLevel    = v[0];
+            for ( int k = 0; k < 3; ++k ) p.secAnchor[k] = v[1 + k];
+            p.haveSection = true;
+        }
+    }
+    return true;                          // every `view` record is ours, even one we skip
+}
+
+void KiwiCamView_ResetPending()
+{
+    s_viewPending = camViewPending_t();
+}
+
+// After the map load's own placement (player start / default spawn) and section reset.
+void KiwiCamView_ApplyPending()
+{
+    const camViewPending_t p = s_viewPending;
+    s_viewPending = camViewPending_t();
+
+    if ( p.haveOrtho )
+        KiwiCam_SetOrtho( p.ortho != 0 );
+    if ( p.haveCam )
+    {
+        camera_s *c = Ed_Camera();
+        for ( int k = 0; k < 3; ++k )
+        {
+            c->origin[k] = p.origin[k];
+            c->angles[k] = p.angles[k];
+        }
+        if ( c->angles[0] >  KCAM_PITCH_MAX ) c->angles[0] =  KCAM_PITCH_MAX;
+        if ( c->angles[0] < -KCAM_PITCH_MAX ) c->angles[0] = -KCAM_PITCH_MAX;
+        s_have = false;
+        if ( p.havePivot )
+        {
+            for ( int k = 0; k < 3; ++k )
+                s_lookAt[k] = p.pivot[k];
+            float d = p.dist;
+            if ( d < KCAM_MIN_DIST )  d = KCAM_MIN_DIST;
+            if ( d > KCam_MaxDist() ) d = KCam_MaxDist();
+            s_dist = d;
+            s_have = true;
+        }
+        s_panHave   = false;
+        s_orbActive = false;
+        Commit( c );
+    }
+    if ( p.haveSection )
+        KiwiSection_SetState( p.secOn != 0, p.secKept != 0, p.secLevel, p.secAnchor );
 }
 
 // Frame a box without changing view direction; move only pivot and standoff.
@@ -1509,6 +1782,41 @@ void KiwiCam_FrameBounds( const float mins[3], const float maxs[3] )
     s_orbActive = false;                  // discard any latched orbit frame
 
     Commit( c );
+}
+
+// KIWI (2026-10-22, user: "when setting a custom construction plane (space) in (P) camera
+// mode, I want it to trace from the surface and find the nearest camera plop point that
+// isn't going past anything to jump to"): after a head-on frame, trace from the surface out
+// along its normal (toward the eye) and, when something is nearer than the framed eye, bring
+// the eye in to just in front of it.  Perspective only: the ortho eye is not a place.
+const float KCAM_PLOP_CLEAR = 16.0f;      // world units left between the eye and the obstacle
+const float KCAM_PLOP_MIN   = 8.0f;       // never closer to the surface than this
+bool KiwiCam_PullInFrontOf( const float surface[3], const float normal[3] )
+{
+    if ( KiwiCam_Ortho() || !surface || !normal || !s_have )
+        return false;
+    float n[3] = { normal[0], normal[1], normal[2] };
+    if ( !Norm3( n ) )
+        return false;
+    ray_t ray;
+    Mad3( surface, n, 0.5f, ray.origin );         // off the face itself
+    Copy3( n, ray.dir );
+    kiwiDropHit_t hit;
+    if ( !KiwiDrop_Trace( ray, false, &hit ) || !( hit.dist + 0.5f < s_dist ) )
+        return false;
+    float d = hit.dist + 0.5f - KCAM_PLOP_CLEAR;
+    if ( d < KCAM_PLOP_MIN )
+        d = fminf( KCAM_PLOP_MIN, hit.dist * 0.5f + 0.25f );
+    if ( d < KCAM_MIN_DIST )
+        d = KCAM_MIN_DIST;
+    camera_s *c = Ed_Camera();
+    float f[3];
+    ViewForward( c, f );
+    for ( int i = 0; i < 3; ++i )
+        c->origin[i] = s_lookAt[i] - f[i] * d;
+    s_dist = d;
+    Commit( c );
+    return true;
 }
 
 // Persisted fly-speed multiplier.

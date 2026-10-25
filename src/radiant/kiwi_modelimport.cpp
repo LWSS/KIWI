@@ -1885,7 +1885,32 @@ namespace
         else
             ImGui::SetItemTooltip( "The clip material the hull brushes are written with." );
 
-        ImGui::BeginDisabled( isManual );
+        // KIWI (2026-10-22, user: "add a button ... that adds a basic clip brush bbox around
+        // the model for player collision instead of having the more advanced system").
+        Label( "Hulls" );
+        if ( ImGui::SmallButton( c.settings.wholeBox ? "Use detailed hulls" : "Simple box" ) )
+        {
+            c.settings.wholeBox = !c.settings.wholeBox;
+            MarkDirty();
+            if ( isManual )
+            {
+                s_leaveTo  = "auto";                // replaces the hand edits: ask
+                s_reqLeave = true;
+            }
+            else
+                RequestHulls();
+        }
+        ImGui::SetItemTooltip( c.settings.wholeBox
+                               ? "Go back to hulls fitted to each piece of the model."
+                               : "One axis-aligned clip brush around the whole model, instead of\n"
+                                 "hulls fitted to each piece." );
+        if ( c.settings.wholeBox )
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled( "one box around the whole model" );
+        }
+
+        ImGui::BeginDisabled( isManual || c.settings.wholeBox );
         bool changed = false;
         Label( "Shape" );
         ImGui::SetNextItemWidth( -1.0f );

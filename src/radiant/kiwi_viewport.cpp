@@ -1181,6 +1181,7 @@ void KiwiVP_CameraTick( bool cursorOver )
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────
 #include "kiwi_perf.h"   // KiwiPerf_Draw - the perf HUD line in the bottom band
+#include "kiwi_csg.h"    // KiwiCsg_DrawFailHint - Merge / Boolean failure hint
 
 bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
 {
@@ -1188,6 +1189,8 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     // This ImDrawList-only fallback complements the engine route without claiming hover;
     // its depth limitation is documented by the declaration.
     KiwiRegion_DrawFillsOverlay( imgMinX, imgMinY, imgW, imgH );   // kiwi_region.h:377
+    // KIWI: the red "where it failed" hint of the last Merge / Boolean, under the HUD.
+    KiwiCsg_DrawFailHint( imgMinX, imgMinY, imgW, imgH );
 
     // KIWI: the captured MMB look hides the cursor (it is warped back every read).
     if ( s_gesture == KG_FLYLOOK )
@@ -1209,6 +1212,7 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     {
         KiwiSnap_DrawLabel( KiwiCmd_LastSnap(), imgMinX, imgMinY, imgW, imgH );
         KiwiNum_DrawHud( imgMinX, imgMinY, imgW, imgH );
+        KiwiAnglePie_Draw( imgMinX, imgMinY, imgW, imgH );   // KIWI: the angle pie, under the bubble
         // The value bubble is pinned to action geometry, not the bottom band.
         KiwiNum_DrawBubble( imgMinX, imgMinY, imgW, imgH );
     }

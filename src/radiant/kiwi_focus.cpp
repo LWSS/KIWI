@@ -373,6 +373,12 @@ namespace
         const float d[3] = { -p.normal[0], -p.normal[1], -p.normal[2] };
         LookDir( d );
         KiwiCam_FrameBounds( box.lo, box.hi );
+        {
+            // KIWI: in perspective, stop the eye in front of whatever is between it and the face.
+            const float c[3] = { ( box.lo[0] + box.hi[0] ) * 0.5f, ( box.lo[1] + box.hi[1] ) * 0.5f,
+                                 ( box.lo[2] + box.hi[2] ) * 0.5f };
+            KiwiCam_PullInFrontOf( c, p.normal );
+        }
         KiwiCon_SetActivePlane( p );
         KiwiCon_MarkPlaneExplicit( "a construction face (Space)" );
         Sys_Printf( "View Face: looking at the construction face head-on; it is now the plane "
@@ -393,6 +399,15 @@ void KiwiFocus_NoteObjectClick( selbrush_t *brush, const float point[3], const f
         Copy3( normal, s_click.normal );
         s_click.haveNormal = true;
     }
+}
+
+bool KiwiFocus_ClickedOrNearestFace( selbrush_t **outBrush, int *outFace )
+{
+    if ( !outBrush || !outFace )
+        return false;
+    if ( ClickedFace( outBrush, outFace ) )
+        return true;
+    return NearestSelectedFace( outBrush, outFace );
 }
 
 void KiwiFocus_RegisterCommands()
@@ -481,6 +496,15 @@ bool KiwiFocus_DispatchInstant( unsigned int cmdId )
     const float d[3] = { -n[0] / nl, -n[1] / nl, -n[2] / nl };
     LookDir( d );
     KiwiCam_FrameBounds( box.lo, box.hi );
+    {
+        // KIWI (2026-10-22): in perspective, trace out from the face's centre and stop the
+        // eye in front of anything nearer than the framed distance (a room's far wall).
+        float centre[3] = { 0.0f, 0.0f, 0.0f };
+        for ( int i = 0; i < w->numpoints; ++i )
+            for ( int k = 0; k < 3; ++k )
+                centre[k] += w->p[i][k] / (float)w->numpoints;
+        KiwiCam_PullInFrontOf( centre, n );
+    }
 
     // Space combines the camera move with Plasticity's construction-plane update.
     // The shared helper uses the winding centre, normal, and longest-edge hint;

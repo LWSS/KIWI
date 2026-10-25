@@ -87,6 +87,11 @@ namespace
 
     int   s_labelX = 0;
     int   s_labelY = 0;
+    // KIWI (2026-10-22, Plasticity 2026.2 mesh snapping): the triangle of the xmodel vertex
+    // the last query snapped to, drawn by KiwiSnap_DrawLabel while that snap stands.
+    bool  s_meshTriValid = false;
+    float s_meshTriAt[3] = { 0.0f, 0.0f, 0.0f };   // the snapped vertex it belongs to
+    float s_meshTri[3][3];
     // Unit direction used to align edge and midpoint marker ticks.
     float s_edgeDir[3] = { 0.0f, 0.0f, 0.0f };
     bool  s_haveEdgeDir = false;
@@ -2381,6 +2386,25 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         out->position[0] = modelVert->pos[0];
         out->position[1] = modelVert->pos[1];
         out->position[2] = modelVert->pos[2];
+        // KIWI: the mesh triangle under the cursor that owns this vertex, for the wireframe;
+        // several queries a frame at one cursor share one lookup.
+        static int   s_meshTriFrame = -1;
+        static float s_meshTriCur[2];
+        const int frame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : -2;
+        const bool same = frame >= 0 && frame == s_meshTriFrame
+                       && s_meshTriCur[0] == curX && s_meshTriCur[1] == curY
+                       && s_meshTriAt[0] == modelVert->pos[0] && s_meshTriAt[1] == modelVert->pos[1]
+                       && s_meshTriAt[2] == modelVert->pos[2];
+        if ( !same )
+        {
+            s_meshTriValid = KiwiDrop_ModelVertTriangle( modelVert->node, modelVert->pos, curX, curY,
+                                                         s_meshTri );
+            s_meshTriFrame  = frame;
+            s_meshTriCur[0] = curX;
+            s_meshTriCur[1] = curY;
+            for ( int k = 0; k < 3; ++k )
+                s_meshTriAt[k] = modelVert->pos[k];
+        }
         return true;
     }
     if ( brushVert )
@@ -3324,6 +3348,31 @@ void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,
 {
     if ( !r.valid || !KiwiSnap_ShowMarkers() )
         return;
+
+    // KIWI (Plasticity 2026.2): an xmodel vertex snap shows the mesh triangle it came from as
+    // a light partial wireframe (s_meshTri, KiwiSnap_Query).  Brush vertices carry a source.
+    if ( r.type == SNAP_VERTEX && !r.source.brush && s_meshTriValid
+      && r.position[0] == s_meshTriAt[0] && r.position[1] == s_meshTriAt[1]
+      && r.position[2] == s_meshTriAt[2] )
+    {
+        ImVec2 p[3];
+        bool ok = true;
+        for ( int c = 0; c < 3 && ok; ++c )
+        {
+            ok = Pick_WorldToImage( s_meshTri[c], &p[c].x, &p[c].y );
+            p[c].x += imgMinX;
+            p[c].y += imgMinY;
+        }
+        if ( ok )
+        {
+            ImDrawList *tl = ImGui::GetWindowDrawList();
+            tl->PushClipRect( ImVec2( imgMinX, imgMinY ), ImVec2( imgMinX + imgW, imgMinY + imgH ), true );
+            tl->AddTriangleFilled( p[0], p[1], p[2], IM_COL32( 120, 255, 145, 28 ) );
+            tl->AddTriangle( p[0], p[1], p[2], IM_COL32( 190, 255, 205, 170 ), 1.0f );
+            tl->PopClipRect();
+        }
+    }
+
     // Display every position through the shared inches formatter.
     char bx[32], by[32], bz[32];
     KiwiUnits_Format( bx, sizeof( bx ), r.position[0] );

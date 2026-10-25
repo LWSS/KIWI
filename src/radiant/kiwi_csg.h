@@ -45,3 +45,22 @@ void KiwiCsg_NoteAfter( const char *label );
 
 // Draw buttons inside the caller's existing ImGui window.
 void KiwiCsg_MenuItems();
+
+// KIWI (2026-10-22, Plasticity 2026.2 "failed operations highlight the problem area in
+// red"): when Merge or Boolean Difference fails, the camera shows WHERE in translucent red,
+// through walls, for KCSG_HINT_SECONDS (fading at the end).  The next operation clears it.
+//   Merge (csg.cpp CSG_Merge): the gaps between the brushes that the merged brush would
+//     have to fill (the convex hull minus every input), or the inputs when there is no hull.
+//   Boolean difference (kiwi_boolean.cpp): where a refused cut's tool meets the piece.
+struct brush_t;
+void KiwiCsg_FailHintClear();
+// A convex solid given by `count` outward planes, 4 doubles each (n.x, n.y, n.z, d), inside
+// where n.p - d <= 0.  Faces that come out degenerate or unbounded are skipped; false when
+// nothing drawable came out.
+bool KiwiCsg_FailHintAddSolid( const double *planes, int count );
+// A brush's face windings as they stand.
+void KiwiCsg_FailHintAddBrush( const brush_t *def );
+// Both brushes' planes together: their overlap.  False when it is empty.
+bool KiwiCsg_FailHintAddOverlap( const brush_t *a, const brush_t *b );
+// Camera overlay pass (KiwiVP_DrawCameraOverlay); no-op while there is no hint.
+void KiwiCsg_DrawFailHint( float imgMinX, float imgMinY, float imgW, float imgH );

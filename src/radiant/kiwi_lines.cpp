@@ -57,6 +57,15 @@ void KiwiLines_Flush()
     s_remaining = 0;
 }
 
+// KIWI: the same batch through $line_nodepth - drawn over everything in front of it.
+void KiwiLines_FlushNoDepth()
+{
+    if ( s_vertCount > 0 )
+        R_AddCmd_Line3DNoDepth( (short)( s_vertCount / 2 ), s_width, s_verts );
+    s_vertCount = 0;
+    s_remaining = 0;
+}
+
 int KiwiLines_Remaining()
 {
     return s_remaining;

@@ -369,6 +369,8 @@ namespace
                 Sys_Printf( "Texture Rotate: select brushes or faces first.\n" );
                 return false;
             }
+            m_pie = false;
+            StartPie();
             UpdateHud();
             return true;
         }
@@ -385,22 +387,31 @@ namespace
             if ( deg && KiwiUv_CanEdit() )
                 Brush_RotateTexture( deg );     // core opens/closes "rotate texture"
             m_deg = 0.0f;
+            KiwiAnglePie_End();
+            m_pie = false;
             g_nUpdateBits = -1;
         }
 
         void Cancel() override
         {
             m_deg = 0.0f;
+            KiwiAnglePie_End();
+            m_pie = false;
             g_nUpdateBits |= 1;
         }
 
     protected:
+        // KIWI (2026-10-22, user: "It works like a pie and when ctrl is held it snaps to 5deg
+        // increments"): the drag turns the cursor around the selection's centre on the angle
+        // pie (kiwi_numeric.h KiwiAnglePie_*) instead of sliding sideways.
         void Recompute() override
         {
             float deg = m_deg;
             int x, y;
-            if ( m_haveStart && CursorPixels( &x, &y ) )
-                deg = (float)( x - m_startX ) * KUV_DEG_PER_PIXEL;
+            if ( !m_pie )
+                StartPie();                     // menu starts: the first camera sample
+            if ( m_pie && CursorPixels( &x, &y ) )
+                deg = KiwiAnglePie_Drag( x, y );
 
             if ( m_hasNum )
                 deg = NumRaw();                                   // exact degrees
@@ -408,10 +419,50 @@ namespace
                 deg = floorf( deg / KUV_ANGLE_STEP + 0.5f ) * KUV_ANGLE_STEP;
 
             m_deg = ClampF( deg, -100000.0f, 100000.0f );
+            if ( m_pie )
+                KiwiAnglePie_Show( m_deg, false );
             UpdateHud();
         }
 
     private:
+        // The pie sits on the centre of the selected brushes' and faces' bounds.
+        void StartPie()
+        {
+            if ( !m_haveStart )
+                return;
+            float mins[3] = {  131072.0f,  131072.0f,  131072.0f };
+            float maxs[3] = { -131072.0f, -131072.0f, -131072.0f };
+            for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+                if ( b->def )
+                    for ( int i = 0; i < 3; ++i )
+                    {
+                        if ( b->def->mins[i] < mins[i] ) mins[i] = b->def->mins[i];
+                        if ( b->def->maxs[i] > maxs[i] ) maxs[i] = b->def->maxs[i];
+                    }
+            const int nf = SelectedFaceCount();
+            for ( int f = 0; f < nf; ++f )
+            {
+                const selface_t &sf = g_SelectedFaces.GetAt( f );
+                brush_t *def = sf.brush ? sf.brush->def : nullptr;
+                if ( !def || !def->faces || sf.index < 0 || sf.index >= def->faceCount
+                  || !def->faces[sf.index].w )
+                    continue;
+                const winding_t *w = def->faces[sf.index].w;
+                for ( int p = 0; p < w->numpoints; ++p )
+                    for ( int i = 0; i < 3; ++i )
+                    {
+                        if ( w->p[p][i] < mins[i] ) mins[i] = w->p[p][i];
+                        if ( w->p[p][i] > maxs[i] ) maxs[i] = w->p[p][i];
+                    }
+            }
+            if ( mins[0] > maxs[0] )
+                return;
+            const float mid[3] = { ( mins[0] + maxs[0] ) * 0.5f, ( mins[1] + maxs[1] ) * 0.5f,
+                                   ( mins[2] + maxs[2] ) * 0.5f };
+            KiwiAnglePie_Begin( mid, m_startX, m_startY, 0.0f );
+            m_pie = true;
+        }
+
         // The core accepts whole degrees; accumulate fractional drag and round once.
         int Degrees() const
         {
@@ -427,6 +478,7 @@ namespace
         }
 
         float m_deg = 0.0f;
+        bool  m_pie = false;            // the angle pie is up (needs a camera cursor)
     };
 
     // Scale is deferred because its core owns undo; arguments are additive texdef

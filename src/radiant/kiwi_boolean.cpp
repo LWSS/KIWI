@@ -271,6 +271,9 @@ namespace
                     else if ( s_carveRefusals == KBOOL_REFUSE_REPORT_MAX + 1 )
                         Sys_Printf( "Boolean: (further per-cut refusals suppressed "
                                     "for this operation)\n" );
+                    // KIWI: failure hint - where this tool meets the piece it could not cut.
+                    if ( !KiwiCsg_FailHintAddOverlap( cur[p], tool ) )
+                        KiwiCsg_FailHintAddBrush( cur[p] );
                     next.push_back( cur[p] );      // survives whole; ownership unchanged
                     continue;
                 }
@@ -857,6 +860,7 @@ namespace
 
             // Scope all diagnostics to this commit.
             KiwiBool_ResetCarveReport();
+            KiwiCsg_FailHintClear();          // KIWI: refusals below draw the new hint
 
             for ( size_t i = 0; i < m_targets.size(); ++i )
             {
@@ -888,6 +892,12 @@ namespace
                     ++refused;
                     Sys_Printf( "Boolean: one brush left untouched — %s.\n",
                                 why ? why : "invalid geometry" );
+                    // KIWI: failure hint - where the tools meet it, else the whole brush.
+                    bool hinted = false;
+                    for ( size_t t = 0; t < toolDefs.size(); ++t )
+                        hinted |= KiwiCsg_FailHintAddOverlap( node->def, toolDefs[t] );
+                    if ( !hinted )
+                        KiwiCsg_FailHintAddBrush( node->def );
                 }
             }
 

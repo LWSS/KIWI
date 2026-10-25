@@ -37,6 +37,8 @@ struct CollisionSettings {
     // (at most 2^maxDepth hulls per piece).
     double splitGain = 0.7;
     int maxDepth = 4;
+    // KIWI (2026-10-22): one clip box around the whole model instead of per-piece hulls.
+    bool wholeBox = false;
 };
 
 // One hull per piece (pieces small, or inside another piece's hull, are skipped).

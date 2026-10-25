@@ -46,6 +46,23 @@ namespace
     float s_grabScalar = 0.0f;
     float s_grabLevel  = 0.0f;
 
+    // KIWI (2026-10-22, user: "add a lollipop on the height setter for fine adjustment, also
+    // keep the section active and allow de-selection of the section gizmo.  It's ON until
+    // section button is clicked again, and also section button should resume to the section
+    // when it's turned back on again but make the gizmo active again"):
+    //   - Ctrl while dragging the lollipop snaps the level to the grid;
+    //   - a click off the handles deselects the gizmo (hidden) and the cut stays;
+    //   - the button turns the cut OFF but keeps the level, and turning it back on resumes
+    //     there with the gizmo selected.  A new map forgets the level.
+    // Later (same day): "the section adjustment handle is too fine, just make it normal" (the
+    // second, 1/10-speed lollipop is gone) and "the section view re-activate has no way to set
+    // a height by clicking, add this back but allow cancelation with ESC or by pulling on the
+    // lollipop": a resume also arms s_repick - the next click sets a new level, Escape or a
+    // grab of the lollipop keeps the resumed one.
+    bool s_gizmo     = false;           // the handles are shown and grabbable
+    bool s_haveLevel = false;           // s_level/s_anchor hold a level to resume
+    bool s_repick    = false;           // ON, and the next click may set a new level
+
     // One-shot refusal reporting, so a level ortho view does not print per frame.
     int  s_refusedKind = 0;             // 0 none, 1 perspective, 2 ortho
 
@@ -59,6 +76,7 @@ namespace
     const int   KSEC_RING_SEGS = 24;
     const int   KSEC_BALL_SEGS = 12;
     const float KSEC_PLANE_PIX = 160.0f;
+    const float KSEC_SINK_PIX  = 1.0f;      // the drawn glyph sits this far below the cut
 
     const float KSEC_COL_PLANE[3] = { 0.36f, 0.68f, 0.95f };   // cut plane
     const float KSEC_COL_RING [3] = { 0.86f, 0.74f, 0.28f };
@@ -77,12 +95,42 @@ namespace
         e1[0] = 0.0f; e1[1] = 1.0f; e1[2] = 0.0f;
     }
 
+    // KIWI (2026-10-24, user: "the newest section view is culling the lollipop handle, making
+    // it impossible to pull"): the oblique cut removes everything above the level, handle
+    // lines included, so the lollipop hangs DOWN from the plane and the whole glyph sits a
+    // pixel below it (DrawWorld also draws it without a depth test, over the floor it is on).
+    //
+    // KIWI (2026-10-24, user: "when in section view, the lollipop must be visible at all times.
+    // it keeps getting culled and not usable"): the anchor slides along the cut plane to stay
+    // inside the view (only the level matters, so its X/Y are free); held still mid-drag.
+    const float KSEC_KEEP_PIX = KSEC_STEM_PIX + KSEC_BALL_PIX + KSEC_PICK_PIX + 8.0f;
+    void PinAnchor()
+    {
+        if ( s_grabbed )
+            return;
+        float pinned[3], ix, iy;
+        if ( !KiwiCam_KeepOnScreen( s_anchor, KSEC_KEEP_PIX, pinned ) )
+            return;
+        ray_t ray;
+        if ( !Pick_WorldToImage( pinned, &ix, &iy ) || !Pick_RayFromImagePos( (int)ix, (int)iy, &ray ) )
+            return;
+        if ( fabsf( ray.dir[2] ) < 1.0e-4f )
+            return;
+        const float t = ( s_level - ray.origin[2] ) / ray.dir[2];
+        if ( !( t > 0.0f ) )
+            return;                         // that pixel never sees the plane: stay put
+        s_anchor[0] = ray.origin[0] + ray.dir[0] * t;
+        s_anchor[1] = ray.origin[1] + ray.dir[1] * t;
+        s_anchor[2] = s_level;
+    }
+
     void HandleTip( float *outTip, float *outWpp )
     {
+        PinAnchor();
         const float wpp = KiwiCam_WorldPerPixel( s_anchor );
         if ( outWpp )
             *outWpp = wpp;
-        Mad3( s_anchor, KSEC_N, KSEC_STEM_PIX * wpp, outTip );
+        Mad3( s_anchor, KSEC_N, -( KSEC_STEM_PIX + KSEC_SINK_PIX ) * wpp, outTip );
     }
 
     bool BallHit( int imgX, int imgY )
@@ -182,38 +230,89 @@ void KiwiSection_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewXRay",        0, 0, KIWI_CMD_VIEW_XRAY );
 }
 
-// Every exit clears the mode and frame verdict before the next pick.
-void KiwiSection_Reset()
+// Every exit clears the mode and frame verdict before the next pick.  KIWI: Off keeps the
+// level for the button to resume; Reset (a document change) forgets it too.
+static void KiwiSection_Off()
 {
     s_mode        = SEC_OFF;
     s_frameCut    = false;
     s_grabbed     = false;
     s_hot         = false;
+    s_gizmo       = false;
+    s_repick      = false;
     s_grabScalar  = 0.0f;
     s_grabLevel   = 0.0f;
     s_refusedKind = 0;
     Repaint();
 }
 
+void KiwiSection_Reset()
+{
+    KiwiSection_Off();
+    s_haveLevel = false;
+}
+
+// KIWI (2026-10-24, user: "start saving the camera position/settings/mode/sectionview when
+// the map is closed"): a mid-pick section saves as its kept level (or none).
+void KiwiSection_GetState( bool *on, bool *haveLevel, float *level, float *anchor3 )
+{
+    *on        = ( s_mode == SEC_ON );
+    *haveLevel = s_haveLevel || s_mode == SEC_ON;
+    *level     = s_level;
+    for ( int k = 0; k < 3; ++k )
+        anchor3[k] = s_anchor[k];
+}
+
+// Restores ON with the gizmo deselected (dimmed); OFF with a level resumes on the button.
+void KiwiSection_SetState( bool on, bool haveLevel, float level, const float *anchor3 )
+{
+    KiwiSection_Reset();
+    if ( !on && !haveLevel )
+        return;
+    s_anchor[0] = anchor3[0];
+    s_anchor[1] = anchor3[1];
+    SetLevel( level );
+    s_haveLevel = true;
+    if ( on )
+        s_mode = SEC_ON;
+    Repaint();
+}
+
 void KiwiSection_Toggle()
 {
+    char zb[64];
     switch ( s_mode )
     {
     case SEC_OFF:
+        if ( s_haveLevel )
+        {
+            // KIWI: resume the last level with the gizmo selected.
+            s_mode        = SEC_ON;
+            s_gizmo       = true;
+            s_repick      = true;
+            s_refusedKind = 0;
+            Sys_Printf( "Section analysis: ON again at Z = %s.  Click anywhere to cut at a new "
+                        "height, or press Escape / drag the lollipop to keep this one.\n",
+                        KiwiUnits_Format( zb, sizeof( zb ), s_level ) );
+            Radiant_FL_Log( "SECTION resume: level=%.3f", s_level );
+            Repaint();
+            break;
+        }
         s_mode = SEC_PICKING;
         Sys_Printf( "Section analysis: click anywhere to cut at that point's HEIGHT "
                     "(everything above it disappears).  Escape cancels.\n" );
         Repaint();
         break;
     case SEC_PICKING:
-        KiwiSection_Reset();
+        KiwiSection_Off();
         Sys_Printf( "Section analysis: cancelled.\n" );
         break;
     default:
-        KiwiSection_Reset();
+        KiwiSection_Off();
         Sys_Printf( "Section analysis: OFF - the whole model is back, and picking is "
-                    "unclamped again.\n" );
-        Radiant_FL_Log( "SECTION off (cleared)" );
+                    "unclamped again.  The SECTION button resumes at Z = %s.\n",
+                    KiwiUnits_Format( zb, sizeof( zb ), s_level ) );
+        Radiant_FL_Log( "SECTION off (level kept)" );
         break;
     }
 }
@@ -242,14 +341,31 @@ bool KiwiSection_DispatchInstant( unsigned int cmdId )
 
 bool  KiwiSection_Active()  { return s_mode == SEC_ON; }
 bool  KiwiSection_Picking() { return s_mode == SEC_PICKING; }
+bool  KiwiSection_Repicking() { return s_mode == SEC_ON && s_repick; }
 bool  KiwiSection_Cutting() { return s_mode == SEC_ON && s_frameCut; }
 float KiwiSection_Level()   { return s_level; }
 
 bool KiwiSection_HandleEscape()
 {
+    if ( s_mode == SEC_ON && s_repick )
+    {
+        // KIWI: Escape keeps the resumed level; one Escape level, like PICKING.
+        s_repick = false;
+        Sys_Printf( "Section: keeping the resumed height.\n" );
+        Repaint();
+        return true;
+    }
+    if ( s_mode == SEC_ON && s_gizmo && !s_grabbed )
+    {
+        // KIWI: Escape deselects the gizmo like any selection; the cut stays ON.
+        s_gizmo = false;
+        s_hot   = false;
+        Repaint();
+        return false;                       // and still reaches the rest of the selection
+    }
     if ( s_mode != SEC_PICKING )
         return false;                       // Escape keeps selection semantics while ON.
-    KiwiSection_Reset();
+    KiwiSection_Off();
     Sys_Printf( "Section analysis: cancelled.\n" );
     return true;
 }
@@ -257,7 +373,10 @@ bool KiwiSection_HandleEscape()
 // Input.
 bool KiwiSection_ClickPick( int imgX, int imgY )
 {
-    if ( s_mode != SEC_PICKING )
+    // KIWI: a resumed section takes one click as a new level, unless it lands on the
+    // lollipop (HandleDown takes that grab and keeps the resumed level).
+    const bool repick = s_mode == SEC_ON && s_repick && !BallHit( imgX, imgY );
+    if ( s_mode != SEC_PICKING && !repick )
         return false;
     if ( !LevelFromClick( imgX, imgY ) )
     {
@@ -266,12 +385,15 @@ bool KiwiSection_ClickPick( int imgX, int imgY )
     }
     s_mode        = SEC_ON;
     s_grabbed     = false;
+    s_gizmo       = true;
+    s_haveLevel   = true;
+    s_repick      = false;
     s_refusedKind = 0;
     // Keep live user feedback and the diagnostic latch record.
     char zb[64];
     Sys_Printf( "[KIWI] SECTION ON at Z = %s - everything above that height is cut "
-                "away in the 3D view.  Drag the lollipop to slide it; press the "
-                "SECTION button again to clear.\n",
+                "away in the 3D view.  Drag the lollipop to slide it (Ctrl snaps to the "
+                "grid).  Click elsewhere to deselect it; the SECTION button turns it off.\n",
                 KiwiUnits_Format( zb, sizeof( zb ), s_level ) );
     Radiant_FL_Log( "SECTION latch: level=%.3f anchor=(%.1f %.1f %.1f)",
                     s_level, s_anchor[0], s_anchor[1], s_anchor[2] );
@@ -284,7 +406,18 @@ bool KiwiSection_HandleDown( int imgX, int imgY )
     if ( s_mode != SEC_ON )
         return false;
     if ( !BallHit( imgX, imgY ) )
+    {
+        // KIWI: a click off the handles deselects (dims) the gizmo and carries on as a click.
+        if ( s_gizmo )
+        {
+            s_gizmo = false;
+            s_hot   = false;
+            Repaint();
+        }
         return false;
+    }
+    s_gizmo  = true;                        // KIWI: a dimmed lollipop is still grabbable
+    s_repick = false;                       // KIWI: pulling the lollipop keeps the resumed level
 
     ray_t ray;
     if ( !Pick_RayFromImagePos( imgX, imgY, &ray ) )
@@ -315,7 +448,15 @@ void KiwiSection_HandleDrag( int imgX, int imgY )
     float hit[3];
     if ( !KiwiCam_RayAxis( ray, s_anchor, KSEC_N, hit ) )
         return;                             // refused sample: HOLD, do not jump
-    SetLevel( s_grabLevel + ( hit[2] - s_grabScalar ) );
+    // KIWI: Ctrl snaps the level to the grid.
+    float z = s_grabLevel + ( hit[2] - s_grabScalar );
+    if ( ::GetKeyState( VK_CONTROL ) < 0 )
+    {
+        const float g = grid_sizes[g_qeglobals.d_gridsize];
+        if ( g > 0.0f )
+            z = floorf( z / g + 0.5f ) * g;
+    }
+    SetLevel( z );
     Repaint();
 }
 
@@ -371,6 +512,9 @@ bool KiwiSection_ObliqueDepthColumn( const float origin[3], const float vpn[3],
                                      float halfW, float halfH, float depthHalf,
                                      float outCol[4] )
 {
+    // KIWI (2026-10-24, user: "when re-activating section view, it isn't going back to the
+    // saved height automatically"): a resume cuts at the saved level at once; the armed
+    // repick still lets a click on what remains set a new one.
     if ( s_mode != SEC_ON || !origin || !vpn || !vright || !vup || !outCol )
         return false;
 
@@ -446,7 +590,7 @@ void KiwiSection_EmitClipEnd()   {}
 // Render.
 void KiwiSection_DrawWorld()
 {
-    if ( s_mode != SEC_ON )
+    if ( s_mode != SEC_ON )                 // KIWI: always drawn while ON; deselected = dimmed
         return;
     if ( !KiwiUX_ModernInput() )
         return;
@@ -460,7 +604,13 @@ void KiwiSection_DrawWorld()
     if ( !( wpp > 0.0f ) )
         return;
 
-    KiwiLines_Begin( KSEC_RING_SEGS + KSEC_BALL_SEGS * 2 + 12, 2 );
+    KiwiLines_Begin( KSEC_RING_SEGS + KSEC_BALL_SEGS * 4 + 16, 2 );
+
+    const float dim = s_gizmo ? 1.0f : 0.55f;   // KIWI: deselected reads dimmer, still there
+
+    // KIWI: everything is drawn just under the cut so the oblique near plane keeps it.
+    float at[3];
+    Mad3( s_anchor, KSEC_N, -KSEC_SINK_PIX * wpp, at );
 
     // Screen-constant square makes the otherwise invisible cut plane readable.
     {
@@ -470,12 +620,12 @@ void KiwiSection_DrawWorld()
         float q[4][3];
         for ( int k = 0; k < 3; ++k )
         {
-            q[0][k] = s_anchor[k] - e0[k] * h - e1[k] * h;
-            q[1][k] = s_anchor[k] + e0[k] * h - e1[k] * h;
-            q[2][k] = s_anchor[k] + e0[k] * h + e1[k] * h;
-            q[3][k] = s_anchor[k] - e0[k] * h + e1[k] * h;
+            q[0][k] = at[k] - e0[k] * h - e1[k] * h;
+            q[1][k] = at[k] + e0[k] * h - e1[k] * h;
+            q[2][k] = at[k] + e0[k] * h + e1[k] * h;
+            q[3][k] = at[k] - e0[k] * h + e1[k] * h;
         }
-        KiwiLines_Color( KSEC_COL_PLANE[0], KSEC_COL_PLANE[1], KSEC_COL_PLANE[2] );
+        KiwiLines_Color( KSEC_COL_PLANE[0] * dim, KSEC_COL_PLANE[1] * dim, KSEC_COL_PLANE[2] * dim );
         for ( int i = 0; i < 4; ++i )
             if ( !KiwiLines_Add( q[i], q[( i + 1 ) & 3] ) )
                 break;
@@ -486,7 +636,7 @@ void KiwiSection_DrawWorld()
         float e0[3], e1[3];
         PlaneBasis( e0, e1 );
         const float r = KSEC_RING_PIX * wpp;
-        KiwiLines_Color( KSEC_COL_RING[0], KSEC_COL_RING[1], KSEC_COL_RING[2] );
+        KiwiLines_Color( KSEC_COL_RING[0] * dim, KSEC_COL_RING[1] * dim, KSEC_COL_RING[2] * dim );
         float prev[3];
         for ( int i = 0; i <= KSEC_RING_SEGS; ++i )
         {
@@ -494,7 +644,7 @@ void KiwiSection_DrawWorld()
                            / (float)KSEC_RING_SEGS;
             float p[3];
             for ( int k = 0; k < 3; ++k )
-                p[k] = s_anchor[k] + e0[k] * cosf( th ) * r + e1[k] * sinf( th ) * r;
+                p[k] = at[k] + e0[k] * cosf( th ) * r + e1[k] * sinf( th ) * r;
             if ( i > 0 && !KiwiLines_Add( prev, p ) )
                 break;
             Copy3( p, prev );
@@ -504,14 +654,16 @@ void KiwiSection_DrawWorld()
     // Stem and ball.
     {
         const float *col = ( s_hot || s_grabbed ) ? KSEC_COL_HOT : KSEC_COL_BALL;
-        KiwiLines_Color( col[0], col[1], col[2] );
+        const float  bd  = ( s_hot || s_grabbed ) ? 1.0f : dim;
+        KiwiLines_Color( col[0] * bd, col[1] * bd, col[2] * bd );
         float base[3];
-        Mad3( s_anchor, KSEC_N, KSEC_RING_PIX * wpp, base );
+        Mad3( at, KSEC_N, -KSEC_RING_PIX * wpp, base );
         KiwiLines_Add( base, tip );
         EmitDisc( c, tip, KSEC_BALL_PIX * wpp, KSEC_BALL_SEGS, true );
     }
 
-    KiwiLines_Flush();
+    // KIWI: no depth test - the stem hangs into the surface the level was picked on.
+    KiwiLines_FlushNoDepth();
 }
 
 // Picking follows KiwiSection_Cutting(), never merely the armed mode.

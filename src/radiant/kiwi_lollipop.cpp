@@ -88,6 +88,8 @@ namespace
         if ( !KiwiLollipop_Wanted( g->anchor, g->dir ) )
             return false;
 
+        // KIWI (2026-10-22): the lollipop never leaves the view while its tool runs.
+        KiwiCam_KeepOnScreen( g->anchor, KLOL_STEM_PIX + KLOL_PICK_PIX, g->anchor );
         const float wpp = KiwiCam_WorldPerPixel( g->anchor );
         g->ring = KLOL_RING_PIX * wpp;
         g->stem = KLOL_STEM_PIX * wpp;

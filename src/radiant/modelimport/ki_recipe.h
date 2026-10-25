@@ -35,6 +35,9 @@ struct Recipe {
     std::string origin = "base";           // base | center | none
     bool flipWinding = false;
     bool uvFlip = true;
+    // KIWI (2026-10-22): "" or +x -x +y -y +z -z - triangles facing that model axis are
+    // dropped (a sign mounted on a wall loses its back).
+    std::string cullFacing;
     std::string normalGreen = "auto";      // auto | flip | keep
     std::string surface = "concrete";      // default surface type name
     std::vector<RecipePiece> pieces;       // only pieces with an override, plus names

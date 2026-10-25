@@ -135,7 +135,8 @@ int  KiwiRegion_SelectedAt( int which );    // 0..count-1 -> live region index, 
 bool KiwiRegion_IsSelected( int index );
 
 // KIWI (2026-09-28, user: "allow deletion of a construction face, you basically select a face
-// and it'll trim all the lines on the exterior of the face away"): Delete on selected regions.
+// and it'll trim all the lines on the exterior of the face away"): Shift+Delete on selected
+// regions (plain Delete moved to KiwiRegion_DeleteSelected on 2026-10-22).
 // Every visible straight/parametric object lying on a selected region's plane AND touching
 // that region (boundary, crossing or inside, within the weld) keeps only its parts inside or
 // on the union of the selected regions of that plane; the rest is cut away at the boundary.
@@ -143,6 +144,13 @@ bool KiwiRegion_IsSelected( int index );
 // / rect freezes to polylines (as Trim does); a fully kept object is left exactly as it was.
 // Spline chains are skipped.  ONE construction undo snapshot; false = nothing changed.
 bool KiwiRegion_TrimOutsideSelected();
+
+// KIWI (2026-10-22, user: "ensure that construction faces can be deleted with DEL and it
+// deletes all associated lines for easy removal"): Delete on selected regions removes every
+// visible object lying wholly inside or on a selected face (its own lines; a face made by one
+// closed object loses exactly that object).  Objects that also run outside it stay - they
+// still bound something else.  ONE construction undo snapshot; false = nothing deleted.
+bool KiwiRegion_DeleteSelected();
 
 // Engine-route fill and the sole once-per-drawn-frame owner of flash aging.
 void KiwiRegion_DrawFills( int highlightIndex );

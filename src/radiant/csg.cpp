@@ -20,6 +20,7 @@
 #include "winding.h"
 #include <universal/assertive.h>   // iassert (USE_ASSERTS always on; same handler as Assert)
 #include "kiwi_ported.h"           // KIWI: shared engine/editor externs
+#include "kiwi_csg.h"              // KIWI: Merge's failure hint
 #include <math.h>
 #include <vector>
 
@@ -529,9 +530,16 @@ namespace
 
     struct kmPick_t { face_t *face; kmPlane_t plane; bool caulk; double area; };
 
+    // KIWI: why the last KmConvexUnion said no, for CSG_Merge's failure hint (kiwi_csg.h).
+    // Only CSG_Merge publishes it; Auto Bool's trial merges fail as a matter of course.
+    std::vector<kmPoly_t> s_kmGaps;          // what the merged brush would have to fill
+    bool                  s_kmNoHull = false;  // no usable hull: the inputs are the problem
+
     // The hull faces of a convex union, or false when the union is not one convex solid.
     bool KmConvexUnion( selbrush_t *brushList, std::vector<face_t *> *outFaces )
     {
+        s_kmGaps.clear();
+        s_kmNoHull = true;                   // until the coverage test below is reached
         std::vector<double> verts;
         double mins[3] = { 1e30, 1e30, 1e30 }, maxs[3] = { -1e30, -1e30, -1e30 };
         std::vector<kmPoly_t> inputs;
@@ -611,6 +619,7 @@ namespace
         }
 
         // Coverage: carve every input out of the hull; nothing solid may remain.
+        s_kmNoHull = false;
         std::vector<kmPoly_t> pieces( 1, hull ), next;
         for ( size_t b = 0; b < inputs.size() && !pieces.empty(); ++b )
         {
@@ -632,12 +641,18 @@ namespace
                         break;
                 }
                 if ( (int)next.size() > KMERGE_PIECES )
+                {
+                    s_kmNoHull = true;           // KIWI: half-carved pieces would mislead
                     return false;
+                }
             }
             pieces.swap( next );
         }
         if ( !pieces.empty() )
+        {
+            s_kmGaps.swap( pieces );             // KIWI: the gaps, for the failure hint
             return false;
+        }
 
         outFaces->clear();
         for ( size_t k = 0; k < picks.size(); ++k )
@@ -693,6 +708,7 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
 int CSG_Merge()
 {
     Sys_Printf( "Merging...\n" );
+    KiwiCsg_FailHintClear();   // KIWI: a new operation drops the last failure's hint
 
     selbrush_t *sel = selected_brushes.next;
 
@@ -756,6 +772,28 @@ int CSG_Merge()
     }
     else
     {
+        // KIWI: show where - the gaps the merged brush would have to fill, or the inputs.
+        bool hinted = false;
+        if ( !s_kmNoHull )
+            for ( size_t g = 0; g < s_kmGaps.size(); ++g )
+            {
+                std::vector<double> planes;
+                for ( size_t k = 0; k < s_kmGaps[g].size(); ++k )
+                {
+                    const kmPlane_t &p = s_kmGaps[g][k];
+                    planes.push_back( p.n[0] );
+                    planes.push_back( p.n[1] );
+                    planes.push_back( p.n[2] );
+                    planes.push_back( p.d );
+                }
+                if ( !planes.empty() && KiwiCsg_FailHintAddSolid( &planes[0], (int)( planes.size() / 4 ) ) )
+                    hinted = true;
+            }
+        if ( !hinted )
+            for ( selbrush_t *cur = mergeList; cur; cur = cur->next )
+                KiwiCsg_FailHintAddBrush( cur->def );
+        s_kmGaps.clear();
+
         for ( selbrush_t *cur = mergeList; cur; )
         {
             selbrush_t *next = cur->next;
@@ -764,7 +802,8 @@ int CSG_Merge()
             Brush_AddToList2( cur );
             cur = next;
         }
-        return Sys_Printf( "Cannot add a set of brushes with a concave hull.\n" );
+        return Sys_Printf( "Cannot add a set of brushes with a concave hull%s.\n",
+                           hinted ? " (the gaps it would have to fill are shown in red)" : "" );
     }
 }
 

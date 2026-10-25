@@ -1814,6 +1814,14 @@ bool Radiant_FrameCloseAllowed()
     if ( !Radiant_OkToDiscard() )
         return false;
     Prefab_LevelBack();
+    // KIWI (2026-10-24): exiting closes the map too - record its view in its .kiwi (only the
+    // `view` records; Map_NewMap does the same for File->New and opening another map).
+    {
+        extern char currentmap[1024];                                  // map.cpp
+        extern bool KiwiCon_SaveViewOnClose( const char *mapPath );   // kiwi_construct.cpp
+        if ( currentmap[0] && _stricmp( currentmap, "unnamed.map" ) != 0 )
+            KiwiCon_SaveViewOnClose( currentmap );
+    }
     return true;
 }
 

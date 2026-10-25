@@ -973,6 +973,113 @@ static int GatherModelVerts( float curX, float curY, float reachPx, bool exclude
     return count;
 }
 
+bool KiwiDrop_ModelVertTriangle( selbrush_t *node, const float pos[3], float curX, float curY,
+                                 float outTri[3][3] )
+{
+    if ( !node || !pos || !Pick_ProjectBegin() )
+        return false;
+    vertModel_t m;
+    float mins[3], maxs[3], angles[3];
+    m.model = 0;
+    if ( !KiwiDrop_GetModelInfo( node, mins, maxs, angles, &m.scale, m.origin, &m.model )
+      || !m.model || !( m.scale > 0.0f ) )
+        return false;
+    m.extent = sqrtf( ( maxs[0] - mins[0] ) * ( maxs[0] - mins[0] ) + ( maxs[1] - mins[1] ) * ( maxs[1] - mins[1] )
+                    + ( maxs[2] - mins[2] ) * ( maxs[2] - mins[2] ) );
+    AnglesToAxis( angles, m.axis );
+
+    const float *verts = 0;
+    const unsigned short *indices = 0;
+    int indexCount = 0;
+    if ( !KiwiShadowCache_ModelGeo( m.model, &verts, &indices, &indexCount ) )
+        return false;
+
+    // The snapped vertex in mesh space; seam copies match by position (KeepNearest's 0.01).
+    const float rel[3] = { pos[0] - m.origin[0], pos[1] - m.origin[1], pos[2] - m.origin[2] };
+    float local[3];
+    WorldToAxisDir( m.axis, rel, local );
+    for ( int k = 0; k < 3; ++k )
+        local[k] /= m.scale;
+    const float tol2 = 1.0e-4f / ( m.scale * m.scale );
+
+    const camera_s *cam   = Ed_Camera();
+    const bool      ortho = KiwiCam_Ortho();
+    float bestScore = FLT_MAX;
+    bool  found     = false;
+    for ( int t = 0; t + 2 < indexCount; t += 3 )
+    {
+        const float *v[3] = { verts + 3 * indices[t], verts + 3 * indices[t + 1], verts + 3 * indices[t + 2] };
+        bool owns = false;
+        for ( int c = 0; c < 3 && !owns; ++c )
+        {
+            const float dx = v[c][0] - local[0], dy = v[c][1] - local[1], dz = v[c][2] - local[2];
+            owns = dx * dx + dy * dy + dz * dz < tol2;
+        }
+        if ( !owns )
+            continue;
+
+        // A face the model hides (its far side) is not the one under the cursor.
+        const float centroid[3] = { ( v[0][0] + v[1][0] + v[2][0] ) / 3.0f, ( v[0][1] + v[1][1] + v[2][1] ) / 3.0f,
+                                    ( v[0][2] + v[1][2] + v[2][2] ) / 3.0f };
+        if ( SelfOccluded( m, centroid, cam, ortho ) )
+            continue;
+
+        float world[3][3], sx[3], sy[3];
+        bool projected = true;
+        for ( int c = 0; c < 3 && projected; ++c )
+        {
+            const float scaled[3] = { v[c][0] * m.scale, v[c][1] * m.scale, v[c][2] * m.scale };
+            AxisToWorldDir( m.axis, scaled, world[c] );
+            for ( int k = 0; k < 3; ++k )
+                world[c][k] += m.origin[k];
+            projected = Pick_Project( world[c], &sx[c], &sy[c] );
+        }
+        if ( !projected )
+            continue;
+
+        // 0 inside the screen triangle, else the distance to its nearest edge.
+        float score = 0.0f;
+        float sign = 0.0f;
+        bool  inside = true;
+        for ( int e = 0; e < 3; ++e )
+        {
+            const int   f  = ( e + 1 ) % 3;
+            const float ex = sx[f] - sx[e], ey = sy[f] - sy[e];
+            const float cr = ex * ( curY - sy[e] ) - ey * ( curX - sx[e] );
+            if ( cr != 0.0f )
+            {
+                if ( sign == 0.0f )
+                    sign = cr;
+                else if ( ( cr > 0.0f ) != ( sign > 0.0f ) )
+                    inside = false;
+            }
+        }
+        if ( !inside )
+        {
+            score = FLT_MAX;
+            for ( int e = 0; e < 3; ++e )
+            {
+                const int   f  = ( e + 1 ) % 3;
+                const float ex = sx[f] - sx[e], ey = sy[f] - sy[e];
+                const float l2 = ex * ex + ey * ey;
+                float u = l2 > 0.0f ? ( ( curX - sx[e] ) * ex + ( curY - sy[e] ) * ey ) / l2 : 0.0f;
+                u = u < 0.0f ? 0.0f : ( u > 1.0f ? 1.0f : u );
+                const float dx = sx[e] + ex * u - curX, dy = sy[e] + ey * u - curY;
+                score = (std::min)( score, sqrtf( dx * dx + dy * dy ) );
+            }
+        }
+        if ( score < bestScore )
+        {
+            bestScore = score;
+            found     = true;
+            for ( int c = 0; c < 3; ++c )
+                for ( int k = 0; k < 3; ++k )
+                    outTri[c][k] = world[c][k];
+        }
+    }
+    return found;
+}
+
 namespace
 {
     // The snap query (8 px) and the accent dots (60 px) ask every frame at the same cursor:

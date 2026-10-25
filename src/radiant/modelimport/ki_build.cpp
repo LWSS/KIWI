@@ -84,6 +84,55 @@ fs::path SettingsPath(const GameRoot& root) {
     return root.ModelSource() / "settings.json";
 }
 
+// KIWI (2026-10-22, user: "delete the backfaces. This will be against a wall"): drop the
+// triangles whose face normal points along recipe.cullFacing (within ~8 degrees).  The loaded
+// source is already in the model's axes (the FBX step converts them; origin and units only
+// move and scale), so the axis named here is the one Radiant shows.
+bool CullFacing(ObjMesh& mesh, const std::string& facing, const LogFn& log, std::string& error) {
+    if (facing.empty()) return true;
+    int axis = -1;
+    double sign = 0.0;
+    if (facing.size() == 2 && (facing[0] == '+' || facing[0] == '-')) {
+        const char c = static_cast<char>(facing[1] | 0x20);
+        if (c >= 'x' && c <= 'z') axis = c - 'x';
+        sign = (facing[0] == '+') ? 1.0 : -1.0;
+    }
+    if (axis < 0) {
+        error = "cullFacing '" + facing + "' must be +x, -x, +y, -y, +z or -z";
+        return false;
+    }
+    const bool groups = mesh.triangleGroup.size() == mesh.triangles.size();
+    const bool materials = mesh.triangleMaterial.size() == mesh.triangles.size();
+    std::size_t kept = 0;
+    for (std::size_t t = 0; t < mesh.triangles.size(); ++t) {
+        const IndexedTriangle& tri = mesh.triangles[t];
+        const Vec3& a = mesh.positions[tri.corners[0].position];
+        const Vec3& b = mesh.positions[tri.corners[1].position];
+        const Vec3& c = mesh.positions[tri.corners[2].position];
+        const double ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const double vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        const double n[3] = {uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx};
+        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (len > 0.0 && sign * n[axis] / len > 0.99) continue;
+        mesh.triangles[kept] = tri;
+        if (groups) mesh.triangleGroup[kept] = mesh.triangleGroup[t];
+        if (materials) mesh.triangleMaterial[kept] = mesh.triangleMaterial[t];
+        ++kept;
+    }
+    const std::size_t removed = mesh.triangles.size() - kept;
+    mesh.triangles.resize(kept);
+    if (groups) mesh.triangleGroup.resize(kept);
+    if (materials) mesh.triangleMaterial.resize(kept);
+    if (kept == 0) {
+        error = "cullFacing '" + facing + "' removed every triangle";
+        return false;
+    }
+    if (log)
+        log("cullFacing " + facing + ": removed " + std::to_string(removed) + " of " +
+            std::to_string(removed + kept) + " triangles");
+    return true;
+}
+
 }  // namespace
 
 bool InspectSource(const Recipe& recipe, SourceState& state, const LogFn& log,
@@ -93,15 +142,18 @@ bool InspectSource(const Recipe& recipe, SourceState& state, const LogFn& log,
     SourceStamp(recipe.source, size, stamp);
     const bool sameMesh = !state.loadedFrom.empty() && state.loadedFrom == recipe.source &&
                           state.loadedFlipWinding == recipe.flipWinding &&
+                          state.loadedCullFacing == recipe.cullFacing &&
                           state.sourceSize == size && state.sourceStamp == stamp;
     if (!sameMesh) {
         SourceState fresh;
         if (!LoadSourceMesh(recipe.source, recipe.flipWinding, fresh.mesh, fresh.objPath, log,
                             error))
             return false;
+        if (!CullFacing(fresh.mesh, recipe.cullFacing, log, error)) return false;
         fresh.pieceSet = pieces::BuildPieces(ToPieceMesh(fresh.mesh));
         fresh.loadedFrom = recipe.source;
         fresh.loadedFlipWinding = recipe.flipWinding;
+        fresh.loadedCullFacing = recipe.cullFacing;
         fresh.sourceSize = size;
         fresh.sourceStamp = stamp;
         state = std::move(fresh);
@@ -173,6 +225,38 @@ fs::path MasterCollmapPath(const GameRoot& root, const Recipe& recipe) {
 
 void GenerateRecipeHulls(const Recipe& recipe, const SourceState& state,
                          std::vector<Hull>& hulls, const LogFn& log) {
+    // KIWI (2026-10-22, user: "a basic clip brush bbox around the model for player
+    // collision instead of having the more advanced system"): one box, every vertex.
+    if (recipe.collision.settings.wholeBox) {
+        hulls.clear();
+        if (state.modelMesh.positions.empty()) return;
+        std::array<double, 3> lo{1e30, 1e30, 1e30}, hi{-1e30, -1e30, -1e30};
+        for (const auto& p : state.modelMesh.positions)
+            for (int k = 0; k < 3; ++k) {
+                lo[k] = std::min(lo[k], (double)p[k]);
+                hi[k] = std::max(hi[k], (double)p[k]);
+            }
+        // Axis-aligned; thin sides are thickened about their middle like other hulls.
+        const double minT = recipe.collision.settings.minThickness;
+        for (int k = 0; k < 3; ++k)
+            if (hi[k] - lo[k] < minT) {
+                const double mid = (lo[k] + hi[k]) * 0.5;
+                lo[k] = mid - minT * 0.5;
+                hi[k] = mid + minT * 0.5;
+            }
+        Hull hull;
+        hull.kind = "box";
+        for (int k = 0; k < 3; ++k) {
+            HullPlane pos{0.0, 0.0, 0.0, hi[k]}, neg{0.0, 0.0, 0.0, -lo[k]};
+            pos[k] = 1.0;
+            neg[k] = -1.0;
+            hull.planes.push_back(pos);
+            hull.planes.push_back(neg);
+        }
+        hulls.push_back(std::move(hull));
+        if (log) log("Collision: one box around the whole model");
+        return;
+    }
     // The same rules as for built models (ki_autocollide): props get automatic hulls,
     // trees only their trunk, other plants none. The source is described as a "raw
     // model" whose surfaces are the recipe's surface types (default + piece overrides).

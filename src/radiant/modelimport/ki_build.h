@@ -25,6 +25,7 @@ struct SourceState {
     double loadedScale = 0.0;
     std::string loadedOrigin;
     bool loadedFlipWinding = false;
+    std::string loadedCullFacing;    // KIWI: recipe.cullFacing the mesh was culled with
     bool loadedUvFlip = true;
     std::filesystem::path objPath;
     ObjMesh mesh;

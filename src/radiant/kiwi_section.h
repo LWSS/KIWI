@@ -27,6 +27,9 @@ void KiwiSection_Toggle();
 // State.
 bool  KiwiSection_Active();     // ON: a level is set and the camera wants to cut
 bool  KiwiSection_Picking();    // PICKING: waiting for the click that sets the level
+// KIWI: ON after the button resumed a kept level; the next click may set a new one
+// (Escape or grabbing the lollipop keeps the resumed level).  The cut is held off meanwhile.
+bool  KiwiSection_Repicking();
 float KiwiSection_Level();      // the Z level (meaningless while OFF)
 
 // True only when the current frame installed the oblique projection.
@@ -34,6 +37,11 @@ bool KiwiSection_Cutting();
 
 // Reset all view state; a section must not survive a document change.
 void KiwiSection_Reset();
+
+// KIWI (2026-10-24): the per-map section, saved in the .kiwi sidecar (KiwiCamView_*) and
+// restored after the map load's Reset.  `haveLevel` = a kept level (ON or resumable).
+void KiwiSection_GetState( bool *on, bool *haveLevel, float *level, float *anchor3 );
+void KiwiSection_SetState( bool on, bool haveLevel, float level, const float *anchor3 );
 
 // Consumes Escape only while PICKING.
 bool KiwiSection_HandleEscape();

@@ -17,6 +17,7 @@
 #include "kiwi_transform.h"  // Transform-gizmo activity queries.
 #include "kiwi_units.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,11 @@ namespace
 {
     // 24 chars exceeds practical coordinate input; the buffer is a hard cap.
     enum { KNUM_TEXT_MAX = 24 };
+
+    // KIWI: the angle pie (KiwiAnglePie_*, end of file).  Ring radius in image pixels; the
+    // centre is the projected anchor, false while no pie is up or it is behind the eye.
+    const float KNUM_PIE_RADIUS = 64.0f;
+    bool KiwiAnglePie_Center( float *outX, float *outY );
 
     char           s_text[KNUM_MAX_FIELDS][KNUM_TEXT_MAX] = { { 0 } };
     kiwiNumField_t s_fields[KNUM_MAX_FIELDS];
@@ -791,6 +797,13 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
     const float standoff = gizmoUp ? 96.0f : 16.0f;
     float x = imgMinX + sx + standoff;
     float y = imgMinY + sy - boxH - ( gizmoUp ? 48.0f : 10.0f );
+    // KIWI: an angle pie fills the anchor's surroundings; the bubble sits beside its ring.
+    float pieX, pieY;
+    if ( KiwiAnglePie_Center( &pieX, &pieY ) )
+    {
+        x = imgMinX + pieX + KNUM_PIE_RADIUS + 14.0f;
+        y = imgMinY + pieY - boxH * 0.5f;
+    }
     const float maxX = imgMinX + imgW - boxW - 2.0f;
     const float maxY = imgMinY + imgH - boxH - 2.0f;
     if ( x > maxX ) x = maxX;
@@ -824,4 +837,173 @@ void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH )
         dl->AddText( ImVec2( x + pad.x, ty ), col, rows[i].text );
         ty += lineH + 2.0f;
     }
+}
+
+// ─── Angle pie (Plasticity 2026.2) ───────────────────────────────────────────
+// Screen angles are counter-clockwise radians with +y up; image pixels grow downward,
+// hence the negated dy.  The zero spoke stays where Begin put it, so the wedge always
+// shows the whole value, not just this drag's share.
+namespace
+{
+    const float KNUM_PIE_PI      = 3.14159265358979323846f;
+    const float KNUM_PIE_DEAD_PX = 10.0f;     // cursor this close to the centre: no direction
+
+    bool               s_pieUp    = false;
+    KiwiEditorCommand *s_pieOwner = 0;
+    float              s_pieAnchor[3];
+    float              s_pieLast  = 0.0f;     // the cursor's last direction
+    float              s_pieZero  = 0.0f;     // direction of 0 deg
+    float              s_pieValue = 0.0f;     // Begin's value + swept, unsnapped
+    float              s_pieShown = 0.0f;     // after the command's snapping / clamps
+
+    bool PieLive()
+    {
+        return s_pieUp && s_pieOwner && s_pieOwner == KiwiCmd_Active();
+    }
+
+    bool PieDirection( int imgX, int imgY, float *outAng )
+    {
+        float cx, cy;
+        if ( !Pick_WorldToImage( s_pieAnchor, &cx, &cy ) )
+            return false;
+        const float dx = (float)imgX - cx;
+        const float dy = cy - (float)imgY;
+        if ( dx * dx + dy * dy < KNUM_PIE_DEAD_PX * KNUM_PIE_DEAD_PX )
+            return false;
+        *outAng = atan2f( dy, dx );
+        return true;
+    }
+
+    bool KiwiAnglePie_Center( float *outX, float *outY )
+    {
+        return PieLive() && Pick_WorldToImage( s_pieAnchor, outX, outY );
+    }
+
+    ImVec2 PiePoint( float cx, float cy, float ang, float r )
+    {
+        return ImVec2( cx + cosf( ang ) * r, cy - sinf( ang ) * r );
+    }
+}
+
+void KiwiAnglePie_Begin( const float *anchor, int imgX, int imgY, float valueDeg )
+{
+    s_pieUp        = true;
+    s_pieOwner     = KiwiCmd_Active();
+    s_pieAnchor[0] = anchor[0];
+    s_pieAnchor[1] = anchor[1];
+    s_pieAnchor[2] = anchor[2];
+    s_pieValue     = valueDeg;
+    s_pieShown     = valueDeg;
+    // On the centre or behind the eye: the value spoke points along the value itself
+    // until the first usable sample.
+    if ( !PieDirection( imgX, imgY, &s_pieLast ) )
+        s_pieLast = valueDeg * ( KNUM_PIE_PI / 180.0f );
+    s_pieZero = s_pieLast - valueDeg * ( KNUM_PIE_PI / 180.0f );
+}
+
+float KiwiAnglePie_Drag( int imgX, int imgY )
+{
+    float ang;
+    if ( !s_pieUp || !PieDirection( imgX, imgY, &ang ) )
+        return s_pieValue;
+    float d = ang - s_pieLast;                 // the short way round; whole turns accumulate
+    while ( d >  KNUM_PIE_PI ) d -= 2.0f * KNUM_PIE_PI;
+    while ( d < -KNUM_PIE_PI ) d += 2.0f * KNUM_PIE_PI;
+    s_pieLast   = ang;
+    s_pieValue += d * ( 180.0f / KNUM_PIE_PI );
+    return s_pieValue;
+}
+
+void KiwiAnglePie_Show( float valueDeg, bool rebase )
+{
+    s_pieShown = valueDeg;
+    if ( rebase )
+        s_pieValue = valueDeg;
+}
+
+void KiwiAnglePie_End()
+{
+    s_pieUp    = false;
+    s_pieOwner = 0;
+}
+
+bool KiwiAnglePie_Active()
+{
+    return PieLive();
+}
+
+void KiwiAnglePie_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
+{
+    (void)imgW; (void)imgH;
+    float sx, sy;
+    if ( !KiwiAnglePie_Center( &sx, &sy ) )
+        return;
+    const float cx = imgMinX + sx;
+    const float cy = imgMinY + sy;
+    const float r  = KNUM_PIE_RADIUS;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+
+    const ImU32 ring  = IM_COL32(  64, 118, 232, 235 );
+    const ImU32 spoke = IM_COL32( 125, 178, 255, 255 );
+    const ImU32 wedge = IM_COL32( 150, 150, 150,  95 );
+    const ImU32 dots  = IM_COL32( 240, 220,  60, 230 );
+
+    // The swept wedge, fanned in <= 90 deg pieces (PathFillConvex needs convex ones);
+    // a whole turn or more shows as a full disc.
+    const float valRad = s_pieShown * ( KNUM_PIE_PI / 180.0f );
+    float sweep = valRad;
+    if ( sweep >  2.0f * KNUM_PIE_PI ) sweep =  2.0f * KNUM_PIE_PI;
+    if ( sweep < -2.0f * KNUM_PIE_PI ) sweep = -2.0f * KNUM_PIE_PI;
+    const int pieces = (int)ceilf( fabsf( sweep ) / ( 0.5f * KNUM_PIE_PI ) );
+    for ( int i = 0; i < pieces; ++i )
+    {
+        const float a0 = s_pieZero + sweep * (float)i / (float)pieces;
+        const float a1 = s_pieZero + sweep * (float)( i + 1 ) / (float)pieces;
+        dl->PathLineTo( ImVec2( cx, cy ) );
+        dl->PathArcTo( ImVec2( cx, cy ), r, -a0, -a1, 16 );   // ImGui angles run clockwise
+        dl->PathFillConvex( wedge );
+    }
+
+    dl->AddCircle( ImVec2( cx, cy ), r, ring, 64, 2.5f );
+
+    // Ctrl snaps the command to 5 deg: show the steps, longer every 45.
+    if ( KiwiCmd_SnapEngaged() )
+        for ( int t = 0; t < 72; ++t )
+        {
+            const float a   = s_pieZero + (float)t * ( KNUM_PIE_PI / 36.0f );
+            const float len = ( t % 9 == 0 ) ? 9.0f : 4.0f;
+            dl->AddLine( PiePoint( cx, cy, a, r - len ), PiePoint( cx, cy, a, r ), ring, 1.5f );
+        }
+
+    // Zero and value spokes.
+    dl->AddLine( ImVec2( cx, cy ), PiePoint( cx, cy, s_pieZero, r ), spoke, 2.0f );
+    dl->AddLine( ImVec2( cx, cy ), PiePoint( cx, cy, s_pieZero + valRad, r ), spoke, 3.0f );
+    dl->AddCircleFilled( ImVec2( cx, cy ), 3.5f, spoke );
+
+    // The dotted line from the centre out through the cursor.
+    int mx, my;
+    if ( KiwiCmd_LastCursor( &mx, &my ) )
+    {
+        const float dx  = (float)mx - sx;
+        const float dy  = (float)my - sy;
+        const float len = sqrtf( dx * dx + dy * dy );
+        if ( len > KNUM_PIE_DEAD_PX )
+        {
+            const float ux = dx / len, uy = dy / len;
+            const float reach = ( len > r ? len : r ) + 24.0f;
+            for ( float t = 0.0f; t < reach; t += 7.0f )
+                dl->AddCircleFilled( ImVec2( cx + ux * t, cy + uy * t ), 1.4f, dots, 6 );
+        }
+    }
+
+    // The value under the ring.
+    char text[32];
+    _snprintf( text, sizeof( text ), "%.2f deg", s_pieShown );
+    text[sizeof( text ) - 1] = '\0';
+    const ImVec2 ts = ImGui::CalcTextSize( text );
+    const ImVec2 pad( 7.0f, 3.0f );
+    const ImVec2 b0( cx - ts.x * 0.5f - pad.x, cy + r + 10.0f );
+    const ImVec2 b1( cx + ts.x * 0.5f + pad.x, cy + r + 10.0f + ts.y + pad.y * 2.0f );
+    dl->AddRectFilled( b0, b1, IM_COL32( 58, 58, 62, 230 ), 4.0f );
+    dl->AddText( ImVec2( b0.x + pad.x, b0.y + pad.y ), IM_COL32( 235, 238, 245, 255 ), text );
 }

@@ -366,6 +366,9 @@ bool KiwiCon_ToolLoopStart( float out[3] );
 // Bad sidecars warn but never fail map load.
 bool KiwiCon_SaveSidecar( const char *mapPath );
 bool KiwiCon_LoadSidecar( const char *mapPath );
+// KIWI (2026-10-24): on map close, rewrite ONLY the sidecar's `view` records (camera,
+// section); every other line keeps describing the .map on disk.  No-op for an unsaved map.
+bool KiwiCon_SaveViewOnClose( const char *mapPath );
 
 // Command and panel integration.
 void KiwiCon_RegisterCommands();

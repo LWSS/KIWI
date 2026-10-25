@@ -340,6 +340,7 @@ namespace
                           && mouse.x >= x0 && mouse.x <= x1
                           && mouse.y >= y0 && mouse.y <= y1;
 
+        // KIWI: a resumed section is cutting at its saved level, so it reads ON (with Z).
         const bool on   = KiwiSection_Active();
         const bool pick = KiwiSection_Picking();
 
@@ -379,7 +380,11 @@ namespace
             ImGui::SetTooltip( "Section analysis - cut the 3D view at a Z LEVEL.\n"
                                "Click, then click anything: everything above that\n"
                                "point's height disappears.  Drag the lollipop to\n"
-                               "slide the level.  Click again to clear." );
+                               "slide the level (Ctrl snaps to the grid).  Clicking\n"
+                               "elsewhere hides the handle; the cut stays.  Click this\n"
+                               "again to turn it off.  Turning it back on offers the\n"
+                               "same level: click a new height, or Escape / drag the\n"
+                               "lollipop to keep it." );
 
         if ( hot && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
             KiwiSection_Toggle();

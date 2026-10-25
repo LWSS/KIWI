@@ -368,7 +368,7 @@ namespace
         { KIWI_CMD_BOOLEAN,         { "Boolean (difference / union)","Modeling", SEL_MASK_OBJECT, KiwiBool_CanBoolean } },
         { KIWI_CMD_LOFT,            { "Loft (bridge two faces)",     "Modeling", SEL_MASK_FACE,   KiwiLoft_CanExecute } },
         { KIWI_CMD_MATCH_FACE,      { "Match Face",                  "Modeling", SEL_MASK_FACE,   KiwiMatch_CanMatch } },
-        { KIWI_CMD_SPLIT_FACE,      { "Split Brush at Face (Ctrl+R)", "Modeling", SEL_MASK_FACE,  KiwiSplit_CanSplitFace } },
+        { KIWI_CMD_SPLIT_FACE,      { "Split Face / Brush (Ctrl+R)", "Modeling", 0,              KiwiSplit_CanSplitFace } },   // KIWI: face -> construction faces, brush -> halves
         { KIWI_CMD_EXTRUDE_FACE,    { "Extrude Face (new body)",     "Modeling", SEL_MASK_FACE,   KiwiExtrudeFace_CanExecute } },
         { KIWI_CMD_JOIN,            { "Join (faces / lines)",        "Modeling", 0,               KiwiJoin_CanJoin } },
         { KIWI_CMD_AUTO_BOOL,       { "Auto Bool (consolidate brushes)", "Modeling", SEL_MASK_OBJECT, KiwiAutoBool_CanExecute } },
@@ -1689,14 +1689,21 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // KIWI (2026-09-28, user: "allow deletion of a construction face, you basically select a
     // face and it'll trim all the lines on the exterior of the face away"): Delete on a pure
     // region selection - idle, or over the paused extrude a region click parks.
-    if ( ( vk == 0x2E || vk == 0x08 ) && CurrentMods() == 0              // VK_DELETE / VK_BACK
+    // KIWI (2026-10-22, user: "ensure that construction faces can be deleted with DEL and it
+    // deletes all associated lines"): plain Delete removes the face's own lines; the trim
+    // moved to Shift+Delete.
+    if ( ( vk == 0x2E || vk == 0x08 )                                    // VK_DELETE / VK_BACK
+      && ( CurrentMods() == 0 || CurrentMods() == 1 )                    // none / Shift
       && KiwiRegion_HasSelection() && KiwiConSel_Empty()
       && selected_brushes.next == &selected_brushes
       && ( !g_activeCommand || g_activeCommand->PreemptIdle() ) )
     {
         if ( g_activeCommand )
             KiwiCmd_Cancel();
-        KiwiRegion_TrimOutsideSelected();
+        if ( CurrentMods() == 1 )
+            KiwiRegion_TrimOutsideSelected();
+        else
+            KiwiRegion_DeleteSelected();
         ClearEverySelection();
         return true;
     }

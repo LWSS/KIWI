@@ -2401,7 +2401,22 @@ namespace
     }
 }
 
+// KIWI (2026-10-22): one walk serves both verbs.  Trim (deleteOwned false) cuts objects back
+// to the selected faces; Delete (deleteOwned true) removes the objects that lie wholly inside
+// or on a selected face - its own lines - and leaves any that also run outside it.
+static bool RegionLinesEdit( bool deleteOwned );
+
 bool KiwiRegion_TrimOutsideSelected()
+{
+    return RegionLinesEdit( false );
+}
+
+bool KiwiRegion_DeleteSelected()
+{
+    return RegionLinesEdit( true );
+}
+
+static bool RegionLinesEdit( bool deleteOwned )
 {
     EnsureBuilt();
     std::vector<trimRegion_t> regs;
@@ -2524,6 +2539,13 @@ bool KiwiRegion_TrimOutsideSelected()
         if ( !run.empty() )
             pieces.push_back( run );
 
+        if ( deleteOwned )
+        {
+            // Delete: only objects the selected faces hold whole (inside or on the boundary).
+            if ( touched && !dropped )
+                removeIdx.push_back( oi );
+            continue;
+        }
         // Untouched objects stay; so does anything the region keeps whole.
         if ( !touched || !dropped )
             continue;
@@ -2557,8 +2579,11 @@ bool KiwiRegion_TrimOutsideSelected()
 
     if ( removeIdx.empty() )
     {
-        Sys_Printf( "Delete face: no line runs outside the selected face — nothing to "
-                    "trim.\n" );
+        Sys_Printf( deleteOwned
+                    ? "Delete face: every line of the selected face also runs outside it — "
+                      "nothing deleted (Shift+Delete trims them to the face instead).\n"
+                    : "Delete face: no line runs outside the selected face — nothing to "
+                      "trim.\n" );
         return false;
     }
 
@@ -2567,6 +2592,14 @@ bool KiwiRegion_TrimOutsideSelected()
     KiwiConSel_Clear();
     for ( int i = (int)removeIdx.size() - 1; i >= 0; --i )
         KiwiCon_RemoveAt( removeIdx[(size_t)i] );
+    if ( deleteOwned )
+    {
+        KiwiRegion_ClearSelection();
+        Sys_Printf( "Delete face: deleted %i line(s) of the selected face%s.\n",
+                    (int)removeIdx.size(), regs.size() == 1 ? "" : "s" );
+        g_nUpdateBits = -1;
+        return true;
+    }
     int added = 0;
     for ( size_t i = 0; i < addObjs.size(); ++i )
         if ( KiwiCon_Add( addObjs[i] ) >= 0 )

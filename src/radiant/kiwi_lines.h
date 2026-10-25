@@ -21,6 +21,8 @@ bool KiwiLines_Add( const float *a, const float *b );
 
 // Emit whatever is pending and close the batch.
 void KiwiLines_Flush();
+// KIWI: the same, without the depth test (the batch reads through geometry in front of it).
+void KiwiLines_FlushNoDepth();
 
 // Segments still allowed in the open batch.
 int  KiwiLines_Remaining();

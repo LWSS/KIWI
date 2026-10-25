@@ -100,3 +100,24 @@ void KiwiNum_DrawHud( float imgMinX, float imgMinY, float imgW, float imgH );
 
 // Value bubble at BubbleAnchor, drawn through ImDrawList so it cannot take hover.
 void KiwiNum_DrawBubble( float imgMinX, float imgMinY, float imgW, float imgH );
+
+// KIWI (2026-10-22, user: "plasticity just added a new angle tool ... It works like a pie and
+// when ctrl is held it snaps to 5deg increments"): Plasticity 2026.2's angle pie.  An angle
+// drag turns the cursor AROUND a world anchor instead of sliding it sideways; the camera
+// draws a ring on the anchor, the zero spoke, the value spoke, the swept wedge between them,
+// a dotted line to the cursor, 5-degree ticks while Ctrl snaps, and a "deg" label.  The pie
+// only measures; the command owns the value (its snapping and clamps) and reports it back.
+// Begin: the cursor's direction now means valueDeg.  Owned by the active command, so it
+// also disappears when that command ends.
+void  KiwiAnglePie_Begin( const float *anchor, int imgX, int imgY, float valueDeg );
+// valueDeg at Begin plus the signed angle the cursor has swept around the anchor since
+// (counter-clockwise on screen = +), counted continuously so whole turns add up.  Unchanged
+// while the cursor sits on the centre, where the direction is meaningless.
+float KiwiAnglePie_Drag( int imgX, int imgY );
+// The value the spoke and label show after the command's snapping and clamps.  `rebase`:
+// the cursor's current direction now means valueDeg (a clamp, so travel back answers at once).
+void  KiwiAnglePie_Show( float valueDeg, bool rebase );
+void  KiwiAnglePie_End();
+bool  KiwiAnglePie_Active();
+// Camera overlay pass (KiwiVP_DrawCameraOverlay); no-op while no pie is up.
+void  KiwiAnglePie_Draw( float imgMinX, float imgMinY, float imgW, float imgH );

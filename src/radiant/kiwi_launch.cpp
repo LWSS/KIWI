@@ -52,6 +52,9 @@ bool s_leakTest    = false;
 // build without it (StartSelectedBuild sets s_buildSkipFragileStop for every build).
 bool s_fragileStop = true;
 bool s_buildSkipFragileStop = false;
+// KIWI (2026-10-22, user: "add a "build and run" button that launches the locally built
+// game into the map automatically"): set by Build and Run, consumed by FinishBuildSuccess.
+bool s_runAfterBuild = false;
 // KIWI (2026-09-30, model importer): stamp collmaps\<model>.map player-collision hulls
 // on every placed misc_model (cod4map map.cpp ProcessMiscModels). xmodel collision is
 // bullets only, so without this imported props never block players.
@@ -388,6 +391,42 @@ void ToolPath( const launchPaths_t &p, const char *exe, char *out, size_t outSz 
     out[outSz - 1] = '\0';
 }
 
+// KIWI: start KIWI-mp.exe beside Radiant straight into the built map, detached (the game
+// outlives the panel; nothing is captured).  The same command line as the REFLECTIONS bake,
+// so the freshly written raw\maps\mp BSP is what loads.
+bool RunBuiltMap( const launchPaths_t &p )
+{
+    char exe[MAX_PATH];
+    ToolPath( p, "KIWI-mp.exe", exe, sizeof( exe ) );
+    if ( !FileExists( exe ) )
+    {
+        LogLine( "ERROR: RUN needs KIWI-mp.exe beside Radiant (%s).", exe );
+        return false;
+    }
+    std::string cmd = "\"";
+    cmd += exe;
+    cmd += "\" +set useFastFile 0 +devmap ";
+    cmd += p.name;
+    LogLine( "" );
+    LogLine( "==== RUN ====" );
+    LogLine( "%s", cmd.c_str() );
+    STARTUPINFOA si;
+    memset( &si, 0, sizeof( si ) );
+    si.cb = sizeof( si );
+    PROCESS_INFORMATION pi;
+    memset( &pi, 0, sizeof( pi ) );
+    std::string mutableCmd = cmd;
+    if ( !::CreateProcessA( exe, &mutableCmd[0], nullptr, nullptr, FALSE, 0, nullptr, p.root, &si, &pi ) )
+    {
+        LogLine( "ERROR: could not start the game (GetLastError %lu).", ::GetLastError() );
+        return false;
+    }
+    ::CloseHandle( pi.hThread );
+    ::CloseHandle( pi.hProcess );
+    Sys_Printf( "Build: running %s in KIWI-mp.\n", p.name );
+    return true;
+}
+
 bool EnsureTargetDir( const launchPaths_t &p )
 {
     static const char *const kParts[] = { "raw", "raw\\maps", "raw\\maps\\mp" };
@@ -546,6 +585,7 @@ void BeginBuildStatus( const launchPaths_t &p )
 void FinishBuildFailure( launchStage_t stage, DWORD exitCode, bool haveExit,
                          const char *fallbackDetail )
 {
+    s_runAfterBuild = false;                // KIWI: a failed build never runs
     s_buildElapsed = CurrentBuildElapsed();
     s_buildStatus = BSTATUS_FAILED;
     s_failureStage = stage;
@@ -616,6 +656,11 @@ void FinishBuildSuccess( launchStage_t finalStage )
     LogLine( "BUILD SUCCEEDED - %s - %s (%s)", elapsed, s_buildOutputPath, size );
     Sys_Printf( "Build: SUCCEEDED in %s - %s (%s)\n", elapsed,
                 s_buildOutputPath, size );
+    if ( s_runAfterBuild )
+    {
+        s_runAfterBuild = false;
+        RunBuiltMap( s_buildPaths );
+    }
 }
 
 // Capture stdout/stderr in one pipe; the parent must close its writer for EOF to work.
@@ -1643,8 +1688,23 @@ void DrawWindow()
     else
     {
         ImGui::BeginDisabled( blockedReason != nullptr );
-        if ( ImGui::Button( "Build", ImVec2( -1.0f, 36.0f ) ) )
+        const float half = ( ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x ) * 0.5f;
+        if ( ImGui::Button( "Build", ImVec2( half, 36.0f ) ) )
+        {
+            s_runAfterBuild = false;
             StartSelectedBuild( p );
+        }
+        ImGui::SameLine();
+        // KIWI: Build and Run - the same build, then the game straight into the map.
+        ImGui::BeginDisabled( !FileExists( reflExe ) );
+        if ( ImGui::Button( "Build and Run", ImVec2( -1.0f, 36.0f ) ) )
+        {
+            s_runAfterBuild = true;         // cleared by a failure, consumed by success
+            StartSelectedBuild( p );
+        }
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip( "Build the ticked stages, then start KIWI-mp.exe on this map\n"
+                               "(+set useFastFile 0 +devmap %s).", p.name );
         ImGui::EndDisabled();
     }
 

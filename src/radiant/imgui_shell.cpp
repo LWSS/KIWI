@@ -27,6 +27,7 @@
 #include "kiwi_import.h"           // KIWI-UX ROUND BE: the texture-import wizard (modal popup)
 #include "kiwi_launch.h"           // KIWI-UX ROUND BF: the Build & Run dialog + its child poll
 #include "kiwi_texgrave.h"         // the deferred-release graveyard (D-BU-A..E)
+#include "kiwi_texcolor.h"         // KIWI: the Textures colour filter swatches
 #include "radiant_registry.h"      // KIWI-UX (CLEANUP, C-7): Radiant_IniPath — <exedir>\…
 #include <universal/profile.h>
 #include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
@@ -1109,10 +1110,31 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
             ImGui::TextUnformatted( "Show:" );
             ImGui::SameLine();
             if ( ImGui::SmallButton( "All" ) )
+            {
+                TexWnd_SetViewFilter( false );
                 Texture_ShowAll();
+            }
             ImGui::SameLine();
             if ( ImGui::SmallButton( "In Use" ) )
+            {
+                TexWnd_SetViewFilter( false );
                 Texture_ShowInuse();
+            }
+            // KIWI (2026-10-22, user: "add another fliter for textures that is (In Use & View)
+            // that shows textures that are currently visible in the 3d view").
+            ImGui::SameLine();
+            {
+                const bool viewOn = TexWnd_GetViewFilter();
+                if ( viewOn )
+                    ImGui::PushStyleColor( ImGuiCol_Button, ImGui::GetStyleColorVec4( ImGuiCol_ButtonActive ) );
+                if ( ImGui::SmallButton( "In Use & View" ) )
+                    TexWnd_SetViewFilter( !viewOn );
+                if ( viewOn )
+                    ImGui::PopStyleColor();
+                ImGui::SetItemTooltip( "Only the textures on faces the 3D view can see right now\n"
+                                       "(it follows the camera).  Click again to turn it off." );
+                TexWnd_PumpViewFilter();
+            }
             // ── KIWI-UX (ROUND AE): the search bar ──────────────────────────
             // USER DIRECTIVE: "add a small searchbar in the textures bar next to
             // the new buttons".  The filter itself is the BINARY's own ported
@@ -1138,6 +1160,53 @@ static void ImGuiShell_DrawViewportImage( rttViewport_t id, kiwiWindow_t win )
                     {
                         s_texSearch[0] = '\0';
                         TexWnd_SetSearchFilter( "" );
+                    }
+                }
+            }
+            // KIWI (2026-10-22, user: "add color sort buttons on the textures window, so if I
+            // want a "green" texture, I click a green button and it shows only green.  Make it
+            // a radio style set of buttons."): one swatch per colour, the picked one ringed.
+            {
+                const int cur = TexWnd_GetColorFilter();
+                const float sw = ImGui::GetFrameHeight() - 4.0f;
+                for ( int b = 0; b < KTEXCOL_COUNT; ++b )
+                {
+                    const kiwiTexColor_t *ci = TexWnd_ColorInfo( b );
+                    ImGui::PushID( b );
+                    if ( b == KTEXCOL_ALL )
+                    {
+                        if ( cur == KTEXCOL_ALL )
+                            ImGui::PushStyleColor( ImGuiCol_Button, ImGui::GetStyleColorVec4( ImGuiCol_ButtonActive ) );
+                        if ( ImGui::SmallButton( "Any colour" ) )
+                            TexWnd_SetColorFilter( KTEXCOL_ALL );
+                        if ( cur == KTEXCOL_ALL )
+                            ImGui::PopStyleColor();
+                    }
+                    else
+                    {
+                        ImGui::SameLine( 0.0f, 3.0f );
+                        if ( ImGui::ColorButton( "##texcol", ImVec4( ci->r, ci->g, ci->b, 1.0f ),
+                                                 ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop,
+                                                 ImVec2( sw, sw ) ) )
+                            TexWnd_SetColorFilter( b );
+                        if ( ImGui::IsItemHovered() )
+                            ImGui::SetTooltip( "%s", ci->name );
+                        if ( cur == b )
+                            ImGui::GetWindowDrawList()->AddRect(
+                                ImVec2( ImGui::GetItemRectMin().x - 2.0f, ImGui::GetItemRectMin().y - 2.0f ),
+                                ImVec2( ImGui::GetItemRectMax().x + 2.0f, ImGui::GetItemRectMax().y + 2.0f ),
+                                IM_COL32( 255, 255, 255, 255 ), 0.0f, 0, 2.0f );
+                    }
+                    ImGui::PopID();
+                }
+                if ( cur != KTEXCOL_ALL )
+                {
+                    int done = 0, total = 0;
+                    if ( !TexWnd_PumpColorFilter( 6.0, &done, &total ) )
+                    {
+                        ImGui::SameLine();
+                        ImGui::TextDisabled( "sorting %d/%d", done, total );
+                        g_nUpdateBits |= 1;          // keep frames coming until it is done
                     }
                 }
             }

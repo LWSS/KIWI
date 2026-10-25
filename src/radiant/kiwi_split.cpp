@@ -16,6 +16,7 @@
 #include "kiwi_camera.h"                    // cut-disc world/pixel scale
 #include "kiwi_command.h"
 #include "kiwi_fmt.h"
+#include "kiwi_focus.h"                     // Ctrl+R brush mode: the clicked face
 #include "kiwi_construct.h"
 #include "kiwi_conselect.h"                 // Cut fence seeded from selected lines
 #include "kiwi_grid.h"                      // world-anchored lattice
@@ -1771,15 +1772,19 @@ namespace
                 // Advertise the persistent center latch.
                 { "Dot",  "Face centre - snaps for an exact half" },
                 { "0-9",  "Exact offset" },
-                { "!",    "Splits the brush - brush faces cannot split alone" },
+                { "!",    "Splits the whole brush" },
             };
-            *out = s_prompts;
+            // KIWI (2026-10-22): face mode leaves the brush alone.
+            static const kiwiPrompt_t s_facePrompts[] = {
+                { "Tab",  "Flip U / V" },
+                { "Move", "Slide the cut" },
+                { "Dot",  "Face centre - snaps for an exact half" },
+                { "0-9",  "Exact offset" },
+                { "!",    "Makes two construction faces on the face - extrude either" },
+            };
+            *out = m_faceOnly ? s_facePrompts : s_prompts;
             return (int)( sizeof( s_prompts ) / sizeof( s_prompts[0] ) );
         }
-
-        // KIWI: the brush face under a selected construction region (the region wins the
-        // click on a face it is drawn on) - one Begin only; the selection is not converted.
-        void SetTarget( selbrush_t *node, int face ) { m_tgtNode = node; m_tgtFace = face; }
 
         bool Begin() override
         {
@@ -1790,32 +1795,7 @@ namespace
             m_numWorld = 0.0f;
             m_haveT    = false;             // seed at centroid until mouse movement
 
-            selbrush_t *tgtNode = m_tgtNode;
-            const int   tgtFace = m_tgtFace;
-            m_tgtNode = 0;
-            m_tgtFace = -1;
-            m_fromRegion = false;
-            if ( tgtNode && Sel_BrushLive( tgtNode ) )
-            {
-                if ( !Splittable( tgtNode ) )
-                {
-                    Sys_Printf( "Split Face: that brush cannot be split.\n" );
-                    return false;
-                }
-                m_node = tgtNode;
-                m_face = tgtFace;
-                m_fromRegion = true;
-                if ( !Derive() )
-                {
-                    Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
-                    return false;
-                }
-                UpdateHud();
-                Sys_Printf( "Split Face: the construction face lies on a brush face - "
-                            "splitting that brush (move slides, Tab flips U/V, RMB / "
-                            "Enter splits).\n" );
-                return true;
-            }
+            m_faceOnly = false;
 
             const selection_t &sel = KiwiSel();
             const sel_item_t  *face = 0;
@@ -1827,30 +1807,58 @@ namespace
                 face = &sel.items[i];
                 ++nFaces;
             }
+            // KIWI (2026-10-22, user): "Mode (4) Brush: Select a brush (selection requires
+            // clicking a face, record this), ctrl-R (same controls as now), entire brush is
+            // split" with the line shown around the whole brush.  No face selected: the
+            // selected brush splits along the face its selecting click landed on.
+            if ( nFaces == 0 )
+            {
+                selbrush_t *node = 0;
+                int         fi   = -1;
+                if ( !KiwiFocus_ClickedOrNearestFace( &node, &fi ) || !Sel_BrushLive( node ) )
+                {
+                    Sys_Printf( "Split Face: select ONE face, or a brush.\n" );
+                    return false;
+                }
+                if ( !Splittable( node ) )
+                {
+                    Sys_Printf( "Split Face: that brush cannot be split.\n" );
+                    return false;
+                }
+                m_node = node;
+                m_face = fi;
+                if ( !Derive() )
+                {
+                    Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
+                    return false;
+                }
+                UpdateHud();
+                Sys_Printf( "Split Brush: the cut runs across the face you clicked - move the "
+                            "mouse to slide it, Tab flips U/V, type an exact offset, RMB / "
+                            "Enter splits the whole brush.\n" );
+                return true;
+            }
             if ( nFaces != 1 || !face )
             {
                 Sys_Printf( "Split Face: select exactly ONE face.\n" );
                 return false;
             }
-            if ( !Splittable( face->brush ) )
-            {
-                Sys_Printf( "Split Face: that brush cannot be split.\n" );
-                return false;
-            }
             m_node = face->brush;
             m_face = face->faceIndex;
+            // KIWI (2026-10-22, user): "Mode (3) Face: ... just show the line cutting the face,
+            // not the entire block ... instead of splitting the entire brush, a new construction
+            // face is created from the area and placed against the brush perfectly" - both
+            // halves, as two closed construction loops on the face; the brush is not touched.
+            m_faceOnly = true;
             if ( !Derive() )
             {
                 Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
                 return false;
             }
             UpdateHud();
-            // State the convex-brush limitation before commit.
-            Sys_Printf( "Split Face: move the mouse to slide the cut, Tab flips U/V, "
-                        "type an exact offset, RMB / Enter splits.\n"
-                        "Split Face: this splits the BRUSH along that line - a brush "
-                        "face cannot be split on its own (a convex plane-brush has no "
-                        "way to carry a divided face).\n" );
+            Sys_Printf( "Split Face: move the mouse to slide the cut, Tab flips U/V, type an "
+                        "exact offset, RMB / Enter lays the two halves on the face as "
+                        "construction faces (the brush is not split).\n" );
             return true;
         }
 
@@ -1938,7 +1946,7 @@ namespace
             KiwiLines_Color( KSPLIT_EDGE_COL[0], KSPLIT_EDGE_COL[1], KSPLIT_EDGE_COL[2] );
             KiwiLines_Add( m_a, m_b );
             KiwiLines_Color( KSPLIT_LINE_COL[0], KSPLIT_LINE_COL[1], KSPLIT_LINE_COL[2] );
-            if ( Sel_BrushLive( m_node ) )
+            if ( !m_faceOnly && Sel_BrushLive( m_node ) )   // KIWI: face mode: the face's line only
                 DrawIntersection( m_node->def, m_planeN, m_planeD );
 
             // Draw the standard point glyph last so the persistent center stays visible.
@@ -1955,13 +1963,48 @@ namespace
                 return;
             }
 
+            // KIWI (2026-10-22): face mode - two closed construction loops exactly on the face
+            // (both halves), one construction undo step; the brush is untouched.
+            if ( m_faceOnly )
+            {
+                kconPlane_t plane;
+                if ( !KiwiCon_MakePlane( m_centre, m_nrm, m_lineDir, &plane ) )
+                {
+                    Sys_Printf( "Split Face: that face has no usable plane.\n" );
+                    return;
+                }
+                std::vector<float> half[2];
+                HalfOfFace( true,  half[0] );
+                HalfOfFace( false, half[1] );
+                KiwiCon_UndoPush();
+                int added = 0;
+                for ( int h = 0; h < 2; ++h )
+                {
+                    if ( half[h].size() < 9 )
+                        continue;
+                    kconObject_t o;
+                    o.type       = KCON_POLYLINE;
+                    o.closed     = true;
+                    o.plane      = plane;
+                    o.planeValid = true;
+                    o.pts        = half[h];
+                    if ( KiwiCon_Add( o ) >= 0 )
+                        ++added;
+                }
+                Sel_Clear( KiwiSel() );
+                Sys_Printf( "Split Face: %i construction face%s laid on the face - click one "
+                            "to extrude it; Delete removes a construction face's lines.\n",
+                            added, added == 1 ? "" : "s" );
+                m_valid = false;
+                g_nUpdateBits = -1;
+                return;
+            }
+
             // Modern face selection is absent from selected_brushes; promote its brush
             // before opening undo so the head clones the source and tail stamps halves.
             Select_Deselect( 1 );
             Select_Brush( m_node, 0, 0, 0 );
             Sel_Clear( KiwiSel() );
-            if ( m_fromRegion )
-                KiwiRegion_ClearSelection();    // the halves are the selection now
 
             KiwiCmd_UndoBegin( "split face" );
             std::vector<selbrush_t *> one;
@@ -2121,8 +2164,68 @@ namespace
 
             if ( !PlaneOf( m_p[0], m_p[1], m_p[2], m_planeN, &m_planeD ) )
                 return false;
+            // KIWI: face mode shows only the cut across the face itself.
+            if ( m_faceOnly )
+                ClipLineToFace( pc );
             m_valid = true;
             return true;
+        }
+
+        // KIWI: m_a / m_b trimmed to the (convex) face winding along m_lineDir through pc.
+        void ClipLineToFace( const float pc[3] )
+        {
+            const winding_t *w = m_node->def->faces[m_face].w;
+            float lo = -m_half, hi = m_half;
+            for ( int i = 0; i < w->numpoints; ++i )
+            {
+                const float *p = w->p[i];
+                const float *q = w->p[( i + 1 ) % w->numpoints];
+                float e[3], in[3], rel[3];
+                Sub3( q, p, e );
+                Cross3( m_nrm, e, in );                 // in-plane edge normal
+                Sub3( m_centre, p, rel );
+                if ( Dot3( in, rel ) < 0.0f )           // point it inward
+                    for ( int k = 0; k < 3; ++k )
+                        in[k] = -in[k];
+                // dot(in, pc + s*dir - p) >= 0
+                Sub3( pc, p, rel );
+                const float base = Dot3( in, rel );
+                const float rate = Dot3( in, m_lineDir );
+                if ( fabsf( rate ) < 1.0e-9f )
+                    continue;
+                const float s = -base / rate;
+                if ( rate > 0.0f ) { if ( s > lo ) lo = s; }
+                else               { if ( s < hi ) hi = s; }
+            }
+            if ( hi > lo )
+            {
+                Mad3( pc, m_lineDir, lo, m_a );
+                Mad3( pc, m_lineDir, hi, m_b );
+            }
+        }
+
+        // KIWI: Sutherland-Hodgman - the part of the face winding on one side of the cut.
+        void HalfOfFace( bool front, std::vector<float> &out ) const
+        {
+            out.clear();
+            const winding_t *w = m_node->def->faces[m_face].w;
+            const int n = w->numpoints;
+            for ( int i = 0; i < n; ++i )
+            {
+                const float *p = w->p[i];
+                const float *q = w->p[( i + 1 ) % n];
+                float dp = Dot3( m_planeN, p ) - m_planeD;
+                float dq = Dot3( m_planeN, q ) - m_planeD;
+                if ( !front ) { dp = -dp; dq = -dq; }
+                if ( dp >= 0.0f )
+                    out.insert( out.end(), p, p + 3 );
+                if ( ( dp >= 0.0f ) != ( dq >= 0.0f ) )
+                {
+                    const float t = dp / ( dp - dq );
+                    for ( int k = 0; k < 3; ++k )
+                        out.push_back( p[k] + ( q[k] - p[k] ) * t );
+                }
+            }
         }
 
         void UpdateHud()
@@ -2138,7 +2241,8 @@ namespace
                 // Display offset with total span so its low-edge reference has scale.
                 char offset[48], span[48];
                 _snprintf( m_hud, sizeof( m_hud ),
-                           "split brush  %s  offset %s / %s%s  (Tab flips)",
+                           "%s  %s  offset %s / %s%s  (Tab flips)",
+                           m_faceOnly ? "split face" : "split brush",
                            ( m_axis == 0 ) ? "U" : "V",
                            KiwiFmt_Num( offset, sizeof( offset ),
                                         Units_ToDisplay( m_t - m_lo ), 6 ),
@@ -2151,9 +2255,7 @@ namespace
 
         selbrush_t *m_node = 0;
         int   m_face   = -1;
-        selbrush_t *m_tgtNode = 0;          // KIWI: SetTarget, consumed by Begin
-        int   m_tgtFace    = -1;
-        bool  m_fromRegion = false;
+        bool  m_faceOnly   = false;        // KIWI: face mode - construction faces, no brush split
         int   m_axis   = 0;                 // 0 = U, 1 = V
         bool  m_valid  = false;
         bool  m_tooSmall = false;           // DeriveBasis: the face spans under KSPLIT_MIN_SPAN
@@ -2183,10 +2285,10 @@ namespace
     // KIWI (2026-09-28, user: "allow the ctrl-R to be used on construction faces to add a
     // perfect bisecting line in the plane of the face"): Ctrl+R with regions selected lays a
     // construction line across each one, in its plane, clipped to its interior (a ring's line
-    // stops at the hole, the even-odd way the region itself is filled).  It STARTS PAUSED at
-    // the exact half of each region's span, so Ctrl+R, Enter is the perfect bisect; LMB
-    // resumes and slides it (on-plane geometry snap, grid, the half latch within 8 px), Tab
-    // flips U/V, a typed number is the offset from the low edge.  The line crosses the
+    // stops at the hole, the even-odd way the region itself is filled).  It seeds at the exact
+    // half of each region's span and follows the mouse like face mode (KIWI 2026-10-24, user:
+    // "it needs to follow the mouse like normal") - on-plane geometry snap, grid, the half
+    // latch within 8 px; Tab flips U/V, a typed number is the offset from the low edge.  The line crosses the
     // region's longest edge (U) or runs along it (V).  Several regions each take their own
     // line at the same fraction of their own span.  ONE construction undo snapshot.
     class KiwiSplitRegionCommand : public KiwiEditorCommand
@@ -2231,10 +2333,11 @@ namespace
         int HudPrompts( const kiwiPrompt_t **out ) const override
         {
             static const kiwiPrompt_t s_prompts[] = {
-                { "Enter", "Add the line (starts at the exact half)" },
-                { "LMB",   "Slide it" },
-                { "Tab",   "Flip U / V" },
-                { "0-9",   "Exact offset" },
+                { "Tab",  "Flip U / V" },
+                { "Move", "Slide the line" },
+                { "Dot",  "Centre - snaps for an exact half" },
+                { "0-9",  "Exact offset" },
+                { "!",    "Adds the bisecting line across the construction face" },
             };
             *out = s_prompts;
             return (int)( sizeof( s_prompts ) / sizeof( s_prompts[0] ) );
@@ -2274,9 +2377,8 @@ namespace
             }
 
             Rebuild();
-            KiwiCmd_Pause();                    // the exact half, until LMB slides it
-            Sys_Printf( "Split Region: %i region(s) — Enter adds the bisecting line, LMB "
-                        "slides it, Tab flips U/V, type an exact offset.\n",
+            Sys_Printf( "Split Region: %i region(s) - move the mouse to slide the line, Tab "
+                        "flips U/V, type an exact offset, RMB / Enter adds it.\n",
                         (int)m_regs.size() );
             return true;
         }
@@ -3565,75 +3667,6 @@ namespace
     KiwiSplitFaceCommand   s_splitFace;
     KiwiSplitRegionCommand s_splitRegion;
 
-    // KIWI (2026-09-28, user: "ctrl-R is now broken on brush faces"): a region drawn ON a
-    // brush face wins the click over that face (KiwiRegion_WinsOverSurface), so Ctrl+R saw a
-    // region and laid a construction line.  The brush face whose plane holds the primary
-    // selected region and whose winding covers the region's middle is the real target.
-    bool RegionBrushFace( selbrush_t **outNode, int *outFace )
-    {
-        const int ri = KiwiRegion_SelectedIndex();
-        const std::vector<kregion_t> &all = KiwiRegion_All();
-        if ( ri < 0 || ri >= (int)all.size() )
-            return false;
-        const kregion_t &r = all[(size_t)ri];
-        const std::vector<float> &L = KiwiRegion_OuterLoop( r );
-        const int n = (int)( L.size() / 2 );
-        if ( n < 3 )
-            return false;
-        float uv[2] = { 0.0f, 0.0f };
-        for ( int i = 0; i < n; ++i )
-        {
-            uv[0] += L[(size_t)i * 2];
-            uv[1] += L[(size_t)i * 2 + 1];
-        }
-        uv[0] /= (float)n;
-        uv[1] /= (float)n;
-        float mid[3];
-        KiwiCon_PlaneToWorld( r.plane, uv, mid );
-
-        const float band = KiwiRegion_PlaneBand();
-        selbrush_t *lists[2] = { &active_brushes, &selected_brushes };
-        for ( int l = 0; l < 2; ++l )
-            for ( selbrush_t *b = lists[l]->next; b && b != lists[l]; b = b->next )
-            {
-                if ( !Pick_BrushPickable( b ) || !Splittable( b ) || !b->def->faces )
-                    continue;
-                const brush_t *def = b->def;
-                for ( int f = 0; f < def->faceCount; ++f )
-                {
-                    const winding_t *w = def->faces[f].w;
-                    if ( !w || w->numpoints < 3 || w->numpoints > MAX_POINTS_ON_WINDING )
-                        continue;
-                    float fn[3];
-                    Copy3( def->faces[f].plane.normal, fn );
-                    if ( !Norm3( fn ) || fabsf( Dot3( fn, r.plane.normal ) ) < 0.999f )
-                        continue;
-                    if ( fabsf( Dot3( fn, mid ) - Dot3( fn, w->p[0] ) ) > band )
-                        continue;
-                    // Inside the convex winding (either winding order).
-                    int pos = 0, neg = 0;
-                    for ( int i = 0; i < w->numpoints; ++i )
-                    {
-                        const float *a = w->p[i];
-                        const float *c = w->p[( i + 1 ) % w->numpoints];
-                        float e[3], p[3], x[3];
-                        Sub3( c, a, e );
-                        Sub3( mid, a, p );
-                        Cross3( e, p, x );
-                        const float s = Dot3( x, fn );
-                        if ( s >  0.01f ) ++pos;
-                        if ( s < -0.01f ) ++neg;
-                    }
-                    if ( pos && neg )
-                        continue;
-                    *outNode = b;
-                    *outFace = f;
-                    return true;
-                }
-            }
-        return false;
-    }
-
     // Ctrl+R routes to the region split when regions are selected and no brush face is.
     bool SplitFaceSelected()
     {
@@ -3662,6 +3695,15 @@ bool KiwiSplit_CanSplitFace()
             ++n;
     if ( n == 0 && KiwiRegion_HasSelection() )
         return true;                    // KIWI: Ctrl+R on regions = bisecting line
+    if ( n == 0 )
+    {
+        // KIWI (2026-10-22): brush mode - a selected splittable brush splits along its
+        // clicked face.
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+            if ( Splittable( b ) )
+                return true;
+        return false;
+    }
     return n == 1;
 }
 
@@ -3683,16 +3725,12 @@ KiwiEditorCommand *KiwiSplit_CommandForId( int commandId )
     }
     if ( commandId == KIWI_CMD_SPLIT_FACE )
     {
-        // KIWI: a selected construction face (region) takes the bisecting-line split -
-        // unless it is drawn on a brush face, which then splits that brush.
+        // KIWI (2026-10-24, user: "If I want to do repeated ctrl-r operations, it doesn't work
+        // and actually wrongly does a 4-style brush cut ... I want to be able to bisect
+        // construction faces with Ctrl-R"): a selected construction face always takes the
+        // bisecting-line split, also when it lies on a brush face (face mode's own halves).
         if ( !SplitFaceSelected() && KiwiRegion_HasSelection() )
-        {
-            selbrush_t *node = 0;
-            int         face = -1;
-            if ( !RegionBrushFace( &node, &face ) )
-                return &s_splitRegion;
-            s_splitFace.SetTarget( node, face );
-        }
+            return &s_splitRegion;
         return &s_splitFace;
     }
     return 0;

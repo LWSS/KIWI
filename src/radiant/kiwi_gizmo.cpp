@@ -228,6 +228,8 @@ namespace
             return false;
         }
 
+        // KIWI (2026-10-22): the gizmo never leaves the view while its tool runs.
+        KiwiCam_KeepOnScreen( g->anchor, KGZ_AXIS_PIX + KGZ_HEAD_PIX, g->anchor );
         g->wpp       = KiwiCam_WorldPerPixel( g->anchor );
         g->axisLen   = KGZ_AXIS_PIX      * g->wpp;
         g->headLen   = KGZ_HEAD_PIX      * g->wpp;
@@ -262,6 +264,7 @@ namespace
             for ( int c = 0; c < 3; ++c )
                 g->basis[r][c] = ( r == c ) ? 1.0f : 0.0f;
         KiwiXform_ActiveRotateFrame( g->basis );          // leaves identity when unframed
+        KiwiCam_KeepOnScreen( g->pivot, KGZ_RING_PIX * KGZ_VIEW_RING_MUL + 8.0f, g->pivot );   // KIWI: stays in view
         g->radius = KGZ_RING_PIX * KiwiCam_WorldPerPixel( g->pivot );
         return g->radius > 0.0f;
     }
