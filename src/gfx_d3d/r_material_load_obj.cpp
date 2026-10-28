@@ -755,7 +755,7 @@ char __cdecl Material_GetVertexShaderHashIndex(
     iassert( shaderName );
     iassert( foundHashIndex );
     hashTable = mtlLoadGlob.vertexShaderHashTable[renderer];
-    for (hashIndex = R_HashAssetName(shaderName) & 0x7FF; hashTable[hashIndex]; hashIndex = (hashIndex + 1) & 0x7FF)
+    for (hashIndex = R_HashAssetName(shaderName) & (MAX_SHADER_COUNT - 1); hashTable[hashIndex]; hashIndex = (hashIndex + 1) & (MAX_SHADER_COUNT - 1))   // KIWI: 0x7FF retail
     {
         if (!strcmp(hashTable[hashIndex]->name, shaderName))
         {
@@ -1587,8 +1587,8 @@ MaterialVertexShader *__cdecl Material_RegisterVertexShader(
     if (mtlShader)
     {
         mtlLoadGlob.vertexShaderHashTable[renderer][hashIndex] = mtlShader;
-        if (++mtlLoadGlob.vertexShaderCount == 2048)
-            Com_Error(ERR_DROP, "More than %i unique vertex shaders", 2047);
+        if (++mtlLoadGlob.vertexShaderCount == MAX_SHADER_COUNT)
+            Com_Error(ERR_DROP, "More than %i unique vertex shaders", MAX_SHADER_COUNT - 1);
     }
     return mtlShader;
 }
@@ -1693,7 +1693,7 @@ char __cdecl Material_GetPixelShaderHashIndex(
     iassert( shaderName );
     iassert( foundHashIndex );
     hashTable = mtlLoadGlob.pixelShaderHashTable[renderer];
-    for (hashIndex = R_HashAssetName(shaderName) & 0x7FF; hashTable[hashIndex]; hashIndex = (hashIndex + 1) & 0x7FF)
+    for (hashIndex = R_HashAssetName(shaderName) & (MAX_SHADER_COUNT - 1); hashTable[hashIndex]; hashIndex = (hashIndex + 1) & (MAX_SHADER_COUNT - 1))   // KIWI: 0x7FF retail
     {
         if (!strcmp(hashTable[hashIndex]->name, shaderName))
         {
@@ -1777,8 +1777,8 @@ MaterialPixelShader *__cdecl Material_RegisterPixelShader(
     if (mtlShader)
     {
         mtlLoadGlob.pixelShaderHashTable[renderer][hashIndex] = mtlShader;
-        if (++mtlLoadGlob.pixelShaderCount == 2048)
-            Com_Error(ERR_DROP, "More than %i unique pixel shaders", 2047);
+        if (++mtlLoadGlob.pixelShaderCount == MAX_SHADER_COUNT)
+            Com_Error(ERR_DROP, "More than %i unique pixel shaders", MAX_SHADER_COUNT - 1);
     }
     return mtlShader;
 }
@@ -6123,9 +6123,9 @@ static bool KiwiMtlSort_Compare(const KiwiMtlSortKey *k0, const KiwiMtlSortKey *
     return comparison < 0;
 }
 
-// Fixed: the material count is hard-capped — rgp.sortedMaterials is Material *[2048] and
-// Material_Add Com_Errors out at 2048.
-#define KIWI_MTL_SORT_MAX 2048
+// Fixed: the material count is hard-capped — rgp.sortedMaterials is Material *[MAX_MATERIAL_COUNT]
+// and Material_Add Com_Errors out at MAX_MATERIAL_COUNT (r_gfx.h).
+#define KIWI_MTL_SORT_MAX MAX_MATERIAL_COUNT
 static KiwiMtlSortKey        s_kiwiMtlSortKeys[KIWI_MTL_SORT_MAX];
 static const KiwiMtlSortKey *s_kiwiMtlSortOrder[KIWI_MTL_SORT_MAX];
 #endif
@@ -6171,6 +6171,6 @@ void __cdecl Material_SortInternal(Material **sortedMaterials, uint materialCoun
 void __cdecl Material_Sort()
 {
     if (IsFastFileLoad())
-        rgp.materialCount = DB_GetAllXAssetOfType(ASSET_TYPE_MATERIAL, (XAssetHeader *)&rgp, 2048);
+        rgp.materialCount = DB_GetAllXAssetOfType(ASSET_TYPE_MATERIAL, (XAssetHeader *)&rgp, MAX_MATERIAL_COUNT);
     Material_SortInternal(rgp.sortedMaterials, rgp.materialCount);
 }

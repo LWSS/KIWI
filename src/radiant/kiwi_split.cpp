@@ -57,8 +57,17 @@ namespace
     // World units: keep the cut away from both span ends so neither half is an
     // immediate §19 sliver.  (Snaps project onto the slide axis from any plane.)
     const float KSPLIT_MIN_SPAN  = 1.0f;
+    // KIWI (2026-10-26, user: "im trying to split this smaller region and it wont let me"):
+    // splits that only lay CONSTRUCTION (region split, face-mode split) answer to the region
+    // weld, not to brush slivers.  An edge longer than KREG_JOIN_DIST survives chaining, so
+    // a cut line that long and pieces that wide survive; any region that exists at all is
+    // wider than the weld, so its cross line always fits.  The old 1-unit floor refused
+    // every region under an inch across.
+    const float KSPLIT_CON_MIN_EDGE = KREG_JOIN_DIST * 1.05f;
+    // Region split: both pieces must outlive the weld, so the span holds two of them.
+    const float KSPLITREG_MIN_SPAN  = 2.0f * KSPLIT_CON_MIN_EDGE;
     const char *const KSPLIT_TOO_SMALL_MSG =
-        "Split Face: that face is under 1 unit across that way - too small to split (Tab tries the other way).\n";
+        "Split Face: that face is too narrow to split either way.\n";
 
     // The centroid is both drawn and latched within screen-constant 8 px; Ctrl
     // suppresses the latch with other snapping.
@@ -1827,7 +1836,7 @@ namespace
                 }
                 m_node = node;
                 m_face = fi;
-                if ( !Derive() )
+                if ( !DeriveEitherAxis() )
                 {
                     Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
                     return false;
@@ -1850,7 +1859,7 @@ namespace
             // face is created from the area and placed against the brush perfectly" - both
             // halves, as two closed construction loops on the face; the brush is not touched.
             m_faceOnly = true;
-            if ( !Derive() )
+            if ( !DeriveEitherAxis() )
             {
                 Sys_Printf( m_tooSmall ? KSPLIT_TOO_SMALL_MSG : "Split Face: that face is degenerate.\n" );
                 return false;
@@ -2057,6 +2066,27 @@ namespace
         // Cached slide axis from the current frame's DeriveBasis.
         const float *OffDir() const { return m_off; }
 
+        // KIWI (2026-10-26): face mode lays construction, so only the region weld bounds
+        // it (KSPLIT_CON_MIN_EDGE); brush mode keeps the 1-unit brush-sliver floor.
+        float MinSpan() const
+        {
+            return m_faceOnly ? 2.0f * KSPLIT_CON_MIN_EDGE : KSPLIT_MIN_SPAN;
+        }
+
+        // KIWI (2026-10-26): a face too narrow across U seeds on V instead of refusing.
+        bool DeriveEitherAxis()
+        {
+            if ( Derive() )
+                return true;
+            if ( !m_tooSmall )
+                return false;
+            m_axis = 1;
+            if ( Derive() )
+                return true;
+            m_axis = 0;
+            return false;
+        }
+
         // Rebuild face basis and projected span independently of cut position.
         bool DeriveBasis()
         {
@@ -2120,7 +2150,7 @@ namespace
                 if ( s < m_lo ) m_lo = s;
                 if ( s > m_hi ) m_hi = s;
             }
-            m_tooSmall = !( m_hi - m_lo > KSPLIT_MIN_SPAN );
+            m_tooSmall = !( m_hi - m_lo > MinSpan() );
             if ( m_tooSmall )
                 return false;               // a sliver: no room for two halves
 
@@ -2146,7 +2176,7 @@ namespace
                 t = m_centreT;
 
             // Both halves must survive: keep the cut strictly inside the span.
-            const float guard = KSPLIT_MIN_SPAN * 0.5f;
+            const float guard = MinSpan() * 0.5f;
             if ( t < m_lo + guard ) t = m_lo + guard;
             if ( t > m_hi - guard ) t = m_hi - guard;
             m_t = t;
@@ -2377,6 +2407,17 @@ namespace
             }
 
             Rebuild();
+            // KIWI (2026-10-26): a region with no room across U seeds on V instead.
+            if ( m_lines.empty() )
+            {
+                m_axis = 1;
+                Rebuild();
+                if ( m_lines.empty() )
+                {
+                    m_axis = 0;
+                    Rebuild();
+                }
+            }
             Sys_Printf( "Split Region: %i region(s) - move the mouse to slide the line, Tab "
                         "flips U/V, type an exact offset, RMB / Enter adds it.\n",
                         (int)m_regs.size() );
@@ -2401,7 +2442,7 @@ namespace
             if ( m_regs.empty() )
                 return;
             const regSplit_t &r = m_regs[0];
-            if ( !( r.hi - r.lo > KSPLIT_MIN_SPAN ) )
+            if ( !( r.hi - r.lo > KSPLITREG_MIN_SPAN ) )
                 return;
 
             float world[3];
@@ -2549,7 +2590,7 @@ namespace
         // The resolved slide position for one region: typed offset, else the fraction.
         float TOf( const regSplit_t &r ) const
         {
-            const float guard = KSPLIT_MIN_SPAN * 0.5f;
+            const float guard = KSPLITREG_MIN_SPAN * 0.5f;
             float t = m_hasNum ? ( r.lo + m_numWorld ) : ( r.lo + m_frac * ( r.hi - r.lo ) );
             if ( t < r.lo + guard ) t = r.lo + guard;
             if ( t > r.hi - guard ) t = r.hi - guard;
@@ -2593,7 +2634,7 @@ namespace
                     if ( t < r.lo ) r.lo = t;
                     if ( t > r.hi ) r.hi = t;
                 }
-                if ( !( r.hi - r.lo > KSPLIT_MIN_SPAN ) )
+                if ( !( r.hi - r.lo > KSPLITREG_MIN_SPAN ) )
                     continue;                   // a sliver: nothing to split
                 const float t = TOf( r );
 
@@ -2622,7 +2663,7 @@ namespace
                 std::sort( hits.begin(), hits.end() );
                 for ( size_t h = 0; h + 1 < hits.size(); h += 2 )
                 {
-                    if ( !( hits[h + 1] - hits[h] > KSPLIT_MIN_SPAN ) )
+                    if ( !( hits[h + 1] - hits[h] > KSPLIT_CON_MIN_EDGE ) )
                         continue;
                     for ( int e = 0; e < 2; ++e )
                     {

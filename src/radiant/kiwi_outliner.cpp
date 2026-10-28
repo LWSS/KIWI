@@ -34,6 +34,7 @@
 #include <string.h>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // Ported entry points; locations anchor the exact ABI used here.
@@ -144,10 +145,8 @@ bool IsTerrainNode( const selbrush_t *b )
 
 // A brush with any lightgrid face (lightgrid_volume and friends; the same substring the
 // camera's tool colours and kiwi_material.cpp's tool list use).
-bool IsLightGridNode( const selbrush_t *b )
+bool IsLightGridNodeUncached( const selbrush_t *b )
 {
-    if ( !b || !b->def || b->def->patch || !b->def->faces )
-        return false;
     for ( int f = 0; f < b->def->faceCount; ++f )
     {
         MaterialDef *md = const_cast<MaterialDef *>( &b->def->faces[f].mtldef[0] );
@@ -158,6 +157,45 @@ bool IsLightGridNode( const selbrush_t *b )
             return true;
     }
     return false;
+}
+
+// KIWI (2026-10-27, user: "the dx9 is causing the lag, primarily with the UI actions being
+// used ... You need to fix it"): a live-editor sample put 22% of the main thread in this
+// panel, and d3d9 + the driver at 2.3%.  Most of the panel's share was this test: every
+// face name of every world brush scanned for "lightgrid", five or more times a frame
+// (section counts, the Brushes list, the eye states).  The answer is kept per brush and
+// reused while the brush still has the same faces and face materials (the material name
+// lives in the material, so a retexture changes the pointer and re-tests).
+struct koutGridMemo_t
+{
+    const void *def;
+    const void *faces;
+    int         faceCount;
+    size_t      mtlKey;
+    bool        grid;
+};
+std::unordered_map<const selbrush_t *, koutGridMemo_t> s_gridMemo;
+const size_t KOUT_GRID_MEMO_MAX = 1u << 18;   // stale keys only cost memory; drop them all
+
+bool IsLightGridNode( const selbrush_t *b )
+{
+    if ( !b || !b->def || b->def->patch || !b->def->faces )
+        return false;
+    size_t key = 0;
+    for ( int f = 0; f < b->def->faceCount; ++f )
+    {
+        const MaterialDef &md = b->def->faces[f].mtldef[0];
+        key = key * 31u + ( (size_t)md.lyrMtl ^ ( (size_t)md.radMtl << 1 ) );
+    }
+    auto it = s_gridMemo.find( b );
+    if ( it != s_gridMemo.end() && it->second.def == b->def && it->second.faces == b->def->faces
+      && it->second.faceCount == b->def->faceCount && it->second.mtlKey == key )
+        return it->second.grid;
+    if ( s_gridMemo.size() >= KOUT_GRID_MEMO_MAX )
+        s_gridMemo.clear();
+    const bool grid = IsLightGridNodeUncached( b );
+    s_gridMemo[b] = { b->def, b->def->faces, b->def->faceCount, key, grid };
+    return grid;
 }
 
 bool PassesFilter( const selbrush_t *b, koutFilter_t filter )
@@ -337,7 +375,7 @@ bool IsFuncGroup( entity_s *inst )
 }
 
 // Centralized so every section uses the same entity classification.
-koutKind_t EntitySection( entity_s *inst )
+koutKind_t EntitySectionUncached( entity_s *inst )
 {
     if ( IsFuncGroup( inst ) )
         return KOUT_SECTION_BRUSHES;
@@ -372,6 +410,30 @@ koutKind_t EntitySection( entity_s *inst )
     }
 
     return KOUT_SECTION_ENTITIES;
+}
+
+// KIWI (2026-10-27, same lag pass as IsLightGridNode): a frame asks for every entity's
+// section ~18 times (six section counts, six lists, the eye states), each up to eight
+// class-name compares.  Asked once per entity per frame now; the memo is emptied at the
+// top of every outliner frame, so a class or "model" key edit shows on the next frame.
+struct koutSectionMemo_t
+{
+    const void *def;
+    const void *eclass;
+    koutKind_t  kind;
+};
+std::unordered_map<const entity_s *, koutSectionMemo_t> s_sectionMemo;
+
+koutKind_t EntitySection( entity_s *inst )
+{
+    entity_s_def *def = DefOf( inst );
+    const void *ec = def ? (const void *)def->eclass : nullptr;
+    auto it = s_sectionMemo.find( inst );
+    if ( it != s_sectionMemo.end() && it->second.def == def && it->second.eclass == ec )
+        return it->second.kind;
+    const koutKind_t kind = EntitySectionUncached( inst );
+    s_sectionMemo[inst] = { def, ec, kind };
+    return kind;
 }
 
 unsigned SectionKey( koutKind_t kind )
@@ -2384,6 +2446,8 @@ void KiwiOutliner_ResetForNewMap()
     s_renameFocus = false;
     s_structural = false;
     s_paintSelecting = false;
+    s_gridMemo.clear();
+    s_sectionMemo.clear();
 }
 
 // Panel
@@ -2391,6 +2455,9 @@ void KiwiOutliner_Draw()
 {
     // Clear before the early-out so closing the panel cannot retain viewport hover.
     KiwiHover_OutlinerClear();
+    // ...and this frame's EntitySection answers, so commands run while the panel is closed
+    // never read an old frame's classification either.
+    s_sectionMemo.clear();
 
     bool *open = KiwiWindows_OpenPtr( KIWI_WIN_OUTLINER );
     if ( !open || !*open )

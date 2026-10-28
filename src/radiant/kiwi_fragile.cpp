@@ -31,6 +31,7 @@
 #include "kiwi_vec.h"
 #include "kiwi_viewdirty.h"
 
+#include <float.h>                  // FLT_EPSILON (FlattenPatch's "already flat")
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1081,6 +1082,19 @@ namespace
 
     const DWORD KFRAG_LIVE_POLL_MS = 250;   // geometry hash cadence
     const DWORD KFRAG_LIVE_IDLE_MS = 600;   // an edit settles this long before a check starts
+    // KIWI (2026-10-27, user: "it still lags and sucks"): LiveStart writes the whole map
+    // snapshot on the main thread (Map_WriteSnapshot - 124 ms on kisak_trash in a live
+    // capture), and it fired 0.6 s after every drag, mid-work.  It now also waits until
+    // nobody has touched the mouse or keyboard for this long and no command is running.
+    const DWORD KFRAG_LIVE_INPUT_IDLE_MS = 2000;
+
+    DWORD InputIdleMs()
+    {
+        LASTINPUTINFO lii = { sizeof( LASTINPUTINFO ), 0 };
+        if ( !::GetLastInputInfo( &lii ) )
+            return 0xFFFFFFFFu;
+        return ::GetTickCount() - lii.dwTime;
+    }
 
     // Order-free sum of every brush's plane hash: selection and undo's node swaps leave it
     // alone, any geometry edit changes it.  0 = no brushes, nothing to check.
@@ -1223,7 +1237,7 @@ namespace
             s_geomChangedAt = now;
         }
         if ( !s_liveProc && s_geomHash != s_checkedHash && now - s_geomChangedAt >= KFRAG_LIVE_IDLE_MS
-          && !KiwiLaunch_Busy() )
+          && !KiwiLaunch_Busy() && !KiwiCmd_Active() && InputIdleMs() >= KFRAG_LIVE_INPUT_IDLE_MS )
         {
             s_checkedHash = s_geomHash;
             LiveStart();
@@ -1566,7 +1580,21 @@ namespace
                 if ( fabs( d ) > *dev )
                     *dev = fabs( d );
             }
-        if ( *dev > KFRAG_FLAT_DEV || *dev < 1e-6 )
+        // KIWI (2026-10-27, user: "try to fix the remaining issues"): "already flat" was 1e-6,
+        // under what a float can hold out here - a slanted patch at x 3000 lands only within
+        // ~1 ulp (2.4e-4) of its plane, so every run re-flattened it (gauntlet
+        // real.clean_precision: "a second cleanup still found work").  Flat now means within
+        // two float steps of the patch's largest coordinate.
+        double maxAbs = 0.0;
+        for ( int c = 0; c < pm->width; ++c )
+            for ( int r = 0; r < pm->height; ++r )
+                for ( int k = 0; k < 3; ++k )
+                    if ( fabs( (double)pm->ctrl[c][r].xyz[k] ) > maxAbs )
+                        maxAbs = fabs( (double)pm->ctrl[c][r].xyz[k] );
+        double flat = 2.0 * maxAbs * (double)FLT_EPSILON;
+        if ( flat < 1e-6 )
+            flat = 1e-6;
+        if ( *dev > KFRAG_FLAT_DEV || *dev < flat )
             return false;                           // shaped on purpose, or already flat
         if ( !apply )
             return true;

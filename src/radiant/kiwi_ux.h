@@ -27,6 +27,12 @@ void KiwiUX_SetLeakBackground( bool on );
 // press (kiwi_camera.cpp KiwiCam_DrawOrbitDebug).
 bool KiwiUX_DebugOrbitPivot();
 void KiwiUX_SetDebugOrbitPivot( bool on );
+// KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5, make this a
+// setting in the View-> menu"): View > Background Frame Cap (5 fps), default on.  The pump
+// (radiant_main.cpp Radiant_RunMessageLoop) draws 5 frames a second while no window of this
+// process is in the foreground; input still drains on every wake.
+bool KiwiUX_BackgroundFpsCap();
+void KiwiUX_SetBackgroundFpsCap( bool on );
 bool KiwiUX_ShowTriCount();               // camera bottom-right "N tris" readout (View menu)
 void KiwiUX_SetShowTriCount( bool on );
 

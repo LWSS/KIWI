@@ -85,6 +85,9 @@ void KiwiSection_DrawWorld();
 // screen-space pass rejects a hidden vertex/edge winner. Both require Cutting().
 void KiwiSection_ClampRayStart( float *start, const float *dir );
 bool KiwiSection_PointVisible( const float *p );
+// KIWI (2026-10-26): marquee selection.  Trims a->b to its visible (z <= level) part in
+// place; false when none of it survives.  No-op (true) without Cutting().
+bool KiwiSection_ClipSegment( float *a, float *b );
 
 // ── Camera view modes beside the section button (RADIANT_UX_DESIGN D-EDGEOUTLINE / D-XRAY) ──
 // Both are persisted view state ("KiwiUX" EdgeOutline / XRay), toggled by the view-cube

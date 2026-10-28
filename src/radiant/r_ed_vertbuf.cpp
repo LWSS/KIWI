@@ -434,6 +434,23 @@ unsigned int Editor_VB_Upload(Material *material, int vertCount,
     return handle;
 }
 
+// KIWI (2026-10-27, user: "it's still laggy while dragging and using tools"): refill a run
+// Editor_VB_Upload handed out, in place.  The caller guarantees the run is still live and
+// was allocated for `material` with exactly `vertCount` verts.  A drag rebuilt every moved
+// face each frame as free + re-allocate, and both halves walk the material's free-slot
+// lists (R_Ed_VB_FreeSlot_Coalesce / Editor_VB_AllocFromPools), which grow with every
+// face on that material.  The slot itself is not reassigned, but the
+// surf cache is still told, exactly like an upload, because the geometry it replays moved.
+void Editor_VB_Rewrite(unsigned int handle, int vertCount,
+    const float *xyz, const float *tangent, const float *binormal,
+    const float *normal, const float *texCoord, const float *color)
+{
+    iassert(handle);
+    iassert(vertCount > 0 && vertCount <= ED_VERTBUF_VERTEX_COUNT);
+    KiwiSurfCache_Invalidate( "Editor_VB_Rewrite" );
+    Editor_VB_WriteVertices(handle, tangent, vertCount, xyz, binormal, normal, texCoord, color);
+}
+
 // ── FREE PATH ─────────────────────────────────────────────────────────────────
 // The release side of the per-material VB pool.  R_Ed_FreeVertices (0x51CB70) dispatches
 // through

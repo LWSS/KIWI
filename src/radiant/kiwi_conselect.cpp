@@ -13,6 +13,7 @@
 #include "kiwi_ported.h"
 #include "kiwi_refimage.h"       // Unhide All also reveals hidden reference images
 #include "kiwi_region.h"
+#include "kiwi_section.h"        // the marquee skips what the section cut hides
 #include "kiwi_selection.h"
 #include "kiwi_camera.h"         // Extend: KiwiCam_RayAxis / AxisPortrayable / WorldPerPixel
 #include "kiwi_lines.h"          // Extend: the preview pieces
@@ -381,6 +382,8 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
                 float w[3], px, py;
                 if ( !KiwiCon_AnchorWorld( *o, a, w ) )
                     break;
+                if ( !KiwiSection_PointVisible( w ) )
+                    continue;                   // KIWI: cut away by the section
                 if ( !Pick_WorldToImage( w, &px, &py ) )
                     continue;
                 if ( !PointIn( x0, y0, x1, y1, px, py ) )
@@ -399,12 +402,18 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
         bool objAny = false;
         bool objAll = true;
         bool objAnyPoint = false;
+        bool objVisible = false;
         const int segs = KiwiCon_SegmentCount( *o );
         for ( int s = 0; s < segs; ++s )
         {
             float wa[3], wb[3], ax, ay, bx, by;
             if ( !KiwiCon_SegmentWorld( *o, s, wa, wb ) )
                 break;
+            // KIWI (2026-10-26, user: "...box select invisible parts (sectioned off areas)..."):
+            // only the part of the segment the section cut leaves drawn.
+            if ( !KiwiSection_ClipSegment( wa, wb ) )
+                continue;
+            objVisible = true;
             const bool pa = Pick_WorldToImage( wa, &ax, &ay );
             const bool pb = Pick_WorldToImage( wb, &bx, &by );
             if ( !pa || !pb )
@@ -432,7 +441,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
             }
         }
 
-        if ( want == KCONSEL_OBJECT && segs > 0 )
+        if ( want == KCONSEL_OBJECT && segs > 0 && objVisible )
         {
             const bool take = crossing ? ( objAny || objAnyPoint ) : objAll;
             if ( take )

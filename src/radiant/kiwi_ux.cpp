@@ -42,6 +42,7 @@ namespace
     kuxFlag_t s_showFacing  = { "ShowFacingArrows", -1, 1 };   // KIWI 2026-09-09: View menu
     kuxFlag_t s_leakBack    = { "LeakBackground", -1, 0 };     // KIWI 2026-09-18: strobing camera clear colour
     kuxFlag_t s_orbitDebug  = { "DebugOrbitPivot", -1, 0 };    // KIWI 2026-09-29: orbit pivot probe rays
+    kuxFlag_t s_bgFpsCap    = { "BackgroundFpsCap", -1, 1 };   // KIWI 2026-10-27: 5 fps while unfocused
 
     bool Get( kuxFlag_t &f )
     {
@@ -72,6 +73,8 @@ bool KiwiUX_LeakBackground()             { return Get( s_leakBack ); }
 void KiwiUX_SetLeakBackground( bool on ) { Set( s_leakBack, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_DebugOrbitPivot()             { return Get( s_orbitDebug ); }
 void KiwiUX_SetDebugOrbitPivot( bool on ) { Set( s_orbitDebug, on ); g_nUpdateBits |= 1; }
+bool KiwiUX_BackgroundFpsCap()             { return Get( s_bgFpsCap ); }
+void KiwiUX_SetBackgroundFpsCap( bool on ) { Set( s_bgFpsCap, on ); }
 bool KiwiUX_ShowTriCount()             { return Get( s_showTris ); }
 void KiwiUX_SetShowTriCount( bool on ) { Set( s_showTris, on ); g_nUpdateBits |= 1; }
 bool KiwiUX_ShowFacingArrows()             { return Get( s_showFacing ); }
@@ -175,15 +178,41 @@ void KiwiUX_DrawSettings()
                            "Every key shown is read LIVE from the command table,\n"
                            "so remaps and keymap-profile switches show at once." );
 
+    // KIWI (2026-10-27): the fly speed in units per second (the wheel changes it while flying).
+    float ups = KiwiCam_FlySpeed();
+    ImGui::SetNextItemWidth( 220.0f );
+    if ( ImGui::SliderFloat( "Fly speed (units/s)", &ups, KCAM_FLY_UPS_MIN, KCAM_FLY_UPS_MAX, "%.0f",
+                             ImGuiSliderFlags_Logarithmic ) )
+        KiwiCam_SetFlySpeed( ups );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "Hold mouse-forward to fly; the wheel changes this while flying.\n"
+                           "Shift x3, Ctrl x0.25." );
+
     // A logarithmic scale keeps both 0.1x and 50x usable.
     float fly = KiwiCam_FlySpeedScale();
     ImGui::SetNextItemWidth( 220.0f );
-    if ( ImGui::SliderFloat( "Fly speed x", &fly, 0.1f, 50.0f, "%.1fx",
+    if ( ImGui::SliderFloat( "Ortho arrow pan x", &fly, 0.1f, 50.0f, "%.1fx",
                              ImGuiSliderFlags_Logarithmic ) )
         KiwiCam_SetFlySpeedScale( fly );
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "Multiplier over the classic MoveSpeed preference (units\n"
-                           "per second in perspective; ortho pans at a screen rate)." );
+        ImGui::SetTooltip( "The arrow keys' pan rate in the orthographic camera." );
+
+    // KIWI (2026-10-27, user: "a better mouselook option"): the mouse-forward fly's look.
+    float sens = KiwiCam_FlyLookSens();
+    ImGui::SetNextItemWidth( 220.0f );
+    if ( ImGui::SliderFloat( "Fly look sensitivity", &sens, 0.1f, 5.0f, "%.2fx",
+                             ImGuiSliderFlags_Logarithmic ) )
+        KiwiCam_SetFlyLookSens( sens );
+    bool invertY = KiwiCam_FlyInvertY();
+    if ( ImGui::Checkbox( "Fly look: invert Y", &invertY ) )
+        KiwiCam_SetFlyInvertY( invertY );
+    ImGui::SameLine();
+    bool worldUp = KiwiCam_FlyWorldUp();
+    if ( ImGui::Checkbox( "Q / E: straight up / down", &worldUp ) )
+        KiwiCam_SetFlyWorldUp( worldUp );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "Off: Q / E move along the camera's own up.\n"
+                           "On: Q / E rise and sink along world Z." );
 
     KiwiKeymap_DrawSettings();
 

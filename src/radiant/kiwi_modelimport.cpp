@@ -1439,7 +1439,8 @@ namespace
     const clipMaterial_t KMI_CLIP[] =
     {
         { "clip",               "Players, AI and vehicles" },
-        { "clip_metal",         "Also stops bullets, with metal impacts" },
+        { "clip_physics",       "Also stops physics objects (KIWI)" },
+        { "clip_metal",        "Also stops bullets, with metal impacts" },
         { "clip_nosight",       "Also blocks AI sight" },
         { "clip_nosight_metal", "Blocks AI sight; metal impacts" },
         { "clip_player",        "Players only" },

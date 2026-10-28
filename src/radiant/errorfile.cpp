@@ -58,6 +58,9 @@ s_errLogEntry_t s_errLog[1024]; // IDB block starting at 0x180ACE8
 // IDB: dword_180A8E4 @ 0x180A8E4.
 static int s_errLogIndex = 0;
 
+// KIWI: Pointfile_Errorfile_LoadOnly - load without jumping to the first entry.
+static bool s_errLogLoadOnly = false;
+
 // s_errLogMapPath — the .map path the loaded error log belongs to.  IDB `path` @ 0x180A8E8
 // (a 1024-byte global).  Written by Pointfile_Errorfile (I_strncpyz(path, currentmap, 1024))
 // and read by the error-log navigators (sub_410640/670/710) to decide whether the user has
@@ -353,6 +356,12 @@ char Pointfile_Errorfile()
     {
         qsort( &s_errLog[0], (size_t)s_errLogCount,
                sizeof( s_errLogEntry_t ), ErrorLog_Compare );
+        // KIWI: the build's reload (Pointfile_Errorfile_LoadOnly) parks before the first entry.
+        if ( s_errLogLoadOnly )
+        {
+            s_errLogIndex = -1;
+            return 1;
+        }
         return ErrorLog_01();
     }
     return (char)s_errLogCount;
@@ -361,6 +370,17 @@ char Pointfile_Errorfile()
 // ── menu-handler entry points (CMainFrame::OnErrorFile, mainfrm.cpp) ───────────
 // Exposed so the File→Error file toggle handler (0x423B40) can drive the load/clear.
 void Pointfile_Errorfile_Public() { Pointfile_Errorfile(); }
+
+// KIWI (2026-10-25, user: "stop moving the camera when building the map"): the build loads
+// the fresh .errlog after every compile, and the ported load jumps to the first entry -
+// camera, selection, material mode.  This loads it without navigating; Next error then goes
+// to the first entry (index -1 is the navigation's own "no current entry").
+void Pointfile_Errorfile_LoadOnly()
+{
+    s_errLogLoadOnly = true;
+    Pointfile_Errorfile();
+    s_errLogLoadOnly = false;
+}
 // (Pointfile_Clear lives in points.cpp; the handler calls it directly via extern.)
 
 // ── error-log navigation (Misc→Next/Previous leak spot, error-log branch) ─────

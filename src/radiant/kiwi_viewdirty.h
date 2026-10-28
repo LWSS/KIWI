@@ -12,8 +12,9 @@ enum kiwiDirtyView_t
     KIWI_DIRTYVIEW_COUNT
 };
 
-// Missed-invalidation backstop in pump ticks; 120 is about 2 s at 60 Hz, 0 disables.
-#define KIWI_VIEWDIRTY_HEARTBEAT_TICKS 120
+// Missed-invalidation backstop in pump ticks; 170 is about 2 s at the 85 Hz cap (KIWI
+// 2026-10-27; was 120 at 60 Hz, 250 at 125 Hz), 0 disables.
+#define KIWI_VIEWDIRTY_HEARTBEAT_TICKS 170
 
 // Mark from the g_nUpdateBits snapshot drained by Radiant_RoutineProcessing.
 void KiwiViewDirty_MarkFromUpdateBits( int bits );

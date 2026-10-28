@@ -23,6 +23,7 @@
 #include "kiwi_ported.h"
 #include "kiwi_refimage.h"
 #include "kiwi_region.h"             // region click/extrude
+#include "kiwi_section.h"            // the marquee skips what the section cut hides
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"                // the sun helper's glyph is clickable
 
@@ -78,6 +79,52 @@ namespace
             }
         }
         return true;
+    }
+
+    // KIWI (2026-10-26, user: "we have a fucking bug with the section view where it will box
+    // select invisible parts (sectioned off areas). Horrible. Fix"): the marquee tests only
+    // what the cut leaves drawn (z <= level, KiwiSection_PointVisible).  A winding wholly
+    // above the cut comes back nullptr; one straddling it is clipped into s_secW, which
+    // holds one winding at a time (each caller is done with it before the next call).
+    struct secWinding_t { int numpoints; float p[MAX_POINTS_ON_WINDING + 1][3]; };
+    secWinding_t s_secW;
+
+    winding_t *SectionVisible( winding_t *w )
+    {
+        if ( !w || !KiwiSection_Cutting() || w->numpoints < 1 || w->numpoints > MAX_POINTS_ON_WINDING )
+            return w;
+        const float level = KiwiSection_Level();
+        int above = 0;
+        for ( int i = 0; i < w->numpoints; ++i )
+            if ( w->p[i][2] > level )
+                ++above;
+        if ( !above )
+            return w;
+        if ( above == w->numpoints )
+            return nullptr;
+        int n = 0;
+        for ( int i = 0; i < w->numpoints && n < MAX_POINTS_ON_WINDING; ++i )
+        {
+            const float *a = w->p[i];
+            const float *b = w->p[( i + 1 ) % w->numpoints];
+            const bool va = a[2] <= level;
+            const bool vb = b[2] <= level;
+            if ( va )
+            {
+                s_secW.p[n][0] = a[0]; s_secW.p[n][1] = a[1]; s_secW.p[n][2] = a[2];
+                ++n;
+            }
+            if ( va != vb )
+            {
+                const float t = ( level - a[2] ) / ( b[2] - a[2] );
+                for ( int k = 0; k < 3; ++k )
+                    s_secW.p[n][k] = a[k] + ( b[k] - a[k] ) * t;
+                s_secW.p[n][2] = level;
+                ++n;
+            }
+        }
+        s_secW.numpoints = n;
+        return ( n >= 3 ) ? (winding_t *)&s_secW : nullptr;
     }
 
     // ── per-shape accumulators ──────────────────────────────────────────────
@@ -141,6 +188,8 @@ namespace
         for ( int col = 0; col < pm->width; ++col )
             for ( int row = 0; row < pm->height; ++row )
             {
+                if ( !KiwiSection_PointVisible( pm->ctrl[col][row].xyz ) )
+                    continue;                      // KIWI: cut away by the section
                 float x = 0.0f, y = 0.0f;
                 const bool ok = Pick_WorldToImage( pm->ctrl[col][row].xyz, &x, &y );
                 t.Point( r, ok, x, y );
@@ -150,6 +199,8 @@ namespace
     // Conservative whole-brush reject: the projected AABB of the def's bounding box.
     bool BrushMaybeInRect( const rect2_t &r, brush_t *def )
     {
+        if ( KiwiSection_Cutting() && def->mins[2] > KiwiSection_Level() )
+            return false;                          // KIWI: wholly above the section cut
         float lo[2] = {  1e30f,  1e30f };
         float hi[2] = { -1e30f, -1e30f };
         for ( int i = 0; i < 8; ++i )
@@ -264,11 +315,11 @@ namespace
                 // wrongly reject diagonal patches whose projected bbox corners protrude.
                 if ( crossing && def->faces )
                     for ( int f = 0; f < def->faceCount; ++f )
-                        TestWinding( r, def->faces[f].w, t, crossing );
+                        TestWinding( r, SectionVisible( def->faces[f].w ), t, crossing );
             }
             else if ( def->faces )
                 for ( int f = 0; f < def->faceCount; ++f )
-                    TestWinding( r, def->faces[f].w, t, crossing );
+                    TestWinding( r, SectionVisible( def->faces[f].w ), t, crossing );
             if ( crossing ? t.Crossed() : t.Contained() )
                 out.push_back( Sel_MakeObject( b ) );
             return;
@@ -284,6 +335,8 @@ namespace
                 for ( int col = 0; col < pm->width; ++col )
                     for ( int row = 0; row < pm->height; ++row )
                     {
+                        if ( !KiwiSection_PointVisible( pm->ctrl[col][row].xyz ) )
+                            continue;              // KIWI: cut away by the section
                         float x, y;
                         if ( !Pick_WorldToImage( pm->ctrl[col][row].xyz, &x, &y ) )
                             continue;
@@ -305,6 +358,8 @@ namespace
                     continue;
                 for ( int i = 0; i < w->numpoints; ++i )
                 {
+                    if ( !KiwiSection_PointVisible( w->p[i] ) )
+                        continue;                  // KIWI: cut away by the section
                     float x, y;
                     if ( !Pick_WorldToImage( w->p[i], &x, &y ) )
                         continue;
@@ -337,6 +392,11 @@ namespace
 
             if ( kind == SEL_FACE )
             {
+                // KIWI: test only the part of the face the section cut leaves drawn.  (Edges
+                // below keep the full winding: their index names an edge of it.)
+                w = SectionVisible( w );
+                if ( !w )
+                    continue;
                 // Drop back-facing faces before the marquee test.  The full winding,
                 // not its centroid, preserves object-style containment/crossing and
                 // leaves wholly enclosed crossing faces to Collect's center-ray rescue.
@@ -393,10 +453,15 @@ namespace
             for ( int i = 0; i < n; ++i )
             {
                 const int j = ( i + 1 ) % n;
-                float ax, ay, bx, by;
-                if ( !Pick_WorldToImage( w->p[i], &ax, &ay ) )
+                // KIWI: only the part of the edge the section cut leaves drawn.
+                float pa[3] = { w->p[i][0], w->p[i][1], w->p[i][2] };
+                float pb[3] = { w->p[j][0], w->p[j][1], w->p[j][2] };
+                if ( !KiwiSection_ClipSegment( pa, pb ) )
                     continue;
-                if ( !Pick_WorldToImage( w->p[j], &bx, &by ) )
+                float ax, ay, bx, by;
+                if ( !Pick_WorldToImage( pa, &ax, &ay ) )
+                    continue;
+                if ( !Pick_WorldToImage( pb, &bx, &by ) )
                     continue;
                 const bool hit = crossing
                     ? SegHitsRect( r, ax, ay, bx, by )
@@ -1030,12 +1095,12 @@ void KiwiBox_DrawPreview()
             if ( !def->faces )
                 continue;
             for ( int f = 0; f < def->faceCount; ++f )
-                PreviewWinding( c, def->faces[f].w );
+                PreviewWinding( c, SectionVisible( def->faces[f].w ) );
         }
         else if ( it.kind == SEL_FACE )
         {
             if ( def->faces && it.faceIndex >= 0 && it.faceIndex < def->faceCount )
-                PreviewWinding( c, def->faces[it.faceIndex].w );
+                PreviewWinding( c, SectionVisible( def->faces[it.faceIndex].w ) );
         }
         else if ( it.kind == SEL_VERTEX )
         {

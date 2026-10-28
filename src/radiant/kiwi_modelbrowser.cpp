@@ -12,6 +12,10 @@
 #include "kiwi_modelbrowser.h"
 #include "kiwi_command.h"
 #include "kiwi_droptrace.h"     // KiwiDrop_IsModelEntity - "Swap in place" targets
+#include "kiwi_construct.h"     // kconPlane_t - Wrap in clip brush
+#include "kiwi_extrude.h"       // KiwiExtrude_BuildPrismDef - the model-aligned clip box
+#include "kiwi_validity.h"      // KiwiValid_Rebuild / CheckBrush
+#include "kiwi_vec.h"           // Cross3 / Dot3
 #include "kiwi_entthumb.h"
 #include "kiwi_thumbcache.h"
 #include "kiwi_fmt.h"
@@ -28,6 +32,7 @@
 #include <filesystem>
 
 #include <algorithm>
+#include <array>
 #include <float.h>
 #include <map>
 #include <random>
@@ -39,6 +44,7 @@
 
 extern void        Undo_KiwiMarkCreated( brush_t *def );                  // undo.cpp (KIWI tail)
 extern void        Radiant_SetProjectMapsPath( const char *mapPath );
+extern void        TexWnd_MaterialDefFor( qtexture_s *q, MaterialDef *out );  // texwnd.cpp (Wrap in clip brush)
 
 namespace
 {
@@ -1527,6 +1533,130 @@ namespace
     }
 
     // Colours: player hulls green, bullet collision orange, physics shape yellow.
+    // KIWI (2026-10-25, user: "a button to wrap a model in a simple clip brush in the model
+    // inspector next to the physics options ... for static models too"): one `clip` box
+    // brush around each selected model's placed bounds (misc_model or dyn_model), in
+    // worldspawn, one undo step.  Unlike the collmap buttons this is per placed copy and an
+    // ordinary brush to edit afterwards.
+    void WrapSelectedInClip()
+    {
+        std::vector<selbrush_t *> models;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            if ( !b->owner || !b->owner->def || !KiwiDrop_IsModelEntity( b ) )
+                continue;
+            const entity_s_def *def = (const entity_s_def *)b->owner->def;
+            if ( def->eclass && ( def->eclass->classtype & 0x10 ) )
+                continue;                                   // prefabs: no single xmodel
+            models.push_back( b );
+        }
+        if ( models.empty() )
+            return;
+
+        // KIWI (2026-10-25, user: "make a new clip that affects physics then ... it should
+        // affect physics and players"): physics collides with PHYS_WORLD_CLIPMASK (qcommon.h),
+        // which has ITEMCLIP but no PLAYERCLIP, so plain `clip` let dyn_models fall through.
+        // `clip_physics` (raw/materials, KIWI) is `clip` + ITEMCLIP: players, AI, vehicles and
+        // physics objects; bullets and AI sight pass, as with `clip`.
+        // Texture_GetHandle registers the render material on first use; a browser entry the
+        // texture window never drew has a null handle, and drawing a face with it crashed
+        // (Face_GetLayerColor -> Ed_Material_GetColorTint).
+        qtexture_s *clip = Texture_GetHandle( "clip_physics" );
+        if ( !clip || !clip->handle )
+        {
+            Sys_Printf( "Wrap in clip brush: the \"clip_physics\" material is not loaded.\n" );
+            return;
+        }
+        Ed_EnsureCurrentMaterial_Kiwi();
+        MaterialDef md;
+        memset( &md, 0, sizeof( md ) );
+        TexWnd_MaterialDefFor( clip, &md );
+
+        // KIWI (2026-10-25, user: "the clip is axis aligned, it should prioritize aligning to
+        // the model"): the box is the model's own bounds in the model's frame - its bottom
+        // rectangle on a plane through the origin along the model's X/Y axes, extruded along
+        // its Z - so a rotated model gets a rotated brush (scale applied).  Gathered before
+        // the deselect below drops the selection list.
+        struct wrapBox_t
+        {
+            kconPlane_t plane;
+            float       loop[8];
+            float       lo, hi;
+        };
+        std::vector<wrapBox_t> boxes;
+        for ( selbrush_t *b : models )
+        {
+            float mins[3], maxs[3], ang[3], scale, org[3];
+            XModel *xm = nullptr;
+            if ( !KiwiDrop_GetModelInfo( b, mins, maxs, ang, &scale, org, &xm ) )
+                continue;
+            float axis[3][3];
+            AnglesToAxis( ang, axis );
+            float lo[3], hi[3];
+            for ( int a = 0; a < 3; ++a )
+            {
+                lo[a] = mins[a] * scale;
+                hi[a] = maxs[a] * scale;
+                if ( hi[a] - lo[a] < 1.0f )         // a flat model still gets a solid brush
+                {
+                    const float mid = 0.5f * ( lo[a] + hi[a] );
+                    lo[a] = mid - 0.5f;
+                    hi[a] = mid + 0.5f;
+                }
+            }
+            wrapBox_t w;
+            for ( int k = 0; k < 3; ++k )
+            {
+                w.plane.origin[k] = org[k];
+                w.plane.u[k]      = axis[0][k];
+                w.plane.v[k]      = axis[1][k];
+            }
+            // The prism extrudes along u x v; if the model's Z points the other way, mirror
+            // the Z range so the box still lands on the model.
+            Cross3( w.plane.u, w.plane.v, w.plane.normal );
+            const bool zAlong = Dot3( w.plane.normal, axis[2] ) >= 0.0f;
+            w.lo = zAlong ? lo[2] : -hi[2];
+            w.hi = zAlong ? hi[2] : -lo[2];
+            const float loop[8] = { lo[0], lo[1],  hi[0], lo[1],  hi[0], hi[1],  lo[0], hi[1] };
+            memcpy( w.loop, loop, sizeof( loop ) );
+            boxes.push_back( w );
+        }
+        if ( boxes.empty() )
+        {
+            Sys_Printf( "Wrap in clip brush: the selected model(s) have no loaded bounds yet.\n" );
+            return;
+        }
+
+        Select_Deselect( 1 );
+        KiwiCmd_UndoBegin( "wrap models in clip" );
+        int built = 0;
+        for ( const wrapBox_t &w : boxes )
+        {
+            const char *why = "unknown";
+            brush_t *def = KiwiExtrude_BuildPrismDef( w.plane, w.loop, 4, w.lo, w.hi, &why );
+            if ( !def )
+            {
+                Sys_Printf( "Wrap in clip brush: skipped a model - %s.\n", why );
+                continue;
+            }
+            for ( int f = 0; f < def->faceCount; ++f )     // the prism takes the current material
+                memcpy( &def->faces[f].mtldef[0], &md, sizeof( MaterialDef ) );
+            KiwiValid_Rebuild( def );
+            if ( !KiwiValid_CheckBrush( def, &why ) )
+            {
+                Brush_Free_R( def );                        // still unlinked
+                Sys_Printf( "Wrap in clip brush: skipped a model - %s.\n", why ? why : "invalid box" );
+                continue;
+            }
+            KiwiExtrude_LandDef( def );             // worldspawn, selected
+            ++built;
+        }
+        KiwiCmd_UndoCommit();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Wrap in clip brush: %i clip brush%s around the selected model%s (selected).\n",
+                    built, built == 1 ? "" : "es", built == 1 ? "" : "s" );
+    }
+
     void DrawSelectedModelInfo( bool inspector )
     {
         std::vector<entity_s_def *> defs;
@@ -1611,6 +1741,15 @@ namespace
                 ImGui::SetTooltip( "Remove collmaps\\%s.map (kept as .map.bak): no player collision.\n"
                                    "Applies to every copy of this model at the next compile.", model );
         }
+
+        // KIWI (2026-10-25): per placed copy, static or dyn_model alike (WrapSelectedInClip).
+        if ( ImGui::SmallButton( "Wrap in clip brush" ) )
+            WrapSelectedInClip();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Put a clip_physics box around each selected model, aligned to it:\n"
+                               "players, AI, vehicles and physics objects collide with it; bullets\n"
+                               "still reach the model. Only these copies, as ordinary world brushes\n"
+                               "you can resize. Undoable." );
 
         // physPreset for dyn_models (and anything already carrying the key)
         int physCount = 0;

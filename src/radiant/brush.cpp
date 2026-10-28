@@ -81,6 +81,8 @@ extern patchMesh_t *Patch_Duplicate( patchMesh_t *from );
 extern void Visuals_VisArray( faceVis_s *vis );
 extern int  Visuals_InitFaceVis( faceVis_s *vis, face_t *faceDef,
                                   const orientation_t *orient );
+bool        Visuals_RewriteFaceVis( faceVis_s *vis, face_t *faceDef,
+                                    const orientation_t *orient );   // KIWI: in-place refill
 // Vis_Free + PlanePts_Alloc are defined further below; Brush_MakeFaceVisuals uses them
 // before their definitions, so forward-declare.
 void  Vis_Free( int count, faceVis_s *f, selbrush_t *brushPtr );
@@ -153,6 +155,10 @@ static void Brush_MakeFaceVisuals( selbrush_t *b, const float *orientArg )
     for ( int i = 0; i < b->faceCount; ++i )
     {
         faceVis_s *fv = &b->faces[i];
+        // KIWI: same materials and vertex count = refill the face's runs in place (see
+        // Visuals_RewriteFaceVis); anything else takes the ported rebuild below.
+        if ( gpu && Visuals_RewriteFaceVis( fv, &b->def->faces[i], orient ) )
+            continue;
         Visuals_VisArray( fv );                     // free old visArray
         if ( gpu )
             Visuals_InitFaceVis( fv, &b->def->faces[i], orient );   // build + upload
@@ -1793,6 +1799,10 @@ extern Material *MaterialDef_14( unsigned int visIndex, MaterialDef *m );
 extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
     const float *xyz, const float *tangent, const float *binormal,
     const float *normal, const float *texCoord, const float *color );
+// KIWI: refill a live run of the same material and vertex count in place.
+extern void Editor_VB_Rewrite( unsigned int handle, int vertCount,
+    const float *xyz, const float *tangent, const float *binormal,
+    const float *normal, const float *texCoord, const float *color );
 
 // renderer string hash (r_utils.cpp) — for the material constant lookup.
 extern unsigned int R_HashString( const char *string );
@@ -2590,6 +2600,45 @@ int Visuals_InitFaceVis( faceVis_s *face, face_t *def, const orientation_t *orie
             (const float *)g.normal, (const float *)g.st, (const float *)g.color );
     }
     return layerCount;
+}
+
+// KIWI (2026-10-27, user: "it's still laggy while dragging and using tools. Nasty hitches
+// too"): a live sample of a drag put 19% of the main thread in Brush_MakeFaceVisuals - every
+// moved face freed its VB runs and allocated new ones every frame.  When a face still has
+// the same layer count, the same material per layer and the same vertex count (every face
+// of a move, and most edits), its existing runs are refilled in place instead.  Every layer
+// is built first; nothing is written unless all of them fit, so any mismatch falls back
+// to the ported free + Visuals_InitFaceVis path untouched.  True = rewritten.
+const int KVIS_REWRITE_MAX_LAYERS = 8;
+
+bool Visuals_RewriteFaceVis( faceVis_s *face, face_t *def, const orientation_t *orient )
+{
+    winding_t *w = def->w;
+    if ( !face->visCount || !face->visArray || !w || face->vertcount != w->numpoints
+      || face->visCount > KVIS_REWRITE_MAX_LAYERS )
+        return false;
+    MaterialDef *mtldef = &def->mtldef[g_qeglobals.current_edit_layer];
+    if ( MaterialDef_11( mtldef ) != face->visCount )
+        return false;
+
+    static EdLayerGeom s_geom[KVIS_REWRITE_MAX_LAYERS];   // ~4 KB each; main thread only
+    for ( int L = 0; L < face->visCount; ++L )
+    {
+        const faceVisuals_s &old = face->visArray[L];
+        EdLayerGeom &g = s_geom[L];
+        if ( !old.mtlHandle || !old.vertHandle
+          || !Face_BuildLayerGeom( def, orient, L, &g ) || g.material != old.mtlHandle
+          || g.vertcount != face->vertcount )
+            return false;
+    }
+    for ( int L = 0; L < face->visCount; ++L )
+    {
+        const EdLayerGeom &g = s_geom[L];
+        Editor_VB_Rewrite( (unsigned int)face->visArray[L].vertHandle, g.vertcount,
+            (const float *)g.xyz, (const float *)g.tangent, (const float *)g.binormal,
+            (const float *)g.normal, (const float *)g.st, (const float *)g.color );
+    }
+    return true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════

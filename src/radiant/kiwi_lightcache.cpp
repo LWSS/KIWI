@@ -188,24 +188,30 @@ const KiwiLightCasterRecord *KiwiLightCache_Get(
         if ( s_entries[i].stamp < s_entries[victim].stamp ) victim = i;
     }
 
-    KiwiLightCasterRecord *scratch = (KiwiLightCasterRecord *)
-        malloc((size_t)KLIGHT_MAX_CASTERS * sizeof(KiwiLightCasterRecord));
-    if ( !scratch )
-        return nullptr;
-    int count = gather(scratch, origin, radius);
+    // KIWI (2026-10-27, user: "it's still laggy while dragging and using tools. Nasty
+    // hitches too"): the gather buffer was a fresh KLIGHT_MAX_CASTERS-record malloc per
+    // miss, and a miss is every frame while a light (or its casters) moves.  The Debug
+    // CRT fills every new block, so the drag sample showed that fill alone.  One scratch
+    // buffer now lives for the session; only the `count` records kept are allocated.
+    static KiwiLightCasterRecord *s_scratch = nullptr;
+    if ( !s_scratch )
+    {
+        s_scratch = (KiwiLightCasterRecord *)
+            malloc((size_t)KLIGHT_MAX_CASTERS * sizeof(KiwiLightCasterRecord));
+        if ( !s_scratch )
+            return nullptr;
+    }
+    int count = gather(s_scratch, origin, radius);
     if ( count < 0 ) count = 0;
     if ( count > KLIGHT_MAX_CASTERS ) count = KLIGHT_MAX_CASTERS;
 
-    KiwiLightCasterRecord *kept = scratch;
-    if ( count == 0 )
+    KiwiLightCasterRecord *kept = nullptr;
+    if ( count > 0 )
     {
-        free(scratch);
-        kept = nullptr;
-    }
-    else
-    {
-        void *shrunk = realloc(scratch, (size_t)count * sizeof(KiwiLightCasterRecord));
-        if ( shrunk ) kept = (KiwiLightCasterRecord *)shrunk;
+        kept = (KiwiLightCasterRecord *)malloc((size_t)count * sizeof(KiwiLightCasterRecord));
+        if ( !kept )
+            return nullptr;
+        memcpy(kept, s_scratch, (size_t)count * sizeof(KiwiLightCasterRecord));
     }
 
     LightCacheEntry &e = s_entries[victim];

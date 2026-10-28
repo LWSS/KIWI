@@ -36,6 +36,7 @@
 #include "kiwi_plastbridge.h"
 #include "kiwi_ported.h"
 #include "kiwi_test.h"               // KIWI-TEST: unattended script mode hooks
+#include "kiwi_ux.h"                 // KIWI: KiwiUX_BackgroundFpsCap (the unfocused 5 fps cap)
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
 #include "prefs.h"                     // Prefs_Init + g_PrefsDlg (the light-preview seeds)
@@ -64,6 +65,7 @@ extern bool ImGuiShell_FrameAuthorized();         // ROUND U: will this paint dr
 extern void ImGuiShell_RenderViewportsToRT();     // Phase 5: render the 4 viewports to their RTs
 extern void ImGuiShell_DispatchViewportInput();   // Phase 5: viewport mouse input (post-present)
 extern void ImGuiShell_ForwardSwallowedKey( UINT msg, WPARAM wParam, LPARAM lParam );   // KIWI: the Alt release latch
+extern bool KiwiKeybind_CaptureMessage( const MSG *msg );   // kiwi_keymap.cpp - Command List key capture
 
 // ── KIWI-UX (ROUND AD): device-health reporting for the frame's own paint ──────
 // Declared against kiwi_devicereset.h (the definition is kiwi_devicereset.cpp); that
@@ -834,6 +836,12 @@ static bool Radiant_BootFrame( HWND frame )
 // ═════════════════════════════════════════════════════════════════════════════
 static bool Radiant_PreTranslateMessage( MSG *pMsg )
 {
+    // KIWI (2026-10-27, user: "It should also allow assignment of new keybinds"): while the
+    // Command List waits for a new chord, that key belongs to it ahead of ImGui, the key
+    // funnel, the accelerators and the table, so pressing it runs nothing.
+    if ( KiwiKeybind_CaptureMessage( pMsg ) )
+        return true;
+
     // ImGui text input outranks accelerators/hotkeys: when a panel field owns the
     // keyboard, keys must reach it, not the command map (the pump-side twin of the MFC
     // shell's CEntityWnd::PreTranslateMessage "not an Edit control" gate).
@@ -1048,9 +1056,9 @@ static int Radiant_RunMessageLoop()
     // sleep-until-input-or-10ms. UI runs ~60-100 Hz, input latency ≤ one tick, no
     // busy spin, and no window can starve another. (Free fix: the RMB camera fly now
     // advances every tick instead of MFC's message-driven ~4 Hz idle cadence.)
-    // 60 FPS CAP, ZERO ADDED INPUT LATENCY: messages are drained on EVERY wake (input is
-    // never held back by the frame gate), but a dockspace frame renders only when 1/60 s
-    // has elapsed since the last one. The wait timeout is "time until the next frame is
+    // 85 FPS CAP (KIWI 2026-10-27; was 60, then 125), ZERO ADDED INPUT LATENCY: messages are
+    // drained on EVERY wake (input is never held back by the frame gate), but a dockspace frame
+    // renders only when ~11.8 ms has elapsed since the last one. The wait timeout is "time until the next frame is
     // due", so the loop sleeps precisely between frames yet wakes instantly for input
     // (QS_ALLINPUT). timeBeginPeriod(1) keeps the wait granularity ~1 ms — without it the
     // default 15.6 ms timer quantum would make a 16.7 ms cadence oscillate 30↔60.
@@ -1059,7 +1067,16 @@ static int Radiant_RunMessageLoop()
     LARGE_INTEGER qpf, lastFrame;
     ::QueryPerformanceFrequency( &qpf );
     ::QueryPerformanceCounter( &lastFrame );
-    const LONGLONG frameTicks = qpf.QuadPart / 60;
+    // KIWI (2026-10-27, user: "change the fps cap to 125, to match the game's frame cap
+    // (1000/8)"), then (user: "change the fps limit to 85, 125 is too heavy"): one frame per
+    // 1/85 s (was qpf / 60, then 8 ms).
+    const LONGLONG fgFrameTicks = qpf.QuadPart / 85;
+    // KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5, make this
+    // a setting in the View-> menu"): 5 frames a second while no window of this process (the
+    // frame, a popped-out panel, a modal dialog) is in the foreground.  Test modes never get
+    // the foreground and are exempt.
+    const LONGLONG bgFrameTicks = qpf.QuadPart / 5;
+    const DWORD    selfPid      = ::GetCurrentProcessId();
 
     MSG msg;
     for ( ;; )
@@ -1091,6 +1108,17 @@ static int Radiant_RunMessageLoop()
                                // (event-driven viewport repaints — not frame-gated, so an
                                // edit still shows on the very next tick)
 
+        bool background = false;
+        if ( KiwiUX_BackgroundFpsCap() && !KiwiTest_Active() )
+        {
+            DWORD fgPid = 0;
+            const HWND fg = ::GetForegroundWindow();
+            if ( fg )
+                ::GetWindowThreadProcessId( fg, &fgPid );
+            background = ( fgPid != selfPid );
+        }
+        const LONGLONG frameTicks = background ? bgFrameTicks : fgFrameTicks;
+
         LARGE_INTEGER now;
         ::QueryPerformanceCounter( &now );
         const LONGLONG sinceFrame = now.QuadPart - lastFrame.QuadPart;
@@ -1099,7 +1127,7 @@ static int Radiant_RunMessageLoop()
             if ( s_hwndFrame && ::IsWindowVisible( s_hwndFrame ) && ImGuiShell_PrimaryActive() )
             {
                 // The editor's frame: four RT viewport renders, one composited ImGui frame,
-                // then the pop-out windows.  Capped at 60 Hz by the QPC arithmetic around it.
+                // then the pop-out windows.  Capped at 85 Hz by the QPC arithmetic around it.
                 PROF_SCOPED( "editor frame" );
                 // Phase 5: render the four viewports into their RT textures FIRST — each does
                 // its own scene + suppressed Present, so it must run OUTSIDE the compositing
@@ -1129,7 +1157,8 @@ static int Radiant_RunMessageLoop()
         DWORD waitMs = 0;
         if ( ticksLeft > 0 )
             waitMs = (DWORD)( ( ticksLeft * 1000 ) / qpf.QuadPart );
-        if ( waitMs > 16 ) waitMs = 16;
+        const DWORD maxWait = background ? 200 : 12;
+        if ( waitMs > maxWait ) waitMs = maxWait; // KIWI: never sleep past one frame (85 fps / 5 fps)
         ::MsgWaitForMultipleObjects( 0, nullptr, FALSE, waitMs, QS_ALLINPUT );
     }
 }

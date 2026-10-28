@@ -688,6 +688,28 @@ bool KiwiSection_PointVisible( const float *p )
     return p[2] <= s_level;
 }
 
+// KIWI (2026-10-26, user: "we have a fucking bug with the section view where it will box
+// select invisible parts (sectioned off areas). Horrible. Fix"): the marquee trims what it
+// tests to the half PointVisible keeps.
+bool KiwiSection_ClipSegment( float *a, float *b )
+{
+    if ( !KiwiSection_Cutting() || !a || !b )
+        return true;
+    const bool va = a[2] <= s_level;
+    const bool vb = b[2] <= s_level;
+    if ( va && vb )
+        return true;
+    if ( !va && !vb )
+        return false;
+    float *hidden = va ? b : a;
+    const float *kept = va ? a : b;
+    const float t = ( s_level - kept[2] ) / ( hidden[2] - kept[2] );   // straddles: denominator != 0
+    for ( int k = 0; k < 3; ++k )
+        hidden[k] = kept[k] + ( hidden[k] - kept[k] ) * t;
+    hidden[2] = s_level;
+    return true;
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 //  CAMERA VIEW MODES - EDGE OUTLINE + X-RAY (RADIANT_UX_DESIGN D-EDGEOUTLINE / D-XRAY)
 // ═════════════════════════════════════════════════════════════════════════════

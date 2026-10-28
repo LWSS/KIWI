@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34173, modal none (block full).
+// 34100..34199 the second instant block. Next free: instant 34175, modal none (block full).
 // Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -182,6 +182,8 @@
 #define KIWI_CMD_WINDOW_GLASS       34167   // Windows > Glass
 // KIWI END
 #define KIWI_CMD_CLEAN_PRECISION    34168   // Build > Clean Up Precision (kiwi_fragile)
+#define KIWI_CMD_WINDOW_MATPROPS    34173   // Windows > Material Properties (kiwi_matprops) - KIWI (2026-10-26, user: "material properties panel")
+#define KIWI_CMD_VIEW_BG_FPS_CAP    34174   // View > Background Frame Cap (5 fps) - KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5")
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

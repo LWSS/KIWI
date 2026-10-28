@@ -15,6 +15,7 @@
 #include "kiwi_boolean.h"
 #include "kiwi_cmdoptions.h"             // KiwiCmdOpts_TabFocus (Tab into the options panel)
 #include "kiwi_camera.h"                 // KiwiCam_FlySwallowKey (the fly-key funnel rung)
+#include "kiwi_viewport.h"               // KiwiVP_FlyActive (the held fly's keys come first)
 #include "kiwi_construct.h"
 #include "kiwi_csg.h"
 #include "kiwi_dupe.h"
@@ -472,6 +473,7 @@ namespace
         { KIWI_CMD_PERF_HUD,         { "Perf HUD",         "View",    0, nullptr    } },
         { KIWI_CMD_VIEW_SHOW_TRIS,   { "Show Triangle Count", "View", 0, nullptr    } },
         { KIWI_CMD_VIEW_LEAK_BG,     { "Leak Finder Background (strobing)", "View", 0, nullptr } },
+        { KIWI_CMD_VIEW_BG_FPS_CAP,  { "Background Frame Cap (5 fps)", "View", 0, nullptr } },   // KIWI 2026-10-27
         { KIWI_CMD_VIEW_DEBUG_ORBIT, { "Debug: Orbit Pivot Probe",          "View", 0, nullptr } },
         { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
@@ -484,6 +486,7 @@ namespace
         { KIWI_CMD_GLASS_APPLY,      { "Apply Glass Set",         "Gameplay",  SEL_MASK_EVERYTHING, KiwiGlass_CanApply } },
         { KIWI_CMD_WINDOW_GLASS,     { "Glass",                   "Windows",   0, nullptr } },
         // KIWI END
+        { KIWI_CMD_WINDOW_MATPROPS,  { "Material Properties",     "Windows",   0, nullptr } },   // KIWI (2026-10-26, user: "material properties panel")
         { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { KIWI_CMD_CLEAN_PRECISION,  { "Clean Up Precision (square near-axial faces, flatten near-flat patches)", "Build", 0, nullptr } },
@@ -858,6 +861,7 @@ namespace
         case KIWI_CMD_PERF_HUD:                         // a HUD toggle, not a verb
         case KIWI_CMD_VIEW_SHOW_TRIS:                   // View readout toggle
         case KIWI_CMD_VIEW_LEAK_BG:                     // View toggle
+        case KIWI_CMD_VIEW_BG_FPS_CAP:                  // View toggle (unfocused 5 fps)
         case KIWI_CMD_VIEW_DEBUG_ORBIT:                 // View toggle
         case KIWI_CMD_VIEW_SHOW_FACING:                 // View overlay toggle (facing arrows)
         case KIWI_CMD_TERRAIN_PANEL:                    // a panel toggle, not a verb
@@ -869,6 +873,7 @@ namespace
         // KIWI GLASS
         case KIWI_CMD_WINDOW_GLASS:
         // KIWI END
+        case KIWI_CMD_WINDOW_MATPROPS:                  // KIWI (2026-10-26): a window toggle, not a verb
         case KIWI_CMD_WINDOWS_RESET_LAYOUT:             // a layout action, not a verb
         case KIWI_CMD_PARTICLE_EXPORT:
         case KIWI_CMD_PLASTICITY_PUSH:                 // external export, not a modelling replay
@@ -1596,6 +1601,13 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     default:
         break;
     }
+
+    // KIWI (2026-10-27): while the mouse-forward fly is HELD its keys are the camera's,
+    // ahead of a live tool (the Line tool's S would otherwise toggle spline spans mid-flight).
+    if ( KiwiVP_FlyActive()
+      && ( vk == 'W' || vk == 'A' || vk == 'S' || vk == 'D' || vk == 'Q' || vk == 'E'
+        || vk == 0x25 || vk == 0x26 || vk == 0x27 || vk == 0x28 ) )   // VK_LEFT .. VK_DOWN
+        return true;
 
     if ( KiwiAdd_IsOpen() )
     {

@@ -10,7 +10,8 @@
 // Bump when defaults or dock placement changes so existing profiles receive both together.
 // Version 17 adds Reference Images beside Decals in the lower-right dock node.
 // Version 18 adds Particles beside Models (2026-09-24).
-#define KIWI_LAYOUT_VERSION  18
+// Version 19 adds Material as a tab beside the 2D View (2026-10-26, user: "material properties panel").
+#define KIWI_LAYOUT_VERSION  19
 
 enum kiwiWindow_t
 {
@@ -42,6 +43,9 @@ enum kiwiWindow_t
     // docks into the main node when opened.
     KIWI_WIN_GLASS,         // "Glass"                          default OFF
     // KIWI END
+    // KIWI (2026-10-26, user: "material properties panel"): the Textures browser's current
+    // material - surface type, bullet penetration, flag bits (kiwi_matprops.h).
+    KIWI_WIN_MATPROPS,      // "Material"                       default ON
     KIWI_WIN_COUNT,
 };
 

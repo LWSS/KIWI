@@ -54,7 +54,12 @@ float KiwiRegion_PlaneBand();
 // Report the nearest visible open-end gap, throttled once per store generation.
 // `force` also prints the no-gap answer for explicit diagnostics.
 void KiwiRegion_ReportGaps( bool force );
-#define KREG_MIN_AREA    1.0f       // square world units — below this it is a scratch
+// KIWI (2026-10-26, user: "drawing construction lines on it does not complete a construction
+// face"): was 1.0 - a whole square inch - so hardware-scale detail drawn after Space framed a
+// small face (a 0.25 sq in triangle on a door jamb) never became a face.  The weld already
+// removes edges under KREG_JOIN_DIST; a triangle whose edges just clear it is ~0.11, so the
+// floor only has to catch zero-area spurs and float noise.
+#define KREG_MIN_AREA    0.02f      // square world units — below this it is a scratch
 
 // A derived loop can combine several tessellated objects, so its cap is distinct
 // from KCON_SEGS_MAX.  128 admits two fully tessellated round boundaries and must
@@ -62,7 +67,7 @@ void KiwiRegion_ReportGaps( bool force );
 #define KREG_MAX_LOOP    128        // vertices per derived region loop
 
 // Count the new-region flash in drawn frames so idle time cannot consume it unseen.
-#define KREG_FLASH_FRAMES 60
+#define KREG_FLASH_FRAMES 85        // ~1 s at the 85 fps cap (KIWI 2026-10-27; was 60 at 60, 125 at 125)
 
 // Lift coplanar fills toward the viewer along the oriented region-plane normal.
 // Match the 0.5-unit face-fill displacement; a fan needs more margin than an outline.
@@ -173,6 +178,21 @@ struct kchainStep_t
 
 bool KiwiRegion_ChainWalk( const int *objects, int count,
                            std::vector<kchainStep_t> *outSteps, bool *outClosed );
+
+// KIWI (2026-10-27, user: "If I draw a line like this, there is no construction face made"):
+// lay a free chain about to be stored ONTO the construction face it crosses.  `pts` are WORLD
+// points (3 floats); `rays` the click ray behind each (origin + unit dir, 6 floats); a point
+// with `movable` set (a plain surface / grid hit) slides along its ray onto the face plane,
+// at most `maxMove` units, so it stays exactly under the cursor; a fixed point must already
+// lie on the plane.  The flattened chain must touch the face (a point inside, an edge
+// crossing).  Of several faces the one needing the least movement wins.  True = changed.
+bool KiwiRegion_FlattenChain( std::vector<float> &pts, const std::vector<unsigned char> &movable,
+                              const std::vector<float> &rays, float maxMove );
+// KIWI (2026-10-27, user: "try to fix the remaining issues"): an open chain END that stops
+// INSIDE a construction face, in its plane, just short of the face's rim (beyond the weld, so
+// the arrangement leaves it dangling) is carried along its last segment onto the rim when the
+// gap is under maxGap[end] world units.  canMove[0] / [1] = first / last point may move.
+bool KiwiRegion_ExtendChainEnds( std::vector<float> &pts, const bool canMove[2], const float maxGap[2] );
 
 // 2D polygon toolkit.
 // Signed area of a plane-space loop; > 0 == CCW.

@@ -338,18 +338,46 @@ struct GfxStaticModelDrawInst // sizeof=0x4C
     // padding byte
 };
 
+#ifdef KISAK_RADIANT
+// KIWI (2026-10-26, Radiant crash "Too many unique materials (2048 or more)" while scrolling
+// the Textures window over ~6300 raw materials): Radiant builds every material's sort key
+// itself (raw loads only; the game's keys are baked into fastfiles and keep the retail
+// layout), so its material index takes 3 of the 4 unused bits: 14 bits = 16384 materials.
+// Everything above it moves up 3; the low 29 bits (and DRAWSURF_KEY_MASK) are unchanged.
+#define MAX_MATERIAL_COUNT 16384
 struct GfxDrawSurfFields // sizeof=0x8
 {                                       // ...
     /* 0*/ unsigned __int64 objectId : 16;
     /*16*/ unsigned __int64 reflectionProbeIndex : 8;
-    /*24*/ unsigned __int64 customIndex : 5;         
-    /*29*/ unsigned __int64 materialSortedIndex : 11;
-    /*40*/ unsigned __int64 prepass : 2;             
-    /*42*/ unsigned __int64 primaryLightIndex : 8;   
-    /*50*/ unsigned __int64 surfType : 4;            
-    /*54*/ unsigned __int64 primarySortKey : 6;      
-    /*60*/ unsigned __int64 unused : 4;              
+    /*24*/ unsigned __int64 customIndex : 5;
+    /*29*/ unsigned __int64 materialSortedIndex : 14;
+    /*43*/ unsigned __int64 prepass : 2;
+    /*45*/ unsigned __int64 primaryLightIndex : 8;
+    /*53*/ unsigned __int64 surfType : 4;
+    /*57*/ unsigned __int64 primarySortKey : 6;
+    /*63*/ unsigned __int64 unused : 1;
 };
+#define DRAWSURF_PRIMARY_SORT_KEY_SHIFT 57
+#else
+#define MAX_MATERIAL_COUNT 2048
+struct GfxDrawSurfFields // sizeof=0x8
+{                                       // ...
+    /* 0*/ unsigned __int64 objectId : 16;
+    /*16*/ unsigned __int64 reflectionProbeIndex : 8;
+    /*24*/ unsigned __int64 customIndex : 5;
+    /*29*/ unsigned __int64 materialSortedIndex : 11;
+    /*40*/ unsigned __int64 prepass : 2;
+    /*42*/ unsigned __int64 primaryLightIndex : 8;
+    /*50*/ unsigned __int64 surfType : 4;
+    /*54*/ unsigned __int64 primarySortKey : 6;
+    /*60*/ unsigned __int64 unused : 4;
+};
+#define DRAWSURF_PRIMARY_SORT_KEY_SHIFT 54
+#endif
+static_assert( sizeof( GfxDrawSurfFields ) == 8, "GfxDrawSurfFields must stay one 64-bit key" );
+// The reverse sort's raw HIDWORD rewrite of primarySortKey (r_light.cpp).
+#define DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT ( DRAWSURF_PRIMARY_SORT_KEY_SHIFT - 32 )
+#define DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR ( ~( 0x3Fu << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT ) )
 
 constexpr unsigned __int64 DRAWSURF_KEY_MASK = 0xFFFFFFFFE0000000;
 

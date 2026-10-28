@@ -84,6 +84,7 @@ static float  s_directionalExtrudeDistance = 0.0f;
        Material *mat_white_multiply = nullptr; // 0x23F15C4
 static short  s_indexCount     = 0;    // 0x23F15C8  indexCount
 static short  s_vertexCount    = 0;    // 0x23F15CA  vertexCount
+static KiwiShadVolRecording *s_recording = nullptr;   // KIWI: flushed batches are copied here
 
 // The binary's flush sweeps ALL 65,536 edge slots and memsets the whole 64 KB vertex-index
 // table per batch.  These two lists record which slots an insert actually claimed so the
@@ -286,6 +287,13 @@ void SunLightPreview_PolyOffsetShadows()
     {
         if ( !mat_stencilshadow )
             mat_stencilshadow = rgp.stencilShadowMaterial;   // engine builtin "stencilshadow"
+        if ( s_recording )                                   // KIWI: the light-preview cache
+        {
+            s_recording->emplace_back();
+            KiwiShadVolBatch &b = s_recording->back();
+            b.indices.assign( s_indexBuf, s_indexBuf + s_indexCount );
+            b.xyzw.assign( s_xyzw, s_xyzw + 4 * (int)s_vertexCount );
+        }
         ++g_svBatches;
         g_svBatchKB += ( 16 + 40 * (int)s_vertexCount + 2 * (int)s_indexCount ) / 1024;
         R_AddRenderCmdDrawTris(
@@ -302,6 +310,39 @@ void SunLightPreview_PolyOffsetShadows()
 
     s_vertexCount = 0;
     s_indexCount  = 0;
+}
+
+void Radiant_ShadVol_SetRecording( KiwiShadVolRecording *rec )
+{
+    s_recording = rec;
+}
+
+// The batches go out exactly as the flush above sent them; normal / colour / st are the
+// same never-written zero arrays it passes (the stencil pass reads only xyzw).
+void Radiant_ShadVol_Replay( const KiwiShadVolRecording &rec )
+{
+    if ( !mat_stencilshadow )
+        mat_stencilshadow = rgp.stencilShadowMaterial;
+    if ( !mat_stencilshadow )
+        return;
+    for ( const KiwiShadVolBatch &b : rec )
+    {
+        const int vertexCount = (int)b.xyzw.size() / 4;
+        if ( b.indices.empty() || !vertexCount || vertexCount > SHADVOL_MAX_VERTS )
+            continue;
+        ++g_svBatches;
+        g_svBatchKB += ( 16 + 40 * vertexCount + 2 * (int)b.indices.size() ) / 1024;
+        R_AddRenderCmdDrawTris(
+            mat_stencilshadow,
+            TECHNIQUE_UNLIT,
+            (short)b.indices.size(),
+            (const uint16_t *)b.indices.data(),
+            (short)vertexCount,
+            (const float (*)[4])b.xyzw.data(),
+            (const float (*)[3])s_normal,
+            s_color,
+            (const float (*)[2])s_st );
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

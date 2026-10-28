@@ -180,7 +180,15 @@ namespace
 
     // Fly tuning.
     const float  KCAM_FLY_SHIFT   = 3.0f;      // Shift boost
+    const float  KCAM_FLY_CTRL    = 0.25f;     // KIWI (2026-10-27): Ctrl creep
     const double KCAM_FLY_MAX_DT  = 0.1;       // a stall must not teleport the camera
+    // KIWI (2026-10-27): perspective fly velocity eases toward the keys' target with this
+    // time constant (seconds) - starts and stops in ~0.1 s instead of snapping.
+    const double KCAM_FLY_EASE    = 0.06;
+    const char  *KCAM_LOOKSENS_ENTRY = "FlyLookSens";    // x100
+    const char  *KCAM_FLYUPS_ENTRY   = "FlySpeedUps";    // units per second
+    const char  *KCAM_INVERTY_ENTRY  = "FlyInvertY";
+    const char  *KCAM_WORLDUP_ENTRY  = "FlyWorldUp";
 
     // Ortho arrows pan at a fixed screen-pixel rate. Normalize the persisted speed
     // by its default so the multiplier is applied once in both projections.
@@ -219,6 +227,12 @@ namespace
     bool   s_flyLookHeld = false;
     bool   s_flyWasd     = false;               // KIWI: the WASD/QE fly keys were live last tick
     float  s_flyScale = -1.0f;                  // <0 = not read from the profile yet
+    float  s_flyVel[3] = { 0.0f, 0.0f, 0.0f };  // KIWI: eased perspective fly velocity, units/s
+    float  s_lookSens  = -1.0f;                 // <0 = not read from the profile yet
+    float  s_flyUps    = -1.0f;                 // KIWI: perspective fly speed, units/s (<0 = unread)
+    double s_flySpeedStamp = 0.0;               // when the wheel last changed it (0 = never)
+    int    s_invertY   = -1;
+    int    s_worldUp   = -1;
 
     bool FlyLetter( unsigned int vk )
     {
@@ -230,7 +244,7 @@ namespace
         return KiwiCmd_KeyHeld( vk );       // a test instance never flies off the user's keys
     }
 
-    // Measure fly dt because the 60-fps pump cadence is a cap, not a guarantee.
+    // Measure fly dt because the 125-fps pump cadence is a cap, not a guarantee.
     double NowSeconds()
     {
         // QueryPerformanceFrequency is constant for the process lifetime.
@@ -249,19 +263,82 @@ namespace
 }   // Pause the namespace: KiwiCam_RayAxis is declared with external linkage.
 
 // Shared closest-point-on-an-axis solve.
+// KIWI: "extrude a construction face at a very flat camera angle, it's Red and wont work"
+// - looking (nearly) straight along the axis used to refuse every sample, so extrude,
+// cylinder height, face push, dupe, pipe and extend held at zero.  The mode is chosen
+// from the CAMERA (eye->pt against the axis), never per cursor ray, so one drag never
+// switches formulas: an end-on view through pt makes the exact solve return the eye
+// itself for every ray, which no per-ray blend can repair.
 bool KiwiCam_RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out )
 {
+    float a[3] = { axis[0], axis[1], axis[2] };
+    if ( !Norm3( a ) )
+        return false;
     float w0[3];
     Sub3( pt, ray.origin, w0 );
-    const float b = Dot3( axis, ray.dir );
-    const float d = Dot3( axis, w0 );
     const float e = Dot3( ray.dir, w0 );
-    const float den = 1.0f - b * b;
-    // den is sin²(theta); reject the same 14-degree cone as the view gate.
-    if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
-        return false;
-    const float s = ( b * e - d ) / den;
-    Mad3( pt, axis, s, out );
+
+    // The view direction AT the anchor: perspective eye->pt, ortho the view forward.
+    const camera_s *c = Ed_Camera();
+    float f[3];
+    Copy3( c->vpn, f );
+    if ( !KiwiCam_Ortho() )
+    {
+        float ep[3];
+        Sub3( pt, c->origin, ep );
+        if ( Norm3( ep ) )
+            Copy3( ep, f );
+    }
+    const float af = Dot3( a, f );
+
+    if ( fabsf( af ) < KCAM_AXIS_EXACT_DOT )
+    {
+        const float b = Dot3( a, ray.dir );
+        const float d = Dot3( a, w0 );
+        const float den = 1.0f - b * b;
+        // den is sin²(theta); the cursor is near the axis's vanishing point - hold.
+        if ( fabsf( den ) < KCAM_RAYAXIS_MIN_DEN )
+            return false;
+        const float s = ( b * e - d ) / den;
+        Mad3( pt, a, s, out );
+        return true;
+    }
+
+    // Near end-on.  L = pt -> the closest point of the cursor ray (no division, so no
+    // ray can fail); a_s = the axis as seen in the screen plane at pt, |a_s| = sin.
+    float L[3], as[3];
+    for ( int k = 0; k < 3; ++k )
+    {
+        L[k]  = ray.origin[k] + ray.dir[k] * e - pt[k];
+        as[k] = a[k] - f[k] * af;
+    }
+    const float sn = Len3( as );
+    float g[3];
+    if ( sn > KCAM_AXIS_UPCONV_SIN )
+    {
+        for ( int k = 0; k < 3; ++k )
+            g[k] = as[k] / sn;                  // follow the axis's own screen direction
+    }
+    else
+    {
+        // Dead end-on: the axis has no screen direction.  Screen-up pulls toward the eye.
+        const float uf = Dot3( c->vup, f );
+        for ( int k = 0; k < 3; ++k )
+            g[k] = c->vup[k] - f[k] * uf;
+        if ( !Norm3( g ) )
+            Copy3( c->vup, g );
+        const float toward = ( af < 0.0f ) ? 1.0f : -1.0f;   // +axis points at the eye
+        for ( int k = 0; k < 3; ++k )
+            g[k] *= toward;
+    }
+    // True foreshortening down to the 14-degree cone (the cap tracks the cursor, gain
+    // <= 4.1), then eased back to 1:1 at a dead end-on view.  Continuous in the camera.
+    float m = sn;
+    if ( sn < KCAM_AXIS_PORTRAY_SIN )
+        m = KCAM_AXIS_PORTRAY_SIN + ( 1.0f - KCAM_AXIS_PORTRAY_SIN )
+                                  * ( 1.0f - sn / KCAM_AXIS_PORTRAY_SIN );
+    const float s = Dot3( L, g ) / m;
+    Mad3( pt, a, s, out );
     return true;
 }
 
@@ -1308,7 +1385,11 @@ bool KiwiCam_AxisPortrayable( const float *axis, float *outDot )
         d = -d;
     if ( outDot )
         *outDot = d;
-    return d < KCAM_AXIS_PORTRAY_DOT;
+    // KIWI: "extrude a construction face at a very flat camera angle, it's Red and wont
+    // work" - was `d < KCAM_AXIS_PORTRAY_DOT`, a 14-degree view gate that froze every
+    // axis drag (extrude, cylinder height, face push, dupe, pipe, extend) at its held
+    // value.  KiwiCam_RayAxis now maps an end-on view in screen space, so no gate.
+    return true;
 }
 
 // KIWI (2026-10-22, user: "make it so that when a tool is being used or activated, the
@@ -1398,7 +1479,12 @@ float KiwiCam_WorldPerPixel( const float *world )
 // Mouselook.
 void KiwiCam_LookDrag( int dx, int dy )
 {
-    if ( dx == 0 && dy == 0 )
+    KiwiCam_LookDelta( (float)dx, (float)dy );
+}
+
+void KiwiCam_LookDelta( float dx, float dy )
+{
+    if ( dx == 0.0f && dy == 0.0f )
         return;
     camera_s *c = Ed_Camera();
 
@@ -1407,8 +1493,8 @@ void KiwiCam_LookDrag( int dx, int dy )
     // making the opposite pole reachable.
     float lo = 0.0f, hi = 0.0f;
     KCam_PitchDragBounds( c->angles[0], &lo, &hi );
-    c->angles[1] -= (float)dx * KCAM_DEG_PER_PX;
-    c->angles[0] -= (float)dy * KCAM_DEG_PER_PX;
+    c->angles[1] -= dx * KCAM_DEG_PER_PX;
+    c->angles[0] -= dy * KCAM_DEG_PER_PX;
 
     if ( c->angles[0] > hi ) c->angles[0] = hi;
     if ( c->angles[0] < lo ) c->angles[0] = lo;
@@ -1614,6 +1700,7 @@ namespace
         float secLevel = 0.0f, secAnchor[3] = {};
     };
     camViewPending_t s_viewPending;
+    bool             s_viewRestored = false;    // KiwiCamView_Restored
 
     // A hand-edited or damaged record must not throw the camera into NaN or the far void.
     bool ViewFinite( const float *v, int n )
@@ -1696,7 +1783,16 @@ bool KiwiCamView_ParseSidecarLine( const char *line )
 
 void KiwiCamView_ResetPending()
 {
-    s_viewPending = camViewPending_t();
+    s_viewPending  = camViewPending_t();
+    s_viewRestored = false;
+}
+
+// KIWI (2026-10-25, user: "the camera save/load does not work. it starts way zoomed out
+// alwasy"): Radiant_OpenMap's whole-map fit (mainfrm.cpp) ran after the restore and
+// re-framed the camera; it asks this first.
+bool KiwiCamView_Restored()
+{
+    return s_viewRestored;
 }
 
 // After the map load's own placement (player start / default spawn) and section reset.
@@ -1731,6 +1827,7 @@ void KiwiCamView_ApplyPending()
         s_panHave   = false;
         s_orbActive = false;
         Commit( c );
+        s_viewRestored = true;
     }
     if ( p.haveSection )
         KiwiSection_SetState( p.secOn != 0, p.secKept != 0, p.secLevel, p.secAnchor );
@@ -1843,13 +1940,96 @@ void KiwiCam_SetFlySpeedScale( float mul )
 }
 
 // KIWI (2026-10-21, user: "no scroll zooming in P camera mode, make it adjust the camera
-// speed instead"): 1.25x per notch, held to the Settings slider's 0.1x..50x range.
+// speed instead"): 1.25x per notch.  KIWI (2026-10-27): on the absolute fly speed, held to
+// KCAM_FLY_UPS_MIN .. MAX (20 .. 4096: 24 notches end to end), and stamped for the speed bar.
 void KiwiCam_WheelFlySpeed( float wheelSteps )
 {
-    float mul = KiwiCam_FlySpeedScale() * powf( 1.25f, wheelSteps );
-    if ( mul < 0.1f )  mul = 0.1f;
-    if ( mul > 50.0f ) mul = 50.0f;
-    KiwiCam_SetFlySpeedScale( mul );
+    KiwiCam_SetFlySpeed( KiwiCam_FlySpeed() * powf( 1.25f, wheelSteps ) );
+    s_flySpeedStamp = NowSeconds();
+}
+
+float KiwiCam_FlySpeed()
+{
+    if ( s_flyUps < 0.0f )
+    {
+        // First run on this key: carry the old multiplier over (it was x MoveSpeed).
+        const int old = (int)( (float)g_PrefsDlg->m_nMoveSpeed * KiwiCam_FlySpeedScale() + 0.5f );
+        s_flyUps = (float)Radiant_ProfileGetInt( KCAM_SECTION, KCAM_FLYUPS_ENTRY, old > 0 ? old : 400 );
+        if ( !( s_flyUps >= KCAM_FLY_UPS_MIN ) ) s_flyUps = KCAM_FLY_UPS_MIN;
+        if ( s_flyUps > KCAM_FLY_UPS_MAX )       s_flyUps = KCAM_FLY_UPS_MAX;
+        s_flyUps = floorf( s_flyUps + 0.5f );
+    }
+    return s_flyUps;
+}
+
+void KiwiCam_SetFlySpeed( float ups )
+{
+    if ( !( ups >= KCAM_FLY_UPS_MIN ) ) ups = KCAM_FLY_UPS_MIN;
+    if ( ups > KCAM_FLY_UPS_MAX )       ups = KCAM_FLY_UPS_MAX;
+    // KIWI (2026-10-27, user: "keep the fly speed a whole number"): whole units / s; each
+    // notch (x1.25, >= 5 at the 20 minimum) still always changes it.
+    ups = floorf( ups + 0.5f );
+    s_flyUps = ups;
+    Radiant_ProfileSetInt( KCAM_SECTION, KCAM_FLYUPS_ENTRY, (int)( ups + 0.5f ) );
+}
+
+double KiwiCam_FlySpeedChangedAge()
+{
+    return s_flySpeedStamp > 0.0 ? NowSeconds() - s_flySpeedStamp : 1.0e9;
+}
+
+// KIWI (2026-10-27): raw mouse counts -> look.  0.12 deg per count at sensitivity 1 (an
+// 800-dpi inch turns ~96 deg); KiwiCam_LookDelta runs at KCAM_DEG_PER_PX per unit.
+void KiwiCam_FlyLookRaw( float countsX, float countsY )
+{
+    const float k = ( 0.12f / KCAM_DEG_PER_PX ) * KiwiCam_FlyLookSens();
+    KiwiCam_LookDelta( countsX * k, countsY * k * ( KiwiCam_FlyInvertY() ? -1.0f : 1.0f ) );
+}
+
+// KIWI (2026-10-27, user: "a better mouselook option"): the fly-look settings.
+float KiwiCam_FlyLookSens()
+{
+    if ( s_lookSens < 0.0f )
+    {
+        s_lookSens = (float)Radiant_ProfileGetInt( KCAM_SECTION, KCAM_LOOKSENS_ENTRY, 100 ) * 0.01f;
+        if ( !( s_lookSens >= 0.1f ) ) s_lookSens = 0.1f;
+        if ( s_lookSens > 5.0f )       s_lookSens = 5.0f;
+    }
+    return s_lookSens;
+}
+
+void KiwiCam_SetFlyLookSens( float s )
+{
+    if ( !( s >= 0.1f ) ) s = 0.1f;
+    if ( s > 5.0f )       s = 5.0f;
+    s_lookSens = s;
+    Radiant_ProfileSetInt( KCAM_SECTION, KCAM_LOOKSENS_ENTRY, (int)( s * 100.0f + 0.5f ) );
+}
+
+bool KiwiCam_FlyInvertY()
+{
+    if ( s_invertY < 0 )
+        s_invertY = Radiant_ProfileGetInt( KCAM_SECTION, KCAM_INVERTY_ENTRY, 0 ) ? 1 : 0;
+    return s_invertY != 0;
+}
+
+void KiwiCam_SetFlyInvertY( bool on )
+{
+    s_invertY = on ? 1 : 0;
+    Radiant_ProfileSetInt( KCAM_SECTION, KCAM_INVERTY_ENTRY, s_invertY );
+}
+
+bool KiwiCam_FlyWorldUp()
+{
+    if ( s_worldUp < 0 )
+        s_worldUp = Radiant_ProfileGetInt( KCAM_SECTION, KCAM_WORLDUP_ENTRY, 0 ) ? 1 : 0;
+    return s_worldUp != 0;
+}
+
+void KiwiCam_SetFlyWorldUp( bool on )
+{
+    s_worldUp = on ? 1 : 0;
+    Radiant_ProfileSetInt( KCAM_SECTION, KCAM_WORLDUP_ENTRY, s_worldUp );
 }
 
 // Keyboard fly uses arrows only. During RMB look they are swallowed from the
@@ -1880,7 +2060,11 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
     s_flyWasd     = wasd;
 
     if ( !lookHeld && !arrows && !wasd )
+    {
+        for ( int i = 0; i < 3; ++i )
+            s_flyVel[i] = 0.0f;                  // letting go of the fly stops dead
         return;
+    }
     if ( !( dt > 0.0 ) )
         return;
     if ( dt > KCAM_FLY_MAX_DT )
@@ -1888,7 +2072,11 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
 
     // GetAsyncKeyState ignores focus, so require this thread to own the foreground.
     if ( ::GetActiveWindow() == nullptr )
+    {
+        for ( int i = 0; i < 3; ++i )
+            s_flyVel[i] = 0.0f;
         return;
+    }
 
     // RMB look ignores modifiers so Shift can boost; hover requires bare arrows,
     // preserving classic modified-arrow bindings. There is deliberately no Q/E
@@ -1917,14 +2105,15 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
     if ( fwd < -1 ) fwd = -1;
     if ( side > 1 ) side = 1;
     if ( side < -1 ) side = -1;
-    if ( !fwd && !side && !rise )
+    const bool coasting = s_flyVel[0] != 0.0f || s_flyVel[1] != 0.0f || s_flyVel[2] != 0.0f;
+    if ( !fwd && !side && !rise && ( KiwiCam_Ortho() || !coasting ) )
         return;
 
     camera_s *c = Ed_Camera();
     CamWnd_BuildMatrix();                        // vpn/vright/vup for this frame's angles
 
-    // MoveSpeed is a units-per-second rate here, matching classic camera use.
-    float speed = (float)g_PrefsDlg->m_nMoveSpeed * KiwiCam_FlySpeedScale();
+    // KIWI (2026-10-27): perspective flies at the absolute fly speed (units / s).
+    float speed = KiwiCam_FlySpeed();
     // In ortho arrows pan along vup/vright at a constant screen-pixel rate; motion
     // along vpn would be invisible in a parallel projection. Normalize the speed
     // slider by its default so it is counted once.
@@ -1948,11 +2137,30 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
     {
         if ( lookHeld && KeyDown( VK_SHIFT ) )
             speed *= KCAM_FLY_SHIFT;
-        const float step = speed * (float)dt;
+        if ( lookHeld && KeyDown( VK_CONTROL ) )
+            speed *= KCAM_FLY_CTRL;              // KIWI (2026-10-27): creep for fine framing
+        // KIWI (2026-10-27): Q / E rise along world Z when the Settings option asks for it.
+        static const float s_worldZ[3] = { 0.0f, 0.0f, 1.0f };
+        const float *up = KiwiCam_FlyWorldUp() ? s_worldZ : c->vup;
+        // KIWI (2026-10-27, user: "the current one is awkward to use"): the velocity eases
+        // toward the keys' target instead of snapping on and off (KCAM_FLY_EASE).
+        const float k = (float)( 1.0 - exp( -dt / KCAM_FLY_EASE ) );
         for ( int i = 0; i < 3; ++i )
-            d[i] = c->vpn[i]    * ( (float)fwd  * step )
-                 + c->vright[i] * ( (float)side * step )
-                 + c->vup[i]    * ( (float)rise * step );
+        {
+            const float target = c->vpn[i]    * ( (float)fwd  * speed )
+                               + c->vright[i] * ( (float)side * speed )
+                               + up[i]        * ( (float)rise * speed );
+            s_flyVel[i] += ( target - s_flyVel[i] ) * k;
+        }
+        const float v2 = s_flyVel[0] * s_flyVel[0] + s_flyVel[1] * s_flyVel[1] + s_flyVel[2] * s_flyVel[2];
+        if ( !fwd && !side && !rise && v2 < 0.25f )   // under 0.5 units/s: stopped
+        {
+            for ( int i = 0; i < 3; ++i )
+                s_flyVel[i] = 0.0f;
+            return;
+        }
+        for ( int i = 0; i < 3; ++i )
+            d[i] = s_flyVel[i] * (float)dt;
     }
 
     // The pivot rides along, so a fly followed by an orbit does not swing the view

@@ -1241,7 +1241,7 @@ void __cdecl R_CreateMaterialList()
     int index; // [esp+10h] [ebp-4h]
 
     s_world.materialMemoryCount = 0;
-    for (hashIndex = 0; hashIndex < 0x800u; ++hashIndex)
+    for (hashIndex = 0; hashIndex < ARRAY_COUNT(rg.materialUsage); ++hashIndex)
     {
         if (rg.materialUsage[hashIndex].memory)
             ++s_world.materialMemoryCount;
@@ -1250,7 +1250,7 @@ void __cdecl R_CreateMaterialList()
     {
         s_world.materialMemory = (MaterialMemory*)Hunk_Alloc(sizeof(MaterialMemory) * s_world.materialMemoryCount, "R_CreateMaterialList", 20);
         index = 0;
-        for (hashIndexa = 0; hashIndexa < 0x800u; ++hashIndexa)
+        for (hashIndexa = 0; hashIndexa < ARRAY_COUNT(rg.materialUsage); ++hashIndexa)
         {
             memory = rg.materialUsage[hashIndexa].memory;
             if (memory)

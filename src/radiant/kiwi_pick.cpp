@@ -328,6 +328,7 @@ namespace
 
                         float t = 0.0f;
                         const float d = SegDist2D( curX, curY, ax, ay, bx, by, &t );
+                        t = Pick_ScreenToWorldT( w->p[i], w->p[j], t );   // KIWI (2026-10-26): perspective-correct
                         const float mid[3] = {
                             w->p[i][0] + ( w->p[j][0] - w->p[i][0] ) * t,
                             w->p[i][1] + ( w->p[j][1] - w->p[i][1] ) * t,
@@ -390,6 +391,24 @@ bool Pick_WorldToImage( const float *world, float *outX, float *outY )
     CamWnd_BuildMatrix();
     const projCtx_t p = MakeProjCtx();
     return ProjectRaw( p, world, outX, outY );
+}
+
+// KIWI (2026-10-26): perspective-correct screen → world fraction (kiwi_pick.h).
+float Pick_ScreenToWorldT( const float *wa, const float *wb, float s )
+{
+    if ( !wa || !wb || KiwiCam_Ortho() )
+        return s;
+    const camera_s *c = Ed_Camera();
+    const float ra[3] = { wa[0] - c->origin[0], wa[1] - c->origin[1], wa[2] - c->origin[2] };
+    const float rb[3] = { wb[0] - c->origin[0], wb[1] - c->origin[1], wb[2] - c->origin[2] };
+    const double za = Dot3( ra, c->vpn ), zb = Dot3( rb, c->vpn );
+    if ( !( za > 1.0e-3 ) || !( zb > 1.0e-3 ) )
+        return s;                          // an end at or behind the eye: no projection
+    // 1/z interpolates linearly on screen: t = (s/zb) / ((1-s)/za + s/zb).
+    const double den = ( 1.0 - s ) / za + s / zb;
+    if ( !( den > 0.0 ) )
+        return s;
+    return (float)( ( s / zb ) / den );
 }
 
 namespace

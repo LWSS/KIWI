@@ -19,6 +19,7 @@
 // KIWI GLASS
 #include "kiwi_glass.h"
 // KIWI END
+#include "kiwi_matprops.h"         // KIWI (2026-10-26, user: "material properties panel")
 #include "kiwi_skybox.h"           // KIWI-UX ROUND AZ: the Sky tab (third tab of that node)
 #include "kiwi_uveditor.h"         // KIWI-UX ROUND BD: the UV editor (fourth tab of it)
 #include "kiwi_sun.h"              // KIWI-UX: the Sun helper tab (fifth tab of that node)
@@ -188,7 +189,7 @@ void ImGuiShell_CloseOnFocusLoss( bool *p_open )
     // for a frame or two while the OS window settles / the continuously-repainted frame briefly
     // reactivates. A short grace absorbs that bounce; a real click-off still closes in ~0.1 s.
     static std::unordered_map<ImGuiID, int> s_unfocused;
-    static const int kGraceFrames = 8;    // ~130 ms at 60 fps — imperceptible for click-off
+    static const int kGraceFrames = 11;   // ~130 ms at the 85 fps cap (KIWI 2026-10-27; was 8 at 60, 16 at 125)
 
     if ( !p_open || !*p_open )
         return;
@@ -307,6 +308,9 @@ extern void KiwiVP_CameraHover     ( int imgX, int imgY, bool over );
 extern void KiwiVP_CameraTick      ( bool cursorOver );
 extern bool KiwiVP_CameraAbort     ();
 extern bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH );
+extern bool KiwiVP_FlyBegin        ( bool testHold );      // kiwi_viewport.h (KIWI 2026-10-27)
+extern bool KiwiVP_FlyActive       ();
+extern void KiwiVP_FlyRawDelta     ( int dx, int dy );
 // KIWI (REFIMG): XY images get first refusal while armed, or for a direct
 // object/everything-mode image click.
 extern bool KiwiRefImage_HandleXYDown( int imgX, int imgY, unsigned int flags );
@@ -597,6 +601,24 @@ static void ImGuiShell_ViewportInput( rttViewport_t id, bool hovered )
     int my = (int)( io.MousePos.y - s_imgMin[id].y );
 
     const bool owns = ( s_inputOwner == id );
+
+    // KIWI (2026-10-27, user: "make it so mouse-forward button does this ... hold style"):
+    // the fly (kiwi_viewport.cpp KiwiVP_FlyBegin) - mouse-forward (ImGui button 4, XButton2)
+    // pressed over an idle camera.  While it is live the camera takes nothing else but the
+    // wheel (the fly speed); its look arrives as raw input (WM_INPUT below).
+    if ( id == RTT_CAMERA )
+    {
+        if ( KiwiVP_FlyActive() )
+        {
+            if ( s_wheel[id] != 0.0f )
+                KiwiVP_CameraWheel( s_wheel[id], mx, my );
+            return;
+        }
+        if ( hovered && s_inputOwner == RTT_COUNT && ImGui::IsMouseClicked( 4 )
+          && !io.MouseDown[0] && !io.MouseDown[1] && !io.MouseDown[2]
+          && KiwiVP_FlyBegin( false ) )
+            return;
+    }
 
     // ── KIWI-UX (ROUND AB, ITEM 2): A LIVE DRAG NEVER LOSES THE CURSOR ──────
     // WM_MOUSELEAVE makes the backend post io.AddMousePosEvent(-FLT_MAX, -FLT_MAX)
@@ -1485,7 +1507,13 @@ void ImGuiShell_RenderViewportsToRT()
     // drawing a window, so the size these calls read is 0 and the RT render early-outs;
     // (b) the flag is checked here as well, so even a stale size can never resurrect a
     // hidden viewport.  The CAMERA has no flag — it is always rendered.
-    KiwiPhysDrop_Tick();                    // KIWI: falling models pose before this frame's views
+    // KIWI (2026-10-27): every call in this function gets a zone of its own.  A 462 ms
+    // hitch while dragging landed here OUTSIDE all the view zones, so one of the untimed
+    // ticks below owns it; the next capture names it.
+    {
+        PROF_SCOPED( "PhysDrop tick" );
+        KiwiPhysDrop_Tick();                // KIWI: falling models pose before this frame's views
+    }
     {
         KiwiPerf_TickBegin( g_nUpdateBits );
         KiwiPerfScope perf( KPERF_CAMERA );
@@ -1495,6 +1523,7 @@ void ImGuiShell_RenderViewportsToRT()
     // time the blink flips (every 512 ms); the camera above renders every tick anyway.
     {
         extern void KiwiFragile_Tick();   // kiwi_fragile.cpp
+        PROF_SCOPED( "Fragile tick" );
         KiwiFragile_Tick();
     }
     // The 2D views render only when dirty: when the gate says "clean" the RTT keeps its last
@@ -1509,7 +1538,10 @@ void ImGuiShell_RenderViewportsToRT()
             XYWnd_RenderToRT ( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
         }
         else
+        {
+            PROF_SCOPED( "XY tick skipped" );
             XYWnd_TickSkipped( s_cellW[RTT_XY],      s_cellH[RTT_XY] );
+        }
     }
     else
     {
@@ -1544,11 +1576,17 @@ void ImGuiShell_RenderViewportsToRT()
     // a standalone RTT slot, freed by the same RTT_ReleaseForReset the four viewports use
     // — see kiwi_entthumb.h.
     extern void KiwiEntThumb_Tick();   // kiwi_entthumb.cpp
-    KiwiEntThumb_Tick();
+    {
+        PROF_SCOPED( "EntThumb tick" );
+        KiwiEntThumb_Tick();
+    }
     // KIWI (2026-10-01): the Model Import window's 3D view, on the same terms as the
     // thumbnails: behind both gates above, its own standalone RT slot, and an early
     // return unless the window showed the view last frame and something changed.
-    KiwiModelImport_RenderPreview();
+    {
+        PROF_SCOPED( "ModelImport preview" );
+        KiwiModelImport_RenderPreview();
+    }
 }
 
 // Post-present (frame WM_PAINT): every native viewport child is a render-target IMAGE now, and
@@ -1686,6 +1724,10 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     ImGui::DockBuilderDockWindow( "Console",  console );       // full-width bottom strip
     ImGui::DockBuilderDockWindow( "2D View",  rightTop );      // top-right
     ImGui::DockBuilderDockWindow( "Textures", rightBottom );   // right-middle/bottom
+    // KIWI (2026-10-26, user: "material properties panel"): a tab of the 2D View's node, so
+    // it sits directly above the Textures browser whose current material it shows and both
+    // are visible together (a tab of Textures' own node would hide the browser).  Layout 19.
+    ImGui::DockBuilderDockWindow( "Material", rightTop );
 
     // ── KIWI-UX: the ENTITIES tab ───────────────────────────────────────────
     // USER DIRECTIVE, verbatim: "a new panel that's in the same viewport (tabbed)
@@ -2006,6 +2048,7 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // KIWI GLASS
     KiwiGlass_Draw();
     // KIWI END
+    KiwiMatProps_Draw();     // KIWI (2026-10-26): the Material tab (Textures browser's current material)
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint
@@ -2167,10 +2210,68 @@ void ImGuiShell_InvalidateDeviceObjects()
 // consumed the message — the camera handlers must not also react. Mouse/key
 // traffic invalidates the camera window so the overlay repaints without a
 // continuous frame loop (the editor renders per-WM_PAINT).
+// KIWI (2026-10-27): raw mouse input for the mouse-forward fly's look (kiwi_viewport.cpp).
+// Registered only while a fly is held, so nothing else ever sees WM_INPUT; legacy mouse
+// messages keep flowing (no RIDEV_NOLEGACY).
+static bool s_rawMouse  = false;
+static bool s_rawAbsHave = false;
+static LONG s_rawAbsX = 0, s_rawAbsY = 0;
+
+bool ImGuiShell_RawMouse( bool on )
+{
+    if ( on == s_rawMouse )
+        return true;
+    RAWINPUTDEVICE rid;
+    rid.usUsagePage = 0x01;                          // generic desktop
+    rid.usUsage     = 0x02;                          // mouse
+    rid.dwFlags     = on ? 0u : RIDEV_REMOVE;
+    rid.hwndTarget  = on ? s_backendHwnd : nullptr;
+    if ( on && !s_backendHwnd )
+        return false;
+    if ( !::RegisterRawInputDevices( &rid, 1, sizeof( rid ) ) )
+        return false;
+    s_rawMouse   = on;
+    s_rawAbsHave = false;
+    return true;
+}
+
+static void ImGuiShell_RawInput( LPARAM lParam )
+{
+    RAWINPUT ri;
+    UINT size = sizeof( ri );
+    if ( ::GetRawInputData( (HRAWINPUT)lParam, RID_INPUT, &ri, &size, sizeof( RAWINPUTHEADER ) ) == (UINT)-1
+      || ri.header.dwType != RIM_TYPEMOUSE )
+        return;
+    const RAWMOUSE &m = ri.data.mouse;
+    if ( m.usFlags & MOUSE_MOVE_ABSOLUTE )
+    {
+        // Remote desktop / tablets report absolute 0..65535 positions: difference them.
+        const bool virt = ( m.usFlags & MOUSE_VIRTUAL_DESKTOP ) != 0;
+        const int  w = ::GetSystemMetrics( virt ? SM_CXVIRTUALSCREEN : SM_CXSCREEN );
+        const int  h = ::GetSystemMetrics( virt ? SM_CYVIRTUALSCREEN : SM_CYSCREEN );
+        if ( s_rawAbsHave )
+            KiwiVP_FlyRawDelta( (int)( (double)( m.lLastX - s_rawAbsX ) * w / 65535.0 ),
+                                (int)( (double)( m.lLastY - s_rawAbsY ) * h / 65535.0 ) );
+        s_rawAbsX = m.lLastX;
+        s_rawAbsY = m.lLastY;
+        s_rawAbsHave = true;
+        return;
+    }
+    if ( m.lLastX || m.lLastY )
+        KiwiVP_FlyRawDelta( (int)m.lLastX, (int)m.lLastY );
+}
+
 bool ImGuiShell_HandleMessage( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
 {
     if ( !s_shellInited || hwnd != s_backendHwnd )
         return false;
+
+    if ( msg == WM_INPUT )
+    {
+        if ( s_rawMouse )
+            ImGuiShell_RawInput( lParam );
+        return false;                                // DefWindowProc frees the input
+    }
 
     // The backend's return value is LOAD-BEARING and must be respected. It returns 1 for
     // messages it fully handles — most importantly WM_SETCURSOR, where it has just set the

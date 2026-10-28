@@ -39,6 +39,7 @@
 #include "kiwi_transform.h"
 #include "kiwi_numeric.h"
 #include "kiwi_patchverts.h"
+#include "kiwi_ported.h"        // g_nUpdateBits (the fly's begin / end repaint)
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
 #include "kiwi_selection.h"
@@ -56,6 +57,7 @@
 extern void CamWnd_OnRButtonDown( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5575
 extern void CamWnd_OnRButtonUp  ( HWND hwnd, unsigned int nFlags, int x, int y ); // camwnd.cpp:5581
 extern bool ImGuiShell_WantsKeyboard();                                           // imgui_shell.cpp:152
+extern bool ImGuiShell_RawMouse( bool on );                                       // imgui_shell.cpp (KIWI 2026-10-27)
 
 namespace
 {
@@ -71,20 +73,7 @@ namespace
                       KG_LOOK, KG_PAN, KG_GIZMO, KG_CMD_MARQUEE, KG_SECTION,
                       KG_SUN, KG_DROP, KG_GRASS, KG_REFIMG, KG_TERRAIN, KG_DECAL,
                       KG_DROP_ARM, KG_DROP_DONE,
-                      KG_FLYLOOK };              // KIWI: MMB mouselook (perspective, nothing selected)
-
-    // KIWI (2026-10-21, user: "This all works while nothing is selected, if something is
-    // selected, all the regular keybinds take precedence!"): the fly controls' gate.
-    bool NothingSelected()
-    {
-        return selected_brushes.next == &selected_brushes
-            && g_SelectedFaces.GetSize() == 0
-            && KiwiConSel_Empty()
-            && !KiwiRegion_HasSelection()
-            && !KiwiSun_Selected()
-            && KiwiRefImage_SelectedCount() == 0
-            && !KiwiCmd_Active();
-    }
+                      KG_FLYLOOK };              // KIWI: the mouse-forward fly (held)
 
     // The sticky RMB menu-drag latch uses tighter slop than LMB selection so an
     // intended camera drag cannot become a menu click after returning near its press.
@@ -124,36 +113,34 @@ namespace
     bool         s_navPan  = false;
     int          s_navX = 0, s_navY = 0;
 
-    // KIWI (2026-10-21, user: "leave it on MMB, but suck the mouse up so we dont get
-    // constrained by the window-size"): the MMB look hides the cursor and warps it back to
-    // its press point after every read, so the look reads endless screen-pixel deltas; the
-    // cursor reappears where the press was.
+    // KIWI (2026-10-27, user: "re-design the (P) camera mode so that WASD/QE are usable to
+    // fly around, with a better mouselook option ... make it so mouse-forward button does
+    // this ... hold style"): HOLD the mouse's forward button (XButton2) over the camera to
+    // fly, whatever is selected.  The cursor is pinned (ClipCursor to its own pixel) and
+    // hidden; the look reads RAW mouse counts (WM_INPUT, imgui_shell.cpp) - the old MMB look
+    // warped the cursor back every read (SetCursorPos), which jumped, stalled at monitor
+    // edges and died under DPI / elevated windows.  WASD / QE + Shift / Ctrl and the wheel
+    // (speed) belong to the fly only while it is held; letting go puts the cursor back.
     bool  s_flyCaptured = false;
     POINT s_flyAnchor   = { 0, 0 };
+    int   s_flyRawX     = 0, s_flyRawY = 0;        // raw counts since the last tick
+    bool  s_flyTestHold = false;                   // -kiwiremote: the button "held" (fly_hold)
 
-    void FlyLookCapture()
+    void FlyRelease()
     {
-        s_flyCaptured = ::GetCursorPos( &s_flyAnchor ) != FALSE;
-    }
-
-    void FlyLookPump()
-    {
-        POINT p;
-        if ( !s_flyCaptured || !::GetCursorPos( &p ) )
+        if ( !s_flyCaptured )
             return;
-        const int dx = p.x - s_flyAnchor.x;
-        const int dy = p.y - s_flyAnchor.y;
-        if ( !dx && !dy )
-            return;
+        ::ClipCursor( nullptr );
+        ImGuiShell_RawMouse( false );
         ::SetCursorPos( s_flyAnchor.x, s_flyAnchor.y );
-        KiwiCam_LookDrag( dx, dy );
+        s_flyCaptured = false;
+        s_flyRawX = s_flyRawY = 0;
     }
 
     void EndGesture()
     {
-        if ( s_gesture == KG_FLYLOOK && s_flyCaptured )
-            ::SetCursorPos( s_flyAnchor.x, s_flyAnchor.y );
-        s_flyCaptured = false;
+        if ( s_gesture == KG_FLYLOOK )
+            FlyRelease();
         s_gesture    = KG_NONE;
         s_gestureBtn = -1;
         s_sunCtrl    = false;
@@ -722,13 +709,6 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
             KiwiCam_PanBegin( imgX, imgY );   // anchor pan scale for this gesture
             s_gesture = KG_PAN;
         }
-        else if ( !KiwiCam_Ortho() && NothingSelected() )
-        {
-            // KIWI (2026-10-21, user: "MMB will instead do a 'mouselook' in place of the
-            // pivot rotation"): with a selection MMB still orbits it.
-            s_gesture = KG_FLYLOOK;
-            FlyLookCapture();
-        }
         else
         {
             KiwiCam_OrbitBegin( imgX, imgY );
@@ -899,8 +879,6 @@ bool KiwiVP_CameraMouseMove( int imgX, int imgY )
 
     if ( s_gesture == KG_ORBIT )
         KiwiCam_OrbitDrag( dx, dy );
-    else if ( s_gesture == KG_FLYLOOK )
-        FlyLookPump();                   // screen deltas from the captured anchor
     else if ( s_gesture == KG_MARQUEE || s_gesture == KG_CMD_MARQUEE )
         KiwiBox_Update( imgX, imgY );    // one rectangle, selection or command owner
     else if ( s_gesture == KG_PAN )
@@ -1040,13 +1018,59 @@ bool KiwiVP_CameraWheel( float steps, int imgX, int imgY )
         if ( KiwiTerrain_HandleWheel( steps, shift, ctrl, alt ) || KiwiDecal_HandleWheel( steps, shift, ctrl ) )
             return true;
     }
-    // KIWI (2026-10-21): perspective never wheel-zooms - the wheel sets the fly speed.
-    // Ortho keeps the dolly, its only zoom.
-    if ( KiwiCam_Ortho() )
-        KiwiCam_Dolly( steps, imgX, imgY );
-    else
+    // KIWI (2026-10-27): the wheel sets the fly speed WHILE flying (mouse-forward held) and
+    // zooms toward the cursor otherwise, in both projections (was: perspective never zoomed).
+    if ( s_gesture == KG_FLYLOOK )
         KiwiCam_WheelFlySpeed( steps );
+    else
+        KiwiCam_Dolly( steps, imgX, imgY );
     return true;
+}
+
+// KIWI (2026-10-27): the mouse-forward fly (see s_flyCaptured above).
+bool KiwiVP_FlyBegin( bool testHold )
+{
+    if ( !KiwiUX_ModernInput() || s_gesture != KG_NONE )
+        return false;
+    KiwiHover_Clear();
+    s_flyTestHold = testHold;
+    s_flyRawX = s_flyRawY = 0;
+    s_flyCaptured = ::GetCursorPos( &s_flyAnchor ) != FALSE;
+    if ( s_flyCaptured && !testHold )
+    {
+        // Pin the cursor on its own pixel: the look reads raw counts, so it can neither
+        // drift onto another window nor stop at a screen edge.
+        const RECT pin = { s_flyAnchor.x, s_flyAnchor.y, s_flyAnchor.x + 1, s_flyAnchor.y + 1 };
+        ::ClipCursor( &pin );
+        ImGuiShell_RawMouse( true );
+    }
+    s_gesture    = KG_FLYLOOK;
+    s_gestureBtn = -1;                   // not a routed viewport button
+    g_nUpdateBits |= 1;
+    return true;
+}
+
+void KiwiVP_FlyEnd()
+{
+    if ( s_gesture != KG_FLYLOOK )
+        return;
+    s_flyTestHold = false;
+    EndGesture();                        // FlyRelease: unpin, raw input off, cursor back
+    KiwiCam_FlyTick( false, false, false );
+    g_nUpdateBits |= 1;
+}
+
+bool KiwiVP_FlyActive()
+{
+    return s_gesture == KG_FLYLOOK;
+}
+
+void KiwiVP_FlyRawDelta( int dx, int dy )
+{
+    if ( s_gesture != KG_FLYLOOK )
+        return;
+    s_flyRawX += dx;
+    s_flyRawY += dy;
 }
 
 void KiwiVP_CameraHover( int imgX, int imgY, bool over )
@@ -1163,25 +1187,99 @@ void KiwiVP_CameraTick( bool cursorOver )
     if ( !KiwiUX_ModernInput() )
     {
         // Tick disabled arms to reset dt and clear the key-funnel ownership latch.
+        KiwiVP_FlyEnd();                 // KIWI: never leave the cursor pinned
         KiwiCam_FlyTick( false, false, false );
         return;
     }
-    // A still mouse sends no moves; the tick drains the captured look anyway.
+    // KIWI (2026-10-27): the mouse-forward fly - drain the raw look, and let go if the
+    // button is up (a release can be lost to another window) or the editor lost focus.
     if ( s_gesture == KG_FLYLOOK )
-        FlyLookPump();
-    const bool lookHeld = ( s_gesture == KG_LOOK || s_gesture == KG_FLYLOOK );
+    {
+        const bool held = s_flyTestHold || ( ::GetAsyncKeyState( VK_XBUTTON2 ) & 0x8000 ) != 0;
+        if ( !held || ( !s_flyTestHold && ::GetActiveWindow() == nullptr ) )
+            KiwiVP_FlyEnd();
+        else if ( s_flyRawX || s_flyRawY )
+        {
+            KiwiCam_FlyLookRaw( (float)s_flyRawX, (float)s_flyRawY );
+            s_flyRawX = s_flyRawY = 0;
+        }
+    }
+    const bool flying   = ( s_gesture == KG_FLYLOOK );
+    const bool lookHeld = ( s_gesture == KG_LOOK || flying );
     const bool arrows   = cursorOver && !ImGuiShell_WantsKeyboard()
                        && s_gesture == KG_NONE;
-    // KIWI (2026-10-21): WASD / Q E fly in perspective while nothing is selected - hovering
-    // the camera, or during either mouselook.
-    const bool wasd = !KiwiCam_Ortho() && !ImGuiShell_WantsKeyboard() && NothingSelected()
-                   && ( ( cursorOver && s_gesture == KG_NONE ) || lookHeld );
-    KiwiCam_FlyTick( lookHeld, arrows, wasd );
+    // WASD / QE belong to the fly only while it is held, so every hotkey stays itself the
+    // rest of the time (was: hover + nothing selected, KIWI 2026-10-21).
+    KiwiCam_FlyTick( lookHeld, arrows, flying );
 }
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────
 #include "kiwi_perf.h"   // KiwiPerf_Draw - the perf HUD line in the bottom band
 #include "kiwi_csg.h"    // KiwiCsg_DrawFailHint - Merge / Boolean failure hint
+#include <math.h>        // logf - the fly speed bar's scale
+
+namespace
+{
+    // KIWI (2026-10-27, user: "show the movespeed changes when scroll is activated (with some
+    // kind of speed bar)"): a small bar at the top middle of the camera while the wheel is
+    // changing the fly speed - log scale over KCAM_FLY_UPS_MIN .. MAX with a tick per
+    // doubling - fading out KFLYBAR_HOLD seconds after the last notch.
+    const double KFLYBAR_HOLD = 1.1;           // full strength
+    const double KFLYBAR_FADE = 0.4;           // then fades over this
+    const float  KFLYBAR_W    = 240.0f;
+    const float  KFLYBAR_H    = 6.0f;
+
+    void DrawFlySpeedBar( float imgMinX, float imgMinY, float imgW, float imgH )
+    {
+        const double age = KiwiCam_FlySpeedChangedAge();
+        if ( !( age < KFLYBAR_HOLD + KFLYBAR_FADE ) || imgW < KFLYBAR_W + 40.0f )
+            return;
+        g_nUpdateBits |= 1;                    // keep painting until the fade is done
+        const float a = ( age <= KFLYBAR_HOLD ) ? 1.0f
+                      : 1.0f - (float)( ( age - KFLYBAR_HOLD ) / KFLYBAR_FADE );
+        const auto col = [a]( int r, int g, int b, int al ) { return IM_COL32( r, g, b, (int)( al * a ) ); };
+
+        const float ups  = KiwiCam_FlySpeed();
+        const float span = logf( KCAM_FLY_UPS_MAX / KCAM_FLY_UPS_MIN );
+        float frac = logf( ups / KCAM_FLY_UPS_MIN ) / span;
+        if ( frac < 0.0f ) frac = 0.0f;
+        if ( frac > 1.0f ) frac = 1.0f;
+
+        // KIWI (2026-10-27, user: "keep the fly speed a whole number"): units / s, no decimals.
+        char text[64];
+        _snprintf( text, sizeof( text ), "%d units / s", (int)( ups + 0.5f ) );
+        text[sizeof( text ) - 1] = '\0';
+
+        ImDrawList  *dl   = ImGui::GetWindowDrawList();
+        const float  lh   = ImGui::GetTextLineHeight();
+        const float  padX = 10.0f, padY = 7.0f;
+        const float  w    = KFLYBAR_W + padX * 2.0f;
+        const float  h    = padY * 2.0f + lh + 5.0f + KFLYBAR_H;
+        // KIWI (2026-10-27, user: "move it to the top so its not in the way"): top centre,
+        // below the selection-mode chip row's height.
+        const float  x0   = imgMinX + ( imgW - w ) * 0.5f;
+        const float  y0   = imgMinY + 40.0f;
+        dl->AddRectFilled( ImVec2( x0, y0 ), ImVec2( x0 + w, y0 + h ), col( 18, 20, 24, 200 ), 5.0f );
+
+        // "Fly speed" left, the value right.
+        dl->AddText( ImVec2( x0 + padX, y0 + padY ), col( 170, 175, 185, 255 ), "Fly speed" );
+        const float tw = ImGui::CalcTextSize( text ).x;
+        dl->AddText( ImVec2( x0 + w - padX - tw, y0 + padY ), col( 240, 240, 240, 255 ), text );
+
+        // The bar: track, fill, a tick per doubling, and the at-a-limit tint.
+        const float bx = x0 + padX, by = y0 + padY + lh + 5.0f;
+        dl->AddRectFilled( ImVec2( bx, by ), ImVec2( bx + KFLYBAR_W, by + KFLYBAR_H ),
+                           col( 60, 64, 72, 255 ), 2.0f );
+        const bool atLimit = ups <= KCAM_FLY_UPS_MIN * 1.001f || ups >= KCAM_FLY_UPS_MAX * 0.999f;
+        dl->AddRectFilled( ImVec2( bx, by ), ImVec2( bx + KFLYBAR_W * frac, by + KFLYBAR_H ),
+                           atLimit ? col( 235, 170, 70, 255 ) : col( 120, 180, 255, 255 ), 2.0f );
+        for ( float s = KCAM_FLY_UPS_MIN * 2.0f; s < KCAM_FLY_UPS_MAX; s *= 2.0f )
+        {
+            const float tx = bx + KFLYBAR_W * ( logf( s / KCAM_FLY_UPS_MIN ) / span );
+            dl->AddLine( ImVec2( tx, by ), ImVec2( tx, by + KFLYBAR_H ), col( 18, 20, 24, 160 ) );
+        }
+    }
+}
 
 bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
 {
@@ -1192,9 +1290,10 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     // KIWI: the red "where it failed" hint of the last Merge / Boolean, under the HUD.
     KiwiCsg_DrawFailHint( imgMinX, imgMinY, imgW, imgH );
 
-    // KIWI: the captured MMB look hides the cursor (it is warped back every read).
+    // KIWI: the held fly hides the (pinned) cursor.
     if ( s_gesture == KG_FLYLOOK )
         ImGui::SetMouseCursor( ImGuiMouseCursor_None );
+    DrawFlySpeedBar( imgMinX, imgMinY, imgW, imgH );
 
     DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
     KiwiSnap_DrawCylinderOverlay( imgMinX, imgMinY, imgW, imgH );

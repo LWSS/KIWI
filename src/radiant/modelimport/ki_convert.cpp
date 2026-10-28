@@ -818,6 +818,9 @@ struct TextureSet {
     // Colour with the glass alpha in A (written only when a glass piece exists).
     std::vector<std::uint8_t> glassColor;
     std::string glassAlphaSource;   // "opacity map <file>", "basecolor alpha", "constant"
+    // Opacity map with real holes (texels under 50%): colour alpha = opacity and the
+    // non-glass materials use the alpha-test template (keyholes, grates, perforated steel).
+    bool cutout = false;
 };
 
 bool PrepareTextures(const Options& options, TextureSet& textures,
@@ -892,6 +895,21 @@ bool PrepareTextures(const Options& options, TextureSet& textures,
         opacityPath.has_value() ? "opacity map " + opacityPath->string()
         : baseHasAlpha          ? std::string("basecolor alpha")
                                 : "constant " + std::to_string(options.glassOpacity);
+
+    // KIWI: an opacity map that actually cuts holes makes the opaque material a cut-out.
+    // An all-white map (InstaMAT exports one by default) changes nothing.
+    if (opacityPath.has_value()) {
+        std::size_t holes = 0;
+        for (std::size_t offset = 0; offset < opacity.size(); offset += 4u)
+            holes += opacity[offset] < 128u;
+        if (holes > 0) {
+            textures.cutout = true;
+            for (std::size_t offset = 0; offset + 3u < textures.color.size(); offset += 4u)
+                textures.color[offset + 3u] = opacity[offset];
+            LogPrintf(log, "Opacity map cuts %zu texels: alpha-tested material",
+                      holes);
+        }
+    }
 
     // Green convention: Flip forces the inversion, Keep forbids it; Auto reads
     // it off the map itself so an OpenGL export (InstaMAT's default) is
@@ -1248,8 +1266,11 @@ int RunConvert(const Options& options, const ObjMesh& mesh,
         error = "could not resolve the WorldGlass template: " + templateError;
         return 1;
     }
+    fs::path cutoutTemplate;
+    bool slotCutout = false;
     auto templateFor = [&](int type) -> const fs::path& {
-        return IsGlassType(type) ? glassTemplate : materialTemplate;
+        if (IsGlassType(type)) return glassTemplate;
+        return slotCutout ? cutoutTemplate : materialTemplate;
     };
     for (std::size_t slot = 0; slot < slots.size(); ++slot) {
         const Options& slotOptions = slots[slot];
@@ -1257,8 +1278,17 @@ int RunConvert(const Options& options, const ObjMesh& mesh,
         for (std::size_t index = 0; index < triangleTypes.size() && !slotGlass; ++index)
             slotGlass = triangleSlot[index] == slot && IsGlassType(triangleTypes[index]);
         TextureSet textures;
-        if (!PrepareTextures(slotOptions, textures, log, error) ||
-            !WriteTextures(slotOptions, textures, slotGlass, log, error) ||
+        if (!PrepareTextures(slotOptions, textures, log, error)) return 1;
+        slotCutout = textures.cutout;
+        if (slotCutout && cutoutTemplate.empty() &&
+            !cod4::ResolveMaterialTemplate(options.templateRoot,
+                                           cod4::MaterialTemplate::WorldLitAlphaTestNormalSpecular,
+                                           cutoutTemplate, templateError)) {
+            error = "could not resolve the WorldLitAlphaTestNormalSpecular template: " +
+                    templateError;
+            return 1;
+        }
+        if (!WriteTextures(slotOptions, textures, slotGlass, log, error) ||
             !WriteMaterial(slotOptions, templateFor(options.surfaceType),
                            slotOptions.assetName, options.surfaceType, log, error)) {
             return 1;

@@ -747,10 +747,15 @@ static void Radiant_FitXYToMap()
     // (35 degrees down, 45 degrees off the X axis) so the whole map is in shot on
     // load instead of the player-start eye view the binary used.  FrameBounds keeps
     // the aim and backs the camera off until the bounding sphere fits the FOV.
-    KiwiCam_LookAlong( -35.0f, 45.0f );
-    CamWnd_BuildMatrix();
-    KiwiCam_FrameBounds( mins, maxs );
-    CamWnd_BuildMatrix();
+    // KIWI (2026-10-25): ...unless the map's .kiwi restored the view it was closed with.
+    extern bool KiwiCamView_Restored();   // kiwi_camera.h
+    if ( !KiwiCamView_Restored() )
+    {
+        KiwiCam_LookAlong( -35.0f, 45.0f );
+        CamWnd_BuildMatrix();
+        KiwiCam_FrameBounds( mins, maxs );
+        CamWnd_BuildMatrix();
+    }
 
     Sys_Printf( "XY view fit: top view on %d brushes, %d construction objects, %d images "
                 "(%g x %g units, scale %g); camera framed on the same bounds.\n",
@@ -1667,7 +1672,24 @@ BOOL Radiant_ShowMenuItemKeyBindings( HMENU hMenu )
     // that no IDR_MENU_QUAKE3 item owns, so GetMenuItemInfoA simply fails and they skip.
     for ( int ci = 0; ci < g_radiantCommandCount; ++ci )
     {
-        const RadiantCommand &c = g_radiantCommands[ci];
+        // KIWI (2026-10-27, user: "the keybinds will save to disk and be loaded upon start"):
+        // one caption per command id, from its FIRST BOUND row.  Each row used to rewrite the
+        // caption, so a later unbound alias row (KiwiDeleteSelection in classic, the Command
+        // List's KiwiUserBinding pool) blanked the accelerator text of its command.
+        bool earlier = false;
+        for ( int j = 0; j < ci && !earlier; ++j )
+            earlier = ( g_radiantCommands[j].commandId == g_radiantCommands[ci].commandId );
+        if ( earlier )
+            continue;
+        int bound = ci;
+        for ( int j = ci; j < g_radiantCommandCount; ++j )
+            if ( g_radiantCommands[j].commandId == g_radiantCommands[ci].commandId
+              && g_radiantCommands[j].vk )
+            {
+                bound = j;
+                break;
+            }
+        const RadiantCommand &c = g_radiantCommands[bound];
         MENUITEMINFOA mii;
         char caption[1028];
         memset( &mii, 0, sizeof( mii ) );
@@ -1695,13 +1717,17 @@ BOOL Radiant_ShowMenuItemKeyBindings( HMENU hMenu )
         }
 
         // VK â†’ key name (g_Keys); if not a named key, emit the raw character.
-        const char *keyName = nullptr;
-        for ( const RadiantKeyName &k : g_radiantKeys )
-            if ( k.vk == c.vk ) { keyName = k.name; break; }
-        if ( keyName )
-            strcpy( w, keyName );
+        // KIWI (2026-10-27): through CommandList_KeyName so the KIWI-named keys (/ ; = ...)
+        // print as names; an unbound command gets no accelerator text at all.
+        if ( c.vk )
+        {
+            char keybuf[8];
+            strcpy( w, CommandList_KeyName( c, keybuf ) );
+        }
         else
-            sprintf( caption + strlen( caption ), "%c", c.vk );
+        {
+            *strchr( caption, '\t' ) = 0;  // drop the "\t" (and any modifiers) written above
+        }
 
         memset( &mii, 0, sizeof( mii ) );
         mii.cbSize     = sizeof( mii );
@@ -4139,11 +4165,16 @@ static void Cmd_OnDeleteExportables() { Delete_Exportables(); }
 // UI-independent halves of a command-list line (0x40BBC0): key-name lookup and the
 // modifier string, in the binary's order.
 // key name: the g_Keys entry, else the raw character (the binary's %c).
+extern const char *KiwiKeymap_ExtraKeyName( unsigned vk );   // kiwi_keymap.cpp
 const char *CommandList_KeyName( const RadiantCommand &c, char keybuf[8] )
 {
     for ( const RadiantKeyName &k : g_radiantKeys )
         if ( k.vk == c.vk )
             return k.name;
+    // KIWI (2026-10-27, user: "allow assignment of new keybinds"): VKs the ported table never
+    // named (/ ; = ' Home F13+ ...) printed as a raw byte; the Command List can bind them now.
+    if ( const char *extra = KiwiKeymap_ExtraKeyName( c.vk ) )
+        return extra;
     keybuf[0] = (char)c.vk;
     keybuf[1] = '\0';
     return keybuf;

@@ -28,6 +28,7 @@
 #include "kiwi_terrain.h"
 #include "kiwi_transform.h"
 #include "kiwi_units.h"
+#include "kiwi_viewport.h"    // KiwiVP_FlyActive - the fly's own chips
 #include "radiant_registry.h"
 
 #include <math.h>
@@ -284,17 +285,9 @@ namespace
         AddChip( chips, &n, "LMB",   "Pick" );
         AddChip( chips, &n, "Shift", "Add" );
         AddChip( chips, &n, "Ctrl",  "Remove" );
-        if ( !KiwiCam_Ortho() )
-        {
-            // KIWI (2026-10-21): perspective fly controls while nothing is selected.
-            AddChip( chips, &n, "WASD", "Fly" );
-            AddChip( chips, &n, "Q / E", "Down / Up" );
-            AddChip( chips, &n, "MMB",  "Look" );
-            char speed[40];
-            _snprintf( speed, sizeof( speed ), "Speed %.1fx", KiwiCam_FlySpeedScale() );
-            speed[sizeof( speed ) - 1] = '\0';
-            AddChip( chips, &n, "Wheel", speed );
-        }
+        // KIWI (2026-10-27): the fly is the held mouse-forward button (its keys show while
+        // it is held - BuildFlyPrompts).
+        AddChip( chips, &n, "Mouse fwd", "Hold to fly" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_LINE,     "Line" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_RECT,     "Rect" );
         AddVerb( chips, &n, KIWI_CMD_DRAW_CIRCLE,   "Circle" );
@@ -304,6 +297,22 @@ namespace
         // With nothing selected, Focus frames the visible world.
         AddVerb( chips, &n, KIWI_CMD_FOCUS_SELECTION, "Frame all" );
         AddVerb( chips, &n, KIWI_CMD_PALETTE,       "Commands" );
+        return n;
+    }
+
+    // KIWI (2026-10-27): the mouse-forward fly owns the keys while it is held.
+    int BuildFlyPrompts( chip_t *chips )
+    {
+        int n = 0;
+        AddChip( chips, &n, "WASD",  "Fly" );
+        AddChip( chips, &n, "Q / E", "Down / Up" );
+        AddChip( chips, &n, "Shift", "Faster" );
+        AddChip( chips, &n, "Ctrl",  "Slower" );
+        char speed[40];
+        _snprintf( speed, sizeof( speed ), "Speed %d/s", (int)( KiwiCam_FlySpeed() + 0.5f ) );
+        speed[sizeof( speed ) - 1] = '\0';
+        AddChip( chips, &n, "Wheel", speed );
+        AddChip( chips, &n, "Release", "Stop" );
         return n;
     }
 
@@ -629,7 +638,9 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     int    nV = 0;
 
     KiwiEditorCommand *cmd = KiwiCmd_Active();
-    if ( cmd )
+    if ( KiwiVP_FlyActive() )
+        nP = BuildFlyPrompts( prompts );
+    else if ( cmd )
     {
         // A live gesture owns the keyboard, so suppress selection verbs.
         nP = BuildCommandPrompts( prompts, cmd );

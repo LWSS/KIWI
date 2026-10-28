@@ -18,12 +18,14 @@
 #include "kiwi_construct.h"
 #include "kiwi_transform.h" // pivot placement and snap-dot state
 #include "kiwi_grid.h"
+#include "kiwi_hover.h"       // KIWI: the cylinder overlay's hovered target
 #include "kiwi_region.h"      // KREG_JOIN_DIST weld tolerance
 #include "kiwi_section.h"     // KIWI: KiwiView_XRay, section clamp/visibility (line of sight)
 #include "kiwi_lines.h"
 #include "kiwi_ported.h"
 #include "kiwi_primitive.h"
 #include "kiwi_units.h"
+#include "kiwi_ux.h"          // KIWI: KiwiUX_ShowHover (the cylinder overlay's hovered target)
 #include "radiant_registry.h"
 #include "kiwi_vec.h"         // Dot3/Sub3/Cross3/Norm3
 
@@ -325,6 +327,7 @@ namespace
                     continue;
                 best->hit  = true;
                 best->dist = d;
+                t = Pick_ScreenToWorldT( wa, wb, t );     // KIWI (2026-10-26): perspective-correct
                 for ( int k = 0; k < 3; ++k )
                 {
                     best->pos[k] = wa[k] + ( wb[k] - wa[k] ) * t;
@@ -465,14 +468,14 @@ namespace
             float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
             float use = half;
             bool  ok  = false;
+            float wa[3], wb[3];
             for ( int tryI = 0; tryI < 3 && !ok; ++tryI )
             {
-                const float wa[3] = { anchor[0] - cand[i].dir[0] * use,
-                                      anchor[1] - cand[i].dir[1] * use,
-                                      anchor[2] - cand[i].dir[2] * use };
-                const float wb[3] = { anchor[0] + cand[i].dir[0] * use,
-                                      anchor[1] + cand[i].dir[1] * use,
-                                      anchor[2] + cand[i].dir[2] * use };
+                for ( int k = 0; k < 3; ++k )
+                {
+                    wa[k] = anchor[k] - cand[i].dir[k] * use;
+                    wb[k] = anchor[k] + cand[i].dir[k] * use;
+                }
                 ok = Pick_WorldToImage( wa, &ax, &ay ) && Pick_WorldToImage( wb, &bx, &by );
                 if ( !ok )
                     use *= 0.25f;
@@ -491,8 +494,13 @@ namespace
             if ( best->hit && d >= best->dist )
                 continue;
             // Grid-quantize along the axis using the absolute-vs-distance rule above.
+            // KIWI (2026-10-26, user: "it wont let me create a new construction line that is
+            // going upwards"): the screen fraction is NOT the world fraction in perspective.
+            // A Z guide climbing toward a camera above projects its upper half far longer
+            // than its lower half, so the old linear map pinned the point near the anchor
+            // however far up the cursor went.
             const float along = SnapAlongAxis( anchor, cand[i].dir,
-                                               -use + ( 2.0f * use ) * t );
+                                               -use + ( 2.0f * use ) * Pick_ScreenToWorldT( wa, wb, t ) );
 
             best->hit     = true;
             best->dist    = d;
@@ -1915,6 +1923,7 @@ namespace
                     if ( !Pick_Project( w->p[j], &bx, &by ) )
                         continue;
                     const float d = Pick_SegDist2D( curX, curY, ax, ay, bx, by, &t );
+                    t = Pick_ScreenToWorldT( w->p[i], w->p[j], t );   // KIWI (2026-10-26): perspective-correct
                     float mid[3];
                     for ( int k = 0; k < 3; ++k )
                         mid[k] = w->p[i][k] + ( w->p[j][k] - w->p[i][k] ) * t;
@@ -2132,6 +2141,27 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     const bool haveCPlane = planarPlacer && KiwiCon_RayPlaneBounded( cplane, ray, cplaneHit );
     // Surface hit used by the raw ladder, occlusion gate, and area arm.
     const pick_result_t surf = Pick( ray, SEL_MASK_OBJECT, pickFlags );
+    // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction face
+    // made"): a free line drawn over a construction face landed on whatever brush lies
+    // behind it, so a face that does not sit exactly on that brush (an inch proud of the
+    // wall, tilted, or in the air) never received the line in its plane and was never cut.
+    // A free draw tool now draws ON the construction face under the cursor, with the same
+    // arbitration a click uses (KiwiRegion_WinsOverPick: a nearer solid still wins).
+    bool  onRegion = false;
+    float regionHit[3]    = { 0.0f, 0.0f, 0.0f };
+    float regionNormal[3] = { 0.0f, 0.0f, 1.0f };
+    if ( !haveCPlane && KiwiCon_FreeToolActive() && KiwiCon_ShowConstruction() )
+    {
+        const int ri = KiwiRegion_PickAt( ray );
+        float     rd = 0.0f;
+        if ( ri >= 0 && KiwiRegion_HitDistance( ray, ri, &rd )
+          && ( !surf.valid || KiwiRegion_WinsOverPick( ray, ri, surf ) ) )
+        {
+            onRegion = true;
+            RayPoint( ray, rd, regionHit );
+            Copy3( KiwiRegion_All()[(size_t)ri].plane.normal, regionNormal );
+        }
+    }
     float raw[3];
     // Raw ladder: planar plane, surface, world ground, view-aligned fallback.
     // rawRung records which plane normal the frame must report.
@@ -2143,6 +2173,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         raw[1] = cplaneHit[1];
         raw[2] = cplaneHit[2];
         rawRung = 0;
+    }
+    else if ( onRegion )
+    {
+        Copy3( regionHit, raw );
+        rawRung = 4;                         // a construction face (KIWI 2026-10-27)
     }
     else if ( surf.valid )
     {
@@ -2188,6 +2223,8 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         else
             out->havePlane = false;          // a hit with no usable normal
     }
+    else if ( rawRung == 4 )
+        Copy3( regionNormal, out->planeNormal );
     else if ( rawRung == 2 )
     {
         out->planeNormal[0] = 0.0f;          // world ground
@@ -2795,11 +2832,12 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
     // Area rank: exact unsnapped surface hit for free tools. Planar shapes suppress
     // this arm because projecting another surface's hit onto their plane misplaces the cursor.
-    if ( surf.valid && !planarPlacer )
+    if ( ( surf.valid || onRegion ) && !planarPlacer )
     {
         out->valid  = true;
         out->type   = SNAP_FACE;
-        out->source = surf.item;
+        if ( !onRegion )
+            out->source = surf.item;         // a construction face has no brush source
         out->position[0] = raw[0];
         out->position[1] = raw[1];
         out->position[2] = raw[2];
@@ -3269,11 +3307,28 @@ void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, flo
     const selection_t &selection = KiwiSel();
     for ( size_t i = 0; i < selection.items.size() && nodes.size() < 32; ++i ) add( selection.items[i].brush );
     const ImVec2 mouse = ImGui::GetMousePos();
-    if ( mouse.x >= imgMinX && mouse.x < imgMinX+imgW && mouse.y >= imgMinY && mouse.y < imgMinY+imgH )
+    // KIWI (2026-10-27, user: "the dx9 is causing the lag, primarily with the UI actions
+    // being used ... You need to fix it"): this second whole-map ray every frame was 6% of
+    // the main thread in a live sample.  While the hover pass runs it already picked what
+    // is under this cursor, so the hovered target is ITS item.  While a command owns the
+    // cursor (a drag: 9% of the main thread in a second sample) the target that matters is
+    // the snap source, added below, so no ray at all; the overlay picks for itself only
+    // when hover is switched off.
+    if ( !KiwiCmd_Active() &&
+         mouse.x >= imgMinX && mouse.x < imgMinX+imgW && mouse.y >= imgMinY && mouse.y < imgMinY+imgH )
     {
-        ray_t ray;
-        if ( Pick_RayFromImagePos( (int)( mouse.x-imgMinX ), (int)( mouse.y-imgMinY ), &ray ) )
-            add( Pick( ray, SEL_MASK_OBJECT ).item.brush );
+        if ( KiwiUX_ShowHover() )
+        {
+            const pick_result_t &hover = KiwiHover_Get();
+            if ( hover.valid && Sel_BrushLive( hover.item.brush ) )
+                add( hover.item.brush );
+        }
+        else
+        {
+            ray_t ray;
+            if ( Pick_RayFromImagePos( (int)( mouse.x-imgMinX ), (int)( mouse.y-imgMinY ), &ray ) )
+                add( Pick( ray, SEL_MASK_OBJECT ).item.brush );
+        }
     }
     if ( KiwiCmd_Active() && KiwiCmd_LastSnap().valid && Sel_BrushLive( KiwiCmd_LastSnap().source.brush ) )
         add( KiwiCmd_LastSnap().source.brush );

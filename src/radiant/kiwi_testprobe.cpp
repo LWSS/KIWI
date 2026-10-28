@@ -41,6 +41,8 @@
 //   raw_write <qpath> <text>               (KiwiFS_WriteRawAtomic into raw/)
 //   iwi_write <source image> <qpath>       (KiwiIwi_WriteFromFile + KiwiIwi_VerifyOnDisk)
 //   con_state                              (construction objects, undo depth, selection)
+//   reg_state                              con_pts <index>   (derived faces; an object's points)
+//   focus_click e b f                      (an object click recorded on that face: Ctrl+R brush mode)
 //   con_label <index> <name> <group>       can <command id>   (KiwiCmd_CanExecute)
 //   con_select <index> [index ...]         face_add e b f     (adds to the face selection)
 //   cap_commit <type 0..3>                 undo_depth         (the unified journal's depth)
@@ -71,10 +73,13 @@
 #include "kiwi_test.h"
 #include "kiwi_camera.h"
 #include "kiwi_command.h"
+#include "kiwi_keymap.h"           // keybind_* probes (the Command List editor)
 #include "kiwi_conselect.h"
 #include "kiwi_construct.h"
+#include "kiwi_focus.h"       // focus_click
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
+#include "kiwi_region.h"      // reg_state
 #include "kiwi_selection.h"
 #include "kiwi_uveditor.h"    // KiwiUvEd_TestAffine
 #include "kiwi_validity.h"
@@ -837,6 +842,32 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         CamChanged();
         return true;
     }
+    // KIWI (2026-10-27): the mouse-forward fly without a physical button - fly_hold 1 begins
+    // it (no cursor pin / raw input), fly_hold 0 ends it; fly_raw dx dy feeds raw counts.
+    if ( verb == "fly_hold" )
+    {
+        if ( !need( 2, 2, "fly_hold 0|1" ) ) return true;
+        if ( w[1] == "1" )
+        {
+            if ( !KiwiVP_FlyBegin( true ) )
+                error = "fly_hold: the camera is busy (another gesture is live)";
+        }
+        else
+            KiwiVP_FlyEnd();
+        KiwiTest_LogChannel( "DATA", "fly %d", KiwiVP_FlyActive() ? 1 : 0 );
+        return true;
+    }
+    if ( verb == "fly_raw" )
+    {
+        if ( !need( 3, 3, "fly_raw dx dy" ) ) return true;
+        int v[2];
+        if ( !ints( 1, 2, v ) ) return true;
+        KiwiVP_FlyRawDelta( v[0], v[1] );
+        KiwiVP_CameraTick( true );                 // drain it now, as the pump's tick does
+        CamChanged();
+        CamReport( "cam" );
+        return true;
+    }
     if ( verb == "vp_wheel" )
     {
         if ( !need( 4, 7, "vp_wheel steps x y [shift] [ctrl] [alt]" ) ) return true;
@@ -1398,6 +1429,48 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         }
         return true;
     }
+    // KIWI (2026-10-27): the derived construction faces and an object's world points, for
+    // the construction suite (tools/kiwitest/gauntlet_construct.py).
+    if ( verb == "reg_state" )
+    {
+        // one DATA line: region count; then one per region (plane-space area, world centroid)
+        const std::vector<kregion_t> &regs = KiwiRegion_All();
+        KiwiTest_LogChannel( "DATA", "reg_state %d", (int)regs.size() );
+        for ( size_t i = 0; i < regs.size(); ++i )
+        {
+            const kregion_t &r = regs[i];
+            KiwiTest_LogChannel( "DATA", "reg %d pts %d area %.6f normal %.6f %.6f %.6f centroid "
+                                 "%.6f %.6f %.6f src %d holes %d", (int)i,
+                                 (int)( r.pts.size() / 2 ), fabsf( KiwiRegion_SignedArea( r.pts ) ),
+                                 r.plane.normal[0], r.plane.normal[1], r.plane.normal[2],
+                                 r.centroid[0], r.centroid[1], r.centroid[2], r.sourceObject,
+                                 (int)r.holes.size() );
+        }
+        return true;
+    }
+    if ( verb == "con_pts" )
+    {
+        // con_pts <index>: the object's stored world points, one DATA line
+        if ( !need( 2, 2, "con_pts <index>" ) ) return true;
+        int index;
+        if ( !ints( 1, 1, &index ) ) return true;
+        const kconObject_t *o = KiwiCon_At( index );
+        if ( !o )
+        {
+            error = "con_pts: no such construction object";
+            return true;
+        }
+        std::string s;
+        char buf[64];
+        for ( size_t k = 0; k < o->pts.size(); ++k )
+        {
+            _snprintf( buf, sizeof( buf ), " %.6f", o->pts[k] );
+            buf[sizeof( buf ) - 1] = '\0';
+            s += buf;
+        }
+        KiwiTest_LogChannel( "DATA", "con_pts %d%s", index, s.c_str() );
+        return true;
+    }
     if ( verb == "con_label" )
     {
         // con_label <index> <name> <group name>: name the object and put it in a new group
@@ -1443,6 +1516,35 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         Sel_Add( KiwiSel(), Sel_MakeFace( node, v[2] ) );
         Sel_SyncToLegacy();
         g_nUpdateBits = -1;
+        return true;
+    }
+    if ( verb == "focus_click" )
+    {
+        // KIWI (2026-10-27): focus_click e b f - record an object click on that face's centre,
+        // as a camera click on a whole brush does (KiwiFocus_NoteObjectClick); brush-mode
+        // Ctrl+R splits across the face the selecting click landed on.
+        if ( !need( 4, 4, "focus_click e b f" ) ) return true;
+        int v[3];
+        if ( !ints( 1, 3, v ) ) return true;
+        brush_t *def = nullptr;
+        ForEachSavedBrush( [&]( int e, entity_s *, int b, brush_t *d ) { if ( e == v[0] && b == v[1] ) def = d; } );
+        selbrush_t *node = nullptr;
+        for ( selbrush_t *list : { &selected_brushes, &active_brushes } )
+            for ( selbrush_t *n = list->next; def && !node && n != list; n = n->next )
+                if ( n->def == def )
+                    node = n;
+        if ( !node || !def->faces || v[2] < 0 || v[2] >= def->faceCount || !def->faces[v[2]].w
+          || def->faces[v[2]].w->numpoints < 3 )
+        {
+            error = "focus_click: no such brush face";
+            return true;
+        }
+        const winding_t *wd = def->faces[v[2]].w;
+        float c[3] = { 0.0f, 0.0f, 0.0f };
+        for ( int i = 0; i < wd->numpoints; ++i )
+            for ( int k = 0; k < 3; ++k )
+                c[k] += wd->p[i][k] / (float)wd->numpoints;
+        KiwiFocus_NoteObjectClick( node, c, def->faces[v[2]].plane.normal );
         return true;
     }
     if ( verb == "simple_patch" )
@@ -1609,6 +1711,103 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         if ( !ints( 1, 1, &id ) ) return true;
         KiwiTest_LogChannel( "DATA", "can %d %d", id, KiwiCmd_CanExecute( id ) ? 1 : 0 );
         return true;
+    }
+
+    // ── keybinds (KIWI 2026-10-27: the Command List editor, kiwi_keymap.h) ──────────
+    //   keybind_get <name>                 DATA keybind <name> <id> <custom> <chords|none>
+    //   keybind_set <name> <chord> [slot]  slot = index to replace, default: add
+    //   keybind_remove <name> <slot>       keybind_reset_cmd <name>
+    //   keybind_reset                      Reset to Default (Modern + both user sections)
+    //   keybind_reload                     re-read every layer from disk (a restart)
+    //   keybind_who <chord>                DATA keybind_who <chord> <winner id> <reserved?>
+    if ( verb.compare( 0, 8, "keybind_" ) == 0 )
+    {
+        auto lookup = [&]( const std::string &name ) -> int
+        {
+            const int id = KiwiKeybind_FindCommand( name.c_str() );
+            if ( !id )
+                error = "no command named " + name;
+            return id;
+        };
+        auto chordArg = [&]( const std::string &text, kiwiChord_t *c ) -> bool
+        {
+            if ( KiwiKeybind_Parse( text.c_str(), c ) && c->vk )
+                return true;
+            error = "not a chord: " + text;
+            return false;
+        };
+        if ( verb == "keybind_get" )
+        {
+            if ( !need( 2, 2, "keybind_get <name>" ) ) return true;
+            const int id = lookup( w[1] );
+            if ( !id ) return true;
+            kiwiChord_t chords[KIWI_KEYBIND_MAX * 4];
+            const int n = KiwiKeybind_Get( id, chords, KIWI_KEYBIND_MAX * 4 );
+            std::string list;
+            for ( int k = 0; k < n; ++k )
+            {
+                char text[64];
+                KiwiKeybind_Format( chords[k], text, sizeof( text ) );
+                if ( k ) list += ",";
+                list += text;
+            }
+            KiwiTest_LogChannel( "DATA", "keybind %s %d %d %s", w[1].c_str(), id,
+                                 KiwiKeybind_IsCustom( id ) ? 1 : 0, n ? list.c_str() : "none" );
+            return true;
+        }
+        if ( verb == "keybind_set" )
+        {
+            if ( !need( 3, 4, "keybind_set <name> <chord> [slot]" ) ) return true;
+            const int id = lookup( w[1] );
+            kiwiChord_t c;
+            if ( !id || !chordArg( w[2], &c ) ) return true;
+            int slot = -1;
+            if ( w.size() == 4 && !ints( 3, 1, &slot ) ) return true;
+            if ( const char *why = KiwiKeybind_Reserved( c, id ) )
+            {
+                error = std::string( "reserved: " ) + why;
+                return true;
+            }
+            if ( !KiwiKeybind_Assign( id, slot, c ) )
+                error = "assign failed";
+            return true;
+        }
+        if ( verb == "keybind_remove" )
+        {
+            if ( !need( 3, 3, "keybind_remove <name> <slot>" ) ) return true;
+            const int id = lookup( w[1] );
+            int slot;
+            if ( !id || !ints( 2, 1, &slot ) ) return true;
+            KiwiKeybind_Remove( id, slot );
+            return true;
+        }
+        if ( verb == "keybind_reset_cmd" )
+        {
+            if ( !need( 2, 2, "keybind_reset_cmd <name>" ) ) return true;
+            const int id = lookup( w[1] );
+            if ( id ) KiwiKeybind_ResetCommand( id );
+            return true;
+        }
+        if ( verb == "keybind_reset" )
+        {
+            KiwiKeybind_ResetAll();
+            return true;
+        }
+        if ( verb == "keybind_reload" )
+        {
+            KiwiKeybind_Reload();
+            return true;
+        }
+        if ( verb == "keybind_who" )
+        {
+            if ( !need( 2, 2, "keybind_who <chord>" ) ) return true;
+            kiwiChord_t c;
+            if ( !chordArg( w[1], &c ) ) return true;
+            const char *why = KiwiKeybind_Reserved( c, 0 );
+            KiwiTest_LogChannel( "DATA", "keybind_who %s %d %s", w[1].c_str(),
+                                 KiwiKeybind_Winner( c ), why ? "reserved" : "free" );
+            return true;
+        }
     }
     return false;
 }

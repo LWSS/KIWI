@@ -42,6 +42,17 @@ void KiwiVP_CameraHover( int imgX, int imgY, bool over );
 // is off.
 void KiwiVP_CameraTick( bool cursorOver );
 
+// KIWI (2026-10-27, user: "make it so mouse-forward button does this ... hold style"):
+// the fly.  Begin when the mouse-forward button (XButton2) goes down over the camera;
+// it ends on the button's release (polled), focus loss or Abort.  While it is live the
+// cursor is pinned and hidden, the look reads raw mouse counts (FlyRawDelta, fed from
+// WM_INPUT), WASD / QE + Shift / Ctrl fly and the wheel sets the speed.  `testHold`
+// (-kiwiremote) skips the cursor pin / raw input and treats the button as held.
+bool KiwiVP_FlyBegin( bool testHold );
+void KiwiVP_FlyEnd();
+bool KiwiVP_FlyActive();
+void KiwiVP_FlyRawDelta( int dx, int dy );
+
 // Stuck-drag teardown.  True when a modern gesture was live and has been torn
 // down here — the shell must then NOT also run CamWnd_AbortDrag (that would be a
 // foreign viewport's teardown).

@@ -2462,7 +2462,48 @@ namespace
             m_anyLmbPoint  = false;
             m_splineMode   = false;
             m_smooth.clear();
+            m_movable.clear();
+            m_rays.clear();
             return KiwiDrawTool::Begin();
+        }
+
+        // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction face
+        // made"): what each placed point rests on, for KiwiRegion_FlattenChain at Finish.  A
+        // plain surface / grid hit may slide along its click ray onto a construction face the
+        // line crosses; a geometry, axis or typed point never moves.
+        bool CursorMovable() const
+        {
+            return m_snap.valid && !m_zLock && !m_hasNum && !m_hasAngle
+                && ( m_snap.type == SNAP_FACE || m_snap.type == SNAP_GRID
+                  || m_snap.type == SNAP_NONE );
+        }
+        void CursorRay( float out[6] ) const
+        {
+            ray_t ray;
+            int   x = 0, y = 0;
+            if ( KiwiCmd_LastCursor( &x, &y ) && Pick_RayFromImagePos( x, y, &ray ) )
+            {
+                Copy3( ray.origin, out );
+                Copy3( ray.dir, out + 3 );
+                return;
+            }
+            for ( int k = 0; k < 6; ++k )
+                out[k] = 0.0f;                 // no ray: a zero direction never slides
+        }
+        void RecordCursorSource( std::vector<unsigned char> &movable, std::vector<float> &rays ) const
+        {
+            float r[6];
+            CursorRay( r );
+            const bool haveRay = ( r[3] != 0.0f || r[4] != 0.0f || r[5] != 0.0f );
+            // An axis / 15-degree guide from a point that may slide slides with it (a level
+            // cut caught by the X guide); from a fixed point (a face corner) it holds.
+            bool mov = CursorMovable();
+            if ( !mov && m_snap.valid && !m_zLock && !m_hasNum && !m_hasAngle
+              && ( m_snap.type == SNAP_AXIS || m_snap.type == SNAP_ANGLE )
+              && !movable.empty() && movable.back() )
+                mov = true;
+            movable.push_back( ( haveRay && mov ) ? 1 : 0 );
+            rays.insert( rays.end(), r, r + 6 );
         }
 
         // KIWI (2026-09-10, user: "add an S key in the line mode to start a spline
@@ -2496,6 +2537,11 @@ namespace
             if ( vk == 0x1B && !m_pts.empty() )         // VK_ESCAPE
             {
                 m_pts.resize( m_pts.size() - 3 );
+                if ( !m_movable.empty() )
+                {
+                    m_movable.pop_back();
+                    m_rays.resize( m_rays.size() - 6 );
+                }
                 if ( !m_smooth.empty() )
                     m_smooth.pop_back();
                 if ( !m_smooth.empty() )
@@ -2515,6 +2561,8 @@ namespace
         void OnChainCleared() override
         {
             m_smooth.clear();
+            m_movable.clear();
+            m_rays.clear();
         }
 
         bool OnClick( bool doubleClick ) override
@@ -2538,6 +2586,7 @@ namespace
                 Finish();
                 return false;
             }
+            RecordCursorSource( m_movable, m_rays );
             PushPoint( m_cur );
             m_smooth.push_back( m_splineMode ? 1 : 0 );   // the span leaving this point
             m_anyLmbPoint = true;
@@ -2624,6 +2673,8 @@ namespace
         {
             // Closed chains omit the cursor tail to avoid a duplicate seam.
             std::vector<float> pts = m_pts;
+            std::vector<unsigned char> movable = m_movable;
+            std::vector<float>         rays    = m_rays;
             // Append a tail only below the cap and never for post-LMB RMB finish.
             if ( !m_wantClosed && m_haveCur && !m_noTailPoint
               && PointCount() < KCON_MAX_POINTS )
@@ -2642,7 +2693,31 @@ namespace
                     pts.push_back( m_cur[0] );
                     pts.push_back( m_cur[1] );
                     pts.push_back( m_cur[2] );
+                    RecordCursorSource( movable, rays );
                 }
+            }
+            // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction
+            // face made"): a cut started on the wall beside a face that sits proud of it (or
+            // tilted off it) slides onto the face, under the same pixels; see
+            // KiwiRegion_FlattenChain.  Spline chains are layout curves and keep their points.
+            bool anySmooth = false;
+            for ( size_t k = 0; k < m_smooth.size(); ++k )
+                anySmooth = anySmooth || m_smooth[k] != 0;
+            if ( !anySmooth && movable.size() * 3 == pts.size()
+              && KiwiRegion_FlattenChain( pts, movable, rays, KCON_FLATTEN_MAX ) )
+                Sys_Printf( "Line: laid onto the construction face it crosses.\n" );
+            // KIWI (2026-10-27, user: "try to fix the remaining issues"): an open cut whose
+            // end stopped a few pixels inside a face, short of its edge and outside the snap,
+            // dangled and cut nothing; it now reaches the edge (KiwiRegion_ExtendChainEnds).
+            if ( !anySmooth && !m_wantClosed && pts.size() >= 6 && movable.size() * 3 == pts.size() )
+            {
+                const int   last = (int)( pts.size() / 3 ) - 1;
+                const bool  canMove[2] = { movable[0] != 0, movable[(size_t)last] != 0 };
+                const float gap[2] = {
+                    KiwiCam_WorldPerPixel( &pts[0] ) * KCON_EXTEND_END_PX,
+                    KiwiCam_WorldPerPixel( &pts[(size_t)last * 3] ) * KCON_EXTEND_END_PX };
+                if ( KiwiRegion_ExtendChainEnds( pts, canMove, gap ) )
+                    Sys_Printf( "Line: carried to the construction face's edge.\n" );
             }
             if ( (int)( pts.size() / 3 ) < 2 )
             {
@@ -2651,6 +2726,8 @@ namespace
                 if ( !m_pts.empty() )
                     Sys_Printf( "Line: needs at least two points — nothing placed.\n" );
                 m_pts.clear();
+                m_movable.clear();
+                m_rays.clear();
                 m_wantClosed  = false;
                 m_noTailPoint = false;
                 m_anyLmbPoint = false;
@@ -2676,6 +2753,8 @@ namespace
                             splineSpans ? " (with spline spans: a layout curve, never a brush edge)" : "" );
             m_pts.clear();
             m_smooth.clear();
+            m_movable.clear();
+            m_rays.clear();
             m_wantClosed  = false;
             m_noTailPoint = false;
             m_anyLmbPoint = false;
@@ -2686,6 +2765,9 @@ namespace
         // Spline-span mode (S) and the per-placed-point flags (kiwi_construct.h smooth).
         bool m_splineMode  = false;
         std::vector<unsigned char> m_smooth;
+        // Per placed point: may it slide onto a face (CursorMovable), and its click ray.
+        std::vector<unsigned char> m_movable;
+        std::vector<float>         m_rays;      // 6 floats per point: origin, unit dir
         // One-gesture RMB finish-without-tail latch.
         bool m_noTailPoint = false;
         // One-chain LMB-history latch controlling RMB grammar and hints.
@@ -3602,6 +3684,11 @@ bool KiwiCon_PlanePlacement()
     // True only for intrinsically planar draw tools or an announced planar
     // primitive; free curves must bypass every plane-borne snap branch.
     return ( s_activeTool != 0 && s_activeToolPlanar ) || s_planePlacement;
+}
+
+bool KiwiCon_FreeToolActive()
+{
+    return s_activeTool != 0 && !s_activeToolPlanar && !s_planePlacement;
 }
 
 bool KiwiCon_ToolAnchor( float out[3] )

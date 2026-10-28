@@ -37,9 +37,12 @@ float        KiwiCam_Distance();
 
 // Mouselook matches CamWnd_Rotate2's 0.35 deg/px and signs (camwnd.cpp:4245), with
 // one-sided ±89 pitch bounds. It changes angles only, then re-seats the pivot.
-// The cursor is not recentered here, so an Alt+RMB drag stops at the screen edge; the MMB
-// fly look (kiwi_viewport.cpp FlyLookPump) hides and warps the cursor, so it never does.
+// The cursor is not recentered here, so an Alt+RMB drag stops at the screen edge; the
+// mouse-forward fly (kiwi_viewport.cpp) reads raw mouse motion, so it never does.
 void KiwiCam_LookDrag( int dx, int dy );
+// KIWI (2026-10-27): the same look in fractional pixels (the fly look's raw, sensitivity-
+// scaled motion), so slow sensitivities keep their sub-pixel remainder.
+void KiwiCam_LookDelta( float dx, float dy );
 
 // Truck-pan moves origin and pivot by -vright*dx*k + vup*dy*k. Cache k at the
 // pivot when the gesture begins; moving eye and pivot together keeps it invariant.
@@ -89,9 +92,9 @@ float KiwiCam_WorldPerPixel( const float *world );
 // `arrows` is the bare-arrow hover arm. QPC supplies dt, clamped to 0.1 seconds.
 // Perspective flies in world units; ortho pans along vright/vup at a screen-pixel
 // rate because moving along the view axis is invisible in a parallel projection.
-// KIWI (2026-10-21): `wasd` = the perspective fly keys are live (nothing selected, the
-// camera hovered or looking): W/S forward/back, A/D strafe, Q/E down/up along the
-// camera's own up axis.  Bare keys while hovering; any modifiers while a look is held.
+// KIWI (2026-10-21, reworked 2026-10-27): `wasd` = the fly keys are live (the mouse-forward
+// fly is held): W/S forward/back, A/D strafe, Q/E down/up (camera up, or world Z with
+// KiwiCam_FlyWorldUp); Shift faster, Ctrl slower.  Perspective motion eases in and out.
 void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd );
 
 // True while the camera owns this vk - the four ARROWS during a look, and W/A/S/D/Q/E
@@ -101,8 +104,28 @@ bool KiwiCam_FlySwallowKey( unsigned int vk );
 // Persisted multiplier over classic MoveSpeed; default 4x.
 float KiwiCam_FlySpeedScale();
 void  KiwiCam_SetFlySpeedScale( float mul );
-// Perspective wheel: positive steps speed the fly keys up (1.25x per notch).
+// Wheel while flying: positive steps speed the fly keys up (1.25x per notch).
 void  KiwiCam_WheelFlySpeed( float wheelSteps );
+// KIWI (2026-10-27, user: "show the movespeed changes when scroll is activated (with some kind
+// of speed bar). also have sensible mins and maxs"): the perspective fly speed in WORLD UNITS
+// per second, KCAM_FLY_UPS_MIN .. KCAM_FLY_UPS_MAX (no longer a multiple of the classic
+// MoveSpeed pref, which put the range at 35 .. 17500 u/s with MoveSpeed 350).
+#define KCAM_FLY_UPS_MIN  20.0f            // KIWI (2026-10-27, user: "the minimum should be 20, anything lower is too slow")
+#define KCAM_FLY_UPS_MAX  4096.0f          // ~340 ft/s: across a whole map in a few seconds
+float KiwiCam_FlySpeed();
+void  KiwiCam_SetFlySpeed( float ups );
+// Seconds since the wheel last changed the fly speed (a large value when it never has):
+// the viewport's speed bar shows while this is fresh.
+double KiwiCam_FlySpeedChangedAge();
+// KIWI (2026-10-27, user: "a better mouselook option"): fly-look settings (Settings panel).
+// Raw mouse counts (WM_INPUT) -> look, with the sensitivity and invert-Y settings applied.
+void  KiwiCam_FlyLookRaw( float countsX, float countsY );
+float KiwiCam_FlyLookSens();               // multiplier over 0.12 deg per raw count, default 1
+void  KiwiCam_SetFlyLookSens( float s );
+bool  KiwiCam_FlyInvertY();
+void  KiwiCam_SetFlyInvertY( bool on );
+bool  KiwiCam_FlyWorldUp();                // Q / E along world Z instead of the camera's up
+void  KiwiCam_SetFlyWorldUp( bool on );
 
 // Orthographic/perspective toggle.
 // Real orthographic projection with pivot-scale continuity:
@@ -132,14 +155,27 @@ float KiwiCam_OrthoHalfHeight();
 // encode the same cone and must move together.
 #define KCAM_AXIS_PORTRAY_DOT   0.97f
 #define KCAM_RAYAXIS_MIN_DEN    0.0594f
+// KIWI: "extrude a construction face at a very flat camera angle ... wont work" - the
+// exact closest-point solve is used only while the eye->anchor line is at least 28.4
+// degrees off the axis (twice the sample cone, so the vanishing-point refusal zone stays
+// clear of the anchor); closer to end-on, KiwiCam_RayAxis maps cursor travel in the
+// anchor's screen plane instead of refusing.
+#define KCAM_AXIS_EXACT_DOT     0.88f
+#define KCAM_AXIS_PORTRAY_SIN   0.2431f     // sqrt(1 - KCAM_AXIS_PORTRAY_DOT²)
+#define KCAM_AXIS_UPCONV_SIN    0.035f      // ~2 degrees: below this the axis is end-on
 
-// Closest point on unit-axis line (pt,axis) to a unit-direction ray. False inside
-// the sample-refusal cone. Forward-declare ray_t to keep this header lightweight.
+// Point on unit-axis line (pt,axis) driven by a unit-direction cursor ray.  Off-axis
+// views: the exact closest point (false only for a ray inside the sample cone around
+// the axis's vanishing point).  Near end-on views (KIWI: "very flat camera angle"): the
+// cursor's offset from pt in the screen plane along the axis's screen direction, gain
+// eased to 1:1 at a dead end-on view where screen-up pulls toward the viewer; never
+// false.  Forward-declare ray_t to keep this header lightweight.
 struct ray_t;
 bool  KiwiCam_RayAxis( const ray_t &ray, const float *pt, const float *axis, float *out );
 
-// Whether the view can portray motion along `axis`; outDot receives |vpn·axis|.
-// Ortho uses the same test because its end-on rays have the same degeneracy.
+// outDot receives |vpn·axis|.  KIWI: "extrude a construction face at a very flat camera
+// angle ... wont work" - every non-zero axis is portrayable now (KiwiCam_RayAxis has the
+// end-on fallback), so the tools' "ORBIT to pull" holds no longer engage.
 bool  KiwiCam_AxisPortrayable( const float *axis, float *outDot = 0 );
 
 // KIWI (2026-10-24, user: "start saving the camera position/settings/mode/sectionview when
@@ -151,3 +187,4 @@ void KiwiCamView_WriteSidecar( void *file );              // FILE *: the `view` 
 bool KiwiCamView_ParseSidecarLine( const char *line );   // true = a `view` record, consumed
 void KiwiCamView_ResetPending();                          // KiwiCon_LoadSidecar's start
 void KiwiCamView_ApplyPending();                          // tail of the map load
+bool KiwiCamView_Restored();      // the last load restored a saved camera (skip the load fit)

@@ -64,3 +64,68 @@ void KiwiKeymap_ApplyBoot();
 
 // Draw the profile switcher in KiwiUX settings.
 void KiwiKeymap_DrawSettings();
+
+// ── User keybinds (Help > Command List) ──────────────────────────────────────────
+// KIWI (2026-10-27, user: "allow assignment of new keybinds ... the keybinds will save to disk
+// and be loaded upon start ... Keybind cfg is saved as you go").  The layers are now
+// compiled defaults -> radiant.ini -> profile patch -> USER layer.  The user layer is a diff:
+// kiwi_radiant.ini [KiwiKeybindsModern] / [KiwiKeybindsClassic] holds one line per command
+// whose bindings differ from that profile's defaults ("Name=Ctrl+R, F5" or "Name=none"),
+// keyed by the command's FIRST table name.  Every edit rewrites the section at once.
+// A command's bindings are all rows with its id; a binding beyond its own rows takes a
+// "KiwiUserBinding" alias row (registered unbound, so Reset leaves it free for reuse).
+struct kiwiChord_t
+{
+    byte vk;
+    byte mods;                    // Shift=1, Alt=2, Ctrl=4, Win=8
+};
+
+#define KIWI_KEYBIND_MAX 4        // bindings one command may hold
+
+// Key name for a VK the ported key-name table never named (/ ; = ' Home F13..F24 ...);
+// NULL when unnamed.  CommandList_KeyName falls back to it.
+const char *KiwiKeymap_ExtraKeyName( unsigned vk );
+
+// "Ctrl+Shift+Alt+Win+Key" (the hint strip's order); "" for vk 0.
+void KiwiKeybind_Format( kiwiChord_t c, char *out, int outSize );
+
+// Parses "Ctrl+Shift+R", "ctrl r", "ctrl-r", "R", "f5", "ctrl" (modifiers only: *vk = 0).
+// False on an unknown token or two key tokens.
+bool KiwiKeybind_Parse( const char *text, kiwiChord_t *out );
+
+// Live / profile-default bindings of one command id, table order; returns the count.
+int  KiwiKeybind_Get( int commandId, kiwiChord_t *out, int maxOut );
+int  KiwiKeybind_GetDefault( int commandId, kiwiChord_t *out, int maxOut );
+bool KiwiKeybind_IsCustom( int commandId );
+
+// First command the hotkey lookup would run for a chord (0 = none), and every id holding it.
+int  KiwiKeybind_Winner( kiwiChord_t c );
+int  KiwiKeybind_Owners( kiwiChord_t c, int *ids, int maxIds );
+
+// Why a chord cannot fire as a table binding for `commandId` (system chord, menu key, a fixed
+// accelerator or pump key that runs first, unnamed key); NULL when it can.
+const char *KiwiKeybind_Reserved( kiwiChord_t c, int commandId );
+
+// Fixed chords that run this command OUTSIDE the table (IDR_MAIN_ACCEL accelerators, the
+// pump's Ctrl+Z / Ctrl+Y), minus any the live table already lists for it.
+int  KiwiKeybind_Fixed( int commandId, kiwiChord_t *out, int maxOut );
+
+// Edits.  Each applies, strips the chord from every other command (a chord has ONE owner),
+// saves, and refreshes the menu accelerator text.  slot -1 = add a binding.
+bool KiwiKeybind_Assign( int commandId, int slot, kiwiChord_t c );
+void KiwiKeybind_Remove( int commandId, int slot );
+void KiwiKeybind_ResetCommand( int commandId );
+// Reset to Default: Modern profile, both user sections dropped, every binding compiled default.
+void KiwiKeybind_ResetAll();
+// Re-read everything from disk (the test probe's simulated restart).
+void KiwiKeybind_Reload();
+// Command id for a table name (first row), 0 if absent.
+int  KiwiKeybind_FindCommand( const char *name );
+const char *KiwiKeybind_PrimaryName( int commandId );
+
+// Chord capture for the Command List: the pump offers every key message first
+// (radiant_main.cpp Radiant_PreTranslateMessage).  Esc cancels; modifiers pass through.
+void KiwiKeybind_BeginCapture();
+void KiwiKeybind_CancelCapture();
+bool KiwiKeybind_Capturing();
+bool KiwiKeybind_TakeCaptured( kiwiChord_t *out );

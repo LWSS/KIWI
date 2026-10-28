@@ -176,6 +176,13 @@ bool KiwiCon_RayPlaneBounded( const kconPlane_t &p, const ray_t &ray, float outW
 #define KCON_PLANE_FACING_MIN   0.0872f    // cos(85 degrees)
 #define KCON_FACE_PLANE_SLACK   1.0f
 #define KCON_FACE_PLANE_MINGROW 16.0f      // world units, so a tiny face still has reach
+// KIWI (2026-10-27): how far a plain surface point of a free line may slide along its click
+// ray onto the construction face the line crosses (KiwiRegion_FlattenChain) - a face a few
+// inches proud of the wall it was drawn against.
+#define KCON_FLATTEN_MAX        4.0f
+// ...and how far short of a face's edge (screen pixels) a line end inside it is carried onto
+// it (KiwiRegion_ExtendChainEnds) - just past the 8 px snap reach.
+#define KCON_EXTEND_END_PX      16.0f
 // Build an orthonormal basis, preferring hintU; false for a degenerate normal.
 bool KiwiCon_MakePlane( const float origin[3], const float normal[3],
                         const float *hintU, kconPlane_t *out );
@@ -346,6 +353,9 @@ void KiwiCon_SetShowConstruction( bool on );
 // Set and clear it for the full gesture so every plane-borne snap branch agrees.
 void KiwiCon_SetPlanePlacement( bool on );
 bool KiwiCon_PlanePlacement();      // a PLANAR draw tool OR a plane-placing command
+// KIWI (2026-10-27): a FREE draw tool (line / polyline / spline) is live - its points
+// land on a construction face under the cursor (kiwi_snap.cpp raw ladder).
+bool KiwiCon_FreeToolActive();
 
 // Last placed tool point; SNAP_ANGLE's origin. False before the first point.
 bool KiwiCon_ToolAnchor( float out[3] );

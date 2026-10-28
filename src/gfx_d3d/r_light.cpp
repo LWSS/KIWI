@@ -1154,6 +1154,7 @@ bool __cdecl R_SpotLightIsAttachedToDobj(const DObj_s *obj)
 }
 
 // KISAKTODO: unfk
+// KIWI: primarySortKey's position comes from r_gfx.h (Radiant moved it from bit 54 to 57).
 void __cdecl ShortSortArray_GfxReverseSortDrawSurfsInterface_GfxDrawSurf_(GfxDrawSurf *lo, GfxDrawSurf *hi)
 {
     int packed_high; // edx
@@ -1167,15 +1168,15 @@ void __cdecl ShortSortArray_GfxReverseSortDrawSurfsInterface_GfxDrawSurf_(GfxDra
     {
         max = lo;
         LODWORD(maxKey) = LODWORD(lo->fields);
-        HIDWORD(maxKey) = ((~((lo->packed >> 54) & 0x3F) & 0x3F) << 22) | HIDWORD(lo->packed) & 0xF03FFFFF;
+        HIDWORD(maxKey) = ((~((lo->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT) | HIDWORD(lo->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
         for (walk = lo + 1; walk <= hi; ++walk)
         {
             packed = walk->packed;
-            HIDWORD(packed) = ((~((walk->packed >> 54) & 0x3F) & 0x3F) << 22) | HIDWORD(walk->packed) & 0xF03FFFFF;
+            HIDWORD(packed) = ((~((walk->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT) | HIDWORD(walk->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
             if (maxKey < packed)
             {
                 LODWORD(maxKey) = LODWORD(walk->fields);
-                HIDWORD(maxKey) = ((~((walk->packed >> 54) & 0x3F) & 0x3F) << 22) | HIDWORD(walk->packed) & 0xF03FFFFF;
+                HIDWORD(maxKey) = ((~((walk->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT) | HIDWORD(walk->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
                 max = walk;
             }
         }
@@ -1240,7 +1241,7 @@ void __cdecl qsortArray_GfxReverseSortDrawSurfsInterface_GfxDrawSurf_(GfxDrawSur
                 loWalk = loEnd;
                 hiWalk = hiEnd + 1;
                 LODWORD(pivotKey) = loEnd->packed;
-                HIDWORD(pivotKey) = ((~((loEnd->packed >> 54) & 0x3F) & 0x3F) << 22) | HIDWORD(loEnd->packed) & 0xF03FFFFF;
+                HIDWORD(pivotKey) = ((~((loEnd->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT) | HIDWORD(loEnd->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
                 while (1)
                 {
                     do
@@ -1248,16 +1249,16 @@ void __cdecl qsortArray_GfxReverseSortDrawSurfsInterface_GfxDrawSurf_(GfxDrawSur
                         if (++loWalk > hiEnd)
                             break;
                         v11.fields = loWalk->fields;
-                        HIDWORD(v11.packed) = ((~((loWalk->packed >> 54) & 0x3F) & 0x3F) << 22)
-                            | HIDWORD(loWalk->packed) & 0xF03FFFFF;
+                        HIDWORD(v11.packed) = ((~((loWalk->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT)
+                            | HIDWORD(loWalk->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
                     } while (v11.packed <= pivotKey);
                     do
                     {
                         if (loEnd >= --hiWalk)
                             break;
                         v10.fields = hiWalk->fields;
-                        HIDWORD(v10.packed) = ((~((hiWalk->packed >> 54) & 0x3F) & 0x3F) << 22)
-                            | HIDWORD(hiWalk->packed) & 0xF03FFFFF;
+                        HIDWORD(v10.packed) = ((~((hiWalk->packed >> DRAWSURF_PRIMARY_SORT_KEY_SHIFT) & 0x3F) & 0x3F) << DRAWSURF_PRIMARY_SORT_KEY_HI_SHIFT)
+                            | HIDWORD(hiWalk->packed) & DRAWSURF_PRIMARY_SORT_KEY_HI_CLEAR;
                     } while (pivotKey <= v10.packed);
                     if (hiWalk < loWalk)
                         break;

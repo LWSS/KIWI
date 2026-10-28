@@ -513,7 +513,7 @@ void __cdecl Material_GetHashIndex(const char *name, uint16_t *hashIndex, bool *
     iassert( name );
     iassert( hashIndex );
     iassert( exists );
-    beginHashIndex = R_HashAssetName(name) % 0x7FF;
+    beginHashIndex = R_HashAssetName(name) % (MAX_MATERIAL_COUNT - 1);   // KIWI: 0x7FF retail
     *hashIndex = beginHashIndex;
     do
     {
@@ -524,7 +524,7 @@ void __cdecl Material_GetHashIndex(const char *name, uint16_t *hashIndex, bool *
             *exists = 1;
             return;
         }
-        *hashIndex = (*hashIndex + 1) % 0x7FF;
+        *hashIndex = (*hashIndex + 1) % (MAX_MATERIAL_COUNT - 1);
     } while (*hashIndex != beginHashIndex);
     *exists = 0;
 }
@@ -559,8 +559,8 @@ void __cdecl Material_Add(Material *material, uint16_t hashIndex)
 #endif
     rgp.sortedMaterials[rgp.materialCount] = material;
     rg.materialHashTable[hashIndex] = material;
-    if (++rgp.materialCount == 2048)
-        Com_Error(ERR_FATAL, "Too many unique materials (%i or more)\n", 2048);
+    if (++rgp.materialCount == MAX_MATERIAL_COUNT)
+        Com_Error(ERR_FATAL, "Too many unique materials (%i or more)\n", MAX_MATERIAL_COUNT);
 }
 
 Material *__cdecl Material_Register_LoadObj(char *name, int imageTrack)

@@ -178,12 +178,42 @@ namespace
                                       PtCount( pts ), 2, true );
     }
 
+    // KIWI (2026-10-27): an arrangement cell walks a dangling line (a cut that stops inside
+    // the face) out and back - a, b, a.  Its tip b is not a corner of the face: with it the
+    // face came out a second time beside the clean one (same area, a centroid pulled toward
+    // the spur, so DuplicateRegion missed it) and drew / picked twice.  Drop every tip whose
+    // neighbours coincide, repeatedly; DedupLoop then folds the doubled base.
+    void DropSpurs( std::vector<float> &pts, float tol )
+    {
+        bool changed = true;
+        while ( changed )
+        {
+            changed = false;
+            const int n = PtCount( pts );
+            if ( n < 4 )
+                return;
+            for ( int i = 0; i < n; ++i )
+            {
+                const float *a = Pt( pts, ( i + n - 1 ) % n );
+                const float *c = Pt( pts, ( i + 1 ) % n );
+                const float du = c[0] - a[0], dv = c[1] - a[1];
+                if ( sqrtf( du * du + dv * dv ) > tol )
+                    continue;
+                pts.erase( pts.begin() + (size_t)i * 2, pts.begin() + (size_t)i * 2 + 2 );
+                DedupLoop( pts, tol );
+                changed = true;
+                break;
+            }
+        }
+    }
+
     // Joined and unjoined outlines must sanitize identically: bounded dedupe,
     // collinear removal, then dedupe again because removal can expose a new weld.
     // Winding remains an acceptance decision in AcceptLoop.
     void SanitizeRing( std::vector<float> &pts )
     {
         DedupLoop( pts, KiwiRegion_WeldFor( FinestLoopEdge( pts ) ) );
+        DropSpurs( pts, KiwiRegion_WeldFor( FinestLoopEdge( pts ) ) );
         DropCollinear( pts );
         DedupLoop( pts, KiwiRegion_WeldFor( FinestLoopEdge( pts ) ) );
     }
@@ -383,6 +413,9 @@ namespace
         float cw[3];
         KiwiCon_PlaneToWorld( r.plane, c, cw );
         const float area = fabsf( KiwiRegion_SignedArea( r.pts ) );
+        // KIWI (2026-10-26): bounded by the region's own finest edge - at a coarse grid the
+        // 1.5-unit grid weld called two equal small faces side by side duplicates.
+        const float weld = KiwiRegion_WeldFor( FinestLoopEdge( r.pts ) );
 
         for ( size_t k = 0; k < s_regions.size(); ++k )
         {
@@ -400,7 +433,7 @@ namespace
             oc[1] /= (float)on;
             float ow[3];
             KiwiCon_PlaneToWorld( o.plane, oc, ow );
-            if ( Dist3( cw, ow ) > KiwiRegion_WeldDist() )      // shared weld distance
+            if ( Dist3( cw, ow ) > weld )                       // shared weld distance
                 continue;
             const float oa = fabsf( KiwiRegion_SignedArea( o.pts ) );
             const float bigger = ( oa > area ) ? oa : area;
@@ -429,6 +462,8 @@ namespace
         return inside;
     }
 
+    bool StrictlyInside( const kregion_t &outer, const kregion_t &inner );   // below
+
     // See BuildRegions' tail.  Only strictly smaller coplanar regions whose centroid
     // lies inside count towards the tiling; the areas must agree within 1 %.
     void DropTiledRegions()
@@ -453,7 +488,13 @@ namespace
                     continue;
                 const kregion_t &s = s_regions[k];
                 const float sa = fabsf( KiwiRegion_SignedArea( s.pts ) );
-                if ( !( sa < area * 0.99f ) || !SamePlaneApprox( r.plane, s.plane ) )
+                // KIWI (2026-10-27): was `sa < area * 0.99` - a cut taking a sliver off a
+                // face left a piece over 99 % of it, that piece never counted, and the whole
+                // face stayed as a third face over both pieces.  "Smaller" is now any real
+                // difference; the 1 % margin kept out a lone inset loop (a hole), which the
+                // single-tile test below now refuses by shape.
+                const float same = ( KREG_MIN_AREA > area * 1.0e-4f ) ? KREG_MIN_AREA : area * 1.0e-4f;
+                if ( !( sa < area - same ) || !SamePlaneApprox( r.plane, s.plane ) )
                     continue;
                 if ( CentroidInside( r, s ) )
                 {
@@ -461,7 +502,9 @@ namespace
                     candArea.push_back( sa );
                 }
             }
-            float sum = 0.0f;
+            float  sum   = 0.0f;
+            int    tiles = 0;
+            size_t lone  = 0;
             for ( size_t a = 0; a < cand.size(); ++a )
             {
                 bool nested = false;
@@ -469,8 +512,15 @@ namespace
                     nested = b != a && candArea[b] > candArea[a]
                           && CentroidInside( s_regions[cand[b]], s_regions[cand[a]] );
                 if ( !nested )
+                {
                     sum += candArea[a];
+                    ++tiles;
+                    lone = cand[a];
+                }
             }
+            // One "tile" lying strictly inside is an inset loop (a hole), never a tiling.
+            if ( tiles == 1 && StrictlyInside( r, s_regions[lone] ) )
+                continue;
             if ( sum > 0.0f && fabsf( sum - area ) <= area * 0.01f )
                 drop[i] = 1;
         }
@@ -1145,6 +1195,24 @@ bool KiwiRegion_ChainWalk( const int *objects, int count,
     if ( !objects || count < 1 || !outSteps )
         return false;
 
+    // KIWI (2026-10-26, user: "drawing construction lines on it does not complete a
+    // construction face"): the weld was the grid-only KiwiRegion_WeldDist (1.5 at a 6-unit
+    // grid), so a member shorter than that collapsed onto one node and a small triangle of
+    // lines lost a side.  Bound it by the shortest member, as ArrangeWeld and AcceptLoop do.
+    float finest = 0.0f;
+    for ( int m = 0; m < count; ++m )
+    {
+        const kconObject_t *o = KiwiCon_At( objects[m] );
+        const int n = o ? KiwiCon_VertCount( *o ) : 0;
+        float w0[3], w1[3];
+        if ( n < 2 || !KiwiCon_VertWorld( *o, 0, w0 ) || !KiwiCon_VertWorld( *o, n - 1, w1 ) )
+            continue;
+        const float d = Dist3( w0, w1 );
+        if ( d > KREG_JOIN_DIST && ( finest <= 0.0f || d < finest ) )
+            finest = d;
+    }
+    const float weld = KiwiRegion_WeldFor( finest );
+
     // Weld every member's two world-space ends into shared nodes.
     std::vector<chainNode_t> nodes;
     std::vector<chainEdge_t> edges;
@@ -1161,13 +1229,13 @@ bool KiwiRegion_ChainWalk( const int *objects, int count,
             continue;
 
         // Self-closing objects belong to pass 1; drop them before creating nodes.
-        if ( Dist3( w0, w1 ) <= KiwiRegion_WeldDist() )         // pass-1 object, not a link
+        if ( Dist3( w0, w1 ) <= weld )                          // pass-1 object, not a link
             continue;
 
         chainEdge_t e;
         e.objIndex = objects[m];
-        e.node0    = NodeFor( nodes, w0, KiwiRegion_WeldDist() );   // shared weld distance
-        e.node1    = NodeFor( nodes, w1, KiwiRegion_WeldDist() );
+        e.node0    = NodeFor( nodes, w0, weld );                // shared weld distance
+        e.node1    = NodeFor( nodes, w1, weld );
         e.used     = false;
         if ( e.node0 == e.node1 )
             continue;                        // welded onto one node — same case
@@ -1233,6 +1301,169 @@ bool KiwiRegion_ChainWalk( const int *objects, int count,
     }
     if ( outClosed )
         *outClosed = ( node == startNode );
+    return true;
+}
+
+// KIWI (2026-10-27): see kiwi_region.h.
+bool KiwiRegion_ExtendChainEnds( std::vector<float> &pts, const bool canMove[2], const float maxGap[2] )
+{
+    const int n = (int)( pts.size() / 3 );
+    if ( n < 2 )
+        return false;
+    const std::vector<kregion_t> &regions = KiwiRegion_All();
+    const float onPlane = 0.05f;
+    bool changed = false;
+    for ( int end = 0; end < 2; ++end )
+    {
+        if ( !canMove[end] || !( maxGap[end] > 0.0f ) )
+            continue;
+        float *p = &pts[(size_t)( end == 0 ? 0 : n - 1 ) * 3];
+        const float *q = &pts[(size_t)( end == 0 ? 1 : n - 2 ) * 3];
+        float bestS = maxGap[end];
+        float bestHit[3];
+        bool  found = false;
+        for ( size_t r = 0; r < regions.size(); ++r )
+        {
+            const kregion_t &reg = regions[r];
+            const int m = PtCount( reg.pts );
+            if ( m < 3 )
+                continue;
+            const kconPlane_t &pl = reg.plane;
+            const float rp[3] = { p[0] - pl.origin[0], p[1] - pl.origin[1], p[2] - pl.origin[2] };
+            const float rq[3] = { q[0] - pl.origin[0], q[1] - pl.origin[1], q[2] - pl.origin[2] };
+            if ( fabsf( Dot3( rp, pl.normal ) ) > onPlane || fabsf( Dot3( rq, pl.normal ) ) > onPlane )
+                continue;                      // the end segment is not in this face's plane
+            float a[2], b[2];
+            KiwiCon_WorldToPlane( pl, p, a );
+            KiwiCon_WorldToPlane( pl, q, b );
+            if ( !PointInLoop( reg.pts, a ) )
+                continue;                      // only an end that stops INSIDE the face
+            float d[2] = { a[0] - b[0], a[1] - b[1] };
+            const float dl = sqrtf( d[0] * d[0] + d[1] * d[1] );
+            if ( !( dl > 1.0e-4f ) )
+                continue;
+            d[0] /= dl;
+            d[1] /= dl;
+            for ( int e = 0; e < m; ++e )
+            {
+                if ( KiwiRegion_EdgeIsBridge( reg, e ) )
+                    continue;                  // a ring's slit is not a rim
+                const float *ea = Pt( reg.pts, e ), *eb = Pt( reg.pts, ( e + 1 ) % m );
+                const float ex = eb[0] - ea[0], ey = eb[1] - ea[1];
+                const float den = d[0] * ey - d[1] * ex;
+                if ( fabsf( den ) < 1.0e-6f )
+                    continue;                  // parallel to that edge
+                const float wx = ea[0] - a[0], wy = ea[1] - a[1];
+                const float s = ( wx * ey - wy * ex ) / den;      // along the extension
+                const float u = ( wx * d[1] - wy * d[0] ) / den;  // along the edge
+                if ( s <= 0.0f || s >= bestS || u < -1.0e-4f || u > 1.0f + 1.0e-4f )
+                    continue;
+                const float hit[2] = { a[0] + d[0] * s, a[1] + d[1] * s };
+                KiwiCon_PlaneToWorld( pl, hit, bestHit );
+                bestS = s;
+                found = true;
+            }
+        }
+        if ( found && bestS > KREG_JOIN_DIST )   // within the weld the arrangement joins it
+        {
+            Copy3( bestHit, p );
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// KIWI (2026-10-27): see kiwi_region.h.  A cut drawn from the brick beside a face that sits
+// proud of (or tilted off) the wall put its outside end ON the wall, off the face's plane, so
+// the line never joined the face and never cut it.
+bool KiwiRegion_FlattenChain( std::vector<float> &pts, const std::vector<unsigned char> &movable,
+                              const std::vector<float> &rays, float maxMove )
+{
+    const int n = (int)( pts.size() / 3 );
+    if ( n < 2 || (int)movable.size() < n || (int)rays.size() < n * 6 )
+        return false;
+    const std::vector<kregion_t> &regions = KiwiRegion_All();
+    const float onPlane = 0.05f;               // a fixed point's slack off the face plane
+    const float weld    = KREG_JOIN_DIST;
+
+    int                best      = -1;
+    float              bestMove  = 0.0f;
+    std::vector<float> bestPts;
+    std::vector<float> cand( pts.size() );
+    std::vector<float> uv( (size_t)n * 2 );
+    for ( size_t r = 0; r < regions.size(); ++r )
+    {
+        const kregion_t &reg = regions[r];
+        if ( PtCount( reg.pts ) < 3 )
+            continue;
+        const kconPlane_t &pl = reg.plane;
+        bool  ok    = true;
+        float moved = 0.0f;
+        for ( int i = 0; i < n && ok; ++i )
+        {
+            const float *p = &pts[(size_t)i * 3];
+            float       *q = &cand[(size_t)i * 3];
+            const float rel[3] = { p[0] - pl.origin[0], p[1] - pl.origin[1], p[2] - pl.origin[2] };
+            const float off = Dot3( rel, pl.normal );
+            if ( fabsf( off ) <= onPlane )
+            {
+                Copy3( p, q );
+            }
+            else if ( movable[(size_t)i] )
+            {
+                const float *ro = &rays[(size_t)i * 6], *rd = ro + 3;
+                const float den = Dot3( rd, pl.normal );
+                if ( fabsf( den ) < 1.0e-3f )
+                {
+                    ok = false;                // grazing: the slide is unbounded
+                    break;
+                }
+                const float orel[3] = { pl.origin[0] - ro[0], pl.origin[1] - ro[1], pl.origin[2] - ro[2] };
+                const float t = Dot3( orel, pl.normal ) / den;
+                if ( !( t > 0.0f ) )
+                {
+                    ok = false;
+                    break;
+                }
+                for ( int k = 0; k < 3; ++k )
+                    q[k] = ro[k] + rd[k] * t;
+                const float d = Dist3( p, q );
+                if ( d > maxMove )
+                    ok = false;
+                moved += d;
+            }
+            else
+                ok = false;                    // a snapped point off this plane stays put
+            if ( ok )
+                KiwiCon_WorldToPlane( pl, q, &uv[(size_t)i * 2] );
+        }
+        if ( !ok || ( best >= 0 && moved >= bestMove ) )
+            continue;
+
+        // The flattened chain must touch the face: a point in it or on its rim, or a crossing.
+        const int m = PtCount( reg.pts );
+        bool touch = false;
+        for ( int i = 0; i < n && !touch; ++i )
+        {
+            const float *a = &uv[(size_t)i * 2];
+            if ( PointInLoop( reg.pts, a ) )
+                touch = true;
+            for ( int e = 0; e < m && !touch; ++e )
+                touch = PointSegDist2D( a, Pt( reg.pts, e ), Pt( reg.pts, ( e + 1 ) % m ) ) <= weld;
+            if ( i + 1 < n )
+                for ( int e = 0; e < m && !touch; ++e )
+                    touch = SegCross( a, &uv[(size_t)( i + 1 ) * 2], Pt( reg.pts, e ),
+                                      Pt( reg.pts, ( e + 1 ) % m ) );
+        }
+        if ( !touch )
+            continue;
+        best     = (int)r;
+        bestMove = moved;
+        bestPts  = cand;
+    }
+    if ( best < 0 || !( bestMove > 0.0f ) )
+        return false;
+    pts.swap( bestPts );
     return true;
 }
 
@@ -1860,7 +2091,14 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
         if ( n < 3 || n > KREG_MAX_LOOP )
             continue;
 
-        bool anyFront = false, onScreen = false;
+        // KIWI (2026-10-26, user: "construction faces dont render when zoomed in close"): the
+        // test was "some CORNER projects within one image of the view", so a face zoomed in
+        // until every corner sat further off-screen than that - the face covering the whole
+        // view - was skipped and only its outline drew.  Test the projected corners' BOUNDS
+        // against the view instead; with every corner in front of the eye the face's image
+        // lies inside them.
+        bool anyFront = false;
+        float bx0 = FLT_MAX, by0 = FLT_MAX, bx1 = -FLT_MAX, by1 = -FLT_MAX;
         for ( int i = 0; i < n; ++i )
         {
             KiwiCon_PlaneToWorld( reg.plane, Pt( reg.pts, i ), s_w[i] );
@@ -1868,13 +2106,16 @@ void KiwiRegion_DrawFillsOverlay( float imgMinX, float imgMinY, float imgW, floa
             if ( s_d[i] < KREG_OVERLAY_NEAR )
                 continue;
             anyFront = true;
-            // Cheap padded vertex-near-image test; the clip rect handles final coverage.
             ImVec2 s;
-            if ( project( s_w[i], &s )
-              && s.x >= clipMin.x - imgW && s.x <= clipMax.x + imgW
-              && s.y >= clipMin.y - imgH && s.y <= clipMax.y + imgH )
-                onScreen = true;
+            if ( !project( s_w[i], &s ) )
+                continue;
+            if ( s.x < bx0 ) bx0 = s.x;
+            if ( s.x > bx1 ) bx1 = s.x;
+            if ( s.y < by0 ) by0 = s.y;
+            if ( s.y > by1 ) by1 = s.y;
         }
+        const bool onScreen = bx0 <= clipMax.x && bx1 >= clipMin.x
+                           && by0 <= clipMax.y && by1 >= clipMin.y;
         // A loop straddling the eye plane may have no front corner on screen yet still
         // cover it; keep those rather than guess.
         bool straddles = false;

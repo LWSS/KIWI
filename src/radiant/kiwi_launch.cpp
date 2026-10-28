@@ -24,7 +24,7 @@
 // Ported and cross-file entry points.
 extern const char *Dvar_GetString( const char *dvarName );   // universal/dvar.cpp (fs_basepath)
 extern int  prefabStackLevel;                          // map.cpp 0x25D5B34
-extern void Pointfile_Errorfile_Public();                // errorfile.cpp:409
+extern void Pointfile_Errorfile_LoadOnly();              // errorfile.cpp: load, no jump to entry 1
 extern void Pointfile_Clear();                           // points.cpp:112  (frees the error-log entries)
 extern void Pointfile_ResetPoints();                     // points.cpp:129  (s_num_points = 0)
 extern int  Pointfile_GetNumPoints();                    // points.cpp:132
@@ -833,7 +833,9 @@ void AfterBspDiagnostics( DWORD exitCode )
     {
         Pointfile_ResetPoints();            // the ported Cmd_OnErrorFile head
         Pointfile_Clear();                  // reload rather than toggle
-        Pointfile_Errorfile_Public();
+        // KIWI (2026-10-25, user: "stop moving the camera when building the map"): loaded
+        // without the ported jump to the first entry (camera, selection, material mode).
+        Pointfile_Errorfile_LoadOnly();
         LogLine( "" );
         LogLine( "error log loaded (%d entries) from %s", s_errLogCount, errlog );
         int fragileElsewhere = 0;

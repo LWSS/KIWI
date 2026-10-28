@@ -65,26 +65,44 @@ namespace
         return sqrtf( dx * dx + dy * dy );
     }
 
-    // Test original 3D segments so projection cannot invent crossings in a merely
-    // near-coplanar group. This matches Trim's closest-point test and tolerance.
+    // Closest-point test and tolerance as Trim's, in the group's plane (below).
     // KIWI (2026-09-27, user: "I just cant get the array tool to close off loops/make faces"
     // on a window grid): a line END within the node weld of another segment also cuts it -
     // a T-junction whose end missed by a hair.  Arrayed dividers crept 0.012 u per copy
     // (the picked line was not level), so past ~20 copies their ends sat more than
     // KCON_ISECT_DIST off the frame line and the rows the frame closes never formed.  The
     // weld then merges the end with the cut, exactly as it merges near-touching ends.
+    // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction face
+    // made ... make the construction lines more reliable"): the crossing test ran on the 3D
+    // segments at KCON_ISECT_DIST (0.25), while membership of this group is the plane band
+    // (KiwiRegion_PlaneBand, 0.5 .. grid/4).  A line a few tenths off a face's plane - drawn
+    // on the brick behind a face laid a hair proud of it, or across a face tilted by its own
+    // corner snaps - joined the group and then crossed none of its edges, so the face was
+    // never cut.  Every segment here is ON the plane by membership, so the crossing is
+    // measured where the cells are built: in the plane (`flat`, z = 0).  Projection cannot
+    // join two members further apart than twice the band.
     void GatherCuts( const std::vector<float> &world,      // 6 floats per segment
+                     const kconPlane_t &plane,
                      float weld, std::vector< std::vector<float> > *cuts )
     {
         const int n = (int)( world.size() / 6 );
         cuts->assign( (size_t)n, std::vector<float>() );
 
+        std::vector<float> flat( world.size(), 0.0f );
+        for ( int i = 0; i < n * 2; ++i )
+        {
+            float uv[2];
+            KiwiCon_WorldToPlane( plane, &world[(size_t)i * 3], uv );
+            flat[(size_t)i * 3 + 0] = uv[0];
+            flat[(size_t)i * 3 + 1] = uv[1];
+        }
+
         for ( int i = 0; i < n; ++i )
         {
-            const float *ai = &world[(size_t)i * 6];
+            const float *ai = &flat[(size_t)i * 6];
             for ( int j = i + 1; j < n; ++j )
             {
-                const float *aj = &world[(size_t)j * 6];
+                const float *aj = &flat[(size_t)j * 6];
                 float ta = 0.0f, tb = 0.0f;
                 const float d = KiwiCon_SegSegClosest( ai, ai + 3, aj, aj + 3,
                                                        &ta, &tb, 0 );
@@ -252,7 +270,7 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
 
     // Fragment at crossings.
     std::vector< std::vector<float> > cuts;
-    GatherCuts( world, weld, &cuts );
+    GatherCuts( world, plane, weld, &cuts );
 
     std::vector<seg2_t> frag;
     for ( int i = 0; i < nSeg; ++i )

@@ -98,6 +98,13 @@ inline float Pick_SegDist2D( float px, float py, float ax, float ay,
     return sqrtf( ex * ex + ey * ey );
 }
 
+// KIWI (2026-10-26, user: "it wont let me create a new construction line that is going
+// upwards"): a SCREEN fraction s along the projection of world segment wa-wb, as the WORLD
+// fraction.  Perspective is not affine - 1/depth is - so s != t for any segment that
+// recedes; a Z guide aimed up at a camera above put the anchor's world spot at the guide's
+// screen middle, far up the screen.  Orthographic views return s.
+float Pick_ScreenToWorldT( const float *wa, const float *wb, float s );
+
 // Shared with box selection to keep its candidate set aligned with click picking;
 // mirrors the ported BrushList_Trace admission rules.
 bool Pick_BrushPickable( selbrush_t *b );

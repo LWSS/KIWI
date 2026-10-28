@@ -59,6 +59,7 @@ namespace
         // KIWI GLASS
         { "Glass",            "Glass",   "&Glass (breakable glass sets)", KIWI_CMD_WINDOW_GLASS, 0 },
         // KIWI END
+        { "Material",         "Material", "&Material Properties",   KIWI_CMD_WINDOW_MATPROPS, 1 },  // KIWI (2026-10-26, user: "material properties panel")
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.
@@ -268,6 +269,9 @@ void KiwiWindows_BuildViewMenu( void *frameMenu )
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_SHOW_FACING, "Show &Facing Arrows" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_LEAK_BG, "&Leak Finder Background (strobing)" );
     ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_DEBUG_ORBIT, "Debug: Orbit &Pivot Probe" );
+    // KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5, make this a
+    // setting in the View-> menu topbar").
+    ::AppendMenuA( view, MF_STRING, (UINT_PTR)KIWI_CMD_VIEW_BG_FPS_CAP, "&Background Frame Cap (5 fps)" );
     s_viewMenuBuilt = true;
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 
@@ -287,6 +291,7 @@ void KiwiWindows_SyncViewMenu()
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_SHOW_FACING, KiwiUX_ShowFacingArrows() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_LEAK_BG, KiwiUX_LeakBackground() );
     Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_DEBUG_ORBIT, KiwiUX_DebugOrbitPivot() );
+    Radiant_CheckMenu( (UINT)KIWI_CMD_VIEW_BG_FPS_CAP, KiwiUX_BackgroundFpsCap() );
 }
 
 // Command registration and dispatch.
@@ -300,6 +305,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiWindowShell",   0, 0, KIWI_CMD_WINDOW_SHELL );
     Radiant_RegisterCommand( "KiwiWindowOutliner",0, 0, KIWI_CMD_WINDOW_OUTLINER );  // toggle registered here
     Radiant_RegisterCommand( "KiwiWindowInspector", 0, 0, KIWI_CMD_WINDOW_INSPECTOR );
+    Radiant_RegisterCommand( "KiwiWindowMaterial",  0, 0, KIWI_CMD_WINDOW_MATPROPS );  // KIWI (2026-10-26, user: "material properties panel")
     // Other helper windows register their rows in their owning modules; all toggles
     // still dispatch through s_def below.
     Radiant_RegisterCommand( "KiwiViewShowGrid",  0, 0, KIWI_CMD_VIEW_SHOW_GRID );
@@ -314,6 +320,7 @@ void KiwiWindows_RegisterCommands()
     Radiant_RegisterCommand( "KiwiViewShowFacing",  0, 0, KIWI_CMD_VIEW_SHOW_FACING ); // View > Show Facing Arrows
     Radiant_RegisterCommand( "KiwiViewLeakBackground", 0, 0, KIWI_CMD_VIEW_LEAK_BG );  // View > Leak Finder Background
     Radiant_RegisterCommand( "KiwiViewDebugOrbitPivot", 0, 0, KIWI_CMD_VIEW_DEBUG_ORBIT ); // View > Debug: Orbit Pivot Probe
+    Radiant_RegisterCommand( "KiwiViewBackgroundFpsCap", 0, 0, KIWI_CMD_VIEW_BG_FPS_CAP ); // View > Background Frame Cap (5 fps)
     Radiant_RegisterCommand( "KiwiWindowsResetLayout", 0, 0, KIWI_CMD_WINDOWS_RESET_LAYOUT ); // Windows > Reset Layout
 }
 
@@ -374,6 +381,12 @@ bool KiwiWindows_DispatchInstant( unsigned int cmdId )
     if ( cmdId == (unsigned int)KIWI_CMD_VIEW_DEBUG_ORBIT )
     {
         KiwiUX_SetDebugOrbitPivot( !KiwiUX_DebugOrbitPivot() );
+        KiwiWindows_SyncViewMenu();
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_VIEW_BG_FPS_CAP )
+    {
+        KiwiUX_SetBackgroundFpsCap( !KiwiUX_BackgroundFpsCap() );
         KiwiWindows_SyncViewMenu();
         return true;
     }
