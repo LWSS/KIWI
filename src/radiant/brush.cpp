@@ -1726,6 +1726,7 @@ extern int  *toolflags;  // toolflags table
 extern void Map_ParseEntityLayerKey( const char **text, const char *defVal, char *outBuf, const char *key );
 extern int  Map_ParseContentsLine( const char **text );
 extern int  Map_ParseToolFlagsLine( const char **text );
+extern void Map_ParseFlagLines( const char **text, int *contents, int *toolFlags );   // engine_stubs.cpp
 extern char *Mtl_NormalizeName( char *name );
 extern float Float_CleanLowBits( float f, int threshold );  // snap low 12 mantissa bits
 
@@ -3873,8 +3874,7 @@ brush_t *Brush_Parse( const char **text, int version )
     if ( version >= 4 )
     {
         Map_ParseEntityLayerKey( text, "000_Global", layerStr, "layer" );
-        contents  = Map_ParseContentsLine( text );
-        toolFlags = Map_ParseToolFlagsLine( text );
+        Map_ParseFlagLines( text, &contents, &toolFlags );   // KIWI: any number, any order
     }
     else
     {
@@ -5225,10 +5225,16 @@ next_clamp_face:;
                 fa->w = merged;
                 Brush_RemoveFace( b, (unsigned int)flipB );
                 const unsigned int fc = (unsigned int)b->faceCount;
+                // KIWI (2026-10-27, crash: Plane_Equal read b->faces[0xFFFFFFFF] in Phase 2e
+                // while moving points in vertex mode): faces after flipB slide down one slot,
+                // so origins past flipB drop by one, but an origin that WAS flipB pointed at
+                // the face just merged away - "nv - 1" made that -1 whenever flipB was 0.
+                // Such a face has no surviving origin to merge back into: it is its own.
                 for ( unsigned int s = (unsigned int)flipB; s < fc; ++s )
                 {
                     const int nv = originalFaceIndex[s + 1];
-                    originalFaceIndex[s] = ( nv >= flipB ) ? nv - 1 : nv;
+                    originalFaceIndex[s] = ( nv == flipB ) ? (int)s
+                                         : ( nv >  flipB ) ? nv - 1 : nv;
                 }
             }
             else
@@ -5244,6 +5250,8 @@ next_clamp_face:;
             while ( i < (unsigned int)b->faceCount )
             {
                 unsigned int orig = (unsigned int)originalFaceIndex[i];
+                if ( orig > i )                  // KIWI: never index past this face (see above)
+                    orig = i;
                 if ( orig == i )
                 {
                     ++i;

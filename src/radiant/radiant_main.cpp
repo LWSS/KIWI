@@ -1116,6 +1116,16 @@ static int Radiant_RunMessageLoop()
             if ( fg )
                 ::GetWindowThreadProcessId( fg, &fgPid );
             background = ( fgPid != selfPid );
+            // KIWI (2026-10-27, user: "the 5fps limit needs to go away if the program is
+            // moused over"): a cursor over any window of this process counts as in front.
+            POINT cursor;
+            if ( background && ::GetCursorPos( &cursor ) )
+            {
+                DWORD overPid = 0;
+                if ( const HWND over = ::WindowFromPoint( cursor ) )
+                    ::GetWindowThreadProcessId( over, &overPid );
+                background = ( overPid != selfPid );
+            }
         }
         const LONGLONG frameTicks = background ? bgFrameTicks : fgFrameTicks;
 

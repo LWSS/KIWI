@@ -911,8 +911,15 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
 
     char layerBuf[1024];
     Map_ParseEntityLayerKey( text, "000_Global", layerBuf, "layer" );
-    p->contents = Map_ParseContentsLine( text );    // optional `contents <names>;`
-    p->flags    = Map_ParseToolFlagsLine( text );   // optional `toolFlags <names>;`
+    // optional `contents <names>;` / `toolFlags <names>;` - KIWI: any number, any order
+    // (newer CoD Radiants write one line per flag; engine_stubs.cpp Map_ParseFlagLines)
+    {
+        extern void Map_ParseFlagLines( const char **text, int *contents, int *toolFlags );
+        int contents = 0, toolFlags = 0;
+        Map_ParseFlagLines( text, &contents, &toolFlags );
+        p->contents = contents;
+        p->flags    = toolFlags;
+    }
 
     // material names. spaceDelimited=1 so '/' in a material path isn't a delimiter;
     // it covers BOTH the texture and lightmap reads, then reset to 0 for smoothing.

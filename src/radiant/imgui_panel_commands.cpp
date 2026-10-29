@@ -186,6 +186,7 @@ namespace
     };
 
     bool                         s_show       = false;
+    bool                         s_focusNext  = false;   // Help > Command list: front + focus once
     bool                         s_built      = false;
     bool                         s_showFixed  = true;
     bool                         s_dirty      = true;     // refilter / resort
@@ -728,10 +729,13 @@ void ImGuiPanel_Commands_MenuItem()
     ImGui::Checkbox( "Command list", &s_show );
 }
 
-// Help > Command list... (32790, Radiant_DispatchCommandDirect) flips the same flag.
+// Help > Command list... (32790, Radiant_DispatchCommandDirect) sets the same flag.
+// KIWI (2026-10-27): it OPENS the window and brings it to the front (a menu command never
+// closes the window it names); the window's ✕ and the panels checkbox still close it.
 void ImGuiPanel_Commands_Toggle()
 {
-    s_show = !s_show;
+    s_show      = true;
+    s_focusNext = true;
 }
 
 void ImGuiPanel_Commands_Draw()
@@ -750,6 +754,11 @@ void ImGuiPanel_Commands_Draw()
         Build();
 
     ImGui::SetNextWindowSize( ImVec2( 900.0f, 600.0f ), ImGuiCond_FirstUseEver );
+    if ( s_focusNext )
+    {
+        ImGui::SetNextWindowFocus();        // also selects its tab if it is docked
+        s_focusNext = false;
+    }
     if ( ImGui::Begin( "Command List", &s_show ) )
     {
         Gather();

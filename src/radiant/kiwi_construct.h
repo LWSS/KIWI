@@ -143,6 +143,9 @@ struct kconObject_t
 
 // True for a LINE/POLYLINE with at least three points and one spline span.
 bool KiwiCon_HasSmooth( const kconObject_t &o );
+// KIWI (2026-10-27): a spline whose tessellation fits no plane (and is not straight) - the
+// only spline that stays out of construction faces (kiwi_region.cpp / kiwi_arrange.cpp).
+bool KiwiCon_SplineOffPlane( const kconObject_t &o );
 // The tessellated polyline of a smooth chain (WORLD xyz triples); `closed` mirrors
 // o.closed.  Used by the draw tool preview as well as the store accessors.
 void KiwiCon_TessellateMixed( const std::vector<float> &ctrl,
@@ -356,6 +359,11 @@ bool KiwiCon_PlanePlacement();      // a PLANAR draw tool OR a plane-placing com
 // KIWI (2026-10-27): a FREE draw tool (line / polyline / spline) is live - its points
 // land on a construction face under the cursor (kiwi_snap.cpp raw ladder).
 bool KiwiCon_FreeToolActive();
+// KIWI (2026-10-27, user: "This needs to draw on the face while it's selected"): the explicit
+// (Space) plane is a selected brush face's / construction face's plane - a free draw tool
+// started then is bound to it (FreeToolPlaneLocked: it places through the planar snap path).
+bool KiwiCon_ExplicitPlaneSelected();
+bool KiwiCon_FreeToolPlaneLocked();
 
 // Last placed tool point; SNAP_ANGLE's origin. False before the first point.
 bool KiwiCon_ToolAnchor( float out[3] );

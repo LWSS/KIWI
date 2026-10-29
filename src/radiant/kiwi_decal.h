@@ -23,3 +23,7 @@ bool KiwiDecal_HandleWheel( float steps, bool shift, bool ctrl );   // Ctrl+whee
 
 void KiwiDecal_Hover( int imgX, int imgY, bool over );
 void KiwiDecal_DrawWorld();
+
+// The camera hint strip's chips while armed (kiwi_hints.cpp); 0 when disarmed.
+struct kiwiPrompt_t;
+int  KiwiDecal_HudPrompts( const kiwiPrompt_t **out );

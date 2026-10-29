@@ -18,14 +18,12 @@
 #include "kiwi_construct.h"
 #include "kiwi_transform.h" // pivot placement and snap-dot state
 #include "kiwi_grid.h"
-#include "kiwi_hover.h"       // KIWI: the cylinder overlay's hovered target
 #include "kiwi_region.h"      // KREG_JOIN_DIST weld tolerance
 #include "kiwi_section.h"     // KIWI: KiwiView_XRay, section clamp/visibility (line of sight)
 #include "kiwi_lines.h"
 #include "kiwi_ported.h"
 #include "kiwi_primitive.h"
 #include "kiwi_units.h"
-#include "kiwi_ux.h"          // KIWI: KiwiUX_ShowHover (the cylinder overlay's hovered target)
 #include "radiant_registry.h"
 #include "kiwi_vec.h"         // Dot3/Sub3/Cross3/Norm3
 
@@ -448,7 +446,7 @@ namespace
 
     void ScanAxes( const camera_s *c, const float *anchor, const kconPlane_t &plane,
                    const float *extDirs, const char *const *extNames, int extCount,
-                   float curX, float curY, axisBest_t *best )
+                   float curX, float curY, axisBest_t *best, bool inPlaneOnly )
     {
         const float wpp = WorldPerPixel( c, anchor );
         if ( !( wpp > 0.0f ) )
@@ -462,6 +460,11 @@ namespace
 
         for ( int i = 0; i < n; ++i )
         {
+            // KIWI (2026-10-27, user: "This needs to draw on the face while it's selected"):
+            // a plane-bound placer only offers guides IN its plane - world Z or N on a level
+            // face led straight off it (the guide point was then projected back onto the anchor).
+            if ( inPlaneOnly && fabsf( Dot3( cand[i].dir, plane.normal ) ) > 0.01f )
+                continue;
             // The guide half-length is shortened until BOTH ends project — an axis
             // through a point near the eye plane runs behind the camera at full
             // length, and Pick_WorldToImage refuses those (as it must).
@@ -2670,7 +2673,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             }
 
             ScanAxes( Ed_Camera(), anchor, axisBasis, extDirs, extNames, extCount,
-                      curX, curY, &axisBest );
+                      curX, curY, &axisBest, planarPlacer );
         }
         if ( axisBest.hit )
         {
@@ -2734,7 +2737,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     // capped at 0.22 of one 15-degree step. Outside the band the point is untouched.
     // Rotate only the in-plane component, preserve out-of-plane offset, and quantize
     // length with the same absolute-world-axis rule as SNAP_AXIS.
-    if ( !planarPlacer && out->havePlane && haveCursorPx )
+    // KIWI (2026-10-27): a free line bound to the selected Space face keeps the line tool's
+    // capture band here (in the face's plane, the raw rung's) rather than the planar shapes'
+    // hard quantization below.
+    const bool freeLocked = KiwiCon_FreeToolPlaneLocked();
+    if ( ( !planarPlacer || freeLocked ) && out->havePlane && haveCursorPx )
     {
         float anchor[3];
         if ( KiwiCon_ToolAnchor( anchor ) )
@@ -2851,7 +2858,7 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         KiwiCon_WorldToPlane( cplane, cplaneHit, uv );
 
         float anchor[3];
-        if ( KiwiCon_ToolAnchor( anchor ) )
+        if ( !freeLocked && KiwiCon_ToolAnchor( anchor ) )   // KIWI: a face-bound line: grid only
         {
             float auv[2];
             KiwiCon_WorldToPlane( cplane, anchor, auv );
@@ -3290,112 +3297,10 @@ void KiwiSnap_DrawAxisGuides()
 
     KiwiLines_Flush();
 }
-// Draw only selected cylinders and the hovered target, so dense maps stay legible.
-// These are overlays (like transform handles), including the centre inside a shell.
-void KiwiSnap_DrawCylinderOverlay( float imgMinX, float imgMinY, float imgW, float imgH )
-{
-    if ( !KiwiSnap_ShowMarkers() ) return;
-    std::vector<selbrush_t *> nodes;
-    auto add = [&]( selbrush_t *b )
-    {
-        if ( !b || nodes.size() >= 32 ) return;
-        for ( selbrush_t *existing : nodes ) if ( existing == b ) return;
-        nodes.push_back( b );
-    };
-    // Stop once full: the loops used to run the whole (building-sized) selection every frame.
-    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes && nodes.size() < 32; b = b->next ) add( b );
-    const selection_t &selection = KiwiSel();
-    for ( size_t i = 0; i < selection.items.size() && nodes.size() < 32; ++i ) add( selection.items[i].brush );
-    const ImVec2 mouse = ImGui::GetMousePos();
-    // KIWI (2026-10-27, user: "the dx9 is causing the lag, primarily with the UI actions
-    // being used ... You need to fix it"): this second whole-map ray every frame was 6% of
-    // the main thread in a live sample.  While the hover pass runs it already picked what
-    // is under this cursor, so the hovered target is ITS item.  While a command owns the
-    // cursor (a drag: 9% of the main thread in a second sample) the target that matters is
-    // the snap source, added below, so no ray at all; the overlay picks for itself only
-    // when hover is switched off.
-    if ( !KiwiCmd_Active() &&
-         mouse.x >= imgMinX && mouse.x < imgMinX+imgW && mouse.y >= imgMinY && mouse.y < imgMinY+imgH )
-    {
-        if ( KiwiUX_ShowHover() )
-        {
-            const pick_result_t &hover = KiwiHover_Get();
-            if ( hover.valid && Sel_BrushLive( hover.item.brush ) )
-                add( hover.item.brush );
-        }
-        else
-        {
-            ray_t ray;
-            if ( Pick_RayFromImagePos( (int)( mouse.x-imgMinX ), (int)( mouse.y-imgMinY ), &ray ) )
-                add( Pick( ray, SEL_MASK_OBJECT ).item.brush );
-        }
-    }
-    if ( KiwiCmd_Active() && KiwiCmd_LastSnap().valid && Sel_BrushLive( KiwiCmd_LastSnap().source.brush ) )
-        add( KiwiCmd_LastSnap().source.brush );
-    ImDrawList *draw = ImGui::GetWindowDrawList();
-    draw->PushClipRect( ImVec2( imgMinX, imgMinY ), ImVec2( imgMinX+imgW, imgMinY+imgH ), true );
-    for ( selbrush_t *b : nodes )
-    {
-        if ( !CylinderUsable( b ) ) continue;
-        float ends[2][3];
-        if ( !KiwiPrim_CylinderAxis( b->def, ends ) ) continue;
-        if ( ends[0][2] > ends[1][2] )
-            for ( int k = 0; k < 3; ++k ) { float t = ends[0][k]; ends[0][k] = ends[1][k]; ends[1][k] = t; }
-        float centre[3], delta[3], length2 = 0;
-        for ( int k = 0; k < 3; ++k )
-        {
-            centre[k] = ( ends[0][k]+ends[1][k] ) * 0.5f;
-            delta[k] = ends[1][k]-ends[0][k]; length2 += delta[k]*delta[k];
-        }
-        ImVec2 points[3];
-        if ( !Pick_WorldToImage( ends[0], &points[0].x, &points[0].y ) ||
-             !Pick_WorldToImage( ends[1], &points[1].x, &points[1].y ) ||
-             !Pick_WorldToImage( centre, &points[2].x, &points[2].y ) ) continue;
-        for ( ImVec2 &v : points ) { v.x += imgMinX; v.y += imgMinY; }
-        const ImU32 ink = IM_COL32( 255, 220, 80, 255 ), shadow = IM_COL32( 20, 20, 24, 230 );
-        draw->AddLine( points[0], points[1], shadow, 4 );
-        draw->AddLine( points[0], points[1], ink, 2 );
-        for ( int i = 0; i < 3; ++i )
-        {
-            const ImVec2 v = points[i];
-            draw->AddCircleFilled( v, 6, shadow, 16 );
-            draw->AddCircle( v, 5, ink, 16, 1.5f );
-            draw->AddLine( ImVec2(v.x-8,v.y), ImVec2(v.x+8,v.y), ink );
-            draw->AddLine( ImVec2(v.x,v.y-8), ImVec2(v.x,v.y+8), ink );
-        }
-        const float length = sqrtf( length2 );
-        float z = fabsf( delta[2] ) / length;
-        if ( z > 1 ) z = 1;
-        const float tilt = acosf( z ) * (float)KIWI_RAD2DEG;
-        // A dotted world-up reference makes actual tilt visible independently
-        // of perspective. It is intentionally not another snapping axis.
-        if ( tilt > 0.05f )
-        {
-            float up[3] = { ends[0][0], ends[0][1], ends[0][2]+length };
-            float x,y;
-            if ( Pick_WorldToImage( up, &x, &y ) )
-            {
-                ImVec2 end( x+imgMinX, y+imgMinY );
-                const ImVec2 start = points[0];
-                for ( int j = 0; j < 16; j += 2 )
-                {
-                    float t0 = j/16.0f, t1 = (j+1)/16.0f;
-                    draw->AddLine( ImVec2(start.x+(end.x-start.x)*t0,start.y+(end.y-start.y)*t0),
-                                   ImVec2(start.x+(end.x-start.x)*t1,start.y+(end.y-start.y)*t1),
-                                   IM_COL32(100,210,255,220), 1.5f );
-                }
-                draw->AddText( ImVec2(end.x+5,end.y), IM_COL32(100,210,255,255), "Z up" );
-            }
-        }
-        char label[96];
-        if ( tilt <= 0.05f ) snprintf( label, sizeof(label), "Axis: vertical (90 deg to XY)" );
-        else snprintf( label, sizeof(label), "Axis: %.1f deg from vertical", tilt );
-        const ImVec2 pos( points[2].x+12, points[2].y+9 ), size = ImGui::CalcTextSize( label );
-        draw->AddRectFilled( ImVec2(pos.x-3,pos.y-2), ImVec2(pos.x+size.x+3,pos.y+size.y+2), shadow, 3 );
-        draw->AddText( pos, ink, label );
-    }
-    draw->PopClipRect();
-}
+// KIWI (2026-10-27, user: "what is this ugly yellow shit that comes up with the face
+// selection??" / "Remove it entirely"): the selected-cylinder axis overlay
+// (KiwiSnap_DrawCylinderOverlay - axis line, end/centre crosshairs, "Z up" reference and
+// "Axis: N deg from vertical" label) is gone.  Snapping to cylinder axes is unchanged.
 
 // Screen-space label drawn during the ImGui frame.
 void KiwiSnap_DrawLabel( const snap_result_t &r, float imgMinX, float imgMinY,

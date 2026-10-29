@@ -2685,6 +2685,21 @@ static void Lines_AddLinkTo()
     const orientation_t *ident = (const orientation_t *)world_orient_matrix;
     int vertCount = 0;
 
+    // KIWI (2026-10-28, user: "ive got this map loaded in the kiwi radiant, and it's ungodly
+    // laggy"): every target was strcmp'd against every targetname - london.map's 1279 x 2196
+    // = 2.8M compares per pass, run by the camera AND the 2D view each frame (12% of the main
+    // thread).  The targetnames are sorted once per pass (ties by gather order) and each
+    // target binary-searches its run, which visits exactly the old matches in the old order.
+    static std::vector<int> s_tnOrder;
+    s_tnOrder.resize( (size_t)nTn );
+    for ( int i = 0; i < nTn; ++i )
+        s_tnOrder[(size_t)i] = i;
+    std::sort( s_tnOrder.begin(), s_tnOrder.end(), []( int a, int b )
+    {
+        const int c = strcmp( tnVals[a], tnVals[b] );
+        return c ? ( c < 0 ) : ( a < b );
+    } );
+
     // Pass 2: for each entity with a "target", connect to the matching targetname(s).
     for ( entity_s *te = entityInsts.next; te != &entityInsts; te = te->next )
     {
@@ -2696,10 +2711,11 @@ static void Lines_AddLinkTo()
             continue;
 
         bool anyMatch = false;
-        for ( int i = 0; i < nTn; ++i )
+        auto run = std::lower_bound( s_tnOrder.begin(), s_tnOrder.end(), target,
+                                     []( int a, const char *t ) { return strcmp( tnVals[a], t ) < 0; } );
+        for ( ; run != s_tnOrder.end() && !strcmp( tnVals[*run], target ); ++run )
         {
-            if ( strcmp( tnVals[i], target ) )
-                continue;
+            const int i = *run;
             anyMatch = true;
             entity_s   *me = tnEnts[i];
             selbrush_t *mb = me->brushes.ownerNext;       // matched entity's brush inst

@@ -23,6 +23,7 @@
 #include "kiwi_region.h"
 #include "kiwi_section.h"     // KiwiView_XRay - the snap-through-walls chip
 #include "kiwi_conselect.h"
+#include "kiwi_decal.h"       // KiwiDecal_IsArmed / KiwiDecal_HudPrompts
 #include "kiwi_selection.h"
 #include "kiwi_sun.h"
 #include "kiwi_terrain.h"
@@ -658,6 +659,11 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
         {
             nP = BuildTerrainChips( prompts, KiwiTerrain_HudPrompts );
             nV = BuildTerrainChips( verbs,   KiwiTerrain_HudKeys );
+        }
+        // KIWI (2026-10-27): an armed decal placer owns LMB the same way.
+        else if ( KiwiDecal_IsArmed() )
+        {
+            nP = BuildTerrainChips( prompts, KiwiDecal_HudPrompts );
         }
         // Sun wins because clicking elsewhere clears it, making it the most recent target.
         else if ( KiwiSun_Selected() )

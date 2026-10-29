@@ -629,6 +629,9 @@ bool KiwiAutoBool_DispatchInstant( unsigned int commandId )
 
 void KiwiAutoBool_RegisterCommands()
 {
-    // Intentionally unbound: this topology-changing command is palette/CSG-panel only.
-    Radiant_RegisterCommand( "KiwiAutoBool", 0, 0, KIWI_CMD_AUTO_BOOL );
+    // KIWI (2026-10-28, user: "put autobool on alt+b by default (make sure it's not taken)"):
+    // Alt+B was free in the command table and in both keymap profiles (B / Shift+B / Ctrl+B /
+    // Shift+Alt+B are other commands).  The menu bar's "&Build" mnemonic also answered Alt+B;
+    // it is "Buil&d" now (kiwi_launch.cpp).
+    Radiant_RegisterCommand( "KiwiAutoBool", 0x42, 2, KIWI_CMD_AUTO_BOOL );   // Alt+B
 }

@@ -241,8 +241,9 @@ bool KiwiArrange_Cells( const int *objects, int count, const kconPlane_t &plane,
     {
         const kconObject_t *o = KiwiCon_At( objects[i] );
         // Public entry points enforce the store-wide rule that hidden geometry is inert.
-        // Spline spans (KIWI 2026-09-10) never become a cell edge either.
-        if ( !o || o->hidden || KiwiCon_HasSmooth( *o ) )
+        // Spline spans (KIWI 2026-09-10) never became a cell edge; a PLANAR spline does now,
+        // as its tessellation (KIWI 2026-10-27, user: "splines dont make construction faces").
+        if ( !o || o->hidden || KiwiCon_SplineOffPlane( *o ) )
             continue;
         const int segs = KiwiCon_SegmentCount( *o );
         for ( int s = 0; s < segs; ++s )

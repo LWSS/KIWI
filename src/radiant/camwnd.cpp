@@ -26,7 +26,6 @@
 #include "kiwi_uveditor.h"          // KIWI-UX (ROUND BN, ITEM 3): KiwiUvEd_OverlaySuppressed
 #include <universal/profile.h>
 #include "kiwi_shadowcache.h"       // the sun-preview cache magnitudes
-#include "kiwi_command.h"           // KIWI: KiwiCmd_Active (the light-shadow cache's drag split)
 #include "kiwi_lightcache.h"        // per-light caster records keyed by the shared epoch
 #include "kiwi_light.h"             // KIWI Light helper policy and viewport overlay
 #include "kiwi_sunshadow.h"         // shared default-on sun-preview preference/status
@@ -1666,6 +1665,8 @@ struct CamDeferredToolFace
     float   col[4];   // MATERIAL_COLOR (neutral for a volume's own art; zeros for the film)
     bool    film;     // sky see-through film instead of a flat volume
     bool    ownBlend; // KIWI: blend the material's own art (lightgrid) instead of the twin
+    selbrush_t *inst = nullptr;   // KIWI: where its resident geometry lives (tool pass)
+    int         faceIndex = -1;
 };
 static std::vector< CamDeferredToolFace > s_deferredToolFaces;
 
@@ -2190,188 +2191,6 @@ static int Cam_LightPreview_SetLightTechnique( const float *origin, float radius
     return TECHNIQUE_LIGHT_OMNI;
 }
 
-// KIWI (2026-10-27, user: "it's still laggy while dragging and using tools ... keep
-// optimizing"): live samples put the light preview's CPU shadow-volume build at 6.4 ms a
-// frame while flying and 16% of the main thread while dragging - every caster's silhouette
-// re-derived every frame although a point light's volumes are world-space and do not
-// depend on the camera.  The flushed batches are now recorded per light and replayed:
-//  - idle / flying: the whole light's output (ONE build, ONE flush - bit-identical to the
-//    uncached pass) is replayed while the light, its caster set, every caster's version
-//    stamps, the walk epoch and the filter / layer / caster-class switches are unchanged;
-//  - during a command (a drag): every frame bumps the walk epoch, so the light's casters are
-//    split.  Selected casters are rebuilt live every frame; the rest are one recording that
-//    is replayed until any of THEM changes (version stamps, structural epoch, filters).  The
-//    two halves flush separately, so an edge shared by a selected and an unselected caster is
-//    no longer cancelled; each half is a closed volume, so the stencil count is unchanged.
-// KIWI_LIGHTSHADOW_CACHE_OFF=1 runs the original per-frame build.
-namespace
-{
-    struct camLightShadowRec_t
-    {
-        entity_s_def          *ent = nullptr;
-        float                  origin[4] = {};
-        float                  radius = 0.0f;
-        unsigned               stamp = 0;
-        bool                   allValid = false;     // whole-light recording (no command)
-        unsigned long long     allKey = 0;
-        KiwiShadVolRecording   all;
-        bool                   restValid = false;    // unselected casters (command running)
-        unsigned long long     restKey = 0;
-        KiwiShadVolRecording   rest;
-    };
-    camLightShadowRec_t s_camLightShadow[16];
-    unsigned            s_camLightShadowStamp = 0;
-
-    inline void CamLS_Mix( unsigned long long &h, const void *p, size_t n )
-    {
-        const unsigned char *c = (const unsigned char *)p;
-        for ( size_t i = 0; i < n; ++i ) { h ^= c[i]; h *= 1099511628211ull; }
-    }
-    template <typename T> inline void CamLS_Mix( unsigned long long &h, const T &v )
-    {
-        CamLS_Mix( h, &v, sizeof( v ) );
-    }
-
-    // Everything one caster's volume is built from that can change without the light moving.
-    void CamLS_MixCaster( unsigned long long &h, const KiwiLightCasterRecord &c )
-    {
-        const selbrush_t *b = c.brush;
-        CamLS_Mix( h, b );
-        CamLS_Mix( h, &c.orient, sizeof( c.orient ) );
-        if ( !b )
-            return;
-        CamLS_Mix( h, b->def );
-        CamLS_Mix( h, b->def ? b->def->version : (short)0 );
-        CamLS_Mix( h, b->patch );
-        if ( b->patch )
-        {
-            CamLS_Mix( h, b->patch->def );
-            CamLS_Mix( h, b->patch->version );
-        }
-        CamLS_Mix( h, b->owner );
-        if ( b->owner )
-        {
-            CamLS_Mix( h, b->owner->version );
-            CamLS_Mix( h, b->owner->modelInst );
-            CamLS_Mix( h, b->owner->def ? b->owner->def->version_prob_wrong : 0 );
-        }
-    }
-
-    bool CamLS_Selected( const KiwiLightCasterRecord &c )
-    {
-        return c.brush && ( c.brush->brushFlags & 0x80 ) != 0;
-    }
-
-    camLightShadowRec_t *CamLS_Find( entity_s_def *ent, const float origin[4], float radius )
-    {
-        camLightShadowRec_t *victim = &s_camLightShadow[0];
-        for ( camLightShadowRec_t &r : s_camLightShadow )
-        {
-            if ( r.ent == ent && !memcmp( r.origin, origin, sizeof( r.origin ) )
-              && !memcmp( &r.radius, &radius, sizeof( radius ) ) )
-            {
-                r.stamp = ++s_camLightShadowStamp;
-                return &r;
-            }
-            if ( r.stamp < victim->stamp )
-                victim = &r;
-        }
-        *victim = camLightShadowRec_t();
-        victim->ent = ent;
-        memcpy( victim->origin, origin, sizeof( victim->origin ) );
-        victim->radius = radius;
-        victim->stamp = ++s_camLightShadowStamp;
-        return victim;
-    }
-}
-
-// The binary's shadow slice of LightPreview_DrawLight (Begin, every caster, flush), cached.
-static void Cam_LightPreview_Shadows( const float origin[4], float radius, entity_s_def *ent,
-                                      const KiwiLightCasterRecord *casters, int casterCount )
-{
-    extern bool Radiant_ShadVol_Begin( int frontCapPerTri, float directionalExtrudeDistance );
-    extern void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *brush,
-                                                  orientation_t *brushOrient );
-    extern void SunLightPreview_PolyOffsetShadows();
-    extern bool g_svCastPatches, g_svCastModels, g_svCastBrushes;
-
-    static const bool s_off = []{ const char *e = getenv( "KIWI_LIGHTSHADOW_CACHE_OFF" );
-                                  return e && e[0] == '1'; }();
-    const bool begun = Radiant_ShadVol_Begin( 6, 0.0f );   // point lights: binary extrusion unchanged
-    if ( s_off || !begun )
-    {
-        if ( begun )
-            for ( int i = 0; i < casterCount; ++i )
-                SunLightPreview_DrawBrushShadow(
-                    origin, casters[i].brush, (orientation_t *)&casters[i].orient );
-        SunLightPreview_PolyOffsetShadows();
-        return;
-    }
-
-    // State every caster's emission reads besides its own geometry.
-    unsigned long long state = 1469598103934665603ull;
-    CamLS_Mix( state, g_qeglobals.g_filtersUpdated );
-    CamLS_Mix( state, g_qeglobals.current_edit_layer );
-    CamLS_Mix( state, g_svCastPatches );
-    CamLS_Mix( state, g_svCastModels );
-    CamLS_Mix( state, g_svCastBrushes );
-    CamLS_Mix( state, casterCount );
-
-    camLightShadowRec_t *rec = CamLS_Find( ent, origin, radius );
-
-    if ( !KiwiCmd_Active() )
-    {
-        rec->restValid = false;
-        unsigned long long key = state;
-        CamLS_Mix( key, KiwiWalkCache_Epoch() );
-        for ( int i = 0; i < casterCount; ++i )
-            CamLS_MixCaster( key, casters[i] );
-        if ( rec->allValid && rec->allKey == key )
-        {
-            Radiant_ShadVol_Replay( rec->all );
-            return;
-        }
-        rec->all.clear();
-        Radiant_ShadVol_SetRecording( &rec->all );
-        for ( int i = 0; i < casterCount; ++i )
-            SunLightPreview_DrawBrushShadow(
-                origin, casters[i].brush, (orientation_t *)&casters[i].orient );
-        SunLightPreview_PolyOffsetShadows();
-        Radiant_ShadVol_SetRecording( nullptr );
-        rec->allKey   = key;
-        rec->allValid = true;
-        return;
-    }
-
-    // A command is running: the unselected casters as one recording, the selected ones live.
-    rec->allValid = false;
-    unsigned long long key = state;
-    CamLS_Mix( key, KiwiWalkCache_StructEpoch() );
-    for ( int i = 0; i < casterCount; ++i )
-        if ( !CamLS_Selected( casters[i] ) )
-            CamLS_MixCaster( key, casters[i] );
-    if ( rec->restValid && rec->restKey == key )
-        Radiant_ShadVol_Replay( rec->rest );
-    else
-    {
-        rec->rest.clear();
-        Radiant_ShadVol_SetRecording( &rec->rest );
-        for ( int i = 0; i < casterCount; ++i )
-            if ( !CamLS_Selected( casters[i] ) )
-                SunLightPreview_DrawBrushShadow(
-                    origin, casters[i].brush, (orientation_t *)&casters[i].orient );
-        SunLightPreview_PolyOffsetShadows();
-        Radiant_ShadVol_SetRecording( nullptr );
-        rec->restKey   = key;
-        rec->restValid = true;
-    }
-    for ( int i = 0; i < casterCount; ++i )
-        if ( CamLS_Selected( casters[i] ) )
-            SunLightPreview_DrawBrushShadow(
-                origin, casters[i].brush, (orientation_t *)&casters[i].orient );
-    SunLightPreview_PolyOffsetShadows();
-}
-
 // 0x406fb0 LightPreview_DrawLight. The 52-byte gather result is KIWI-cached;
 // every render command and brush/shadow pass retains the binary's order.
 static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
@@ -2442,8 +2261,17 @@ static bool Cam_LightPreview_DrawLight( const float origin[4], float radius,
     const int technique = Cam_LightPreview_SetLightTechnique(
         origin, radius, color, ent, scope, orient );
 
-    // KIWI: Begin + every caster + flush, recorded and replayed per light (see above).
-    Cam_LightPreview_Shadows( origin, radius, ent, casters, casterCount );
+    extern bool Radiant_ShadVol_Begin( int frontCapPerTri, float directionalExtrudeDistance );
+    extern void SunLightPreview_DrawBrushShadow( const float *light, selbrush_t *brush,
+                                                  orientation_t *brushOrient );
+    extern void SunLightPreview_PolyOffsetShadows();
+    if ( Radiant_ShadVol_Begin( 6, 0.0f ) )     // point lights: binary extrusion unchanged
+    {
+        for ( int i = 0; i < casterCount; ++i )
+            SunLightPreview_DrawBrushShadow(
+                origin, casters[i].brush, (orientation_t *)&casters[i].orient );
+    }
+    SunLightPreview_PolyOffsetShadows();
 
     R_SortMaterials();
     for ( int i = 0; i < casterCount; ++i )
@@ -3472,6 +3300,8 @@ void CamWnd_Draw( HWND hwnd )
                         // flush, so lightgrid blends its own art (DXT3 alpha ~60%) instead.
                         d.ownBlend = mn && KiwiStr_ContainsNoCase( mn, "lightgrid" );
                         memcpy( d.col, skySeeThrough ? ecol : s_artNeutral, sizeof( d.col ) );
+                        d.inst      = ent.inst;
+                        d.faceIndex = ent.faceIndex;
                         s_deferredToolFaces.push_back( d );
                         continue;
                     }
@@ -3975,6 +3805,58 @@ void CamWnd_Draw( HWND hwnd )
     if ( !s_deferredToolFaces.empty() )
     {
         PROF_SCOPED( "tool volume pass" );
+        // KIWI (2026-10-28, user: "ive got this map loaded in the kiwi radiant, and it's ungodly
+        // laggy"): every volume face was rebuilt on the CPU (Face_BuildLayerGeom) and drawn as
+        // its own RC_DRAW_TRIANGLES, ~10k draws a frame on london.map.  A plain volume (its own
+        // art at the neutral colour) already has its geometry resident - the same faceVis run
+        // the world pass draws by name - so those go through ONE self-bracketed flush window
+        // after the main flush (the selected-brush resident pass's shape), sorted and merged
+        // by the flush.  Lightgrid (own blended art), the sky film and any face without
+        // resident geometry keep the immediate arm below.
+        static const float s_toolArtNeutral[4] = { 1.0f, 1.0f, 1.0f, 0.0f };
+        static std::vector< CamDeferredToolFace > s_immediateTools;
+        s_immediateTools.clear();
+        bool windowOpen = false;
+        for ( const CamDeferredToolFace &d : s_deferredToolFaces )
+        {
+            if ( !d.film && !d.ownBlend && d.inst
+              && !memcmp( d.col, s_toolArtNeutral, sizeof( d.col ) ) )
+            {
+                CamSortFace s = {};
+                s.f         = d.f;
+                s.inst      = d.inst;
+                s.faceIndex = d.faceIndex;
+                if ( Cam_FaceResidentReady( s ) )
+                {
+                    if ( !windowOpen )
+                    {
+                        R_SortMaterials();
+                        R_AddCmdSetMaterialColor( s_toolArtNeutral );
+                        windowOpen = true;
+                    }
+                    if ( Cam_DrawFaceResident( s, TECHNIQUE_UNLIT ) )
+                        continue;
+                }
+            }
+            s_immediateTools.push_back( d );
+        }
+        if ( windowOpen )
+            R_AddEditorSurfsCmd();
+        s_deferredToolFaces.swap( s_immediateTools );
+
+        // The immediate remainder: consecutive RC_DRAW_TRIANGLES share one draw only while
+        // material, technique and MATERIAL_COLOR stay the same, so group them (stable: a
+        // group keeps its brush order).
+        std::stable_sort( s_deferredToolFaces.begin(), s_deferredToolFaces.end(),
+            []( const CamDeferredToolFace &a, const CamDeferredToolFace &b )
+            {
+                const int c = memcmp( a.col, b.col, sizeof( a.col ) );
+                if ( c )                      return c < 0;
+                if ( a.film != b.film )       return a.film < b.film;
+                if ( a.ownBlend != b.ownBlend ) return a.ownBlend < b.ownBlend;
+                const int layer = g_qeglobals.current_edit_layer;
+                return (uintptr_t)a.f->mtldef[layer].lyrMtl < (uintptr_t)b.f->mtldef[layer].lyrMtl;
+            } );
         float lastToolMC[4] = { -1.0f, -1.0f, -1.0f, -1.0f };
         for ( const CamDeferredToolFace &d : s_deferredToolFaces )
         {

@@ -1427,7 +1427,8 @@ namespace
                 return;
             }
 
-            if ( m_invalid )
+            // KIWI (2026-10-27): a capped face push is red but commits at its cap (CapFaces).
+            if ( m_invalid && !m_capped )
             {
                 // Invalid geometry restores baseline and takes the undo-cancel path.
                 RestoreAll();
@@ -1623,6 +1624,7 @@ namespace
             m_haveMapStart = false;
             m_axisWarned   = false;
             m_invalid      = false;
+            m_capped       = false;
             m_why          = 0;
             m_hasNum       = false;
             m_grabbed      = false;    // cursor-mapping gate
@@ -2301,18 +2303,38 @@ namespace
                 d[k] -= dn * m_refImageNormal[k];
         }
 
+        // KIWI (2026-10-27, user: "I previously have asked for you to ignore negative/positive
+        // values after an initial push from a move gizmo or similar, this does not work, I
+        // still get wrong directions when typing in exact numbers"): the push made before
+        // typing is latched once, when typing starts, and every typed value is measured
+        // along it (NumericDirection / RecomputeFace) - a bare number continues the push,
+        // '-' reverses it.  The axis lock used to take its axis' POSITIVE direction
+        // whatever the drag, and the free / plane arms re-read the live total, which a
+        // typed negative value flipped every frame.
+        void NumericChanged( bool has, float world ) override
+        {
+            if ( has && KiwiNum_HasValue() && !m_hasNum )
+            {
+                Copy3( m_total, m_numDrag );
+                m_numScalar = m_scalar;
+            }
+            KiwiXformBase::NumericChanged( has, world );
+        }
+
         // Direction for a bare typed move scalar.
         bool NumericDirection( float *out )
         {
             if ( m_con == CON_AXIS )
             {
                 FrameAxis( m_axis, out );       // frame X/Y/Z, else world
+                if ( Dot3( m_numDrag, out ) < 0.0f )
+                    for ( int k = 0; k < 3; ++k ) out[k] = -out[k];   // the way it was pushed
                 return true;
             }
             // Framed plane lock: project the carried direction onto the frame plane.
             if ( Framed() && m_con == CON_PLANE )
             {
-                float d[3]; Copy3( m_total, d );
+                float d[3]; Copy3( m_numDrag, d );
                 float fa[3]; FrameAxis( m_axis, fa );
                 const float dn = Dot3( d, fa );
                 for ( int k = 0; k < 3; ++k ) d[k] -= dn * fa[k];
@@ -2322,7 +2344,7 @@ namespace
                 return true;
             }
             float d[3];
-            Copy3( m_total, d );
+            Copy3( m_numDrag, d );
             if ( m_refImage )
             {
                 d[m_refImageAxis] = 0.0f;
@@ -2596,6 +2618,11 @@ namespace
             if ( m_hasNum )
             {
                 dist = m_numWorld;
+                // KIWI (2026-10-27): the lollipop already writes the drag's sign into the
+                // typed text (kiwi_numeric.cpp AutoSign); a push made any other way (the
+                // gizmo's push arrow) gets the same rule here.
+                if ( m_numScalar < 0.0f && !KiwiLollipop_Active() )
+                    dist = -m_numWorld;
             }
             else if ( m_absolute && haveRaw )
             {
@@ -2967,6 +2994,15 @@ namespace
                 return;
             OpenUndoForBrushes();
 
+            PlaceFaces( m_scalar );
+            RebuildAndValidate();
+            if ( m_invalid && fabsf( m_scalar ) > KX_EPS )
+                CapFaces();
+        }
+
+        // Every selected face at `scalar` from its own plane/texture baseline.
+        void PlaceFaces( float scalar )
+        {
             for ( size_t i = 0; i < m_faces.size(); ++i )
             {
                 faceUnit_t &u = m_faces[i];
@@ -2987,14 +3023,59 @@ namespace
 
                 // KIWI (2026-10-05, precision): the plane only translates, so the exact
                 // shift lock (TexLockTranslateFace), not the Save / Reproject re-solve.
-                const float d[3] = { dir[0] * m_scalar, dir[1] * m_scalar, dir[2] * m_scalar };
+                const float d[3] = { dir[0] * scalar, dir[1] * scalar, dir[2] * scalar };
                 TexLockTranslateFace( f, d );
 
                 for ( int p = 0; p < 3; ++p )
-                    Mad3( &u.basePts[p * 3], dir, m_scalar, f->planepts[p] );
+                    Mad3( &u.basePts[p * 3], dir, scalar, f->planepts[p] );
             }
+        }
 
-            RebuildAndValidate();
+        // KIWI (2026-10-27, user: "when extruding a face fails, I want it to still be red, but
+        // cap it at the maximum possible valid value and allow completion of the operation at
+        // the max cap even if it's red"): a rejected push no longer snaps back to the start.
+        // The furthest valid distance between the start (always valid) and the requested one
+        // is bisected to KX_FACE_CAP_TOL and left live; m_invalid stays set (red rubber band,
+        // INVALID HUD) and m_capped lets Commit land the capped geometry.
+        static constexpr float KX_FACE_CAP_TOL = 0.01f;   // world units (1/100 inch)
+        bool  m_capped    = false;
+        float m_capScalar = 0.0f;
+
+        bool RebuildCheck()
+        {
+            for ( size_t i = 0; i < m_base.size(); ++i )
+                KiwiValid_Rebuild( m_base[i].def );
+            const char *why = 0;
+            bool ok = true;
+            for ( size_t i = 0; i < m_base.size() && ok; ++i )
+                ok = KiwiValid_CheckBrush( m_base[i].def, &why );
+            return ok;
+        }
+
+        void CapFaces()
+        {
+            float lo = 0.0f, hi = m_scalar;   // lo is valid, hi is not
+            for ( int it = 0; it < 32 && fabsf( hi - lo ) > KX_FACE_CAP_TOL; ++it )
+            {
+                const float mid = 0.5f * ( lo + hi );
+                PlaceFaces( mid );
+                if ( RebuildCheck() ) lo = mid;
+                else                  hi = mid;
+            }
+            if ( fabsf( lo ) > KX_EPS )
+            {
+                PlaceFaces( lo );
+                if ( RebuildCheck() )
+                {
+                    m_capped    = true;
+                    m_capScalar = lo;
+                    g_nUpdateBits = -1;
+                    return;
+                }
+            }
+            for ( size_t i = 0; i < m_base.size(); ++i )
+                KiwiValid_Restore( m_base[i] );      // nothing valid past the start
+            g_nUpdateBits = -1;
         }
 
         // Edge invariant: moved endpoints vary while the retained third point stays
@@ -3152,6 +3233,7 @@ namespace
         // Rebuild, validate, and restore baseline on rejection.
         void RebuildAndValidate()
         {
+            m_capped = false;                    // ApplyFaces' CapFaces re-arms it
             for ( size_t i = 0; i < m_base.size(); ++i )
                 KiwiValid_Rebuild( m_base[i].def );
 
@@ -3187,6 +3269,7 @@ namespace
                 if ( m_verts[i].patchPoint )
                     ok = KiwiValid_CheckBounds( m_verts[i].def, &why );
             m_invalid = !ok;
+            m_capped  = false;                   // the cap is face pushes only
             m_why     = ok ? 0 : why;
         }
 
@@ -3231,6 +3314,15 @@ namespace
                 return;
             }
 
+            if ( m_invalid && m_capped )
+            {
+                char cbuf[24], b[32];
+                KiwiUnits_Format( b, sizeof( b ), m_capScalar );
+                SetHud( "%s  %s  INVALID past %s: %s  -  confirm keeps %s", what,
+                        ConstraintText( cbuf, sizeof( cbuf ) ), b,
+                        m_why ? m_why : "rejected", b );
+                return;
+            }
             if ( m_invalid )
             {
                 char cbuf[24];
@@ -3339,6 +3431,9 @@ namespace
         int   m_grabPixX     = 0;
         int   m_grabPixY     = 0;
         bool  m_pivotOverridden = false;
+        // The push typing continues (NumericChanged): its total, and its face scalar.
+        float m_numDrag[3]   = { 0.0f, 0.0f, 0.0f };
+        float m_numScalar    = 0.0f;
         // Mutable scratch returns the derived live anchor through a pointer API.
         mutable float m_liveRef[3] = { 0.0f, 0.0f, 0.0f };
         // Confirm deletes when this frame's push annihilates a brush.

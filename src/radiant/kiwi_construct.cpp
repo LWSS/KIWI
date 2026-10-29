@@ -439,6 +439,47 @@ namespace
     }
 }
 
+// KIWI (2026-10-27, user: "I noticed that splines dont make construction faces, is this
+// something we can add?" -> "Automatic"): a spline takes part in faces like a polyline of its
+// tessellation (KiwiCon_VertWorld already serves it), unless it leaves every plane - a 3D path
+// for Pipe / Barbwire stays a layout curve.  Coplanar control points give a coplanar
+// Catmull-Rom curve; a straight spline is plane-free like a line and may pair with others.
+bool KiwiCon_SplineOffPlane( const kconObject_t &o )
+{
+    if ( !KiwiCon_HasSmooth( o ) )
+        return false;
+    const std::vector<float> &t = SmoothTess( o );
+    const int n = (int)( t.size() / 3 );
+    if ( n < 3 )
+        return false;
+    kconPlane_t p;
+    if ( KiwiCon_FitPlane( &t[0], n, &p ) )
+        return false;
+    // No plane fits: collinear (fine, like a line) or genuinely 3D.
+    const float *a = &t[0];
+    int   farIdx = 0;
+    float best = 0.0f;
+    for ( int i = 1; i < n; ++i )
+    {
+        const float d = Dist3( a, &t[(size_t)i * 3] );
+        if ( d > best ) { best = d; farIdx = i; }
+    }
+    if ( !( best > 1.0e-4f ) )
+        return false;
+    float dir[3];
+    Sub3( &t[(size_t)farIdx * 3], a, dir );
+    Norm3( dir );
+    for ( int i = 1; i < n; ++i )
+    {
+        float rel[3], c[3];
+        Sub3( &t[(size_t)i * 3], a, rel );
+        Cross3( rel, dir, c );
+        if ( Len3( c ) > KCON_PLANE_FIT_DIST )
+            return true;                         // off the line and off every plane: 3D
+    }
+    return false;
+}
+
 // Plane math.
 void KiwiCon_PlaneToWorld( const kconPlane_t &p, const float uv[2], float out[3] )
 {
@@ -1426,6 +1467,43 @@ void KiwiCon_MarkPlaneExplicit( const char *desc )
 
 bool KiwiCon_PlaneIsExplicit() { return s_planeExplicit; }
 
+// KIWI (2026-10-27, user: "with the face as a plane (space pressed), face selected ... This
+// needs to draw on the face while it's selected"): the explicit (Space) plane is the plane of
+// a selected brush face or construction face.
+bool KiwiCon_ExplicitPlaneSelected()
+{
+    if ( !s_planeExplicit )
+        return false;
+    const kconPlane_t &p = KiwiCon_ActivePlane();
+    const float KSAME_COS = 0.9999f, KSAME_DIST = 0.5f;
+    const selection_t &sel = KiwiSel();
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+    {
+        const sel_item_t &it = sel.items[i];
+        if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) || !it.brush->def
+          || !it.brush->def->faces || it.faceIndex < 0 || it.faceIndex >= it.brush->def->faceCount )
+            continue;
+        const plane_t &fp = it.brush->def->faces[it.faceIndex].plane;
+        if ( fabsf( Dot3( fp.normal, p.normal ) ) >= KSAME_COS
+          && fabsf( Dot3( p.origin, fp.normal ) - fp.dist ) <= KSAME_DIST )
+            return true;
+    }
+    const std::vector<kregion_t> &regs = KiwiRegion_All();
+    for ( int s = 0; s < KiwiRegion_SelectedCount(); ++s )
+    {
+        const int r = KiwiRegion_SelectedAt( s );
+        if ( r < 0 || r >= (int)regs.size() )
+            continue;
+        const kconPlane_t &rp = regs[(size_t)r].plane;
+        const float rel[3] = { p.origin[0] - rp.origin[0], p.origin[1] - rp.origin[1],
+                               p.origin[2] - rp.origin[2] };
+        if ( fabsf( Dot3( rp.normal, p.normal ) ) >= KSAME_COS
+          && fabsf( Dot3( rel, rp.normal ) ) <= KSAME_DIST )
+            return true;
+    }
+    return false;
+}
+
 void KiwiCon_ClearPlaneToDefault()
 {
     const bool was = s_planeExplicit;
@@ -1925,6 +2003,17 @@ namespace
                 KiwiCon_AutoPlaneForTool();
                 m_plane = KiwiCon_ActivePlane();
             }
+            // KIWI (2026-10-27, user: "with the face as a plane (space pressed), face selected
+            // ... This needs to draw on the face while it's selected"): a free tool started
+            // while the Space plane's face is selected is bound to that plane for the gesture -
+            // the snap runs its planar path (cursor on the plane, in-plane grid and guides) and
+            // every point is projected onto it.  Free tools otherwise follow the cursor in 3D.
+            m_planeLock = !PlanarOnly() && KiwiCon_ExplicitPlaneSelected();
+            if ( m_planeLock )
+            {
+                m_plane = KiwiCon_ActivePlane();
+                KiwiCon_SetPlanePlacement( true );
+            }
             // Restore the planar gesture's entry plane on Leave.
             m_planeOnEntry     = m_plane;
             m_planeFromSurface = false;
@@ -1956,8 +2045,9 @@ namespace
                 m_haveCur = true;
 
                 // Only planar tools project after their first point, or immediately
-                // when the user supplied an explicit plane.
-                if ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) )
+                // when the user supplied an explicit plane; a face-bound free tool always.
+                if ( ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) )
+                  || m_planeLock )
                     ProjectCurOntoPlane();
             }
             // Explicit Z constraint outranks the snap, while geometry snaps donate height.
@@ -2007,6 +2097,13 @@ namespace
                 {
                     Sys_Printf( "%s: this shape is planar — Z does nothing here "
                                 "(use the line, polyline or spline tool).\n", Name() );
+                    return true;
+                }
+                // KIWI (2026-10-27): bound to a face, vertical is only allowed when it lies in it.
+                if ( m_planeLock && fabsf( m_plane.normal[2] ) > 0.01f )
+                {
+                    Sys_Printf( "%s: drawing on the selected face - vertical would leave it "
+                                "(deselect the face to draw freely).\n", Name() );
                     return true;
                 }
                 m_zLock = !m_zLock;
@@ -2067,7 +2164,7 @@ namespace
         void DrawWorld() override
         {
             // Do not advertise a plane for free tools that do not use one.
-            if ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) )
+            if ( ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) ) || m_planeLock )
                 DrawWorkingPlane();
             DrawChain();
         }
@@ -2113,7 +2210,7 @@ namespace
             (void)KiwiCmd_LastCursor( &cx, &cy ); // label anchor only; the ray drives
             if ( !KiwiSnap_ResolvePoint( ray, cx, cy, m_cur ) )
                 return false;
-            if ( PlanarOnly() && KiwiCon_PlaneIsExplicit() )
+            if ( ( PlanarOnly() && KiwiCon_PlaneIsExplicit() ) || m_planeLock )
                 ProjectCurOntoPlane();
             m_haveCur = true;
             return true;
@@ -2129,6 +2226,11 @@ namespace
             // Only planar tools can alter the active plane; restore their entry state.
             if ( PlanarOnly() )
                 KiwiCon_SetActivePlane( m_planeOnEntry );
+            if ( m_planeLock )
+            {
+                KiwiCon_SetPlanePlacement( false );   // KIWI: the face binding ends with the tool
+                m_planeLock = false;
+            }
             m_pts.clear();
             m_haveCur = false;
             m_zLock   = false;
@@ -2390,12 +2492,14 @@ namespace
         kconPlane_t        m_planeOnEntry;
         // Records whether a planar tool derived its plane from a surface.
         bool               m_planeFromSurface = false;
+        // KIWI (2026-10-27): a free tool bound to the selected Space face's plane (Begin).
+        bool               m_planeLock = false;
         // BearingNormal uses the planar shape plane, else the current resolved snap
         // plane, else this last-point fallback normal.
         float              m_bearingNormal[3] = { 0.0f, 0.0f, 1.0f };
         const float       *BearingNormal() const
         {
-            if ( PlanarOnly() )
+            if ( PlanarOnly() || m_planeLock )
                 return m_plane.normal;
             if ( m_snap.valid && m_snap.havePlane )
                 return m_snap.planeNormal;
@@ -2643,8 +2747,9 @@ namespace
             const int n = PointCount();
             if ( n == 0 )
             {
-                SetHud( "line%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
+                SetHud( "line%s%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
                         m_splineMode ? " [SPLINE]" : "",
+                        m_planeLock ? " [ON FACE]" : "",
                         m_anyLmbPoint ? "RMB: end (no point)"
                                       : "RMB: place a point and end" );
                 return;
@@ -2656,10 +2761,11 @@ namespace
             KiwiUnits_Format( b,  sizeof( b ),  Len3( d ) );
             KiwiUnits_Format( dz, sizeof( dz ), d[2] );
             // Advertise both the aimable Z guide and the explicit Z lock.
-            SetHud( "line%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
+            SetHud( "line%s%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
                     "Enter: finish here  ·  "
                     "Esc: drop last  ·  S: spline span  ·  vertical: aim the Z guide%s",
                     m_splineMode ? " [SPLINE]" : "",
+                    m_planeLock ? " [ON FACE]" : "",
                     n, b, dz, m_zLock ? "  [Z LOCK]" : "",
                     ( n >= 3 && NearFirstPoint() )
                         ? "click: CLOSE the loop"
@@ -3689,6 +3795,11 @@ bool KiwiCon_PlanePlacement()
 bool KiwiCon_FreeToolActive()
 {
     return s_activeTool != 0 && !s_activeToolPlanar && !s_planePlacement;
+}
+
+bool KiwiCon_FreeToolPlaneLocked()
+{
+    return s_activeTool != 0 && !s_activeToolPlanar && s_planePlacement;
 }
 
 bool KiwiCon_ToolAnchor( float out[3] )

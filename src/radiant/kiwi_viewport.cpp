@@ -328,7 +328,15 @@ namespace
             if ( ImGui::IsItemHovered() )
             {
                 anyHovered = true;
-                if ( objectChip || edgeChip )
+                // KIWI (2026-10-27, user: "clicking the help->command list, it instantly
+                // closes because mouseover of the 1/2/3/4/5 selection modes closes it"):
+                // OpenPopup focuses the dropdown and its close hands focus back to this
+                // camera window, which raised the camera's dock tab over a window sharing
+                // its node and pulled focus from one just opened.  The hover dropdowns open
+                // only while the camera window already has focus; otherwise the chip shows
+                // its tooltip like the others.
+                const bool camFocused = ImGui::IsWindowFocused( ImGuiFocusedFlags_RootAndChildWindows );
+                if ( ( objectChip || edgeChip ) && camFocused )
                 {
                     const char *popup = objectChip ? "kiwiobjfilter" : "kiwiedgefilter";
                     if ( !ImGui::IsPopupOpen( popup ) )
@@ -551,7 +559,9 @@ bool KiwiVP_CameraButtonDown( int btn, int imgX, int imgY, bool shift, bool ctrl
         s_gestureBtn = btn;
         return true;
     }
-    if ( btn == 0 && !shift && !ctrl && !ImGui::GetIO().KeyAlt && KiwiDecal_IsArmed() )
+    // KIWI (2026-10-27): Ctrl+LMB places too - Ctrl snaps the decal (kiwi_decal.cpp
+    // PickPlacement).  Ctrl+Shift+LMB still falls through to face selection for overlays.
+    if ( btn == 0 && !shift && !ImGui::GetIO().KeyAlt && KiwiDecal_IsArmed() )
     {
         KiwiHover_Clear();
         KiwiDecal_HandleDown( imgX, imgY );
@@ -1296,7 +1306,6 @@ bool KiwiVP_DrawCameraOverlay( float imgMinX, float imgMinY, float imgW, float i
     DrawFlySpeedBar( imgMinX, imgMinY, imgW, imgH );
 
     DrawSunRemoveCue( imgMinX, imgMinY, imgW, imgH );
-    KiwiSnap_DrawCylinderOverlay( imgMinX, imgMinY, imgW, imgH );
     DrawMarquee( imgMinX, imgMinY );     // under the chips
 
     // Bottom-band slots grow upward in call order, preventing HUD overlap.

@@ -43,6 +43,8 @@
 #ifdef KISAK_RADIANT
 // KIWI: an RC_DRAW_TRIANGLES batch is open in tess (RB_DrawTriangles_Internal).
 static bool g_rbTriBatchOpen = false;
+// KIWI: RB_DrawText3DCmd is running, so RB_DrawTextInSpace may join / leave open that batch.
+static bool g_rbText3DBatch = false;
 #endif
 
 void(__cdecl *const RB_RenderCommandTable[RC_COUNT])(GfxRenderCommandExecState *) =
@@ -2566,8 +2568,19 @@ void __cdecl RB_DrawTextInSpace(
     iassert( font );
     material = Material_FromHandle(font->material);
     iassert( material );
+#ifdef KISAK_RADIANT
+    // KIWI (2026-10-28, london.map lag): every label flushed tess before and after its glyphs,
+    // one draw (and one VB/IB lock) per label - ~18k draws a frame in the 2D view.  Labels
+    // ride the open RC_DRAW_TRIANGLES batch like triangles do: consecutive labels in one font
+    // share a draw, and RB_SetTessTechnique still closes it on a material change.  Only the
+    // command loop's RB_DrawText3DCmd batches (g_rbText3DBatch): it is the one caller whose
+    // open batch the loop is guaranteed to close.
+    if (tess.indexCount && !( g_rbText3DBatch && g_rbTriBatchOpen ))
+        RB_EndTessSurface();
+#else
     if (tess.indexCount)
         RB_EndTessSurface();
+#endif
     R_Set3D(&gfxCmdBufSourceState);
     Vec3Mad(org, -0.5, xPixelStep, curOrg);
     Vec3Mad(curOrg, -0.5, yPixelStep, curOrg);
@@ -2589,8 +2602,15 @@ void __cdecl RB_DrawTextInSpace(
         scaleb = (float)glyph->dx;
         Vec3Mad(curOrg, scaleb, xPixelStep, curOrg);
     }
+#ifdef KISAK_RADIANT
+    if (tess.indexCount && g_rbText3DBatch)
+        g_rbTriBatchOpen = true;                 // KIWI: left open for the next label
+    else if (tess.indexCount)
+        RB_EndTessSurface();
+#else
     if (tess.indexCount)
         RB_EndTessSurface();
+#endif
 }
 
 void __cdecl RB_DrawCharInSpace(
@@ -2691,7 +2711,13 @@ void __cdecl RB_DrawText3DCmd(GfxRenderCommandExecState *execState)
 {
     GfxCmdDrawText3D *cmd = (GfxCmdDrawText3D *)execState->cmd;
 
+#ifdef KISAK_RADIANT
+    g_rbText3DBatch = true;                      // KIWI: see RB_DrawTextInSpace
+#endif
     RB_DrawTextInSpace(cmd->text, cmd->font, cmd->org, cmd->xPixelStep, cmd->yPixelStep, cmd->color);
+#ifdef KISAK_RADIANT
+    g_rbText3DBatch = false;
+#endif
     execState->cmd = (char *)execState->cmd + cmd->header.byteCount;
 }
 
@@ -2885,7 +2911,7 @@ void __cdecl RB_ExecuteRenderCommandsLoop(const void *cmds)
 #ifdef KISAK_RADIANT
         // KIWI: an open triangle batch ends before any other command, so every other
         // command sees exactly the state it did when each RC_DRAW_TRIANGLES drew alone.
-        if (g_rbTriBatchOpen && header->id != RC_DRAW_TRIANGLES)
+        if (g_rbTriBatchOpen && header->id != RC_DRAW_TRIANGLES && header->id != RC_DRAW_TEXT_3D)
         {
             g_rbTriBatchOpen = false;
             if (tess.indexCount)

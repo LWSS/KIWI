@@ -26,6 +26,7 @@
 #include "kiwi_matwriter.h"     // KiwiMat_ReadSource (decals-only list, unloaded materials)
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
+#include "kiwi_snap.h"          // KIWI: Ctrl snaps the placement point
 #include "kiwi_vec.h"
 #include "kiwi_windows.h"
 #include "radiant_registry.h"
@@ -83,6 +84,7 @@ namespace
     float s_hoverPoint[3]  = { 0, 0, 0 };
     float s_hoverNormal[3] = { 0, 0, 1 };
     patchMesh_t *s_hoverPatch = nullptr;  // the patch under the cursor (wrap projection)
+    snap_result_t s_hoverSnap;            // the Ctrl snap the preview sits on (invalid = free)
     ImVec2 s_winMin( 0, 0 ), s_winMax( 0, 0 );   // the window's rect last frame it was shown
     int    s_winFrame = -1;                       // (file drops onto it import decal stamps)
     bool  s_previewDirty = true;          // rebuild the wrap preview outline
@@ -1102,6 +1104,31 @@ namespace
         return true;
     }
 
+    // KIWI (2026-10-27, user: "allow holding Ctrl in the decal placer to snap the mouse to a
+    // snapping point"): the face under the cursor still gives the normal and the wrap
+    // patch; with Ctrl held the point moves to the ranked snap (vertex, edge midpoint /
+    // quarter, face centre, intersection...) the transform tools use, which outside a
+    // command engage exactly while Ctrl is down (KiwiCmd_SnapEngaged).  Only geometry
+    // targets count: a grid or ground point would lift the decal off the face.
+    bool PickPlacement( int imgX, int imgY, float outPoint[3], float outNormal[3],
+                        patchMesh_t **outPatch, snap_result_t *outSnap )
+    {
+        *outSnap = snap_result_t();
+        if ( !PickFace( imgX, imgY, outPoint, outNormal, outPatch ) )
+            return false;
+        if ( !KiwiCmd_CtrlHeld() )
+            return true;
+        ray_t ray;
+        snap_result_t snap;
+        if ( Pick_RayFromImagePos( imgX, imgY, &ray ) && KiwiSnap_Query( ray, imgX, imgY, &snap )
+          && KiwiSnap_Active( snap ) && KiwiSnap_IsGeometry( snap.type ) )
+        {
+            memcpy( outPoint, snap.position, sizeof( snap.position ) );
+            *outSnap = snap;
+        }
+        return true;
+    }
+
     float UnitRandom() { return (float)rand() / ( (float)RAND_MAX + 1.0f ); }
 
     void FillRecFromSettings( decalRec_t &r, const float *point, const float *normal )
@@ -1921,7 +1948,8 @@ bool KiwiDecal_HandleDown( int imgX, int imgY )
     }
     float point[3], normal[3];
     patchMesh_t *surf = nullptr;
-    if ( !PickFace( imgX, imgY, point, normal, &surf ) )
+    snap_result_t snap;
+    if ( !PickPlacement( imgX, imgY, point, normal, &surf, &snap ) )
     {
         SetStatus( "Armed. No face under the cursor." );
         return false;
@@ -1930,12 +1958,28 @@ bool KiwiDecal_HandleDown( int imgX, int imgY )
     memcpy( s_hoverPoint, point, sizeof( point ) );
     memcpy( s_hoverNormal, normal, sizeof( normal ) );
     s_hoverPatch = surf;
+    s_hoverSnap  = snap;
     s_previewDirty = true;
     return Place( point, normal, surf );
 }
 
 void KiwiDecal_HandleUp()   {}
 void KiwiDecal_HandleAbort() {}
+
+int KiwiDecal_HudPrompts( const kiwiPrompt_t **out )
+{
+    static const kiwiPrompt_t prompts[] = {
+        { "LMB",         "Place" },
+        { "Ctrl",        "Snap to a point" },
+        { "Ctrl+wheel",  "Size" },
+        { "Shift+wheel", "Rotate" },
+        { "Esc",         "Disarm" },
+    };
+    if ( !out || !s_armed )
+        return 0;
+    *out = prompts;
+    return (int)( sizeof( prompts ) / sizeof( prompts[0] ) );
+}
 
 bool KiwiDecal_HandleEscape()
 {
@@ -1979,11 +2023,15 @@ void KiwiDecal_Hover( int imgX, int imgY, bool over )
     }
     float point[3], normal[3];
     patchMesh_t *surf = nullptr;
-    if ( !PickFace( imgX, imgY, point, normal, &surf ) )
+    snap_result_t snap;
+    if ( !PickPlacement( imgX, imgY, point, normal, &surf, &snap ) )
     {
         ClearHover();
         return;
     }
+    if ( snap.valid != s_hoverSnap.valid || snap.type != s_hoverSnap.type )
+        g_nUpdateBits |= W_CAMERA;           // the snap marker appears, changes or goes
+    s_hoverSnap = snap;
     const bool moved = !s_hoverHave || surf != s_hoverPatch
                     || fabsf( point[0] - s_hoverPoint[0] ) > 0.01f
                     || fabsf( point[1] - s_hoverPoint[1] ) > 0.01f
@@ -2032,6 +2080,8 @@ void KiwiDecal_DrawWorld()
         segs += (int)rec->outline.size() / 3;
     if ( preview )
         segs += (int)s_previewOutline.size() / 3;
+    if ( preview && s_hoverSnap.valid )
+        segs += 64;                          // the snap marker's dot + ring (+ edge tick)
     KiwiLines_Begin( segs, 2 );
     if ( def && rec )
     {
@@ -2052,6 +2102,8 @@ void KiwiDecal_DrawWorld()
             r.width = s_width; r.height = s_height;
             OutlineRec( r, 0.3f, 0.9f, 1.0f );
         }
+        if ( s_hoverSnap.valid )
+            KiwiSnap_EmitMarker( s_hoverSnap );   // KIWI: where Ctrl snapped the decal
     }
     KiwiLines_Flush();
 }

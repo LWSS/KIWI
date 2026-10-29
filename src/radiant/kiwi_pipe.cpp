@@ -37,13 +37,30 @@ namespace
     const float KPIPE_COL_OK[3]  = { 0.55f, 0.85f, 1.00f };   // the primitives' preview blue
     const float KPIPE_PI         = (float)KIWI_PI;
 
-    const kiwiNumField_t KPIPE_FIELDS[2] = { { "radius", KNUM_LENGTH, false },
-                                             { "sides",  KNUM_COUNT,  false } };
+    const kiwiNumField_t KPIPE_FIELDS[3] = { { "radius", KNUM_LENGTH, false },
+                                             { "sides",  KNUM_COUNT,  false },
+                                             { "bend",   KNUM_LENGTH, false } };
+
+    // KIWI (2026-10-28, user: "the corners are blank and need to have bent pipe. I want you
+    // to fix this tool so it will create nice corners in cases like this. Add more options to
+    // the imgui dialogue"): how a straight spine's corners are joined.
+    //   Butt  - every segment ends square at the vertex (the old behaviour: wedge gaps);
+    //   Miter - segment ends are cut on the corner's bisector plane, so they meet exactly;
+    //   Bend  - segments are pulled back and an elbow (curve patch) is swept round an arc of
+    //           the bend radius, measured to the pipe's centre line.
+    enum { KPIPE_CORNER_BUTT = 0, KPIPE_CORNER_MITER, KPIPE_CORNER_BEND, KPIPE_CORNER_COUNT };
+    const char *const KPIPE_CORNER_NAMES[KPIPE_CORNER_COUNT] = { "Butt (open)", "Miter", "Bend" };
+    const float KPIPE_MIN_TURN_DEG   = 0.5f;    // straighter than this is no corner
+    const int   KPIPE_BEND_SEGS_MAX  = 8;       // curve spans per 90 degrees of bend
 
     // Remembered across runs of the tool this session (Plasticity keeps its dialog values).
     float s_lastRadius = 0.0f;              // 0 = seed from the grid
     int   s_lastSides  = 0;                 // 0 = round
     int   s_lastAngle  = 0;
+    int   s_lastCorner = KPIPE_CORNER_BEND;
+    float s_lastBend   = 0.0f;              // bend radius; 0 = follow the section size
+    int   s_lastBendSegs = 2;
+    int   s_lastMiterMax = 135;             // sharper corners bend instead of spiking
 
     // One spine: world points and whether the pipe along it is straight-sided.
     struct pipeSpine_t
@@ -55,10 +72,29 @@ namespace
         float              hint[3] = { 0.0f, 0.0f, 1.0f };   // the object's plane normal
     };
 
-    // One section frame along the spine.
+    // One section frame along the spine.  `cut` is the normal of the plane the section lies
+    // in: the tangent for a square end, the corner's bisector for a mitered one (section
+    // points are slid along t onto it).
     struct pipeFrame_t
     {
-        float p[3], t[3], u[3], v[3];
+        float p[3], t[3], u[3], v[3], cut[3];
+    };
+
+    // One piece of a straight spine: a segment (prism / patch cylinder from f.p along f.t for
+    // len, each end square or mitered onto the plane through its corner), or an elbow
+    // (stations on an exact arc, as a curved spine's resampled points).
+    struct pipePiece_t
+    {
+        bool  elbow = false;
+        bool  valid = true;
+        pipeFrame_t f;
+        float len = 0.0f;
+        bool  miter[2] = { false, false };
+        float cut[2][3];
+        float corner[2][3];
+        std::vector<float>       pts;       // elbow: 2 * spans + 1 stations
+        std::vector<pipeFrame_t> frames;
+        int   spans = 0;
     };
 
     int PointCount( const pipeSpine_t &s ) { return (int)( s.pts.size() / 3 ); }
@@ -158,6 +194,18 @@ namespace
         Cross3( f->t, u, v );
         Copy3( u, f->u );
         Copy3( v, f->v );
+        Copy3( f->t, f->cut );              // square end unless a miter sets it
+    }
+
+    // Slide `pt` along `t` onto the plane through `origin` with normal `cut`.
+    void OntoCut( float pt[3], const float t[3], const float cut[3], const float origin[3] )
+    {
+        const float tc = Dot3( t, cut );
+        if ( fabsf( tc ) < 1.0e-3f )
+            return;
+        float d[3];
+        Sub3( origin, pt, d );
+        Mad3( pt, t, Dot3( d, cut ) / tc, pt );
     }
 
     // World position of a section point (c, s in world units along the turned u / v).
@@ -171,6 +219,7 @@ namespace
             const float tv = -sa * f.u[k] + ca * f.v[k];
             out[k] = f.p[k] + c * tu + s * tv;
         }
+        OntoCut( out, f.t, f.cut, f.p );    // no-op for a square end
     }
 
     // Arc-length resample of a polyline into `count` points (closed wraps; the last equals
@@ -283,7 +332,7 @@ namespace
         int NumericFields( const kiwiNumField_t **out ) const override
         {
             *out = KPIPE_FIELDS;
-            return 2;
+            return 3;
         }
         bool NumericFieldValue( int field, float *out ) const override
         {
@@ -291,6 +340,7 @@ namespace
                 return false;
             if ( field == 0 )      *out = m_radius;
             else if ( field == 1 ) *out = (float)m_sides;
+            else if ( field == 2 ) *out = BendRadius();
             else                   return false;
             return true;
         }
@@ -302,26 +352,59 @@ namespace
                 SetRadius( world );
             else if ( field == 1 )
                 SetSides( (int)floorf( Units_ToDisplay( world ) + 0.5f ), 0 );
+            else if ( field == 2 )
+            {
+                m_bend = world < KPIPE_MIN_RADIUS ? KPIPE_MIN_RADIUS : world;
+                s_lastBend = m_bend;
+            }
             UpdateHud();
             g_nUpdateBits |= 1;
         }
 
-        // Plasticity's PipeDialog: vertex count, section size, angle (+ KIWI's patch density).
+        // Plasticity's PipeDialog: vertex count, section size, angle (+ KIWI's patch density
+        // and corner joints).  The corner rows depend on the corner style (enabledBy can only
+        // gate on non-zero, so the table is rebuilt, as Loft does).
         int CommandOptions( const kiwiOption_t **out ) const override
         {
-            static const kiwiOption_t rows[] = {
+            static const kiwiOption_t base[5] = {
                 { "Vertex count (0 = round)", KOPT_INT,      nullptr, 0, 0, 0, KPIPE_MAX_SIDES, -1 },
                 { "Section size (radius)",    KOPT_NUMFIELD, nullptr, 0, 0, KPIPE_MIN_RADIUS, 4096, -1 },
                 { "Angle (degrees)",          KOPT_INT,      nullptr, 0, 0, 0, 360, -1 },
                 { "Curve density",            KOPT_INT,      nullptr, 0, 0, KPRIM_PATCH_DENSITY_MIN,
                                                                            KPRIM_PATCH_DENSITY_MAX, -1 },
+                { "Corners",                  KOPT_ENUM,     KPIPE_CORNER_NAMES, KPIPE_CORNER_COUNT, 0,
+                                                                           0, 0, -1 },
             };
+            static const kiwiOption_t bend[2] = {
+                { "Bend radius (to centre line)", KOPT_NUMFIELD, nullptr, 0, 2, KPIPE_MIN_RADIUS, 4096, -1 },
+                { "Bend smoothness (per 90 deg)", KOPT_INT,      nullptr, 0, 0, 1, KPIPE_BEND_SEGS_MAX, -1 },
+            };
+            static const kiwiOption_t miter[1] = {
+                { "Miter up to (degrees)",        KOPT_INT,      nullptr, 0, 0, 15, 170, -1 },
+            };
+            static kiwiOption_t rows[7];
+            for ( int i = 0; i < 5; ++i )
+                rows[i] = base[i];
+            int n = 5;
+            if ( m_corner == KPIPE_CORNER_BEND )
+            {
+                rows[n++] = bend[0];
+                rows[n++] = bend[1];
+            }
+            else if ( m_corner == KPIPE_CORNER_MITER )
+                rows[n++] = miter[0];
             *out = rows;
-            return 4;
+            return n;
         }
         int OptionValue( int opt ) const override
         {
-            return opt == 0 ? m_sides : opt == 2 ? m_angle : opt == 3 ? m_density : 0;
+            if ( opt == 0 ) return m_sides;
+            if ( opt == 2 ) return m_angle;
+            if ( opt == 3 ) return m_density;
+            if ( opt == 4 ) return m_corner;
+            if ( opt == 5 ) return m_corner == KPIPE_CORNER_MITER ? m_miterMax : 0;   // bend: numfield
+            if ( opt == 6 ) return m_bendSegs;
+            return 0;
         }
         void OptionChanged( int opt, int value ) override
         {
@@ -338,6 +421,12 @@ namespace
                           : value > KPRIM_PATCH_DENSITY_MAX ? KPRIM_PATCH_DENSITY_MAX : value;
                 KiwiPrim_SetPatchDensity( m_density );
             }
+            else if ( opt == 4 && value >= 0 && value < KPIPE_CORNER_COUNT )
+                m_corner = s_lastCorner = value;
+            else if ( opt == 5 && m_corner == KPIPE_CORNER_MITER )
+                m_miterMax = s_lastMiterMax = value < 15 ? 15 : value > 170 ? 170 : value;
+            else if ( opt == 6 )
+                m_bendSegs = s_lastBendSegs = value < 1 ? 1 : value > KPIPE_BEND_SEGS_MAX ? KPIPE_BEND_SEGS_MAX : value;
             s_lastAngle = m_angle;
             UpdateHud();
             g_nUpdateBits |= 1;
@@ -415,6 +504,10 @@ namespace
             m_radius  = s_lastRadius;
             m_sides   = s_lastSides;
             m_angle   = s_lastAngle;
+            m_corner  = s_lastCorner;
+            m_bend    = s_lastBend;
+            m_bendSegs = s_lastBendSegs;
+            m_miterMax = s_lastMiterMax;
             m_density = KiwiPrim_PatchDensity();
             FirstFrame( &m_first );
             Copy3( m_first.p, m_handleBase );
@@ -494,35 +587,39 @@ namespace
             const int ringSegs = m_sides >= 3 ? m_sides : 16;
             for ( size_t i = 0; i < m_spines.size(); ++i )
             {
-                std::vector<pipeFrame_t> frames;
-                PreviewFrames( m_spines[i], &frames );
-                // Straight spines come as (start, end) pairs per segment; curved as one run.
-                const bool pairs = !m_spines[i].curved;
-                for ( size_t f = 0; f < frames.size(); ++f )
+                // Runs of frames: a curved spine is one run; a straight one a run per segment
+                // (start, end - mitered ends ring on their cut plane) and per elbow.
+                std::vector<std::vector<pipeFrame_t> > runs;
+                PreviewRuns( m_spines[i], &runs );
+                for ( size_t r = 0; r < runs.size(); ++r )
                 {
-                    float prev[3];
-                    for ( int k = 0; k <= ringSegs; ++k )
+                    const std::vector<pipeFrame_t> &frames = runs[r];
+                    for ( size_t f = 0; f < frames.size(); ++f )
                     {
-                        const float a = 2.0f * KPIPE_PI * (float)( k % ringSegs ) / (float)ringSegs;
-                        float p[3];
-                        SectionPoint( frames[f], (float)m_angle, cosf( a ) * m_radius,
-                                      sinf( a ) * m_radius, p );
-                        if ( k && !KiwiLines_Add( prev, p ) )
-                            return;
-                        Copy3( p, prev );
-                    }
-                    // Four longitudinal rails to the next ring.
-                    if ( f + 1 < frames.size() && ( !pairs || ( f & 1 ) == 0 ) )
-                        for ( int k = 0; k < 4; ++k )
+                        float prev[3];
+                        for ( int k = 0; k <= ringSegs; ++k )
                         {
-                            const int idx = ( k * ringSegs ) / 4;
-                            const float a = 2.0f * KPIPE_PI * (float)idx / (float)ringSegs;
-                            float p0[3], p1[3];
-                            SectionPoint( frames[f],     (float)m_angle, cosf( a ) * m_radius, sinf( a ) * m_radius, p0 );
-                            SectionPoint( frames[f + 1], (float)m_angle, cosf( a ) * m_radius, sinf( a ) * m_radius, p1 );
-                            if ( !KiwiLines_Add( p0, p1 ) )
+                            const float a = 2.0f * KPIPE_PI * (float)( k % ringSegs ) / (float)ringSegs;
+                            float p[3];
+                            SectionPoint( frames[f], (float)m_angle, cosf( a ) * m_radius,
+                                          sinf( a ) * m_radius, p );
+                            if ( k && !KiwiLines_Add( prev, p ) )
                                 return;
+                            Copy3( p, prev );
                         }
+                        // Four longitudinal rails to the next ring.
+                        if ( f + 1 < frames.size() )
+                            for ( int k = 0; k < 4; ++k )
+                            {
+                                const int idx = ( k * ringSegs ) / 4;
+                                const float a = 2.0f * KPIPE_PI * (float)idx / (float)ringSegs;
+                                float p0[3], p1[3];
+                                SectionPoint( frames[f],     (float)m_angle, cosf( a ) * m_radius, sinf( a ) * m_radius, p0 );
+                                SectionPoint( frames[f + 1], (float)m_angle, cosf( a ) * m_radius, sinf( a ) * m_radius, p1 );
+                                if ( !KiwiLines_Add( p0, p1 ) )
+                                    return;
+                            }
+                    }
                 }
             }
         }
@@ -586,36 +683,205 @@ namespace
                 m_start = m_radius - r;
         }
 
-        // Straight spines ring at every vertex; curved ones at their patch stations.
-        void PreviewFrames( const pipeSpine_t &s, std::vector<pipeFrame_t> *out ) const
+        // Bend radius to the centre line: typed / dragged, else the section size (a tight
+        // elbow whose inside just closes).
+        float BendRadius() const
         {
-            out->clear();
-            const float *hint = s.haveHint ? s.hint : nullptr;
+            return m_bend > 0.0f ? m_bend : m_radius;
+        }
+
+        // Curved spines ring at their patch stations; straight ones at each piece's ends and
+        // at every elbow station.
+        void PreviewRuns( const pipeSpine_t &s, std::vector<std::vector<pipeFrame_t> > *runs ) const
+        {
+            runs->clear();
             if ( s.curved )
             {
                 std::vector<float> pts;
+                runs->push_back( std::vector<pipeFrame_t>() );
                 Resample( s, CurvedSpans( s ) + 1, &pts );
-                CurvedFrames( pts, s.closed, hint, out );
+                CurvedFrames( pts, s.closed, s.haveHint ? s.hint : nullptr, &runs->back() );
                 return;
             }
+            std::vector<pipePiece_t> pieces;
+            PlanStraight( s, &pieces, nullptr );
+            for ( size_t i = 0; i < pieces.size(); ++i )
+            {
+                const pipePiece_t &pc = pieces[i];
+                if ( !pc.valid )
+                    continue;
+                if ( pc.elbow )
+                {
+                    runs->push_back( pc.frames );
+                    continue;
+                }
+                pipeFrame_t a = pc.f, b = pc.f;
+                Mad3( pc.f.p, pc.f.t, pc.len, b.p );
+                if ( pc.miter[0] ) { Copy3( pc.corner[0], a.p ); Copy3( pc.cut[0], a.cut ); }
+                if ( pc.miter[1] ) { Copy3( pc.corner[1], b.p ); Copy3( pc.cut[1], b.cut ); }
+                runs->push_back( std::vector<pipeFrame_t>() );
+                runs->back().push_back( a );
+                runs->back().push_back( b );
+            }
+        }
+
+        // ── straight spines: segments + corner joints ──────────────────────────
+        // Lays out every segment (pulled back for bends, cut planes for miters) and every
+        // elbow, carrying the section frame through the elbows so faceted sections line up.
+        // `notes` (optional) gets bit 1 when bends fell back to miters (sections over
+        // KPIPE_MAX_PATCH_SIDES), bit 2 when a bend radius was shrunk to fit a short segment.
+        void PlanStraight( const pipeSpine_t &s, std::vector<pipePiece_t> *out, int *notes ) const
+        {
+            out->clear();
+            const float *hint = s.haveHint ? s.hint : nullptr;
             const int n = PointCount( s );
             const int segs = s.closed ? n : n - 1;
-            float prevU[3];
-            bool  havePrev = false;          // a copy: push_back may move the vector
-            pipeFrame_t f;
-            for ( int i = 0; i < segs; ++i )
+            if ( segs < 1 )
+                return;
+            std::vector<float> dir( (size_t)segs * 3 ), len( (size_t)segs );
+            std::vector<char>  ok( (size_t)segs );
+            for ( int j = 0; j < segs; ++j )
             {
-                Sub3( Pt( s, ( i + 1 ) % n ), Pt( s, i ), f.t );
-                if ( !Norm3( f.t ) )
+                float *d = &dir[(size_t)j * 3];
+                Sub3( Pt( s, ( j + 1 ) % n ), Pt( s, j ), d );
+                len[(size_t)j] = Len3( d );
+                ok[(size_t)j] = len[(size_t)j] >= 1.0f && Norm3( d );
+            }
+
+            // Joint per vertex: kind (BUTT = none), miter plane, bend pull-back.
+            struct joint_t { int kind; float theta, pull, cut[3]; };
+            std::vector<joint_t> jt( (size_t)n );
+            for ( int v = 0; v < n; ++v )
+            {
+                joint_t &j = jt[(size_t)v];
+                j.kind = KPIPE_CORNER_BUTT;
+                j.theta = j.pull = 0.0f;
+                if ( m_corner == KPIPE_CORNER_BUTT || ( !s.closed && ( v == 0 || v == n - 1 ) ) )
                     continue;
-                Copy3( Pt( s, i ), f.p );
-                FinishFrame( &f, havePrev ? prevU : nullptr, hint );
-                out->push_back( f );
-                pipeFrame_t e = f;
-                Copy3( Pt( s, ( i + 1 ) % n ), e.p );
-                out->push_back( e );
-                Copy3( f.u, prevU );
+                const int a = ( v - 1 + segs ) % segs, b = v % segs;
+                if ( !ok[(size_t)a] || !ok[(size_t)b] )
+                    continue;
+                const float *d0 = &dir[(size_t)a * 3], *d1 = &dir[(size_t)b * 3];
+                float c = Dot3( d0, d1 );
+                c = c > 1.0f ? 1.0f : c < -1.0f ? -1.0f : c;
+                const float theta = acosf( c );
+                if ( theta * 180.0f / KPIPE_PI < KPIPE_MIN_TURN_DEG )
+                    continue;
+                j.theta = theta;
+                int kind = m_corner;
+                // Miters spike on sharp corners: past the limit they bend.
+                if ( kind == KPIPE_CORNER_MITER && theta * 180.0f / KPIPE_PI > (float)m_miterMax )
+                    kind = KPIPE_CORNER_BEND;
+                // Elbows are curve patches, which hold KPIPE_MAX_PATCH_SIDES sides at most.
+                if ( kind == KPIPE_CORNER_BEND && m_sides > KPIPE_MAX_PATCH_SIDES )
+                {
+                    kind = KPIPE_CORNER_MITER;
+                    if ( notes ) *notes |= 1;
+                }
+                if ( kind == KPIPE_CORNER_MITER )
+                {
+                    for ( int k = 0; k < 3; ++k )
+                        j.cut[k] = d0[k] + d1[k];
+                    if ( theta > 170.0f * KPIPE_PI / 180.0f || !Norm3( j.cut ) )
+                        continue;                       // a U-turn has no miter
+                }
+                else
+                {
+                    const float half = theta * 0.5f < 89.5f * KPIPE_PI / 180.0f ? theta * 0.5f
+                                                                               : 89.5f * KPIPE_PI / 180.0f;
+                    j.pull = BendRadius() * tanf( half );
+                }
+                j.kind = kind;
+            }
+
+            // A segment can give at most 90% of its length to the bends at its two ends.
+            std::vector<float> scale( (size_t)n, 1.0f );
+            for ( int sg = 0; sg < segs; ++sg )
+            {
+                const int va = sg, vb = ( sg + 1 ) % n;
+                const float want = jt[(size_t)va].pull + jt[(size_t)vb].pull;
+                if ( want > 0.9f * len[(size_t)sg] && want > 0.0f )
+                {
+                    const float f = 0.9f * len[(size_t)sg] / want;
+                    if ( f < scale[(size_t)va] ) scale[(size_t)va] = f;
+                    if ( f < scale[(size_t)vb] ) scale[(size_t)vb] = f;
+                }
+            }
+            for ( int v = 0; v < n; ++v )
+                if ( scale[(size_t)v] < 1.0f && jt[(size_t)v].pull > 0.0f )
+                {
+                    jt[(size_t)v].pull *= scale[(size_t)v];
+                    if ( notes ) *notes |= 2;
+                }
+
+            float prevU[3];
+            bool  havePrev = false;
+            for ( int sg = 0; sg < segs; ++sg )
+            {
+                const int va = sg, vb = ( sg + 1 ) % n;
+                pipePiece_t pc;
+                if ( !ok[(size_t)sg] )
+                {
+                    pc.valid = false;
+                    out->push_back( pc );
+                    continue;
+                }
+                const float *d = &dir[(size_t)sg * 3];
+                const joint_t &ja = jt[(size_t)va], &jb = jt[(size_t)vb];
+                Copy3( d, pc.f.t );
+                Mad3( Pt( s, va ), d, ja.kind == KPIPE_CORNER_BEND ? ja.pull : 0.0f, pc.f.p );
+                pc.len = len[(size_t)sg] - ( ja.kind == KPIPE_CORNER_BEND ? ja.pull : 0.0f )
+                                         - ( jb.kind == KPIPE_CORNER_BEND ? jb.pull : 0.0f );
+                FinishFrame( &pc.f, havePrev ? prevU : nullptr, hint );
+                Copy3( pc.f.u, prevU );
                 havePrev = true;
+                pc.miter[0] = ja.kind == KPIPE_CORNER_MITER;
+                pc.miter[1] = jb.kind == KPIPE_CORNER_MITER;
+                Copy3( ja.kind == KPIPE_CORNER_MITER ? ja.cut : d, pc.cut[0] );
+                Copy3( jb.kind == KPIPE_CORNER_MITER ? jb.cut : d, pc.cut[1] );
+                Copy3( Pt( s, va ), pc.corner[0] );
+                Copy3( Pt( s, vb ), pc.corner[1] );
+                out->push_back( pc );
+
+                if ( jb.kind != KPIPE_CORNER_BEND || !( jb.pull > 0.0f ) )
+                    continue;
+                // The elbow at vb: an arc of radius pull / tan(theta / 2) from the pulled-back
+                // end of this segment to the pulled-back start of the next.
+                const int nx = vb % segs;
+                const float *d1 = &dir[(size_t)nx * 3];
+                float inward[3];
+                const float c = Dot3( d, d1 );
+                for ( int k = 0; k < 3; ++k )
+                    inward[k] = d1[k] - c * d[k];
+                if ( !Norm3( inward ) )
+                    continue;
+                const float half = jb.theta * 0.5f;
+                const float R = jb.pull / tanf( half );
+                float A[3], C[3];
+                Mad3( Pt( s, vb ), d, -jb.pull, A );
+                Mad3( A, inward, R, C );
+                pipePiece_t el;
+                el.elbow = true;
+                el.spans = (int)ceilf( jb.theta / ( 0.5f * KPIPE_PI ) * (float)m_bendSegs );
+                if ( el.spans < 1 ) el.spans = 1;
+                const int stations = el.spans * 2 + 1;
+                for ( int q = 0; q < stations; ++q )
+                {
+                    const float phi = jb.theta * (float)q / (float)( stations - 1 );
+                    const float cp = cosf( phi ), sp = sinf( phi );
+                    pipeFrame_t f;
+                    for ( int k = 0; k < 3; ++k )
+                    {
+                        f.p[k] = C[k] + R * ( -inward[k] * cp + d[k] * sp );
+                        f.t[k] = d[k] * cp + inward[k] * sp;
+                    }
+                    Norm3( f.t );
+                    FinishFrame( &f, prevU, hint );
+                    Copy3( f.u, prevU );
+                    el.pts.insert( el.pts.end(), f.p, f.p + 3 );
+                    el.frames.push_back( f );
+                }
+                out->push_back( el );
             }
         }
 
@@ -634,25 +900,34 @@ namespace
         void BuildStraight( const pipeSpine_t &s, std::vector<brush_t *> *defs,
                             int *brushes, int *patches, int *rejected )
         {
-            const float *hint = s.haveHint ? s.hint : nullptr;
-            const int n = PointCount( s );
-            const int segs = s.closed ? n : n - 1;
-            float prevU[3];
-            bool  havePrev = false;
-            for ( int i = 0; i < segs; ++i )
+            std::vector<pipePiece_t> pieces;
+            int notes = 0;
+            PlanStraight( s, &pieces, &notes );
+            if ( notes & 1 )
+                Sys_Printf( "Pipe: bends are curve patches (at most %i sides) - the corners of this "
+                            "%i-sided pipe are mitered instead.\n", KPIPE_MAX_PATCH_SIDES, m_sides );
+            if ( notes & 2 )
+                Sys_Printf( "Pipe: some bend radii were reduced to fit short segments.\n" );
+            for ( size_t i = 0; i < pieces.size(); ++i )
             {
-                pipeFrame_t f;
-                Copy3( Pt( s, i ), f.p );
-                Sub3( Pt( s, ( i + 1 ) % n ), Pt( s, i ), f.t );
-                const float len = Len3( f.t );
-                if ( len < 1.0f || !Norm3( f.t ) )
+                const pipePiece_t &pc = pieces[i];
+                if ( !pc.valid )
                 {
                     ++*rejected;
                     continue;
                 }
-                FinishFrame( &f, havePrev ? prevU : nullptr, hint );
-                Copy3( f.u, prevU );
-                havePrev = true;
+                if ( pc.elbow )
+                {
+                    BuildSweep( pc.pts, pc.frames, pc.spans, m_sides, defs, patches, rejected );
+                    continue;
+                }
+                const pipeFrame_t &f = pc.f;
+                const float len = pc.len;
+                if ( len < 0.05f )
+                {
+                    ++*rejected;
+                    continue;
+                }
 
                 // The section plane: normal along the segment, u = the turned section axis.
                 float turnedU[3];
@@ -671,8 +946,30 @@ namespace
                 if ( m_sides < 3 )
                 {
                     brush_t *def = KiwiPrim_BuildPatchCylinder( pl, centre, m_radius, 0.0f, len, m_density );
-                    if ( def ) { defs->push_back( def ); ++*patches; }
-                    else         ++*rejected;
+                    if ( !def )
+                    {
+                        ++*rejected;
+                        continue;
+                    }
+                    // Miter: slide the end rings along the axis onto the cut planes; the middle
+                    // row goes back halfway so the sides stay straight.
+                    if ( ( pc.miter[0] || pc.miter[1] ) && def->patch
+                      && def->patch->height == KPRIM_PATCH_ROWS )
+                    {
+                        patchMesh_t *p = def->patch;
+                        for ( int col = 0; col < p->width; ++col )
+                        {
+                            float *r0 = p->ctrl[col][0].xyz, *r2 = p->ctrl[col][2].xyz;
+                            if ( pc.miter[0] ) OntoCut( r0, f.t, pc.cut[0], pc.corner[0] );
+                            if ( pc.miter[1] ) OntoCut( r2, f.t, pc.cut[1], pc.corner[1] );
+                            for ( int k = 0; k < 3; ++k )
+                                p->ctrl[col][1].xyz[k] = 0.5f * ( r0[k] + r2[k] );
+                        }
+                        Patch_Rebuild( p, 1 );
+                        KiwiValid_Rebuild( def );
+                    }
+                    defs->push_back( def );
+                    ++*patches;
                     continue;
                 }
 
@@ -694,6 +991,26 @@ namespace
                     ++*rejected;
                     continue;
                 }
+                // Miter: the cap faces' plane points slide along the axis onto the cut planes
+                // (a shear along t keeps their winding, so the caps still face outward).
+                if ( pc.miter[0] || pc.miter[1] )
+                    for ( int fi = 0; fi < def->faceCount; ++fi )
+                    {
+                        face_t *fc = &def->faces[fi];
+                        float e1[3], e2[3], nrm[3];
+                        Sub3( fc->planepts[1], fc->planepts[0], e1 );
+                        Sub3( fc->planepts[2], fc->planepts[0], e2 );
+                        Cross3( e1, e2, nrm );
+                        if ( !Norm3( nrm ) || fabsf( Dot3( nrm, f.t ) ) < 0.999f )
+                            continue;                   // a side face
+                        float rel[3];
+                        Sub3( fc->planepts[0], f.p, rel );
+                        const int end = Dot3( rel, f.t ) > 0.5f * len ? 1 : 0;
+                        if ( !pc.miter[end] )
+                            continue;
+                        for ( int q = 0; q < 3; ++q )
+                            OntoCut( fc->planepts[q], f.t, pc.cut[end], pc.corner[end] );
+                    }
                 KiwiValid_Rebuild( def );
                 if ( !KiwiValid_CheckBrush( def, &why ) )
                 {
@@ -743,7 +1060,6 @@ namespace
                             "sides - using %i.\n", KPIPE_MAX_PATCH_SIDES, KPIPE_MAX_PATCH_SIDES );
                 sides = KPIPE_MAX_PATCH_SIDES;
             }
-            const int cols = ( sides < 3 ) ? ( m_density + 3 ) * 2 + 1 : sides * 2 + 1;
             if ( SpineLength( s ) < 1.0f )
             {
                 ++*rejected;
@@ -755,6 +1071,23 @@ namespace
             Resample( s, spans * 2 + 1, &pts );      // even = on the curve, odd = midpoints
             std::vector<pipeFrame_t> frames;
             CurvedFrames( pts, s.closed, s.haveHint ? s.hint : nullptr, &frames );
+            BuildSweep( pts, frames, spans, sides, defs, patches, rejected );
+        }
+
+        // Curve patches swept through 2 * spans + 1 stations (even = on the spine, odd = the
+        // span midpoints the quadratic passes through) - a curved spine, or one elbow.
+        void BuildSweep( const std::vector<float> &pts, const std::vector<pipeFrame_t> &frames,
+                         int spans, int sides, std::vector<brush_t *> *defs,
+                         int *patches, int *rejected )
+        {
+            if ( sides > KPIPE_MAX_PATCH_SIDES )
+                sides = KPIPE_MAX_PATCH_SIDES;
+            if ( spans < 1 || (int)frames.size() < spans * 2 + 1 )
+            {
+                ++*rejected;
+                return;
+            }
+            const int cols = ( sides < 3 ) ? ( m_density + 3 ) * 2 + 1 : sides * 2 + 1;
 
             // Section control points per resampled station.
             auto station = [&]( int row, int col, float out[3] )
@@ -835,11 +1168,25 @@ namespace
                              : anyCurved                ? "curve patches"
                              : m_sides < 3              ? "patch cylinders"
                                                         : "brushes";
-            if ( m_sides < 3 )
-                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  round  angle %i  ->  %s", r, m_angle, what );
+            char corners[48];
+            if ( !anyStraight )
+                corners[0] = '\0';
+            else if ( m_corner == KPIPE_CORNER_BEND )
+            {
+                char b[32];
+                KiwiUnits_Format( b, sizeof( b ), BendRadius() );
+                _snprintf( corners, sizeof( corners ), "  bend %s", b );
+            }
             else
-                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  %i sides  angle %i  ->  %s",
-                           r, m_sides, m_angle, what );
+                _snprintf( corners, sizeof( corners ), "  %s corners",
+                           m_corner == KPIPE_CORNER_MITER ? "miter" : "butt" );
+            corners[sizeof( corners ) - 1] = '\0';
+            if ( m_sides < 3 )
+                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  round  angle %i%s  ->  %s",
+                           r, m_angle, corners, what );
+            else
+                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  %i sides  angle %i%s  ->  %s",
+                           r, m_sides, m_angle, corners, what );
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
@@ -850,6 +1197,10 @@ namespace
         int         m_sides   = 0;
         int         m_angle   = 0;
         int         m_density = KPRIM_PATCH_DENSITY_DEF;
+        int         m_corner  = KPIPE_CORNER_BEND;
+        float       m_bend    = 0.0f;           // 0 = the section size
+        int         m_bendSegs = 2;
+        int         m_miterMax = 135;
         bool        m_grab    = false;
         float       m_start   = 0.0f;
         char        m_hud[192] = { 0 };

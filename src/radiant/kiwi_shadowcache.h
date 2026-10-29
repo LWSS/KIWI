@@ -22,18 +22,3 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
 
 // Free cache storage during Map_NewMap teardown.
 void KiwiShadowCache_Shutdown();
-
-// KIWI (2026-10-27): one shadow-volume batch exactly as SunLightPreview_PolyOffsetShadows
-// issued it (xyzw = 4 floats per vertex).  shadowvolume.cpp appends every flushed batch to
-// the recording set by Radiant_ShadVol_SetRecording; Radiant_ShadVol_Replay re-issues them
-// through the same stencil-shadow command.  The light preview's per-light cache (camwnd.cpp)
-// is the client.
-#include <vector>
-struct KiwiShadVolBatch
-{
-    std::vector<short> indices;
-    std::vector<float> xyzw;
-};
-typedef std::vector<KiwiShadVolBatch> KiwiShadVolRecording;
-void Radiant_ShadVol_SetRecording( KiwiShadVolRecording *rec );   // nullptr = stop
-void Radiant_ShadVol_Replay( const KiwiShadVolRecording &rec );

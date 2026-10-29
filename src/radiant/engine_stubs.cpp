@@ -959,22 +959,52 @@ int *toolflags_table = (int *)s_toolflagsTable;
 // KISAK: on a malformed line the binary walks off the end of the name table (it prints
 // "missing token"/"not a known token" and keeps scanning, then strcmps against the
 // table's NULL terminator) — we stop instead.  Identical on well-formed input.
-static int Map_ParseFlagsLine( const char **text, const char *keyword,
-                               const RadiantFlagName *table )
+// KIWI (2026-10-28, crash opening a newer-CoD map, user: "I tried opening a user map from
+// desktop (attached, london.map), and we got a crash"): Radiant's Com_PrintMessage is
+// (fmt, ...) (cmdlib.cpp), but these two prints passed the game's channel first - the 0
+// became the FORMAT and vsnprintf aborted on the null.  That map spells out
+// "contents solid;" (8177 brushes) and uses "playerclip" / "monsterclip" (4453 / 4342),
+// none of which CoD4's table knows.  "solid" is the default (no bits) and is accepted
+// silently; any other unknown token is ignored and reported ONCE per session, not once
+// per brush.  cod4map still refuses unknown tokens, so such a map must be cleaned
+// (re-saved from here drops them) before it compiles.
+static void Map_ReportUnknownFlag( const char *token, const char *keyword )
 {
+    static char s_seen[32][48];
+    static int  s_seenCount = 0;
+    for ( int i = 0; i < s_seenCount; ++i )
+        if ( !strcmp( s_seen[i], token ) )
+            return;
+    if ( s_seenCount < 32 )
+    {
+        strncpy( s_seen[s_seenCount], token, sizeof( s_seen[0] ) - 1 );
+        s_seen[s_seenCount][sizeof( s_seen[0] ) - 1] = '\0';
+        ++s_seenCount;
+    }
+    Com_PrintMessage( "'%s' is not a known token for '%s' - ignored (not reported again)\n",
+                      token, keyword );
+}
+
+static int Map_ParseFlagsLine( const char **text, const char *keyword,
+                               const RadiantFlagName *table, bool *found = nullptr )
+{
+    if ( found )
+        *found = false;
     parseInfo_t *tok = Com_Parse( text );          // prologue + ParseExt(text,1)
     if ( strcmp( tok->token, keyword ) )
     {
         Com_UngetToken();
         return 0;
     }
+    if ( found )
+        *found = true;
     int bits = 0;
     for ( ;; )
     {
         parseInfo_t *f = Com_ParseOnLine( text );  // prologue + ParseExt(text,0)
         if ( !f->token[0] )
         {
-            Com_PrintMessage( 0, "missing token for '%s'\n", keyword );
+            Com_PrintMessage( "missing token for '%s'\n", keyword );
             break;
         }
         if ( f->token[0] == ';' )
@@ -984,14 +1014,35 @@ static int Map_ParseFlagsLine( const char **text, const char *keyword,
             ++i;
         if ( table[i].name )
             bits |= table[i].bits;
+        else if ( table == s_contentsTable && !_stricmp( f->token, "solid" ) )
+            ;                                      // the default, spelled out: no bits
         else
-            Com_PrintMessage( 0, "'%s' is not a known token for '%s'\n", f->token, keyword );
+            Map_ReportUnknownFlag( f->token, keyword );
     }
     return bits;
 }
 
 int  Map_ParseContentsLine( const char **text )  { return Map_ParseFlagsLine( text, "contents",  s_contentsTable  ); } // 0x42FB80
 int  Map_ParseToolFlagsLine( const char **text ) { return Map_ParseFlagsLine( text, "toolFlags", s_toolflagsTable ); } // 0x42FBA0
+
+// KIWI (2026-10-28, london.map: "missing '(' parsing brush"): CoD4 writes at most one
+// `contents` line then one `toolFlags` line; newer CoD Radiants write ONE LINE PER FLAG,
+// in any order ("contents playerclip;" / "contents monsterclip;" / "contents detail;").
+// Read every such line before the faces and OR them together.  On a CoD4 map this is the
+// binary's single contents-then-toolFlags read.
+void Map_ParseFlagLines( const char **text, int *contents, int *toolFlags )
+{
+    *contents  = 0;
+    *toolFlags = 0;
+    for ( int guard = 0; guard < 64; ++guard )
+    {
+        bool c = false, t = false;
+        *contents  |= Map_ParseFlagsLine( text, "contents",  s_contentsTable,  &c );
+        *toolFlags |= Map_ParseFlagsLine( text, "toolFlags", s_toolflagsTable, &t );
+        if ( !c && !t )
+            break;
+    }
+}
 
 // 0x45ad50 — material-name normaliser: strip to basename, then apply the
 // materialNameRemap table (case-insensitive).  Only the version==0 legacy .map parse

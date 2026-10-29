@@ -38,6 +38,7 @@ extern void Ed_BrushSetFaceCount( brush_t *def, int faceCount );
 // Patch creation entry points; the landing order mirrors kiwi_patchfillet.cpp.
 extern void         Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );
 extern void         Patch_KiwiCapAlign( patchMesh_t *p );                     // pmesh.cpp
+extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMap, int *rowMap ); // pmesh.cpp
 
 namespace
 {
@@ -69,6 +70,169 @@ namespace
     // Reject arc handles farther than this chord multiple; near-parallel tangents
     // otherwise produce unbounded patches. A quarter-circle handle is about 0.71.
     const float KLOFT_HANDLE_MAX = 2.0f;
+
+    // ── CURVE bridge texturing ───────────────────────────────────────────────
+    // KIWI (2026-10-27, user: "the default texture apply on this lofted curve is broken.
+    // can you make it so the default application is better UV'd?"): every strip used to
+    // get CAP alignment - one planar projection along the reference face's world axis.
+    // Right for a FLAT strip (the top / bottom of a bend: it lines up with the straight
+    // brushes at both ends), but a curved WALL turns edge-on to that axis, so the texture
+    // smeared into radial streaks.  A curved strip now takes its source face's own mapping
+    // (scale, rotation, shift - read back from the face's drawn texcoords) at the joint and
+    // carries it along the path by arc length, row by row, continuously across chunks.
+
+    // The source face's layer-0 texcoords as an affine map of its plane.
+    struct faceTexMap_t
+    {
+        float  o[3], e1[3], e2[3];
+        float  st0[2], d1[2], d2[2];
+        double g11, g12, g22, det;
+    };
+
+    bool FaceTexMap( const face_t *f, faceTexMap_t *m )
+    {
+        static EdLayerGeom g;                // 4 KB of scratch, main thread only
+        if ( !Face_BuildLayerGeom( const_cast<face_t *>( f ),
+                                   (const orientation_t *)world_orient_matrix, 0, &g )
+          || g.vertcount < 3 )
+            return false;
+        // The pair that spans the largest triangle with corner 0 gives a stable basis.
+        int ia = 1, ib = 2;
+        float best = 0.0f;
+        for ( int a = 1; a < g.vertcount; ++a )
+            for ( int b = a + 1; b < g.vertcount; ++b )
+            {
+                float ea[3], eb[3], c[3];
+                Sub3( g.xyz[a], g.xyz[0], ea );
+                Sub3( g.xyz[b], g.xyz[0], eb );
+                Cross3( ea, eb, c );
+                const float area = Dot3( c, c );
+                if ( area > best ) { best = area; ia = a; ib = b; }
+            }
+        if ( best < 1.0e-6f )
+            return false;
+        Copy3( g.xyz[0], m->o );
+        Sub3( g.xyz[ia], g.xyz[0], m->e1 );
+        Sub3( g.xyz[ib], g.xyz[0], m->e2 );
+        for ( int k = 0; k < 2; ++k )
+        {
+            m->st0[k] = g.st[0][k];
+            m->d1[k]  = g.st[ia][k] - g.st[0][k];
+            m->d2[k]  = g.st[ib][k] - g.st[0][k];
+        }
+        m->g11 = Dot3( m->e1, m->e1 );
+        m->g12 = Dot3( m->e1, m->e2 );
+        m->g22 = Dot3( m->e2, m->e2 );
+        m->det = m->g11 * m->g22 - m->g12 * m->g12;
+        return m->det > 1.0e-9;
+    }
+
+    // Texcoord change for an offset v (its out-of-plane part is ignored).
+    void FaceTexDelta( const faceTexMap_t &m, const float v[3], float out[2] )
+    {
+        const double b1 = Dot3( m.e1, v ), b2 = Dot3( m.e2, v );
+        const double a  = ( m.g22 * b1 - m.g12 * b2 ) / m.det;
+        const double b  = ( m.g11 * b2 - m.g12 * b1 ) / m.det;
+        out[0] = (float)( a * m.d1[0] + b * m.d2[0] );
+        out[1] = (float)( a * m.d1[1] + b * m.d2[1] );
+    }
+
+    // One strip row's running state: its texcoords at the joint, their rate per world
+    // unit along the path there, and the arc length laid so far (chunks continue it).
+    struct curveRowRun_t
+    {
+        bool  have = false;
+        float st[2] = { 0.0f, 0.0f };
+        float rate[2] = { 0.0f, 0.0f };
+        float len = 0.0f;
+    };
+
+    bool StripIsPlanar( const patchMesh_t *p )
+    {
+        float a[3], b[3], n[3];
+        Sub3( p->ctrl[p->width - 1][0].xyz, p->ctrl[0][0].xyz, a );
+        Sub3( p->ctrl[0][p->height - 1].xyz, p->ctrl[0][0].xyz, b );
+        Cross3( a, b, n );
+        if ( !Norm3( n ) )
+            return false;
+        for ( int c = 0; c < p->width; ++c )
+            for ( int r = 0; r < p->height; ++r )
+            {
+                float d[3];
+                Sub3( p->ctrl[c][r].xyz, p->ctrl[0][0].xyz, d );
+                if ( fabsf( Dot3( d, n ) ) > KLOFT_ONPLANE_EPS )
+                    return false;
+            }
+        return true;
+    }
+
+    // Arc length of one quadratic span (even, odd, even controls).
+    float QuadSpanLength( const float *p0, const float *p1, const float *p2 )
+    {
+        const int N = 8;
+        float prev[3] = { p0[0], p0[1], p0[2] }, len = 0.0f;
+        for ( int i = 1; i <= N; ++i )
+        {
+            const float t = (float)i / (float)N, u = 1.0f - t;
+            float q[3], d[3];
+            for ( int k = 0; k < 3; ++k )
+                q[k] = u * u * p0[k] + 2.0f * u * t * p1[k] + t * t * p2[k];
+            Sub3( q, prev, d );
+            len += Len3( d );
+            Copy3( q, prev );
+        }
+        return len;
+    }
+
+    // Lays layer-0 texcoords from the face map; false (patch untouched) when the path
+    // leaves the face's plane head-on, where the face mapping says nothing about it.
+    bool UnrollStripST( patchMesh_t *p, const faceTexMap_t &m, curveRowRun_t *rows )
+    {
+        // The first chunk seeds every row or none (all-or-nothing keeps later chunks sane).
+        if ( !rows[0].have )
+        {
+            curveRowRun_t seed[KLOFT_CURVE_ROWS];
+            for ( int r = 0; r < p->height && r < KLOFT_CURVE_ROWS; ++r )
+            {
+                float v[3], t[3];
+                Sub3( p->ctrl[0][r].xyz, m.o, v );
+                FaceTexDelta( m, v, seed[r].st );
+                seed[r].st[0] += m.st0[0];
+                seed[r].st[1] += m.st0[1];
+                Sub3( p->ctrl[1][r].xyz, p->ctrl[0][r].xyz, t );
+                if ( !Norm3( t ) )
+                    return false;
+                FaceTexDelta( m, t, seed[r].rate );
+                if ( fabsf( seed[r].rate[0] ) + fabsf( seed[r].rate[1] ) < 1.0e-7f )
+                    return false;
+                seed[r].have = true;
+            }
+            for ( int r = 0; r < p->height && r < KLOFT_CURVE_ROWS; ++r )
+                rows[r] = seed[r];
+        }
+        for ( int r = 0; r < p->height && r < KLOFT_CURVE_ROWS; ++r )
+        {
+            curveRowRun_t &rr = rows[r];
+            float len = rr.len;
+            float *st0 = p->ctrl[0][r].texCoord.st;
+            st0[0] = rr.st[0] + rr.rate[0] * len;
+            st0[1] = rr.st[1] + rr.rate[1] * len;
+            for ( int c = 0; c + 2 < p->width; c += 2 )
+            {
+                len += QuadSpanLength( p->ctrl[c][r].xyz, p->ctrl[c + 1][r].xyz,
+                                       p->ctrl[c + 2][r].xyz );
+                float *a = p->ctrl[c][r].texCoord.st;
+                float *h = p->ctrl[c + 1][r].texCoord.st;
+                float *b = p->ctrl[c + 2][r].texCoord.st;
+                b[0] = rr.st[0] + rr.rate[0] * len;
+                b[1] = rr.st[1] + rr.rate[1] * len;
+                h[0] = 0.5f * ( a[0] + b[0] );      // linear in the span parameter
+                h[1] = 0.5f * ( a[1] + b[1] );
+            }
+            rr.len = len;
+        }
+        return true;
+    }
 
     typedef std::vector<float> ring_t;      // 3 floats per point, WORLD space
 
@@ -1774,6 +1938,13 @@ namespace
                     fi = m_aFace;
                 const face_t *src = &adef->faces[fi];
 
+                // KIWI: per edge and copy, the curved-strip texturing state (see UnrollStripST).
+                faceTexMap_t  texMap;
+                const bool    haveTexMap = FaceTexMap( src, &texMap );
+                curveRowRun_t runs[2][KLOFT_CURVE_ROWS];
+                bool          unrollOff[2] = { !haveTexMap, !haveTexMap };
+                float         natOffset[2] = { 0.0f, 0.0f };
+
                 // Split into bounded chunks with shared stations and global tangents.
                 // Interior visibility emits a coincident row-mirrored second copy.
                 const int copies = m_twoSided ? 2 : 1;
@@ -1811,10 +1982,34 @@ namespace
                         KiwiMtl_EnsurePatchChannels( p );   // kiwi_material.h:250
                         Patch_KiwiFinishNewLike( p, &src->mtldef[0].mat_texDef );
 
+                        // KIWI (2026-10-27): CAP only where the strip is flat; a curved strip
+                        // follows the path (UnrollStripST), else keeps the natural layout
+                        // continued across chunks so the texture never restarts mid-bend.
+                        const bool flat = StripIsPlanar( p );
+                        if ( !flat )
+                        {
+                            if ( !unrollOff[copy] && !UnrollStripST( p, texMap, runs[copy] ) )
+                                unrollOff[copy] = true;
+                            if ( unrollOff[copy] )
+                            {
+                                const float span = p->ctrl[p->width - 1][0].texCoord.st[0]
+                                                 - p->ctrl[0][0].texCoord.st[0];
+                                for ( int c = 0; c < p->width; ++c )
+                                    for ( int r = 0; r < p->height; ++r )
+                                        p->ctrl[c][r].texCoord.st[0] += natOffset[copy];
+                                natOffset[copy] += span;
+                            }
+                            if ( p->curveDef )
+                                free( p->curveDef );
+                            p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+                            ++p->version;
+                        }
+
                         brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
                         // ORDERING: AddBrushForPatch must create pSymbiot before CAP
                         // alignment reads its reference face (pmesh.cpp:869).
-                        Patch_KiwiCapAlign( p );
+                        if ( flat )
+                            Patch_KiwiCapAlign( p );
                         selbrush_t *inst = Brush_AddToList( pdef, owner );
                         Brush_AddToList2( inst );
                         ++made;

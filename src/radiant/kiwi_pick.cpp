@@ -228,6 +228,33 @@ namespace
         best.point[2] = point[2];
     }
 
+    // KIWI (2026-10-28, user: "ive got this map loaded in the kiwi radiant, and it's ungodly
+    // laggy"): the hover pick ran ScanList over every brush every frame - on london.map
+    // ~30k brushes, every face point projected, 25% of the main thread in vertex/edge mode.
+    // A brush's box corners bound the screen projection of every point in it while all
+    // eight are in front of the eye, so a cursor outside that rectangle plus the pick
+    // radius cannot be near any of its vertices or edges.  A box reaching behind the eye
+    // answers "maybe" and is scanned as before.
+    bool BoxNearCursor( const projCtx_t &p, const float *mins, const float *maxs,
+                        float curX, float curY, float pad )
+    {
+        float lox = 1.0e30f, loy = 1.0e30f, hix = -1.0e30f, hiy = -1.0e30f;
+        for ( int c = 0; c < 8; ++c )
+        {
+            const float corner[3] = { ( c & 1 ) ? maxs[0] : mins[0],
+                                      ( c & 2 ) ? maxs[1] : mins[1],
+                                      ( c & 4 ) ? maxs[2] : mins[2] };
+            float sx, sy;
+            if ( !ProjectRaw( p, corner, &sx, &sy ) )
+                return true;
+            if ( sx < lox ) lox = sx;
+            if ( sx > hix ) hix = sx;
+            if ( sy < loy ) loy = sy;
+            if ( sy > hiy ) hiy = sy;
+        }
+        return curX >= lox - pad && curX <= hix + pad && curY >= loy - pad && curY <= hiy + pad;
+    }
+
     // Screen-space vertex/edge scan over one display list.
     void ScanList( selbrush_t *sentinel, const projCtx_t &p, sel_mask_t kindMask,
                    float curX, float curY, pickBest_t &bestVert, pickBest_t &bestEdge,
@@ -244,6 +271,11 @@ namespace
                 continue;
 
             brush_t *def = b->def;
+            const float pad = ( PICK_VERT_PIXELS > PICK_EDGE_PIXELS ? PICK_VERT_PIXELS
+                                                                    : PICK_EDGE_PIXELS ) + 1.0f;
+            // (patches are left out: their control points can sit outside the brush bounds)
+            if ( def && !b->patch && !BoxNearCursor( p, def->mins, def->maxs, curX, curY, pad ) )
+                continue;                                   // KIWI: nothing of it near the cursor
 
             // Patch grids expose control points only; grid edges are not brush windings,
             // and terrain dragging addresses control points.

@@ -1764,7 +1764,8 @@ void KiwiLaunch_BuildMenu( void *frameMenu )
     HMENU hMenu = (HMENU)frameMenu;
     if ( !hMenu )
         return;
-    ::AppendMenuA( hMenu, MF_STRING, (UINT_PTR)KIWI_CMD_BUILD_RUN, "&Build" );
+    // KIWI (2026-10-28): Alt+B is Auto Bool, so the mnemonic moved to the free D (Alt+D).
+    ::AppendMenuA( hMenu, MF_STRING, (UINT_PTR)KIWI_CMD_BUILD_RUN, "Buil&d" );
     ::DrawMenuBar( g_qeglobals.d_hwndMain );
 }
 

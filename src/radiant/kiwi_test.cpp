@@ -2047,11 +2047,13 @@ static void ExecuteLine( const ScriptLine &line )
         // KIWI (2026-09-16): construct x y z x y z [x y z ...] [closed] - a world-space
         // line (2 points) or polyline, added through the construction undo and left
         // SELECTED so barbwire / offset / extrude verbs can act on it.
-        bool closed = false;
+        // KIWI (2026-10-27): ... [smooth] - every span a spline span (the Line tool's S mode).
+        bool closed = false, smooth = false;
         std::vector<std::string> nums;
         for ( size_t i = 1; i < w.size(); ++i )
         {
             if ( Lower( w[i] ) == "closed" ) closed = true;
+            else if ( Lower( w[i] ) == "smooth" ) smooth = true;
             else nums.push_back( w[i] );
         }
         if ( nums.size() < 6 || nums.size() % 3 )
@@ -2065,6 +2067,8 @@ static void ExecuteLine( const ScriptLine &line )
             if ( !ParseFloat( nums[i], v ) ) { ScriptError( line, "construct coordinate %d is not numeric", (int)i + 1 ); return; }
             o.pts.push_back( v );
         }
+        if ( smooth )
+            o.smooth.assign( o.pts.size() / 3, 1 );
         const int index = KiwiCon_AddWithUndo( o );
         if ( index < 0 ) { ScriptError( line, "the construction store rejected the object" ); return; }
         KiwiConSel_SelectObjects( &index, 1 );
