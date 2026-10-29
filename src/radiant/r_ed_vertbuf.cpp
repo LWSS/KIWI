@@ -27,9 +27,9 @@
 #include <gfx_d3d/r_gfx.h>        // GfxWorldVertex, GfxColor, PackedUnitVec
 #include <qcommon/com_pack.h>     // Vec3PackUnitVec
 #include "kiwi_pack.h"            // KiwiPack_UnitVec: the editor's fast encoder
-// The camera surf cache holds editorMesh_s records whose `handle` IS a slot in this
-// pool, so every function here that reassigns or destroys a slot must invalidate it.
-#include "kiwi_surfcache.h"       // KiwiSurfCache_Invalidate / KiwiEdScene_ReleaseMeshRunIB
+#include "kiwi_scene.h"           // KiwiScene_InvalidateAll
+#include <gfx_d3d/r_material.h>   // MaterialTechniqueSet routing (Editor_MaterialRoutesTangent)
+#include <gfx_d3d/r_state.h>      // STREAM_SRC_TANGENT
 
 // d3d9 lock flag used by the original (D3DLOCK_NOOVERWRITE)
 #ifndef D3DLOCK_NOOVERWRITE
@@ -60,6 +60,7 @@ struct edMatVertBuf {        // 12 bytes — sub_51C380
     Material *material;      // +0
     edVbPool *pools;         // +4
     edMatVertBuf *next;      // +8
+    bool binormalSign;       // KIWI: Editor_MaterialRoutesTangent( material ), see Editor_VB_WriteVertices
 };
 
 // ── editorGlobals (0x14F7CE0) ─────────────────────────────────────────────────
@@ -133,9 +134,7 @@ static void Editor_VB_FreePoolList(edVbPool *pool)
 // R_ReleaseForShutdownOrReset.
 void Editor_VB_ReleaseForReset()
 {
-    // The POOL goes, not one brush's slots: nothing cached may survive (kiwi_surfcache.h).
-    KiwiSurfCache_InvalidateAll( "Editor_VB_ReleaseForReset" );
-    KiwiEdScene_ReleaseMeshRunIB();
+    KiwiScene_InvalidateAll();         // KIWI: the retained world indexes these pages
 
     for (unsigned i = 0; i < editorGlobals.vbCount; ++i)
     {
@@ -161,6 +160,31 @@ void Editor_VB_ReleaseForReset()
 }
 
 // 0x51C380  sub_51C380 — find/create the per-material vertex-buffer record.
+// KIWI (2026-10-28): GfxWorldVertex.binormalSign is POSITION.w (the world decl reads
+// position as FLOAT4).  Only a technique that routes the tangent stream can rebuild a
+// binormal from it, and those shaders force w = 1 themselves.  Every other shader reads
+// position.w as the homogeneous w: the tools techsets' unlit vertcol_simple_tools does, and
+// a -1 there projects the vertex through infinity - london.map's caulk_shadow faces drew
+// streaks across the camera from 27000 units behind it.
+static bool Editor_MaterialRoutesTangent(const Material *material)
+{
+    const MaterialTechniqueSet *set = material ? material->techniqueSet : nullptr;
+    if (!set)
+        return false;
+    for (int t = 0; t < TECHNIQUE_COUNT; ++t) {
+        const MaterialTechnique *tech = set->techniques[t];
+        if (!tech)
+            continue;
+        for (int p = 0; p < tech->passCount; ++p) {
+            const MaterialVertexDeclaration *decl = tech->passArray[p].vertexDecl;
+            for (int s = 0; decl && s < decl->streamCount; ++s)
+                if (decl->routing.data[s].source == STREAM_SRC_TANGENT)
+                    return true;
+        }
+    }
+    return false;
+}
+
 static edMatVertBuf *Editor_GetMaterialVertexBuffer(Material *material)
 {
     edMatVertBuf *m = editorGlobals_matVertBufs;
@@ -173,6 +197,7 @@ static edMatVertBuf *Editor_GetMaterialVertexBuffer(Material *material)
     m->material = material;
     m->pools    = 0;
     m->next     = editorGlobals_matVertBufs;
+    m->binormalSign = Editor_MaterialRoutesTangent(material);
     editorGlobals_matVertBufs = m;
     return m;
 }
@@ -333,7 +358,7 @@ void Editor_GetVertexBufferAndIndex(unsigned int handle, IDirect3DVertexBuffer9 
 // binormalSign feed lighting only and are packed with Vec3PackUnitVec.
 static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, int vertCount,
     const float *xyz, const float *binormal, const float *normal,
-    const float *texCoord, const float *color)
+    const float *texCoord, const float *color, bool binormalSign)
 {
     iassert(handle);                                          // 0x51cd72 (level 0)
     iassert(vertCount > 0);                                   // 0x51cd95 (level 0)
@@ -375,11 +400,16 @@ static void Editor_VB_WriteVertices(unsigned int handle, const float *tangent, i
         o->xyz[1] = p[1];
         o->xyz[2] = p[2];
 
-        // binormalSign = handedness of the (normal, tangent, binormal) frame.
-        float cr[3];
-        Vec3Cross(n, t, cr);
-        float d = b[0] * cr[0] + b[1] * cr[1] + b[2] * cr[2];
-        o->binormalSign = (d < 0.0f) ? -1.0f : 1.0f;
+        // binormalSign = handedness of the (normal, tangent, binormal) frame, for a material
+        // that can read it; 1 = the homogeneous w every other shader takes it as.
+        o->binormalSign = 1.0f;
+        if (binormalSign) {
+            float cr[3];
+            Vec3Cross(n, t, cr);
+            float d = b[0] * cr[0] + b[1] * cr[1] + b[2] * cr[2];
+            if (d < 0.0f)
+                o->binormalSign = -1.0f;
+        }
 
         o->color = ((const GfxColor *)color)[i];
         o->texCoord[0] = texCoord[2 * i];
@@ -411,8 +441,6 @@ unsigned int Editor_VB_Upload(Material *material, int vertCount,
     iassert(vertCount > 0);                                   // 0x51d1ff (level 0)
     iassert(vertCount <= ED_VERTBUF_VERTEX_COUNT);            // 0x51d225 (level 0)
 
-    KiwiSurfCache_Invalidate( "Editor_VB_Upload" );
-
     edMatVertBuf *matVertBuf = Editor_GetMaterialVertexBuffer(material);
     iassert( matVertBuf );   // r_ed_vertbuf.cpp:377
 
@@ -430,7 +458,8 @@ unsigned int Editor_VB_Upload(Material *material, int vertCount,
         vassert( (handle), "(vertCount) = %i", vertCount );   // r_ed_vertbuf.cpp:400
     }
 
-    Editor_VB_WriteVertices(handle, tangent, vertCount, xyz, binormal, normal, texCoord, color);
+    Editor_VB_WriteVertices(handle, tangent, vertCount, xyz, binormal, normal, texCoord, color,
+        matVertBuf->binormalSign);
     return handle;
 }
 
@@ -439,16 +468,16 @@ unsigned int Editor_VB_Upload(Material *material, int vertCount,
 // was allocated for `material` with exactly `vertCount` verts.  A drag rebuilt every moved
 // face each frame as free + re-allocate, and both halves walk the material's free-slot
 // lists (R_Ed_VB_FreeSlot_Coalesce / Editor_VB_AllocFromPools), which grow with every
-// face on that material.  The slot itself is not reassigned, but the
-// surf cache is still told, exactly like an upload, because the geometry it replays moved.
-void Editor_VB_Rewrite(unsigned int handle, int vertCount,
+// face on that material.  The slot itself is not reassigned.
+void Editor_VB_Rewrite(Material *material, unsigned int handle, int vertCount,
     const float *xyz, const float *tangent, const float *binormal,
     const float *normal, const float *texCoord, const float *color)
 {
+    iassert(material);
     iassert(handle);
     iassert(vertCount > 0 && vertCount <= ED_VERTBUF_VERTEX_COUNT);
-    KiwiSurfCache_Invalidate( "Editor_VB_Rewrite" );
-    Editor_VB_WriteVertices(handle, tangent, vertCount, xyz, binormal, normal, texCoord, color);
+    Editor_VB_WriteVertices(handle, tangent, vertCount, xyz, binormal, normal, texCoord, color,
+        Editor_GetMaterialVertexBuffer(material)->binormalSign);
 }
 
 // ── FREE PATH ─────────────────────────────────────────────────────────────────
@@ -558,9 +587,6 @@ char R_Ed_FreeVertices(Material *handle, int vertCount, int vertHandle)
 {
     iassert(vertCount > 0);                                   // 0x51cb7a (level 0)  r_ed_vertbuf.cpp:496
     iassert(vertCount <= ED_VERTBUF_VERTEX_COUNT);           // 0x51cba0 (level 0)  r_ed_vertbuf.cpp:497
-
-    // The freed run goes on a free list; the next GetHandle can give it to another face.
-    KiwiSurfCache_Invalidate( "R_Ed_FreeVertices" );
 
     edMatVertBuf *matVertBuf = Editor_GetMaterialVertexBuffer(handle);   // 0x51cbc3
     iassert( matVertBuf );   // r_ed_vertbuf.cpp:500

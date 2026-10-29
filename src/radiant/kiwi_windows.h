@@ -17,7 +17,7 @@ enum kiwiWindow_t
 {
     // Defaults mirror s_def. Default-open windows must also be placed by
     // ImGuiShell_BuildDefaultDockLayout or they can float over the camera.
-    KIWI_WIN_XY = 0,        // "2D View"          (RTT_XY)      default ON
+    KIWI_WIN_XY = 0,        // "2D View"          (RTT_XY)      default OFF
     KIWI_WIN_Z,             // "Z"                (RTT_Z)       default OFF
     KIWI_WIN_TEXTURE,       // "Textures"         (RTT_TEXTURE) default ON
     KIWI_WIN_CONSOLE,       // "Console"                        default ON

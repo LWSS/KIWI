@@ -12,7 +12,6 @@
 #include "kiwi_droptrace.h"
 #include "kiwi_pick.h"
 #include "kiwi_ux.h"
-#include "kiwi_surfcache.h"
 #include "radiant_frame.h"
 #include "mainfrm.h"
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
@@ -1767,14 +1766,14 @@ static void ExecuteLine( const ScriptLine &line )
     }
     if ( command == "facing_toggle_probe" )
     {
-        // Warm cache first (script frames); either transition must age captures.
+        // The camera's retained scene keys its kept arrows on this switch (Cam_SceneKey), so
+        // a flip re-describes every entity; the probe checks the switch flips and restores.
         const bool before=KiwiUX_ShowFacingArrows();
-        const unsigned epoch=KiwiSurfCache_Epoch();
         KiwiUX_SetShowFacingArrows(!before);
-        const bool changed=KiwiSurfCache_Epoch()!=epoch && KiwiUX_ShowFacingArrows()!=before;
+        const bool changed=KiwiUX_ShowFacingArrows()!=before;
         KiwiUX_SetShowFacingArrows(before);
-        if ( !changed ) ScriptError(line,"facing toggle did not invalidate the entity render cache");
-        else LogFormat("FACING","toggle and full render-cache invalidation passed");
+        if ( !changed ) ScriptError(line,"facing toggle did not change the switch");
+        else LogFormat("FACING","toggle passed");
         return;
     }
     if ( command == "prefab_insert" )
@@ -1906,6 +1905,20 @@ static void ExecuteLine( const ScriptLine &line )
         LogFormat( "COMMAND", "%s -> #%u", w[1].c_str(), id );
         if ( !Radiant_DispatchCommandDirect( id ) )
             ScriptError( line, "command #%u is registered but not dispatchable", id );
+        return;
+    }
+    if ( command == "layer" )
+    {
+        // layer hide|show <name>: the layer dialog's hidden bit (Layers_SetFlag / ClearFlag 1).
+        if ( w.size() != 3 || ( Lower( w[1] ) != "hide" && Lower( w[1] ) != "show" ) )
+        { ScriptError( line, "layer syntax is: layer hide|show <name>" ); return; }
+        if ( !Layers_Exists( w[2].c_str() ) )
+        { ScriptError( line, "no layer '%s'", w[2].c_str() ); return; }
+        if ( Lower( w[1] ) == "hide" )
+            Layers_SetFlag( w[2].c_str(), 1 );
+        else
+            Layers_ClearFlag( w[2].c_str(), 1 );
+        g_nUpdateBits = -1;
         return;
     }
     if ( command == "undo" || command == "redo" )

@@ -21,6 +21,7 @@
 #include "radiant_frame.h"  // Radiant_RegisterCommand
 #include "radiant_registry.h"   // Radiant_Profile* - the view-mode toggles persist
 #include <gfx_d3d/r_rendercmds.h>  // R_AddCmd_Line3D / R_AddCmd_Line3DNoDepth, GfxPointVertex
+#include <universal/profile.h>
 
 #include <math.h>
 #include <algorithm>
@@ -1342,7 +1343,11 @@ void KiwiView_DrawEdges()
 
     // Seams: re-merge when the scene changes, at most every KEDGE_SEAM_THROTTLE_MS during a
     // drag; a repaint is requested so the last change of a drag still gets its pass.
-    const unsigned long long sig = SceneSignature();
+    unsigned long long sig;
+    {
+        PROF_SCOPED( "edges: scene signature" );
+        sig = SceneSignature();
+    }
     if ( sig != s_seamSig )
     {
         s_seamSig     = sig;
@@ -1353,6 +1358,7 @@ void KiwiView_DrawEdges()
         const unsigned now = (unsigned)::GetTickCount();
         if ( !s_seamEver || now - s_seamTick >= KEDGE_SEAM_THROTTLE_MS )
         {
+            PROF_SCOPED( "edges: seam merge" );
             SeamPass();
             s_seamPending = false;
             s_seamEver    = true;
@@ -1363,9 +1369,15 @@ void KiwiView_DrawEdges()
     }
 
     int budget = KEDGE_MAX_SEGS;
-    budget -= EdgePass( v, true, xray ? 3 : 1, KEDGE_COL_DARK, budget );
+    {
+        PROF_SCOPED( "edges: visible pass" );
+        budget -= EdgePass( v, true, xray ? 3 : 1, KEDGE_COL_DARK, budget );
+    }
     if ( xray && budget > 0 )
+    {
+        PROF_SCOPED( "edges: x-ray pass" );
         EdgePass( v, false, 1, KEDGE_COL_XRAY, budget );
+    }
     // The selected-outline pass (and its model wireframe surfs) inherit MATERIAL_COLOR.
     KiwiTris_FillNeutral();
 }

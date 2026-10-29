@@ -25,11 +25,12 @@
 // KIWI END
 #include "kiwi_ported.h"
 #include "kiwi_refimage.h"
+#include "kiwi_scene.h"         // brush classes and per-entity counts
 #include "kiwi_selection.h"
-#include "kiwi_str.h"           // KiwiStr_ContainsNoCase - the lightgrid brush test
 #include "kiwi_visibility.h"    // shared hidden state and undo
 #include "kiwi_windows.h"
 
+#include <universal/profile.h>
 #include <stdio.h>
 #include <string.h>
 #include <map>
@@ -51,8 +52,9 @@ extern void        Undo_SetIdForEntity( entity_s_def *ent );                 // 
 namespace
 {
 // Row model
-// Equal-height rows are flattened from live state each frame so ImGuiListClipper
-// can skip off-screen entries; section headers therefore use ordinary rows too.
+// Equal-height rows are flattened from live state so ImGuiListClipper can skip off-screen
+// entries; section headers therefore use ordinary rows too.  KIWI (2026-10-28): flattened
+// when something the rows show moved (koutModelKey_t), not every frame.
 enum koutKind_t
 {
     KOUT_SECTION_BRUSHES = 0,   // worldspawn brushes + func_group folders
@@ -91,6 +93,7 @@ enum koutKind_t
     // listing worldspawn's lightgrid brushes (they leave "Brushes").  Like the Barbwire folder
     // it is not a drop target and cannot be renamed.
     KOUT_LIGHTGRID_FOLDER,
+    KOUT_KIND_COUNT
 };
 
 struct koutRow_t
@@ -137,38 +140,28 @@ const unsigned KOUT_KEY_LIGHTGRID = 0xF000000Cu;  // the LightGrid folder inside
 enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TERRAIN,
                     KOUT_FILTER_LIGHTGRID };
 
+// KIWI (2026-10-28, user: "executerendercmds still takes forever" - the outliner was 80% of
+// it on london.map): a brush's class (terrain / lightgrid) and the per-entity counts come from
+// the retained scene (kiwi_scene.h), which keeps them per brush as the brushes change, instead
+// of every frame re-reading every face name of every worldspawn brush.
+static_assert( (int)KOUT_FILTER_ALL == (int)KS_FILTER_ALL
+            && (int)KOUT_FILTER_NOT_TERRAIN == (int)KS_FILTER_PLAIN
+            && (int)KOUT_FILTER_TERRAIN == (int)KS_FILTER_TERRAIN
+            && (int)KOUT_FILTER_LIGHTGRID == (int)KS_FILTER_LIGHTGRID, "koutFilter_t == ksBrushFilter_t" );
+
 bool IsTerrainNode( const selbrush_t *b )
 {
-    return b && b->def && b->def->patch && ( b->def->patch->type & PATCH_TERRAIN ) != 0;
+    return b && ( KiwiScene_BrushClass( b ) & KS_CLASS_TERRAIN ) != 0;
 }
 
-// A brush with any lightgrid face (lightgrid_volume and friends; the same substring the
-// camera's tool colours and kiwi_material.cpp's tool list use).
 bool IsLightGridNode( const selbrush_t *b )
 {
-    if ( !b || !b->def || b->def->patch || !b->def->faces )
-        return false;
-    for ( int f = 0; f < b->def->faceCount; ++f )
-    {
-        MaterialDef *md = const_cast<MaterialDef *>( &b->def->faces[f].mtldef[0] );
-        if ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) != 1 )
-            continue;                       // a half-built face has no name to read
-        const char *name = (const char *)Materialdef_GetName( md );
-        if ( name && KiwiStr_ContainsNoCase( name, "lightgrid" ) )
-            return true;
-    }
-    return false;
+    return b && ( KiwiScene_BrushClass( b ) & KS_CLASS_LIGHTGRID ) != 0;
 }
 
 bool PassesFilter( const selbrush_t *b, koutFilter_t filter )
 {
-    switch ( filter )
-    {
-    case KOUT_FILTER_TERRAIN:     return IsTerrainNode( b );
-    case KOUT_FILTER_LIGHTGRID:   return IsLightGridNode( b );
-    case KOUT_FILTER_NOT_TERRAIN: return !IsTerrainNode( b ) && !IsLightGridNode( b );
-    default:                      return true;
-    }
+    return KiwiScene_BrushPasses( b, (ksBrushFilter_t)filter );
 }
 
 const int KOUT_CLASS_LIGHT      = 0x01;
@@ -181,7 +174,8 @@ const unsigned KOUT_HIDDEN_BIT = 4u;
 
 // Panel-local state
 std::vector<unsigned>  s_expanded;         // keys of the folders that are OPEN
-std::vector<koutRow_t> s_rows;             // rebuilt every frame
+unsigned               s_layoutGen = 1;    // moves when s_expanded does
+std::vector<koutRow_t> s_rows;             // rebuilt when koutModelKey_t moves (Flatten)
 unsigned               s_lastSelGen = 0;   // for the selection-folder pass
 unsigned               s_lastImageGen = 0;
 unsigned               s_markImageGen = 0; // (image half of the selection-folder pass)
@@ -310,11 +304,17 @@ void SetCollapsed( unsigned key, bool closed )
         if ( s_expanded[i] != key )
             continue;
         if ( closed )
+        {
             s_expanded.erase( s_expanded.begin() + i );
+            ++s_layoutGen;
+        }
         return;
     }
     if ( !closed )
+    {
         s_expanded.push_back( key );
+        ++s_layoutGen;
+    }
 }
 
 entity_s_def *DefOf( entity_s *inst )
@@ -685,13 +685,26 @@ const char *ConTypeName( kconType_t t )
     }
 }
 
+// The scene's counters (kiwi_scene.h): every brush of the entity on the display lists.
 int EntityBrushCount( entity_s *inst, koutFilter_t filter = KOUT_FILTER_ALL )
 {
+    const ksEntityCounts_t *c = inst ? KiwiScene_EntityCounts( inst ) : nullptr;
+    return c ? c->brushes[filter] : 0;
+}
+
+int EntityHiddenCount( entity_s *inst, koutFilter_t filter = KOUT_FILTER_ALL )
+{
+    const ksEntityCounts_t *c = inst ? KiwiScene_EntityCounts( inst ) : nullptr;
+    return c ? c->hidden[filter] : 0;
+}
+
+// The live count, for commands that relink brushes mid-gesture (the scene's counters are as
+// of this frame's sync).  Only ever asked of func_groups, which are small.
+int OwnedBrushCountLive( entity_s *inst )
+{
     int n = 0;
-    if ( !inst )
-        return 0;
-    for ( selbrush_t *b = inst->brushes.ownerNext; b && b != &inst->brushes; b = b->ownerNext )
-        if ( PassesFilter( b, filter ) )
+    if ( inst )
+        for ( selbrush_t *b = inst->brushes.ownerNext; b && b != &inst->brushes; b = b->ownerNext )
             ++n;
     return n;
 }
@@ -1060,6 +1073,44 @@ void FlattenImages()
     }
 }
 
+// The brush-backed section eyes, from the scene's per-entity counters: the same membership
+// SectionBrushes walks to apply a click, counted once per Flatten instead of per row per frame.
+struct koutEye_t
+{
+    int n  = 0;
+    int nh = 0;
+};
+koutEye_t s_sectionEye[KOUT_KIND_COUNT];
+
+void AddEye( koutKind_t k, entity_s *e, koutFilter_t filter )
+{
+    s_sectionEye[k].n  += EntityBrushCount( e, filter );
+    s_sectionEye[k].nh += EntityHiddenCount( e, filter );
+}
+
+void ComputeSectionEyes()
+{
+    for ( koutEye_t &eye : s_sectionEye )
+        eye = koutEye_t();
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    {
+        if ( e == world_entity )
+        {
+            AddEye( KOUT_SECTION_BRUSHES,  e, KOUT_FILTER_NOT_TERRAIN );
+            AddEye( KOUT_SECTION_TERRAIN,  e, KOUT_FILTER_TERRAIN );
+            AddEye( KOUT_SECTION_LIGHTS,   e, KOUT_FILTER_LIGHTGRID );
+            AddEye( KOUT_LIGHTGRID_FOLDER, e, KOUT_FILTER_LIGHTGRID );
+            continue;
+        }
+        const koutKind_t section = EntitySection( e );
+        AddEye( section, e, KOUT_FILTER_ALL );
+        if ( section == KOUT_SECTION_MODELS && IsBarbwireEntity( e ) )
+            AddEye( KOUT_BARBWIRE_FOLDER, e, KOUT_FILTER_ALL );
+        if ( UGHas( e ) )
+            AddEye( KOUT_SECTION_GROUPS, e, KOUT_FILTER_ALL );
+    }
+}
+
 // Divergence from Plasticity: KIWI emits seven fixed top-level sections, including
 // empty ones; Plasticity emits only non-empty type sections within each group.
 void Flatten()
@@ -1079,6 +1130,60 @@ void Flatten()
     FlattenEntitySection( KOUT_SECTION_GLASS );
     // KIWI END
     FlattenImages();
+    ComputeSectionEyes();
+}
+
+// Everything Flatten reads, by the generation its owner keeps.  The rows are rebuilt when one
+// of these moves - not each frame:
+//   facts      the scene: a brush appeared / went, or its owner, class or hidden bit changed
+//   keys       any entity key (names, classes, models, group paths)
+//   entities   the entity list itself (create, delete, undo, paste - checked each frame)
+//   con/image  the construction store and the reference images
+//   layout     the open folders
+struct koutModelKey_t
+{
+    unsigned           facts    = 0;
+    unsigned           keys     = 0;
+    unsigned long long entities = 0;
+    unsigned           con      = 0;
+    unsigned           image    = 0;
+    unsigned           layout   = 0;
+    const entity_s    *world    = nullptr;
+
+    bool operator==( const koutModelKey_t &o ) const
+    {
+        return facts == o.facts && keys == o.keys && entities == o.entities && con == o.con
+            && image == o.image && layout == o.layout && world == o.world;
+    }
+};
+koutModelKey_t s_modelKey;
+bool           s_modelValid = false;
+
+unsigned long long EntityListSignature()
+{
+    unsigned long long h = 1469598103934665603ull;
+    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+        h = ( h ^ (unsigned long long)(uintptr_t)e ) * 1099511628211ull;
+    return h;
+}
+
+// Flatten when the key moved; `force` = a group / ungroup / rename re-filed rows.
+void RefreshModel( bool force )
+{
+    koutModelKey_t key;
+    key.facts    = KiwiScene_FactsGeneration();
+    key.keys     = KiwiEntity_KeyGeneration();
+    key.entities = EntityListSignature();
+    key.con      = KiwiCon_Generation();
+    key.image    = KiwiRefImage_Generation();
+    key.layout   = s_layoutGen;
+    key.world    = world_entity;
+    if ( !force && s_modelValid && key == s_modelKey )
+        return;
+    PROF_SCOPED( "outliner flatten" );
+    Flatten();
+    s_modelKey   = key;
+    s_modelValid = true;
 }
 
 void AddFolderKey( std::vector<unsigned> &keys, unsigned key )
@@ -1107,19 +1212,27 @@ void MarkSelectionFolders( bool force )
     s_markImageGen = igen;
     s_selFolders.clear();
 
-    for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
+    // KIWI (2026-10-28): from the selected brushes, not every brush of every entity - a
+    // selected object is always on selected_brushes (Sel_SyncToLegacy).
+    struct koutSelKinds_t { bool terrain = false, other = false, grid = false; };
+    std::map<entity_s *, koutSelKinds_t> owners;
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
     {
-        bool anyTerrain = false, anyOther = false, anyGrid = false;
-        for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
-        {
-            if ( !BrushSelected( b ) )
-                continue;
-            if ( IsTerrainNode( b ) )                               anyTerrain = true;
-            else if ( e == world_entity && IsLightGridNode( b ) )   anyGrid    = true;
-            else                                                    anyOther   = true;
-        }
-        if ( !anyTerrain && !anyOther && !anyGrid )
+        if ( !b->owner || !BrushSelected( b ) )
             continue;
+        koutSelKinds_t &k = owners[b->owner];
+        if ( IsTerrainNode( b ) )                                     k.terrain = true;
+        else if ( b->owner == world_entity && IsLightGridNode( b ) )  k.grid    = true;
+        else                                                          k.other   = true;
+    }
+
+    for ( std::map<entity_s *, koutSelKinds_t>::const_iterator it = owners.begin();
+          it != owners.end(); ++it )
+    {
+        entity_s *e = it->first;
+        const bool anyTerrain = it->second.terrain;
+        const bool anyOther   = it->second.other;
+        const bool anyGrid    = it->second.grid;
 
         if ( e == world_entity )
         {
@@ -1403,7 +1516,7 @@ void RecordMoveForUndo( const std::vector<selbrush_t *> &move, std::vector<entit
         for ( size_t k = 0; k < move.size(); ++k )
             if ( move[k]->owner == owner )
                 ++leaving;
-        if ( leaving == EntityBrushCount( owner ) )
+        if ( leaving == OwnedBrushCountLive( owner ) )
             emptied.push_back( owner );
     }
     for ( size_t i = 0; i < emptied.size(); ++i )
@@ -1544,7 +1657,7 @@ void UGUnitsFrom( const std::vector<selbrush_t *> &picked, ugUnits_t &u )
         }
         // Only a func_group can be taken apart; a trigger or a script_brushmodel is one
         // object however many of its brushes were clicked.
-        if ( IsFuncGroup( e ) && pickedOf[e] < EntityBrushCount( e ) )
+        if ( IsFuncGroup( e ) && pickedOf[e] < OwnedBrushCountLive( e ) )
         {
             u.loose.push_back( sb );
             continue;
@@ -2081,7 +2194,10 @@ void SectionEyeState( koutKind_t k, bool *hidden, bool *hasEye )
 {
     int n = 0, nh = 0;
     if ( SectionIsBrushBacked( k ) )
-        SectionBrushes( k, -1, &n, &nh );
+    {
+        n  = s_sectionEye[k].n;              // ComputeSectionEyes, with the rows
+        nh = s_sectionEye[k].nh;
+    }
     else if ( k == KOUT_SECTION_CURVES )
     {
         n = KiwiCon_Count();
@@ -2372,6 +2488,8 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
 void KiwiOutliner_ResetForNewMap()
 {
     s_expanded.clear();
+    ++s_layoutGen;
+    s_modelValid = false;
     s_selFolders.clear();
     s_selConFolders.clear();
     s_rows.clear();
@@ -2429,7 +2547,8 @@ void KiwiOutliner_Draw()
         const bool refiled = s_structural;
         s_structural = false;
         ObserveImageGeneration();
-        Flatten();
+        KiwiScene_SyncRecords();                 // this frame's counts (a no-op after the camera's)
+        RefreshModel( refiled );
         MarkSelectionFolders( refiled );         // the rows below tint what these hold
         MarkConstructionFolders();
 
@@ -2550,14 +2669,8 @@ void KiwiOutliner_Draw()
                 case KOUT_ENTITY:
                 {
                     // Folder eye state is "all hidden"; one click applies its inverse.
-                    int n = 0, nh = 0;
-                    for ( selbrush_t *b = r.ent->brushes.ownerNext;
-                          b && b != &r.ent->brushes; b = b->ownerNext )
-                    {
-                        ++n;
-                        if ( BrushHidden( b ) )
-                            ++nh;
-                    }
+                    const int n  = EntityBrushCount( r.ent );
+                    const int nh = EntityHiddenCount( r.ent );
                     hidden = ( n > 0 && nh == n );
                     hasEye = ( n > 0 );
                     break;
@@ -2601,13 +2714,10 @@ void KiwiOutliner_Draw()
                     UGRowEntities( r, ents );
                     int n = 0, nh = 0;
                     for ( size_t k = 0; k < ents.size(); ++k )
-                        for ( selbrush_t *b = ents[k]->brushes.ownerNext;
-                              b && b != &ents[k]->brushes; b = b->ownerNext )
-                        {
-                            ++n;
-                            if ( BrushHidden( b ) )
-                                ++nh;
-                        }
+                    {
+                        n  += EntityBrushCount( ents[k] );
+                        nh += EntityHiddenCount( ents[k] );
+                    }
                     hidden = ( n > 0 && nh == n );
                     hasEye = ( n > 0 );
                     break;

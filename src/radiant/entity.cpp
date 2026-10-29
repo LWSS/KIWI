@@ -137,10 +137,20 @@ void Entity_FreeEpairs( entity_s_def *e )
     *head = nullptr;
 }
 
+// KIWI: one counter for "some entity's keys changed" - the outliner's names, classes and
+// group paths come from keys.  Bumped by the two key writers below.
+static unsigned s_entityKeyGen = 1;
+
+unsigned KiwiEntity_KeyGeneration()
+{
+    return s_entityKeyGen;
+}
+
 // DeleteKey (0x483720) — remove the FIRST epair whose key matches (case-sensitive),
 // freeing the node + its key/value strings.  Only the first match is removed.
 void DeleteKey( epair_t **head, const char *key )
 {
+    ++s_entityKeyGen;                       // KIWI
     for ( epair_t **pp = head; *pp; pp = &( *pp )->next )
     {
         epair_t *cur = *pp;
@@ -202,6 +212,7 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
 {
     if ( !e || !key || !*key )
         return;
+    ++s_entityKeyGen;                       // KIWI: KiwiEntity_KeyGeneration
 
     // The prefab/walk caches derive from this epair list (prefab layer prefix from "model",
     // the walk recording from origin/angles/modelscale/spawnflags): any key set drops the
@@ -229,6 +240,14 @@ void SetKeyValue( entity_s_def *e, const char *key, const char *value )
     if ( !_stricmp( key, "model" ) )
         EntityAssignModel( e );
     Checkkey_Color( e, key );
+    // KIWI: a placed prefab's spawnflags decide which of its contents DrawBrush draws, so the
+    // edit moves the entity brush's version the way a _color edit does.
+    if ( !_stricmp( key, "spawnflags" ) && e->eclass && ( e->eclass->classtype & 0x10 /* CLASS_PREFAB */ ) != 0 )
+    {
+        brush_t *b = (brush_t *)e->brushes.prev;
+        if ( b != (brush_t *)&e->def )
+            ++b->version;
+    }
     Entity_ClampRadius( key, e );
     Entity_ClampHeight( key, e );
 }

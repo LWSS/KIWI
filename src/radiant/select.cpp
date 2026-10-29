@@ -23,6 +23,7 @@
 #include "kiwi_angles.h" // KIWI: double "angles" composition (RotateFixedSize, DoFlip)
 #include "kiwi_floatsnap.h" // KIWI: KiwiRound_Fistp
 #include "kiwi_ported.h" // KIWI: shared engine/editor externs
+#include "kiwi_scene.h"  // KIWI: KiwiScene_QueryActive (BrushList_Trace's cull)
 
 // ─── CRT import thunk (j__free_0 = free) ─────────────────────────────────────
 static inline void j__free_0( void *p ) { free( p ); }
@@ -614,11 +615,61 @@ bool KiwiSelect_TracePrefab( selbrush_t *node, const float *start,
 //  Iterate a brush list (`list` is the sentinel head), ray-test each pickable brush via
 //  Brush_TraceTest, and keep the nearest hit into the `traces` array (maxTraces long).
 //  The camera/XY frustum cull is skipped headless (see the chain header).
+// KIWI (2026-10-28): the cull the binary had and the port dropped (see the chain header),
+// restored through the retained scene's cells: the ray [start, start + 262144 * dir] against
+// a cell's bounds, slab test, a unit of slack for faces lying on the box.
+struct traceRay_t
+{
+    float start[3];
+    float dir[3];
+};
+
+static bool Trace_RayHitsBox( const float mins[3], const float maxs[3], void *ctx )
+{
+    const traceRay_t *r = (const traceRay_t *)ctx;
+    float t0 = 0.0f, t1 = 262144.0f;
+    for ( int k = 0; k < 3; ++k )
+    {
+        const float lo = mins[k] - 1.0f, hi = maxs[k] + 1.0f;
+        if ( fabsf( r->dir[k] ) < 1.0e-12f )
+        {
+            if ( r->start[k] < lo || r->start[k] > hi )
+                return false;
+            continue;
+        }
+        float a = ( lo - r->start[k] ) / r->dir[k];
+        float b = ( hi - r->start[k] ) / r->dir[k];
+        if ( a > b ) { const float t = a; a = b; b = t; }
+        if ( a > t0 ) t0 = a;
+        if ( b < t1 ) t1 = b;
+        if ( t0 > t1 )
+            return false;
+    }
+    return true;
+}
+
 static void BrushList_Trace( const float *start, const float *dir, int contents,
                              selbrush_t *list, const orientation_t *orient, edTrace_t *traces,
                              int maxTraces )
 {
-    for ( selbrush_t *sbn = list->next; sbn != list; sbn = sbn->next )
+    // KIWI: the active list is walked through the cells the ray crosses (kiwi_scene.h), in
+    // list order; every other list (selected, prefab contents) whole, as before.
+    const bool culled = ( list == &active_brushes );
+    std::vector<selbrush_t *> candidates;
+    if ( culled )
+    {
+        traceRay_t ray;
+        for ( int k = 0; k < 3; ++k )
+        {
+            ray.start[k] = start[k];
+            ray.dir[k]   = dir[k];
+        }
+        KiwiScene_QueryActive( Trace_RayHitsBox, &ray, candidates );
+    }
+    size_t candidate = 0;
+    for ( selbrush_t *sbn = culled ? ( candidates.empty() ? list : candidates[0] ) : list->next;
+          sbn != list;
+          sbn = culled ? ( ++candidate < candidates.size() ? candidates[candidate] : list ) : sbn->next )
     {
         // contents&4 (world pass): skip prefab/model entity brushes (owner != world &
         // owner is a prefab class) — those are picked via the prefab/model recursion.

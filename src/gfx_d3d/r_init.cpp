@@ -32,6 +32,9 @@
 #ifdef KISAK_MP
 #include <game_mp/g_public_mp.h>
 #endif
+#ifdef KISAK_RADIANT
+#include "r_gpuprof.h"
+#endif
 
 enum DxCapsResponse : int
 {                                       // ...
@@ -3906,6 +3909,9 @@ char __cdecl R_CreateForInitOrReset()
             RB_AllocSunSpriteQueries();
             gfxAssets.pixelCountQuery = RB_HW_AllocOcclusionQuery();
         }
+#ifdef KISAK_RADIANT
+        R_GpuProf_CreateQueries();   // KIWI: Tracy GPU timing (optional: a driver may lack timestamps)
+#endif
         return 1;
     }
     else
@@ -4264,6 +4270,7 @@ void R_ReleaseForShutdownOrReset()
     // recreated lazily on the next RTT_Begin.
     extern void RTT_ReleaseForReset();                  // radiant/radiant_rtt.cpp
     RTT_ReleaseForReset();
+    R_GpuProf_ReleaseQueries();                         // KIWI: Tracy GPU timing
 #endif
     IDirect3DSurface9 *pixelCountQuery; // [esp+0h] [ebp-18h]
     IDirect3DSurface9 *v1; // [esp+4h] [ebp-14h]

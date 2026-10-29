@@ -2,6 +2,8 @@
 // Per-brush cast memo plus shared model-local geometry in CPU heap (no device-reset hook).
 // Map_NewMap drops it because its keys point into brush and model asset memory.
 
+#include <vector>
+
 struct selbrush_t;
 struct orientation_t;
 struct XModel;
@@ -22,3 +24,31 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
 
 // Free cache storage during Map_NewMap teardown.
 void KiwiShadowCache_Shutdown();
+
+// KIWI (2026-10-28): a previewed light OWNS its shadow volumes (camwnd.cpp
+// Cam_LightPreview_Shadows): one batch exactly as SunLightPreview_PolyOffsetShadows flushed it
+// (xyzw = 4 floats per vertex).  shadowvolume.cpp appends every flush to the recording set by
+// Radiant_ShadVol_SetRecording.
+struct KiwiShadVolBatch
+{
+    std::vector<short> indices;
+    std::vector<float> xyzw;
+};
+typedef std::vector<KiwiShadVolBatch> KiwiShadVolRecording;
+void Radiant_ShadVol_SetRecording( KiwiShadVolRecording *rec );   // nullptr = stop
+
+// A recording moved into static GPU buffers (kiwi_gpu.h), one pair per flushed batch, and
+// drawn as editor batches in the flush's place: the volumes cost no CPU work at rest.
+struct KiwiGpuVertexBuffer;
+struct KiwiGpuIndexBuffer;
+struct KiwiShadVolGpuBatch
+{
+    KiwiGpuVertexBuffer *vb;
+    KiwiGpuIndexBuffer  *ib;
+    int                  vertexCount;
+    int                  triCount;
+};
+typedef std::vector<KiwiShadVolGpuBatch> KiwiShadVolRetained;
+void Radiant_ShadVol_Retain( const KiwiShadVolRecording &rec, KiwiShadVolRetained *out );
+void Radiant_ShadVol_DrawRetained( const KiwiShadVolRetained &retained );
+void Radiant_ShadVol_ReleaseRetained( KiwiShadVolRetained *retained );

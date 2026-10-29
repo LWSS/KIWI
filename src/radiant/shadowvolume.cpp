@@ -14,6 +14,15 @@
 #include "kiwi_shadowcache.h"        // the model-geo + cast memo caches
 #include "kiwi_walkcache.h"          // the shared caster-walk recording
 #include "kiwi_ported.h"             // KIWI: shared engine/editor externs
+#include "kiwi_gpu.h"                // the retained volumes' static buffers
+#include <gfx_d3d/rb_backend.h>      // GfxVertex, VERTDECL_GENERIC, R_SetVertex4dWithNormal
+
+extern void *R_AddEditorSurfsCmd();                                                   // r_ed_scene.cpp
+extern int __cdecl Editor_MaterialSortKey( Material *handle );                       // r_ed_scene.cpp
+extern void Editor_AddVertexBatchCmd( Material *handle, int techType, int sortKey,
+                                      const KiwiGpuVertexBuffer *vb, int vertDecl, int stride,
+                                      const KiwiGpuIndexBuffer *ib, int firstIndex, int triCount,
+                                      int maxVert );   // r_ed_scene.cpp
 
 int g_svNodesWalked   = 0;   // brushes+prefabs the caster walk visited
 int g_svCastersDrawn  = 0;   // brushes that reached SunLightPreview_DrawBrushShadow
@@ -84,6 +93,7 @@ static float  s_directionalExtrudeDistance = 0.0f;
        Material *mat_white_multiply = nullptr; // 0x23F15C4
 static short  s_indexCount     = 0;    // 0x23F15C8  indexCount
 static short  s_vertexCount    = 0;    // 0x23F15CA  vertexCount
+static KiwiShadVolRecording *s_recording = nullptr;   // KIWI: a light's batches are kept here
 
 // The binary's flush sweeps ALL 65,536 edge slots and memsets the whole 64 KB vertex-index
 // table per batch.  These two lists record which slots an insert actually claimed so the
@@ -286,6 +296,13 @@ void SunLightPreview_PolyOffsetShadows()
     {
         if ( !mat_stencilshadow )
             mat_stencilshadow = rgp.stencilShadowMaterial;   // engine builtin "stencilshadow"
+        if ( s_recording )                                   // KIWI: the light keeps it
+        {
+            s_recording->emplace_back();
+            KiwiShadVolBatch &b = s_recording->back();
+            b.indices.assign( s_indexBuf, s_indexBuf + s_indexCount );
+            b.xyzw.assign( s_xyzw, s_xyzw + 4 * (int)s_vertexCount );
+        }
         ++g_svBatches;
         g_svBatchKB += ( 16 + 40 * (int)s_vertexCount + 2 * (int)s_indexCount ) / 1024;
         R_AddRenderCmdDrawTris(
@@ -302,6 +319,73 @@ void SunLightPreview_PolyOffsetShadows()
 
     s_vertexCount = 0;
     s_indexCount  = 0;
+}
+
+void Radiant_ShadVol_SetRecording( KiwiShadVolRecording *rec )
+{
+    s_recording = rec;
+}
+
+// Each batch becomes the GfxVertex stream RB_DrawTriangles_Internal would build from it in
+// tess (R_SetVertex4dWithNormal over the flush's zero normal / colour / st), so the
+// stencilshadow pass reads the same input, extruded w = 0 verts included.
+void Radiant_ShadVol_Retain( const KiwiShadVolRecording &rec, KiwiShadVolRetained *out )
+{
+    Radiant_ShadVol_ReleaseRetained( out );
+    std::vector<GfxVertex> verts;
+    for ( const KiwiShadVolBatch &b : rec )
+    {
+        const int vertexCount = (int)b.xyzw.size() / 4;
+        if ( b.indices.empty() || !vertexCount || vertexCount > SHADVOL_MAX_VERTS )
+            continue;
+        verts.resize( (size_t)vertexCount );
+        for ( int i = 0; i < vertexCount; ++i )
+            R_SetVertex4dWithNormal( &verts[(size_t)i], b.xyzw[4 * i + 0], b.xyzw[4 * i + 1],
+                                     b.xyzw[4 * i + 2], b.xyzw[4 * i + 3], 0.0f, 0.0f, 0.0f,
+                                     0.0f, 0.0f, (const uint8_t *)&s_color[0] );
+        KiwiShadVolGpuBatch g;
+        g.vb          = KiwiGpu_CreateVertexBuffer( verts.data(), sizeof( GfxVertex ), vertexCount );
+        g.ib          = KiwiGpu_CreateIndexBuffer( (const uint16_t *)b.indices.data(),
+                                                   (int)b.indices.size() );
+        g.vertexCount = vertexCount;
+        g.triCount    = (int)b.indices.size() / 3;
+        if ( !g.vb || !g.ib )
+        {
+            KiwiGpu_ReleaseVertexBuffer( g.vb );
+            KiwiGpu_ReleaseIndexBuffer( g.ib );
+            continue;
+        }
+        out->push_back( g );
+    }
+}
+
+// The flush's place in the command stream: one editor surf window of stencilshadow batches.
+void Radiant_ShadVol_DrawRetained( const KiwiShadVolRetained &retained )
+{
+    if ( !mat_stencilshadow )
+        mat_stencilshadow = rgp.stencilShadowMaterial;
+    if ( !mat_stencilshadow || retained.empty() )
+        return;
+    const int sortKey = Editor_MaterialSortKey( mat_stencilshadow );
+    R_SortMaterials();
+    for ( const KiwiShadVolGpuBatch &g : retained )
+    {
+        ++g_svBatches;
+        Editor_AddVertexBatchCmd( mat_stencilshadow, TECHNIQUE_UNLIT, sortKey, g.vb,
+                                  VERTDECL_GENERIC, sizeof( GfxVertex ), g.ib, 0, g.triCount,
+                                  g.vertexCount - 1 );
+    }
+    R_AddEditorSurfsCmd();
+}
+
+void Radiant_ShadVol_ReleaseRetained( KiwiShadVolRetained *retained )
+{
+    for ( KiwiShadVolGpuBatch &g : *retained )
+    {
+        KiwiGpu_ReleaseVertexBuffer( g.vb );
+        KiwiGpu_ReleaseIndexBuffer( g.ib );
+    }
+    retained->clear();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

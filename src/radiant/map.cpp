@@ -27,6 +27,7 @@
 #include "kiwi_instcache.h"     // KiwiInstCache_Shutdown
 #include "kiwi_shadowcache.h"   // KiwiShadowCache_Shutdown
 #include "kiwi_walkcache.h"     // KiwiWalkCache_Shutdown
+#include "kiwi_scene.h"         // KiwiScene_InvalidateAll
 // a face/patch whose lightmap or smoothing channel is dead is invisible in the
 // Shift+L render method and compiles unlit; load repairs it, save never writes it.
 #include "kiwi_material.h"      // KiwiMtl_HealMapLayersOnLoad / KiwiMtl_HealMapLayers
@@ -232,6 +233,8 @@ void Map_NewMap()
         // The shared prefab-walk recording holds selbrush_t* into the lists just released.
         // Its epoch is the editor's ONE epoch, so this also ages every memo above.
         KiwiWalkCache_Shutdown();
+        // The retained world's records name selbrush_t* from the same lists (kiwi_scene.h).
+        KiwiScene_InvalidateAll();
         // and the prefab layer-prefix cache, keyed on entity DEF
         // pointers that Brush_FreeMapBrushes has just recycled (brush.cpp).
         KiwiPrefabPrefix_Shutdown();
@@ -1790,6 +1793,7 @@ void Prefab_NextLevel( void *brush )
     active_brushes.prev = prefab->active_brushlist;
     active_brushes.next->prev = &active_brushes;
     active_brushes.prev->next = &active_brushes;
+    KiwiWalkCache_MarkStructural();   // KIWI: the lists were swapped (kiwi_walkcache.h contract)
 
     // The reset RUNS on an explicit-brush entry (the selection was just saved into
     // the slot).  On the NULL path Select_Deselect(1) above already emptied it.
@@ -1900,6 +1904,7 @@ void Prefab_PrevLevel()
 
     iassert( active_brushes.next->prev == &active_brushes );
     iassert( active_brushes.prev->next == &active_brushes );
+    KiwiWalkCache_MarkStructural();   // KIWI: the lists were swapped back (kiwi_walkcache.h contract)
 
     if ( slot->selectedNext )
     {

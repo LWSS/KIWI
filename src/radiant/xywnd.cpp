@@ -23,6 +23,7 @@ enum { YZ = ED_VIEW_YZ, XZ = ED_VIEW_XZ, XY = ED_VIEW_XY };   // the binary's ba
 #include "kiwi_light.h"            // selected-light radius and cone overlays
 #include "kiwi_floatsnap.h"        // KiwiFloor_Fistp
 #include "kiwi_ported.h"           // KIWI: shared engine/editor externs
+#include "kiwi_scene.h"            // KIWI: KiwiScene_QueryActive (the active pass's view cull)
 #include <math.h>
 #include <vector>                   // XY_ContextMenu Layers submenu — distinct layer-name set
 #include <string>                   // (std::string / std::vector; <algorithm> already in stdafx)
@@ -1027,6 +1028,20 @@ static void XY_ModelTintNote( const float *rgba )
     s_xyTintOpen = true;
 }
 
+// The 2D view rectangle on its two world axes, for KiwiScene_QueryActive.
+struct xyViewRect_t
+{
+    int   dim1, dim2;
+    float xmin, xmax, ymin, ymax;
+};
+
+static bool XY_CellInView( const float mins[3], const float maxs[3], void *ctx )
+{
+    const xyViewRect_t *r = (const xyViewRect_t *)ctx;
+    return maxs[r->dim1] >= r->xmin && mins[r->dim1] <= r->xmax
+        && maxs[r->dim2] >= r->ymin && mins[r->dim2] <= r->ymax;
+}
+
 void XY_DrawBrushes(const XYViewState *v)
 {
     if ( !active_brushes.next )            // sentinel list not bootstrapped → no map loaded
@@ -1067,7 +1082,16 @@ void XY_DrawBrushes(const XYViewState *v)
     const bool walkReplay = KiwiWalk_BeginReplay(
         &active_brushes, ident, /*backward*/ false );
 
-    for ( selbrush_t *b = active_brushes.next; b != &active_brushes; b = b->next )
+    // KIWI (2026-10-28, user: "it's ungodly laggy" - a london.map redraw walked and filtered
+    // all ~30k active brushes): only the brushes in retained-scene cells that reach the view
+    // rectangle (kiwi_scene.h), in list order, so the walk-replay cursor above still moves
+    // forward.  Entity brushes are always kept: their radius / heading overlays and labels
+    // reach beyond their own boxes.  DrawBrush still culls each brush itself.
+    xyViewRect_t rect = { nDim1, nDim2, xmin, xmax, ymin, ymax };
+    static std::vector<selbrush_t *> s_xyActive;
+    KiwiScene_QueryActive( XY_CellInView, &rect, s_xyActive, /*keepEntityBrushes*/ true );
+
+    for ( selbrush_t *b : s_xyActive )
     {
         brush_t *def = b->def;
         if ( !def )

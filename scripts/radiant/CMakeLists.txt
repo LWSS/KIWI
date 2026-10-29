@@ -78,6 +78,21 @@ add_executable(${PROJECT_NAME} WIN32
     ${MODELIMPORT_CORE_SOURCES}
 )
 
+# KIWI (2026-10-27, user: "disable the debug heap, keep optimizing"): a live sample of a drag
+# put ~12% of the editor's main thread in the Debug CRT heap (0xCD fills, the heap lock and
+# _CrtIsValidHeapPointer on every free).  With this ON the Debug build links the RELEASE C
+# runtime (/MT): no debug heap, and therefore no _DEBUG; RELEASE_ASSERTS keeps every
+# iassert / vassert live (universal/assertive.h), and /Z7 keeps full symbols.  The CRT's own
+# heap-corruption checks go with it.  OFF restores the /MTd debug runtime.
+option(KIWI_RADIANT_DEBUG_RELEASE_CRT
+       "Radiant Debug: link the release C runtime (no debug heap); iasserts stay on" ON)
+if(KIWI_RADIANT_DEBUG_RELEASE_CRT)
+    set(RADIANT_DEBUG_CRT /MT)
+    set(KIWI_TRACY_IN_TARGET ON)   # TracyClient.lib is /MTd in Debug: compile the client in
+else()
+    set(RADIANT_DEBUG_CRT /MTd)
+endif()
+
 # Tracy — same FetchContent client the mp/sp/dedi targets use.
 include(${SCRIPTS_DIR}/extern/tracy.cmake)
 
@@ -117,10 +132,14 @@ option(KIWI_RADIANT_DEBUG_OPTIMIZED
 if(KIWI_RADIANT_DEBUG_OPTIMIZED)
     string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7 /permissive-")
-    set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}   /MTd /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${RADIANT_DEBUG_CRT} /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7 /permissive-")
+    set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG}   ${RADIANT_DEBUG_CRT} /O2 /Ob2 /Oi /Ot /MP4 /W3 /Z7")
 else()
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd /Od /MP4 /W3 /Z7 /permissive-")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} ${RADIANT_DEBUG_CRT} /Od /MP4 /W3 /Z7 /permissive-")
+endif()
+if(KIWI_RADIANT_DEBUG_RELEASE_CRT)
+    # No _DEBUG under /MT, so the engine's asserts are kept on explicitly.
+    target_compile_definitions(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:RELEASE_ASSERTS>)
 endif()
 
 # KIWI (2026-09-17): x64 only guarantees SSE2.  AVX2 lets the compiler vectorise the editor's
@@ -144,8 +163,12 @@ list(FILTER RADIANT_W4_SRCS INCLUDE REGEX "/radiant/(kiwi_[^/]*|imgui_[^/]*|radi
 set_property(SOURCE ${RADIANT_W4_SRCS} APPEND PROPERTY COMPILE_OPTIONS /W4 /wd4201 /wd4324 /wd4505)
 
 # Static MSVC runtime
-set_property(TARGET ${PROJECT_NAME} PROPERTY
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(KIWI_RADIANT_DEBUG_RELEASE_CRT)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded")
+else()
+    set_property(TARGET ${PROJECT_NAME} PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 # The generator's selected architecture also determines the linker machine.
 target_link_options(${PROJECT_NAME} PRIVATE /machine:${RADIANT_ARCH})

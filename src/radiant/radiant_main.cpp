@@ -37,6 +37,8 @@
 #include "kiwi_ported.h"
 #include "kiwi_test.h"               // KIWI-TEST: unattended script mode hooks
 #include "kiwi_ux.h"                 // KIWI: KiwiUX_BackgroundFpsCap (the unfocused 5 fps cap)
+#include "kiwi_scene.h"              // KIWI: KiwiScene_BeginFrame
+#include <gfx_d3d/r_gpuprof.h>         // KIWI: R_GpuProf_FrameBegin/End (Tracy GPU timing)
 #include "radiant_frame.h"             // the shell-agnostic frame API (this unit's header)
 #include "xywnd.h"                     // Ed_ActiveXY / ED_VIEW_XY (U-GLOBALS)
 #include "prefs.h"                     // Prefs_Init + g_PrefsDlg (the light-preview seeds)
@@ -249,7 +251,10 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
             // Surface/client reconciliation, OUTSIDE the scene bracket (see the helper).
             // No-op on the steady state; only a mismatched size recreates the chain.
             if ( drawScene && dx.device )
+            {
+                PROF_SCOPED( "frame swap chain sync" );
                 Radiant_SyncFrameSwapChain( hwnd );
+            }
 
             PAINTSTRUCT ps;
             ::BeginPaint( hwnd, &ps );
@@ -260,9 +265,17 @@ static LRESULT CALLBACK Radiant_FrameWndProc( HWND hwnd, UINT msg, WPARAM wParam
                 R_BeginSharedCmdList();
                 R_AddCmdClearScreen( 7, g_qeglobals.d_savedinfo.colors[1], 1.0f, 0 );
                 R_EndFrame();
-                R_IssueRenderCommands( (uint)-1 );
+                {
+                    // The ImGui frame is built and drawn inside this (ImGuiShell_DrawOverlay,
+                    // before EndScene).
+                    PROF_SCOPED( "frame issue (ImGui overlay)" );
+                    R_IssueRenderCommands( (uint)-1 );
+                }
                 R_SortMaterials();
-                R_CheckTargetWindow( hwnd );
+                {
+                    PROF_SCOPED( "frame present" );
+                    R_CheckTargetWindow( hwnd );
+                }
                 s_framePresented = true;
                 scenePainted     = true;
             }
@@ -1139,22 +1152,39 @@ static int Radiant_RunMessageLoop()
                 // The editor's frame: four RT viewport renders, one composited ImGui frame,
                 // then the pop-out windows.  Capped at 85 Hz by the QPC arithmetic around it.
                 PROF_SCOPED( "editor frame" );
+                // KIWI: the retained scene re-reads the brush lists once this frame, on its
+                // first use (the camera, or a panel when the camera does not render).
+                {
+                    PROF_SCOPED( "scene begin frame" );
+                    KiwiScene_BeginFrame();
+                }
+                R_GpuProf_FrameBegin();          // KIWI: one GPU frame on Tracy's GPU timeline
                 // Phase 5: render the four viewports into their RT textures FIRST — each does
                 // its own scene + suppressed Present, so it must run OUTSIDE the compositing
                 // frame's scene bracket. The compositing ImGui frame then samples them.
                 ImGuiShell_RenderViewportsToRT();
                 ImGuiShell_BeginFrame();         // authorize exactly one ImGui NewFrame for
                                                  // the paint we force next (stray paints won't)
-                ::InvalidateRect( s_hwndFrame, nullptr, FALSE );
-                ::UpdateWindow( s_hwndFrame );   // synchronous WM_PAINT — one dockspace frame
+                {
+                    PROF_SCOPED( "frame paint (ImGui + present)" );
+                    ::InvalidateRect( s_hwndFrame, nullptr, FALSE );
+                    ::UpdateWindow( s_hwndFrame );   // synchronous WM_PAINT — one dockspace frame
+                }
                 // Render the pop-out panel OS windows now, once, immediately after the
                 // frame rendered — decoupled from WM_PAINT so it can never run on a paint
                 // that didn't render an ImGui frame (the AFK UpdatePlatformWindows assert).
-                ImGuiShell_RenderPlatformWindows();
+                {
+                    PROF_SCOPED( "platform windows" );
+                    ImGuiShell_RenderPlatformWindows();
+                }
+                R_GpuProf_FrameEnd();
                 // Viewport mouse input — AFTER present, outside the scene bracket (a
                 // handler may pop a modal context menu). Uses the rects/hover the frame
                 // just recorded.
-                ImGuiShell_DispatchViewportInput();
+                {
+                    PROF_SCOPED( "viewport input" );
+                    ImGuiShell_DispatchViewportInput();
+                }
                 FrameMark;
             }
             // Advance by whole frame intervals (drift-free cadence); a long stall

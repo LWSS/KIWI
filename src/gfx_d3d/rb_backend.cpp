@@ -41,6 +41,7 @@
 #endif
 
 #ifdef KISAK_RADIANT
+#include "r_gpuprof.h"
 // KIWI: an RC_DRAW_TRIANGLES batch is open in tess (RB_DrawTriangles_Internal).
 static bool g_rbTriBatchOpen = false;
 // KIWI: RB_DrawText3DCmd is running, so RB_DrawTextInSpace may join / leave open that batch.
@@ -77,6 +78,7 @@ void(__cdecl *const RB_RenderCommandTable[RC_COUNT])(GfxRenderCommandExecState *
   &RB_SetCustomConstantCmd,         // RC_SET_CUSTOM_CONSTANT = 0x18 (#26 layer C2 sun preview)
   &RB_SetClipPlaneCmd,              // RC_SET_CLIP_PLANE = 0x19 (KIWI-UX ROUND BM: section analysis)
   &RB_SetLightColorCmd,             // RC_SET_LIGHT_COLOR = 0x1A (CoD4Radiant light preview)
+  &RB_GpuZoneCmd,                   // RC_GPU_ZONE = 0x1B (KIWI: Tracy GPU timing, r_gpuprof.h)
 #endif
 }; // idb (KISAK_RADIANT extends with RC_BEGIN_VIEW + RC_DRAW_EDITOR_SKINNEDCACHED + RC_SET_CUSTOM_CONSTANT; RC_COUNT sizes the table)
 
@@ -2925,6 +2927,7 @@ void __cdecl RB_ExecuteRenderCommandsLoop(const void *cmds)
     }
 #ifdef KISAK_RADIANT
     g_rbTriBatchOpen = false;
+    RB_GpuProf_ListEnd();   // KIWI: a GPU zone whose end marker the full buffer refused
 #endif
     if (tess.indexCount)
         RB_EndTessSurface();

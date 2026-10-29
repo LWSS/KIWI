@@ -13,6 +13,7 @@
 #include "kiwi_camera.h"        // KiwiCam_Ortho
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
+#include "kiwi_scene.h"         // KiwiScene_ActiveOfClass: the model pick's candidates
 #include "kiwi_section.h"
 #include "kiwi_shadowcache.h"
 
@@ -308,7 +309,17 @@ namespace
                                 float incumbentDist, bool excludeSelectedModels,
                                 modelCandidate_t *candidates, int *candidateCount )
     {
-        for ( selbrush_t *node = head->next; node && node != head; node = node->next )
+        // KIWI (2026-10-28): every model entity is owned by an entity other than worldspawn,
+        // so the active list comes from the retained scene's entity-owned brushes
+        // (kiwi_scene.h), in list order, instead of all ~30k world brushes.
+        std::vector<selbrush_t *> owned;
+        const bool fromScene = ( head == &active_brushes );
+        if ( fromScene )
+            KiwiScene_ActiveOfClass( KS_CLASS_ENTITY, owned );
+        size_t ownedAt = 0;
+        for ( selbrush_t *node = fromScene ? ( owned.empty() ? head : owned[0] ) : head->next;
+              node && node != head;
+              node = fromScene ? ( ++ownedAt < owned.size() ? owned[ownedAt] : head ) : node->next )
         {
             if ( !Pick_BrushPickable( node ) || !KiwiDrop_IsModelEntity( node ) )
                 continue;

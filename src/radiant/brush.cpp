@@ -14,6 +14,7 @@
 #include <string>                   // SelectedAssociated's matchValue
 #include "kiwi_shadowcache.h"       // KiwiShadowCache_Invalidate
 #include "kiwi_walkcache.h"         // the shared prefab-walk recording
+#include "kiwi_scene.h"             // KiwiScene_NodeFreed
 #include "kiwi_matconvert.h"        // KIWI-UX: solid-red Shift+L face diagnostic
 #include "kiwi_ux.h"                // KIWI: unified facing-arrow visibility
 #include "kiwi_fmt.h"               // KIWI: exact key values
@@ -955,6 +956,7 @@ void Brush_Free( selbrush_t *b )
     // recording that outlived one of its brushes is a DANGLING POINTER.  Bump unconditionally.
     KiwiWalkCache_MarkStructural();
     KiwiShadowCache_Invalidate();
+    KiwiScene_NodeFreed( b );           // KIWI: before the address can be handed out again
     // The head drops this brush's cached light-preview record from the camera window (the
     // binary only when the cam window existed; the record array lives in the
     // shell-agnostic camera state, so no guard is needed).
@@ -1801,7 +1803,7 @@ extern unsigned int Editor_VB_Upload( Material *material, int vertCount,
     const float *xyz, const float *tangent, const float *binormal,
     const float *normal, const float *texCoord, const float *color );
 // KIWI: refill a live run of the same material and vertex count in place.
-extern void Editor_VB_Rewrite( unsigned int handle, int vertCount,
+extern void Editor_VB_Rewrite( Material *material, unsigned int handle, int vertCount,
     const float *xyz, const float *tangent, const float *binormal,
     const float *normal, const float *texCoord, const float *color );
 
@@ -2635,7 +2637,7 @@ bool Visuals_RewriteFaceVis( faceVis_s *face, face_t *def, const orientation_t *
     for ( int L = 0; L < face->visCount; ++L )
     {
         const EdLayerGeom &g = s_geom[L];
-        Editor_VB_Rewrite( (unsigned int)face->visArray[L].vertHandle, g.vertcount,
+        Editor_VB_Rewrite( face->visArray[L].mtlHandle, (unsigned int)face->visArray[L].vertHandle, g.vertcount,
             (const float *)g.xyz, (const float *)g.tangent, (const float *)g.binormal,
             (const float *)g.normal, (const float *)g.st, (const float *)g.color );
     }
@@ -6063,8 +6065,9 @@ extern bool MaterialDef_15_Drawflag_Multiply( int drawFlags, MaterialDef *m );//
 // True if `mtl` is the CoD4 "$opaque" clip/tool editor material (basename "$opaque",
 // after stripping any "wc/" path).  See the CoD3↔CoD4 techset note at the FILLED-branch
 // call site: this material has no lit technique in the CoD4 binary but does in kisak's
-// CoD3-loaded form, so it must not draw as an opaque lit surface in the camera.
-static bool Material_IsToolOpaque( Material *mtl )
+// CoD3-loaded form, so it must not draw as an opaque lit surface in the camera.  Not static:
+// the retained scene's describe (camwnd.cpp Cam_GeoLayers) applies the same gate.
+bool Material_IsToolOpaque( Material *mtl )
 {
     if ( !mtl )
         return false;

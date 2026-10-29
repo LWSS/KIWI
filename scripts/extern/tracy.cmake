@@ -30,5 +30,15 @@ set_property(TARGET TracyClient PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<
 # TRACY_ENABLE; on-demand mode costs nothing until a profiler connects.
 set_property(TARGET TracyClient APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST)
 target_include_directories(${PROJECT_NAME} PUBLIC "${tracy_SOURCE_DIR}/public")
-target_link_libraries(${PROJECT_NAME} PUBLIC TracyClient)
+# KIWI (2026-10-27): a target that links a different C runtime than the shared TracyClient
+# library (KIWI-Radiant's Debug on the release CRT) compiles the client source itself, with
+# the same switches TracyClient puts on its PUBLIC interface; mixing the two runtimes in one
+# link is LNK2038.  Every other target keeps linking the library.
+if(KIWI_TRACY_IN_TARGET)
+    target_sources(${PROJECT_NAME} PRIVATE "${tracy_SOURCE_DIR}/public/TracyClient.cpp")
+    target_compile_definitions(${PROJECT_NAME} PUBLIC
+        TRACY_ENABLE TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST TRACY_NO_SYSTEM_TRACING)
+else()
+    target_link_libraries(${PROJECT_NAME} PUBLIC TracyClient)
+endif()
 #################

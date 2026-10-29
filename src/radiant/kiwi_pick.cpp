@@ -16,6 +16,7 @@
 #include "kiwi_section.h"   // section-plane pick clamps
 #include "kiwi_vec.h"     // Dot3/Sub3/...
 #include "kiwi_droptrace.h" // KiwiDrop_PickModelMesh: models pick by mesh, not by proxy box
+#include "kiwi_scene.h"     // KiwiScene_QueryActive: the active list near the cursor
 #include "kiwi_selection.h" // KiwiSel_ModelsOnly
 
 #include <float.h>
@@ -255,6 +256,18 @@ namespace
         return curX >= lox - pad && curX <= hix + pad && curY >= loy - pad && curY <= hiy + pad;
     }
 
+    struct cursorBox_t
+    {
+        const projCtx_t *p;
+        float            x, y, pad;
+    };
+
+    bool CellNearCursor( const float mins[3], const float maxs[3], void *ctx )
+    {
+        const cursorBox_t *c = (const cursorBox_t *)ctx;
+        return BoxNearCursor( *c->p, mins, maxs, c->x, c->y, c->pad );
+    }
+
     // Screen-space vertex/edge scan over one display list.
     void ScanList( selbrush_t *sentinel, const projCtx_t &p, sel_mask_t kindMask,
                    float curX, float curY, pickBest_t &bestVert, pickBest_t &bestEdge,
@@ -263,7 +276,23 @@ namespace
         const bool wantVert = ( kindMask & SEL_MASK_VERTEX ) != 0;
         const bool wantEdge = ( kindMask & SEL_MASK_EDGE ) != 0;
 
-        for ( selbrush_t *b = sentinel->next; b && b != sentinel; b = b->next )
+        // KIWI (2026-10-28): the active list through the retained scene's cells near the
+        // cursor (kiwi_scene.h), in list order - unless patch control points are wanted,
+        // which can sit outside the bounds a cell is built from.
+        const bool patchPoints = wantVert && ( kindMask & SEL_MASK_OBJECT ) == 0;
+        const bool culled = sentinel == &active_brushes && !patchPoints;
+        std::vector<selbrush_t *> candidates;
+        if ( culled )
+        {
+            cursorBox_t box = { &p, curX, curY,
+                                ( PICK_VERT_PIXELS > PICK_EDGE_PIXELS ? PICK_VERT_PIXELS
+                                                                      : PICK_EDGE_PIXELS ) + 1.0f };
+            KiwiScene_QueryActive( CellNearCursor, &box, candidates );
+        }
+        size_t candidate = 0;
+        for ( selbrush_t *b = culled ? ( candidates.empty() ? sentinel : candidates[0] ) : sentinel->next;
+              b && b != sentinel;
+              b = culled ? ( ++candidate < candidates.size() ? candidates[candidate] : sentinel ) : b->next )
         {
             if ( !BrushPickable( b ) || Pick_IsModelProxy( b ) )   // KIWI: no model box points/edges
                 continue;

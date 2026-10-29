@@ -31,6 +31,7 @@
 #include "kiwi_texcolor.h"         // KIWI: the Textures colour filter swatches
 #include "radiant_registry.h"      // KIWI-UX (CLEANUP, C-7): Radiant_IniPath — <exedir>\…
 #include <universal/profile.h>
+#include <gfx_d3d/r_gpuprof.h>
 #include "kiwi_viewdirty.h"        // the 2D-view dirty-flag skip
 #include "kiwi_perf.h"             // KiwiPerf: per-stage frame timers (the "KiwiPerf" HUD)
 #include "kiwi_physdrop.h"         // KiwiPhysDrop_Tick (Physics Drop steps before the camera)
@@ -1904,12 +1905,19 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // UI build and presented by its WM_PAINT, so this is the first instant a release is safe.
     // ABOVE `s_inFrame = true` deliberately: `s_beginFrame` was consumed at the top, so a
     // paint this drain pumps (Image_Reload can Com_Error) returns at that gate instead.
-    KiwiTexGrave_Drain();
+    {
+        PROF_SCOPED( "UI: texture grave drain" );
+        KiwiTexGrave_Drain();
+    }
 
+    PROF_SCOPED( "ImGui frame" );
     s_inFrame = true;
-    ImGui_ImplDX9_NewFrame();
-    ImGui_ImplWin32_NewFrame();
-    ImGui::NewFrame();
+    {
+        PROF_SCOPED( "UI: NewFrame" );
+        ImGui_ImplDX9_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+    }
     // KIWI: InputScalar / Drag / Slider apply typed text live, as before ImGui 1.92.9.  With
     // the new default they re-parse their ROUNDED display text ("%.2f") when focus leaves,
     // so clicking through a field rewrote the key (sunlight 1.234 -> 1.23) with an undo.
@@ -1922,7 +1930,11 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // with `const bool dockMode = true;` twenty lines up — the "pre-boot overlay
     // fallback" that variable selected against was removed (see the note above the
     // primary-surface gate), so the false arm could not be taken.
-    const ImGuiID dockId = ImGui::DockSpaceOverViewport();
+    ImGuiID dockId;
+    {
+        PROF_SCOPED( "UI: dockspace" );
+        dockId = ImGui::DockSpaceOverViewport();
+    }
     s_dockRoot = dockId;                  // KIWI-UX §9: re-dock target for re-opened windows
 
     // KIWI-UX: the mouse wheel over a dock node's tab bar scrolls its tabs, so tabs
@@ -1978,11 +1990,20 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // set, and pass it as p_open so the title-bar ✕ toggles the SAME state the
     // Windows menu does.  The titles are read from kiwi_windows so there is exactly
     // one spelling of each per build (the dock ini keys off them).
-    ImGuiShell_DrawViewportImage( RTT_CAMERA,  KIWI_WIN_COUNT );   // always on
-    ImGuiShell_DrawViewportImage( RTT_XY,      KIWI_WIN_XY );
-    ImGuiShell_DrawViewportImage( RTT_Z,       KIWI_WIN_Z );
-    ImGuiShell_DrawViewportImage( RTT_TEXTURE, KIWI_WIN_TEXTURE );
-    ImGuiShell_DrawConsoleTab( g_qeglobals.d_hwndEdit );
+    {
+        PROF_SCOPED( "UI: camera image + overlay" );
+        ImGuiShell_DrawViewportImage( RTT_CAMERA,  KIWI_WIN_COUNT );   // always on
+    }
+    {
+        PROF_SCOPED( "UI: 2D/Z/texture images" );
+        ImGuiShell_DrawViewportImage( RTT_XY,      KIWI_WIN_XY );
+        ImGuiShell_DrawViewportImage( RTT_Z,       KIWI_WIN_Z );
+        ImGuiShell_DrawViewportImage( RTT_TEXTURE, KIWI_WIN_TEXTURE );
+    }
+    {
+        PROF_SCOPED( "UI: console" );
+        ImGuiShell_DrawConsoleTab( g_qeglobals.d_hwndEdit );
+    }
 
     // KIWI-UX (user directive): the FPS readout lives in the WIN32 TITLE BAR, not
     // the panel.  Every ~500ms: read the current title, strip OUR " | N FPS"
@@ -2036,48 +2057,86 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // KIWI-UX (ROUND W): the OUTLINER dock window.  It Begins/Ends itself (and
     // early-outs when its §9 flag is clear) exactly like the shell panel above, but
     // its body is large enough to deserve its own file — kiwi_outliner.cpp.
-    KiwiOutliner_Draw();
+    {
+        PROF_SCOPED( "UI: outliner" );
+        KiwiOutliner_Draw();
+    }
     // KIWI-UX (ROUND AU): the ENTITY BROWSER dock window — same contract as the
     // outliner above (Begins/Ends itself, early-outs on its §9 flag).  Drawn AFTER
     // the viewport images so the camera image is already submitted when a tile's
     // drag starts, and at top-level window scope because it is a real window.
-    KiwiEntBrowser_Draw();
-    KiwiModelBrowser_Draw(); // KIWI-UX
-    KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
-    KiwiModelImport_Draw();  // KIWI: FBX/OBJ -> xmodel importer (its preview renders in RenderViewportsToRT)
+    {
+        PROF_SCOPED( "UI: entity browser" );
+        KiwiEntBrowser_Draw();
+    }
+    {
+        PROF_SCOPED( "UI: model browser" );
+        KiwiModelBrowser_Draw(); // KIWI-UX
+    }
+    {
+        PROF_SCOPED( "UI: particles" );
+        KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
+    }
+    {
+        PROF_SCOPED( "UI: model import" );
+        KiwiModelImport_Draw();  // KIWI: FBX/OBJ -> xmodel importer (its preview renders in RenderViewportsToRT)
+    }
     // KIWI GLASS
-    KiwiGlass_Draw();
+    {
+        PROF_SCOPED( "UI: glass" );
+        KiwiGlass_Draw();
+    }
     // KIWI END
-    KiwiMatProps_Draw();     // KIWI (2026-10-26): the Material tab (Textures browser's current material)
+    {
+        PROF_SCOPED( "UI: material" );
+        KiwiMatProps_Draw();     // KIWI (2026-10-26): the Material tab (Textures browser's current material)
+    }
     // KIWI-UX (ROUND AZ, ITEM 3): the SKY dock window — same contract again
     // (Begins/Ends itself, early-outs on its §9 flag).  It has no drag-to-camera
     // gesture, so unlike the entity browser it carries no ordering constraint
     // against the viewport images; it sits here to keep the three tabs of one dock
     // node adjacent in this function as well as on screen.
-    KiwiSky_Draw();
+    {
+        PROF_SCOPED( "UI: sky" );
+        KiwiSky_Draw();
+    }
     // KIWI-UX (ROUND BD): the UV EDITOR dock window — same contract again (Begins/Ends
     // itself, early-outs on its §9 flag).  Its canvas is pure ImDrawList over an
     // InvisibleButton, so like the Sky tab it carries no ordering constraint against the
     // viewport images; it sits here to keep the four tabs of one dock node adjacent in
     // this function as well as on screen.
-    KiwiUvEd_Draw();
+    {
+        PROF_SCOPED( "UI: UV editor" );
+        KiwiUvEd_Draw();
+    }
     // KIWI-UX: the SUN HELPER dock window — same contract again (Begins/Ends itself,
     // early-outs on its §9 flag).  Its body is plain ImGui items with no canvas and no
     // drag gesture, so like the Sky tab it carries no ordering constraint against the
     // viewport images; it sits here to keep the seven tabs of one dock node adjacent in
     // this function as well as on screen.
-    KiwiSun_Draw();
-    KiwiLight_Draw();
     {
+        PROF_SCOPED( "UI: sun" );
+        KiwiSun_Draw();
+    }
+    {
+        PROF_SCOPED( "UI: light" );
+        KiwiLight_Draw();
+    }
+    {
+        PROF_SCOPED( "UI: decals" );
         extern void KiwiDecal_Draw();     // kiwi_decal.cpp — the Decals dock window
         KiwiDecal_Draw();
     }
     { // KIWI (REFIMG): tabbed beside Decals in the same right-hand dock node.
+        PROF_SCOPED( "UI: reference images" );
         extern void KiwiRefImage_Draw();
         KiwiRefImage_Draw();
     }
-    extern void ImGuiPanel_Entity_Draw(); // imgui_panel_entity.cpp
-    ImGuiPanel_Entity_Draw(); // KIWI-UX
+    {
+        PROF_SCOPED( "UI: entity panel" );
+        extern void ImGuiPanel_Entity_Draw(); // imgui_panel_entity.cpp
+        ImGuiPanel_Entity_Draw(); // KIWI-UX
+    }
     // KIWI-UX (ROUND BE): the TEXTURE IMPORT WIZARD.  Not a dock window — a MODAL POPUP
     // that exists only while the dropped-file queue is non-empty, which is why this round
     // adds no kiwiWindow_t row and does NOT bump KIWI_LAYOUT_VERSION.  It draws at
@@ -2106,28 +2165,42 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
     // must not stall the pipe or freeze the BSP -> Light -> Run chain between stages
     // (kiwi_launch.h D-BF-D).  Top-level window scope for the same reason as the wizard
     // above: its Kill confirmation is an ImGui modal popup.
-    KiwiLaunch_Draw();
+    {
+        PROF_SCOPED( "UI: build & run" );
+        KiwiLaunch_Draw();
+    }
 
     // KIWI-UX (ROUND AI, ITEM 3): the IN-COMMAND OPTIONS panel — a floating window
     // that exists only while the live modal command declares options.  Drawn HERE,
     // at top-level window scope, rather than from KiwiVP_DrawCameraOverlay: that
     // runs INSIDE the viewport window's Begin/End and its whole contract is
     // ImDrawList-only (kiwi_hints.h "no ImGui items inside the camera image").
-    KiwiCmdOpts_Draw();
+    {
+        PROF_SCOPED( "UI: command options" );
+        KiwiCmdOpts_Draw();
+    }
 
-    extern void ImGuiPanels_Draw();       // imgui_panels.cpp
-    ImGuiPanels_Draw();
+    {
+        PROF_SCOPED( "UI: tool panels" );
+        extern void ImGuiPanels_Draw();       // imgui_panels.cpp
+        ImGuiPanels_Draw();
+    }
 
     // KIWI-UX (§9): reconcile anything the ✕ boxes above changed — persist it and
     // re-sync the Windows-menu check marks.  Must run after every Begin/End of this
     // frame and before the next one, so the one-frame "just opened" latch is correct.
-    KiwiWindows_CommitPending();
+    {
+        PROF_SCOPED( "UI: window state commit" );
+        KiwiWindows_CommitPending();
+    }
 
     {
         PROF_SCOPED( "ImGui render" );
         ImGui::PopItemFlag();               // the frame-wide LiveEditOnInputScalar above
         ImGui::Render();
+        RB_GpuProf_ZoneBegin( "ImGui" );    // runs inside the backend, before EndScene
         ImGui_ImplDX9_RenderDrawData( ImGui::GetDrawData() );   // main viewport (this surface)
+        RB_GpuProf_ZoneEnd( "ImGui" );
     }
     s_frameRendered = true;   // gates ImGuiShell_RenderPlatformWindows (see below)
     // The extra platform windows (popped-out panels) are NOT rendered here — each does its

@@ -18,7 +18,6 @@
 #include "kiwi_selection.h"
 #include "kiwi_viewcube.h"
 #include "kiwi_windows.h"         // Native View-menu checkbox synchronization.
-#include "kiwi_surfcache.h"
 #include "radiant_registry.h"
 
 #include <imgui/imgui.h>
@@ -83,10 +82,7 @@ void KiwiUX_SetShowFacingArrows( bool on )
     if ( Get( s_showFacing ) == on )
         return;
     Set( s_showFacing, on );
-    // Legacy prefab arrows are captured alongside entity geometry. Merely
-    // requesting a redraw replays them, and partial invalidation keeps clean
-    // segments: discard the complete capture when changing this draw policy.
-    KiwiSurfCache_InvalidateAll( "facing arrows" );
+    // The camera's retained scene keeps arrows and keys them on this switch (Cam_SceneKey).
     g_nUpdateBits = -1;
 }
 

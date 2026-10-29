@@ -57,6 +57,7 @@ float       Entity_GetFloatValueForKey( const entity_s *e, const char *key ); //
 bool        HasKeyValuePair( entity_s_def *e, const char *key );             // entity.cpp:117 0x4838B0
 void        DeleteKey( epair_t **head, const char *key );                    // entity.cpp:142 0x483720
 void        SetKeyValue( entity_s_def *e, const char *key, const char *value ); // entity.cpp:201 0x483690
+unsigned    KiwiEntity_KeyGeneration();                                      // entity.cpp; KIWI: moves on every SetKeyValue / DeleteKey
 void        Entity_LinkBrush( brush_t *b, entity_s *world_ent );             // entity.cpp:402 0x484FC0; def-list linker
 void        Entity_UnlinkBrush( brush_t *b );                                // entity.cpp:469 0x485020
 bool        Entity_HasEpairMatch( entity_s *e, const char *key, const char *val ); // entity.cpp:508 0x483930

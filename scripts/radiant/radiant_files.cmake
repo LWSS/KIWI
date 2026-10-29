@@ -468,6 +468,8 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_matwriter.cpp"
     "${SRC_DIR}/radiant/kiwi_matconvert.h"   # unlit conversion + map material health
     "${SRC_DIR}/radiant/kiwi_matconvert.cpp"
+    "${SRC_DIR}/radiant/kiwi_matprops.h"     # KIWI (2026-10-26): Material window (surface type, flags, penetration)
+    "${SRC_DIR}/radiant/kiwi_matprops.cpp"
     "${SRC_DIR}/radiant/kiwi_import.h"       # the drop plumbing + the material wizard
     "${SRC_DIR}/radiant/kiwi_import.cpp"
 
@@ -539,10 +541,15 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_viewdirty.h"
     "${SRC_DIR}/radiant/kiwi_viewdirty.cpp"
 
-    # The camera's draw list is pose-invariant, so the entity + prefab pass's PRODUCT (surf
-    # records + immediate command bytes) is cached.  The camera still renders every frame.
-    "${SRC_DIR}/radiant/kiwi_surfcache.h"
-    "${SRC_DIR}/radiant/kiwi_surfcache.cpp"
+    # The retained camera world: per-brush records, grid cells and batches in static index
+    # buffers, synced against the brush list each frame.  kiwi_gpu.h is its only graphics
+    # API boundary (kiwi_gpu_d3d9.cpp today).
+    "${SRC_DIR}/radiant/kiwi_scene.h"
+    "${SRC_DIR}/radiant/kiwi_scene.cpp"
+    "${SRC_DIR}/radiant/kiwi_gpu.h"
+    "${SRC_DIR}/radiant/kiwi_gpu_d3d9.h"
+    "${SRC_DIR}/radiant/kiwi_gpu_d3d9.cpp"
+    "${SRC_DIR}/radiant/kiwi_edmodel.h"
 
     # Boot: the texture browser's 40-byte material headers from one cache file instead of
     # opening all ~4,300 material files (the cold-start 20 s).
@@ -716,6 +723,8 @@ set(RADIANT_GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_font.cpp"
     "${SRC_DIR}/gfx_d3d/r_font.h"
     "${SRC_DIR}/gfx_d3d/r_gfx.h"
+    "${SRC_DIR}/gfx_d3d/r_gpuprof.cpp"
+    "${SRC_DIR}/gfx_d3d/r_gpuprof.h"
     "${SRC_DIR}/gfx_d3d/r_image.cpp"
     "${SRC_DIR}/gfx_d3d/r_image.h"
     "${SRC_DIR}/gfx_d3d/r_imagedecode.cpp"

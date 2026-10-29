@@ -36,10 +36,11 @@ namespace
     };
 
     // Order must match kiwiWindow_t.
-    // 2D View and Textures stay open in the right column; Z and shell stay closed for 3D-first use.
+    // Textures stays open in the right column; 2D View, Z and shell stay closed for 3D-first use
+    // (the 2D View redraws on every camera move, its marker moving in it: the camera lags).
     // Default-open tabs must also be placed by ImGuiShell_BuildDefaultDockLayout.
     const kwEntry_t s_def[KIWI_WIN_COUNT] = {
-        { "2D View",          "XY",      "&2D View (XY / XZ / YZ)", KIWI_CMD_WINDOW_XY,      1 },
+        { "2D View",          "XY",      "&2D View (XY / XZ / YZ) (Lag!)", KIWI_CMD_WINDOW_XY,      0 },
         { "Z",                "Z",       "&Z View",                 KIWI_CMD_WINDOW_Z,       0 },
         { "Textures",         "Texture", "&Texture Browser",        KIWI_CMD_WINDOW_TEXTURE, 1 },
         { "Console",          "Console", "&Console",                KIWI_CMD_WINDOW_CONSOLE, 1 },

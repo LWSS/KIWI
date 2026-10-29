@@ -63,8 +63,3 @@ void KiwiWalk_DrawChildren( const orientation_t *prefabOrient, int viewType, int
                             GfxColor *col, char width, int drawFlags, const char *childPrefix,
                             xywndState_t *drawXY );
 void KiwiWalk_PrefabLeave();
-
-// Folds identities, geometry/model versions, filter bits, entity placement, spawnflags, and
-// prefab orientations across the current recorded subtree. Equal keeps cached surfaces valid;
-// 0 means UNKNOWN and must be treated as changed. No allocation or string work.
-unsigned long long KiwiWalk_SubtreeSignature( const selbrush_t *brush );

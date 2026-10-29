@@ -7,6 +7,7 @@
 #include "r_gfx.h"
 #include "r_material.h"
 #include <qcommon/com_pack.h>
+#include <vector>
 
 enum CodeConstant : int; // r_state.h
 
@@ -66,7 +67,10 @@ enum GfxRenderCommand : int
     RC_SET_CLIP_PLANE = 0x19,
     // CoD4Radiant's deferred per-light constant payload (0x4fc330).
     RC_SET_LIGHT_COLOR = 0x1A,
-    RC_COUNT = 0x1B,
+    // KIWI: a GPU timing marker for Tracy (r_gpuprof.h).  Emitted only while a profiler is
+    // connected.
+    RC_GPU_ZONE = 0x1B,
+    RC_COUNT = 0x1C,
 #else
     RC_COUNT = 0x16,
 #endif
@@ -640,26 +644,28 @@ void __cdecl R_Ed_FlushLineBucket();
 // Per-frame magnitudes for the camera plots; reading them resets them.
 void __cdecl R_Ed_LineBucketStats(int *lines, int *groups, int *cmds, int *spills);
 
-// ── KIWI: THE BUCKET'S UNGROUPED CONTENTS, FOR THE PER-OBJECT SURF CACHE ──────
+// ── KIWI: EMITTING PRE-BUILT SEGMENTS ────────────────────────────────────────
 // The bucket holds segments UNGROUPED, in emit order, and groups them only at the
-// flush — which is what lets a per-object cache store one object's lines on their own
-// and still get ONE global grouping when the frame replays a mix of cached and live
-// objects.  Read back a range with R_Ed_LineBucketRead, put it back later with
-// R_Ed_LineBucketAddSegs; the colour is carried by the vertices themselves, so only
+// flush — so lines the retained scene kept get the same ONE global grouping as the
+// frame's live lines.  The colour is carried by the vertices themselves, so only
 // width and dimension travel beside them.
-// Mark = the current segment count.  Pair it with the FLUSH COUNT: a flush emits
-// everything the bucket held and restarts the numbering, so a range noted before one
-// no longer names the same segments and the caller must abandon its capture.
-int  __cdecl R_Ed_LineBucketMark();
-int  __cdecl R_Ed_LineBucketFlushCount();
-// Copy segments [from, from+count) out.  `verts` receives 2*count vertices.
-// false = out of range / the bucket is not open.
-bool __cdecl R_Ed_LineBucketRead(int from, int count, GfxPointVertex *verts,
-                                 unsigned char *widths, unsigned char *dimensions);
-// Append previously read segments back into the open bucket, interning their colours
-// through the same group table the live path uses.  false = it did not fit.
-bool __cdecl R_Ed_LineBucketAddSegs(const GfxPointVertex *verts, const unsigned char *widths,
-                                    const unsigned char *dimensions, int count);
+// Emit segments exactly as live lines go: into the open bucket, or drawn at once when
+// none is open.
+void __cdecl R_Ed_AddLineSegs(const GfxPointVertex *verts, const unsigned char *widths,
+                              const unsigned char *dimensions, int count);
+
+// ── KIWI: RECORDING THE EDITOR'S LINES (the retained scene, radiant camwnd.cpp) ──
+// While a recording is set, every editor line emission (R_AddCmd_Line3D and friends) is
+// appended to it instead of drawn: segments as vertex pairs, with the width and dimension
+// each would have drawn at.  R_Ed_AddLineSegs puts them back.
+struct EdLineRecording
+{
+    std::vector<GfxPointVertex> verts;        // 2 per segment
+    std::vector<unsigned char>  widths;       // 1 per segment
+    std::vector<unsigned char>  dimensions;   // 1 per segment
+    bool                        unrecorded = false;   // an immediate draw it cannot keep
+};                                                    // was dropped (R_AddRenderCmdDrawTris)
+void __cdecl R_Ed_SetLineRecording(EdLineRecording *rec);   // nullptr = stop
 
 // Editor begin-view command — IDB R_AddBeginViewCmd @ 0x4fc3a0 (r_rendercmds.cpp).
 // Emits an RC_BEGIN_VIEW carrying the scene def + the GfxViewParms* the backend
@@ -752,6 +758,13 @@ struct GfxCmdSetLightColor // sizeof=0x44
 static_assert(sizeof(GfxCmdSetLightColor) == (sizeof(void *) == 8 ? 80 : 68), "GfxCmdSetLightColor");
 void __cdecl RC_SetLightColor(const GfxLight *light);
 void __cdecl RB_SetLightColorCmd(GfxRenderCommandExecState *execState);
+// KIWI: RC_GPU_ZONE (r_gpuprof.h).  `name` is a string literal; begin 1 opens, 0 closes.
+struct GfxCmdGpuZone
+{
+    GfxCmdHeader header;
+    const char  *name;
+    int          begin;
+};
 // Editor full-screen colored quad — IDB R_AddCmdDrawFullScreenColoredQuad @ 0x4fc260
 // (#26 sun-preview, R_SunPrev_Main). Emits RC_DRAW_FULL_SCREEN_COLORED_QUAD (the backend
 // RB_DrawFullScreenColoredQuadCmd already exists in the CoD3 base). Used for the black-world
