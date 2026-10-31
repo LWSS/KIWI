@@ -1747,13 +1747,8 @@ void KiwiGlass_Draw()
 void KiwiGlass_DrawBuildCheck()
 {
     CheckMap( false );
-    if ( s_map.panes.empty() )
+    if ( s_map.panes.empty() || ( !s_map.bad && !MapLimitText()[0] ) )
         return;
-    if ( !s_map.bad && !MapLimitText()[0] )
-    {
-        ImGui::TextDisabled( "Glass: %i pane(s) OK", (int)s_map.panes.size() );
-        return;
-    }
     ImGui::TextColored( ImVec4( 1.0f, 0.6f, 0.2f, 1.0f ), "Glass: %i of %i pane(s) will not break in game", s_map.bad, (int)s_map.panes.size() );
     if ( MapLimitText()[0] )
         ImGui::TextColored( ImVec4( 1.0f, 0.45f, 0.35f, 1.0f ), "%s", MapLimitText() );

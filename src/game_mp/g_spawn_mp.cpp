@@ -704,6 +704,24 @@ void G_CallSpawn()
     }
 }
 
+// KIWI: a player's view is set through delta_angles, which snapshots carry as 16-bit angles, so
+// spawn angles off that grid leave clients mispredicting there.  cod4map refuses such maps
+// (CheckSpawnAngles); this catches a bsp compiled without that check.
+static bool G_SpawnAnglesOnNetGrid(const gentity_s *ent)
+{
+    const char *classname;
+    G_LevelSpawnString("classname", "", &classname);
+    if (strncmp(classname, "mp_", 3) && strcmp(classname, "info_player_start"))
+        return true;
+    for (int i = 0; i < 3; ++i)
+    {
+        const float a = ent->r.currentAngles[i];
+        if ((float)(floor((double)a * (65536.0 / 360.0) + 0.5) * (360.0 / 65536.0)) != a)
+            return false;
+    }
+    return true;
+}
+
 void __cdecl G_ParseEntityFields(gentity_s *ent)
 {
     int i; // [esp+0h] [ebp-4h]
@@ -711,6 +729,11 @@ void __cdecl G_ParseEntityFields(gentity_s *ent)
     iassert(level.spawnVar.spawnVarsValid);
     for (i = 0; i < level.spawnVar.numSpawnVars; ++i)
         G_ParseEntityField(level.spawnVar.spawnVars[i][0], level.spawnVar.spawnVars[i][1], ent);
+    // LWSS: if a map has spawners at a malformed/bad angle, it will corrupt the delta viewangle starting point and cause prediction errors.    
+    // My shitty spawner was at 180.001 yaw
+    vassert(G_SpawnAnglesOnNetGrid(ent), "player spawn at (%g %g %g) has angles (%.9g %.9g %.9g) off the 360/65536 network grid - re-save the map in KIWI Radiant and recompile",
+            ent->r.currentOrigin[0], ent->r.currentOrigin[1], ent->r.currentOrigin[2],
+            ent->r.currentAngles[0], ent->r.currentAngles[1], ent->r.currentAngles[2]);
     G_SetOrigin(ent, ent->r.currentOrigin);
     G_SetAngle(ent, ent->r.currentAngles);
 }

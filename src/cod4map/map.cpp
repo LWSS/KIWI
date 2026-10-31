@@ -1454,6 +1454,39 @@ void AdjustBrushesForOrigin(Entity_t *ent)
   }
 }
 
+// KIWI: a player's view is set through delta_angles, which snapshots carry as 16-bit angles
+// (360/65536 steps) while the server keeps its float.  A spawn angle off that grid (180.001)
+// leaves the client's predicted view a hair off the server's, and its moves miss.  KIWI Radiant
+// saves spawn angles on the grid; a map that does not fails here.
+static bool IsPlayerSpawnClass(const char *classname)
+{
+  return !strncmp(classname, "mp_", 3) || !strcmp(classname, "info_player_start");
+}
+
+static float SnapAngle16(float a)
+{
+  return (float)(floor((double)a * (65536.0 / 360.0) + 0.5) * (360.0 / 65536.0));
+}
+
+static void CheckSpawnAngles(Entity_t *ent, const char *classname, const char *mapName)
+{
+  static const char *const keys[] = { "angles", "angle" };
+  for ( int k = 0; k < 2; ++k )
+  {
+    const char *key = keys[k];
+    const char *value = ValueForKey(ent, key);
+    float a[3];
+    const int count = sscanf(value, "%f %f %f", &a[0], &a[1], &a[2]);
+    for ( int i = 0; i < count; ++i )
+    {
+      if ( SnapAngle16(a[i]) != a[i] )
+        Com_Error("Map %s, entity %i (%s) at (%s): \"%s\" \"%s\" is off the network angle grid (360/65536 steps), "
+                  "so players spawning there mispredict.\nOpen and re-save '%s' in KIWI Radiant to fix this.",
+                  mapName, g_parseEntityCount - 1, classname, ValueForKey(ent, "origin"), key, value, mapName);
+    }
+  }
+}
+
 /*
 ================
 ParseMapEntity
@@ -1598,6 +1631,9 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
       && strcmp(val, "worldspawn") && strcmp(val, "func_group") )
       Com_Printf("WARNING: Map %s, entity %i (%s) has no \"origin\" - it is placed at 0 0 0\n",
                  mapName, g_parseEntityCount - 1, val);
+    const bool playerSpawn = IsPlayerSpawnClass(val);
+    if ( playerSpawn )
+      CheckSpawnAngles(g_currentEntity, val, mapName);
     GetVectorForKey(g_currentEntity, "origin", originAndMatrix);
     GetVectorForKey(g_currentEntity, "angles", entityAngles);
     // KIWI (2026-10-05, load/save gauntlet): a misc_model is placed by the game's rule
@@ -1628,6 +1664,13 @@ int ParseMapEntity(char **parsePtr, float *transformMtx, float brushScale,
     SetKeyValue(g_currentEntity, "origin",
       va("%.9g %.9g %.9g", g_currentEntity->origin[0], g_currentEntity->origin[1], g_currentEntity->origin[2]));
 
+    // KIWI: the angles -> matrix -> angles trip (and a prefab's rotation) puts float noise back
+    // on a spawn's checked angles; write them back on the grid
+    if ( playerSpawn )
+    {
+      for ( int i = 0; i < 3; ++i )
+        entityAngles[i] = SnapAngle16(entityAngles[i]);
+    }
     if ( !VectorCompare(entityAngles, vec3_origin_float) || *ValueForKey(g_currentEntity, "angles") || tookAngle )
     {
       /* +0.0f flushes negative zero (MSVC6 prints "0" for -0, modern prints "-0") */

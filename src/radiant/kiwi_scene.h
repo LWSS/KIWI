@@ -44,14 +44,16 @@ enum ksBrushClass_t
     KS_CLASS_LIGHTGRID = 2,     // a brush with any lightgrid face
     KS_CLASS_FIXEDSIZE = 4,     // owned by a fixed-size (point / model / prefab) entity
     KS_CLASS_ENTITY    = 8,     // owned by an entity other than worldspawn
+    KS_CLASS_CURVE     = 16,    // a curve patch that is not terrain (KIWI 2026-10-31)
 };
 
 enum ksBrushFilter_t
 {
     KS_FILTER_ALL,              // every brush
-    KS_FILTER_PLAIN,            // neither terrain nor lightgrid (fixed-size or not)
+    KS_FILTER_PLAIN,            // no patch and no lightgrid face (fixed-size or not)
     KS_FILTER_TERRAIN,
     KS_FILTER_LIGHTGRID,
+    KS_FILTER_CURVE,            // KS_CLASS_CURVE
     KS_FILTER_COUNT
 };
 

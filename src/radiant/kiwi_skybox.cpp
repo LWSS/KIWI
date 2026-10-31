@@ -722,6 +722,22 @@ bool KiwiSky_SeeThroughFace( const float *facePoint )
 
     if ( facePoint && pivot )
     {
+        // KIWI (2026-10-31, user: "when flying inside of a skybox in (P) camera mode it shows
+        // as blue instead of the skybox"): the pivot sits s_dist down the view axis, and that
+        // depth is whatever the last wheel notch zoomed onto - flying keeps it, so inside a
+        // small shell the pivot lands past the far wall and every wall filmed.  An eye inside
+        // the shell with the pivot outside it is standing in the level: every wall is sky.
+        if ( !KiwiCam_Ortho() )
+        {
+            auto inShell = []( const float *p ) {
+                for ( int k = 0; k < 3; ++k )
+                    if ( p[k] < s_boundsMin[k] || p[k] > s_boundsMax[k] )
+                        return false;
+                return true;
+            };
+            if ( inShell( c->origin ) && !inShell( pivot ) )
+                return false;
+        }
         // CamWnd_BuildMatrix populated this frame's vpn before the face-fill loop.
         const float fz = ( facePoint[0] - c->origin[0] ) * c->vpn[0]
                        + ( facePoint[1] - c->origin[1] ) * c->vpn[1]

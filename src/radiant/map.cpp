@@ -1450,6 +1450,35 @@ static bool Brush_OverlapsRegion( const brush_t *b )
     return true;
 }
 
+// KIWI: a player's view is set through delta_angles, which snapshots carry as 16-bit angles
+// (360/65536 steps) while the server keeps its float.  A spawn yaw off that grid (180.001) leaves
+// the client's predicted view a hair off the server's, and its moves miss.  Spawn angles are
+// written on the grid; KiwiFmt_Exact text reads back as exactly that float.
+static bool MapFile_IsPlayerSpawn( const char *classname )
+{
+    return !strncmp( classname, "mp_", 3 ) || !strcmp( classname, "info_player_start" );
+}
+
+static float MapFile_SnapAngle16( float a )
+{
+    return (float)( floor( (double)a * ( 65536.0 / 360.0 ) + 0.5 ) * ( 360.0 / 65536.0 ) );
+}
+
+// "angles" / "angle" value snapped to the grid into buf, or nullptr to write the value as is
+static const char *MapFile_SpawnAngleText( const char *key, const char *value, char *buf, size_t n )
+{
+    float a[3];
+    if ( !strcmp( key, "angles" ) && sscanf( value, "%f %f %f", &a[0], &a[1], &a[2] ) == 3 )
+    {
+        for ( int i = 0; i < 3; ++i )
+            a[i] = MapFile_SnapAngle16( a[i] );
+        return KiwiFmt_Vec3Exact( buf, n, a, 0 );
+    }
+    if ( !strcmp( key, "angle" ) && sscanf( value, "%f", &a[0] ) == 1 )
+        return KiwiFmt_Exact( buf, n, MapFile_SnapAngle16( a[0] ) + 0.0f, 0 );
+    return nullptr;
+}
+
 // 0x4844E0  MapFile_WriteEntity — write one entity block to fout.
 // The binary's writer is a NormalFileWrapper { vftable, fout } pair; Brush_Write
 // dispatches through (*writer)(writer, fmt, ...).  Modelled here by a static
@@ -1494,7 +1523,8 @@ char MapFile_WriteEntity( entity_s_def *ent, FILE *fout, char regionSave )
             // KIWI: exact - "%.1f" / "%.0f" spawned the region test off the camera.
             char camText[160], yawText[48];
             fprintf( fout, "\"origin\" \"%s\"\n", KiwiFmt_Vec3Exact( camText, sizeof( camText ), camOri ) );
-            return (char)fprintf( fout, "\"angles\" \"0 %s 0\"\n}\n", KiwiFmt_Exact( yawText, sizeof( yawText ), camAng[1] ) );
+            return (char)fprintf( fout, "\"angles\" \"0 %s 0\"\n}\n",
+                                  KiwiFmt_Exact( yawText, sizeof( yawText ), MapFile_SnapAngle16( camAng[1] ) + 0.0f, 0 ) );
         }
 
         // Region filter: walk the DEF-list — first = brushes.prev, sentinel = &def, advance
@@ -1566,11 +1596,14 @@ char MapFile_WriteEntity( entity_s_def *ent, FILE *fout, char regionSave )
             fputc( '\n', fout );
         }
     }
+    const bool playerSpawn = MapFile_IsPlayerSpawn( ValueForKey2( ent, "classname" ) );
     for ( epair_t *ep = ent->epairs; ep; ep = ep->next )
     {
+        char angleText[160];
+        const char *spawnAngles = playerSpawn ? MapFile_SpawnAngleText( ep->key, ep->value, angleText, sizeof( angleText ) ) : nullptr;
         writeQuoted( ep->key );
         fputc( ' ', fout );
-        writeQuoted( originInPlace && !strcmp( ep->key, "origin" ) ? originStr : ep->value );
+        writeQuoted( originInPlace && !strcmp( ep->key, "origin" ) ? originStr : spawnAngles ? spawnAngles : ep->value );
         fputc( '\n', fout );
     }
 

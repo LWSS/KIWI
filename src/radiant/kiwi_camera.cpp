@@ -1533,9 +1533,21 @@ void KiwiCam_PanBegin( int imgX, int imgY )
 
     // Pan uses world-per-pixel at the pivot, matching Plasticity's target. Translation
     // moves eye and pivot together, so this scale is invariant for the gesture.
-    (void)imgX;
-    (void)imgY;
-    s_panK    = KiwiCam_WorldPerPixel( s_lookAt );
+    // KIWI (2026-10-31, user: "at times, the pan (right click) camera sensitivity is too high
+    // in (P) camera mode"): the pivot's depth is whatever the last wheel notch zoomed onto,
+    // so after flying up to a ceiling a pan still ran at a far wall's rate.  Grab-pan: in
+    // perspective the surface under the cursor at the press sets the scale (it stays under
+    // the cursor for the drag); a miss keeps the pivot's.  Ortho scale has no depth.
+    s_panK = KiwiCam_WorldPerPixel( s_lookAt );
+    ray_t ray;
+    float hitDist = 0.0f;
+    if ( !KiwiCam_Ortho() && Pick_RayFromImagePos( imgX, imgY, &ray )
+      && Pick_TraceSolid( ray.origin, ray.dir, &hitDist ) && hitDist > 0.0f )
+    {
+        float hit[3];
+        Mad3( ray.origin, ray.dir, hitDist, hit );
+        s_panK = KiwiCam_WorldPerPixel( hit );
+    }
     s_panHave = ( s_panK > 0.0f );
 }
 
@@ -1654,6 +1666,40 @@ void KiwiCam_LookAlong( float pitch, float yaw )
         c->origin[i] = s_lookAt[i] - f[i] * depth;
 
     Commit( c );
+}
+
+// KIWI (2026-10-31, user: "when space is pressed with nothing selected, it goes to the nearest
+// major cube viewpoint (snaps to nearest major plane)").  The pivot is re-seated on what the
+// view centre shows first: s_dist is whatever the last wheel notch zoomed onto, so turning
+// about it could swing the eye around a point far behind the thing on screen.
+const char *KiwiCam_SnapToNearestAxis()
+{
+    camera_s *c = Ed_Camera();
+    CamWnd_BuildMatrix();                        // vpn for this frame's angles
+    float hitDist = 0.0f;
+    if ( !KiwiCam_Ortho() && Pick_TraceSolid( c->origin, c->vpn, &hitDist ) && hitDist > KCAM_MIN_DIST )
+    {
+        Mad3( c->origin, c->vpn, hitDist, s_lookAt );
+        s_dist = hitDist;
+        s_have = true;
+    }
+
+    // vpn = (cos p cos y, cos p sin y, sin p): the axis it is nearest is its largest component.
+    const float p    = DEG2RAD( c->angles[0] );
+    const float y    = DEG2RAD( c->angles[1] );
+    const float vz   = fabsf( sinf( p ) );
+    const float vxy  = fabsf( cosf( p ) ) * fmaxf( fabsf( cosf( y ) ), fabsf( sinf( y ) ) );
+    const float pitch = vz > vxy ? ( sinf( p ) > 0.0f ? KCAM_PITCH_MAX : -KCAM_PITCH_MAX ) : 0.0f;
+    float yaw = 90.0f * floorf( c->angles[1] / 90.0f + 0.5f );
+    yaw = (float)fmod( (double)yaw + 360.0, 360.0 );
+    KiwiCam_LookAlong( pitch, yaw );
+
+    if ( pitch > 0.0f )
+        return "bottom (looking up)";
+    if ( pitch < 0.0f )
+        return "top (looking down)";
+    static const char *const s_side[4] = { "looking +X", "looking +Y", "looking -X", "looking -Y" };
+    return s_side[(int)( yaw / 90.0f + 0.5f ) & 3];
 }
 
 // Modern-profile map-new/map-load placement; the classic profile keeps the ported pose.

@@ -15,13 +15,18 @@
 #include "kiwi_csg.h"                 // KiwiCsg_BrushUsable
 #include "kiwi_boxselect.h"         // KiwiBox_CollectBrushes
 #include "kiwi_command.h"
+#include "kiwi_construct.h"         // kconPlane_t: a curve tool's cross-section plane
+#include "kiwi_extrude.h"           // KiwiExtrude_BuildPrismDef: a curve tool's stand-in
 #include "kiwi_lines.h"
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
 #include "kiwi_selection.h"
 #include "kiwi_split.h"
+#include "kiwi_validity.h"          // KiwiValid_Rebuild
 #include "kiwi_vec.h"     // Dot3/Sub3/...
 
+#include <algorithm>
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -59,6 +64,15 @@ namespace
         return KiwiCsg_BrushUsable( b ) && b->def->faceCount >= 4;
     }
 
+    // KIWI (2026-10-31): an extruded curve may be a difference tool (curveTool_t below).
+    bool CurveAxis( const patchMesh_t *p, bool alongRows, float axis[3] );
+    bool CurveCuts( const selbrush_t *b )
+    {
+        float axis[3];
+        const patchMesh_t *p = ( b && b->patch && b->def ) ? b->def->patch : nullptr;
+        return p && ( CurveAxis( p, true, axis ) || CurveAxis( p, false, axis ) );
+    }
+
     // Brush_BuildWindings keeps these bounds current; reject misses before N splits.
     bool BoundsOverlap( const brush_t *a, const brush_t *b )
     {
@@ -73,6 +87,256 @@ namespace
         for ( size_t i = 0; i < defs->size(); ++i )
             KiwiSplit_FreeUnlandedDef( ( *defs )[i] );
         defs->clear();
+    }
+
+    // ── Curve tools ──────────────────────────────────────────────────────────────
+    // KIWI (2026-10-31, user: "Make it possible so that a brush can be boolean'd (diff) with a
+    // curve (cylinder/etc), and the result is a square box with a curve running perfectly
+    // through it, and caps that line up with the brush exterior"): a curve whose every control
+    // column is a straight line along one shared axis (cylinders, pipes, arches - extruded
+    // curves) cuts with its control hull swept along that axis.  A Bezier surface lies inside
+    // its control hull, so no brush face crosses the curve.  The curve itself is kept: each
+    // column's end rows slide along the axis onto the brush faces it leaves through, so its
+    // ends lie flush on them (sliding along one direction onto a plane is affine, so the end
+    // curve lies exactly in the face).
+    struct curveTool_t
+    {
+        selbrush_t *node      = nullptr;
+        brush_t    *prism     = nullptr;   // unlinked stand-in tool, freed after the carve
+        float       axis[3]   = { 0.0f, 0.0f, 0.0f };
+        bool        alongRows = true;      // ctrl[col][row]: the row index runs along the axis
+        std::vector<float> trimmed;        // the new control points, 3 per (around, along)
+    };
+
+    int CurveAround( const patchMesh_t *p, bool alongRows ) { return alongRows ? p->width  : p->height; }
+    int CurveAlong ( const patchMesh_t *p, bool alongRows ) { return alongRows ? p->height : p->width;  }
+    float *CurvePt( patchMesh_t *p, bool alongRows, int around, int along )
+    {
+        return alongRows ? p->ctrl[around][along].xyz : p->ctrl[along][around].xyz;
+    }
+    const float *CurvePt( const patchMesh_t *p, bool alongRows, int around, int along )
+    {
+        return alongRows ? p->ctrl[around][along].xyz : p->ctrl[along][around].xyz;
+    }
+
+    // Every column a straight line along one shared direction (unit, into `axis`).
+    bool CurveAxis( const patchMesh_t *p, bool alongRows, float axis[3] )
+    {
+        const int na = CurveAround( p, alongRows ), nl = CurveAlong( p, alongRows );
+        if ( na < 3 || nl < 2 )
+            return false;
+        bool have = false;
+        for ( int i = 0; i < na; ++i )
+        {
+            const float *a = CurvePt( p, alongRows, i, 0 );
+            float d[3];
+            Sub3( CurvePt( p, alongRows, i, nl - 1 ), a, d );
+            const float len = Len3( d );
+            if ( len < 0.1f )
+                return false;
+            for ( int k = 0; k < 3; ++k )
+                d[k] /= len;
+            if ( !have )
+            {
+                Copy3( d, axis );
+                have = true;
+            }
+            else if ( Dot3( d, axis ) < 0.9995f )
+                return false;
+            for ( int j = 1; j < nl - 1; ++j )
+            {
+                float r[3], off[3];
+                Sub3( CurvePt( p, alongRows, i, j ), a, r );
+                const float t = Dot3( r, d );
+                Mad3( r, d, -t, off );
+                if ( Len3( off ) > 0.05f || t < -0.05f || t > len + 0.05f )
+                    return false;
+            }
+        }
+        return have;
+    }
+
+    // Andrew's monotone chain: the CCW hull of 2D points, collinear points dropped.
+    void Hull2D( const std::vector<float> &pts, std::vector<float> *out )
+    {
+        const int n = (int)( pts.size() / 2 );
+        std::vector<int> idx( (size_t)n );
+        for ( int i = 0; i < n; ++i )
+            idx[(size_t)i] = i;
+        std::sort( idx.begin(), idx.end(), [&]( int a, int b ) {
+            return pts[a * 2] < pts[b * 2] || ( pts[a * 2] == pts[b * 2] && pts[a * 2 + 1] < pts[b * 2 + 1] );
+        } );
+        auto cross = [&]( int o, int a, int b ) {
+            return ( pts[a * 2] - pts[o * 2] ) * ( pts[b * 2 + 1] - pts[o * 2 + 1] )
+                 - ( pts[a * 2 + 1] - pts[o * 2 + 1] ) * ( pts[b * 2] - pts[o * 2] );
+        };
+        std::vector<int> h( (size_t)( 2 * n ) );
+        int k = 0;
+        for ( int i = 0; i < n; ++i )
+        {
+            while ( k >= 2 && cross( h[k - 2], h[k - 1], idx[i] ) <= 1.0e-4f ) --k;
+            h[k++] = idx[i];
+        }
+        for ( int i = n - 2, lower = k + 1; i >= 0; --i )
+        {
+            while ( k >= lower && cross( h[k - 2], h[k - 1], idx[i] ) <= 1.0e-4f ) --k;
+            h[k++] = idx[i];
+        }
+        out->clear();
+        for ( int i = 0; i + 1 < k; ++i )      // the last point repeats the first
+        {
+            out->push_back( pts[h[i] * 2] );
+            out->push_back( pts[h[i] * 2 + 1] );
+        }
+    }
+
+    // The curve's stand-in tool: its control hull, swept along its axis over its own length.
+    bool CurveToolPrism( selbrush_t *node, curveTool_t *out, const char **why )
+    {
+        const patchMesh_t *p = ( node && node->def ) ? node->def->patch : nullptr;
+        if ( !p )
+        {
+            *why = "it is not a curve";
+            return false;
+        }
+        bool rows = true;
+        if ( !CurveAxis( p, true, out->axis ) )
+        {
+            rows = false;
+            if ( !CurveAxis( p, false, out->axis ) )
+            {
+                *why = "it is not straight along one axis (extruded curves - cylinders, pipes, "
+                       "arches - can cut)";
+                return false;
+            }
+        }
+        out->node      = node;
+        out->alongRows = rows;
+
+        kconPlane_t pl;
+        if ( !KiwiCon_MakePlane( CurvePt( p, rows, 0, 0 ), out->axis, nullptr, &pl ) )
+        {
+            *why = "its axis is degenerate";
+            return false;
+        }
+        const int na = CurveAround( p, rows ), nl = CurveAlong( p, rows );
+        std::vector<float> uv;
+        float lo = FLT_MAX, hi = -FLT_MAX;
+        for ( int i = 0; i < na; ++i )
+            for ( int j = 0; j < nl; ++j )
+            {
+                const float *w = CurvePt( p, rows, i, j );
+                float r[3];
+                Sub3( w, pl.origin, r );
+                const float t = Dot3( r, pl.normal );
+                lo = ( t < lo ) ? t : lo;
+                hi = ( t > hi ) ? t : hi;
+                if ( j == 0 )
+                {
+                    float q[2];
+                    KiwiCon_WorldToPlane( pl, w, q );
+                    uv.push_back( q[0] );
+                    uv.push_back( q[1] );
+                }
+            }
+        std::vector<float> hull;
+        Hull2D( uv, &hull );
+        const int n = (int)( hull.size() / 2 );
+        float area = 0.0f;
+        for ( int i = 0; i < n; ++i )
+        {
+            const int j = ( i + 1 ) % n;
+            area += hull[i * 2] * hull[j * 2 + 1] - hull[j * 2] * hull[i * 2 + 1];
+        }
+        if ( n < 3 || area * 0.5f < 1.0f )
+        {
+            *why = "it has no cross-section to cut with (a flat sheet)";
+            return false;
+        }
+        if ( n > KEXT_MAX_PROFILE )
+        {
+            *why = "its cross-section has too many corners";
+            return false;
+        }
+        out->prism = KiwiExtrude_BuildPrismDef( pl, &hull[0], n, lo, hi, why );
+        if ( !out->prism )
+            return false;
+        KiwiValid_Rebuild( out->prism );
+        return true;
+    }
+
+    // Where the line p + s*axis is inside the convex brush; false when it never is.
+    bool ClipLine( const brush_t *def, const float p[3], const float axis[3], float *sIn, float *sOut )
+    {
+        float in = -FLT_MAX, out = FLT_MAX;
+        for ( int f = 0; f < def->faceCount; ++f )
+        {
+            const float *n   = def->faces[f].plane.normal;
+            const float  den = Dot3( n, axis );
+            const float  num = def->faces[f].plane.dist - Dot3( n, p );
+            if ( fabsf( den ) < 1.0e-6f )
+            {
+                if ( num < 0.0f )
+                    return false;              // parallel and outside this face
+                continue;
+            }
+            const float t = num / den;
+            if ( den > 0.0f )
+                out = ( t < out ) ? t : out;
+            else
+                in = ( t > in ) ? t : in;
+        }
+        if ( !( in < out ) )
+            return false;
+        *sIn  = in;
+        *sOut = out;
+        return true;
+    }
+
+    // The curve's control points with every column's ends trimmed to where it leaves the
+    // brushes; false leaves the curve alone (a column passing beside them all, or nothing to trim).
+    bool PlanCurveTrim( curveTool_t *ct, const std::vector<const brush_t *> &brushes )
+    {
+        const patchMesh_t *p = ct->node->def->patch;
+        const bool rows = ct->alongRows;
+        const int  na = CurveAround( p, rows ), nl = CurveAlong( p, rows );
+        ct->trimmed.clear();
+        bool changed = false;
+        for ( int i = 0; i < na; ++i )
+        {
+            const float *a = CurvePt( p, rows, i, 0 );
+            float r[3];
+            Sub3( CurvePt( p, rows, i, nl - 1 ), a, r );
+            const float len = Dot3( r, ct->axis );
+            float sIn = FLT_MAX, sOut = -FLT_MAX;
+            bool  hit = false;
+            for ( const brush_t *b : brushes )
+            {
+                float i0, o0;
+                if ( !ClipLine( b, a, ct->axis, &i0, &o0 ) )
+                    continue;
+                hit  = true;
+                sIn  = ( i0 < sIn ) ? i0 : sIn;
+                sOut = ( o0 > sOut ) ? o0 : sOut;
+            }
+            if ( !hit )
+                return false;
+            const float s0 = ( sIn  > 0.0f ) ? sIn  : 0.0f;
+            const float s1 = ( sOut < len  ) ? sOut : len;
+            if ( s1 - s0 < 0.1f )
+                return false;
+            if ( s0 > 1.0e-3f || s1 < len - 1.0e-3f )
+                changed = true;
+            for ( int j = 0; j < nl; ++j )
+            {
+                Sub3( CurvePt( p, rows, i, j ), a, r );
+                const float f = ( len > 0.0f ) ? Dot3( r, ct->axis ) / len : 0.0f;
+                float w[3];
+                Mad3( a, ct->axis, s0 + ( s1 - s0 ) * f, w );
+                ct->trimmed.insert( ct->trimmed.end(), w, w + 3 );
+            }
+        }
+        return changed;
     }
 
     // N-plane subtract; see kiwi_boolean.h.
@@ -516,7 +780,8 @@ namespace
             {
                 const pick_result_t hit = Pick( ray, SEL_MASK_OBJECT, PICKF_EXCLUDE_SELECTED );
                 if ( hit.valid && hit.item.brush && Sel_BrushLive( hit.item.brush )
-                  && Usable( hit.item.brush ) && !IsTarget( hit.item.brush ) )
+                  && ( Usable( hit.item.brush ) || CurveCuts( hit.item.brush ) )
+                  && !IsTarget( hit.item.brush ) )
                     m_hover = hit.item.brush;
                 // Preserve a patch-specific refusal instead of conflating it with empty space.
                 else if ( hit.valid && hit.item.brush && Sel_BrushLive( hit.item.brush )
@@ -536,8 +801,8 @@ namespace
             if ( !m_hover )
             {
                 if ( m_hoverIsPatch )           // name the specific refusal
-                    Sys_Printf( "Boolean: that is a curve/patch — a patch is a render "
-                                "surface with no volume and cannot cut.  Use the "
+                    Sys_Printf( "Boolean: that curve cannot cut — only curves straight "
+                                "along one axis (cylinders, pipes, arches) can.  Use the "
                                 "caulk brush inside it as the tool.\n" );
                 else
                     Sys_Printf( "Boolean: that is not a usable solid — click another "
@@ -569,6 +834,9 @@ namespace
                 m_tools.push_back( m_hover );
             }
 
+            if ( m_hover->patch )
+                Sys_Printf( "Boolean: a curve tool cuts its outline through the brush, and "
+                            "the curve stays with its ends trimmed flush to the brush.\n" );
             if ( m_stage == KBOOL_PICK_TOOL )
             {
                 m_op    = KBOOL_DIFFERENCE;
@@ -845,9 +1113,37 @@ namespace
             // tools that disappeared during the gesture are ignored.
             std::vector<selbrush_t *> tools;
             std::vector<brush_t *>    toolDefs;
+            // KIWI (2026-10-31): curve tools cut with an unlinked stand-in prism (curveTool_t)
+            // and are kept, trimmed; the stand-ins are freed however this returns.
+            std::vector<curveTool_t> curves;
+            struct FreePrisms
+            {
+                std::vector<curveTool_t> *c;
+                ~FreePrisms()
+                {
+                    for ( curveTool_t &ct : *c )
+                        if ( ct.prism )
+                            Brush_Free_R( ct.prism );
+                }
+            } freePrisms{ &curves };
             for ( size_t i = 0; i < m_tools.size(); ++i )
                 if ( Sel_BrushLive( m_tools[i] ) && m_tools[i]->def )
                 {
+                    if ( m_tools[i]->patch )
+                    {
+                        curveTool_t ct;
+                        const char *why = "unknown";
+                        if ( !CurveToolPrism( m_tools[i], &ct, &why ) )
+                        {
+                            if ( ct.prism )
+                                Brush_Free_R( ct.prism );
+                            Sys_Printf( "Boolean: a curve tool was skipped — %s.\n", why );
+                            continue;
+                        }
+                        curves.push_back( ct );
+                        toolDefs.push_back( ct.prism );
+                        continue;
+                    }
                     tools.push_back( m_tools[i] );
                     toolDefs.push_back( m_tools[i]->def );
                 }
@@ -923,10 +1219,38 @@ namespace
                             "validity gate and were carried on anyway (they are "
                             "intermediates and are never landed).\n", s_carveCarried );
 
+            // KIWI: each curve's ends go onto the faces of the brushes it cut, planned while
+            // those brushes still stand.
+            int trimmedCurves = 0;
+            {
+                std::vector<const brush_t *> cut;
+                for ( const carve_t &cv : carves )
+                    cut.push_back( cv.node->def );
+                for ( curveTool_t &ct : curves )
+                    if ( !PlanCurveTrim( &ct, cut ) )
+                        ct.trimmed.clear();
+            }
+
             // Clear typed selection before freeing nodes; keep the legacy list for undo cloning.
             Sel_Clear( KiwiSel() );
 
             KiwiCmd_UndoBegin( "boolean difference" );
+
+            // KIWI: the curves are reshaped in place, so the record covers them first.
+            for ( curveTool_t &ct : curves )
+            {
+                if ( ct.trimmed.empty() || !Sel_BrushLive( ct.node ) )
+                    continue;
+                Undo_AddBrush( (entity_brush_s *)ct.node->def );
+                patchMesh_t *p = ct.node->def->patch;
+                const int na = CurveAround( p, ct.alongRows ), nl = CurveAlong( p, ct.alongRows );
+                for ( int i = 0; i < na; ++i )
+                    for ( int j = 0; j < nl; ++j )
+                        Copy3( &ct.trimmed[( (size_t)i * nl + j ) * 3], CurvePt( p, ct.alongRows, i, j ) );
+                // Patch_UpdateSelected_0's own refresh (pmesh.cpp 0x43D800); bDirty stays clear.
+                Patch_Rebuild( p, 1 );
+                ++trimmedCurves;
+            }
 
             // Picked tools are consumed but excluded from selected_brushes, so the
             // bracket head did not clone them. Cover each explicitly, entity first;
@@ -968,6 +1292,9 @@ namespace
                         "tool(s) were consumed (%i missed, %i refused).\n",
                         (int)carves.size(), landed, (int)tools.size(),
                         missed, refused );
+            if ( !curves.empty() )
+                Sys_Printf( "Boolean: %i curve tool(s) kept, %i with their ends trimmed flush "
+                            "to the brush.\n", (int)curves.size(), trimmedCurves );
         }
 
         // Select live targets and tools, then delegate to CSG_Merge (csg.cpp:572).
@@ -1026,6 +1353,17 @@ namespace
         enum stage_t { KBOOL_PICK_TOOL = 0, KBOOL_LIVE };
         enum op_t    { KBOOL_DIFFERENCE = 0, KBOOL_UNION };
 
+    public:
+        // KIWI (2026-10-31): test-only, the Click() a scripted probe cannot aim.
+        void TestPickTool( selbrush_t *b )
+        {
+            m_tools.clear();
+            m_tools.push_back( b );
+            m_op    = KBOOL_DIFFERENCE;
+            m_stage = KBOOL_LIVE;
+        }
+
+    private:
         std::vector<selbrush_t *> m_targets;
         // Pick order controls Esc and fragment topology, though not the difference volume.
         std::vector<selbrush_t *> m_tools;
@@ -1062,4 +1400,12 @@ KiwiEditorCommand *KiwiBool_CommandForId( int commandId )
     if ( commandId == KIWI_CMD_BOOLEAN )
         return &s_boolean;
     return 0;
+}
+
+bool KiwiBool_TestPickTool( selbrush_t *tool )
+{
+    if ( KiwiCmd_Active() != &s_boolean || !tool )
+        return false;
+    s_boolean.TestPickTool( tool );
+    return true;
 }

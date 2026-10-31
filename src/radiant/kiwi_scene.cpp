@@ -479,7 +479,8 @@ namespace
         ksEntityCounts_t &c = s_counts[f.owner];   // value-initialised to zeros when new
         const bool terrain = ( f.cls & KS_CLASS_TERRAIN ) != 0;
         const bool grid    = ( f.cls & KS_CLASS_LIGHTGRID ) != 0;
-        const bool pass[KS_FILTER_COUNT] = { true, !terrain && !grid, terrain, grid };
+        const bool curve   = ( f.cls & KS_CLASS_CURVE ) != 0;
+        const bool pass[KS_FILTER_COUNT] = { true, !terrain && !grid && !curve, terrain, grid, curve };
         for ( int k = 0; k < KS_FILTER_COUNT; ++k )
             if ( pass[k] )
             {
@@ -1133,7 +1134,7 @@ unsigned KiwiScene_ClassifyBrush( const selbrush_t *b )
         cls |= KS_CLASS_ENTITY;
     const brush_t *def = b->def;
     if ( def->patch )
-        return cls | ( ( def->patch->type & PATCH_TERRAIN ) ? KS_CLASS_TERRAIN : 0u );
+        return cls | ( ( def->patch->type & PATCH_TERRAIN ) ? KS_CLASS_TERRAIN : KS_CLASS_CURVE );
     if ( !def->faces )
         return cls;
     // A brush with any lightgrid face (lightgrid_volume and friends; the same substring the
@@ -1163,9 +1164,10 @@ bool KiwiScene_BrushPasses( const selbrush_t *b, ksBrushFilter_t filter )
     const unsigned cls = KiwiScene_BrushClass( b );
     switch ( filter )
     {
-    case KS_FILTER_PLAIN:     return ( cls & ( KS_CLASS_TERRAIN | KS_CLASS_LIGHTGRID ) ) == 0;
+    case KS_FILTER_PLAIN:     return ( cls & ( KS_CLASS_TERRAIN | KS_CLASS_LIGHTGRID | KS_CLASS_CURVE ) ) == 0;
     case KS_FILTER_TERRAIN:   return ( cls & KS_CLASS_TERRAIN ) != 0;
     case KS_FILTER_LIGHTGRID: return ( cls & KS_CLASS_LIGHTGRID ) != 0;
+    case KS_FILTER_CURVE:     return ( cls & KS_CLASS_CURVE ) != 0;
     default:                  return true;
     }
 }

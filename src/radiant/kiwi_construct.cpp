@@ -192,12 +192,28 @@ namespace
         return n;
     }
 
+    // KIWI (2026-10-31, user: "if I make a small circle with the circle tool it doesn't make a
+    // face"): at 64 samples a circle under ~5 units radius has every chord shorter than
+    // KREG_JOIN_DIST.  The region weld is bounded only by edges longer than that, so it fell
+    // back to the grid's quarter step (2 units at an 8 grid, up to 16) and welded the whole
+    // loop into a point.  A small circle samples fewer, longer chords instead; multiples of
+    // four keep the cardinals.
+    const float KCON_CIRCLE_MIN_CHORD = 0.6f;   // past KREG_JOIN_DIST (kiwi_region.h)
+    int CircleSamples( float radius )
+    {
+        const float r = fabsf( radius );
+        int n = KCON_SEGS_MAX;
+        while ( n > 4 && 2.0f * r * sinf( ( 180.0f / (float)n ) * KCON_DEG2RAD ) < KCON_CIRCLE_MIN_CHORD )
+            n -= 4;
+        return n;
+    }
+
     // Circles are analytic; this count only samples their display/region boundary.
     // Legacy circle segment overrides must not turn them into polygons.
     int CircleSegsFor( const kconObject_t &o )
     {
         if ( o.type == KCON_CIRCLE )
-            return KCON_SEGS_MAX;
+            return CircleSamples( o.radius );
         if ( o.segs <= 0 )
             return CircleSegs( o.radius );
         int n = ClampSides( o.segs );
@@ -1828,6 +1844,124 @@ namespace
         return true;
     }
 
+    // KIWI (2026-10-29, user: "if the majority of points are on a single plane, in a single
+    // multi point line operation, assume the user wants it on 1 plane to make a face and
+    // adjust the points to be in-plane"): what a Line point rested on when it was clicked.
+    // Candidate planes: what the cursor rested on, then (a snap onto a brush edge / corner)
+    // every face of that brush through the point - an edge point lies in BOTH its faces.
+    #define KCON_REST_PLANES 6
+    struct kconRest_t
+    {
+        int   count     = 0;       // valid entries of normal / at
+        bool  vacant    = false;   // empty space under the cursor: the depth was a fallback's
+        bool  vertical  = false;   // placed straight up / down on purpose (Z lock, Z guide)
+        float normal[KCON_REST_PLANES][3];   // unit
+        float at[KCON_REST_PLANES][3];       // a point on that plane
+    };
+
+    // The plane strictly more than half of `pts` lie on (within KCON_PLANE_FIT_DIST), among
+    // the points' candidate planes.  Most supporters wins; on a tie (collinear points along
+    // a brush edge lie in both its faces) the plane facing the camera most, then the earliest.
+    bool MajorityPlane( const std::vector<float> &pts, const std::vector<kconRest_t> &rest,
+                        kconPlane_t *out, int *outSupport )
+    {
+        const int n = (int)( pts.size() / 3 );
+        if ( n < 1 || (int)rest.size() < n )
+            return false;
+        const camera_s *cam = Ed_Camera();
+        const float    *bestN = nullptr, *bestAt = nullptr;
+        int             bestCount  = 0;
+        float           bestFacing = 0.0f;
+        for ( int c = 0; c < n; ++c )
+        {
+            const kconRest_t &rc = rest[(size_t)c];
+            for ( int k = 0; k < rc.count; ++k )
+            {
+                int count = 0;
+                for ( int i = 0; i < n; ++i )
+                {
+                    float rel[3];
+                    Sub3( &pts[(size_t)i * 3], rc.at[k], rel );
+                    if ( fabsf( Dot3( rel, rc.normal[k] ) ) <= KCON_PLANE_FIT_DIST )
+                        ++count;
+                }
+                const float facing = cam ? fabsf( Dot3( rc.normal[k], cam->vpn ) ) : 0.0f;
+                if ( count > bestCount || ( count == bestCount && facing > bestFacing + 1.0e-3f ) )
+                {
+                    bestN      = rc.normal[k];
+                    bestAt     = rc.at[k];
+                    bestCount  = count;
+                    bestFacing = facing;
+                }
+            }
+        }
+        if ( !bestN || bestCount * 2 <= n )
+            return false;
+        if ( !KiwiCon_MakePlane( bestAt, bestN, nullptr, out ) )
+            return false;
+        if ( outSupport )
+            *outSupport = bestCount;
+        return true;
+    }
+
+    // A point placed straight up / down off the plane: the chain is 3D on purpose.
+    bool VerticalOffPlane( const std::vector<float> &pts, const std::vector<kconRest_t> &rest,
+                           const kconPlane_t &pl )
+    {
+        const int n = (int)( pts.size() / 3 );
+        for ( int i = 0; i < n && i < (int)rest.size(); ++i )
+        {
+            float rel[3];
+            Sub3( &pts[(size_t)i * 3], pl.origin, rel );
+            if ( rest[(size_t)i].vertical && fabsf( Dot3( rel, pl.normal ) ) > KCON_PLANE_FIT_DIST )
+                return true;
+        }
+        return false;
+    }
+
+    // Lay every point of a chain with a majority plane onto it.  A point clicked over empty
+    // space slides along its click ray (it stays under the pixel it was placed at); a point
+    // on a real surface, or one whose ray grazes the plane, drops straight onto it.  `rays`
+    // holds origin + unit dir per point (6 floats; a zero dir never slides).  Returns the
+    // number of points moved off their spot by more than the on-plane tolerance.
+    int LayOntoMajorityPlane( std::vector<float> &pts, const std::vector<kconRest_t> &rest,
+                              const std::vector<float> &rays )
+    {
+        const int n = (int)( pts.size() / 3 );
+        kconPlane_t pl;
+        int         support = 0;
+        if ( n < 3 || (int)rest.size() < n || (int)rays.size() < n * 6
+          || !MajorityPlane( pts, rest, &pl, &support ) || VerticalOffPlane( pts, rest, pl ) )
+            return 0;
+        int moved = 0;
+        for ( int i = 0; i < n; ++i )
+        {
+            float      *p = &pts[(size_t)i * 3];
+            float       rel[3];
+            Sub3( p, pl.origin, rel );
+            const float off = Dot3( rel, pl.normal );
+            if ( off == 0.0f )
+                continue;
+            float q[3];
+            Mad3( p, pl.normal, -off, q );     // straight onto the plane
+            const float *ro = &rays[(size_t)i * 6], *rd = ro + 3;
+            const float  den = Dot3( rd, pl.normal );
+            if ( rest[(size_t)i].vacant && fabsf( off ) > KCON_PLANE_FIT_DIST
+              && fabsf( den ) >= 1.0e-3f )
+            {
+                float orel[3];
+                Sub3( pl.origin, ro, orel );
+                const float t = Dot3( orel, pl.normal ) / den;
+                if ( t > 0.0f )
+                    Mad3( ro, rd, t, q );      // along the click ray, under the same pixel
+            }
+            if ( fabsf( off ) > KCON_PLANE_FIT_DIST )
+                ++moved;
+            Copy3( q, p );
+        }
+        return moved;
+    }
+
     // Static numeric-field labels; line tools add bearing, round tools add sides.
     const kiwiNumField_t KCON_FIELDS_LEN[1] =
     { { "length", KNUM_LENGTH, false } };
@@ -1985,6 +2119,7 @@ namespace
             m_numWorld  = 0.0f;
             m_hasAngle  = false;
             m_angleDeg  = 0.0f;
+            m_snap      = snap_result_t();     // KIWI: never the last gesture's rest
             // World ground is only the fallback bearing surface.
             m_bearingNormal[0] = 0.0f;
             m_bearingNormal[1] = 0.0f;
@@ -2033,6 +2168,9 @@ namespace
 
         // Intrinsically planar shapes project; free curves accept resolved WORLD points.
         virtual bool PlanarOnly() const { return true; }
+
+        // KIWI (2026-10-29): the open chain's majority plane (KiwiCon_ToolChainPlane).
+        virtual bool ChainPlane( kconPlane_t *out ) const { (void)out; return false; }
 
         void MouseMove( const pick_result_t &pick, const snap_result_t &snap ) override
         {
@@ -2165,7 +2303,7 @@ namespace
         {
             // Do not advertise a plane for free tools that do not use one.
             if ( ( PlanarOnly() && ( PointCount() >= 1 || KiwiCon_PlaneIsExplicit() ) ) || m_planeLock )
-                DrawWorkingPlane();
+                DrawWorkingPlane( m_plane );
             DrawChain();
         }
 
@@ -2416,24 +2554,30 @@ namespace
 
         // Bounded screen-space indicator for the active planar gesture. Fade at
         // grazing angles and draw it before geometry so budget loss drops it first.
-        void DrawWorkingPlane()
+        void DrawWorkingPlane( const kconPlane_t &pl )
         {
             const camera_s *c = Ed_Camera();
             if ( !c )
                 return;
 
             // Squared grazing fade; suppress a near-edge-on screen smear.
-            const float d   = Dot3( m_plane.normal, c->vpn );
+            const float d   = Dot3( pl.normal, c->vpn );
             const float fade = d * d;
             if ( fade < KCON_PLANE_FADE_MIN )
                 return;
 
             // Anchor at the first point, or the explicit plane origin before placement.
+            // KIWI: seated on the plane - a Line's first point may be off its majority plane.
             float o[3];
             if ( PointCount() >= 1 )
+            {
                 FirstPoint( o );
+                float rel[3];
+                Sub3( o, pl.origin, rel );
+                Mad3( o, pl.normal, -Dot3( rel, pl.normal ), o );
+            }
             else
-                Copy3( m_plane.origin, o );
+                Copy3( pl.origin, o );
 
             // Keep a stable screen size at every camera distance.
             const float perPx = KiwiCam_WorldPerPixel( o );
@@ -2455,7 +2599,7 @@ namespace
                 const float su = ( i == 0 || i == 3 ) ? -half : half;
                 const float sv = ( i < 2 )            ? -half : half;
                 for ( int kk = 0; kk < 3; ++kk )
-                    corner[i][kk] = o[kk] + m_plane.u[kk] * su + m_plane.v[kk] * sv;
+                    corner[i][kk] = o[kk] + pl.u[kk] * su + pl.v[kk] * sv;
             }
             for ( int i = 0; i < 4; ++i )
                 if ( !KiwiLines_Add( corner[i], corner[( i + 1 ) % 4] ) )
@@ -2463,12 +2607,12 @@ namespace
 
             const float cross = half * KCON_PLANE_CROSS_FRAC;
             float a[3], b[3];
-            for ( int kk = 0; kk < 3; ++kk ) { a[kk] = o[kk] - m_plane.u[kk] * cross;
-                                               b[kk] = o[kk] + m_plane.u[kk] * cross; }
+            for ( int kk = 0; kk < 3; ++kk ) { a[kk] = o[kk] - pl.u[kk] * cross;
+                                               b[kk] = o[kk] + pl.u[kk] * cross; }
             if ( !KiwiLines_Add( a, b ) )
                 return;
-            for ( int kk = 0; kk < 3; ++kk ) { a[kk] = o[kk] - m_plane.v[kk] * cross;
-                                               b[kk] = o[kk] + m_plane.v[kk] * cross; }
+            for ( int kk = 0; kk < 3; ++kk ) { a[kk] = o[kk] - pl.v[kk] * cross;
+                                               b[kk] = o[kk] + pl.v[kk] * cross; }
             KiwiLines_Add( a, b );
         }
 
@@ -2553,6 +2697,7 @@ namespace
                 { "aim",  "Z guide = vertical" },
                 { "Z",    "Vertical lock" },
                 { "S",    "Spline span on/off" },
+                { "P",    "Plane detection on/off" },
                 { "Esc",  "Drop last point" },
             };
             *out = s_curve;
@@ -2565,10 +2710,32 @@ namespace
             m_noTailPoint  = false;
             m_anyLmbPoint  = false;
             m_splineMode   = false;
+            m_planeDetect  = false;
             m_smooth.clear();
             m_movable.clear();
             m_rays.clear();
+            m_rest.clear();
             return KiwiDrawTool::Begin();
+        }
+
+        // KIWI (2026-10-29): the plane most placed points share (kconRest_t, MajorityPlane).
+        bool ChainPlane( kconPlane_t *out ) const override
+        {
+            if ( !m_planeDetect || m_planeLock || m_rest.size() * 3 != m_pts.size() )
+                return false;
+            kconPlane_t pl;
+            if ( !MajorityPlane( m_pts, m_rest, &pl, nullptr ) || VerticalOffPlane( m_pts, m_rest, pl ) )
+                return false;
+            *out = pl;
+            return true;
+        }
+
+        bool AnySmooth() const
+        {
+            for ( size_t k = 0; k < m_smooth.size(); ++k )
+                if ( m_smooth[k] )
+                    return true;
+            return false;
         }
 
         // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction face
@@ -2594,8 +2761,50 @@ namespace
             for ( int k = 0; k < 6; ++k )
                 out[k] = 0.0f;                 // no ray: a zero direction never slides
         }
-        void RecordCursorSource( std::vector<unsigned char> &movable, std::vector<float> &rays ) const
+        void RecordCursorSource( std::vector<unsigned char> &movable, std::vector<float> &rays,
+                                 std::vector<kconRest_t> &rest ) const
         {
+            // KIWI (2026-10-29): the plane the cursor rested on (MajorityPlane's candidate).
+            kconRest_t rs;
+            if ( m_snap.valid )
+            {
+                rs.vacant = m_snap.rest == SNAP_REST_CHAIN || m_snap.rest == SNAP_REST_GROUND
+                         || m_snap.rest == SNAP_REST_VIEW;
+                if ( m_snap.havePlane && m_snap.rest != SNAP_REST_NONE && m_snap.rest != SNAP_REST_VIEW )
+                {
+                    Copy3( m_snap.planeNormal, rs.normal[0] );
+                    Copy3( m_snap.restPoint, rs.at[0] );
+                    if ( Norm3( rs.normal[0] ) )
+                        rs.count = 1;
+                }
+                // A snap onto a brush's edge / corner / face: the brush faces through the point.
+                const selbrush_t *b = m_snap.source.brush;
+                if ( b && KiwiSnap_IsGeometry( m_snap.type ) && Sel_BrushLive( b )
+                  && b->def && b->def->faces )
+                {
+                    for ( int f = 0; f < b->def->faceCount && rs.count < KCON_REST_PLANES; ++f )
+                    {
+                        const face_t *fc = &b->def->faces[f];
+                        if ( fabsf( Dot3( fc->plane.normal, m_snap.position ) - fc->plane.dist ) > 0.1f )
+                            continue;
+                        Copy3( fc->plane.normal, rs.normal[rs.count] );
+                        Copy3( m_snap.position, rs.at[rs.count] );
+                        if ( Norm3( rs.normal[rs.count] ) )
+                            ++rs.count;
+                    }
+                }
+            }
+            // Straight up / down from the last point by Z lock or the Z guide: 3D on purpose.
+            if ( !m_pts.empty() && ( m_zLock || ( m_snap.valid && m_snap.type == SNAP_AXIS ) ) )
+            {
+                float a[3], d[3];
+                LastPoint( a );
+                Sub3( m_cur, a, d );
+                const float len = Len3( d );
+                rs.vertical = len > 1.0e-3f && fabsf( d[2] ) >= len * 0.9999f;
+            }
+            rest.push_back( rs );
+
             float r[6];
             CursorRay( r );
             const bool haveRay = ( r[3] != 0.0f || r[4] != 0.0f || r[5] != 0.0f );
@@ -2637,6 +2846,23 @@ namespace
                 return true;
             }
 
+            if ( vk == 0x50 && !mods )                  // P: plane detection on / off
+            {
+                m_planeDetect = !m_planeDetect;
+                Sys_Printf( "Line: plane detection %s.\n", m_planeDetect
+                            ? "ON (points are laid onto the plane most of the line is on)" : "off" );
+                if ( m_planeDetect && !AnySmooth() )
+                {
+                    const int moved = LayOntoMajorityPlane( m_pts, m_rest, m_rays );
+                    if ( moved > 0 )
+                        Sys_Printf( "Line: %i point%s laid onto the plane most of the line is on.\n",
+                                    moved, moved == 1 ? "" : "s" );
+                }
+                UpdateHud();
+                g_nUpdateBits |= 1;
+                return true;
+            }
+
             // Remove one point; an empty-chain Esc falls through to command cancel.
             if ( vk == 0x1B && !m_pts.empty() )         // VK_ESCAPE
             {
@@ -2646,6 +2872,8 @@ namespace
                     m_movable.pop_back();
                     m_rays.resize( m_rays.size() - 6 );
                 }
+                if ( !m_rest.empty() )
+                    m_rest.pop_back();
                 if ( !m_smooth.empty() )
                     m_smooth.pop_back();
                 if ( !m_smooth.empty() )
@@ -2667,6 +2895,7 @@ namespace
             m_smooth.clear();
             m_movable.clear();
             m_rays.clear();
+            m_rest.clear();
         }
 
         bool OnClick( bool doubleClick ) override
@@ -2690,10 +2919,20 @@ namespace
                 Finish();
                 return false;
             }
-            RecordCursorSource( m_movable, m_rays );
+            RecordCursorSource( m_movable, m_rays, m_rest );
             PushPoint( m_cur );
             m_smooth.push_back( m_splineMode ? 1 : 0 );   // the span leaving this point
             m_anyLmbPoint = true;
+            // KIWI (2026-10-29): once most points share a plane, the rest are laid onto it as
+            // they are placed, so the chain on screen is the face that will be stored.
+            // Spline chains are layout curves and keep their points (as in Finish).
+            if ( m_planeDetect && !AnySmooth() )
+            {
+                const int moved = LayOntoMajorityPlane( m_pts, m_rest, m_rays );
+                if ( moved > 0 )
+                    Sys_Printf( "Line: %i point%s laid onto the plane most of the line is on.\n",
+                                moved, moved == 1 ? "" : "s" );
+            }
             UpdateHud();
             return true;
         }
@@ -2702,9 +2941,12 @@ namespace
         // a plain chain draws through the base helper.
         void DrawWorld() override
         {
-            bool anySmooth = false;
-            for ( size_t i = 0; i < m_smooth.size() && !anySmooth; ++i )
-                anySmooth = m_smooth[i] != 0;
+            // KIWI (2026-10-29): the cursor rests on the line's majority plane over empty
+            // space - show that working plane like the planar tools do.
+            kconPlane_t chain;
+            if ( m_snap.valid && m_snap.rest == SNAP_REST_CHAIN && ChainPlane( &chain ) )
+                DrawWorkingPlane( chain );
+            const bool anySmooth = AnySmooth();
             if ( !anySmooth || PointCount() < 1 )
             {
                 KiwiDrawTool::DrawWorld();
@@ -2747,9 +2989,10 @@ namespace
             const int n = PointCount();
             if ( n == 0 )
             {
-                SetHud( "line%s%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans",
+                SetHud( "line%s%s%s  ·  click: first point  ·  keep clicking to chain  ·  %s  ·  S: spline spans  ·  P: plane detection",
                         m_splineMode ? " [SPLINE]" : "",
                         m_planeLock ? " [ON FACE]" : "",
+                        m_planeDetect ? " [PLANE]" : "",
                         m_anyLmbPoint ? "RMB: end (no point)"
                                       : "RMB: place a point and end" );
                 return;
@@ -2761,11 +3004,12 @@ namespace
             KiwiUnits_Format( b,  sizeof( b ),  Len3( d ) );
             KiwiUnits_Format( dz, sizeof( dz ), d[2] );
             // Advertise both the aimable Z guide and the explicit Z lock.
-            SetHud( "line%s%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
+            SetHud( "line%s%s%s  %i pts  seg %s  dz %s%s  ·  %s  ·  %s  ·  "
                     "Enter: finish here  ·  "
-                    "Esc: drop last  ·  S: spline span  ·  vertical: aim the Z guide%s",
+                    "Esc: drop last  ·  S: spline span  ·  P: plane detection  ·  vertical: aim the Z guide%s",
                     m_splineMode ? " [SPLINE]" : "",
                     m_planeLock ? " [ON FACE]" : "",
+                    m_planeDetect ? " [PLANE]" : "",
                     n, b, dz, m_zLock ? "  [Z LOCK]" : "",
                     ( n >= 3 && NearFirstPoint() )
                         ? "click: CLOSE the loop"
@@ -2781,6 +3025,7 @@ namespace
             std::vector<float> pts = m_pts;
             std::vector<unsigned char> movable = m_movable;
             std::vector<float>         rays    = m_rays;
+            std::vector<kconRest_t>    rest    = m_rest;
             // Append a tail only below the cap and never for post-LMB RMB finish.
             if ( !m_wantClosed && m_haveCur && !m_noTailPoint
               && PointCount() < KCON_MAX_POINTS )
@@ -2799,16 +3044,25 @@ namespace
                     pts.push_back( m_cur[0] );
                     pts.push_back( m_cur[1] );
                     pts.push_back( m_cur[2] );
-                    RecordCursorSource( movable, rays );
+                    RecordCursorSource( movable, rays, rest );
                 }
             }
             // KIWI (2026-10-27, user: "If I draw a line like this, there is no construction
             // face made"): a cut started on the wall beside a face that sits proud of it (or
             // tilted off it) slides onto the face, under the same pixels; see
             // KiwiRegion_FlattenChain.  Spline chains are layout curves and keep their points.
-            bool anySmooth = false;
-            for ( size_t k = 0; k < m_smooth.size(); ++k )
-                anySmooth = anySmooth || m_smooth[k] != 0;
+            const bool anySmooth = AnySmooth();
+            // KIWI (2026-10-29, user: "if the majority of points are on a single plane, in a
+            // single multi point line operation, assume the user wants it on 1 plane to make a
+            // face and adjust the points to be in-plane"): the tail point included.  First, so
+            // the construction-face slide below sees the planar chain.
+            if ( m_planeDetect && !anySmooth && rest.size() * 3 == pts.size() )
+            {
+                const int moved = LayOntoMajorityPlane( pts, rest, rays );
+                if ( moved > 0 )
+                    Sys_Printf( "Line: %i point%s laid onto the plane most of the line is on.\n",
+                                moved, moved == 1 ? "" : "s" );
+            }
             if ( !anySmooth && movable.size() * 3 == pts.size()
               && KiwiRegion_FlattenChain( pts, movable, rays, KCON_FLATTEN_MAX ) )
                 Sys_Printf( "Line: laid onto the construction face it crosses.\n" );
@@ -2834,6 +3088,7 @@ namespace
                 m_pts.clear();
                 m_movable.clear();
                 m_rays.clear();
+                m_rest.clear();
                 m_wantClosed  = false;
                 m_noTailPoint = false;
                 m_anyLmbPoint = false;
@@ -2861,6 +3116,7 @@ namespace
             m_smooth.clear();
             m_movable.clear();
             m_rays.clear();
+            m_rest.clear();
             m_wantClosed  = false;
             m_noTailPoint = false;
             m_anyLmbPoint = false;
@@ -2874,6 +3130,12 @@ namespace
         // Per placed point: may it slide onto a face (CursorMovable), and its click ray.
         std::vector<unsigned char> m_movable;
         std::vector<float>         m_rays;      // 6 floats per point: origin, unit dir
+        // KIWI (2026-10-29): what each placed point rested on (ChainPlane / LayOntoMajorityPlane).
+        std::vector<kconRest_t>    m_rest;
+        // KIWI (2026-10-31, user: "make this plane detection OFF unless ALT is pressed during the
+        // multi point line operation"; Alt opens the menu bar on release, so P toggles it): lay
+        // the line onto the plane most of its points share.  Off for every new line.
+        bool m_planeDetect = false;
         // One-gesture RMB finish-without-tail latch.
         bool m_noTailPoint = false;
         // One-chain LMB-history latch controlling RMB grammar and hints.
@@ -3808,6 +4070,11 @@ bool KiwiCon_ToolAnchor( float out[3] )
         return false;
     s_activeTool->LastPoint( out );
     return true;
+}
+
+bool KiwiCon_ToolChainPlane( kconPlane_t *out )
+{
+    return out && s_activeTool && s_activeTool->ChainPlane( out );
 }
 
 bool KiwiCon_ToolLoopStart( float out[3] )

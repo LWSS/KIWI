@@ -53,6 +53,8 @@ float KiwiExt_LadderDepth( const snap_result_t &snap, const float *ref,
 // Hertel-Mehlhorn starts with n - 2 triangles, so 128 also covers the worst case.
 #define KEXT_MAX_PROFILE   KREG_MAX_LOOP   // profile vertex cap (== the region cap)
 #define KEXT_MAX_PIECES    128    // convex pieces one concave region may produce
+// KIWI (2026-10-31): a CoD4 brush face holds at most 64 points (cod4map WindingFromPoints).
+#define KEXT_MAX_FACE_POINTS 64
 
 void KiwiExtrude_RegisterCommands();
 KiwiEditorCommand *KiwiExtrude_CommandForId( int commandId );

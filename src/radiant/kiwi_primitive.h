@@ -66,6 +66,19 @@ bool KiwiPrim_BuildPatchCylinderShell( const kconPlane_t &plane, const float cen
     std::vector<brush_t *> *out, const char **why );
 bool KiwiPrim_PatchBackfaces();
 void KiwiPrim_SetPatchBackfaces( bool enabled );
+// The inward-facing twin of a patch brush (a copy with its rows reversed, so its normal flips):
+// unlinked and rebuilt like the builders above, or null for a brush without a patch.
+brush_t *KiwiPrim_BuildPatchBackface( const brush_t *front );
+
+// KIWI (2026-10-31): a curve of a construction face (arc / spline) as curve patches - its wall
+// swept from `lo` to `hi` along plane.normal, and a flat cap at each end filling the sliver
+// between the curve and its chord (the straight edge a brush keeps there).  `ctrl` = the
+// quadratic controls in plane space (u,v pairs; odd count, ends on the curve), running along the
+// region's CCW loop so the outside is the chord's right.  7 spans per patch.  Unlinked and
+// rebuilt like the builders above; appends only when every patch was built.
+bool KiwiPrim_BuildCurvePatches( const kconPlane_t &plane, const float *ctrl, int ctrlCount,
+                                 float lo, float hi, int density,
+                                 std::vector<brush_t *> *out, const char **why );
 float KiwiPrim_PatchThickness();
 void KiwiPrim_SetPatchThickness( float thickness );
 

@@ -38,7 +38,8 @@
 //   5b. SNAP_ANGLE         free-tool 15-degree capture band
 //   6.  SNAP_FACE          unsnapped surface hit for non-planar placement
 //   7.  SNAP_ANGLE         planar placer's hard 15-degree quantization
-//   8.  SNAP_CPLANE        planar placer's in-plane grid
+//   8.  SNAP_CPLANE        planar placer's in-plane grid, or a free line's majority plane
+//                          over empty space (KIWI 2026-10-29)
 //   9.  SNAP_GRID          ground grid, then the view-aligned fallback grid
 //
 // Point snaps outrank line snaps, which outrank the area hit and grid. Construction
@@ -64,8 +65,10 @@
 // X-RAY ON neither test runs and back faces seed edge targets: every point is offered.
 //
 // With snapping disengaged, SNAP_NONE is a valid raw answer. Raw resolution is the
-// planar placer's plane, else the surface hit, else ray intersection with Z=0, else
-// a view-aligned plane through the tool anchor (or KSNAP_FALLBACK_DIST down the ray).
+// planar placer's plane, else the surface hit, else (KIWI 2026-10-29) the open line's
+// majority plane (KiwiCon_ToolChainPlane; its grid is in-plane, SNAP_CPLANE), else ray
+// intersection with Z=0, else a view-aligned plane through the tool anchor (or
+// KSNAP_FALLBACK_DIST down the ray).
 //
 // Construction geometry is outside Pick(), so it is scanned directly. Intersection
 // pairing is capped by KSNAP_MAX_CSEGS. Brush/patch candidates come from Pick(), and
@@ -105,10 +108,22 @@ enum snap_type_t
     SNAP_ENDPOINT,       // construction anchor or open-chain start
     SNAP_INTERSECTION,   // construction segment x segment / brush edge, brush edge x brush face
     SNAP_AXIS,           // axis line through the tool's last point
-    SNAP_CPLANE,         // planar placement only
+    SNAP_CPLANE,         // planar placement, or a free line's majority plane (KIWI)
     SNAP_ANGLE,
     SNAP_EDGE_QUARTER,   // KIWI: brush or construction segment quarter point
     SNAP_TYPE_COUNT
+};
+
+// KIWI (2026-10-29): what the raw ladder rested the cursor on this frame.
+enum snap_rest_t
+{
+    SNAP_REST_NONE = 0,
+    SNAP_REST_CPLANE,    // a planar placer's construction plane
+    SNAP_REST_REGION,    // a construction face
+    SNAP_REST_SURFACE,   // a brush / patch / model surface
+    SNAP_REST_CHAIN,     // empty space: the open line's majority plane (KiwiCon_ToolChainPlane)
+    SNAP_REST_GROUND,    // empty space: the world ground
+    SNAP_REST_VIEW,      // empty space: the view-aligned fallback
 };
 
 struct snap_result_t
@@ -122,6 +137,11 @@ struct snap_result_t
     // allowing bearing readouts to use the same coordinate space as placement.
     bool        havePlane      = false;
     float       planeNormal[3] = { 0.0f, 0.0f, 1.0f };   // unit vector
+
+    // KIWI (2026-10-29): the raw rung and its unsnapped hit; with planeNormal, the plane the
+    // cursor rested on (a draw tool records it per placed point).
+    snap_rest_t rest         = SNAP_REST_NONE;
+    float       restPoint[3] = { 0.0f, 0.0f, 0.0f };
 };
 
 inline bool KiwiSnap_Active( const snap_result_t &s )

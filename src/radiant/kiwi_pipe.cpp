@@ -61,6 +61,9 @@ namespace
     float s_lastBend   = 0.0f;              // bend radius; 0 = follow the section size
     int   s_lastBendSegs = 2;
     int   s_lastMiterMax = 135;             // sharper corners bend instead of spiking
+    // KIWI (2026-10-31, user: "add an option for the pipetool to create double sided faces (for
+    // tunnels you can walk on)"): every curve patch also gets its inward-facing twin.
+    bool  s_lastDoubleSided = false;
 
     // One spine: world points and whether the pipe along it is straight-sided.
     struct pipeSpine_t
@@ -366,7 +369,7 @@ namespace
         // gate on non-zero, so the table is rebuilt, as Loft does).
         int CommandOptions( const kiwiOption_t **out ) const override
         {
-            static const kiwiOption_t base[5] = {
+            static const kiwiOption_t base[6] = {
                 { "Vertex count (0 = round)", KOPT_INT,      nullptr, 0, 0, 0, KPIPE_MAX_SIDES, -1 },
                 { "Section size (radius)",    KOPT_NUMFIELD, nullptr, 0, 0, KPIPE_MIN_RADIUS, 4096, -1 },
                 { "Angle (degrees)",          KOPT_INT,      nullptr, 0, 0, 0, 360, -1 },
@@ -374,6 +377,7 @@ namespace
                                                                            KPRIM_PATCH_DENSITY_MAX, -1 },
                 { "Corners",                  KOPT_ENUM,     KPIPE_CORNER_NAMES, KPIPE_CORNER_COUNT, 0,
                                                                            0, 0, -1 },
+                { "Double-sided (walk inside)", KOPT_TOGGLE, nullptr, 0, 0, 0, 1, -1 },
             };
             static const kiwiOption_t bend[2] = {
                 { "Bend radius (to centre line)", KOPT_NUMFIELD, nullptr, 0, 2, KPIPE_MIN_RADIUS, 4096, -1 },
@@ -382,10 +386,10 @@ namespace
             static const kiwiOption_t miter[1] = {
                 { "Miter up to (degrees)",        KOPT_INT,      nullptr, 0, 0, 15, 170, -1 },
             };
-            static kiwiOption_t rows[7];
-            for ( int i = 0; i < 5; ++i )
+            static kiwiOption_t rows[8];
+            for ( int i = 0; i < 6; ++i )
                 rows[i] = base[i];
-            int n = 5;
+            int n = 6;
             if ( m_corner == KPIPE_CORNER_BEND )
             {
                 rows[n++] = bend[0];
@@ -402,8 +406,9 @@ namespace
             if ( opt == 2 ) return m_angle;
             if ( opt == 3 ) return m_density;
             if ( opt == 4 ) return m_corner;
-            if ( opt == 5 ) return m_corner == KPIPE_CORNER_MITER ? m_miterMax : 0;   // bend: numfield
-            if ( opt == 6 ) return m_bendSegs;
+            if ( opt == 5 ) return m_doubleSided ? 1 : 0;
+            if ( opt == 6 ) return m_corner == KPIPE_CORNER_MITER ? m_miterMax : 0;   // bend: numfield
+            if ( opt == 7 ) return m_bendSegs;
             return 0;
         }
         void OptionChanged( int opt, int value ) override
@@ -423,9 +428,11 @@ namespace
             }
             else if ( opt == 4 && value >= 0 && value < KPIPE_CORNER_COUNT )
                 m_corner = s_lastCorner = value;
-            else if ( opt == 5 && m_corner == KPIPE_CORNER_MITER )
+            else if ( opt == 5 )
+                m_doubleSided = s_lastDoubleSided = value != 0;
+            else if ( opt == 6 && m_corner == KPIPE_CORNER_MITER )
                 m_miterMax = s_lastMiterMax = value < 15 ? 15 : value > 170 ? 170 : value;
-            else if ( opt == 6 )
+            else if ( opt == 7 )
                 m_bendSegs = s_lastBendSegs = value < 1 ? 1 : value > KPIPE_BEND_SEGS_MAX ? KPIPE_BEND_SEGS_MAX : value;
             s_lastAngle = m_angle;
             UpdateHud();
@@ -508,6 +515,7 @@ namespace
             m_bend    = s_lastBend;
             m_bendSegs = s_lastBendSegs;
             m_miterMax = s_lastMiterMax;
+            m_doubleSided = s_lastDoubleSided;
             m_density = KiwiPrim_PatchDensity();
             FirstFrame( &m_first );
             Copy3( m_first.p, m_handleBase );
@@ -559,15 +567,33 @@ namespace
                 g_nUpdateBits |= 1;
                 return;
             }
+            // KIWI (2026-10-31): a walkable tunnel - every curve patch also faces inward.  Brush
+            // prisms are solid and stay as they are.
+            int backs = 0;
+            if ( m_doubleSided )
+            {
+                const size_t front = defs.size();
+                for ( size_t i = 0; i < front; ++i )
+                    if ( brush_t *back = KiwiPrim_BuildPatchBackface( defs[i] ) )
+                    {
+                        defs.push_back( back );
+                        ++backs;
+                    }
+            }
             Select_Deselect( 1 );
             KiwiCmd_UndoBegin( "pipe" );
             for ( size_t i = 0; i < defs.size(); ++i )
                 KiwiExtrude_LandDef( defs[i] );
             char r[32];
             KiwiUnits_Format( r, sizeof( r ), m_radius );
-            Sys_Printf( "Pipe: radius %s - %i brush%s, %i curve patch%s%s.\n", r,
+            Sys_Printf( "Pipe: radius %s - %i brush%s, %i curve patch%s%s%s.\n", r,
                         brushes, brushes == 1 ? "" : "es", patches, patches == 1 ? "" : "es",
+                        backs ? " (each double-sided)" : "",
                         rejected ? " (some segments were too short or degenerate)" : "" );
+            if ( m_doubleSided && brushes > 0 )
+                Sys_Printf( "Pipe: double-sided applies to curve patches; the %i brush prism%s %s "
+                            "solid - use vertex count 0 (round) for a tunnel you can walk inside.\n",
+                            brushes, brushes == 1 ? "" : "s", brushes == 1 ? "is" : "are" );
             g_nUpdateBits = -1;
         }
 
@@ -1181,12 +1207,13 @@ namespace
                 _snprintf( corners, sizeof( corners ), "  %s corners",
                            m_corner == KPIPE_CORNER_MITER ? "miter" : "butt" );
             corners[sizeof( corners ) - 1] = '\0';
+            const char *sided = m_doubleSided ? "  double-sided" : "";
             if ( m_sides < 3 )
-                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  round  angle %i%s  ->  %s",
-                           r, m_angle, corners, what );
+                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  round  angle %i%s%s  ->  %s",
+                           r, m_angle, corners, sided, what );
             else
-                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  %i sides  angle %i%s  ->  %s",
-                           r, m_sides, m_angle, corners, what );
+                _snprintf( m_hud, sizeof( m_hud ), "pipe  radius %s  %i sides  angle %i%s%s  ->  %s",
+                           r, m_sides, m_angle, corners, sided, what );
             m_hud[sizeof( m_hud ) - 1] = '\0';
         }
 
@@ -1201,6 +1228,7 @@ namespace
         float       m_bend    = 0.0f;           // 0 = the section size
         int         m_bendSegs = 2;
         int         m_miterMax = 135;
+        bool        m_doubleSided = false;      // curve patches get inward-facing twins
         bool        m_grab    = false;
         float       m_start   = 0.0f;
         char        m_hud[192] = { 0 };

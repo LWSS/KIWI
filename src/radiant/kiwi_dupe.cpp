@@ -1911,7 +1911,8 @@ bool KiwiDupe_CanArray()
 bool KiwiDupe_CanDuplicate()
 {
     // Edge-only typed selections leave selected_brushes empty; include that dispatch arm.
-    return CloneableSelectedCount() > 0 || KiwiConSel_CanDuplicateEdges();
+    return CloneableSelectedCount() > 0 || KiwiConSel_CanDuplicateEdges()
+        || KiwiConSel_CanDuplicateFaces();
 }
 
 bool KiwiDupe_DispatchInstant( unsigned int cmdId )
@@ -1922,14 +1923,20 @@ bool KiwiDupe_DispatchInstant( unsigned int cmdId )
     // Any live typed edge routes to construction-line duplication. Test it first:
     // edge-only selection has no legacy selected brushes, and mixed selection must
     // not clone the selected edges' owner brushes.
-    if ( KiwiConSel_CanDuplicateEdges() )
+    // KIWI (2026-10-31): selected brush faces become construction faces, the same way.
+    const bool edges = KiwiConSel_CanDuplicateEdges();
+    const bool faces = KiwiConSel_CanDuplicateFaces();
+    if ( edges || faces )
     {
         if ( KiwiCmd_Active() )
         {
             Sys_Printf( "Duplicate: finish the current command first.\n" );
             return true;
         }
-        KiwiConSel_DuplicateEdgesAsLines();
+        if ( edges )
+            KiwiConSel_DuplicateEdgesAsLines();
+        if ( faces )
+            KiwiConSel_DuplicateFacesAsRegions();
         return true;
     }
 

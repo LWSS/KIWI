@@ -1528,6 +1528,9 @@ bool WriteImageMaterial(const ImageMaterialRequest& request, const LogFn& log,
     }
     if (request.surfaceType > 0)
         edits.surfaceTypeBits = request.surfaceType << cod4::kSurfaceTypeShift;
+    edits.usage = static_cast<std::uint8_t>(request.usage);
+    edits.autoTexScaleWidth = static_cast<std::uint16_t>(request.autoTexScaleWidth);
+    edits.autoTexScaleHeight = static_cast<std::uint16_t>(request.autoTexScaleHeight);
     cod4::MaterialWriteResult result;
     if (!cod4::WriteEditedMaterial(request.templateMaterial, request.rawRoot, request.name,
                                    edits, &result, error)) {

@@ -503,27 +503,6 @@ void PrintConversion( const char *name, const kiwiMatSource_t &source,
     Sys_Printf( "  refresh: material, texture browser, brush faces and patches refreshed live\n" );
 }
 
-void ConvertAllFromSnapshot()
-{
-    std::vector<std::string> names;
-    names.reserve( s_health.size() );
-    for ( size_t i = 0; i < s_health.size(); ++i )
-        names.push_back( s_health[i].name );
-
-    int converted = 0;
-    for ( size_t i = 0; i < names.size(); ++i )
-    {
-        char err[512] = { 0 };
-        if ( KiwiMatConvert_ToLit( names[i].c_str(), err, sizeof( err ) ) )
-            ++converted;
-        else
-            Sys_Printf( "Material convert FAILED: '%s': %s\n", names[i].c_str(), err );
-    }
-    ScanMap( true );
-    Sys_Printf( "Material convert: %d of %d map material(s) converted.\n",
-                converted, (int)names.size() );
-}
-
 } // namespace
 
 bool KiwiMatConvert_MaterialIsNonLit( const Material *material )
@@ -838,50 +817,4 @@ bool KiwiMatConvert_HandleTextureContextCommand( unsigned int command, qtexture_
                      MB_OK | MB_ICONERROR );
     }
     return true;
-}
-
-void KiwiMatConvert_DrawMapHealth()
-{
-    if ( !s_healthValid )
-        ScanMap( false );
-
-    ImGui::Separator();
-    ImGui::TextUnformatted( "Map health" );
-    const ImVec4 statusColor = s_nonLitSurfaceCount
-                             ? ImVec4( 1.0f, 0.55f, 0.25f, 1.0f )
-                             : ImVec4( 0.45f, 0.85f, 0.52f, 1.0f );
-    ImGui::TextColored( statusColor, "%d surfaces use non-lit materials (no runtime shadows)",
-                        s_nonLitSurfaceCount );
-
-    char button[160];
-    _snprintf( button, sizeof( button ),
-               "Convert all unlit materials used by this map (%d)", (int)s_health.size() );
-    button[sizeof( button ) - 1] = '\0';
-    ImGui::BeginDisabled( s_health.empty() );
-    if ( ImGui::Button( button, ImVec2( -1.0f, 0.0f ) ) )
-        ImGui::OpenPopup( "Convert map materials to lit?" );
-    ImGui::EndDisabled();
-
-    if ( ImGui::BeginPopupModal( "Convert map materials to lit?", nullptr,
-                                 ImGuiWindowFlags_AlwaysAutoResize ) )
-    {
-        ImGui::TextWrapped( "The following material definitions will be replaced in raw. "
-                            "Every existing raw/main copy is moved to materials/_kiwi_backup first." );
-        ImGui::BeginChild( "##unlit_material_list", ImVec2( 540.0f, 180.0f ),
-                           ImGuiChildFlags_Borders );
-        for ( size_t i = 0; i < s_health.size(); ++i )
-            ImGui::BulletText( "%s  [%s, %d faces]", s_health[i].name.c_str(),
-                               s_health[i].techSet.c_str(), s_health[i].faceCount );
-        ImGui::EndChild();
-
-        if ( ImGui::Button( "Convert all", ImVec2( 160.0f, 0.0f ) ) )
-        {
-            ConvertAllFromSnapshot();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if ( ImGui::Button( "Cancel", ImVec2( 160.0f, 0.0f ) ) )
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
-    }
 }

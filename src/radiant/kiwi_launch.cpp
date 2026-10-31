@@ -1636,7 +1636,6 @@ void DrawWindow()
         }
     }
 
-    KiwiMatConvert_DrawMapHealth();
     // KIWI GLASS
     KiwiGlass_DrawBuildCheck();   // panes that won't break, non-blocking
     // KIWI END

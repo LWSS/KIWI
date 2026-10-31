@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include <mikktspace/mikktspace.h>
+
 namespace xmodel {
 namespace {
 
@@ -288,6 +290,83 @@ Vec3 fallbackTangent(const Vec3& normal) {
     return cross(basis, normal) / length(cross(basis, normal));
 }
 
+// MikkTSpace wants faces counter-clockwise about their normals; the stored
+// corners are clockwise (CoD4), so face vertex i reads stored corner
+// kMikkCorner[i].
+constexpr std::array<int, 3> kMikkCorner{0, 2, 1};
+
+std::array<RawVertex, 3>& mikkTriangle(const SMikkTSpaceContext* context,
+                                       int face) {
+    auto& triangles =
+        *static_cast<std::vector<std::array<RawVertex, 3>>*>(context->m_pUserData);
+    return triangles[static_cast<size_t>(face)];
+}
+
+RawVertex& mikkCorner(const SMikkTSpaceContext* context, int face, int vert) {
+    return mikkTriangle(context, face)[static_cast<size_t>(kMikkCorner[vert])];
+}
+
+int mikkNumFaces(const SMikkTSpaceContext* context) {
+    return static_cast<int>(
+        static_cast<std::vector<std::array<RawVertex, 3>>*>(context->m_pUserData)
+            ->size());
+}
+
+int mikkNumVerticesOfFace(const SMikkTSpaceContext*, const int) {
+    return 3;
+}
+
+void mikkPosition(const SMikkTSpaceContext* context, float out[], const int face,
+                  const int vert) {
+    const RawVertex& raw = mikkCorner(context, face, vert);
+    out[0] = raw.position[0];
+    out[1] = raw.position[1];
+    out[2] = raw.position[2];
+}
+
+void mikkNormal(const SMikkTSpaceContext* context, float out[], const int face,
+                const int vert) {
+    const RawVertex& raw = mikkCorner(context, face, vert);
+    out[0] = raw.normal[0];
+    out[1] = raw.normal[1];
+    out[2] = raw.normal[2];
+}
+
+void mikkTexCoord(const SMikkTSpaceContext* context, float out[], const int face,
+                  const int vert) {
+    const RawVertex& raw = mikkCorner(context, face, vert);
+    out[0] = raw.uv[0];
+    out[1] = raw.uv[1];
+}
+
+// Binormal = sign * cross(N, T), the same reconstruction the bakers use.
+void mikkSetTSpaceBasic(const SMikkTSpaceContext* context, const float tangent[],
+                        const float sign, const int face, const int vert) {
+    RawVertex& raw = mikkCorner(context, face, vert);
+    const Vec3 normal{raw.normal[0], raw.normal[1], raw.normal[2]};
+    Vec3 t{tangent[0], tangent[1], tangent[2]};
+    t = t - normal * dot(normal, t);
+    double tangentLength = length(t);
+    t = tangentLength > 1.0e-12 ? t / tangentLength : fallbackTangent(normal);
+    const Vec3 binormal = cross(normal, t) * (sign < 0.0f ? -1.0 : 1.0);
+    checkedVec3(t, raw.tangent);
+    checkedVec3(binormal, raw.binormal);
+}
+
+bool computeMikkTangents(std::vector<std::array<RawVertex, 3>>& triangles) {
+    SMikkTSpaceInterface callbacks{};
+    callbacks.m_getNumFaces = mikkNumFaces;
+    callbacks.m_getNumVerticesOfFace = mikkNumVerticesOfFace;
+    callbacks.m_getPosition = mikkPosition;
+    callbacks.m_getNormal = mikkNormal;
+    callbacks.m_getTexCoord = mikkTexCoord;
+    callbacks.m_setTSpaceBasic = mikkSetTSpaceBasic;
+    SMikkTSpaceContext context{};
+    context.m_pInterface = &callbacks;
+    context.m_pUserData = &triangles;
+    return genTangSpaceDefault(&context) != 0;
+}
+
 // The translation-only origin rebase (rotation untouched): the pivot picked
 // from the pre-pass bounds, subtracted from every vertex AFTER the meters ->
 // inches conversion. Bounds, radius, box-projected UVs and collision below all
@@ -312,10 +391,10 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
     std::unordered_map<VertexKey, uint16_t, VertexKeyHash> vertexMap;
     vertexMap.reserve(std::min<size_t>(source.triangles.size() * 3u,
                                        kMaxSurfaceElements));
-    // Per welded vertex, the sum of every incident triangle's raw (UV-derived,
-    // area-weighted) tangent frame; resolved after the triangle loop.
-    std::vector<Vec3> tangentSums;
-    std::vector<Vec3> binormalSums;
+    // Triangles that survive the checks, corners in stored (clockwise) order.
+    // Their tangent frames come from MikkTSpace after the loop, then they weld.
+    std::vector<std::array<RawVertex, 3>> kept;
+    kept.reserve(source.triangles.size());
 
     for (size_t triangleIndex = 0; triangleIndex < source.triangles.size();
          ++triangleIndex) {
@@ -422,18 +501,9 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
                                    : " produced a degenerate box projection");
             return false;
         }
-        Vec3 rawTangent = (edge1 * dv2 - edge2 * dv1) / uvDet;
-        Vec3 rawBinormal = (edge2 * du1 - edge1 * du2) / uvDet;
-
-        // Welding must ignore the tangent frame: it is per-triangle here, so
-        // keying on it forces ~3 unique vertices per triangle and overflows the
-        // engine's 32768-verts-per-surface assumption. Weld on
-        // position/normal/uv, accumulate each incident triangle's raw frame,
-        // and orthonormalize per welded vertex after the loop — the averaged
-        // basis also shades smoothly across shared edges.
         std::array<RawVertex, 3> cornerRaw{};
         for (size_t corner = 0; corner < 3; ++corner) {
-            RawVertex& raw = cornerRaw[corner];  // tangent/binormal stay zero for the weld key
+            RawVertex& raw = cornerRaw[corner];  // tangent/binormal: MikkTSpace, after the loop
             if (!checkedVec3(positions[corner], raw.position) ||
                 !checkedVec3(normals[corner], raw.normal) ||
                 !checkedFloat(uv[corner][0], raw.uv[0]) ||
@@ -468,31 +538,8 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
             }
         }
 
+        kept.push_back(cornerRaw);
         for (size_t corner = 0; corner < 3; ++corner) {
-            const RawVertex& raw = cornerRaw[corner];
-            VertexKey key = makeVertexKey(raw);
-            auto found = vertexMap.find(key);
-            if (found == vertexMap.end()) {
-                if (output.vertices.size() >= kMaxVerticesPerSurface) {
-                    // The vertex-aware chunker upstream keeps every surface's
-                    // welded vertex count under kMaxVerticesPerSurface, so this
-                    // is a defensive guard that should be unreachable.
-                    error = "material '" + source.materialName + "' exceeded " +
-                            std::to_string(kMaxVerticesPerSurface) +
-                            " welded vertices in one split surface after "
-                            "vertex-aware splitting (internal invariant)";
-                    return false;
-                }
-                uint16_t index = static_cast<uint16_t>(output.vertices.size());
-                output.vertices.push_back(raw);
-                tangentSums.push_back(Vec3{});
-                binormalSums.push_back(Vec3{});
-                found = vertexMap.emplace(key, index).first;
-            }
-            tangentSums[found->second] = tangentSums[found->second] + rawTangent;
-            binormalSums[found->second] =
-                binormalSums[found->second] + rawBinormal;
-            output.indices.push_back(found->second);
             output.bounds.add(positions[corner]);
             modelBounds.add(positions[corner]);
             radius = std::max(radius, length(positions[corner]));
@@ -529,32 +576,44 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
         output.collision.push_back(collision);
     }
 
-    if (output.indices.empty()) {
+    if (kept.empty()) {
         error = "material '" + source.materialName +
                 "' has no triangles left after skipping float-degenerate ones";
         return false;
     }
 
-    for (size_t vertexIndex = 0; vertexIndex < output.vertices.size();
-         ++vertexIndex) {
-        RawVertex& raw = output.vertices[vertexIndex];
-        const Vec3 vertexNormal{raw.normal[0], raw.normal[1], raw.normal[2]};
-        Vec3 tangent = tangentSums[vertexIndex] -
-                       vertexNormal * dot(vertexNormal, tangentSums[vertexIndex]);
-        double tangentLength = length(tangent);
-        if (tangentLength <= 1.0e-12)
-            tangent = fallbackTangent(vertexNormal);
-        else
-            tangent = tangent / tangentLength;
-        Vec3 crossNT = cross(vertexNormal, tangent);
-        double binormalSign =
-            dot(crossNT, binormalSums[vertexIndex]) < 0.0 ? -1.0 : 1.0;
-        Vec3 binormal = crossNT * binormalSign;
-        if (!checkedVec3(tangent, raw.tangent) ||
-            !checkedVec3(binormal, raw.binormal)) {
-            error = "material '" + source.materialName +
-                    "' produced a non-finite averaged tangent frame";
-            return false;
+    // Normal maps are baked (Blender, Substance, InstaMAT, xNormal) against
+    // MikkTSpace tangents; any other basis turns the bake's broad corrections
+    // into visible facets and lines on low-poly meshes, so use the same code.
+    if (!computeMikkTangents(kept)) {
+        error = "material '" + source.materialName +
+                "' MikkTSpace tangent generation failed";
+        return false;
+    }
+
+    // Weld on the full vertex, tangent frame included: MikkTSpace gives every
+    // corner with equal position/normal/uv the same frame unless it must split
+    // it (mirrored UVs), so this keeps the old vertex counts.
+    for (const std::array<RawVertex, 3>& triangle : kept) {
+        for (const RawVertex& raw : triangle) {
+            VertexKey key = makeVertexKey(raw);
+            auto found = vertexMap.find(key);
+            if (found == vertexMap.end()) {
+                if (output.vertices.size() >= kMaxVerticesPerSurface) {
+                    // The vertex-aware chunker upstream keeps every surface's
+                    // welded vertex count under kMaxVerticesPerSurface, so this
+                    // is a defensive guard that should be unreachable.
+                    error = "material '" + source.materialName + "' exceeded " +
+                            std::to_string(kMaxVerticesPerSurface) +
+                            " welded vertices in one split surface after "
+                            "vertex-aware splitting (internal invariant)";
+                    return false;
+                }
+                uint16_t index = static_cast<uint16_t>(output.vertices.size());
+                output.vertices.push_back(raw);
+                found = vertexMap.emplace(key, index).first;
+            }
+            output.indices.push_back(found->second);
         }
     }
     return true;

@@ -30,10 +30,13 @@ set(MODELIMPORT_CORE_SOURCES
     "${SRC_DIR}/radiant/modelimport/ki_pick.h"
     "${SRC_DIR}/radiant/modelimport/ki_job.cpp"
     "${SRC_DIR}/radiant/modelimport/ki_job.h"
+    "${SRC_DIR}/radiant/deps/mikktspace/mikktspace.c"
+    "${SRC_DIR}/radiant/deps/mikktspace/mikktspace.h"
 )
 
-# The core's header-only third-party code lives beside it in src/radiant/deps:
-# stb_image + stb_dxt (stb/) and nlohmann json (nlohmann/json.hpp).
+# The core's third-party code lives beside it in src/radiant/deps:
+# stb_image + stb_dxt (stb/), nlohmann json (nlohmann/json.hpp) and the
+# MikkTSpace tangent generator (mikktspace/, zlib licence, plain C).
 set(MODELIMPORT_DEPS_INCLUDE_DIRS
     "${SRC_DIR}/radiant/deps/stb"
     "${SRC_DIR}/radiant/deps"

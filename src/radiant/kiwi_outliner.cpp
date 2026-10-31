@@ -93,6 +93,13 @@ enum koutKind_t
     // listing worldspawn's lightgrid brushes (they leave "Brushes").  Like the Barbwire folder
     // it is not a drop target and cannot be renamed.
     KOUT_LIGHTGRID_FOLDER,
+    // KIWI (2026-10-31, user: "separate curves from brushes, they are not the same category"):
+    // worldspawn's curve patches (not terrain) leave "Brushes" for a "Curves" section of their
+    // own, as terrain does.  (KOUT_SECTION_CURVES is the construction section, an older name.)
+    KOUT_SECTION_PATCHES,
+    // KIWI (2026-10-31, user: "re-categorize the outliner to have Patches > Curves, Terrain"):
+    // the top-level "Patches" row; Curves (KOUT_SECTION_PATCHES) and Terrain are its folders.
+    KOUT_SECTION_PATCHROOT,
     KOUT_KIND_COUNT
 };
 
@@ -133,12 +140,15 @@ const unsigned KOUT_KEY_PARTICLES = 0xF000000Au;  // the Particles section
 const unsigned KOUT_KEY_GLASS     = 0xF000000Bu;  // the Glass section
 // KIWI END
 const unsigned KOUT_KEY_LIGHTGRID = 0xF000000Cu;  // the LightGrid folder inside Lights
+const unsigned KOUT_KEY_PATCHES   = 0xF000000Du;  // the Curves folder inside Patches
+const unsigned KOUT_KEY_PATCHROOT = 0xF000000Eu;  // the Patches section
 
 // Which of an entity's brushes a section lists: worldspawn splits its terrain meshes out
-// of "Brushes" into "Terrain" and its lightgrid brushes into Lights > LightGrid; every other
-// entity folder lists all of its own.  KOUT_FILTER_NOT_TERRAIN = worldspawn's "Brushes".
+// of "Brushes" into "Terrain", its curve patches into "Curves" and its lightgrid brushes into
+// Lights > LightGrid; every other entity folder lists all of its own.
+// KOUT_FILTER_NOT_TERRAIN = worldspawn's "Brushes" (no patch, no lightgrid).
 enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TERRAIN,
-                    KOUT_FILTER_LIGHTGRID };
+                    KOUT_FILTER_LIGHTGRID, KOUT_FILTER_CURVE };
 
 // KIWI (2026-10-28, user: "executerendercmds still takes forever" - the outliner was 80% of
 // it on london.map): a brush's class (terrain / lightgrid) and the per-entity counts come from
@@ -147,7 +157,8 @@ enum koutFilter_t { KOUT_FILTER_ALL = 0, KOUT_FILTER_NOT_TERRAIN, KOUT_FILTER_TE
 static_assert( (int)KOUT_FILTER_ALL == (int)KS_FILTER_ALL
             && (int)KOUT_FILTER_NOT_TERRAIN == (int)KS_FILTER_PLAIN
             && (int)KOUT_FILTER_TERRAIN == (int)KS_FILTER_TERRAIN
-            && (int)KOUT_FILTER_LIGHTGRID == (int)KS_FILTER_LIGHTGRID, "koutFilter_t == ksBrushFilter_t" );
+            && (int)KOUT_FILTER_LIGHTGRID == (int)KS_FILTER_LIGHTGRID
+            && (int)KOUT_FILTER_CURVE == (int)KS_FILTER_CURVE, "koutFilter_t == ksBrushFilter_t" );
 
 bool IsTerrainNode( const selbrush_t *b )
 {
@@ -157,6 +168,11 @@ bool IsTerrainNode( const selbrush_t *b )
 bool IsLightGridNode( const selbrush_t *b )
 {
     return b && ( KiwiScene_BrushClass( b ) & KS_CLASS_LIGHTGRID ) != 0;
+}
+
+bool IsCurveNode( const selbrush_t *b )
+{
+    return b && ( KiwiScene_BrushClass( b ) & KS_CLASS_CURVE ) != 0;
 }
 
 bool PassesFilter( const selbrush_t *b, koutFilter_t filter )
@@ -380,6 +396,8 @@ unsigned SectionKey( koutKind_t kind )
     {
     case KOUT_SECTION_BRUSHES:  return KOUT_KEY_BRUSHES;
     case KOUT_SECTION_TERRAIN:  return KOUT_KEY_TERRAIN;
+    case KOUT_SECTION_PATCHES:  return KOUT_KEY_PATCHES;
+    case KOUT_SECTION_PATCHROOT: return KOUT_KEY_PATCHROOT;
     case KOUT_SECTION_CURVES:   return KOUT_KEY_CURVES;
     case KOUT_SECTION_ENTITIES: return KOUT_KEY_ENTITIES;
     case KOUT_SECTION_LIGHTS:   return KOUT_KEY_LIGHTS;
@@ -971,14 +989,37 @@ void UGRowEntities( const koutRow_t &r, std::vector<entity_s *> &out )
 }
 
 // Worldspawn's terrain meshes (Terrain Sculpt chunks, Terrain-dialog patches) get
-// their own section; terrain inside a group or entity stays in that folder.
-void FlattenTerrain()
+// their own folder; terrain inside a group or entity stays in that folder.
+void FlattenTerrain( int indent )
 {
-    PushRow( KOUT_SECTION_TERRAIN, 0, KOUT_KEY_TERRAIN );
+    PushRow( KOUT_SECTION_TERRAIN, indent, KOUT_KEY_TERRAIN );
     s_rows.back().count = world_entity ? EntityBrushCount( world_entity, KOUT_FILTER_TERRAIN ) : 0;
     if ( Collapsed( KOUT_KEY_TERRAIN ) || !world_entity )
         return;
-    FlattenEntityBrushes( world_entity, 1, KOUT_FILTER_TERRAIN );
+    FlattenEntityBrushes( world_entity, indent + 1, KOUT_FILTER_TERRAIN );
+}
+
+// KIWI (2026-10-31): worldspawn's curve patches, as Terrain lists its terrain meshes; a curve
+// inside a group or entity stays in that folder.
+void FlattenCurvePatches( int indent )
+{
+    PushRow( KOUT_SECTION_PATCHES, indent, KOUT_KEY_PATCHES );
+    s_rows.back().count = world_entity ? EntityBrushCount( world_entity, KOUT_FILTER_CURVE ) : 0;
+    if ( Collapsed( KOUT_KEY_PATCHES ) || !world_entity )
+        return;
+    FlattenEntityBrushes( world_entity, indent + 1, KOUT_FILTER_CURVE );
+}
+
+// KIWI (2026-10-31): Patches > Curves, Terrain.
+void FlattenPatches()
+{
+    PushRow( KOUT_SECTION_PATCHROOT, 0, KOUT_KEY_PATCHROOT );
+    s_rows.back().count = world_entity ? EntityBrushCount( world_entity, KOUT_FILTER_CURVE )
+                                       + EntityBrushCount( world_entity, KOUT_FILTER_TERRAIN ) : 0;
+    if ( Collapsed( KOUT_KEY_PATCHROOT ) )
+        return;
+    FlattenCurvePatches( 1 );
+    FlattenTerrain( 1 );
 }
 
 // The "Construction Lines" section (KIWI 2026-09-27: was labelled "Curves", a CoD4 patch term).
@@ -1098,6 +1139,9 @@ void ComputeSectionEyes()
         {
             AddEye( KOUT_SECTION_BRUSHES,  e, KOUT_FILTER_NOT_TERRAIN );
             AddEye( KOUT_SECTION_TERRAIN,  e, KOUT_FILTER_TERRAIN );
+            AddEye( KOUT_SECTION_PATCHES,  e, KOUT_FILTER_CURVE );
+            AddEye( KOUT_SECTION_PATCHROOT, e, KOUT_FILTER_CURVE );
+            AddEye( KOUT_SECTION_PATCHROOT, e, KOUT_FILTER_TERRAIN );
             AddEye( KOUT_SECTION_LIGHTS,   e, KOUT_FILTER_LIGHTGRID );
             AddEye( KOUT_LIGHTGRID_FOLDER, e, KOUT_FILTER_LIGHTGRID );
             continue;
@@ -1120,7 +1164,7 @@ void Flatten()
     FlattenGroups();
     PushRow( KOUT_SPACER, 0, 0 );   // KIWI (2026-09-24, user): a blank line closes the Groups segment
     FlattenEntitySection( KOUT_SECTION_BRUSHES );
-    FlattenTerrain();
+    FlattenPatches();
     FlattenCurves();
     FlattenEntitySection( KOUT_SECTION_ENTITIES );
     FlattenEntitySection( KOUT_SECTION_LIGHTS );
@@ -1214,7 +1258,7 @@ void MarkSelectionFolders( bool force )
 
     // KIWI (2026-10-28): from the selected brushes, not every brush of every entity - a
     // selected object is always on selected_brushes (Sel_SyncToLegacy).
-    struct koutSelKinds_t { bool terrain = false, other = false, grid = false; };
+    struct koutSelKinds_t { bool terrain = false, other = false, grid = false, curve = false; };
     std::map<entity_s *, koutSelKinds_t> owners;
     for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
     {
@@ -1223,6 +1267,7 @@ void MarkSelectionFolders( bool force )
         koutSelKinds_t &k = owners[b->owner];
         if ( IsTerrainNode( b ) )                                     k.terrain = true;
         else if ( b->owner == world_entity && IsLightGridNode( b ) )  k.grid    = true;
+        else if ( b->owner == world_entity && IsCurveNode( b ) )      k.curve   = true;
         else                                                          k.other   = true;
     }
 
@@ -1236,10 +1281,12 @@ void MarkSelectionFolders( bool force )
 
         if ( e == world_entity )
         {
-            // Worldspawn lists its terrain under "Terrain", its lightgrid brushes under
-            // Lights > LightGrid, the rest under "Brushes".
+            // Worldspawn lists its terrain under "Terrain", its curve patches under "Curves",
+            // its lightgrid brushes under Lights > LightGrid, the rest under "Brushes".
             if ( anyOther )   AddFolderKey( s_selFolders, KOUT_KEY_BRUSHES );
             if ( anyTerrain ) AddFolderKey( s_selFolders, KOUT_KEY_TERRAIN );
+            if ( it->second.curve ) AddFolderKey( s_selFolders, KOUT_KEY_PATCHES );
+            if ( anyTerrain || it->second.curve ) AddFolderKey( s_selFolders, KOUT_KEY_PATCHROOT );
             if ( anyGrid )
             {
                 AddFolderKey( s_selFolders, KOUT_KEY_LIGHTS );
@@ -2068,6 +2115,94 @@ std::string UGPathOfBrush( const selbrush_t *sb )
     return ( sb && sb->owner && sb->owner != world_entity ) ? UGPathOf( sb->owner ) : std::string();
 }
 
+// KIWI: Alt-click on an object row selects what it belongs to - its innermost group, or the
+// group above once that one is wholly selected (Select Whole Group's growth).  An ungrouped
+// object selects its whole entity (a worldspawn brush just itself), a construction object its
+// construction group.  `additive` (Alt+Shift) adds instead of replacing the selection.
+void SelectRowOwner( const koutRow_t &r, bool additive )
+{
+    if ( r.kind == KOUT_CON_OBJECT )
+    {
+        const int group = KiwiCon_Group( r.conIndex );
+        if ( group < 0 )
+        {
+            SelectConRow( r.conIndex, additive, false );
+            return;
+        }
+        if ( !additive )
+        {
+            Sel_Clear( KiwiSel() );
+            Sel_SyncToLegacy();
+            KiwiConSel_Clear();
+            KiwiRegion_ClearSelection();
+            KiwiSun_ClearSelection();
+            KiwiRefImage_Select( -1 );
+        }
+        for ( int k = 0; k < KiwiCon_Count(); ++k )
+        {
+            if ( KiwiCon_Group( k ) != group )
+                continue;
+            kconSelItem_t it;
+            it.object = k;
+            it.kind   = KCONSEL_OBJECT;
+            it.index  = -1;
+            KiwiConSel_ApplyClick( it, true, false );
+        }
+        g_nUpdateBits = -1;
+        return;
+    }
+
+    selbrush_t *b     = r.kind == KOUT_BRUSH ? r.inst : nullptr;
+    entity_s   *owner = b ? b->owner : r.ent;
+    if ( b && !Sel_BrushLive( b ) )
+    {
+        Sys_Printf( "Outliner: that brush no longer exists — nothing selected.\n" );
+        return;
+    }
+    std::vector<selbrush_t *> pick;
+    std::string path = ( owner && owner != world_entity ) ? UGPathOf( owner ) : std::string();
+    if ( !path.empty() )
+    {
+        for ( ;; )
+        {
+            pick.clear();
+            UGBrushesOf( path, pick );
+            bool full = !pick.empty();
+            for ( size_t k = 0; k < pick.size() && full; ++k )
+                full = BrushSelected( pick[k] );
+            if ( !full || UGParent( path ).empty() )
+                break;
+            path = UGParent( path );
+        }
+        pick.clear();
+        UGBrushesOf( path, pick );
+    }
+    else if ( owner && owner != world_entity )
+    {
+        for ( selbrush_t *m = owner->brushes.ownerNext; m && m != &owner->brushes; m = m->ownerNext )
+            if ( Sel_BrushLive( m ) )
+                pick.push_back( m );
+    }
+    else if ( b )
+        pick.push_back( b );
+    if ( pick.empty() )
+        return;
+
+    selection_t &sel = KiwiSel();
+    if ( !additive )
+    {
+        Sel_Clear( sel );
+        KiwiConSel_Clear();
+        KiwiRegion_ClearSelection();
+        KiwiSun_ClearSelection();
+        KiwiRefImage_Select( -1 );
+    }
+    for ( size_t k = 0; k < pick.size(); ++k )
+        Sel_Add( sel, Sel_MakeObject( pick[k] ) );
+    Sel_SyncToLegacy();
+    g_nUpdateBits = -1;
+}
+
 // Select_Ungroup for one entity (select.cpp:5106-5146). Undo_AddEntity_W snapshots
 // entity and brushes; undo restores the entity before relinking its brushes.
 bool UngroupEntity( entity_s *inst, const char *op )
@@ -2133,7 +2268,8 @@ bool UngroupEntity( entity_s *inst, const char *op )
 //   Construction Lines = every construction object;  Images = every reference image.
 bool SectionIsBrushBacked( koutKind_t k )
 {
-    return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_ENTITIES
+    return k == KOUT_SECTION_BRUSHES || k == KOUT_SECTION_TERRAIN || k == KOUT_SECTION_PATCHES
+        || k == KOUT_SECTION_PATCHROOT || k == KOUT_SECTION_ENTITIES
         || k == KOUT_SECTION_LIGHTS  || k == KOUT_SECTION_MODELS  || k == KOUT_BARBWIRE_FOLDER
         || k == KOUT_SECTION_GROUPS  || k == KOUT_SECTION_PARTICLES || k == KOUT_LIGHTGRID_FOLDER
         // KIWI GLASS
@@ -2151,10 +2287,17 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh,
     for ( entity_s *e = entityInsts.next; e && e != &entityInsts; e = e->next )
     {
         koutFilter_t filter = KOUT_FILTER_ALL;
+        bool         orTerrain = false;             // Patches: curves OR terrain
         if ( e == world_entity )
         {
             if ( k == KOUT_SECTION_BRUSHES )      filter = KOUT_FILTER_NOT_TERRAIN;
             else if ( k == KOUT_SECTION_TERRAIN ) filter = KOUT_FILTER_TERRAIN;
+            else if ( k == KOUT_SECTION_PATCHES ) filter = KOUT_FILTER_CURVE;
+            else if ( k == KOUT_SECTION_PATCHROOT )
+            {
+                filter    = KOUT_FILTER_CURVE;
+                orTerrain = true;
+            }
             else if ( k == KOUT_SECTION_LIGHTS || k == KOUT_LIGHTGRID_FOLDER )
                                                   filter = KOUT_FILTER_LIGHTGRID;
             else                                  continue;
@@ -2175,7 +2318,7 @@ void SectionBrushes( koutKind_t k, int apply, int *n, int *nh,
             continue;
         for ( selbrush_t *b = e->brushes.ownerNext; b && b != &e->brushes; b = b->ownerNext )
         {
-            if ( !PassesFilter( b, filter ) )
+            if ( !PassesFilter( b, filter ) && !( orTerrain && PassesFilter( b, KOUT_FILTER_TERRAIN ) ) )
                 continue;
             if ( collect )
                 collect->push_back( b );
@@ -2239,6 +2382,58 @@ void SectionSetHidden( koutKind_t k, bool want )
         for ( int i = 0; i < n; ++i )
             KiwiRefImage_SetHidden( i, want );
     }
+}
+
+// KIWI (2026-10-31, user: "alt-clicking categories doesn't work!"): Alt-click on a category
+// row selects everything it lists; Alt+Shift adds it.  False for a row that is not a category.
+bool SelectSection( koutKind_t k, bool additive )
+{
+    const bool brushes = SectionIsBrushBacked( k ) && k != KOUT_SECTION_GROUPS
+                      && k != KOUT_BARBWIRE_FOLDER && k != KOUT_LIGHTGRID_FOLDER;
+    if ( !brushes && k != KOUT_SECTION_CURVES && k != KOUT_SECTION_IMAGES )
+        return false;
+    selection_t &sel = KiwiSel();
+    if ( !additive )
+    {
+        Sel_Clear( sel );
+        KiwiConSel_Clear();
+        KiwiRegion_ClearSelection();
+        KiwiSun_ClearSelection();
+        KiwiRefImage_Select( -1 );
+    }
+    if ( brushes )
+    {
+        std::vector<selbrush_t *> pick;
+        SectionBrushes( k, -1, nullptr, nullptr, &pick );
+        for ( size_t i = 0; i < pick.size(); ++i )
+            if ( Sel_BrushLive( pick[i] ) && !BrushHidden( pick[i] ) )
+                Sel_Add( sel, Sel_MakeObject( pick[i] ) );
+    }
+    else if ( k == KOUT_SECTION_CURVES )
+    {
+        for ( int i = 0; i < KiwiCon_Count(); ++i )
+        {
+            if ( KiwiCon_Hidden( i ) )
+                continue;
+            kconSelItem_t it;
+            it.object = i;
+            it.kind   = KCONSEL_OBJECT;
+            it.index  = -1;
+            KiwiConSel_ApplyClick( it, true, false );
+        }
+    }
+    else
+    {
+        for ( int i = 0; i < KiwiRefImage_Count(); ++i )
+        {
+            const krefImage_t *image = KiwiRefImage_At( i );
+            if ( image && !image->hidden )
+                KiwiRefImage_SelectAdd( i );
+        }
+    }
+    Sel_SyncToLegacy();
+    g_nUpdateBits = -1;
+    return true;
 }
 
 // KIWI (2026-10-11, user: right-click "the eyeball turns red with a slash through it ...
@@ -2349,6 +2544,8 @@ bool RowAcceptsBrushes( const koutRow_t &r )
 {
     return r.kind == KOUT_SECTION_BRUSHES      // -> worldspawn (ungroup)
         || r.kind == KOUT_SECTION_TERRAIN      // -> worldspawn as well
+        || r.kind == KOUT_SECTION_PATCHES      // -> worldspawn as well
+        || r.kind == KOUT_SECTION_PATCHROOT    // -> worldspawn as well
         || r.kind == KOUT_SECTION_GROUPS       // -> a NEW group
         || r.kind == KOUT_UGROUP               // -> into that group
         || r.kind == KOUT_UGROUP_TYPE          // -> likewise (its group)
@@ -2434,7 +2631,8 @@ void ApplyDrop( const koutDrag_t &drag, const koutRow_t &target )
             return;
         }
 
-        const bool toWorld = target.kind == KOUT_SECTION_BRUSHES || target.kind == KOUT_SECTION_TERRAIN;
+        const bool toWorld = target.kind == KOUT_SECTION_BRUSHES || target.kind == KOUT_SECTION_TERRAIN
+                          || target.kind == KOUT_SECTION_PATCHES || target.kind == KOUT_SECTION_PATCHROOT;
         entity_s *targetInst = toWorld ? world_entity : target.ent;
         ReparentBrushes( moving, targetInst, toWorld ? "outliner ungroup" : "outliner group" );
         return;
@@ -2693,6 +2891,8 @@ void KiwiOutliner_Draw()
                 }
                 case KOUT_SECTION_BRUSHES:
                 case KOUT_SECTION_TERRAIN:
+                case KOUT_SECTION_PATCHES:
+                case KOUT_SECTION_PATCHROOT:
                 case KOUT_SECTION_CURVES:
                 case KOUT_SECTION_ENTITIES:
                 case KOUT_SECTION_LIGHTS:
@@ -2856,6 +3056,12 @@ void KiwiOutliner_Draw()
                     break;
                 case KOUT_SECTION_TERRAIN:
                     _snprintf( label, sizeof( label ), "Terrain (%i)", r.count );
+                    break;
+                case KOUT_SECTION_PATCHES:
+                    _snprintf( label, sizeof( label ), "Curves (%i)", r.count );
+                    break;
+                case KOUT_SECTION_PATCHROOT:
+                    _snprintf( label, sizeof( label ), "Patches (%i)", r.count );
                     break;
                 case KOUT_SECTION_CURVES:
                     // KIWI (2026-09-27, user): "Construction lines should not be under
@@ -3047,7 +3253,20 @@ void KiwiOutliner_Draw()
                     ImGui::PopStyleColor( pushedCols );
                 if ( rowClicked )
                 {
-                    if ( r.kind == KOUT_IMAGE )
+                    if ( io.KeyAlt && !io.KeyCtrl
+                      && ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT
+                        || r.kind == KOUT_ENTITY || r.kind == KOUT_GROUP_ENTITY ) )
+                    {
+                        // KIWI: Alt selects the row's group / object, Alt+Shift adds it.
+                        SelectRowOwner( r, io.KeyShift );
+                        if ( r.kind == KOUT_BRUSH || r.kind == KOUT_CON_OBJECT )
+                            SetAnchor( r );
+                    }
+                    else if ( io.KeyAlt && !io.KeyCtrl && SelectSection( r.kind, io.KeyShift ) )
+                    {
+                        // KIWI: Alt on a category selects everything in it, Alt+Shift adds it.
+                    }
+                    else if ( r.kind == KOUT_IMAGE )
                     {
                         SelectImageRow( r.imageIndex, io.KeyShift, io.KeyCtrl );
                         if ( !io.KeyShift && !io.KeyCtrl

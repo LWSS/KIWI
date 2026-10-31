@@ -259,6 +259,12 @@ struct MaterialEditOptions {
     // shifted CoD4 surface type field (index << kSurfaceTypeShift); only the
     // 0x01f00000 type bits are replaced, every other surfaceFlags bit is kept.
     std::int32_t surfaceTypeBits = -1;
+    // Zero keeps the template's. Radiant's texture-browser usage (a row of
+    // deffiles/materials/usage.txt, separators not counted) and autoTexScale
+    // (nominal size; a repeat covers size * 0.25 world units at the default scale).
+    std::uint8_t usage = 0;
+    std::uint16_t autoTexScaleWidth = 0;
+    std::uint16_t autoTexScaleHeight = 0;
 };
 
 const char* MaterialBlendModeLabel(MaterialBlendMode mode);

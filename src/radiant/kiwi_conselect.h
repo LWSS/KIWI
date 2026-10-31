@@ -108,6 +108,11 @@ bool KiwiConSel_HideSelected();
 bool KiwiConSel_CanDuplicateEdges();
 bool KiwiConSel_DuplicateEdgesAsLines();
 
+// Duplicate brush faces as construction faces: each selected face's winding becomes a
+// closed polyline (an extrudable region).  One construction undo snapshot.
+bool KiwiConSel_CanDuplicateFaces();
+bool KiwiConSel_DuplicateFacesAsRegions();
+
 // Move (the construction arm of kiwi_transform.cpp's G)
 // True when G should run the construction arm: construction items are selected
 // and the typed/legacy selection is empty.

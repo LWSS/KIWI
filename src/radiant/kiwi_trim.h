@@ -13,9 +13,10 @@
 // crossings may only narrow it. CIRCLE/ARC tessellation is not user-drawn, so those
 // types retain the arc-between-neighboring-crossings rule.
 //
-// Trimming a parametric object freezes its current tessellation as KCON_POLYLINE;
-// the HUD warns before the click. An interior open-chain cut may leave two objects,
-// while a closed-chain cut leaves one open complement.
+// Trimming a rectangle freezes it as KCON_POLYLINE; the HUD warns before the click.
+// A circle or arc keeps its pieces as true KCON_ARCs on the same circle, their cut ends
+// where the cutter meets the circle itself (KIWI 2026-10-31). An interior open-chain cut
+// may leave two objects, while a closed-chain cut leaves one open complement.
 //
 // Each click gets its own store-undo snapshot. PrepareTrim must finish before
 // KiwiCon_UndoPush: the push also creates a unified-journal ticket, and there is no

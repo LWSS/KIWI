@@ -27,6 +27,7 @@
 #include "qe3.h"
 #include "prefs.h"                  // g_PrefsDlg->m_nTextureWindowScale / m_bTextureScrollbar
 #include "kiwi_matconvert.h"        // KIWI-UX: unlit conversion context menu + Shift+L scan hook
+#include "kiwi_matprops.h"          // KIWI: right-click "Material properties"
 #include "kiwi_mathdrcache.h"       // KIWI: boot-time material header cache (cold-start fix)
 #include "kiwi_floatsnap.h"         // KIWI: KiwiRound_Fistp
 #include "kiwi_ported.h"            // KIWI: shared engine/editor externs
@@ -1801,14 +1802,27 @@ static void TexWnd_OnRightMouseContextMenu( int materialIndex ) // KIWI-UX: thre
         AppendMenuA( PopupMenu, 0x800u, 0, 0 );                              // MF_SEPARATOR
         AppendMenuA( PopupMenu, 0, 0x88C1u, "Save layered materials" );      // id 35009
     }
-    KiwiMatConvert_AppendTextureContextMenu( PopupMenu, materialIndex >= 0 ? texWndGlob_textureOffset.sorted_materials[materialIndex] : nullptr ); // KIWI-UX
+    qtexture_s *hitMaterial = materialIndex >= 0 ? texWndGlob_textureOffset.sorted_materials[materialIndex] : nullptr;
+    // KIWI: the clicked material in the Material window, without changing the browser selection.
+    const unsigned int KIWI_MATPROPS_MENU_ID = 0xE510u;
+    if ( hitMaterial )
+    {
+        AppendMenuA( PopupMenu, MF_SEPARATOR, 0, nullptr );
+        AppendMenuA( PopupMenu, MF_STRING, KIWI_MATPROPS_MENU_ID, "Material properties" );
+    }
+    KiwiMatConvert_AppendTextureContextMenu( PopupMenu, hitMaterial ); // KIWI-UX
     // P5 RTT: d_hwndTexture is the hidden child and a poor menu owner; repoint the owner to the
     // visible main frame.  (TPM_RETURNCMD returns the pick directly, so no WM_COMMAND routing.)
     int cmd = TrackPopupMenu( PopupMenu, 0x100u,                            // TPM_RETURNCMD
                               texWndGlob_textureOffset.m_ptDown[0],
                               texWndGlob_textureOffset.m_ptDown[1],
                               0, g_qeglobals.d_hwndMain, 0 );
-    if ( KiwiMatConvert_HandleTextureContextCommand( (unsigned int)cmd, materialIndex >= 0 ? texWndGlob_textureOffset.sorted_materials[materialIndex] : nullptr ) ) return; // KIWI-UX
+    if ( (unsigned int)cmd == KIWI_MATPROPS_MENU_ID )
+    {
+        KiwiMatProps_Open( hitMaterial );
+        return;
+    }
+    if ( KiwiMatConvert_HandleTextureContextCommand( (unsigned int)cmd, hitMaterial ) ) return; // KIWI-UX
     if ( (unsigned int)(cmd - 1) > 1 )
     {
         if ( cmd == 35009 )

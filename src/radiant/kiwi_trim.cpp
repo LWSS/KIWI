@@ -45,9 +45,15 @@ namespace
     }
 
     // True when trimming converts the source to a polyline; used only by the HUD.
+    // KIWI (2026-10-31): circles and arcs now leave true arcs (TrimArc below).
     bool IsParametricShape( const kconObject_t &o )
     {
-        return o.type == KCON_CIRCLE || o.type == KCON_ARC || o.type == KCON_RECT;
+        return o.type == KCON_RECT;
+    }
+
+    bool IsRound( const kconObject_t &o )
+    {
+        return o.type == KCON_CIRCLE || o.type == KCON_ARC;
     }
 
     // Stored-point segments are user-drawn edges and bound removal. Circle/arc
@@ -469,7 +475,147 @@ namespace
         kconPlane_t        seedPlane;            // seed only; KiwiCon_Add refits
         std::vector<float> a, b;                 // the pieces to keep, world points
         bool               keepA = false, keepB = false;
+        // KIWI (2026-10-31, user: improve Trim so "half circles and arches" are easier): a
+        // circle / arc keeps its pieces as true arcs, not a frozen tessellation.
+        bool               round = false;
+        kconObject_t       src;                  // the circle / arc the pieces come from
+        float              angA[2] = { 0.0f, 0.0f }, angB[2] = { 0.0f, 0.0f };   // degrees
     };
+
+    // The angle (degrees, the curve's own plane) of chain parameter `s`.  A circle's or arc's
+    // vertices sit at even angles with equal chords, so this is linear in s: exact at every
+    // vertex, within a chord's sag in between.
+    float AngleAtParam( const kconObject_t &o, const chain_t &c, float s )
+    {
+        const float f = ( c.Total() > 0.0f ) ? ( s / c.Total() ) : 0.0f;
+        if ( o.type == KCON_CIRCLE )
+            return 360.0f * f;
+        return o.ang0 + ( o.ang1 - o.ang0 ) * f;
+    }
+
+    // A cut is where another object crosses a CHORD.  The arc's end belongs where that
+    // object's line meets the circle itself, or the arc stops short of it and the two never
+    // close into a face.  `guess` is AngleAtParam's answer; a cutter off the curve's plane,
+    // or none near, leaves it as it is.
+    float ExactCutAngle( const kconObject_t &o, int self, const float at[3], float guess )
+    {
+        float best = guess, bestAbs = 360.0f;
+        auto consider = [&]( float px, float py ) {   // a candidate point, centre-relative
+            const float deg = atan2f( py, px ) / KCON_DEG2RAD;
+            float delta = fmodf( deg - guess, 360.0f );
+            if ( delta >  180.0f ) delta -= 360.0f;
+            if ( delta < -180.0f ) delta += 360.0f;
+            if ( fabsf( delta ) < bestAbs )
+            {
+                bestAbs = fabsf( delta );
+                best    = guess + delta;
+            }
+        };
+        const int count = KiwiCon_Count();
+        for ( int i = 0; i < count; ++i )
+        {
+            const kconObject_t *cut = KiwiCon_At( i );
+            if ( i == self || !cut || cut->hidden )
+                continue;
+            const int segs = KiwiCon_SegmentCount( *cut );
+            for ( int s = 0; s < segs; ++s )
+            {
+                float wa[3], wb[3];
+                if ( !KiwiCon_SegmentWorld( *cut, s, wa, wb ) )
+                    break;
+                float t = 0.0f;
+                if ( KiwiCon_SegSegClosest( at, at, wa, wb, &t, 0, 0 ) > KCON_ISECT_DIST )
+                    continue;
+                // The cutter must lie in the curve's plane to meet the circle at all.
+                float ra[3], rb[3];
+                Sub3( wa, o.plane.origin, ra );
+                Sub3( wb, o.plane.origin, rb );
+                if ( fabsf( Dot3( ra, o.plane.normal ) ) > KCON_PLANE_FIT_DIST
+                  || fabsf( Dot3( rb, o.plane.normal ) ) > KCON_PLANE_FIT_DIST )
+                    continue;
+                float a[2], b[2];
+                KiwiCon_WorldToPlane( o.plane, wa, a );
+                KiwiCon_WorldToPlane( o.plane, wb, b );
+                const float d[2] = { b[0] - a[0], b[1] - a[1] };
+                const float f[2] = { a[0] - o.centre[0], a[1] - o.centre[1] };
+                const float qa = d[0] * d[0] + d[1] * d[1];
+                const float qb = 2.0f * ( f[0] * d[0] + f[1] * d[1] );
+                const float qc = f[0] * f[0] + f[1] * f[1] - o.radius * o.radius;
+                const float disc = qb * qb - 4.0f * qa * qc;
+                if ( !( qa > 1.0e-8f ) )
+                    continue;
+                // KIWI (2026-10-31, user: trimming the bottom of a circle whose sides were lines
+                // ending ON it broke the arc): a cutter that ends on the circle counts its end ...
+                const float ends[2][2] = { { f[0], f[1] }, { f[0] + d[0], f[1] + d[1] } };
+                for ( int e = 0; e < 2; ++e )
+                    if ( fabsf( sqrtf( ends[e][0] * ends[e][0] + ends[e][1] * ends[e][1] ) - o.radius )
+                         <= KCON_ISECT_DIST )
+                        consider( ends[e][0], ends[e][1] );
+                // ... a line that only touches it (a double root, which float noise turns
+                // negative) its touch point, and a crossing must lie on the cutter itself.
+                const float tolU = KCON_ISECT_DIST / sqrtf( qa );
+                if ( disc < 0.0f )
+                {
+                    const float u = -qb / ( 2.0f * qa );
+                    const float px = f[0] + d[0] * u, py = f[1] + d[1] * u;
+                    if ( u >= -tolU && u <= 1.0f + tolU
+                      && sqrtf( px * px + py * py ) <= o.radius + KCON_ISECT_DIST )
+                        consider( px, py );
+                    continue;
+                }
+                const float root = sqrtf( disc );
+                for ( int r = 0; r < 2; ++r )
+                {
+                    const float u = ( -qb + ( r ? root : -root ) ) / ( 2.0f * qa );
+                    if ( u >= -tolU && u <= 1.0f + tolU )
+                        consider( f[0] + d[0] * u, f[1] + d[1] * u );
+                }
+            }
+        }
+        // Only a correction within a couple of chords is the same crossing - plus the arc a
+        // touching line stays within KCON_ISECT_DIST of, where the chord crossings smear out.
+        const float chord = 720.0f / (float)( KiwiCon_VertCount( o ) > 1 ? KiwiCon_VertCount( o ) : 2 );
+        const float touch = o.radius > KCON_ISECT_DIST
+                          ? acosf( 1.0f - KCON_ISECT_DIST / o.radius ) / KCON_DEG2RAD : 180.0f;
+        return ( bestAbs <= chord + touch ) ? best : guess;
+    }
+
+    // Fill plan's arc pieces from the hovered span; false leaves the polyline plan.
+    bool PlanRoundTrim( const kconObject_t &src, int self, const chain_t &c, const hover_t &h,
+                        trimPlan_t *plan )
+    {
+        const float total = c.Total();
+        float at[3];
+        auto cutAngle = [&]( float s ) {
+            PointAt( c, s, at );
+            return ExactCutAngle( src, self, at, AngleAtParam( src, c, s ) );
+        };
+        plan->round = true;
+        plan->src   = src;
+        if ( src.type == KCON_CIRCLE )
+        {
+            // The kept arc runs from the span's end round to its start (across the seam
+            // unless the span itself wraps).
+            const float a0 = cutAngle( h.hi );
+            float       a1 = cutAngle( h.lo );
+            const float sweep = ( h.wrap ? ( h.lo - h.hi ) : ( total - h.hi + h.lo ) ) / total * 360.0f;
+            while ( a1 - a0 < sweep - 180.0f ) a1 += 360.0f;
+            while ( a1 - a0 > sweep + 180.0f ) a1 -= 360.0f;
+            plan->angA[0] = a0;
+            plan->angA[1] = a1;
+            plan->keepA   = fabsf( a1 - a0 ) >= 0.5f && fabsf( a1 - a0 ) < 359.5f;
+            plan->keepB   = false;
+            return true;
+        }
+        // An arc keeps [start, lo] and [hi, end]; its own ends are exact already.
+        plan->angA[0] = src.ang0;
+        plan->angA[1] = ( h.lo > 0.0f ) ? cutAngle( h.lo ) : src.ang0;
+        plan->angB[0] = ( h.hi < total ) ? cutAngle( h.hi ) : src.ang1;
+        plan->angB[1] = src.ang1;
+        plan->keepA   = fabsf( plan->angA[1] - plan->angA[0] ) >= 0.5f;
+        plan->keepB   = fabsf( plan->angB[1] - plan->angB[0] ) >= 0.5f;
+        return true;
+    }
 
     // No mutation.  False = the trim cannot proceed and NOTHING has been touched.
     bool PrepareTrim( const hover_t &h, trimPlan_t *plan )
@@ -519,6 +665,8 @@ namespace
 
         plan->keepA = WorthKeeping( plan->a );
         plan->keepB = WorthKeeping( plan->b );
+        if ( IsRound( *src ) )
+            PlanRoundTrim( *src, h.object, c, h, plan );
         return true;
     }
 
@@ -534,6 +682,26 @@ namespace
             const std::vector<float> &pts = ( pass == 0 ) ? plan.a : plan.b;
             if ( pass == 0 ? !plan.keepA : !plan.keepB )
                 continue;
+            if ( plan.round )
+            {
+                // KIWI (2026-10-31): a true arc on the source's own circle.
+                const float *ang = ( pass == 0 ) ? plan.angA : plan.angB;
+                kconObject_t o;
+                o.type      = KCON_ARC;
+                o.plane     = plan.src.plane;
+                o.closed    = false;
+                o.centre[0] = plan.src.centre[0];
+                o.centre[1] = plan.src.centre[1];
+                o.radius    = plan.src.radius;
+                o.ang0      = ang[0];
+                o.ang1      = ang[1];
+                // A circle's piece keeps the circle's smoothness (its full-circle sample
+                // count, which an arc prorates by its sweep); an arc's keeps the arc's.
+                o.segs      = ( plan.src.type == KCON_ARC ) ? plan.src.segs : KiwiCon_VertCount( plan.src );
+                if ( KiwiCon_Add( o ) >= 0 )
+                    ++made;
+                continue;
+            }
             kconObject_t o;
             // Preserve the semantic LINE type for two-point remainders; store
             // consumers branch on it.

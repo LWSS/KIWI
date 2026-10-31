@@ -58,6 +58,11 @@ void KiwiCam_Translate( const float *delta );
 // exact ±90; using the drags' ±89 would leak side faces in top/bottom views.
 void KiwiCam_LookAlong( float pitch, float yaw );
 
+// The nearest of the six axis views (view cube), turned about the surface at the screen
+// centre (else the pivot); the yaw snaps to 90 degrees so top / bottom stay axis-aligned.
+// Returns the view's name for the console.
+const char *KiwiCam_SnapToNearestAxis();
+
 // 2D marker anchor: the eye in perspective; in ortho, the on-axis point at the
 // standoff plane. The ortho origin is a zoom-dependent pseudo-eye, not a world place.
 void KiwiCam_MarkerViewpoint( float out3[3] );

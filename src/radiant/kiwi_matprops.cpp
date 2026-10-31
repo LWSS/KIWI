@@ -365,38 +365,142 @@ namespace
         return ok;
     }
 
-    // Atomic write, then prove it: the OS file holds `data`, and the engine filesystem (what
-    // the editor and the compilers resolve) reads the same bytes back.
-    bool WriteVerified( const std::string &name, const std::vector<unsigned char> &data )
+    void PutI32( std::vector<unsigned char> &b, size_t ofs, int v )
     {
+        memcpy( &b[ofs], &v, sizeof( v ) );
+    }
+
+    void PatchFields( std::vector<unsigned char> &b, int surf, int contents, int sort )
+    {
+        PutI32( b, KMP_OFS_SURF, surf );
+        PutI32( b, KMP_OFS_CONTENTS, contents );
+        b[KMP_OFS_SORT] = (unsigned char)sort;
+    }
+
+    // KIWI: every loose copy of materials/<name> a searchpath can resolve - raw and main under
+    // fs_homepath and fs_basepath (kiwi_matconvert.cpp's roots).  The editor reads whichever
+    // comes first (main/ before raw/ for stock materials) and the compilers read raw/, so Save
+    // and Revert keep them all in step.
+    void LooseCopies( const std::string &name, std::vector<std::string> *out )
+    {
+        out->clear();
         char qpath[160];
         MaterialQpath( name, qpath, sizeof( qpath ) );
-        char err[512] = { 0 };
-        if ( !KiwiFS_WriteRawAtomic( qpath, &data[0], (unsigned)data.size(), err, sizeof( err ) ) )
+        const char *roots[2] = { fs_homepath ? fs_homepath->current.string : nullptr,
+                                 fs_basepath ? fs_basepath->current.string : nullptr };
+        static const char *dirs[2] = { "raw", "main" };
+        for ( int r = 0; r < 2; ++r )
         {
-            SetStatus( true, "Save failed: %s", err );
+            if ( !roots[r] || !roots[r][0] )
+                continue;
+            for ( int d = 0; d < 2; ++d )
+            {
+                char os[MAX_OSPATH];
+                FS_BuildOSPath( roots[r], dirs[d], qpath, os );
+                if ( !OsFileExists( os ) )
+                    continue;
+                bool dup = false;
+                for ( const std::string &s : *out )
+                    dup = dup || !_stricmp( s.c_str(), os );
+                if ( !dup )
+                    out->push_back( os );
+            }
+        }
+    }
+
+    // A temp file beside `path`, then one rename over it: a failed write leaves `path` as it was.
+    bool WriteOsAtomic( const char *path, const std::vector<unsigned char> &data, char *err, size_t errSz )
+    {
+        char tmp[MAX_OSPATH + 8];
+        _snprintf( tmp, sizeof( tmp ), "%s.tmp", path );
+        tmp[sizeof( tmp ) - 1] = '\0';
+        FILE *f = fopen( tmp, "wb" );
+        if ( !f )
+        {
+            _snprintf( err, errSz, "could not open '%s' for writing", tmp );
+            err[errSz - 1] = '\0';
             return false;
         }
-        char os[MAX_OSPATH];
-        RawOsPath( qpath, os );
-        std::vector<unsigned char> back;
-        if ( !ReadOsFile( os, &back ) || back != data )
+        const bool wrote  = fwrite( &data[0], 1, data.size(), f ) == data.size();
+        const bool closed = fclose( f ) == 0;
+        if ( !wrote || !closed )
         {
-            SetStatus( true, "Save did not verify: %s does not hold the written bytes", os );
+            ::DeleteFileA( tmp );
+            _snprintf( err, errSz, "short write to '%s'; '%s' is unchanged", tmp, path );
+            err[errSz - 1] = '\0';
             return false;
         }
-        if ( !ReadQpath( qpath, &back ) || back != data )
+        if ( !::MoveFileExA( tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH ) )
         {
-            SetStatus( true, "Wrote %s, but the editor reads another copy of materials/%s (a searchpath shadows it)",
-                       os, name.c_str() );
+            const unsigned long code = ::GetLastError();
+            ::DeleteFileA( tmp );
+            _snprintf( err, errSz, "could not replace '%s' (error %lu); it is unchanged", path, code );
+            err[errSz - 1] = '\0';
             return false;
         }
         return true;
     }
 
-    void PutI32( std::vector<unsigned char> &b, size_t ofs, int v )
+    // Put the three header fields into every loose copy, each keeping its own other bytes.  A
+    // material with no loose copy (packed) gets raw/materials/<name> made from `resolved`, the
+    // bytes the editor read.  Then prove it: the copy the editor resolves carries the fields.
+    bool WriteFields( const std::string &name, const std::vector<unsigned char> &resolved,
+                      int surf, int contents, int sort )
     {
-        memcpy( &b[ofs], &v, sizeof( v ) );
+        char qpath[160];
+        MaterialQpath( name, qpath, sizeof( qpath ) );
+        char err[512] = { 0 };
+        std::vector<std::string> copies;
+        LooseCopies( name, &copies );
+        if ( copies.empty() )
+        {
+            std::vector<unsigned char> out = resolved;
+            PatchFields( out, surf, contents, sort );
+            if ( !KiwiFS_WriteRawAtomic( qpath, &out[0], (unsigned)out.size(), err, sizeof( err ) ) )
+            {
+                SetStatus( true, "Save failed: %s", err );
+                return false;
+            }
+        }
+        for ( const std::string &path : copies )
+        {
+            std::vector<unsigned char> bytes;
+            Loaded probe;
+            std::string why;
+            if ( !ReadOsFile( path.c_str(), &bytes ) || !Parse( bytes, &probe, &why ) )
+            {
+                SetStatus( true, "%s is not a readable material; it was left alone", path.c_str() );
+                return false;
+            }
+            std::vector<unsigned char> out = bytes;
+            PatchFields( out, surf, contents, sort );
+            if ( out == bytes )
+                continue;
+            if ( !WriteOsAtomic( path.c_str(), out, err, sizeof( err ) ) )
+            {
+                SetStatus( true, "Save failed: %s", err );
+                return false;
+            }
+            std::vector<unsigned char> back;
+            if ( !ReadOsFile( path.c_str(), &back ) || back != out )
+            {
+                SetStatus( true, "Save did not verify: %s does not hold the written bytes", path.c_str() );
+                return false;
+            }
+            Sys_Printf( "Material '%s': wrote %s\n", name.c_str(), path.c_str() );
+        }
+
+        std::vector<unsigned char> back;
+        Loaded probe;
+        std::string why;
+        if ( !ReadQpath( qpath, &back ) || !Parse( back, &probe, &why )
+          || probe.diskSurf != surf || probe.diskContents != contents || probe.diskSort != sort )
+        {
+            SetStatus( true, "Wrote every loose copy of materials/%s, but the editor reads a packed one "
+                             "(an IWD or fastfile), which cannot be changed here", name.c_str() );
+            return false;
+        }
+        return true;
     }
 
     void Save()
@@ -434,14 +538,9 @@ namespace
             Sys_Printf( "Material '%s': backup %s\n", name.c_str(), bos );
         }
 
-        // Byte-patch the three fields; every other byte is the file as read.
-        std::vector<unsigned char> out = now;
-        PutI32( out, KMP_OFS_SURF, s_cur.surf );
-        PutI32( out, KMP_OFS_CONTENTS, s_cur.contents );
-        out[KMP_OFS_SORT] = (unsigned char)s_cur.sort;
-
+        // Byte-patch the three fields; every other byte of each copy is that file as read.
         const int oldSurf = s_cur.diskSurf, oldContents = s_cur.diskContents, oldSort = s_cur.diskSort;
-        if ( !WriteVerified( name, out ) )
+        if ( !WriteFields( name, now, s_cur.surf, s_cur.contents, s_cur.sort ) )
         {
             Load( name );
             return;
@@ -472,7 +571,7 @@ namespace
             SetStatus( true, "Backup %s is missing or unreadable", bos );
             return;
         }
-        if ( !WriteVerified( name, bak ) )
+        if ( !WriteFields( name, bak, probe.diskSurf, probe.diskContents, probe.diskSort ) )
         {
             Load( name );
             return;
@@ -763,7 +862,7 @@ namespace
         if ( ImGui::Button( "Save", ImVec2( KMP_BTN, 0.0f ) ) )
             Save();
         if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Write raw/materials/%s", s_cur.name.c_str() );
+            ImGui::SetTooltip( "Write materials/%s (every raw/ and main/ copy)", s_cur.name.c_str() );
         ImGui::SameLine();
         if ( ImGui::Button( "Discard", ImVec2( KMP_BTN, 0.0f ) ) )
         {
@@ -791,11 +890,26 @@ namespace
         }
     }
 
-    void DrawBody()
+    // KIWI: a material opened from the Textures browser's right-click menu, shown until the
+    // browser's own current material changes (s_openedOver is the current one it was opened
+    // over, compared only).  Held by name: a browser entry can be deleted while it is shown.
+    std::string s_opened;
+    qtexture_s *s_openedOver = nullptr;
+
+    qtexture_s *BrowserCurrent()
     {
         int layer = g_qeglobals.current_edit_layer;
         layer = layer < 0 ? 0 : ( layer > 2 ? 2 : layer );
-        qtexture_s *q = g_qeglobals.random_texture_stuff[layer].mtl.radMtl;
+        return g_qeglobals.random_texture_stuff[layer].mtl.radMtl;
+    }
+
+    void DrawBody()
+    {
+        qtexture_s *q = BrowserCurrent();
+        if ( !s_opened.empty() && q == s_openedOver )
+            q = Texture_GetHandle( s_opened.c_str() );
+        else
+            s_opened.clear();
         if ( !q || !q->name || !q->name[0] || q->name[0] == '$' )
         {
             ImGui::TextDisabled( "No Material Selected" );
@@ -855,4 +969,15 @@ void KiwiMatProps_Draw()
     if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_MATPROPS ), open ) )
         DrawBody();
     ImGui::End();
+}
+
+void KiwiMatProps_Open( qtexture_s *material )
+{
+    if ( !material || !material->name || !material->name[0] || material->name[0] == '$' )
+        return;
+    s_opened     = material->name;
+    s_openedOver = BrowserCurrent();
+    extern void ImGuiShell_FocusTab( const char *title );   // imgui_shell.cpp
+    KiwiWindows_Set( KIWI_WIN_MATPROPS, true );
+    ImGuiShell_FocusTab( KiwiWindows_Title( KIWI_WIN_MATPROPS ) );
 }

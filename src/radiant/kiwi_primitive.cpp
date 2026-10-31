@@ -40,6 +40,8 @@ extern void      Brush_MakeSidedSphere( int sides );                    // brush
 
 // Patch-cylinder entry points; signatures match their definitions.
 extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    // pmesh.cpp:1558
+extern void         Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );
+extern void         Patch_KiwiLmapAlign( patchMesh_t *p );                    // pmesh.cpp
 // radiant_registry.cpp:31 / :44.
 extern int          Radiant_ProfileGetInt( const char *section, const char *entry, int defVal );
 extern bool         Radiant_ProfileSetInt( const char *section, const char *entry, int value );
@@ -1683,10 +1685,9 @@ bool KiwiPrim_BuildPatchCylinderShell( const kconPlane_t &plane, const float cen
     const size_t frontCount = built.size();
     for ( size_t i = 0; backfaces && ok && i < frontCount; ++i )
     {
-        patchMesh_t *p = clone( built[i]->patch );
-        if ( !p ) { ok = false; break; }
-        reverse( p );
-        landUnlinked( p );
+        brush_t *back = KiwiPrim_BuildPatchBackface( built[i] );
+        if ( !back ) { ok = false; break; }
+        built.push_back( back );
     }
     if ( !ok )
     {
@@ -1696,6 +1697,220 @@ bool KiwiPrim_BuildPatchCylinderShell( const kconPlane_t &plane, const float cen
     }
     out->insert( out->end(), built.begin(), built.end() );
     return true;
+}
+
+// KIWI (2026-10-31, user: extrude "a mode where the 2 arcs here would be extracted as curves
+// with nice end caps to align with the center brush part ... similar to how the bevel tool works
+// in fillet mode"): kiwi_patchfillet.cpp's construction - a wall through the curve's quadratic
+// controls, and caps that run from those controls to their projection on the chord - laid along
+// a construction-face arc or spline.
+bool KiwiPrim_BuildCurvePatches( const kconPlane_t &plane, const float *ctrl, int ctrlCount,
+                                 float lo, float hi, int density,
+                                 std::vector<brush_t *> *out, const char **why )
+{
+    const int kMaxSpans = ( KPATCH_MAX_WIDTH - 1 ) / 2;      // 2 * 7 + 1 = 15 columns
+    if ( ctrlCount < 3 || !( ctrlCount & 1 ) || !( hi - lo > 1.0e-3f ) )
+    {
+        *why = "curve out of range for curve patches";
+        return false;
+    }
+    if ( density < KPRIM_PATCH_DENSITY_MIN ) density = KPRIM_PATCH_DENSITY_MIN;
+    if ( density > KPRIM_PATCH_DENSITY_MAX ) density = KPRIM_PATCH_DENSITY_MAX;
+
+    auto onPlane = [&]( float u, float v, float off, float outW[3] ) {
+        const float uv[2] = { u, v };
+        KiwiCon_PlaneToWorld( plane, uv, outW );
+        Mad3( outW, plane.normal, off, outW );
+    };
+    // The chord the brush keeps: the curve's two ends.
+    const float *ca = &ctrl[0];
+    const float *cb = &ctrl[(size_t)( ctrlCount - 1 ) * 2];
+    float chord[2] = { cb[0] - ca[0], cb[1] - ca[1] };
+    const float chordLen = sqrtf( chord[0] * chord[0] + chord[1] * chord[1] );
+    if ( !( chordLen > 1.0e-4f ) )
+    {
+        *why = "curve has no chord";
+        return false;
+    }
+    chord[0] /= chordLen;
+    chord[1] /= chordLen;
+    // Outside the loop: the chord's right (the region loop runs CCW).
+    float outward[3];
+    {
+        float m[3], o[3];
+        onPlane( ( ca[0] + cb[0] ) * 0.5f, ( ca[1] + cb[1] ) * 0.5f, 0.0f, m );
+        onPlane( ( ca[0] + cb[0] ) * 0.5f + chord[1], ( ca[1] + cb[1] ) * 0.5f - chord[0], 0.0f, o );
+        Sub3( o, m, outward );
+    }
+
+    // Material as KiwiPrim_BuildPatchCylinder takes it: an unlinked probe box around the curve.
+    patchMesh_material tex = {}, lm = {};
+    texdef_sub_t texDef = {};                 // the brush faces' scale, for the patches' texel density
+    bool haveMtl = false;
+    {
+        float mins[3] = {}, maxs[3] = {};
+        for ( int i = 0; i < ctrlCount; ++i )
+            for ( int end = 0; end < 2; ++end )
+            {
+                float w[3];
+                onPlane( ctrl[(size_t)i * 2], ctrl[(size_t)i * 2 + 1], end ? hi : lo, w );
+                for ( int k = 0; k < 3; ++k )
+                {
+                    if ( ( i == 0 && end == 0 ) || w[k] < mins[k] ) mins[k] = w[k];
+                    if ( ( i == 0 && end == 0 ) || w[k] > maxs[k] ) maxs[k] = w[k];
+                }
+            }
+        for ( int k = 0; k < 3; ++k )
+        {
+            mins[k] -= 1.0f;
+            maxs[k] += 1.0f;
+        }
+        Ed_EnsureCurrentMaterial_Kiwi();
+        brush_t *probe = Brush_Alloc( g_qeglobals.random_texture_stuff, 0 );
+        if ( probe ) Brush_Create( mins, maxs, probe, 0 );
+        if ( probe )
+        {
+            if ( probe->faces && probe->faceCount > 0 )
+            {
+                tex = *(patchMesh_material *)&probe->faces[0].mtldef[0].lyrMtl;
+                lm  = *(patchMesh_material *)&probe->faces[0].mtldef[1].lyrMtl;
+                texDef = probe->faces[0].mtldef[0].mat_texDef;
+                haveMtl = true;
+            }
+            Brush_Free_R( probe );     // never linked: refCount 0
+        }
+    }
+
+    // Texturing as kiwi_patchfillet.cpp lands a fillet: natural at the brush faces' density,
+    // and the flat caps then Lmap-aligned - natural texturing reads T down their pinched end
+    // columns, zero long, and smears one texel across the whole cap.
+    std::vector<brush_t *> built;
+    bool ok = true;
+    auto land = [&]( patchMesh_t *p, bool flatCap ) {
+        if ( haveMtl )
+        {
+            p->texture  = tex;
+            p->lightmap = lm;
+        }
+        KiwiMtl_RealizePatch( p );
+        KiwiMtl_EnsurePatchChannels( p );
+        Patch_KiwiFinishNewLike( p, haveMtl ? &texDef : nullptr );
+        if ( flatCap )
+            Patch_KiwiLmapAlign( p );
+        brush_t *def = AddBrushForPatch( p, nullptr );
+        KiwiValid_Rebuild( def );
+        built.push_back( def );
+    };
+    // cross(dCol, dRow) is the surface normal (kiwi_patchfillet.h); reverse the rows when it
+    // points against `want`.
+    auto faceRows = [&]( patchMesh_t *p, int midCol, const float want[3] ) {
+        float dCol[3], dRow[3], nrm[3];
+        Sub3( p->ctrl[p->width - 1][1].xyz, p->ctrl[0][1].xyz, dCol );
+        Sub3( p->ctrl[midCol][2].xyz, p->ctrl[midCol][0].xyz, dRow );
+        Cross3( dCol, dRow, nrm );
+        if ( Dot3( nrm, want ) < 0.0f )
+            for ( int col = 0; col < p->width; ++col )
+            {
+                const drawVert_t t = p->ctrl[col][0];
+                p->ctrl[col][0] = p->ctrl[col][2];
+                p->ctrl[col][2] = t;
+            }
+    };
+
+    const int spansTotal = ( ctrlCount - 1 ) / 2;
+    const int chunks = ( spansTotal + kMaxSpans - 1 ) / kMaxSpans;
+    int spanAt = 0;
+    for ( int ch = 0; ch < chunks && ok; ++ch )
+    {
+        const int spans = spansTotal / chunks + ( ch < spansTotal % chunks ? 1 : 0 );
+        const int w = spans * 2 + 1;
+        const float *arc = &ctrl[(size_t)spanAt * 4];     // this chunk's controls, plane space
+        spanAt += spans;
+
+        // The wall: rows at lo, middle and hi, facing out of the loop.
+        patchMesh_t *wall = MakeNewPatch();
+        if ( !wall ) { ok = false; break; }
+        wall->width = w;
+        wall->height = 3;
+        wall->type = PATCH_BEVEL;
+        wall->contents = 0;
+        wall->flags = 0;                              // MakeNewPatch does NOT seed this
+        wall->subDivType = 1 << ( KPRIM_PATCH_DENSITY_MAX - density );
+        for ( int col = 0; col < w; ++col )
+            for ( int row = 0; row < 3; ++row )
+                onPlane( arc[col * 2], arc[col * 2 + 1], lo + ( hi - lo ) * 0.5f * (float)row,
+                         wall->ctrl[col][row].xyz );
+        faceRows( wall, w / 2, outward );
+        land( wall, false );
+
+        // The caps: from the curve's controls to their projection on the chord, flat, one at
+        // each end, facing out of the solid.
+        for ( int end = 0; end < 2 && ok; ++end )
+        {
+            patchMesh_t *cap = MakeNewPatch();
+            if ( !cap ) { ok = false; break; }
+            cap->width = w;
+            cap->height = 3;
+            cap->type = (PATCH_TYPES)( PATCH_BEVEL | PATCH_SEAM );
+            cap->contents = 0;
+            cap->flags = 0;
+            cap->subDivType = wall->subDivType;
+            const float off = end ? hi : lo;
+            for ( int col = 0; col < w; ++col )
+            {
+                const float rel[2] = { arc[col * 2] - ca[0], arc[col * 2 + 1] - ca[1] };
+                const float t = rel[0] * chord[0] + rel[1] * chord[1];
+                const float pr[2] = { ca[0] + chord[0] * t, ca[1] + chord[1] * t };
+                onPlane( arc[col * 2], arc[col * 2 + 1], off, cap->ctrl[col][0].xyz );
+                onPlane( pr[0], pr[1], off, cap->ctrl[col][2].xyz );
+                for ( int k = 0; k < 3; ++k )
+                    cap->ctrl[col][1].xyz[k] = ( cap->ctrl[col][0].xyz[k] + cap->ctrl[col][2].xyz[k] ) * 0.5f;
+            }
+            float want[3];
+            Copy3( plane.normal, want );
+            if ( !end )
+                for ( int k = 0; k < 3; ++k )
+                    want[k] = -want[k];
+            faceRows( cap, w / 2, want );
+            land( cap, true );
+        }
+    }
+    if ( !ok )
+    {
+        for ( brush_t *def : built ) Brush_Free_R( def );
+        *why = "could not allocate the curve patches";
+        return false;
+    }
+    out->insert( out->end(), built.begin(), built.end() );
+    return true;
+}
+
+// KIWI (2026-10-31): shared by the cylinder shell and Pipe's "Double-sided" option.
+brush_t *KiwiPrim_BuildPatchBackface( const brush_t *front )
+{
+    const patchMesh_t *src = front ? front->patch : nullptr;
+    if ( !src )
+        return nullptr;
+    patchMesh_t *p = MakeNewPatch();
+    if ( !p )
+        return nullptr;
+    p->width = src->width; p->height = src->height;
+    p->type = src->type; p->contents = src->contents; p->flags = src->flags;
+    p->subDivType = src->subDivType;
+    p->texture = src->texture; p->lightmap = src->lightmap; p->smoothing = src->smoothing;
+    memcpy( p->ctrl, src->ctrl, sizeof( p->ctrl ) );
+    // Reversing one parametric direction mirrors the surface's winding: it faces the other way.
+    for ( int col = 0; col < p->width; ++col )
+    for ( int row = 0; row < p->height / 2; ++row )
+    {
+        const drawVert_t v = p->ctrl[col][row];
+        p->ctrl[col][row] = p->ctrl[col][p->height - 1 - row];
+        p->ctrl[col][p->height - 1 - row] = v;
+    }
+    Patch_KiwiFinishNew( p );
+    brush_t *def = AddBrushForPatch( p, nullptr );
+    KiwiValid_Rebuild( def );
+    return def;
 }
 
 bool KiwiPrim_PatchBackfaces()

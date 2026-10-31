@@ -40,6 +40,16 @@ KiwiEditorCommand *KiwiBool_CommandForId( int commandId );
 // Palette predicate: at least one selected brush can be consumed by CSG.
 bool KiwiBool_CanBoolean();
 
+// Curve tools (KIWI 2026-10-31): a patch whose every control column runs straight along one
+// shared axis (cylinders, pipes, arches) is a difference tool.  It cuts with its control hull
+// swept along the axis over its own length, and is kept: each column's ends slide along the
+// axis onto the faces of the brushes it cut, so the curve ends flush with them.  Picked by
+// click only (a marquee over terrain would sweep in straight-column terrain patches).
+
+// Test-only: pick `tool` for the live Boolean command, as a click would.
+struct selbrush_t;
+bool KiwiBool_TestPickTool( selbrush_t *tool );
+
 // World-space signed-distance tolerance retained as the normative on-plane epsilon
 // for sibling modelling tools.
 #define KBOOL_ONPLANE_EPS 0.01f

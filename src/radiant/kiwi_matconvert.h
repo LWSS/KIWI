@@ -33,5 +33,3 @@ void KiwiMatConvert_ApplyPatchLightmapDiagnostic( patchMesh_t *patch,
 
 void KiwiMatConvert_AppendTextureContextMenu( void *menu, qtexture_s *material );
 bool KiwiMatConvert_HandleTextureContextCommand( unsigned int command, qtexture_s *material );
-
-void KiwiMatConvert_DrawMapHealth();

@@ -21,6 +21,7 @@
 #include "kiwi_vec.h"            // Extend: Dot3 / Sub3 / Norm3 / Mad3
 
 #include <math.h>
+#include <utility>
 #include <vector>
 
 // 0x23F1864: selected_brushes is the display-list sentinel; read only here.
@@ -38,6 +39,8 @@ namespace
         std::vector<float> pts;         // its WORLD points at Begin
         kconPlane_t        plane;       // full frame at Begin (rotate needs u/v/normal)
         float              radius;      // parametric radius at Begin
+        // KIWI (2026-10-31): the points that move, one flag per point; empty = the whole object.
+        std::vector<unsigned char> mask;
     };
     std::vector<moveBase_t> s_moveBase;
     bool                    s_moveOpen = false;
@@ -109,6 +112,14 @@ namespace
         if ( mask & SEL_MASK_FACE )   return KCONSEL_OBJECT;
         if ( mask & SEL_MASK_EDGE )   return KCONSEL_SEGMENT;
         return KCONSEL_POINT;
+    }
+
+    // Edge mode takes these whole: their segments are tessellation, not edges.  KIWI
+    // (2026-10-31, user: "make it so that circles are just clickable in (2) mode as 1 coherent
+    // unit") - circles and arcs, as splines already were.
+    bool WholeInEdgeMode( const kconObject_t &o )
+    {
+        return KiwiCon_IsParametric( o ) || KiwiCon_HasSmooth( o );
     }
 
     // Liang-Barsky, matching kiwi_boxselect.cpp without widening its private API.
@@ -301,6 +312,10 @@ bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels
 
         // SEGMENT and OBJECT share the segment scan — the difference is only what
         // the winning candidate is RECORDED as.
+        // KIWI (2026-10-31, user: "make it so that construction multi-point splines are 1
+        // object that is clickable with 2 mode"): a spline's segments are tessellation, so
+        // Edge mode takes the whole spline; Point mode still takes its control points.
+        const kconSelKind_t kind = ( want == KCONSEL_SEGMENT && WholeInEdgeMode( *o ) ) ? KCONSEL_OBJECT : want;
         const int segs = KiwiCon_SegmentCount( *o );
         for ( int s = 0; s < segs; ++s )
         {
@@ -317,8 +332,8 @@ bool KiwiConSel_PickAt( int imgX, int imgY, kconSelItem_t *out, float *outPixels
                 continue;
             have = true;  bestDist = d;
             best.object = i;
-            best.kind   = want;                 // KCONSEL_SEGMENT or KCONSEL_OBJECT
-            best.index  = ( want == KCONSEL_SEGMENT ) ? s : -1;
+            best.kind   = kind;                 // KCONSEL_SEGMENT or KCONSEL_OBJECT
+            best.index  = ( kind == KCONSEL_SEGMENT ) ? s : -1;
         }
     }
 
@@ -403,6 +418,8 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
         bool objAll = true;
         bool objAnyPoint = false;
         bool objVisible = false;
+        // KIWI (2026-10-31): Edge mode boxes a spline / circle / arc whole, as a click does (PickAt).
+        const kconSelKind_t kind = ( want == KCONSEL_SEGMENT && WholeInEdgeMode( *o ) ) ? KCONSEL_OBJECT : want;
         const int segs = KiwiCon_SegmentCount( *o );
         for ( int s = 0; s < segs; ++s )
         {
@@ -432,7 +449,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
             if ( hit )
                 objAny = true;
 
-            if ( want == KCONSEL_SEGMENT && hit )
+            if ( kind == KCONSEL_SEGMENT && hit )
             {
                 kconSelItem_t it;
                 it.object = i;  it.kind = KCONSEL_SEGMENT;  it.index = s;
@@ -441,7 +458,7 @@ void KiwiConSel_ApplyRect( float x0, float y0, float x1, float y1,
             }
         }
 
-        if ( want == KCONSEL_OBJECT && segs > 0 && objVisible )
+        if ( kind == KCONSEL_OBJECT && segs > 0 && objVisible )
         {
             const bool take = crossing ? ( objAny || objAnyPoint ) : objAll;
             if ( take )
@@ -1538,10 +1555,142 @@ bool KiwiConSel_DuplicateEdgesAsLines()
     return true;
 }
 
+// KIWI (2026-10-31, user: "make it so that shift-D on a face of a brush will create a new
+// construction face out of the brush face"): each selected brush face's winding becomes a
+// closed polyline, which region derivation makes a construction face.
+bool KiwiConSel_CanDuplicateFaces()
+{
+    const selection_t &sel = KiwiSel();
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+        if ( sel.items[i].kind == SEL_FACE && Sel_BrushLive( sel.items[i].brush ) )
+            return true;
+    return false;
+}
+
+bool KiwiConSel_DuplicateFacesAsRegions()
+{
+    const selection_t &sel = KiwiSel();
+    std::vector<kconObject_t> rings;
+    std::vector<std::pair<const selbrush_t *, int>> seen;
+    for ( size_t i = 0; i < sel.items.size(); ++i )
+    {
+        const sel_item_t &it = sel.items[i];
+        if ( it.kind != SEL_FACE || !Sel_BrushLive( it.brush ) || !it.brush->def )
+            continue;
+        const brush_t *def = it.brush->def;
+        if ( !def->faces || it.faceIndex < 0 || it.faceIndex >= def->faceCount )
+            continue;
+        const std::pair<const selbrush_t *, int> key( it.brush, it.faceIndex );
+        bool dup = false;
+        for ( size_t k = 0; k < seen.size() && !dup; ++k )
+            dup = seen[k] == key;
+        if ( dup )
+            continue;
+        seen.push_back( key );
+
+        const winding_t *w = def->faces[it.faceIndex].w;
+        if ( !w || w->numpoints < 3 || w->numpoints > MAX_POINTS_ON_WINDING )
+            continue;
+        kconObject_t o;
+        o.type   = KCON_POLYLINE;
+        o.closed = true;
+        for ( int p = 0; p < w->numpoints; ++p )
+        {
+            const size_t n = o.pts.size();
+            if ( n >= 3 && SamePoint( &o.pts[n - 3], w->p[p] ) )
+                continue;                       // a degenerate winding edge
+            for ( int k = 0; k < 3; ++k )
+                o.pts.push_back( w->p[p][k] );
+        }
+        const size_t n = o.pts.size();
+        if ( n >= 6 && SamePoint( &o.pts[0], &o.pts[n - 3] ) )
+            o.pts.resize( n - 3 );
+        if ( o.pts.size() >= 9 )
+            rings.push_back( o );
+    }
+    if ( rings.empty() )
+    {
+        Sys_Printf( "Duplicate: no brush faces are selected.\n" );
+        return false;
+    }
+
+    // One snapshot covers every object created by this command.
+    KiwiCon_UndoPush();
+    int added = 0;
+    for ( size_t i = 0; i < rings.size(); ++i )
+        if ( KiwiCon_Add( rings[i] ) >= 0 )
+            ++added;
+    if ( added <= 0 )
+    {
+        Sys_Printf( "Duplicate: nothing was created from the selected faces.\n" );
+        return false;
+    }
+    Sys_Printf( "Duplicate: %i construction face%s from the selected brush face%s.\n",
+                added, ( added == 1 ) ? "" : "s", ( added == 1 ) ? "" : "s" );
+    g_nUpdateBits |= 1;
+    return true;
+}
+
 // Move
 bool KiwiConSel_CanMove()
 {
     return !s_sel.empty() && BrushSelectionEmpty();
+}
+
+// KIWI (2026-10-31, user: "make it so i can move the points of a multi point spline
+// construction line and the spline will re-adjust to keep connection"): with points or
+// segments selected (Point / Edge mode) rather than whole objects, Move / Rotate / Scale act
+// on those points only - a spline re-tessellates through its moved control point.  Every
+// other line / polyline point sitting on a moved point (KCONSEL_FOLLOW_DIST) moves with it, so
+// what was joined there stays joined.  Circles, arcs, rectangles and a spline's tessellation
+// segments still move whole.
+namespace
+{
+    const float KCONSEL_FOLLOW_DIST = KREG_JOIN_DIST;
+
+    bool PointShape( const kconObject_t &o )
+    {
+        return !KiwiCon_IsParametric( o ) && o.type != KCON_RECT;
+    }
+
+    moveBase_t MoveBaseFor( int object, const kconObject_t &o )
+    {
+        moveBase_t b;
+        b.object = object;
+        for ( int k = 0; k < 3; ++k )
+            b.origin[k] = o.plane.origin[k];
+        b.pts    = o.pts;
+        b.plane  = o.plane;
+        b.radius = o.radius;
+        return b;
+    }
+
+    // The selected points of `object`, or false when it moves whole.
+    bool SelectedPointMask( int object, const kconObject_t &o, std::vector<unsigned char> *mask )
+    {
+        const int n = (int)( o.pts.size() / 3 );
+        mask->assign( (size_t)n, 0 );
+        if ( !PointShape( o ) || n < 1 )
+            return false;
+        for ( size_t i = 0; i < s_sel.size(); ++i )
+        {
+            const kconSelItem_t &it = s_sel[i];
+            if ( it.object != object )
+                continue;
+            if ( it.kind == KCONSEL_OBJECT )
+                return false;
+            if ( it.kind == KCONSEL_POINT && it.index >= 0 && it.index < n )
+                ( *mask )[(size_t)it.index] = 1;
+            else if ( it.kind == KCONSEL_SEGMENT && !KiwiCon_HasSmooth( o ) && it.index >= 0 && it.index < n )
+            {
+                ( *mask )[(size_t)it.index] = 1;
+                ( *mask )[(size_t)( ( it.index + 1 ) % n )] = 1;
+            }
+            else
+                return false;
+        }
+        return true;
+    }
 }
 
 bool KiwiConSel_MoveBegin( float outRef[3] )
@@ -1554,23 +1703,74 @@ bool KiwiConSel_MoveBegin( float outRef[3] )
     if ( objs.empty() )
         return false;
 
-    // Use defining anchors for the centroid so tessellation density cannot bias it.
-    float sum[3] = { 0.0f, 0.0f, 0.0f };
-    int   n      = 0;
+    std::vector<float> moved;                  // baseline world points that move alone
     for ( size_t i = 0; i < objs.size(); ++i )
     {
         const kconObject_t *o = KiwiCon_At( objs[i] );
         if ( !o )
             continue;
-        moveBase_t b;
-        b.object = objs[i];
-        for ( int k = 0; k < 3; ++k )
-            b.origin[k] = o->plane.origin[k];
-        b.pts    = o->pts;
-        b.plane  = o->plane;
-        b.radius = o->radius;
+        moveBase_t b = MoveBaseFor( objs[i], *o );
+        std::vector<unsigned char> mask;
+        if ( SelectedPointMask( objs[i], *o, &mask ) )
+        {
+            b.mask = mask;
+            for ( size_t k = 0; k < mask.size(); ++k )
+                if ( mask[k] )
+                    moved.insert( moved.end(), &o->pts[k * 3], &o->pts[k * 3] + 3 );
+        }
         s_moveBase.push_back( b );
+    }
 
+    // Points joined to a moved point come along.
+    for ( int j = 0; j < KiwiCon_Count() && !moved.empty(); ++j )
+    {
+        const kconObject_t *o = KiwiCon_At( j );
+        if ( !o || o->hidden || !PointShape( *o ) )
+            continue;
+        moveBase_t *entry = nullptr;
+        for ( moveBase_t &b : s_moveBase )
+            if ( b.object == j )
+                entry = &b;
+        if ( entry && entry->mask.empty() )
+            continue;                            // moving whole already
+        const int n = (int)( o->pts.size() / 3 );
+        for ( int k = 0; k < n; ++k )
+        {
+            bool joined = false;
+            for ( size_t m = 0; m + 2 < moved.size() && !joined; m += 3 )
+                joined = Dist3( &o->pts[(size_t)k * 3], &moved[m] ) <= KCONSEL_FOLLOW_DIST;
+            if ( !joined )
+                continue;
+            if ( !entry )
+            {
+                s_moveBase.push_back( MoveBaseFor( j, *o ) );
+                entry = &s_moveBase.back();
+                entry->mask.assign( (size_t)n, 0 );
+            }
+            entry->mask[(size_t)k] = 1;
+        }
+    }
+
+    // Use defining anchors for the centroid so tessellation density cannot bias it;
+    // a point move pivots on its moving points.
+    float sum[3] = { 0.0f, 0.0f, 0.0f };
+    int   n      = 0;
+    for ( const moveBase_t &b : s_moveBase )
+    {
+        const kconObject_t *o = KiwiCon_At( b.object );
+        if ( !o )
+            continue;
+        if ( !b.mask.empty() )
+        {
+            for ( size_t k = 0; k < b.mask.size(); ++k )
+                if ( b.mask[k] )
+                {
+                    for ( int a = 0; a < 3; ++a )
+                        sum[a] += b.pts[k * 3 + a];
+                    ++n;
+                }
+            continue;
+        }
         const int anchors = KiwiCon_AnchorCount( *o );
         for ( int a = 0; a < anchors; ++a )
         {
@@ -1620,6 +1820,13 @@ void KiwiConSel_MoveApply( const float delta[3] )
         kconObject_t *o = KiwiCon_MutableAt( b.object );
         if ( !o )
             continue;
+        if ( !b.mask.empty() )                     // KIWI: just the selected / joined points
+        {
+            for ( size_t k = 0; k < b.mask.size() && k * 3 + 2 < o->pts.size(); ++k )
+                for ( int a = 0; a < 3; ++a )
+                    o->pts[k * 3 + a] = b.pts[k * 3 + a] + ( b.mask[k] ? delta[a] : 0.0f );
+            continue;
+        }
         for ( int k = 0; k < 3; ++k )
             o->plane.origin[k] = b.origin[k] + delta[k];
         if ( o->pts.size() == b.pts.size() )
@@ -1682,6 +1889,17 @@ void KiwiConSel_RotateApplyMatrix( const float pivot[3], const float m[3][3] )
         kconObject_t *o = KiwiCon_MutableAt( b.object );
         if ( !o )
             continue;
+        if ( !b.mask.empty() )                     // KIWI: just the selected / joined points
+        {
+            for ( size_t k = 0; k < b.mask.size() && k * 3 + 2 < o->pts.size(); ++k )
+            {
+                if ( b.mask[k] )
+                    MatAbout( pivot, m, &b.pts[k * 3], &o->pts[k * 3] );
+                else
+                    Copy3( &b.pts[k * 3], &o->pts[k * 3] );
+            }
+            continue;
+        }
         // Rigid frame rotation keeps circles/arcs parametric: the origin orbits the
         // pivot and the basis vectors turn with it (centre/radius/angles unchanged).
         MatAbout( pivot, m, b.plane.origin, o->plane.origin );
@@ -1941,6 +2159,14 @@ void KiwiConSel_ScaleApply( const float pivot[3], const float factor[3] )
         kconObject_t *o = KiwiCon_MutableAt( b.object );
         if ( !o )
             continue;
+        if ( !b.mask.empty() )                     // KIWI: just the selected / joined points
+        {
+            for ( size_t k = 0; k < b.mask.size() && k * 3 + 2 < o->pts.size(); ++k )
+                for ( int a = 0; a < 3; ++a )
+                    o->pts[k * 3 + a] = b.mask[k] ? pivot[a] + ( b.pts[k * 3 + a] - pivot[a] ) * factor[a]
+                                                  : b.pts[k * 3 + a];
+            continue;
+        }
         for ( int k = 0; k < 3; ++k )
             o->plane.origin[k] = pivot[k] + ( b.plane.origin[k] - pivot[k] ) * factor[k];
         if ( o->pts.size() == b.pts.size() )

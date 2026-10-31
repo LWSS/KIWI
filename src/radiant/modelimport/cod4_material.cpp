@@ -1156,6 +1156,12 @@ bool WriteEditedMaterial(const std::filesystem::path& sourcePath,
                                output, error)) {
             return false;
         }
+        if (edits.usage != 0)
+            output[17] = edits.usage;
+        if (edits.autoTexScaleWidth != 0 && edits.autoTexScaleHeight != 0) {
+            WriteU16(output, 24, edits.autoTexScaleWidth);
+            WriteU16(output, 26, edits.autoTexScaleHeight);
+        }
 
         const std::filesystem::path outputPath =
             outputRawRoot / "materials" / std::string(name);

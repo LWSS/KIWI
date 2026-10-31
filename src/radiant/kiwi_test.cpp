@@ -32,6 +32,8 @@
 // KIWI END
 #include "kiwi_boxselect.h"    // click_at: the camera's real click path
 #include "kiwi_region.h"       // expect regions_selected
+#include "kiwi_boolean.h"      // curve_bool_probe: KiwiBool_TestPickTool
+#include "kiwi_validity.h"     // curve_bool_probe: KiwiValid_Rebuild
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
 
 #include <algorithm>
@@ -1490,6 +1492,195 @@ static void ExecuteLine( const ScriptLine &line )
             return;
         }
     }
+    if ( command == "conpoint_move_probe" )
+    {
+        // KIWI (2026-10-31, user: "make it so i can move the points of a multi point spline
+        // construction line and the spline will re-adjust to keep connection" / "i still want to
+        // be able to move the entire thing"): a 4-point spline with a line joined to its last
+        // point.  Moving that one control point moves it and the line's joined end only; moving
+        // the spline as an object moves all of it and leaves the line.
+        Map_New();
+        KiwiCon_ClearAll();
+        kconObject_t spline;
+        spline.type = KCON_POLYLINE;
+        const float sp[12] = { 0, 0, 0,  32, 0, 16,  64, 0, 0,  96, 0, 16 };
+        spline.pts.assign( sp, sp + 12 );
+        spline.smooth.assign( 4, 1 );
+        kconObject_t joined;
+        joined.type = KCON_LINE;
+        const float jp[6] = { 96, 0, 16,  96, 0, 64 };
+        joined.pts.assign( jp, jp + 6 );
+        const int s = KiwiCon_Add( spline ), l = KiwiCon_Add( joined );
+        if ( s < 0 || l < 0 ) { ScriptError( line, "could not add the spline and line" ); return; }
+
+        auto movePt = [&]( const kconSelItem_t &it, const float delta[3] ) {
+            KiwiConSel_Clear();
+            KiwiConSel_ApplyClick( it, false, false );
+            float ref[3];
+            if ( !KiwiConSel_MoveBegin( ref ) )
+                return false;
+            KiwiConSel_MoveApply( delta );
+            KiwiConSel_MoveCommit();
+            return true;
+        };
+        auto near3 = []( const float *a, float x, float y, float z ) {
+            return fabsf( a[0] - x ) < 0.01f && fabsf( a[1] - y ) < 0.01f && fabsf( a[2] - z ) < 0.01f;
+        };
+
+        kconSelItem_t pt;
+        pt.object = s;  pt.kind = KCONSEL_POINT;  pt.index = 3;
+        const float up[3] = { 0, 0, 8 };
+        if ( !movePt( pt, up ) ) { ScriptError( line, "the point move did not start" ); return; }
+        const kconObject_t *so = KiwiCon_At( s ), *lo = KiwiCon_At( l );
+        if ( !near3( &so->pts[9], 96, 0, 24 ) || !near3( &so->pts[0], 0, 0, 0 ) || !near3( &so->pts[6], 64, 0, 0 ) )
+        { ScriptError( line, "the spline's points are wrong after moving its last point" ); return; }
+        if ( !near3( &lo->pts[0], 96, 0, 24 ) || !near3( &lo->pts[3], 96, 0, 64 ) )
+        { ScriptError( line, "the joined line did not keep its connection (%g %g %g)", lo->pts[0], lo->pts[1], lo->pts[2] ); return; }
+        if ( !KiwiCon_HasSmooth( *so ) || KiwiCon_VertCount( *so ) <= 4 )
+        { ScriptError( line, "the spline lost its curve" ); return; }
+
+        kconSelItem_t whole;
+        whole.object = s;  whole.kind = KCONSEL_OBJECT;  whole.index = -1;
+        const float side[3] = { 0, 32, 0 };
+        if ( !movePt( whole, side ) ) { ScriptError( line, "the object move did not start" ); return; }
+        so = KiwiCon_At( s );  lo = KiwiCon_At( l );
+        if ( !near3( &so->pts[0], 0, 32, 0 ) || !near3( &so->pts[9], 96, 32, 24 ) )
+        { ScriptError( line, "the whole spline did not move" ); return; }
+        if ( !near3( &lo->pts[0], 96, 0, 24 ) )
+        { ScriptError( line, "moving the whole spline dragged the line along" ); return; }
+        KiwiConSel_Clear();
+        LogFormat( "CONPOINT-MOVE", "spline point move keeps the joined line; whole-spline move moves all of it" );
+        return;
+    }
+    if ( command == "curve_bool_probe" )
+    {
+        // KIWI (2026-10-31, user: "a brush can be boolean'd (diff) with a curve ... a square box
+        // with a curve running perfectly through it, and caps that line up with the brush
+        // exterior"): a 128 x 64 x 128 box and a radius-16 patch cylinder along +Y from y -32 to
+        // 96.  After Q with the curve as the tool: the curve's ends sit on the box faces y 0 and
+        // y 64, nothing solid is left on its axis, solid remains just outside it, and undo
+        // brings back the whole box and the untrimmed curve.
+        Map_New();
+        kconPlane_t ground;                                  // z up through the origin
+        kconPlane_t across;
+        const float acrossOrigin[3] = { 64.0f, -32.0f, 64.0f }, acrossNormal[3] = { 0.0f, 1.0f, 0.0f };
+        KiwiCon_MakePlane( acrossOrigin, acrossNormal, nullptr, &across );
+        const float centre[2] = { 0.0f, 0.0f };
+        brush_t *cyl = KiwiPrim_BuildPatchCylinder( across, centre, 16.0f, 0.0f, 128.0f, KiwiPrim_PatchDensity() );
+        if ( !cyl || !cyl->patch ) { ScriptError( line, "could not build the patch cylinder" ); return; }
+        selbrush_t *curve = KiwiExtrude_LandDef( cyl );
+        Select_Deselect( 1 );
+        const float square[8] = { 0, 0, 128, 0, 128, 64, 0, 64 };
+        const char *why = "unknown";
+        brush_t *box = KiwiExtrude_BuildPrismDef( ground, square, 4, 0.0f, 128.0f, &why );
+        if ( !box ) { ScriptError( line, "could not build the box: %s", why ); return; }
+        KiwiValid_Rebuild( box );
+        KiwiExtrude_LandDef( box );
+
+        if ( !KiwiCmd_Start( KIWI_CMD_BOOLEAN ) || !KiwiBool_TestPickTool( curve ) )
+        { ScriptError( line, "boolean did not start with the box as its target" ); return; }
+        KiwiCmd_Commit();
+
+        const patchMesh_t *p = curve->def ? curve->def->patch : nullptr;
+        if ( !p ) { ScriptError( line, "the curve tool was consumed" ); return; }
+        for ( int col = 0; col < p->width; ++col )
+        {
+            const float y0 = p->ctrl[col][0].xyz[1], y1 = p->ctrl[col][p->height - 1].xyz[1];
+            const float lo = y0 < y1 ? y0 : y1, hi = y0 < y1 ? y1 : y0;
+            if ( fabsf( lo ) > 0.01f || fabsf( hi - 64.0f ) > 0.01f || fabsf( p->ctrl[col][1].xyz[1] - 32.0f ) > 0.01f )
+            { ScriptError( line, "curve column %d ends at y %g / %g, not flush with the box (0 / 64)", col, y0, y1 ); return; }
+        }
+
+        // Solid at a point: inside every face plane of some brush.
+        auto solidAt = []( const float pt[3] ) {
+            for ( int list = 0; list < 2; ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                {
+                    if ( !b->def || b->def->patch )
+                        continue;
+                    bool inside = true;
+                    for ( int f = 0; f < b->def->faceCount && inside; ++f )
+                        inside = Dot3( b->def->faces[f].plane.normal, pt ) - b->def->faces[f].plane.dist < -0.01f;
+                    if ( inside )
+                        return true;
+                }
+            }
+            return false;
+        };
+        for ( int i = 1; i < 8; ++i )
+        {
+            const float onAxis[3] = { 64.0f, 8.0f * i, 64.0f };
+            if ( solidAt( onAxis ) ) { ScriptError( line, "solid left inside the curve at y %g", onAxis[1] ); return; }
+            const float outside[3] = { 64.0f + 30.0f, 8.0f * i, 64.0f };
+            if ( !solidAt( outside ) ) { ScriptError( line, "no solid just outside the curve at y %g", outside[1] ); return; }
+        }
+        MapCounts counts = CountMap();
+        if ( counts.patches != 1 || counts.brushes < 4 )
+        { ScriptError( line, "expected the carved box pieces and one curve, got %d brushes %d patches", counts.brushes, counts.patches ); return; }
+
+        Undo_Undo();
+        counts = CountMap();
+        bool restored = counts.brushes == 1 && counts.patches == 1;
+        for ( int list = 0; list < 2 && restored; ++list )
+        {
+            selbrush_t *head = list ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( b->def && b->def->patch
+                  && fabsf( b->def->patch->ctrl[0][0].xyz[1] + 32.0f ) > 0.01f
+                  && fabsf( b->def->patch->ctrl[0][0].xyz[1] - 96.0f ) > 0.01f )
+                    restored = false;
+        }
+        if ( !restored ) { ScriptError( line, "undo did not restore the box and the untrimmed curve (%d brushes %d patches)", counts.brushes, counts.patches ); return; }
+        LogFormat( "CURVE-BOOL", "box carved around the curve, curve ends flush at y 0 / 64, undo restores both" );
+        return;
+    }
+    if ( command == "small_circle_probe" )
+    {
+        // KIWI (2026-10-31, user: "if I make a small circle with the circle tool it doesn't make a
+        // face"): the region weld used to fall back to the grid's quarter step for a circle whose
+        // chords were all under KREG_JOIN_DIST, welding the loop away.  Every radius on a fine and
+        // a coarse grid must make a face of about its own area.
+        struct RestoreGrid
+        {
+            float  inches = KiwiUnits_GridSpacingInches();
+            float  units  = KiwiUnits_PerInch();
+            ~RestoreGrid()
+            {
+                KiwiUnits_SetGridSpacingInches( inches );
+                KiwiUnits_SetPerInch( units );
+            }
+        } restore;
+        KiwiUnits_SetPerInch( 1.0f );
+        static const float s_grids[]  = { 8.0f, 64.0f };
+        static const float s_radii[]  = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f };
+        int cases = 0;
+        for ( float grid : s_grids )
+        for ( float radius : s_radii )
+        {
+            Map_New();
+            KiwiUnits_SetGridSpacingInches( grid );
+            kconObject_t circle;
+            circle.type   = KCON_CIRCLE;
+            circle.closed = true;
+            circle.radius = radius;
+            const int object = KiwiCon_AddWithUndo( circle );
+            const auto &regions = KiwiRegion_All();
+            int region = -1;
+            for ( size_t i = 0; i < regions.size(); ++i )
+                if ( regions[i].sourceObject == object ) region = (int)i;
+            if ( region < 0 )
+            { ScriptError( line, "radius %g circle on a %g grid made no face", radius, grid ); return; }
+            const float area = KiwiRegion_SignedArea( regions[(size_t)region].pts );
+            const float disc = KCON_PI * radius * radius;
+            if ( area < disc * 0.6f || area > disc * 1.01f )
+            { ScriptError( line, "radius %g circle on a %g grid: face area %g, disc %g", radius, grid, area, disc ); return; }
+            ++cases;
+        }
+        LogFormat( "SMALL-CIRCLE", "%d cases passed: every radius 0.5-8 on an 8 and a 64 grid makes a face", cases );
+        return;
+    }
     if ( command == "circle_extrude_probe" )
     {
         // Exercise the actual modal command, source preservation, undo and patch
@@ -2087,6 +2278,37 @@ static void ExecuteLine( const ScriptLine &line )
         KiwiConSel_SelectObjects( &index, 1 );
         LogFormat( "CONSTRUCT", "added #%d (%d points%s), selected", index, (int)nums.size() / 3,
                    o.closed ? ", closed" : "" );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "construct_circle" )
+    {
+        // KIWI (2026-10-31): construct_circle x y z nx ny nz radius [ang0 ang1] - a circle (or,
+        // with the two angles in degrees, an arc) centred at x y z in the plane of normal
+        // nx ny nz, added through the construction undo (Trim's true-arc cases).
+        if ( w.size() != 8 && w.size() != 10 )
+        { ScriptError( line, "construct_circle x y z nx ny nz radius [ang0 ang1]" ); return; }
+        float v[9] = { 0.0f };
+        for ( size_t i = 1; i < w.size(); ++i )
+            if ( !ParseFloat( w[i], v[i - 1] ) )
+            { ScriptError( line, "construct_circle argument %d is not numeric", (int)i ); return; }
+        kconObject_t o;
+        if ( !KiwiCon_MakePlane( &v[0], &v[3], nullptr, &o.plane ) )
+        { ScriptError( line, "construct_circle: degenerate normal" ); return; }
+        const bool arc = w.size() == 10;
+        o.type      = arc ? KCON_ARC : KCON_CIRCLE;
+        o.closed    = !arc;
+        o.centre[0] = 0.0f;
+        o.centre[1] = 0.0f;
+        o.radius    = v[6];
+        if ( arc )
+        {
+            o.ang0 = v[7];
+            o.ang1 = v[8];
+        }
+        const int index = KiwiCon_AddWithUndo( o );
+        if ( index < 0 ) { ScriptError( line, "the construction store rejected the object" ); return; }
+        LogFormat( "CONSTRUCT", "added #%d (%s, radius %g)", index, arc ? "arc" : "circle", (double)o.radius );
         g_nUpdateBits = -1;
         return;
     }

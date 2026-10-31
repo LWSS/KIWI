@@ -2165,9 +2165,21 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
             Copy3( KiwiRegion_All()[(size_t)ri].plane.normal, regionNormal );
         }
     }
+    // KIWI (2026-10-29, user: "if the majority of points are on a single plane, in a single
+    // multi point line operation, assume the user wants it on 1 plane to make a face"): over
+    // empty space a line whose placed points mostly share a plane stays on that plane - it
+    // acts as a construction face - instead of dropping to the world ground far behind.  A
+    // real surface under the cursor still wins.  Forward hits only (KiwiCon_RayPlane), then
+    // the finite-plane clamp (KiwiCon_RayPlaneBounded) like every other plane rung.
+    kconPlane_t chainPlane;
+    float       chainHit[3] = { 0.0f, 0.0f, 0.0f };
+    const bool  haveChain = !haveCPlane && !onRegion && !surf.valid
+                         && KiwiCon_ToolChainPlane( &chainPlane )
+                         && KiwiCon_RayPlane( chainPlane, ray, chainHit )
+                         && KiwiCon_RayPlaneBounded( chainPlane, ray, chainHit );
     float raw[3];
-    // Raw ladder: planar plane, surface, world ground, view-aligned fallback.
-    // rawRung records which plane normal the frame must report.
+    // Raw ladder: planar plane, surface, the line's majority plane, world ground,
+    // view-aligned fallback.  rawRung records which plane normal the frame must report.
     int rawRung = 3;
     if ( haveCPlane )
     {
@@ -2188,6 +2200,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         raw[1] = surf.point[1];
         raw[2] = surf.point[2];
         rawRung = 1;
+    }
+    else if ( haveChain )
+    {
+        Copy3( chainHit, raw );
+        rawRung = 5;                         // the open line's majority plane (KIWI 2026-10-29)
     }
     else if ( RayHitsGroundPlane( ray, raw ) )
     {
@@ -2228,6 +2245,8 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     }
     else if ( rawRung == 4 )
         Copy3( regionNormal, out->planeNormal );
+    else if ( rawRung == 5 )
+        Copy3( chainPlane.normal, out->planeNormal );
     else if ( rawRung == 2 )
     {
         out->planeNormal[0] = 0.0f;          // world ground
@@ -2238,6 +2257,11 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
     {
         out->havePlane = false;              // the view-aligned rung, same normal
     }                                        // the raw point above was seated on
+    // KIWI (2026-10-29): what the cursor rests on, for the draw tools' majority plane.
+    static const snap_rest_t s_restOfRung[6] = { SNAP_REST_CPLANE, SNAP_REST_SURFACE,
+        SNAP_REST_GROUND, SNAP_REST_VIEW, SNAP_REST_REGION, SNAP_REST_CHAIN };
+    out->rest = s_restOfRung[rawRung];
+    Copy3( raw, out->restPoint );
     // Engagement is context-wide: construction snaps by default and Ctrl frees it;
     // transforms are free by default and Ctrl engages it; pivot placement is always
     // engaged. SNAP_NONE remains valid and carries the raw position.
@@ -2918,6 +2942,21 @@ bool KiwiSnap_Query( const ray_t &ray, int imgX, int imgY, snap_result_t *out,
         KiwiCon_PlaneToWorld( cplane, uv, out->position );
         out->valid = true;
         out->type  = SNAP_CPLANE;
+        return true;
+    }
+    // KIWI (2026-10-29): the line's majority plane takes its own world-anchored in-plane grid
+    // (KiwiCon_SnapUV); the world grid below would quantize the height off the plane.
+    if ( rawRung == 5 )
+    {
+        float uv[2];
+        KiwiCon_WorldToPlane( chainPlane, raw, uv );
+        out->valid = true;
+        out->type  = SNAP_CPLANE;
+        if ( KiwiGrid_SnapEnabled() )
+            KiwiCon_SnapUV( chainPlane, uv );
+        else
+            out->type = SNAP_NONE;           // the grid master switch is off: raw, in plane
+        KiwiCon_PlaneToWorld( chainPlane, uv, out->position );
         return true;
     }
     // Last rank: grid-snap the raw ground/view-fallback point. If grid snapping is

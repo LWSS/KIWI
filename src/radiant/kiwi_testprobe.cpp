@@ -79,6 +79,7 @@
 #include "kiwi_focus.h"       // focus_click
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
+#include "kiwi_primitive.h"   // pref roundpatch
 #include "kiwi_region.h"      // reg_state
 #include "kiwi_selection.h"
 #include "kiwi_uveditor.h"    // KiwiUvEd_TestAffine
@@ -1303,8 +1304,29 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
     // ── preferences (the isolated test profile; see KiwiTest_IsolateProfile) ────
     if ( verb == "pref" )
     {
-        if ( !need( 2, 3, "pref noclamp|grid|lightmaplock|texlock [value]" ) ) return true;
+        if ( !need( 2, 3, "pref noclamp|grid|lightmaplock|texlock|circlesides|roundpatch [value]" ) ) return true;
         const std::string what = Lower( w[1] );
+        if ( what == "roundpatch" )
+        {
+            // KIWI (2026-10-31): Extrude/Cylinder patch mode (the P toggle), saved per profile.
+            if ( w.size() == 3 )
+                KiwiPrim_SetPatchMode( w[2] != "0" );
+            KiwiTest_LogChannel( "DATA", "pref roundpatch %d", KiwiPrim_PatchMode() ? 1 : 0 );
+            return true;
+        }
+        if ( what == "circlesides" )
+        {
+            // KIWI (2026-10-31): the sides a circle - and an outline's arcs - extrude with.
+            if ( w.size() == 3 )
+            {
+                int sides;
+                if ( !ints( 2, 1, &sides ) ) return true;
+                Radiant_ProfileSetInt( "KiwiUX", "CircleExtrudeSides", sides );
+            }
+            KiwiTest_LogChannel( "DATA", "pref circlesides %d",
+                                 Radiant_ProfileGetInt( "KiwiUX", "CircleExtrudeSides", 16 ) );
+            return true;
+        }
         if ( what == "texlock" )
         {
             if ( w.size() == 3 )
@@ -1423,9 +1445,11 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
         for ( int i = 0; i < KiwiCon_Count(); ++i )
         {
             const kconObject_t *o = KiwiCon_At( i );
-            KiwiTest_LogChannel( "DATA", "con %d type %d pts %d closed %d group %d name %s", i,
+            // KIWI (2026-10-31): circles and arcs also report radius, angles and sample count.
+            KiwiTest_LogChannel( "DATA", "con %d type %d pts %d closed %d group %d name %s radius %.6f ang %.6f %.6f verts %d", i,
                                  (int)o->type, (int)( o->pts.size() / 3 ), o->closed ? 1 : 0, o->group,
-                                 o->name.empty() ? "-" : o->name.c_str() );
+                                 o->name.empty() ? "-" : o->name.c_str(), o->radius, o->ang0, o->ang1,
+                                 KiwiCon_VertCount( *o ) );
         }
         return true;
     }

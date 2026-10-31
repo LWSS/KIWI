@@ -13,6 +13,7 @@
 // KIWI GLASS
 //   KIWI-modelimport material <name> --template <stock material> --color <png> [--normal <png>]
 //                        [--spec <png>] [--surface <type>] [--normal-green keep|flip]
+//                        [--usage <usage.txt name|row>] [--texscale <w>[x<h>]]
 //                        material over authored PNGs (e.g. glass)
 // KIWI END
 //   KIWI-modelimport --mcp   MCP server on stdin/stdout (JSON-RPC 2.0, one message per line)
@@ -32,6 +33,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -673,11 +675,32 @@ void Usage() {
                  // KIWI GLASS
                  "KIWI-modelimport material <name> --template <stock material> --color <png>\n"
                  "                     [--normal <png>] [--spec <png>] [--surface t] [--normal-green keep|flip]\n"
+                 "                     [--usage <usage.txt name|row>] [--texscale <w>[x<h>]]\n"
                  // KIWI END
                  "KIWI-modelimport --mcp\n");
 }
 
 // KIWI GLASS
+// Radiant's usage value: a number, or a name looked up in deffiles/materials/usage.txt
+// (rows from 1, "<separator>" lines not counted - the order Radiant's usage filter lists).
+int ParseUsage(const GameRoot& root, const std::string& text) {
+    char* end = nullptr;
+    const long number = std::strtol(text.c_str(), &end, 10);
+    if (end && *end == 0 && !text.empty()) return number > 0 && number < 256 ? static_cast<int>(number) : 0;
+    std::ifstream file(root.root / "deffiles" / "materials" / "usage.txt");
+    std::string line;
+    int row = 0;
+    while (std::getline(file, line)) {
+        const std::size_t first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos || line.compare(first, 2, "//") == 0) continue;
+        line = line.substr(first, line.find_last_not_of(" \t\r") + 1 - first);
+        if (line == "<separator>") continue;
+        ++row;
+        if (Lower(line) == Lower(text)) return row;
+    }
+    return 0;
+}
+
 // Clones a stock material over PNGs used as authored.
 int RunMaterialCli(const std::string& name, std::map<std::string, std::string>& flags) {
     if (!flags.count("--template") || !flags.count("--color")) {
@@ -701,6 +724,23 @@ int RunMaterialCli(const std::string& name, std::map<std::string, std::string>& 
     if (flags.count("--surface") && !cod4::ParseSurfaceType(flags["--surface"], request.surfaceType)) {
         std::fprintf(stderr, "Error: '%s' is not a CoD4 surface type\n", flags["--surface"].c_str());
         return 2;
+    }
+    if (flags.count("--usage") && !(request.usage = ParseUsage(root, flags["--usage"]))) {
+        std::fprintf(stderr, "Error: '%s' is not a usage in deffiles\\materials\\usage.txt\n",
+                     flags["--usage"].c_str());
+        return 2;
+    }
+    if (flags.count("--texscale")) {
+        int width = 0;
+        int height = 0;
+        const int got = std::sscanf(flags["--texscale"].c_str(), "%dx%d", &width, &height);
+        if (got == 1) height = width;
+        if (got < 1 || width < 1 || width > 65535 || height < 1 || height > 65535) {
+            std::fprintf(stderr, "Error: --texscale is <w> or <w>x<h>, 1..65535\n");
+            return 2;
+        }
+        request.autoTexScaleWidth = width;
+        request.autoTexScaleHeight = height;
     }
     const LogFn log = [](const std::string& line) { std::fprintf(stderr, "%s\n", line.c_str()); };
     std::vector<fs::path> written;

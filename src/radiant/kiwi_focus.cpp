@@ -450,9 +450,9 @@ bool KiwiFocus_DispatchInstant( unsigned int cmdId )
             KiwiCon_ClearPlaneToDefault();
             return true;
         }
-        Sys_Printf( "View Face: nothing to look at - select or hover a face, a "
-                    "construction face, or an object (its face nearest the camera), then "
-                    "press Space.\n" );
+        // KIWI (2026-10-31, user: "when space is pressed with nothing selected, it goes to the
+        // nearest major cube viewpoint"): the view snaps to the nearest axis.
+        Sys_Printf( "View: snapped to the nearest axis view, %s.\n", KiwiCam_SnapToNearestAxis() );
         return true;
     }
     if ( target.region >= 0 )

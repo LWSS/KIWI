@@ -368,6 +368,16 @@ bool KiwiCon_FreeToolPlaneLocked();
 // Last placed tool point; SNAP_ANGLE's origin. False before the first point.
 bool KiwiCon_ToolAnchor( float out[3] );
 
+// KIWI (2026-10-29, user: "if the majority of points are on a single plane, in a single multi
+// point line operation, assume the user wants it on 1 plane to make a face and adjust the
+// points to be in-plane"): the plane strictly more than half of the live Line's placed points
+// lie on (within KCON_PLANE_FIT_DIST), chosen among the planes each point was clicked on.
+// The snap rests a cursor over empty space on it (kiwi_snap.cpp raw ladder) and the Line lays
+// its off-plane points onto it.  False when no plane has a majority, for a face-bound or
+// planar tool, or when a point placed straight up / down (Z lock, Z guide) leaves it - that
+// chain is 3D on purpose.
+bool KiwiCon_ToolChainPlane( kconPlane_t *out );
+
 // Previous committed point; relative-angle snapping's base direction.
 bool KiwiCon_ToolPrevAnchor( float out[3] );
 

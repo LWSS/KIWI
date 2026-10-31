@@ -196,6 +196,9 @@ struct ImageMaterialRequest {
     std::filesystem::path specularGloss;      // optional
     NormalGreen normalGreen = NormalGreen::Keep;
     int surfaceType = -1;                     // -1 keeps the template's
+    int usage = 0;                            // 0 keeps the template's (usage.txt row)
+    int autoTexScaleWidth = 0;                // 0 keeps the template's
+    int autoTexScaleHeight = 0;
 };
 
 bool WriteImageMaterial(const ImageMaterialRequest& request, const LogFn& log,

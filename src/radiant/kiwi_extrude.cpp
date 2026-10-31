@@ -470,6 +470,540 @@ namespace
         }
     }
 
+    // KIWI (2026-10-31, user: "when im extruding from the Z (flat ground) plane, position should
+    // be UPWARDS not downwards"): a region's plane faces whichever way its loop happened to wind,
+    // so a ground face often faced down and a positive depth dug.  A flat region facing down is
+    // turned to face up for the extrusion: normal and v negated (u x v stays the normal), every
+    // plane-space loop mirrored in v and re-wound so outlines stay CCW and holes CW.
+    void MirrorLoopV( std::vector<float> &loop )
+    {
+        const size_t n = loop.size() / 2;
+        std::vector<float> out( loop.size() );
+        for ( size_t i = 0; i < n; ++i )
+        {
+            out[i * 2 + 0] =  loop[( n - 1 - i ) * 2 + 0];
+            out[i * 2 + 1] = -loop[( n - 1 - i ) * 2 + 1];
+        }
+        loop.swap( out );
+    }
+
+    kregion_t FlipRegion( const kregion_t &reg )
+    {
+        kregion_t r = reg;
+        for ( int k = 0; k < 3; ++k )
+        {
+            r.plane.normal[k] = -r.plane.normal[k];
+            r.plane.v[k]      = -r.plane.v[k];
+        }
+        MirrorLoopV( r.pts );
+        MirrorLoopV( r.outer );
+        for ( std::vector<float> &hole : r.holes )
+            MirrorLoopV( hole );
+        // Reversed, new edge j runs old edge n-2-j backwards.
+        const size_t n = reg.pts.size() / 2;
+        if ( n > 0 && reg.bridge.size() == n )
+            for ( size_t j = 0; j < n; ++j )
+                r.bridge[j] = reg.bridge[( 2 * n - 2 - j ) % n];
+        return r;
+    }
+
+    kregion_t UprightRegion( const kregion_t &reg )
+    {
+        return ( reg.plane.normal[2] < -0.999f ) ? FlipRegion( reg ) : reg;
+    }
+
+    // KIWI (2026-10-31, user: "there's no way to control the number of brush sides on the arc"):
+    // a construction face's outline carries an arc's DISPLAY tessellation (up to 64 samples per
+    // full circle).  Runs of it that lie on a visible construction circle / arc in the face's
+    // plane - consecutive points on it at most about a sample apart - are resampled at `sides`
+    // per full circle, prorated by the run's sweep, ends kept: the count a whole circle extrudes
+    // with.  A straight line joining two points of the circle spans more than a sample and stays.
+    struct roundRef_t
+    {
+        float c[2];     // centre, plane space
+        float r;
+        float step;     // the object's sample spacing, radians
+    };
+
+    void RoundsInPlane( const kconPlane_t &pl, std::vector<roundRef_t> *out )
+    {
+        out->clear();
+        for ( int i = 0; i < KiwiCon_Count(); ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !o || o->hidden || ( o->type != KCON_CIRCLE && o->type != KCON_ARC ) || !( o->radius > 0.0f ) )
+                continue;
+            if ( fabsf( Dot3( o->plane.normal, pl.normal ) ) < 0.9999f )
+                continue;
+            float w[3], rel[3];
+            KiwiCon_PlaneToWorld( o->plane, o->centre, w );
+            Sub3( w, pl.origin, rel );
+            if ( fabsf( Dot3( rel, pl.normal ) ) > KCON_PLANE_FIT_DIST )
+                continue;
+            roundRef_t rr;
+            KiwiCon_WorldToPlane( pl, w, rr.c );
+            rr.r = o->radius;
+            const int   verts = KiwiCon_VertCount( *o );
+            const int   segs  = ( o->type == KCON_CIRCLE ) ? verts : verts - 1;
+            const float sweep = ( o->type == KCON_CIRCLE ) ? 360.0f : fabsf( o->ang1 - o->ang0 );
+            rr.step = ( segs > 0 ? sweep / (float)segs : 360.0f ) * KCON_DEG2RAD;
+            out->push_back( rr );
+        }
+    }
+
+    // One curve run handed to KiwiPrim_BuildCurvePatches: its quadratic controls (plane-space
+    // u,v pairs, odd count, ends on the loop), in the loop's CCW order.
+    struct curveRun_t
+    {
+        std::vector<float> ctrl;
+    };
+
+    // An arc as non-rational quadratic spans of at most 30 degrees, each middle control on the
+    // tangent intersection at r / cos(half-span) (kiwi_patchfillet.cpp's fillet).
+    void ArcControls( const float c[2], float r, float a0, float sweep, std::vector<float> *ctrl )
+    {
+        const float kSpan = 30.0f * KCON_DEG2RAD;
+        int spans = (int)ceilf( fabsf( sweep ) / kSpan - 1.0e-3f );
+        if ( spans < 1 )
+            spans = 1;
+        const float step = sweep / (float)spans;
+        ctrl->clear();
+        for ( int col = 0; col <= spans * 2; ++col )
+        {
+            const float a  = a0 + step * (float)col * 0.5f;
+            const float rr = ( col & 1 ) ? r / cosf( step * 0.5f ) : r;
+            ctrl->push_back( c[0] + cosf( a ) * rr );
+            ctrl->push_back( c[1] + sinf( a ) * rr );
+        }
+    }
+
+    // KIWI (2026-10-31, user: "make it so this mixture of spline/arc/line extrudes the spline
+    // portion also with a curve in P mode"): a spline is Catmull-Rom (cubic), which no quadratic
+    // patch holds exactly, so its tessellated run is fitted.  Spans take at most 30 degrees of
+    // turn, like the arcs; each middle control sits on the intersection of the run's tangents at
+    // the span's ends, so neighbouring spans share a tangent (no crease).  Where those tangents
+    // do not meet ahead of both ends (an inflection, a straight stretch) the span instead passes
+    // through the run's middle point.
+    void FitQuadraticRun( const std::vector<float> &run, std::vector<float> *ctrl )
+    {
+        const int m = (int)( run.size() / 2 ) - 1;          // edges
+        auto P = [&]( int i ) { return &run[(size_t)i * 2]; };
+        std::vector<float> tan( (size_t)( m + 1 ) * 2 );
+        for ( int i = 0; i <= m; ++i )
+        {
+            const float *a = P( i > 0 ? i - 1 : 0 ), *b = P( i < m ? i + 1 : m );
+            float dx = b[0] - a[0], dy = b[1] - a[1];
+            const float len = sqrtf( dx * dx + dy * dy );
+            if ( len > 1.0e-6f ) { dx /= len; dy /= len; }
+            tan[(size_t)i * 2] = dx;
+            tan[(size_t)i * 2 + 1] = dy;
+        }
+        auto edgeAngle = [&]( int i ) {                      // direction of edge i -> i + 1
+            return atan2f( P( i + 1 )[1] - P( i )[1], P( i + 1 )[0] - P( i )[0] );
+        };
+        const float kSpan = 30.0f * KCON_DEG2RAD;
+        ctrl->assign( P( 0 ), P( 0 ) + 2 );
+        int a = 0;
+        while ( a < m )
+        {
+            int b = a + 1;
+            float turn = 0.0f;
+            while ( b < m )
+            {
+                float d = edgeAngle( b ) - edgeAngle( b - 1 );
+                while ( d >  KCON_PI ) d -= 2.0f * KCON_PI;
+                while ( d < -KCON_PI ) d += 2.0f * KCON_PI;
+                if ( turn + fabsf( d ) > kSpan )
+                    break;
+                turn += fabsf( d );
+                ++b;
+            }
+            const float *p0 = P( a ), *p2 = P( b );
+            const float *t0 = &tan[(size_t)a * 2], *t2 = &tan[(size_t)b * 2];
+            const float cx = p2[0] - p0[0], cy = p2[1] - p0[1];
+            const float chord = sqrtf( cx * cx + cy * cy );
+            // p0 + s t0 = p2 - u t2
+            const float den = t0[0] * t2[1] - t0[1] * t2[0];
+            float mid[2];
+            bool met = false;
+            if ( fabsf( den ) > 1.0e-4f )
+            {
+                const float s = ( cx * t2[1] - cy * t2[0] ) / den;
+                const float u = ( cx * t0[1] - cy * t0[0] ) / den;
+                if ( s > 0.0f && u > 0.0f && s < chord && u < chord )
+                {
+                    mid[0] = p0[0] + t0[0] * s;
+                    mid[1] = p0[1] + t0[1] * s;
+                    met = true;
+                }
+            }
+            if ( !met )
+            {
+                // B(1/2) = (p0 + 2 p1 + p2) / 4 through the run's middle point.
+                const float *pm = P( ( a + b ) / 2 );
+                float on[2] = { pm[0], pm[1] };
+                if ( b - a == 1 ) { on[0] = ( p0[0] + p2[0] ) * 0.5f; on[1] = ( p0[1] + p2[1] ) * 0.5f; }
+                mid[0] = 2.0f * on[0] - ( p0[0] + p2[0] ) * 0.5f;
+                mid[1] = 2.0f * on[1] - ( p0[1] + p2[1] ) * 0.5f;
+            }
+            ctrl->push_back( mid[0] );
+            ctrl->push_back( mid[1] );
+            ctrl->push_back( p2[0] );
+            ctrl->push_back( p2[1] );
+            a = b;
+        }
+    }
+
+    // True when the CCW loop's run from point i to point j (`run`, inclusive) can be cut down to
+    // its chord with a flat cap: it bulges out (right of the chord, never left) and runs along the
+    // chord without doubling back, so the cap - the run projected onto its chord - never folds.
+    bool BulgesOutAlongChord( const std::vector<float> &run )
+    {
+        const int n = (int)( run.size() / 2 );
+        const float *a = &run[0], *b = &run[(size_t)( n - 1 ) * 2];
+        float dx = b[0] - a[0], dy = b[1] - a[1];
+        const float len = sqrtf( dx * dx + dy * dy );
+        if ( n < 3 || !( len > 1.0e-3f ) )
+            return false;
+        dx /= len;
+        dy /= len;
+        const float tol = 1.0e-3f * len > 0.01f ? 1.0e-3f * len : 0.01f;
+        float lastT = 0.0f, deepest = 0.0f;
+        for ( int i = 1; i < n; ++i )
+        {
+            const float rx = run[(size_t)i * 2] - a[0], ry = run[(size_t)i * 2 + 1] - a[1];
+            const float side = dx * ry - dy * rx;            // < 0: right, outside the loop
+            const float t = rx * dx + ry * dy;
+            if ( side > tol || t < lastT - tol )
+                return false;
+            if ( -side > deepest )
+                deepest = -side;
+            if ( t > lastT )
+                lastT = t;
+        }
+        return deepest > tol;
+    }
+
+    // Splines in the face's plane: their tessellation in plane space, and for each tessellation
+    // edge whether it belongs to a smooth (spline) span - a straight span of a mixed chain stays
+    // an ordinary edge.
+    struct splineRef_t
+    {
+        std::vector<float>         tess;      // plane-space u,v pairs
+        std::vector<unsigned char> smoothEdge;
+        bool                       closed = false;
+    };
+
+    void SplinesInPlane( const kconPlane_t &pl, std::vector<splineRef_t> *out )
+    {
+        out->clear();
+        for ( int i = 0; i < KiwiCon_Count(); ++i )
+        {
+            const kconObject_t *o = KiwiCon_At( i );
+            if ( !o || o->hidden || !KiwiCon_HasSmooth( *o ) )
+                continue;
+            const int verts = KiwiCon_VertCount( *o );
+            if ( verts < 2 )
+                continue;
+            splineRef_t sr;
+            sr.closed = o->closed;
+            bool onPlane = true;
+            std::vector<float> world( (size_t)verts * 3 );
+            for ( int v = 0; v < verts && onPlane; ++v )
+            {
+                float *w = &world[(size_t)v * 3], rel[3], uv[2];
+                if ( !KiwiCon_VertWorld( *o, v, w ) )
+                {
+                    onPlane = false;
+                    break;
+                }
+                Sub3( w, pl.origin, rel );
+                if ( fabsf( Dot3( rel, pl.normal ) ) > KCON_PLANE_FIT_DIST )
+                    onPlane = false;
+                KiwiCon_WorldToPlane( pl, w, uv );
+                sr.tess.push_back( uv[0] );
+                sr.tess.push_back( uv[1] );
+            }
+            if ( !onPlane )
+                continue;
+            // A tessellation edge is straight when it joins two consecutive control points
+            // across a span not marked smooth (KiwiCon_TessellateMixed emits only its start).
+            const int ctrlN = (int)( o->pts.size() / 3 );
+            auto ctrlAt = [&]( const float *w ) {
+                for ( int c = 0; c < ctrlN; ++c )
+                    if ( Dist3( w, &o->pts[(size_t)c * 3] ) < 1.0e-3f )
+                        return c;
+                return -1;
+            };
+            const int edges = sr.closed ? verts : verts - 1;
+            sr.smoothEdge.assign( (size_t)edges, 1 );
+            for ( int e = 0; e < edges; ++e )
+            {
+                const int c0 = ctrlAt( &world[(size_t)e * 3] );
+                const int c1 = ctrlAt( &world[(size_t)( ( e + 1 ) % verts ) * 3] );
+                if ( c0 < 0 || c1 < 0 )
+                    continue;
+                const int spans = o->closed ? ctrlN : ctrlN - 1;
+                for ( int s = 0; s < spans; ++s )
+                    if ( c0 == s && c1 == ( s + 1 ) % ctrlN
+                      && !( s < (int)o->smooth.size() && o->smooth[(size_t)s] ) )
+                        sr.smoothEdge[(size_t)e] = 0;
+            }
+            out->push_back( sr );
+        }
+    }
+
+    // Outward spline runs of the loop cut down to their chords, each recorded in `curveRuns`
+    // with its fitted controls.  True when any was.
+    bool ShapeSplineRuns( std::vector<float> &pts, const kconPlane_t &pl,
+                          std::vector<curveRun_t> *curveRuns )
+    {
+        const int n = (int)( pts.size() / 2 );
+        if ( n < 3 )
+            return false;
+        std::vector<splineRef_t> splines;
+        SplinesInPlane( pl, &splines );
+        if ( splines.empty() )
+            return false;
+        // Each loop point's position along each spline's tessellation (edge + fraction), or -1.
+        const float tol = 0.05f;
+        std::vector<float> param( (size_t)n * splines.size(), -1.0f );
+        for ( int i = 0; i < n; ++i )
+            for ( size_t k = 0; k < splines.size(); ++k )
+            {
+                const splineRef_t &sr = splines[k];
+                const int verts = (int)( sr.tess.size() / 2 );
+                const int edges = (int)sr.smoothEdge.size();
+                float best = tol;
+                for ( int e = 0; e < edges; ++e )
+                {
+                    const float *a = &sr.tess[(size_t)e * 2], *b = &sr.tess[(size_t)( ( e + 1 ) % verts ) * 2];
+                    const float ex = b[0] - a[0], ey = b[1] - a[1];
+                    const float ll = ex * ex + ey * ey;
+                    const float px = pts[(size_t)i * 2] - a[0], py = pts[(size_t)i * 2 + 1] - a[1];
+                    float t = ll > 1.0e-12f ? ( px * ex + py * ey ) / ll : 0.0f;
+                    t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+                    const float dx = px - ex * t, dy = py - ey * t;
+                    const float d = sqrtf( dx * dx + dy * dy );
+                    if ( d < best )
+                    {
+                        best = d;
+                        param[(size_t)i * splines.size() + k] = (float)e + t;
+                    }
+                }
+            }
+        // Edge i (point i -> i + 1) follows spline k along a smooth span, or -1.
+        std::vector<int> edge( (size_t)n, -1 );
+        bool any = false;
+        for ( int i = 0; i < n; ++i )
+        {
+            const int j = ( i + 1 ) % n;
+            for ( size_t k = 0; k < splines.size(); ++k )
+            {
+                const float pi = param[(size_t)i * splines.size() + k];
+                const float pj = param[(size_t)j * splines.size() + k];
+                if ( pi < 0.0f || pj < 0.0f )
+                    continue;
+                const int edges = (int)splines[k].smoothEdge.size();
+                float d = pj - pi;
+                if ( splines[k].closed )
+                {
+                    if ( d >  0.5f * (float)edges ) d -= (float)edges;
+                    if ( d < -0.5f * (float)edges ) d += (float)edges;
+                }
+                if ( fabsf( d ) < 1.0e-4f || fabsf( d ) > 1.0001f )
+                    continue;
+                int e = (int)floorf( pi + d * 0.5f );
+                e = ( ( e % edges ) + edges ) % edges;
+                if ( !splines[k].smoothEdge[(size_t)e] )
+                    continue;
+                edge[(size_t)i] = (int)k;
+                any = true;
+                break;
+            }
+        }
+        if ( !any )
+            return false;
+        int start = -1;
+        for ( int i = 0; i < n && start < 0; ++i )
+            if ( edge[(size_t)i] != edge[(size_t)( ( i + n - 1 ) % n )] )
+                start = i;
+        if ( start < 0 )
+            return false;                        // the whole loop is one spline: no chord
+
+        std::vector<float> out;
+        bool cut = false;
+        int i = start, done = 0;
+        while ( done < n )
+        {
+            out.push_back( pts[(size_t)i * 2] );
+            out.push_back( pts[(size_t)i * 2 + 1] );
+            const int k = edge[(size_t)i];
+            int j = i, edges = 0;
+            while ( k >= 0 && done + edges < n && edge[(size_t)j] == k )
+            {
+                j = ( j + 1 ) % n;
+                ++edges;
+            }
+            if ( edges >= 2 )
+            {
+                std::vector<float> run;
+                for ( int s = 0, p = i; s <= edges; ++s, p = ( p + 1 ) % n )
+                {
+                    run.push_back( pts[(size_t)p * 2] );
+                    run.push_back( pts[(size_t)p * 2 + 1] );
+                }
+                if ( BulgesOutAlongChord( run ) )
+                {
+                    curveRun_t cr;
+                    FitQuadraticRun( run, &cr.ctrl );
+                    curveRuns->push_back( cr );
+                    cut = true;
+                    done += edges;               // the chord: point j comes next
+                    i = j;
+                    continue;
+                }
+            }
+            i = ( i + 1 ) % n;
+            ++done;
+        }
+        if ( cut )
+            pts.swap( out );
+        return cut;
+    }
+
+    // True when `pts` had an arc run.  Runs are resampled at `sides` per full circle, except an
+    // arc bulging OUT of the loop by at most a half circle: that one takes `outSides` - or, with
+    // `curveRuns`, is cut down to its chord and recorded there instead, for
+    // KiwiPrim_BuildCurvePatches (Extrude's patch mode).  An arc bulging in stays sides: its chord
+    // would fill the notch.
+    bool ShapeRoundRuns( std::vector<float> &pts, const kconPlane_t &pl, int sides, int outSides,
+                         std::vector<curveRun_t> *curveRuns )
+    {
+        const int n = (int)( pts.size() / 2 );
+        if ( n < 3 )
+            return false;
+        std::vector<roundRef_t> rounds;
+        RoundsInPlane( pl, &rounds );
+        if ( rounds.empty() )
+            return false;
+        auto angleOn = [&]( int i, const roundRef_t &rr, float *ang ) {
+            const float dx = pts[(size_t)i * 2] - rr.c[0], dy = pts[(size_t)i * 2 + 1] - rr.c[1];
+            const float tol = rr.r * 1.0e-3f > 0.02f ? rr.r * 1.0e-3f : 0.02f;
+            if ( fabsf( sqrtf( dx * dx + dy * dy ) - rr.r ) > tol )
+                return false;
+            *ang = atan2f( dy, dx );
+            return true;
+        };
+        auto wrapPi = []( float a ) {
+            while ( a >  KCON_PI ) a -= 2.0f * KCON_PI;
+            while ( a < -KCON_PI ) a += 2.0f * KCON_PI;
+            return a;
+        };
+        // Edge i (point i -> i + 1) is an arc chord of round k, or -1.
+        std::vector<int> edge( (size_t)n, -1 );
+        bool any = false;
+        for ( int i = 0; i < n; ++i )
+        {
+            const int j = ( i + 1 ) % n;
+            for ( size_t k = 0; k < rounds.size(); ++k )
+            {
+                float ai, aj;
+                if ( !angleOn( i, rounds[k], &ai ) || !angleOn( j, rounds[k], &aj ) )
+                    continue;
+                const float d = fabsf( wrapPi( aj - ai ) );
+                if ( d > 1.0e-6f && d <= rounds[k].step * 1.5f )
+                {
+                    edge[(size_t)i] = (int)k;
+                    any = true;
+                    break;
+                }
+            }
+        }
+        if ( !any )
+            return false;
+        // Start where the edge kind changes, so no run wraps round the seam.
+        int start = -1;
+        for ( int i = 0; i < n && start < 0; ++i )
+            if ( edge[(size_t)i] != edge[(size_t)( ( i + n - 1 ) % n )] )
+                start = i;
+        if ( start < 0 )
+            return false;                        // the whole loop is one circle: leave it
+
+        std::vector<float> out;
+        int i = start, done = 0;
+        while ( done < n )
+        {
+            out.push_back( pts[(size_t)i * 2] );
+            out.push_back( pts[(size_t)i * 2 + 1] );
+            const int k = edge[(size_t)i];
+            if ( k < 0 )
+            {
+                i = ( i + 1 ) % n;
+                ++done;
+                continue;
+            }
+            const roundRef_t &rr = rounds[(size_t)k];
+            float a0 = 0.0f, prev = 0.0f, sweep = 0.0f;
+            angleOn( i, rr, &a0 );
+            prev = a0;
+            int j = i, edges = 0;
+            while ( done + edges < n && edge[(size_t)j] == k )
+            {
+                j = ( j + 1 ) % n;
+                float a = prev;
+                angleOn( j, rr, &a );
+                sweep += wrapPi( a - prev );
+                prev = a;
+                ++edges;
+            }
+            int runSides = sides;
+            if ( fabsf( sweep ) <= KCON_PI + 1.0e-3f )
+            {
+                // The loop is CCW, so the outside of chord a -> b is its right: an arc bulging
+                // out has its middle there.
+                const float *pa = &pts[(size_t)i * 2], *pb = &pts[(size_t)j * 2];
+                const float am  = a0 + sweep * 0.5f;
+                const float mx = rr.c[0] + cosf( am ) * rr.r - pa[0];
+                const float my = rr.c[1] + sinf( am ) * rr.r - pa[1];
+                const bool  bulges = ( pb[0] - pa[0] ) * my - ( pb[1] - pa[1] ) * mx < 0.0f;
+                if ( bulges )
+                    runSides = outSides;
+                if ( bulges && curveRuns )
+                {
+                    curveRun_t run;
+                    ArcControls( rr.c, rr.r, a0, sweep, &run.ctrl );
+                    // The ends sit exactly on the loop's points, where the brush's chord ends.
+                    const size_t last = run.ctrl.size() - 2;
+                    run.ctrl[0] = pa[0];  run.ctrl[1] = pa[1];
+                    run.ctrl[last] = pb[0];  run.ctrl[last + 1] = pb[1];
+                    curveRuns->push_back( run );
+                    done += edges;               // the chord: point j comes next
+                    i = j;
+                    continue;
+                }
+            }
+            int segs = (int)floorf( (float)runSides * fabsf( sweep ) / ( 2.0f * KCON_PI ) + 0.5f );
+            if ( segs < 1 )
+                segs = 1;
+            for ( int s = 1; s < segs; ++s )
+            {
+                const float a = a0 + sweep * (float)s / (float)segs;
+                out.push_back( rr.c[0] + cosf( a ) * rr.r );
+                out.push_back( rr.c[1] + sinf( a ) * rr.r );
+            }
+            done += edges;
+            i = j;
+        }
+        pts.swap( out );
+        return true;
+    }
+
+    bool ResampleRoundRuns( std::vector<float> &pts, const kconPlane_t &pl, int sides )
+    {
+        return ShapeRoundRuns( pts, pl, sides, sides, nullptr );
+    }
+
     // Region extrusion command.
     class KiwiExtrudeCommand : public KiwiEditorCommand
     {
@@ -485,7 +1019,15 @@ namespace
 
         int CommandOptions( const kiwiOption_t **out ) const override
         {
-            if ( !m_hasCircle || !m_patchMode ) return 0;
+            if ( !m_patchMode ) return 0;
+            if ( !m_hasCircle )
+            {
+                if ( !HasCurve() ) return 0;
+                static const kiwiOption_t arcOptions[] = {   // KIWI (2026-10-31): the curves' patches
+                    { "Density", KOPT_INT, nullptr, 0, 0, 1, 4, -1 },
+                };
+                *out = arcOptions; return 1;
+            }
             static kiwiOption_t options[] = {
                 { "Density", KOPT_INT, nullptr, 0, 0, 1, 4, -1 },
                 { "Backside faces", KOPT_TOGGLE, nullptr, 0, 0, 0, 1, -1 },
@@ -507,24 +1049,36 @@ namespace
         {
             static const kiwiPrompt_t brush[] = { { "P", "Circle: patch" }, { "[ ]", "Sides" } };
             static const kiwiPrompt_t patch[] = { { "P", "Circle: brush" }, { "[ ]", "Density (1-4)" } };
+            static const kiwiPrompt_t arc[]   = { { "P", "Curves: patches" }, { "[ ]", "Arc sides (per full circle)" } };
+            static const kiwiPrompt_t arcP[]  = { { "P", "Curves: brush sides" }, { "[ ]", "Density (1-4)" } };
+            if ( !m_hasCircle && HasCurve() )
+            {
+                *out = m_patchMode ? arcP : arc;
+                return ( m_patchMode || m_hasArc ) ? 2 : 1;   // a spline has no sides count
+            }
             *out = m_patchMode ? patch : brush;
             return m_hasCircle ? 2 : 0;
         }
 
         bool KeyDown( int vk, unsigned int mods ) override
         {
-            if ( !m_hasCircle || mods ) return false;
+            if ( !( m_hasCircle || HasCurve() ) || mods ) return false;
+            if ( ( vk == 0xDB || vk == 0xDD ) && !PatchCount() && !m_hasCircle && !m_hasArc )
+                return false;                    // brush splines: no count to step
             if ( vk == 'P' )
             {
                 m_patchMode = !m_patchMode;
                 KiwiPrim_SetPatchMode( m_patchMode );
                 KiwiNum_ClearField( 1 );
-                KiwiNum_UpdateFields( m_patchMode ? KEXT_PATCH_FIELDS : KEXT_CIRCLE_FIELDS, m_patchMode ? 3 : 2 );
+                int count;
+                const kiwiNumField_t *fields = RoundFields( &count );
+                KiwiNum_UpdateFields( fields, count );
+                Recompute();
             }
             else if ( vk == 0xDB || vk == 0xDD )
             {
                 KiwiNum_ClearField( 1 );
-                SetCircleCount( ( m_patchMode ? m_density : m_sides ) + ( vk == 0xDD ? 1 : -1 ) );
+                SetCircleCount( ( PatchCount() ? m_density : m_sides ) + ( vk == 0xDD ? 1 : -1 ) );
             }
             else return false;
             UpdateHud();
@@ -540,7 +1094,7 @@ namespace
                 { m_thickness = world; KiwiPrim_SetPatchThickness( world ); }
                 Recompute(); g_nUpdateBits |= 1; return;
             }
-            if ( field == 1 && m_hasCircle )
+            if ( field == 1 && ( m_hasCircle || m_hasArc ) )
             {
                 if ( has ) SetCircleCount( (int)floorf( Units_ToDisplay( world ) + 0.5f ) );
                 UpdateHud();
@@ -553,9 +1107,9 @@ namespace
         bool NumericFieldValue( int field, float *out ) const override
         {
             if ( field == 2 && out && m_patchMode && m_hasCircle ) { *out = m_thickness; return true; }
-            if ( field == 1 && out && m_hasCircle )
+            if ( field == 1 && out && ( m_hasCircle || m_hasArc ) )
             {
-                *out = (float)( m_patchMode ? m_density : m_sides );
+                *out = (float)( PatchCount() ? m_density : m_sides );
                 return true;
             }
             if ( field != 0 || !out )
@@ -649,11 +1203,30 @@ namespace
 
             std::vector<int> sources;
             EachSource( &sources );
+            m_hasArc = false;
+            m_hasSpline = false;
             for ( int source : sources )
-                if ( CircleSource( regions[source] ) ) m_hasCircle = true;
-            if ( m_hasCircle )
             {
-                KiwiNum_SetFields( m_patchMode ? KEXT_PATCH_FIELDS : KEXT_CIRCLE_FIELDS, m_patchMode ? 3 : 2 );
+                if ( CircleSource( regions[source] ) )
+                    m_hasCircle = true;
+                else if ( regions[source].holes.empty() )
+                {
+                    // KIWI (2026-10-31): an outline with arc runs gets the "sides" field too, and
+                    // one with an outward spline run P (curve patches).
+                    std::vector<float> probe = regions[source].pts;
+                    if ( ResampleRoundRuns( probe, regions[source].plane, m_sides ) )
+                        m_hasArc = true;
+                    std::vector<curveRun_t> runs;
+                    probe = regions[source].pts;
+                    if ( ShapeSplineRuns( probe, regions[source].plane, &runs ) )
+                        m_hasSpline = true;
+                }
+            }
+            if ( m_hasCircle || HasCurve() )
+            {
+                int count;
+                const kiwiNumField_t *fields = RoundFields( &count );
+                KiwiNum_SetFields( fields, count );
             }
 
             const kregion_t &reg = regions[m_region];
@@ -679,6 +1252,7 @@ namespace
             KiwiCon_PlaneToWorld( m_plane, c, m_ref );
             if ( const kconObject_t *circle = CircleSource( reg ) )
                 KiwiCon_PlaneToWorld( circle->plane, circle->centre, m_ref );
+            m_plane = UprightRegion( reg ).plane;   // KIWI: a ground face extrudes up (m_ref is world)
 
             m_dist  = 0.0f;
             m_axisBlocked = false;  // recomputed on the first move
@@ -848,13 +1422,31 @@ namespace
             return o && o->type == KCON_CIRCLE && !o->hidden ? o : nullptr;
         }
 
+        // In patch mode circles and outline curves (arcs, splines: curve patches, PatchCurves)
+        // count density; out of it, sides.  Arcs bulging inward stay brush sides at the saved
+        // count, and splines that cannot take a flat cap their tessellation.
+        bool HasCurve() const    { return m_hasArc || m_hasSpline; }
+        bool PatchCount() const  { return ( m_hasCircle || HasCurve() ) && m_patchMode; }
+        bool PatchCurves() const { return HasCurve() && m_patchMode; }
+
+        // The typed fields with a circle or curves in the sources: a patch circle adds density
+        // and wall thickness; curve patches (user: "hide the sides field if P mode is active")
+        // take length alone; brush circles / arcs, length and sides.
+        const kiwiNumField_t *RoundFields( int *count ) const
+        {
+            if ( m_patchMode && m_hasCircle )              { *count = 3; return KEXT_PATCH_FIELDS; }
+            if ( m_patchMode || !( m_hasCircle || m_hasArc ) ) { *count = 1; return KEXT_FIELDS; }
+            *count = 2;
+            return KEXT_CIRCLE_FIELDS;
+        }
+
         void SetCircleCount( int count )
         {
-            const int lo = m_patchMode ? KPRIM_PATCH_DENSITY_MIN : KPRIM_CYL_SIDES_MIN;
-            const int hi = m_patchMode ? KPRIM_PATCH_DENSITY_MAX : KPRIM_CYL_SIDES_MAX;
+            const int lo = PatchCount() ? KPRIM_PATCH_DENSITY_MIN : KPRIM_CYL_SIDES_MIN;
+            const int hi = PatchCount() ? KPRIM_PATCH_DENSITY_MAX : KPRIM_CYL_SIDES_MAX;
             if ( count < lo ) count = lo;
             if ( count > hi ) count = hi;
-            if ( m_patchMode )
+            if ( PatchCount() )
             {
                 m_density = count;
                 KiwiPrim_SetPatchDensity( count );
@@ -874,13 +1466,31 @@ namespace
         }
 
         // Sampling belongs to the output, never to the analytic source object.
+        // KIWI (2026-10-31, user: "fix this nasty direction mismatch with multiple construction
+        // faces"): one signed depth drives every source along its own normal, so a selected face
+        // on a parallel plane facing the other way grew the opposite way.  Ground faces turn up,
+        // then any source facing against the primary's direction is turned to agree with it.
+        kregion_t OrientedRegion( const kregion_t &reg ) const
+        {
+            const kregion_t up = UprightRegion( reg );
+            return ( Dot3( up.plane.normal, m_plane.normal ) < -1.0e-3f ) ? FlipRegion( up ) : up;
+        }
+
         kregion_t EffectiveRegion( const kregion_t &reg ) const
         {
-            kregion_t result = reg;
+            kregion_t result = OrientedRegion( reg );
             const kconObject_t *circle = CircleSource( reg );
-            if ( !circle ) return result;
+            if ( !circle )
+            {
+                // KIWI (2026-10-31): arc runs in the outline take the circle's side count - or,
+                // the arcs that become curve patches (patch mode), a fine count, so the preview
+                // shows the curve itself.
+                if ( result.holes.empty() )
+                    ShapeRoundRuns( result.pts, result.plane, m_sides, PatchCurves() ? 48 : m_sides, nullptr );
+                return result;
+            }
             float centre[2];
-            CircleCentre( *circle, reg.plane, centre );
+            CircleCentre( *circle, result.plane, centre );
             result.pts.clear();
             const int samples = 8;
             const int n = m_patchMode ? ( m_density + 3 ) * samples : m_sides;
@@ -945,14 +1555,34 @@ namespace
             const kconObject_t *circle = CircleSource( source );
             if ( circle && m_patchMode )
             {
+                const kconPlane_t plane = OrientedRegion( source ).plane;   // KIWI: one direction for all
                 float centre[2];
-                CircleCentre( *circle, source.plane, centre );
-                return KiwiPrim_BuildPatchCylinderShell( source.plane, centre, circle->radius,
+                CircleCentre( *circle, plane, centre );
+                return KiwiPrim_BuildPatchCylinderShell( plane, centre, circle->radius,
                     m_dist < 0.0f ? m_dist : 0.0f, m_dist > 0.0f ? m_dist : 0.0f,
                     m_density, m_backfaces, m_thickness, out, why );
             }
-            const kregion_t reg = EffectiveRegion( source );
+            // KIWI (2026-10-31): patch mode on an outline with arcs / splines - each one bulging
+            // out becomes curve patches (wall + caps), and the brushes take its chord instead.
+            std::vector<curveRun_t> curveRuns;
+            kregion_t reg;
+            if ( !circle && PatchCurves() && source.holes.empty() )
+            {
+                reg = OrientedRegion( source );
+                ShapeSplineRuns( reg.pts, reg.plane, &curveRuns );
+                ShapeRoundRuns( reg.pts, reg.plane, m_sides, m_sides, &curveRuns );
+            }
+            else
+                reg = EffectiveRegion( source );
+            prismBuild_t pb;
+            MakeBuildFor( reg, &pb );
+            for ( size_t i = 0; i < curveRuns.size(); ++i )
+                if ( !KiwiPrim_BuildCurvePatches( reg.plane, curveRuns[i].ctrl.data(), (int)( curveRuns[i].ctrl.size() / 2 ),
+                                                  pb.lo, pb.hi, m_density, out, why ) )
+                    return false;
             const int n = (int)( reg.pts.size() / 2 );
+            if ( n < 3 && !curveRuns.empty() )
+                return true;                          // curves only (a lens): no brush between them
             if ( n < 3 || n > KEXT_MAX_PROFILE )
             {
                 *why = "profile out of range";
@@ -972,14 +1602,26 @@ namespace
                 *why = "could not decompose the profile (self-intersecting or degenerate)";
                 return false;
             }
+            // KIWI (2026-10-31, user: cod4map "pointCount <= 64" assert): a CoD4 brush face holds
+            // at most 64 points (WindingFromPoints, cod4map common/polylib.cpp), and a piece's caps
+            // carry all its corners.  A convex piece with more is cut along a diagonal - both halves
+            // stay convex - until every piece fits.
+            for ( size_t p = 0; p < pieces.size(); ++p )
+            {
+                if ( (int)pieces[p].size() <= KEXT_MAX_FACE_POINTS )
+                    continue;
+                std::vector<int> rest;
+                rest.push_back( pieces[p][0] );
+                rest.insert( rest.end(), pieces[p].begin() + ( KEXT_MAX_FACE_POINTS - 1 ), pieces[p].end() );
+                pieces[p].resize( KEXT_MAX_FACE_POINTS );
+                pieces.push_back( rest );             // checked again further down this loop
+            }
             if ( pieces.empty() || (int)pieces.size() > KEXT_MAX_PIECES )
             {
                 *why = "the decomposition produced too many pieces";
                 return false;
             }
 
-            prismBuild_t pb;
-            MakeBuildFor( reg, &pb );
             for ( size_t p = 0; p < pieces.size(); ++p )
             {
                 brush_t *def = BuildPieceDef( pb, reg.pts, pieces[p], why );
@@ -1143,13 +1785,22 @@ namespace
             }
             const std::vector<kregion_t> &regions = KiwiRegion_All();
             const int verts = ( m_region >= 0 && m_region < (int)regions.size() )
-                            ? (int)( regions[m_region].pts.size() / 2 ) : 0;
+                            ? (int)( EffectiveRegion( regions[m_region] ).pts.size() / 2 ) : 0;
             // Show source count because some selected regions may be off screen.
-            char many[24];
+            char many[48];
             many[0] = '\0';
             if ( !m_extra.empty() )
                 _snprintf( many, sizeof( many ), " x%i", (int)m_extra.size() + 1 );
             many[sizeof( many ) - 1] = '\0';
+            if ( HasCurve() )          // KIWI (2026-10-31): the curves' count, [ ] / Tab to change
+            {
+                const size_t len = strlen( many );
+                if ( m_patchMode )
+                    _snprintf( many + len, sizeof( many ) - len, "  curves as patches, density %i", m_density );
+                else if ( m_hasArc )
+                    _snprintf( many + len, sizeof( many ) - len, "  arc sides %i/circle", m_sides );
+                many[sizeof( many ) - 1] = '\0';
+            }
 
             // The view-gate remedy takes precedence over the derivative TOO THIN state.
             if ( m_axisBlocked && !m_hasNum )
@@ -1222,6 +1873,8 @@ namespace
 
         int              m_region  = -1;
         bool             m_hasCircle = false;
+        bool             m_hasArc = false;      // a non-circle source's outline has arc runs
+        bool             m_hasSpline = false;   // ...or an outward spline run (P: curve patches)
         bool             m_patchMode = false;
         int              m_sides = KPRIM_CYL_SIDES_DEF;
         int              m_density = KPRIM_PATCH_DENSITY_DEF;
