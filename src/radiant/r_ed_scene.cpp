@@ -684,8 +684,8 @@ void __cdecl RemoveModelInstFromBuf(int instanceHandle)
     edMapGlobals.modelInstMax = n;
 }
 
-// 0x4FDE10  Entity_GetModelInstBounds — local-space mins/maxs of an instance's
-// model (xmodel bounds rotated by the instance quat, scaled by modelscale).
+// 0x4FDE10  Entity_GetModelInstBounds — WORLD mins/maxs of an instance's model (xmodel
+// bounds rotated by the instance quat, scaled by modelscale, plus the instance origin).
 void __cdecl Entity_GetModelInstBounds(int instanceHandle, float *out_mins, float *out_maxs)
 {
     iassert(instanceHandle > 0 && instanceHandle <= edMapGlobals.modelInstMax);

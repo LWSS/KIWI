@@ -190,9 +190,9 @@ namespace
     const char  *KCAM_INVERTY_ENTRY  = "FlyInvertY";
     const char  *KCAM_WORLDUP_ENTRY  = "FlyWorldUp";
 
-    // Ortho arrows pan at a fixed screen-pixel rate. Normalize the persisted speed
+    // Ortho fly keys pan at a fixed screen-pixel rate. Normalize the persisted speed
     // by its default so the multiplier is applied once in both projections.
-    const float KCAM_FLY_PX_PER_SEC = 600.0f;  // ortho arrows: screen px per second at 1x
+    const float KCAM_FLY_PX_PER_SEC = 600.0f;  // ortho fly keys: screen px per second at 1x
     const float KCAM_FLY_SCALE_DEF  = 4.0f;    // the shipped KiwiCam_FlySpeedScale default
     const char  *KCAM_SECTION     = "KiwiUX";
     const char  *KCAM_FLY_ENTRY   = "FlySpeedScale3";   // v3: default moved 10x -> 4x
@@ -2078,8 +2078,8 @@ void KiwiCam_SetFlyWorldUp( bool on )
     Radiant_ProfileSetInt( KCAM_SECTION, KCAM_WORLDUP_ENTRY, s_worldUp );
 }
 
-// Keyboard fly uses arrows only. During RMB look they are swallowed from the
-// message path; while hovering, only bare arrows fly so modified bindings remain.
+// KIWI (2026-11-01, user: "remove arrow key camera fly, it's useless now and interfere's with
+// the UV editor"): the arrows no longer fly; WASD/QE under the held mouse-forward fly do.
 bool KiwiCam_FlySwallowKey( unsigned int vk )
 {
     // KIWI (2026-10-21): the WASD/QE fly keys - bare while hovering (Shift+W box,
@@ -2091,12 +2091,10 @@ bool KiwiCam_FlySwallowKey( unsigned int vk )
         if ( !KeyDown( VK_SHIFT ) && !KeyDown( VK_CONTROL ) && !KeyDown( VK_MENU ) )
             return true;
     }
-    if ( !s_flyLookHeld )
-        return false;
-    return vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT;
+    return false;
 }
 
-void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
+void KiwiCam_FlyTick( bool lookHeld, bool wasd )
 {
     const double now = NowSeconds();
     double dt = s_flyHave ? ( now - s_flyPrev ) : 0.0;
@@ -2105,7 +2103,7 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
     s_flyLookHeld = lookHeld;
     s_flyWasd     = wasd;
 
-    if ( !lookHeld && !arrows && !wasd )
+    if ( !lookHeld && !wasd )
     {
         for ( int i = 0; i < 3; ++i )
             s_flyVel[i] = 0.0f;                  // letting go of the fly stops dead
@@ -2124,18 +2122,9 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
         return;
     }
 
-    // RMB look ignores modifiers so Shift can boost; hover requires bare arrows,
-    // preserving classic modified-arrow bindings. There is deliberately no Q/E
-    // vertical term.
+    // A held look ignores modifiers so Shift can boost.
     int fwd = 0, side = 0, rise = 0;
     const bool anyMod = KeyDown( VK_SHIFT ) || KeyDown( VK_CONTROL ) || KeyDown( VK_MENU );
-    if ( lookHeld || ( arrows && !anyMod ) )
-    {
-        if ( KeyDown( VK_UP    ) ) ++fwd;
-        if ( KeyDown( VK_DOWN  ) ) --fwd;
-        if ( KeyDown( VK_RIGHT ) ) ++side;
-        if ( KeyDown( VK_LEFT  ) ) --side;
-    }
     // KIWI (2026-10-21, user: "WASD works how you'd expect, Q lowers (relative to camera
     // angle), E Raises ... while nothing is selected").
     if ( wasd && ( lookHeld || !anyMod ) )
@@ -2160,7 +2149,7 @@ void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd )
 
     // KIWI (2026-10-27): perspective flies at the absolute fly speed (units / s).
     float speed = KiwiCam_FlySpeed();
-    // In ortho arrows pan along vup/vright at a constant screen-pixel rate; motion
+    // In ortho the fly keys pan along vup/vright at a constant screen-pixel rate; motion
     // along vpn would be invisible in a parallel projection. Normalize the speed
     // slider by its default so it is counted once.
     const bool ortho = KiwiCam_Ortho();

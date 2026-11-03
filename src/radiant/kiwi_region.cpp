@@ -141,6 +141,12 @@ namespace
 
     // Remove successive edges that §19 would turn into duplicate prism side planes.
     // Reuse KVALID_PLANE_DOT and repeat because one removal can expose another.
+    // KIWI (2026-11-01, user: "when i make a construction face with lines and splines combined,
+    // it doesn't perform well"): only a vertex that also lies ON the line through its neighbours
+    // (KVALID_PLANE_DIST) goes.  The angle alone ate a spline's gentle stretches point after
+    // point - each removal leaves the next turn shallow too - so the face cut across the curve
+    // and Extrude's curve patches no longer recognised it.  The extruder still merges shallow
+    // turns per brush piece (kiwi_extrude.cpp CleanRing), where duplicate planes are the issue.
     void DropCollinear( std::vector<float> &pts )
     {
         bool changed = true;
@@ -164,6 +170,10 @@ namespace
                 const float dot = ( e0[0] * e1[0] + e0[1] * e1[1] ) / ( l0 * l1 );
                 if ( dot <= KVALID_PLANE_DOT )
                     continue;
+                const float ac[2] = { c[0] - a[0], c[1] - a[1] };
+                const float lac = sqrtf( ac[0] * ac[0] + ac[1] * ac[1] );
+                if ( lac > 1.0e-6f && fabsf( ac[0] * e0[1] - ac[1] * e0[0] ) / lac > KVALID_PLANE_DIST )
+                    continue;                // b bends the outline: keep it
                 pts.erase( pts.begin() + (size_t)i * 2, pts.begin() + (size_t)i * 2 + 2 );
                 changed = true;
                 break;

@@ -32,6 +32,9 @@
 #include "kiwi_floatsnap.h"   // KIWI: noise-only half-grid snap
 #include "kiwi_angles.h"      // KIWI: exact sin / cos of degrees
 #include "kiwi_ported.h"      // KIWI: shared engine/editor externs
+#include "kiwi_patchfillet.h" // KIWI: a retextured patch re-matches its brush (KiwiPatch_MatchTexture)
+#include "kiwi_terrain.h"     // KIWI: a retextured terrain patch keeps its layers (KiwiTerrain_BaseRetextured)
+#include <vector>
 
 // ─── editor / engine externs (ported elsewhere) ──────────────────────────────
 extern void  Error( const char *fmt, ... );
@@ -101,6 +104,8 @@ patchMesh_t *MakeNewPatch()
     p->version  = 0;
     p->xx22b    = false;
     memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );   // KIWI: no texture layers
+    for ( int slot = 0; slot < 4; ++slot )               // ...each at the base's own scale
+        p->kiwiLayerScale[slot][0] = p->kiwiLayerScale[slot][1] = 1.0f;
     return p;
 }
 
@@ -933,8 +938,11 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
     Map_ParseEntityLayerKey( text, "smoothing_smooth", smoothBuf, "smoothing" );
     SetMaterial( smoothBuf, &p->smoothing );
 
-    // KIWI texture layers: "kiwilayer <slot> <material>" lines, any count, any order.
+    // KIWI texture layers: "kiwilayer <slot> <material> [scale <s> <t>]" lines, any count, any
+    // order.  The scale is a keyword pair - the token after a bare line is the grid width.
     memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );
+    for ( int slot = 0; slot < 4; ++slot )
+        p->kiwiLayerScale[slot][0] = p->kiwiLayerScale[slot][1] = 1.0f;
     for ( ;; )
     {
         parseInfo_t *tok = Com_Parse( text );
@@ -951,6 +959,18 @@ brush_t *Patch_ParseMesh( const char **text, int version, int isMesh )
         {
             strncpy( p->kiwiLayer[slot], nameTok->token, 63 );
             p->kiwiLayer[slot][63] = 0;
+        }
+        if ( strcmp( Com_Parse( text )->token, "scale" ) )
+        {
+            Com_UngetToken();
+            continue;
+        }
+        const float s = (float)atof( Com_ParseOnLine( text )->token );
+        const float t = (float)atof( Com_ParseOnLine( text )->token );
+        if ( slot >= 0 && slot < 4 && s > 0.0f && t > 0.0f && isfinite( s ) && isfinite( t ) )
+        {
+            p->kiwiLayerScale[slot][0] = s;
+            p->kiwiLayerScale[slot][1] = t;
         }
     }
 
@@ -1099,8 +1119,18 @@ int Patch_Write( WriteWriter_t writer, patchMesh_t *p )
         WRITE( writer, "   smoothing %s\n", smName );
     // KIWI texture layers (patchMesh_t.kiwiLayer): one optional line per used slot.
     for ( int slot = 0; slot < 4; ++slot )
-        if ( p->kiwiLayer[slot][0] )
+    {
+        if ( !p->kiwiLayer[slot][0] )
+            continue;
+        const float s = p->kiwiLayerScale[slot][0], t = p->kiwiLayerScale[slot][1];
+        if ( s > 0.0f && t > 0.0f && ( s != 1.0f || t != 1.0f ) )
+        {
+            char bs[40], bt[40];
+            WRITE( writer, "   kiwilayer %i %s scale %s %s\n", slot, p->kiwiLayer[slot], Fmt8g( bs, s ), Fmt8g( bt, t ) );
+        }
+        else
             WRITE( writer, "   kiwilayer %i %s\n", slot, p->kiwiLayer[slot] );
+    }
 
     // The binary used plain "%g" for the LOD size (6 sig figs).  KIWI: Fmt8g - a scaled patch's
     // 21.333334 saved as 21.3333; stock integer sizes (0 in blackout) print as before.
@@ -1549,15 +1579,107 @@ void Patch_KiwiFinishNew( patchMesh_t *p )
 //
 //  It also rebuilds curveDef (Patch_KiwiFinishNewLike's tail), which is what
 //  Patch_RayTest's pick needs — so this is self-healing on that axis too.
+void Patch_KiwiLmapAlign( patchMesh_t *p );   // below (ROUND AM)
+
+// KIWI (2026-11-01, user: fillet "side caps come out really stretched, they need to be fixed
+// with "lmap" button each time in the S menu"): a flat cap - a planar patch with a collapsed end
+// column or row, as the fillet's and an extruded arc's ends are - has a zero-length side, and
+// natural texturing reads the repeat down it: one texel smeared over the cap.  Those caps are
+// born Lmap-aligned (kiwi_patchfillet.cpp LandCaps); a texture apply re-lays them the same way.
+static bool Patch_KiwiIsFlatCap( const patchMesh_t *p )
+{
+    const float tol = 0.01f;
+    auto same = [&]( const float *a, const float *b ) {
+        return fabsf( a[0] - b[0] ) <= tol && fabsf( a[1] - b[1] ) <= tol && fabsf( a[2] - b[2] ) <= tol;
+    };
+    bool pinched = false;
+    for ( int e = 0; e < 2 && !pinched; ++e )
+    {
+        const int col = e ? p->width - 1 : 0, row = e ? p->height - 1 : 0;
+        bool colSame = true, rowSame = true;
+        for ( int r = 1; r < p->height && colSame; ++r )
+            colSame = same( p->ctrl[col][r].xyz, p->ctrl[col][0].xyz );
+        for ( int c = 1; c < p->width && rowSame; ++c )
+            rowSame = same( p->ctrl[c][row].xyz, p->ctrl[0][row].xyz );
+        pinched = colSame || rowSame;
+    }
+    if ( !pinched )
+        return false;
+    // Planar: every control point on the plane of the three spread-out corners / middle.
+    const float *o = p->ctrl[0][0].xyz;
+    const float *a = p->ctrl[p->width - 1][p->height - 1].xyz;
+    const float *b = p->ctrl[p->width / 2][p->height / 2].xyz;
+    const float *c = p->ctrl[p->width - 1][0].xyz, *d = p->ctrl[0][p->height - 1].xyz;
+    float n[3] = { 0.0f, 0.0f, 0.0f };
+    float best = 0.0f;
+    const float *cands[3] = { b, c, d };
+    for ( int k = 0; k < 3; ++k )
+    {
+        float t1[3], t2[3], tn[3];
+        for ( int i = 0; i < 3; ++i ) { t1[i] = a[i] - o[i]; t2[i] = cands[k][i] - o[i]; }
+        tn[0] = t1[1] * t2[2] - t1[2] * t2[1];
+        tn[1] = t1[2] * t2[0] - t1[0] * t2[2];
+        tn[2] = t1[0] * t2[1] - t1[1] * t2[0];
+        const float len = sqrtf( tn[0] * tn[0] + tn[1] * tn[1] + tn[2] * tn[2] );
+        if ( len > best )
+        {
+            best = len;
+            for ( int i = 0; i < 3; ++i ) n[i] = tn[i] / len;
+        }
+    }
+    if ( !( best > 1.0e-4f ) )
+        return false;
+    for ( int col = 0; col < p->width; ++col )
+        for ( int row = 0; row < p->height; ++row )
+        {
+            const float *q = p->ctrl[col][row].xyz;
+            if ( fabsf( ( q[0] - o[0] ) * n[0] + ( q[1] - o[1] ) * n[1] + ( q[2] - o[2] ) * n[2] ) > tol )
+                return false;
+        }
+    return true;
+}
+
 static void Patch_KiwiReNaturalize( patchMesh_t *p )
 {
     if ( !p || p->width < 2 || p->height < 2 )
         return;
+    if ( Patch_KiwiIsFlatCap( p ) )
+    {
+        Patch_KiwiFinishNewLike( p, 0 );        // the other layers, as a new patch
+        Patch_KiwiLmapAlign( p );               // ... and this one planar, as born
+        return;
+    }
 
     const float sEnd = p->ctrl[p->width  - 1][0].texCoord.st[0];
     const float tEnd = p->ctrl[0][p->height - 1].texCoord.st[1];
     const float wDist = (float)Patch_WidthDistanceTo ( p->width  - 1, p );
     const float hDist = (float)Patch_HeightDistanceTo( p->height - 1, p );
+
+    // KIWI (2026-11-01, user: fillet UVs "really hard to match up to the rest of the shapes"):
+    // a fillet arc is born wrapped from its wall (kiwi_patchfillet.cpp WrapArcST) - S/T start at
+    // the wall's values and may run along either grid direction.  S/T that already advance
+    // evenly with the control distances (st = st0 + A * (widthDist, heightDist)) are not
+    // stretched, and a re-lay could only lose their origin and orientation: keep them.
+    if ( wDist > 0.0f && hDist > 0.0f )
+    {
+        const float *o  = p->ctrl[0][0].texCoord.st;
+        const float *sw = p->ctrl[p->width - 1][0].texCoord.st;
+        const float *sh = p->ctrl[0][p->height - 1].texCoord.st;
+        bool even = true;
+        for ( int col = 0; col < p->width && even; ++col )
+        {
+            const float fw = (float)Patch_WidthDistanceTo( col, p ) / wDist;
+            for ( int row = 0; row < p->height && even; ++row )
+            {
+                const float fh = (float)Patch_HeightDistanceTo( row, p ) / hDist;
+                const float *st = p->ctrl[col][row].texCoord.st;
+                for ( int k = 0; k < 2 && even; ++k )
+                    even = fabsf( o[k] + ( sw[k] - o[k] ) * fw + ( sh[k] - o[k] ) * fh - st[k] ) < 1.0e-3f;
+            }
+        }
+        if ( even && ( sw[0] != o[0] || sw[1] != o[1] ) && ( sh[0] != o[0] || sh[1] != o[1] ) )
+            return;
+    }
 
     texdef_sub_t td;
     memset( &td, 0, sizeof( td ) );
@@ -1584,14 +1706,48 @@ static void Patch_KiwiReNaturalize( patchMesh_t *p )
 // click goes through and it is above every ported apply path.  Walks the SAME
 // sentinel list Brush_SetTexture's brush pass walks, so anything the apply reached
 // is exactly what this re-lays and nothing else.
+//
+// KIWI (2026-11-01, user, retexturing a whole arch-in-a-wall selection: "the UV's change to
+// this ... This sucks and is ugly"): a patch that continues a SELECTED brush face - an arch's
+// curve, its caps, a pipe through a wall - is matched to it again (KiwiPatch_MatchTexture, the
+// UV editor's "Match brush", far wall scrolled) instead of re-laid natural.  Only selected
+// brushes: the apply's undo record holds them, and undo restores a record's saved brushes while
+// redo takes them live, so the scroll rides on that record.  The rest re-lay as before.
 void Patch_KiwiReNaturalizeSelected()
 {
+    std::vector<brush_t *> brushes;
+    for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        if ( !b->patch && b->def )
+            brushes.push_back( b->def );
+
     // Sentinel walk: init from .next, advance via ->next.
     for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
     {
         if ( !b->patch || !b->def )
             continue;
-        Patch_KiwiReNaturalize( b->def->patch );
+        patchMesh_t  *p   = b->def->patch;
+        // KIWI: "When a texture is set via clicking the terrain and then clicking Textures ->
+        // [texture]. The texture paint and blend tools no longer function after doing this. Make
+        // it so this works as a base layer approach." - a terrain patch is never matched to a
+        // brush or re-laid by arc length (its mapping continues its neighbours'): the material
+        // becomes the base under its paint layers (kiwi_terrain.cpp).
+        if ( p->type & PATCH_TERRAIN )
+        {
+            KiwiTerrain_BaseRetextured( p );
+            continue;
+        }
+        const face_t *src = KiwiPatch_FindSourceFace( p, brushes.data(), (int)brushes.size() );
+        if ( src )
+        {
+            kpatchFaceRef_t farFaces[64];
+            float scroll[2];
+            const int nFar = KiwiPatch_MatchTexture( p, src, brushes.data(), (int)brushes.size(), farFaces, 64, scroll );
+            for ( int i = 0; i < nFar; ++i )
+                KiwiPatch_ScrollFace( farFaces[i].brush, farFaces[i].face, scroll );
+            if ( nFar >= 0 )
+                continue;
+        }
+        Patch_KiwiReNaturalize( p );
     }
 }
 
@@ -8433,9 +8589,22 @@ static void Patch_Fill_BuildVisuals( patch_t *inst, const orientation_t *orient,
                                                  int vertCount, Material **material );
             KiwiTerrain_LayerUpload( inst->def, L, baseRuns, color, src, vertCount, &lmat );
         }
+        // KIWI: a terrain layer at its own scale (patchMesh_t.kiwiLayerScale) draws with the
+        // base's texcoords x that scale, as cod4map compiles it.
+        std::vector<float> layerSt;
+        float stScale[2];
+        if ( KiwiTerrain_LayerStScale( inst->def, L, baseRuns, stScale ) )
+        {
+            layerSt.resize( (size_t)vertCount * 2 );
+            for ( int i = 0; i < vertCount; ++i )
+            {
+                layerSt[2 * i + 0] = st[2 * i + 0] * stScale[0];
+                layerSt[2 * i + 1] = st[2 * i + 1] * stScale[1];
+            }
+        }
         inst->visArray[L].material   = lmat;
         inst->visArray[L].vertHandle = (int)Editor_VB_Upload( lmat, vertCount,
-            xyz, tangent, binormal, normal, st, (const float *)color );
+            xyz, tangent, binormal, normal, layerSt.empty() ? st : layerSt.data(), (const float *)color );
     }
 
     operator delete( color );
@@ -9056,13 +9225,27 @@ void Patch_PaintMarkUndo( patchMesh_t *def )
 //  seed the sample size, build curveDef) for patches the terrain tools construct
 //  themselves (split chunks, expander chunks).  `texScale` is the layer-0 natural
 //  scale (random_texture_stuff[0].sampleSize, 0.25 when unset).
-void Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale )
+//  KIWI: "when I create terrain in a hole, the direction is mismatched, and it leads to weird
+//  looking textures" - a gap fill passes `texPlane` (s = m0 x + m1 y + m2, t = m3 x + m4 y +
+//  m5, its neighbour's mapping) and layer 0 continues that instead of being naturalized.
+void Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale, const float *texPlane )
 {
     if ( !p )
         return;
     if ( texScale <= 0.0f )
         texScale = 0.25f;
-    Patch_Naturalize2( p, 0, texScale, texScale );
+    if ( texPlane )
+    {
+        for ( int i = 0; i < p->width; ++i )
+            for ( int j = 0; j < p->height; ++j )
+            {
+                drawVert_t *cp = &p->ctrl[i][j];
+                cp->texCoord.st[0] = texPlane[0] * cp->xyz[0] + texPlane[1] * cp->xyz[1] + texPlane[2];
+                cp->texCoord.st[1] = texPlane[3] * cp->xyz[0] + texPlane[4] * cp->xyz[1] + texPlane[5];
+            }
+    }
+    else
+        Patch_Naturalize2( p, 0, texScale, texScale );
     const bool terrain = ( p->type & PATCH_TERRAIN ) != 0;
     if ( terrain ) Patch_TerrainTexProject( p, 1, 16.0f );
     else           Patch_ResampleCurveST( p, 1, 16.0f );

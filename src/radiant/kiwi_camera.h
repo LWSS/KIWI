@@ -6,7 +6,7 @@
 // and angles consumed by the ported draw; CamWnd_BuildMatrix still owns the basis.
 // Input positions are camera-RTT pixels with a top-left origin.
 // MMB orbits, wheel dollies (ortho; perspective's wheel sets fly speed), RMB/Shift+MMB
-// pans, Alt+RMB looks, and arrows fly.
+// pans, Alt+RMB looks, and the held mouse-forward button flies on WASD/QE.
 
 // Orbit gesture.
 // Latch pivot, eye offset, and angles at press, then rotate that offset by total
@@ -93,17 +93,18 @@ bool KiwiCam_PullInFrontOf( const float surface[3], const float normal[3] );
 // this frame because perspective scaling reads camera.vpn.
 float KiwiCam_WorldPerPixel( const float *world );
 
-// Poll arrow keys once per input tick. `lookHeld` permits modifiers and Shift boost;
-// `arrows` is the bare-arrow hover arm. QPC supplies dt, clamped to 0.1 seconds.
-// Perspective flies in world units; ortho pans along vright/vup at a screen-pixel
-// rate because moving along the view axis is invisible in a parallel projection.
+// Poll the fly keys once per input tick. `lookHeld` permits modifiers and Shift boost.
+// QPC supplies dt, clamped to 0.1 seconds.  Perspective flies in world units; ortho pans
+// along vright/vup at a screen-pixel rate because moving along the view axis is invisible
+// in a parallel projection.
 // KIWI (2026-10-21, reworked 2026-10-27): `wasd` = the fly keys are live (the mouse-forward
 // fly is held): W/S forward/back, A/D strafe, Q/E down/up (camera up, or world Z with
 // KiwiCam_FlyWorldUp); Shift faster, Ctrl slower.  Perspective motion eases in and out.
-void KiwiCam_FlyTick( bool lookHeld, bool arrows, bool wasd );
+// KIWI (2026-11-01): the arrow keys no longer fly (the UV editor nudges with them).
+void KiwiCam_FlyTick( bool lookHeld, bool wasd );
 
-// True while the camera owns this vk - the four ARROWS during a look, and W/A/S/D/Q/E
-// while the fly keys are live - so the key funnel swallows it before the hotkey table.
+// True while the camera owns this vk - W/A/S/D/Q/E while the fly keys are live - so the
+// key funnel swallows it before the hotkey table.
 bool KiwiCam_FlySwallowKey( unsigned int vk );
 
 // Persisted multiplier over classic MoveSpeed; default 4x.

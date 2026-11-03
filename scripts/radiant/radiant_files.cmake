@@ -326,6 +326,8 @@ set(RADIANT_SRCS
     # KIWI: Terrain Sculpt (Y) — patch sculpt/blend paint; Decals — decal patches on faces.
     "${SRC_DIR}/radiant/kiwi_terrain.h"
     "${SRC_DIR}/radiant/kiwi_terrain.cpp"
+    "${SRC_DIR}/radiant/kiwi_weld.h"         # KIWI (2026-11-01): Keep seams welded - terrain ops never open chunk seams
+    "${SRC_DIR}/radiant/kiwi_weld.cpp"
     "${SRC_DIR}/radiant/kiwi_test.h"         # KIWI-TEST: scripted unattended editor runner
     "${SRC_DIR}/radiant/kiwi_test.cpp"
     "${SRC_DIR}/radiant/kiwi_testprobe.h"    # KIWI-TEST: probe verbs (dumps, camera, tool driving)

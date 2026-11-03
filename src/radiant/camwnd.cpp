@@ -2160,12 +2160,15 @@ static void Cam_DescribeModelBrush( selbrush_t *b, eclass_t *ec, ksBrushOut_t *o
     for ( const ksLayer_t &l : layers )
         KiwiScene_AddLayer( out, l );
 
+    // KIWI (2026-11-01): "models are disappearing depending on the camera angle" - the
+    // instance bounds are already world space (origin added); adding the origin again put the
+    // cull box at twice the origin, so any model away from 0,0,0 was culled by the wrong box.
     float mins[3], maxs[3];
     Entity_GetModelInstBounds( inst, mins, maxs );
     for ( int k = 0; k < 3; ++k )
     {
-        mins[k] += placement[4 + k] - 1.0f;
-        maxs[k] += placement[4 + k] + 1.0f;
+        mins[k] -= 1.0f;
+        maxs[k] += 1.0f;
     }
     KiwiScene_SetBounds( out, mins, maxs );
     if ( !Cam_KeepEntityLines( b, ec, /*wholeBox*/ false, out ) )   // its facing arrow
@@ -2357,6 +2360,16 @@ static bool Cam_SceneFrustum( ksFrustum_t *out )
         pl[3] = c->vpn[0] * c->origin[0] + c->vpn[1] * c->origin[1] + c->vpn[2] * c->origin[2] - margin;
     }
     return true;
+}
+
+// KIWI (2026-11-01): "models are disappearing depending on the camera angle" - whether the
+// last camera frame drew `b`'s retained layers (test mode: model_drawn).  A brush the scene
+// does not keep is drawn live, so only the cell cull can drop it.
+bool Cam_SceneDrewBrush( const selbrush_t *b )
+{
+    if ( !s_camScene.synced || !s_camSceneCulled || !KiwiScene_BrushRetained( b, KS_WINDOW_MAIN ) )
+        return true;
+    return KiwiScene_BrushInFrustum( b, &s_camSceneFrustum );
 }
 
 // The retained world serves the default pass.  The sun approximation, the per-frame surf

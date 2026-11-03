@@ -2085,14 +2085,14 @@ float KiwiSnap_LatticeAxis( float d, const float *ref, const float *axis,
     const float maxBand = g * KSNAP_LIGHT_MAX_FRAC;
     if ( !( band > 0.0f ) )  band = maxBand;          // NaN / degenerate camera
     if ( band > maxBand )    band = maxBand;
-    // HARD uses a half-cell band only to size major preference. Its 1.5 multiplier
-    // reaches 0.75 cell, so adjacent minor cells remain reachable.
-    if ( hard )
-        band = g * 0.5f;
-    // Compute the nearest major independently; it wins inside its widened band.
+    // KIWI (2026-11-01, user: "when dragging a face and holding ctrl to snap to the grid, it
+    // is off by 1 grid box usually. The tolerance or rounding is off here"): HARD always lands
+    // on the NEAREST line.  Its major band was 1.5 x half a cell = 0.75 cell, which stole the
+    // neighbouring minor line's outer quarter; a major now only reports MAJOR when nearest.
+    // Compute the nearest major independently; in SOFT mode it wins inside a widened band.
     const float gMajor  = g * (float)KSNAP_MAJOR_STRIDE;
     const float majorAt = floorf( value / gMajor + 0.5f ) * gMajor;
-    const float majBand = band * KSNAP_MAJOR_BAND_MUL;
+    const float majBand = hard ? g * 0.5f : band * KSNAP_MAJOR_BAND_MUL;
     if ( fabsf( value - majorAt ) <= majBand )
     {
         if ( outMajor )

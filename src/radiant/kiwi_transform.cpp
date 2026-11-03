@@ -1901,6 +1901,9 @@ namespace
 
             if ( !WindingCentre( m_faces[drive].def->faces[m_faces[drive].faceIndex].w, m_ref ) )
                 return false;
+            // KIWI (2026-11-01): the drive face's own plane point; a session pivot may move
+            // m_ref off the plane, but the grid and target depths are the PLANE's.
+            Copy3( m_ref, m_faceRef );
             Copy3( m_faces[drive].normal, m_driveNormal );
             if ( !Norm3( m_driveNormal ) )
                 return false;
@@ -2609,7 +2612,21 @@ namespace
             bool  haveRaw = false;
             if ( GrabLive() && m_haveMapStart && MapCursor( p ) )
             {
-                rawAbs  = p[0];
+                // KIWI (2026-11-01, user: "when dragging a face and holding ctrl to snap to the
+                // grid, it is off by 1 grid box usually"): Ctrl's depth is WHERE THE CURSOR
+                // POINTS - the floor / surface point under it, the grid the user is aiming at -
+                // projected onto the push axis.  The ray's closest approach to the axis line
+                // through the face's centre sits half the brush height up, which a tilted view
+                // shifts by about a cell.  An edge-on rest plane can't express depth: axis line.
+                rawAbs  = p[0] + Dot3( m_ref, m_pushDir ) - Dot3( m_faceRef, m_pushDir );
+                if ( m_snap.valid && m_snap.havePlane && m_snap.rest != SNAP_REST_NONE
+                  && m_snap.rest != SNAP_REST_VIEW
+                  && fabsf( Dot3( m_snap.planeNormal, m_pushDir ) ) < 0.5f )
+                {
+                    float rel[3];
+                    Sub3( m_snap.restPoint, m_faceRef, rel );
+                    rawAbs = Dot3( rel, m_pushDir );
+                }
                 haveRaw = true;
                 dist    = absNow ? rawAbs : ( m_scalarBase + ( p[0] - m_scalarStart ) );
                 m_absolute = absNow;
@@ -2628,7 +2645,7 @@ namespace
             {
                 // Absolute one-axis snapping ranks geometry, then face-plane magnet, then the
                 // lattice (including major lines).
-                dist = KiwiExt_LadderDepth( m_snap, m_ref, m_pushDir, rawAbs,
+                dist = KiwiExt_LadderDepth( m_snap, m_faceRef, m_pushDir, rawAbs,
                                             &m_majorLock );
             }
             else if ( GrabLive() && SnapActive() )
@@ -2638,7 +2655,7 @@ namespace
                     // A face snap is a target plane, not the ray's sliding surface point.
                     // KiwiSnap_AxisDepth returns one stable scalar and rejects edge-on planes.
                     float sd = 0.0f;
-                    if ( KiwiSnap_AxisDepth( m_snap, m_ref, m_pushDir, &sd ) )
+                    if ( KiwiSnap_AxisDepth( m_snap, m_faceRef, m_pushDir, &sd ) )
                     {
                         // Reject near-zero one-axis snaps to the selected face or coincident guides.
                         // KEXT_SELF_SNAP_BAND is shared by all one-axis push/extrude gestures.
@@ -3348,7 +3365,7 @@ namespace
                     {
                         char v[32];
                         KiwiUnits_Format( v, sizeof( v ),
-                                          m_ref[worldAxis] + m_pushDir[worldAxis] * m_scalar );
+                                          m_faceRef[worldAxis] + m_pushDir[worldAxis] * m_scalar );
                         _snprintf( abso, sizeof( abso ), "%c %s", "XYZ"[worldAxis], v );
                     }
                     else
@@ -3422,6 +3439,7 @@ namespace
         bool  m_absolute    = false;
         float m_scalarBase  = 0.0f;
         float m_scalarStart = 0.0f;
+        float m_faceRef[3]  = { 0.0f, 0.0f, 0.0f };   // drive face plane point (never the pivot)
         bool  m_haveMapStart = false;
         bool  m_axisWarned   = false;   // say it once per refusal run
         // Cursor mapping is gated by a held move handle.

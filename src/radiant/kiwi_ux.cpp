@@ -100,7 +100,8 @@ void KiwiUX_DrawSettings()
                            "LMB drag is the classic 3D drag-select again, and the\n"
                            "keyboard fly and the gizmo stop taking input.\n"
                            "ON: MMB orbit, RMB drag TRUCK (Shift+MMB and Shift+RMB\n"
-                           "too), Alt+RMB drag mouselook, wheel dolly, arrows fly.\n"
+                           "too), Alt+RMB drag mouselook, wheel dolly, hold the\n"
+                           "mouse-forward button to fly on WASD / QE.\n"
                            "RMB CLICK confirms a live command, or opens the classic\n"
                            "context menu when nothing is running." );
 
@@ -187,11 +188,11 @@ void KiwiUX_DrawSettings()
     // A logarithmic scale keeps both 0.1x and 50x usable.
     float fly = KiwiCam_FlySpeedScale();
     ImGui::SetNextItemWidth( 220.0f );
-    if ( ImGui::SliderFloat( "Ortho arrow pan x", &fly, 0.1f, 50.0f, "%.1fx",
+    if ( ImGui::SliderFloat( "Ortho fly pan x", &fly, 0.1f, 50.0f, "%.1fx",
                              ImGuiSliderFlags_Logarithmic ) )
         KiwiCam_SetFlySpeedScale( fly );
     if ( ImGui::IsItemHovered() )
-        ImGui::SetTooltip( "The arrow keys' pan rate in the orthographic camera." );
+        ImGui::SetTooltip( "The fly keys' pan rate in the orthographic camera." );
 
     // KIWI (2026-10-27, user: "a better mouselook option"): the mouse-forward fly's look.
     float sens = KiwiCam_FlyLookSens();

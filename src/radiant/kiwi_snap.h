@@ -173,8 +173,8 @@ bool KiwiSnap_AxisDepth( const snap_result_t &r, const float *ref,
 // band, converted at the gesture depth and capped at 0.22 of a cell.
 //
 // Every tenth cell is a major line, matching kiwi_grid.cpp. A major candidate wins
-// within 1.5 times the active band; HARD mode uses a half-cell band, so its major
-// preference reaches 0.75 cell without making neighboring cells unreachable.
+// within 1.5 times the SOFT band; HARD mode always takes the nearest line (a major only
+// when it is nearest - KIWI 2026-11-01, Ctrl face push landed a cell off beside majors).
 #define KSNAP_LIGHT_BAND_PIX  5.0f
 #define KSNAP_LIGHT_MAX_FRAC  0.22f
 #define KSNAP_MAJOR_STRIDE    10

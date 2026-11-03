@@ -49,6 +49,8 @@ bool KiwiBool_CanBoolean();
 // Test-only: pick `tool` for the live Boolean command, as a click would.
 struct selbrush_t;
 bool KiwiBool_TestPickTool( selbrush_t *tool );
+// ...and one more, as a Shift-click adds it (after KiwiBool_TestPickTool).
+bool KiwiBool_TestAddTool( selbrush_t *tool );
 
 // World-space signed-distance tolerance retained as the normative on-plane epsilon
 // for sibling modelling tools.

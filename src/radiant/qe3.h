@@ -699,8 +699,14 @@ struct patchMesh_t
     // (r,g,b,a = slots 0..3).  Written to the .map as "kiwilayer <slot> <material>";
     // cod4map expands them into the stock duplicate-patch layered surface itself.
     char               kiwiLayer[4][64];     // 0x504C
+    // KIWI: "I need a mechanism to modify each resolution of each layer" - a layer's texcoords
+    // are the base's x this (s, t); 1 1 = the base's own.  Written as "kiwilayer <slot>
+    // <material> scale <s> <t>" when not 1; cod4map scales that layer's copy of the verts.
+    // Kept equal across every patch carrying the same layer material (kiwi_terrain.cpp).
+    // <= 0 reads as 1 (KiwiLayerScale in kiwi_terrain.cpp).
+    float              kiwiLayerScale[4][2];
 };
-static_assert(sizeof(patchMesh_t) == (sizeof(void *) == 8 ? 20856 : 20812), "patchMesh_t (+KIWI layer slots)");
+static_assert(sizeof(patchMesh_t) == (sizeof(void *) == 8 ? 20888 : 20844), "patchMesh_t (+KIWI layer slots)");
 static_assert(offsetof(patchMesh_t, ctrl) == (sizeof(void *) == 8 ? 88 : 56),       "patchMesh_t.ctrl");
 static_assert(offsetof(patchMesh_t, pSymbiot) == (sizeof(void *) == 8 ? 20576 : 20540), "patchMesh_t.pSymbiot");
 

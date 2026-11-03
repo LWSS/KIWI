@@ -1075,27 +1075,31 @@ namespace
             s_windowsDirty = true;
     }
 
+    bool CellInFrustum( int c, const ksFrustum_t *frustum )
+    {
+        ksCell_t &cell = s_cells[c];
+        RefreshBounds( cell );
+        if ( !cell.hasBounds )
+            return true;
+        for ( int p = 0; p < frustum->planeCount; ++p )
+        {
+            const float *pl = frustum->planes[p];
+            // The box corner furthest along the plane normal.
+            const float x = pl[0] >= 0.0f ? cell.maxs[0] : cell.mins[0];
+            const float y = pl[1] >= 0.0f ? cell.maxs[1] : cell.mins[1];
+            const float z = pl[2] >= 0.0f ? cell.maxs[2] : cell.mins[2];
+            if ( pl[0] * x + pl[1] * y + pl[2] * z < pl[3] )
+                return false;
+        }
+        return true;
+    }
+
     bool CellVisible( int c, const ksFrustum_t *frustum )
     {
         signed char &v = s_cellVisible[c];
         if ( v >= 0 )
             return v != 0;
-        ksCell_t &cell = s_cells[c];
-        RefreshBounds( cell );
-        bool inside = true;
-        if ( cell.hasBounds )
-        {
-            for ( int p = 0; p < frustum->planeCount && inside; ++p )
-            {
-                const float *pl = frustum->planes[p];
-                // The box corner furthest along the plane normal.
-                const float x = pl[0] >= 0.0f ? cell.maxs[0] : cell.mins[0];
-                const float y = pl[1] >= 0.0f ? cell.maxs[1] : cell.mins[1];
-                const float z = pl[2] >= 0.0f ? cell.maxs[2] : cell.mins[2];
-                if ( pl[0] * x + pl[1] * y + pl[2] * z < pl[3] )
-                    inside = false;
-            }
-        }
+        const bool inside = CellInFrustum( c, frustum );
         v = inside ? 1 : 0;
         return inside;
     }
@@ -1586,6 +1590,19 @@ bool KiwiScene_BrushRetained( const selbrush_t *b, ksWindow_t window )
     const ksRec_t &r = s_recs[it->second];
     return r.list == KS_LIST_ACTIVE && !r.dirty && r.cell >= 0 && !s_cells[r.cell].dirty
         && ( r.windows >> window & 1u ) != 0;
+}
+
+// KIWI (2026-11-01): "models are disappearing depending on the camera angle" - lets the
+// test mode ask what KiwiScene_Emit's cull does to one brush.
+bool KiwiScene_BrushInFrustum( const selbrush_t *b, const ksFrustum_t *frustum )
+{
+    std::unordered_map<const selbrush_t *, int>::const_iterator it = s_recByNode.find( b );
+    if ( it == s_recByNode.end() || !frustum )
+        return true;
+    const ksRec_t &r = s_recs[it->second];
+    if ( r.list != KS_LIST_ACTIVE || r.cell < 0 )
+        return true;
+    return CellInFrustum( r.cell, frustum );
 }
 
 void KiwiScene_ForEachPerFrame( ksPerFrameFn fn, void *ctx )

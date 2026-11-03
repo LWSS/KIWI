@@ -15,7 +15,7 @@
 //   [ / ]             halve / double grid spacing
 //   PageDown / PageUp halve / double grid spacing (aliases; PageUp is coarser)
 //   G / R / S         Move / Rotate / Scale
-//   bare arrows       modern polled fly; only the bare stock rows are unbound
+//   bare arrows       unbound (no camera fly); the UV editor nudges with them
 //   Delete            Delete Selection; the base Backspace row remains bound
 //   Shift+A / S / Q   Line / Spline / corner Rectangle
 //   Shift+C / W       centre Circle / corner Box

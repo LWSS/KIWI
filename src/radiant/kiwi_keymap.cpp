@@ -73,7 +73,8 @@ namespace
         Bind( table, count, 33150, 0x47, 3 );   // AssociateEntities -> Shift+Alt+G
         Bind( table, count, 33199, 0x47, 1 );   // VertEdit          -> Shift+G   (frees G)
 
-        // Only bare arrows move to the polled modern fly; modified arrow chords stay classic.
+        // The bare-arrow camera rows stay unbound; modified arrow chords stay classic.  KIWI
+        // (2026-11-01): the arrows no longer fly at all - the UV editor nudges with them.
         Bind( table, count, 33057, 0x00, 0 );   // CameraLeft    -> unbound (modern)
         Bind( table, count, 33058, 0x00, 0 );   // CameraRight   -> unbound
         Bind( table, count, 33059, 0x00, 0 );   // CameraForward -> unbound
@@ -159,7 +160,7 @@ namespace
         Bind( table, count, 33103, 0x4A, 3 );   // ToggleOutlineDraw -> Shift+Alt+J (frees J)
         Bind( table, count, KIWI_CMD_JOIN, 0x4A, 0 );               // J
 
-        // The modern fly consumes arrows only, so bare E remains globally available.
+        // The modern fly takes E only while it is held, so bare E remains globally available.
         Bind( table, count, 33006, 0x45, 3 );   // DragEdges -> Shift+Alt+E (frees E)
         Bind( table, count, KIWI_CMD_EXTRUDE_FACE, 0x45, 0 );       // E
 
@@ -224,9 +225,13 @@ namespace
         Bind( table, count, KIWI_CMD_VIEW_FACE, 0x20, 0 );     // Space -> View Face
 
         // KIWI (2026-09-28, user: "pipe tool needs to be on 'P' key"): Preferences moves to
-        // the free Alt+P (Shift+P is ApplyPatchCap, Ctrl+Shift+P the Plasticity push).
+        // the free Alt+P (Ctrl+Shift+P is the Plasticity push).
         Bind( table, count, 32784, 0x50, 2 );                  // Preferences -> Alt+P (frees P)
         Bind( table, count, KIWI_CMD_CONSTRUCT_PIPE, 0x50, 0 ); // P -> Pipe
+        // KIWI (2026-11-01, user: "add a sweep command ... This should be on Shift-P"):
+        // ApplyPatchCap moves to the free Shift+Alt+P first.
+        Bind( table, count, 35040, 0x50, 3 );                  // ApplyPatchCap -> Shift+Alt+P (frees Shift+P)
+        Bind( table, count, KIWI_CMD_CONSTRUCT_SWEEP, 0x50, 1 ); // Shift+P -> Sweep
 
         // V is command-local for movable pivots and must not gain a global row;
         // modal dispatch precedes hotkey lookup, leaving DragVertices available when idle.

@@ -16,6 +16,7 @@
 #include "mainfrm.h"
 #include "kiwi_refimage.h"     // refimage verbs + expectations (test mode)
 #include "kiwi_terrain.h"      // terrain verb: tool / set / arm / stroke (test mode)
+#include "kiwi_weld.h"         // expect terraingap (Keep seams welded)
 #include "kiwi_plastbridge.h"  // plasticity_export verb (test mode, no hand-off)
 #include "kiwi_construct.h"    // construct verb: a headless line / polyline
 #include "kiwi_extrude.h"
@@ -33,8 +34,11 @@
 #include "kiwi_boxselect.h"    // click_at: the camera's real click path
 #include "kiwi_region.h"       // expect regions_selected
 #include "kiwi_boolean.h"      // curve_bool_probe: KiwiBool_TestPickTool
+#include "kiwi_patchfillet.h"  // patch_match_probe: KiwiPatch_FindSourceFace
 #include "kiwi_validity.h"     // curve_bool_probe: KiwiValid_Rebuild
+#include "kiwi_uveditor.h"     // uv_fold_probe: KiwiUvEd_TestFold
 #include "xywnd.h"             // expect xyview: Ed_ActiveXY / ED_VIEW_*
+#include "kiwi_scene.h"        // model_drawn: KiwiScene_BrushRetained
 
 #include <algorithm>
 #include <cctype>
@@ -62,11 +66,14 @@ extern void Select_GetMid( float *mid );                                     // 
 
 extern void Undo_Undo();                                                     // undo.cpp:736
 extern void Undo_Redo();                                                     // undo.cpp:1019
+extern int  Undo_LastUndoId( const char **operation );                       // undo.cpp (KIWI)
 
 extern bool TexWnd_MakeMaterialCurrentByName( const char *name );             // texwnd.cpp:793
+extern void Patch_KiwiReNaturalizeSelected();                                 // pmesh.cpp
 extern void Patch_Thicken( int amount, char seam );                           // pmesh.cpp:7667
 extern int Radiant_ProfileGetInt( const char *, const char *, int );
 extern bool Radiant_ProfileSetInt( const char *, const char *, int );
+extern bool Cam_SceneDrewBrush( const selbrush_t *b );                       // camwnd.cpp (KIWI)
 
 namespace
 {
@@ -833,6 +840,178 @@ static void ExecuteExpect( const ScriptLine &line )
         ExpectResult( line, fabsf( have - z ) <= tol, std::to_string( have ), w[4] );
         return;
     }
+    if ( subject == "terraingap" )
+    {
+        // expect terraingap <gap> [tolerance]  - the widest open seam between terrain patches
+        // (kiwi_weld: coincident edge points apart, or a T-junction point off its edge); 0 = closed
+        float gap = 0.0f, tol = 0.01f;
+        if ( ( w.size() != 3 && w.size() != 4 ) || !ParseFloat( w[2], gap )
+          || ( w.size() == 4 && !ParseFloat( w[3], tol ) ) )
+        {
+            ScriptError( line, "expect terraingap <gap> [tolerance]" );
+            return;
+        }
+        const float have = KiwiWeld_TestMaxGap();
+        ExpectResult( line, fabsf( have - gap ) <= tol, std::to_string( have ), w[2] );
+        return;
+    }
+    if ( subject == "terrainmatch" )
+    {
+        // expect terrainmatch <x0> <y0> <x1> <y1>  - the terrain patches under the two points
+        // run the same way: grid axes and texture mapping (a gap fill vs its neighbour)
+        float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+        if ( w.size() != 6 || !ParseFloat( w[2], x0 ) || !ParseFloat( w[3], y0 )
+          || !ParseFloat( w[4], x1 ) || !ParseFloat( w[5], y1 ) )
+        {
+            ScriptError( line, "expect terrainmatch <x0> <y0> <x1> <y1>" );
+            return;
+        }
+        char why[256];
+        const bool ok = KiwiTerrain_TestGridMatch( x0, y0, x1, y1, why, sizeof( why ) );
+        ExpectResult( line, ok, why, "same grid axes and texture mapping" );
+        return;
+    }
+    if ( subject == "terraincell" )
+    {
+        // expect terraincell <x> <y> <size> [tolerance]  - both grid axes' mean cell edge of the
+        // terrain patch under (x, y)
+        float x = 0.0f, y = 0.0f, size = 0.0f, tol = 0.5f;
+        if ( ( w.size() != 5 && w.size() != 6 ) || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y )
+          || !ParseFloat( w[4], size ) || ( w.size() == 6 && !ParseFloat( w[5], tol ) ) )
+        {
+            ScriptError( line, "expect terraincell <x> <y> <size> [tolerance]" );
+            return;
+        }
+        float cx = 0.0f, cy = 0.0f;
+        if ( !KiwiTerrain_TestCellAt( x, y, &cx, &cy ) )
+        {
+            ExpectResult( line, false, "no terrain", w[4] );
+            return;
+        }
+        ExpectResult( line, fabsf( cx - size ) <= tol && fabsf( cy - size ) <= tol,
+                      std::to_string( cx ) + " x " + std::to_string( cy ), w[4] );
+        return;
+    }
+    if ( subject == "terraintex" )
+    {
+        // expect terraintex <x> <y> <size|>size|<size> [tolerance]  - world units one base-texture
+        // repeat covers along S and T (a square material) on the terrain patch under (x, y)
+        float x = 0.0f, y = 0.0f, size = 0.0f, tol = 0.5f;
+        const char op = ( w.size() > 4 && !w[4].empty() && ( w[4][0] == '>' || w[4][0] == '<' ) ) ? w[4][0] : '=';
+        if ( ( w.size() != 5 && w.size() != 6 ) || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y )
+          || !ParseFloat( op == '=' ? w[4] : w[4].substr( 1 ), size ) || ( w.size() == 6 && !ParseFloat( w[5], tol ) ) )
+        {
+            ScriptError( line, "expect terraintex <x> <y> <size|>size|<size> [tolerance]" );
+            return;
+        }
+        float rs = 0.0f, rt = 0.0f;
+        if ( !KiwiTerrain_TestTexRepeat( x, y, &rs, &rt ) )
+        {
+            ExpectResult( line, false, "no terrain texture plane", w[4] );
+            return;
+        }
+        const bool ok = op == '>' ? rs > size + tol && rt > size + tol
+                      : op == '<' ? rs < size - tol && rt < size - tol
+                                  : fabsf( rs - size ) <= tol && fabsf( rt - size ) <= tol;
+        ExpectResult( line, ok, std::to_string( rs ) + " x " + std::to_string( rt ), w[4] );
+        return;
+    }
+    if ( subject == "terrainrows" )
+    {
+        // expect terrainrows <n>  - the Terrain panel's layer rows (base + layers) as last drawn:
+        // n rows, each ending inside its column, none taller than one line (no wrapped gap)
+        int want = 0;
+        if ( w.size() != 3 || !ParseInt( w[2], want ) )
+        {
+            ScriptError( line, "expect terrainrows <n>" );
+            return;
+        }
+        float overflow = 0.0f, step = 0.0f, lineStep = 0.0f;
+        const int rows = KiwiTerrain_TestLayerRows( &overflow, &step, &lineStep );
+        char have[160];
+        _snprintf_s( have, sizeof( have ), _TRUNCATE, "%d rows, overflow %.1f px, tallest row %.1f px (one line %.1f)",
+                     rows, overflow, step, lineStep );
+        ExpectResult( line, rows == want && overflow <= 0.5f && step <= lineStep + 0.5f, have,
+                      std::to_string( want ) + " rows that fit on one line each" );
+        return;
+    }
+    if ( subject == "terrainbasetiling" )
+    {
+        // expect terrainbasetiling <x> <y> <tiling>  - the base row's tiling of the terrain under (x, y)
+        float x = 0.0f, y = 0.0f, want = 0.0f;
+        if ( w.size() != 5 || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y ) || !ParseFloat( w[4], want ) )
+        {
+            ScriptError( line, "expect terrainbasetiling <x> <y> <tiling>" );
+            return;
+        }
+        float have = 0.0f;
+        if ( !KiwiTerrain_TestBaseTiling( x, y, &have ) )
+        {
+            ExpectResult( line, false, "no terrain", w[4] );
+            return;
+        }
+        ExpectResult( line, fabsf( have - want ) <= want * 1e-3f, std::to_string( have ), w[4] );
+        return;
+    }
+    if ( subject == "terrainlayerscale" )
+    {
+        // expect terrainlayerscale <x> <y> <material> <scale>  - the layer's slot scale on the
+        // terrain patch under (x, y), and the scale its camera run draws with, both equal
+        float x = 0.0f, y = 0.0f, want = 0.0f;
+        if ( w.size() != 6 || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y ) || !ParseFloat( w[5], want ) )
+        {
+            ScriptError( line, "expect terrainlayerscale <x> <y> <material> <scale>" );
+            return;
+        }
+        float stored = 0.0f, drawn = 0.0f;
+        if ( !KiwiTerrain_TestLayerScale( x, y, w[4].c_str(), &stored, &drawn ) )
+        {
+            ExpectResult( line, false, "no such layer (or s != t)", w[5] );
+            return;
+        }
+        ExpectResult( line, fabsf( stored - want ) <= 1e-4f && fabsf( drawn - want ) <= 1e-4f,
+                      "stored " + std::to_string( stored ) + ", drawn " + std::to_string( drawn ), w[5] );
+        return;
+    }
+    if ( subject == "terrainlayer" )
+    {
+        // expect terrainlayer <x> <y> base <material>        - the base material under (x, y)
+        // expect terrainlayer <x> <y> <material> <op><weight> - that layer's weight (0..255) at the
+        //   nearest control point, -1 when the patch has no such layer; op is = > or <
+        float x = 0.0f, y = 0.0f;
+        if ( w.size() != 6 || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y ) )
+        {
+            ScriptError( line, "expect terrainlayer <x> <y> <base|material> <material|=n|>n|<n>" );
+            return;
+        }
+        if ( Lower( w[4] ) == "base" )
+        {
+            char have[128];
+            if ( !KiwiTerrain_TestBaseMaterial( x, y, have, sizeof( have ) ) )
+            {
+                ExpectResult( line, false, "no terrain", w[5] );
+                return;
+            }
+            ExpectResult( line, _stricmp( have, w[5].c_str() ) == 0, have, w[5] );
+            return;
+        }
+        const char op = w[5].empty() ? 0 : w[5][0];
+        int want = 0;
+        if ( ( op != '=' && op != '>' && op != '<' ) || !ParseInt( w[5].substr( 1 ), want ) )
+        {
+            ScriptError( line, "expect terrainlayer weight must be =n, >n or <n" );
+            return;
+        }
+        int have = 0;
+        if ( !KiwiTerrain_TestLayerWeight( x, y, w[4].c_str(), &have ) )
+        {
+            ExpectResult( line, false, "no terrain", w[5] );
+            return;
+        }
+        const bool ok = op == '=' ? have == want : op == '>' ? have > want : have < want;
+        ExpectResult( line, ok, std::to_string( have ), w[5] );
+        return;
+    }
     if ( subject == "images" )
     {
         // expect images <n> | expect images selected <n>
@@ -1309,6 +1488,27 @@ static void ExecuteTerrain( const ScriptLine &line )
         KiwiTerrain_TestSetPaintMaterial( w[2].c_str() );
         return;
     }
+    if ( verb == "basetiling" )
+    {
+        // The base row's tiling for the base material of the terrain under (x, y), map-wide.
+        float x = 0.0f, y = 0.0f, tiling = 0.0f;
+        if ( w.size() != 5 || !ParseFloat( w[2], x ) || !ParseFloat( w[3], y ) || !ParseFloat( w[4], tiling ) )
+        { ScriptError( line, "terrain basetiling <x> <y> <tiling>" ); return; }
+        if ( !KiwiTerrain_TestSetBaseTiling( x, y, tiling ) )
+        { ScriptError( line, "terrain basetiling: no terrain under %.0f %.0f", x, y ); return; }
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( verb == "layerscale" )
+    {
+        // The panel's layer tiling: every terrain patch carrying <material> takes <scale>.
+        float scale = 0.0f;
+        if ( w.size() != 4 || !ParseFloat( w[3], scale ) ) { ScriptError( line, "terrain layerscale <material> <scale>" ); return; }
+        if ( !KiwiTerrain_TestSetLayerScale( w[2].c_str(), scale ) )
+        { ScriptError( line, "terrain layerscale: no terrain carries '%s'", w[2].c_str() ); return; }
+        g_nUpdateBits = -1;
+        return;
+    }
     if ( verb == "arm" )
     {
         int on = 0;
@@ -1357,7 +1557,7 @@ static void ExecuteTerrain( const ScriptLine &line )
         UpdateSelection( -1, nullptr );
         return;
     }
-    ScriptError( line, "terrain verb must be tool, set, arm, stroke, tessellate or split" );
+    ScriptError( line, "terrain verb must be tool, set, material, layerscale, basetiling, arm, stroke, tessellate or split" );
 }
 
 static void ExecuteRefImage( const ScriptLine &line )
@@ -1583,6 +1783,17 @@ static void ExecuteLine( const ScriptLine &line )
 
         const patchMesh_t *p = curve->def ? curve->def->patch : nullptr;
         if ( !p ) { ScriptError( line, "the curve tool was consumed" ); return; }
+        // KIWI (2026-11-01): the kept curve lines the hole, facing its axis (x 64, z 64).
+        {
+            const int c = p->width / 2, r = p->height / 2;
+            float dCol[3], dRow[3], n[3];
+            Sub3( p->ctrl[c + 1][r].xyz, p->ctrl[c - 1][r].xyz, dCol );
+            Sub3( p->ctrl[c][p->height - 1].xyz, p->ctrl[c][0].xyz, dRow );
+            Cross3( dCol, dRow, n );
+            const float toAxis[3] = { 64.0f - p->ctrl[c][r].xyz[0], 0.0f, 64.0f - p->ctrl[c][r].xyz[2] };
+            if ( !( Dot3( n, toAxis ) > 0.0f ) )
+            { ScriptError( line, "the curve faces out into the box, not into its hole" ); return; }
+        }
         for ( int col = 0; col < p->width; ++col )
         {
             const float y0 = p->ctrl[col][0].xyz[1], y1 = p->ctrl[col][p->height - 1].xyz[1];
@@ -1616,9 +1827,10 @@ static void ExecuteLine( const ScriptLine &line )
             const float outside[3] = { 64.0f + 30.0f, 8.0f * i, 64.0f };
             if ( !solidAt( outside ) ) { ScriptError( line, "no solid just outside the curve at y %g", outside[1] ); return; }
         }
+        // KIWI (2026-11-01): the hole is the curve's bounding square now, capped on both faces.
         MapCounts counts = CountMap();
-        if ( counts.patches != 1 || counts.brushes < 4 )
-        { ScriptError( line, "expected the carved box pieces and one curve, got %d brushes %d patches", counts.brushes, counts.patches ); return; }
+        if ( counts.patches < 3 || counts.brushes < 4 )
+        { ScriptError( line, "expected the carved box pieces, the curve and its caps, got %d brushes %d patches", counts.brushes, counts.patches ); return; }
 
         Undo_Undo();
         counts = CountMap();
@@ -1634,6 +1846,569 @@ static void ExecuteLine( const ScriptLine &line )
         }
         if ( !restored ) { ScriptError( line, "undo did not restore the box and the untrimmed curve (%d brushes %d patches)", counts.brushes, counts.patches ); return; }
         LogFormat( "CURVE-BOOL", "box carved around the curve, curve ends flush at y 0 / 64, undo restores both" );
+        return;
+    }
+    if ( command == "arch_cut_probe" || command == "patch_match_probe" || command == "arch_tools_probe" )
+    {
+        // KIWI (2026-11-01, user, of an arch cut into a wall: "the brush should probably be a flat
+        // square and there should be curved "caps" around the curve"; of the arch solid: "There is
+        // no possible way to make the curved surfaces look natural in comparison to the brush"):
+        // a radius-32 half-round arch over x 32..96 springing at z 64, y -8..24, as Extrude's
+        // patch mode builds it - the curve and its two half-disc caps.
+        Map_New();
+        kconPlane_t ground;                                  // z up through the origin
+        kconPlane_t across;
+        const float acrossOrigin[3] = { 0.0f, -8.0f, 0.0f }, acrossNormal[3] = { 0.0f, 1.0f, 0.0f };
+        const float hintU[3] = { 1.0f, 0.0f, 0.0f };
+        KiwiCon_MakePlane( acrossOrigin, acrossNormal, hintU, &across );
+        std::vector<float> ctrl;
+        for ( int col = 0; col <= 12; ++col )
+        {
+            const float a  = (float)KIWI_PI * (float)col / 12.0f;
+            const float rr = ( col & 1 ) ? 32.0f / cosf( (float)KIWI_PI / 12.0f ) : 32.0f;
+            const float at[3] = { 64.0f + rr * cosf( a ), -8.0f, 64.0f + rr * sinf( a ) };
+            float q[2];
+            KiwiCon_WorldToPlane( across, at, q );
+            ctrl.push_back( q[0] );
+            ctrl.push_back( q[1] );
+        }
+        std::vector<brush_t *> arch;
+        const char *why = "unknown";
+        if ( !KiwiPrim_BuildCurvePatches( across, ctrl.data(), 13, 0.0f, 32.0f, KiwiPrim_PatchDensity(), &arch, &why )
+          || arch.size() != 3 )
+        { ScriptError( line, "could not build the arch patches: %s", why ); return; }
+
+        // A brush face's own mapping at a point, and whether a patch carries it everywhere.
+        auto faceSt = []( const face_t &f, const float *x, float st[2] ) {
+            const texdef_sub_t &td = f.mtldef[0].mat_texDef;
+            float m[8];
+            Face_MoveTexture( td.size, f.plane.normal, m, td.shift, td.rotate, td.crossterm );
+            st[0] = Dot3( &m[0], x ) + m[3];
+            st[1] = Dot3( &m[4], x ) + m[7];
+        };
+        // User, of the far side: "the textures still aren't aligned on that side" - it met the
+        // wall upside down.  Leaving the wall into the curve at `col`, the curve's texture must
+        // move the way the wall's does along that direction.
+        auto runsOn = []( const patchMesh_t *p, int col, const face_t &f ) {
+            const int next = col ? col - 1 : 1, r = p->height / 2;
+            const texdef_sub_t &td = f.mtldef[0].mat_texDef;
+            float m[8], t[3];
+            Face_MoveTexture( td.size, f.plane.normal, m, td.shift, td.rotate, td.crossterm );
+            Sub3( p->ctrl[next][r].xyz, p->ctrl[col][r].xyz, t );
+            Mad3( t, f.plane.normal, -Dot3( t, f.plane.normal ), t );
+            for ( int k = 0; k < 2; ++k )
+            {
+                const float wall  = Dot3( &m[k * 4], t );
+                const float curve = p->ctrl[next][r].texCoord.st[k] - p->ctrl[col][r].texCoord.st[k];
+                if ( fabsf( wall ) > 1.0e-4f && wall * curve <= 0.0f )
+                    return false;
+            }
+            return true;
+        };
+        auto columnMatches = []( const patchMesh_t *p, int col, const face_t &f, decltype( faceSt ) &fs ) {
+            for ( int row = 0; row < p->height; ++row )
+            {
+                float st[2];
+                fs( f, p->ctrl[col][row].xyz, st );
+                if ( fabsf( st[0] - p->ctrl[col][row].texCoord.st[0] ) > 1.0e-3f
+                  || fabsf( st[1] - p->ctrl[col][row].texCoord.st[1] ) > 1.0e-3f )
+                    return false;
+            }
+            return true;
+        };
+
+        if ( command == "patch_match_probe" )
+        {
+            // The brush under the chord; the caps take its end faces' mapping exactly, the curve
+            // takes a side face's, carried on round the arch from the column standing on it.
+            const float body2d[8] = { 32.0f, -8.0f, 96.0f, -8.0f, 96.0f, 24.0f, 32.0f, 24.0f };
+            brush_t *body = KiwiExtrude_BuildPrismDef( ground, body2d, 4, 0.0f, 64.0f, &why );
+            if ( !body ) { ScriptError( line, "could not build the body: %s", why ); return; }
+            KiwiValid_Rebuild( body );
+            bool ok = true;
+            for ( size_t i = 0; i < arch.size() && ok; ++i )
+            {
+                patchMesh_t *p = arch[i]->patch;
+                const face_t *src = KiwiPatch_FindSourceFace( p, &body, 1 );
+                if ( !src )
+                { ScriptError( line, "arch patch %d found no brush face to continue", (int)i ); ok = false; break; }
+                // User: "match the ceiling to both sides of the arch": folded at the crown, the
+                // other side scrolls to meet it.
+                kpatchFaceRef_t farFaces[8];
+                float scroll[2];
+                const int nFar = KiwiPatch_MatchTexture( p, src, &body, 1, farFaces, 8, scroll );
+                if ( nFar < 0 )
+                { ScriptError( line, "arch patch %d could not be textured", (int)i ); ok = false; break; }
+                if ( i == 0 )
+                {
+                    if ( fabsf( src->plane.normal[0] ) < 0.999f )
+                    { ScriptError( line, "the curve continues a face with normal %g %g %g, not a side", src->plane.normal[0], src->plane.normal[1], src->plane.normal[2] ); ok = false; break; }
+                    const int col = fabsf( Dot3( src->plane.normal, p->ctrl[0][0].xyz ) - src->plane.dist ) < 0.1f ? 0 : p->width - 1;
+                    if ( !columnMatches( p, col, *src, faceSt ) || !runsOn( p, col, *src ) )
+                    { ScriptError( line, "the curve's texture breaks where it leaves the side face" ); ok = false; }
+                    if ( nFar != 1 || farFaces[0].brush != body )
+                    { ScriptError( line, "the curve found %d far side faces, want the body's other side", nFar ); ok = false; break; }
+                    KiwiPatch_ScrollFace( body, farFaces[0].face, scroll );
+                    const face_t &farFace = body->faces[farFaces[0].face];
+                    if ( !columnMatches( p, p->width - 1 - col, farFace, faceSt ) )
+                    { ScriptError( line, "the scrolled far side does not meet the curve" ); ok = false; }
+                    if ( !runsOn( p, p->width - 1 - col, farFace ) )
+                    { ScriptError( line, "the curve meets the far side upside down" ); ok = false; }
+                    continue;
+                }
+                if ( nFar != 0 )
+                { ScriptError( line, "flat cap %d reported a far wall", (int)i ); ok = false; break; }
+                if ( fabsf( src->plane.normal[1] ) < 0.999f )
+                { ScriptError( line, "cap %d continues a face with normal %g %g %g, not an end", (int)i, src->plane.normal[0], src->plane.normal[1], src->plane.normal[2] ); ok = false; break; }
+                for ( int col = 0; col < p->width && ok; ++col )
+                    if ( !columnMatches( p, col, *src, faceSt ) )
+                    { ScriptError( line, "cap %d does not carry its end face's mapping", (int)i ); ok = false; }
+            }
+            for ( brush_t *d : arch )
+                Brush_Free_R( d );
+            Brush_Free_R( body );
+            if ( ok )
+                LogFormat( "PATCH-MATCH", "arch caps take the end faces' mapping, the curve continues the side face" );
+            return;
+        }
+
+        if ( command == "arch_tools_probe" )
+        {
+            // User, of the far side of an arch cut with Q: "the textures still aren't aligned on
+            // that side".  Their flow: Extrude's P mode makes the arch solid - brush under the
+            // chord, the curve and its half-disc caps, textured from that brush - and the curve
+            // and the brush both cut one solid wall.  Both doorway sides below the springing
+            // must carry on into the curve.
+            const float body2d[8] = { 32.0f, -8.0f, 96.0f, -8.0f, 96.0f, 24.0f, 32.0f, 24.0f };
+            brush_t *body = KiwiExtrude_BuildPrismDef( ground, body2d, 4, 0.0f, 64.0f, &why );
+            if ( !body ) { ScriptError( line, "could not build the body: %s", why ); return; }
+            KiwiValid_Rebuild( body );
+            for ( size_t i = 0; i < arch.size(); ++i )           // as BuildRegionDefs does
+            {
+                patchMesh_t *pm = arch[i]->patch;
+                const face_t *src = KiwiPatch_FindSourceFace( pm, &body, 1 );
+                if ( !src )
+                    continue;
+                kpatchFaceRef_t farFaces[8];
+                float scroll[2];
+                const int nFar = KiwiPatch_MatchTexture( pm, src, &body, 1, farFaces, 8, scroll );
+                for ( int f = 0; f < nFar; ++f )
+                    KiwiPatch_ScrollFace( farFaces[f].brush, farFaces[f].face, scroll );
+            }
+            selbrush_t *curve = KiwiExtrude_LandDef( arch[0] );
+            KiwiExtrude_LandDef( arch[1] );
+            KiwiExtrude_LandDef( arch[2] );
+            selbrush_t *bodyInst = KiwiExtrude_LandDef( body );
+            Select_Deselect( 1 );
+            const float wall2d[8] = { 0.0f, 0.0f, 128.0f, 0.0f, 128.0f, 16.0f, 0.0f, 16.0f };
+            brush_t *wall = KiwiExtrude_BuildPrismDef( ground, wall2d, 4, 0.0f, 128.0f, &why );
+            if ( !wall ) { ScriptError( line, "could not build the wall: %s", why ); return; }
+            KiwiValid_Rebuild( wall );
+            KiwiExtrude_LandDef( wall );
+            if ( !KiwiCmd_Start( KIWI_CMD_BOOLEAN ) || !KiwiBool_TestPickTool( curve ) || !KiwiBool_TestAddTool( bodyInst ) )
+            { ScriptError( line, "boolean did not start with the wall as its target" ); return; }
+            KiwiCmd_Commit();
+
+            const patchMesh_t *p = curve->def ? curve->def->patch : nullptr;
+            if ( !p ) { ScriptError( line, "the curve tool was consumed" ); return; }
+            for ( int sideX = 0; sideX < 2; ++sideX )
+            {
+                const float x = sideX ? 32.0f : 96.0f, nx = sideX ? 1.0f : -1.0f;   // facing into the opening
+                const int col = fabsf( p->ctrl[0][0].xyz[0] - x ) < 0.01f ? 0 : p->width - 1;
+                int jambs = 0, matched = 0;
+                for ( int l2 = 0; l2 < 2; ++l2 )
+                {
+                    selbrush_t *h2 = l2 ? &selected_brushes : &active_brushes;
+                    for ( selbrush_t *wb = h2->next; wb && wb != h2; wb = wb->next )
+                        if ( wb->def && !wb->def->patch && wb->def->mins[2] < 1.0f )
+                            for ( int f = 0; f < wb->def->faceCount; ++f )
+                            {
+                                const face_t &fc = wb->def->faces[f];
+                                if ( fc.plane.normal[0] * nx < 0.999f || fabsf( fc.plane.dist - x * nx ) > 0.01f || !fc.w || fc.w->numpoints < 3 )
+                                    continue;
+                                ++jambs;
+                                if ( columnMatches( p, col, fc, faceSt ) && runsOn( p, col, fc ) )
+                                    ++matched;
+                                else
+                                {
+                                    float st[2];
+                                    faceSt( fc, p->ctrl[col][0].xyz, st );
+                                    LogFormat( "ARCH-TOOLS", "side x %g: curve st %g %g, wall st %g %g", x,
+                                               p->ctrl[col][0].texCoord.st[0], p->ctrl[col][0].texCoord.st[1], st[0], st[1] );
+                                }
+                            }
+                }
+                if ( !jambs || matched != jambs )
+                { ScriptError( line, "doorway side x %g: %d of %d wall faces carry on into the curve", x, matched, jambs ); return; }
+            }
+            // User, retexturing the whole structure: "the UV's change to this ... This sucks".
+            // The texture apply's patch sweep (Patch_KiwiReNaturalizeSelected) re-matches the
+            // curve to the selected walls; scrambled first, so only that can put it back.
+            {
+                std::vector<selbrush_t *> all;
+                for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+                    all.push_back( b );
+                for ( selbrush_t *b : all )
+                    Select_Brush( b, 0, 0, 0 );
+                patchMesh_t *pm = curve->def->patch;
+                for ( int c = 0; c < pm->width; ++c )
+                    for ( int r = 0; r < pm->height; ++r )
+                    {
+                        pm->ctrl[c][r].texCoord.st[0] = 0.37f * (float)c;
+                        pm->ctrl[c][r].texCoord.st[1] = 0.11f * (float)r;
+                    }
+                Patch_KiwiReNaturalizeSelected();
+                for ( int sideX = 0; sideX < 2; ++sideX )
+                {
+                    const float x = sideX ? 32.0f : 96.0f, nx = sideX ? 1.0f : -1.0f;
+                    const int col = fabsf( p->ctrl[0][0].xyz[0] - x ) < 0.01f ? 0 : p->width - 1;
+                    for ( selbrush_t *wb = selected_brushes.next; wb && wb != &selected_brushes; wb = wb->next )
+                        if ( wb->def && !wb->def->patch && wb->def->mins[2] < 1.0f )
+                            for ( int f = 0; f < wb->def->faceCount; ++f )
+                            {
+                                const face_t &fc = wb->def->faces[f];
+                                if ( fc.plane.normal[0] * nx < 0.999f || fabsf( fc.plane.dist - x * nx ) > 0.01f || !fc.w || fc.w->numpoints < 3 )
+                                    continue;
+                                if ( !columnMatches( p, col, fc, faceSt ) || !runsOn( p, col, fc ) )
+                                { ScriptError( line, "after a retexture the curve no longer meets the side at x %g", x ); return; }
+                            }
+                }
+            }
+            LogFormat( "ARCH-TOOLS", "an Extrude arch cut with its brush meets both doorway sides, also after a retexture" );
+            return;
+        }
+
+        // A 128 x 16 x 128 wall built round a doorway 32..96 wide and 64 high - two pillars and
+        // a full-width lintel - that the arch passes through; Q with the curve as the tool.
+        // (User, of the far side: "Texture offset".  The cut leaves the lintel a hidden pocket
+        // face on each doorway-side plane above the springing; the pillar face below, untouched
+        // by the cut, is the wall the arch continues and the one scrolled to meet it.)
+        selbrush_t *curve = KiwiExtrude_LandDef( arch[0] );
+        KiwiExtrude_LandDef( arch[1] );
+        KiwiExtrude_LandDef( arch[2] );
+        Select_Deselect( 1 );
+        const float pillarL[8] = { 0.0f, 0.0f, 32.0f, 0.0f, 32.0f, 16.0f, 0.0f, 16.0f };
+        const float pillarR[8] = { 96.0f, 0.0f, 128.0f, 0.0f, 128.0f, 16.0f, 96.0f, 16.0f };
+        const float lintel[8]  = { 0.0f, 0.0f, 128.0f, 0.0f, 128.0f, 16.0f, 0.0f, 16.0f };
+        const float *parts[3] = { pillarL, pillarR, lintel };
+        for ( int i = 0; i < 3; ++i )
+        {
+            brush_t *part = KiwiExtrude_BuildPrismDef( ground, parts[i], 4, i < 2 ? 0.0f : 64.0f, i < 2 ? 64.0f : 128.0f, &why );
+            if ( !part ) { ScriptError( line, "could not build the wall: %s", why ); return; }
+            KiwiValid_Rebuild( part );
+            KiwiExtrude_LandDef( part );
+        }
+        if ( !KiwiCmd_Start( KIWI_CMD_BOOLEAN ) || !KiwiBool_TestPickTool( curve ) )
+        { ScriptError( line, "boolean did not start with the wall as its target" ); return; }
+        KiwiCmd_Commit();
+
+        auto solidAt = []( const float pt[3] ) {
+            for ( int list = 0; list < 2; ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                {
+                    if ( !b->def || b->def->patch )
+                        continue;
+                    bool inside = true;
+                    for ( int f = 0; f < b->def->faceCount && inside; ++f )
+                        inside = Dot3( b->def->faces[f].plane.normal, pt ) - b->def->faces[f].plane.dist < -0.01f;
+                    if ( inside )
+                        return true;
+                }
+            }
+            return false;
+        };
+        const float holes[3][3] = { { 94.0f, 8.0f, 94.0f }, { 34.0f, 8.0f, 94.0f }, { 64.0f, 8.0f, 80.0f } };
+        const float walls[3][3] = { { 64.0f, 8.0f, 100.0f }, { 100.0f, 8.0f, 80.0f }, { 112.0f, 8.0f, 40.0f } };
+        for ( int i = 0; i < 3; ++i )
+        {
+            if ( solidAt( holes[i] ) )
+            { ScriptError( line, "solid left in the arch's rectangle at %g %g %g", holes[i][0], holes[i][1], holes[i][2] ); return; }
+            if ( !solidAt( walls[i] ) )
+            { ScriptError( line, "no wall at %g %g %g", walls[i][0], walls[i][1], walls[i][2] ); return; }
+        }
+
+        // The curve trimmed to the wall; the half-discs gone; caps on both faces filling the
+        // rectangle round the curve (64 x 32 less the half disc), textured as the wall face.
+        auto patchArea = []( const patchMesh_t *p ) {
+            auto eval = [p]( float u, float v, float out[3] ) {
+                const int spans = ( p->width - 1 ) / 2;
+                int s = (int)( u * (float)spans );
+                if ( s >= spans )
+                    s = spans - 1;
+                const float t = u * (float)spans - (float)s;
+                float row[3][3];
+                for ( int r = 0; r < 3; ++r )
+                    for ( int k = 0; k < 3; ++k )
+                        row[r][k] = ( 1 - t ) * ( 1 - t ) * p->ctrl[2 * s][r].xyz[k] + 2 * t * ( 1 - t ) * p->ctrl[2 * s + 1][r].xyz[k]
+                                  + t * t * p->ctrl[2 * s + 2][r].xyz[k];
+                for ( int k = 0; k < 3; ++k )
+                    out[k] = ( 1 - v ) * ( 1 - v ) * row[0][k] + 2 * v * ( 1 - v ) * row[1][k] + v * v * row[2][k];
+            };
+            const int N = 96, M = 16;
+            float area = 0.0f;
+            for ( int i = 0; i < N; ++i )
+                for ( int j = 0; j < M; ++j )
+                {
+                    float a[3], b[3], c[3], d[3], e[3], f[3], x[3];
+                    eval( (float)i / N, (float)j / M, a );
+                    eval( (float)( i + 1 ) / N, (float)( j + 1 ) / M, b );
+                    eval( (float)( i + 1 ) / N, (float)j / M, c );
+                    eval( (float)i / N, (float)( j + 1 ) / M, d );
+                    Sub3( b, a, e );
+                    Sub3( d, c, f );
+                    Cross3( e, f, x );
+                    area += 0.5f * Len3( x );
+                }
+            return area;
+        };
+        int caps = 0;
+        float capArea[2] = { 0.0f, 0.0f };
+        for ( int list = 0; list < 2; ++list )
+        {
+            selbrush_t *head = list ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+            {
+                const patchMesh_t *p = ( b->def && b->def->patch ) ? b->def->patch : nullptr;
+                if ( !p )
+                    continue;
+                if ( b == curve )
+                {
+                    for ( int col = 0; col < p->width; ++col )
+                    {
+                        const float y0 = p->ctrl[col][0].xyz[1], y1 = p->ctrl[col][p->height - 1].xyz[1];
+                        if ( fminf( fabsf( y0 ), fabsf( y1 ) ) > 0.01f || fminf( fabsf( y0 - 16.0f ), fabsf( y1 - 16.0f ) ) > 0.01f )
+                        { ScriptError( line, "the arch is not trimmed flush to the wall (y %g / %g)", y0, y1 ); return; }
+                    }
+                    // User: "the ceiling curve is making the faces backwards": at its crown the
+                    // arch faces down, into the opening, cross(dCol, dRow).
+                    {
+                        const int c = p->width / 2, r = p->height / 2;
+                        float dCol[3], dRow[3], n[3];
+                        Sub3( p->ctrl[c + 1][r].xyz, p->ctrl[c - 1][r].xyz, dCol );
+                        Sub3( p->ctrl[c][p->height - 1].xyz, p->ctrl[c][0].xyz, dRow );
+                        Cross3( dCol, dRow, n );
+                        if ( !( n[2] < 0.0f ) )
+                        { ScriptError( line, "the arch faces up into the wall at its crown (normal %g %g %g)", n[0], n[1], n[2] ); return; }
+                    }
+                    // User: "the top ceiling of the arch should "match brush" with the lower walls
+                    // by default" and "match the ceiling to both sides of the arch": the arch
+                    // carries the carved side walls' mapping where it springs, at x 96 and x 32.
+                    for ( int sideX = 0; sideX < 2; ++sideX )
+                    {
+                        const float x = sideX ? 32.0f : 96.0f, nx = sideX ? 1.0f : -1.0f;   // facing into the opening
+                        const face_t *side = nullptr;
+                        for ( int l2 = 0; l2 < 2 && !side; ++l2 )
+                        {
+                            selbrush_t *h2 = l2 ? &selected_brushes : &active_brushes;
+                            for ( selbrush_t *wb = h2->next; wb && wb != h2 && !side; wb = wb->next )
+                                if ( wb->def && !wb->def->patch )
+                                    for ( int f = 0; f < wb->def->faceCount && !side; ++f )
+                                        if ( wb->def->faces[f].plane.normal[0] * nx > 0.999f
+                                          && fabsf( wb->def->faces[f].plane.dist - x * nx ) < 0.01f
+                                          && wb->def->faces[f].w && wb->def->faces[f].w->numpoints > 2
+                                          && wb->def->mins[2] < 63.0f )          // the pillar, not the pocket
+                                            side = &wb->def->faces[f];
+                        }
+                        const int col = fabsf( p->ctrl[0][0].xyz[0] - x ) < 0.01f ? 0 : p->width - 1;
+                        if ( !side || !columnMatches( p, col, *side, faceSt ) || !runsOn( p, col, *side ) )
+                        { ScriptError( line, "the arch does not carry on the wall's texture where it springs at x %g", x ); return; }
+                    }
+                    continue;
+                }
+                const float y = p->ctrl[0][0].xyz[1];
+                if ( fabsf( y ) > 0.01f && fabsf( y - 16.0f ) > 0.01f )
+                { ScriptError( line, "a patch at y %g is neither a cap nor the arch (the half-disc caps should be gone)", y ); return; }
+                // The wall face it lies on, by the same plane and facing.
+                const float faceNy = y < 8.0f ? -1.0f : 1.0f;
+                const face_t *wf = nullptr;
+                for ( int l2 = 0; l2 < 2 && !wf; ++l2 )
+                {
+                    selbrush_t *h2 = l2 ? &selected_brushes : &active_brushes;
+                    for ( selbrush_t *wb = h2->next; wb && wb != h2 && !wf; wb = wb->next )
+                        if ( wb->def && !wb->def->patch )
+                            for ( int f = 0; f < wb->def->faceCount && !wf; ++f )
+                                if ( wb->def->faces[f].plane.normal[1] * faceNy > 0.999f
+                                  && fabsf( wb->def->faces[f].plane.dist - y * faceNy ) < 0.01f )
+                                    wf = &wb->def->faces[f];
+                }
+                if ( !wf ) { ScriptError( line, "no wall face under the cap at y %g", y ); return; }
+                for ( int col = 0; col < p->width; ++col )
+                {
+                    for ( int row = 0; row < p->height; ++row )
+                    {
+                        const float *x = p->ctrl[col][row].xyz;
+                        if ( fabsf( x[1] - y ) > 0.01f || x[0] < 31.99f || x[0] > 96.01f || x[2] < 63.99f || x[2] > 96.01f )
+                        { ScriptError( line, "cap control %g %g %g is off the face or outside the arch's rectangle", x[0], x[1], x[2] ); return; }
+                    }
+                    if ( !columnMatches( p, col, *wf, faceSt ) )
+                    { ScriptError( line, "the cap at y %g is not textured as the wall face", y ); return; }
+                }
+                capArea[y < 8.0f ? 0 : 1] += patchArea( p );
+                ++caps;
+            }
+        }
+        const float want = 64.0f * 32.0f - 0.5f * (float)KIWI_PI * 32.0f * 32.0f;
+        if ( caps < 2 || fabsf( capArea[0] - want ) > 4.0f || fabsf( capArea[1] - want ) > 4.0f )
+        { ScriptError( line, "caps cover %g / %g on the two faces (%d patches), want %g each", capArea[0], capArea[1], caps, want ); return; }
+
+        Undo_Undo();
+        const MapCounts counts = CountMap();
+        if ( counts.brushes != 3 || counts.patches != 3 )
+        { ScriptError( line, "undo did not restore the wall and the arch (%d brushes %d patches)", counts.brushes, counts.patches ); return; }
+        // ...and the scrolled pillar's texture with it: both pillars' doorway faces map alike.
+        {
+            const face_t *jamb[2] = { nullptr, nullptr };
+            for ( int l2 = 0; l2 < 2; ++l2 )
+            {
+                selbrush_t *h2 = l2 ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *wb = h2->next; wb && wb != h2; wb = wb->next )
+                    if ( wb->def && !wb->def->patch )
+                        for ( int f = 0; f < wb->def->faceCount; ++f )
+                        {
+                            const face_t &fc = wb->def->faces[f];
+                            if ( wb->def->mins[2] > 1.0f )
+                                continue;                // the pillars, not the lintel
+                            if ( fc.plane.normal[0] > 0.999f && fabsf( fc.plane.dist - 32.0f ) < 0.01f )
+                                jamb[0] = &fc;
+                            if ( fc.plane.normal[0] < -0.999f && fabsf( fc.plane.dist + 96.0f ) < 0.01f )
+                                jamb[1] = &fc;
+                        }
+            }
+            if ( !jamb[0] || !jamb[1]
+              || fabsf( jamb[0]->mtldef[0].mat_texDef.shift[0] - jamb[1]->mtldef[0].mat_texDef.shift[0] ) > 1.0e-3f
+              || fabsf( jamb[0]->mtldef[0].mat_texDef.shift[1] - jamb[1]->mtldef[0].mat_texDef.shift[1] ) > 1.0e-3f )
+            { ScriptError( line, "undo did not restore the scrolled pillar's texture" ); return; }
+        }
+        LogFormat( "ARCH-CUT", "rectangle cut, %d caps fill it round the arch on both wall faces, textured as the wall; undo restores", caps );
+        return;
+    }
+    if ( command == "uv_texture" )
+    {
+        // uv_texture <+|-> [big]  - the UV editor's Texture + / Texture - on the selection
+        if ( ( w.size() != 2 && w.size() != 3 ) || ( w[1] != "+" && w[1] != "-" )
+          || ( w.size() == 3 && Lower( w[2] ) != "big" ) )
+        { ScriptError( line, "uv_texture <+|-> [big]" ); return; }
+        char status[192];
+        if ( !KiwiUvEd_TestGridStep( w[1] == "+", w.size() == 3, status, sizeof( status ) ) )
+        { ScriptError( line, "uv_texture requires a selection" ); return; }
+        LogFormat( "UV-TEXTURE", "%s", status[0] ? status : "(no status)" );
+        g_nUpdateBits = -1;
+        return;
+    }
+    if ( command == "uv_nudge_probe" )
+    {
+        // KIWI (2026-11-01, user: "moving a UV should only be 1 undo record, I guess make it
+        // write the record after 2 seconds of no moving"): three quick arrow nudges of a box's
+        // UVs are ONE undo record - undo takes all three back, redo puts all three back.
+        Map_New();
+        kconPlane_t ground;
+        const float sq[8] = { 0.0f, 0.0f, 64.0f, 0.0f, 64.0f, 64.0f, 0.0f, 64.0f };
+        const char *why = "unknown";
+        brush_t *box = KiwiExtrude_BuildPrismDef( ground, sq, 4, 0.0f, 64.0f, &why );
+        if ( !box ) { ScriptError( line, "could not build the box: %s", why ); return; }
+        KiwiValid_Rebuild( box );
+        KiwiExtrude_LandDef( box );
+        // Undo replaces brush nodes: find the box afresh every time.
+        auto theBox = []() -> brush_t * {
+            for ( int list = 0; list < 2; ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                    if ( b->def && !b->def->patch )
+                        return b->def;
+            }
+            return nullptr;
+        };
+        auto shiftOf = [&]() { brush_t *b = theBox(); return b ? b->faces[0].mtldef[0].mat_texDef.shift[0] : -1.0e9f; };
+        auto stOf = [&]( float st[2] ) {
+            const face_t &f = theBox()->faces[0];
+            const texdef_sub_t &td = f.mtldef[0].mat_texDef;
+            float m[8];
+            Face_MoveTexture( td.size, f.plane.normal, m, td.shift, td.rotate, td.crossterm );
+            st[0] = Dot3( &m[0], f.w->p[0] ) + m[3];
+            st[1] = Dot3( &m[4], f.w->p[0] ) + m[7];
+        };
+        float st0[2], st1[2];
+        stOf( st0 );
+        const float before = shiftOf();
+        const char *op = nullptr;
+        const int recordsBefore = Undo_LastUndoId( &op );
+        int ids[3];
+        for ( int i = 0; i < 3; ++i )
+        {
+            if ( !KiwiUvEd_TestNudge( 1.0f / 64.0f, 0.0f ) )
+            { ScriptError( line, "nothing to nudge" ); return; }
+            ids[i] = Undo_LastUndoId( &op );
+        }
+        if ( ids[0] == recordsBefore || ids[1] != ids[0] || ids[2] != ids[0] )
+        { ScriptError( line, "three quick nudges made records %d %d %d, want one", ids[0], ids[1], ids[2] ); return; }
+        stOf( st1 );
+        if ( fabsf( st1[0] - st0[0] ) < 1.0e-4f && fabsf( st1[1] - st0[1] ) < 1.0e-4f )
+        { ScriptError( line, "the nudges did not move the UVs" ); return; }
+        const float after = shiftOf();
+        Undo_Undo();
+        if ( fabsf( shiftOf() - before ) > 1.0e-3f )
+        { ScriptError( line, "one undo left the shift at %g, want %g (before the run)", shiftOf(), before ); return; }
+        Undo_Redo();
+        if ( fabsf( shiftOf() - after ) > 1.0e-3f )
+        { ScriptError( line, "redo put the shift at %g, want %g (after the whole run)", shiftOf(), after ); return; }
+        LogFormat( "UV-NUDGE", "three quick nudges are one undo record; undo / redo take the whole run" );
+        return;
+    }
+    if ( command == "uv_fold_probe" )
+    {
+        // KIWI (2026-11-01, user picture of a mitred moulding: "why do the 2 thin strips not
+        // just hug the bigger center piece, why are they diagonal?"): a thin box mitred at one
+        // end, folded with Chain.  The top and bottom strips must lie along a long side face -
+        // their longest displayed edge is an edge of another face - not hang off the mitre.
+        Map_New();
+        kconPlane_t ground;                                  // z up through the origin
+        const float foot[8] = { 0, 0, 128, 0, 124, 4, 0, 4 };
+        const char *why = "unknown";
+        brush_t *box = KiwiExtrude_BuildPrismDef( ground, foot, 4, 0.0f, 6.0f, &why );
+        if ( !box ) { ScriptError( line, "could not build the moulding: %s", why ); return; }
+        KiwiValid_Rebuild( box );
+        KiwiExtrude_LandDef( box );
+
+        kuvFoldFace_t faces[16];
+        const int n = KiwiUvEd_TestFold( faces, 16 );
+        if ( n != 6 ) { ScriptError( line, "expected 6 folded faces, got %d", n ); return; }
+        auto near2 = []( const float *a, const float *b ) {
+            return fabsf( a[0] - b[0] ) < 1.0e-3f && fabsf( a[1] - b[1] ) < 1.0e-3f;
+        };
+        int strips = 0;
+        for ( int i = 0; i < n; ++i )
+        {
+            if ( fabsf( faces[i].nrm[2] ) < 0.9f )
+                continue;
+            ++strips;
+            int   e    = 0;
+            float best = -1.0f;
+            for ( int k = 0; k < faces[i].n; ++k )
+            {
+                const float *p = faces[i].st[k], *q = faces[i].st[( k + 1 ) % faces[i].n];
+                const float l2 = ( q[0] - p[0] ) * ( q[0] - p[0] ) + ( q[1] - p[1] ) * ( q[1] - p[1] );
+                if ( l2 > best ) { best = l2; e = k; }
+            }
+            const float *p = faces[i].st[e], *q = faces[i].st[( e + 1 ) % faces[i].n];
+            bool hugs = false;
+            for ( int j = 0; j < n && !hugs; ++j )
+            {
+                if ( j == i )
+                    continue;
+                for ( int k = 0; k < faces[j].n && !hugs; ++k )
+                {
+                    const float *r = faces[j].st[k], *s = faces[j].st[( k + 1 ) % faces[j].n];
+                    hugs = ( near2( p, r ) && near2( q, s ) ) || ( near2( p, s ) && near2( q, r ) );
+                }
+            }
+            if ( !hugs )
+            { ScriptError( line, "strip %d (normal z %g) does not lie along a side face", i, faces[i].nrm[2] ); return; }
+        }
+        if ( strips != 2 ) { ScriptError( line, "expected 2 strips, found %d", strips ); return; }
+        LogFormat( "UV-FOLD", "both mitred moulding strips fold along their long side faces" );
         return;
     }
     if ( command == "small_circle_probe" )
@@ -1955,6 +2730,35 @@ static void ExecuteLine( const ScriptLine &line )
         if ( !count ) ScriptError( line, "model_vert_probe requires selected model instances" );
         return;
     }
+    if ( command == "model_drawn" )
+    {
+        // KIWI (2026-11-01): "models are disappearing depending on the camera angle".  Every
+        // unselected model whose centre is on the camera image must survive the last camera
+        // frame's retained-scene cull; at least one must be retained, so the cull is tested.
+        const camera_s *cam = Ed_Camera();
+        int onScreen = 0, retained = 0;
+        for ( selbrush_t *b = active_brushes.next; b && b != &active_brushes; b = b->next )
+        {
+            if ( !KiwiDrop_IsModelEntity( b ) ) continue;
+            float mins[3], maxs[3], angles[3], scale, origin[3], rmin[3], rmax[3];
+            if ( !KiwiDrop_GetModelInfo( b, mins, maxs, angles, &scale, origin )
+              || !KiwiDrop_TransformBounds( mins, maxs, angles, scale, rmin, rmax ) )
+                continue;
+            float centre[3], sx, sy;
+            for ( int k = 0; k < 3; ++k ) centre[k] = origin[k] + 0.5f * ( rmin[k] + rmax[k] );
+            if ( !Pick_WorldToImage( centre, &sx, &sy )
+              || sx < 0.0f || sy < 0.0f || sx >= (float)cam->width || sy >= (float)cam->height )
+                continue;
+            ++onScreen;
+            if ( KiwiScene_BrushRetained( b, KS_WINDOW_MAIN ) ) ++retained;
+            if ( !Cam_SceneDrewBrush( b ) )
+            { ScriptError( line, "model_drawn: %s at %.1f %.1f %.1f is on screen (%.0f %.0f px) but culled",
+                           ValueForKey2( b->owner, "model" ), origin[0], origin[1], origin[2], sx, sy ); return; }
+        }
+        if ( !retained ) ScriptError( line, "model_drawn: no retained model on screen (%d on screen)", onScreen );
+        else LogFormat( "MODEL-DRAWN", "%d models on screen, %d retained, all drawn", onScreen, retained );
+        return;
+    }
     if ( command == "facing_toggle_probe" )
     {
         // The camera's retained scene keys its kept arrows on this switch (Cam_SceneKey), so
@@ -2225,7 +3029,13 @@ static void ExecuteLine( const ScriptLine &line )
         if ( w.size() != 2 ) { ScriptError( line, "texture requires one material name" ); return; }
         if ( !HaveSelection() ) { ScriptError( line, "texture requires a selection" ); return; }
         if ( !TexWnd_MakeMaterialCurrentByName( w[1].c_str() ) )
+        {
             ScriptError( line, "material is not registered: %s", w[1].c_str() );
+            return;
+        }
+        // KIWI (2026-11-01): the rest of the browser click's funnel (texwnd.cpp) - selected
+        // patches re-lay their UVs for the new material.
+        Patch_KiwiReNaturalizeSelected();
         return;
     }
     if ( command == "thicken" )

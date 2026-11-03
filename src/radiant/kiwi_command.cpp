@@ -198,6 +198,7 @@ namespace
         case KIWI_CMD_LOFT:
         case KIWI_CMD_OFFSET_CURVE:     // KIWI (2026-09-28): O on a clicked region (paused extrude)
         case KIWI_CMD_CONSTRUCT_PIPE:   // P on a selection whose click parked a tool
+        case KIWI_CMD_CONSTRUCT_SWEEP:  // KIWI (2026-11-01): Shift+P on a clicked face (paused extrude)
         case KIWI_CMD_SELCONV_POINT:
         case KIWI_CMD_SELCONV_EDGE:
         case KIWI_CMD_SELCONV_FACE:
@@ -404,6 +405,7 @@ namespace
         { KIWI_CMD_CONSTRUCT_JOIN,  { "Join Lines",                   "Construct", 0, KiwiConSel_CanJoin } },
         { KIWI_CMD_CONSTRUCT_EXTEND,{ "Extend Lines",                 "Construct", 0, KiwiConSel_CanExtend } },
         { KIWI_CMD_CONSTRUCT_PIPE,  { "Pipe (along a line / spline)", "Construct", 0, KiwiPipe_CanExecute } },
+        { KIWI_CMD_CONSTRUCT_SWEEP, { "Sweep (face along a line / spline)", "Construct", 0, KiwiSweep_CanExecute } },
         { KIWI_CMD_CONSTRUCT_DELETE,{ "Construction: Delete Selected","Construct", 0, KiwiConSel_CanDelete } },
         { KIWI_CMD_CONSTRUCT_HIDE,  { "Hide Selected Lines (H)",      "Construct", 0, KiwiConSel_CanHide } },
         { KIWI_CMD_CONSTRUCT_UNHIDE,{ "Unhide All (construction)",    "Construct", 0, KiwiCon_HasHidden  } },
@@ -1605,8 +1607,7 @@ bool KiwiUX_KeyFunnel( unsigned int vk )
     // KIWI (2026-10-27): while the mouse-forward fly is HELD its keys are the camera's,
     // ahead of a live tool (the Line tool's S would otherwise toggle spline spans mid-flight).
     if ( KiwiVP_FlyActive()
-      && ( vk == 'W' || vk == 'A' || vk == 'S' || vk == 'D' || vk == 'Q' || vk == 'E'
-        || vk == 0x25 || vk == 0x26 || vk == 0x27 || vk == 0x28 ) )   // VK_LEFT .. VK_DOWN
+      && ( vk == 'W' || vk == 'A' || vk == 'S' || vk == 'D' || vk == 'Q' || vk == 'E' ) )
         return true;
 
     if ( KiwiAdd_IsOpen() )

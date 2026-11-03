@@ -90,6 +90,15 @@ static int      g_redoId           = 1;
 static int      s_lastUndoStamp    = 0;
 int Undo_LastUndoStamp() { return s_lastUndoStamp; }
 
+// KIWI (2026-11-01): the newest undo record's id and operation (0 / null: none).  The UV
+// editor folds a run of arrow nudges into one record while it stays the newest.
+int Undo_LastUndoId( const char **operation )
+{
+    if ( operation )
+        *operation = g_lastundo ? g_lastundo->operation : nullptr;
+    return g_lastundo ? g_lastundo->id : 0;
+}
+
 // Accessor for the ON_UPDATE_COMMAND_UI Redo-greying handler (g_lastredo is static).
 // True when a redo record is available (matches OnUpdateEditRedo 0x428790).
 bool Undo_RedoAvailable() { return g_lastredo != nullptr; }

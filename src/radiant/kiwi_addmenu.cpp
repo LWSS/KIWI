@@ -56,6 +56,7 @@ namespace
 
         { "From construction", "Extrude Region", KIWI_CMD_EXTRUDE_REGION },
         { 0,        "Pipe (along a line / spline)", KIWI_CMD_CONSTRUCT_PIPE },
+        { 0,        "Sweep (face along a line / spline)", KIWI_CMD_CONSTRUCT_SWEEP },
 
         // Place Sun edits worldspawn keys, so it remains outside curve/solid groups.
         { "Lighting", "Place Sun",              KIWI_CMD_PLACE_SUN        },

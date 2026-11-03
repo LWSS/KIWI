@@ -189,6 +189,8 @@ typedef void ( *ksLinesFn )( const void *verts, const uint8_t *widths, const uin
                              int segCount, void *ctx );
 void KiwiScene_EmitLines( const ksFrustum_t *frustum, ksLinesFn fn, void *ctx );
 bool KiwiScene_BrushLinesRetained( const selbrush_t *b );
+// False when `b` sits in a cell whose bounds the cull puts outside `frustum`.
+bool KiwiScene_BrushInFrustum( const selbrush_t *b, const ksFrustum_t *frustum );
 
 // True when every layer `b` draws in `window` comes from the batches: an active brush whose
 // describe gave that window layers.  A describe adds a brush to a LIGHT_* window whole or

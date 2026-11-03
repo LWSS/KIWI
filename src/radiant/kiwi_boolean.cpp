@@ -18,6 +18,8 @@
 #include "kiwi_construct.h"         // kconPlane_t: a curve tool's cross-section plane
 #include "kiwi_extrude.h"           // KiwiExtrude_BuildPrismDef: a curve tool's stand-in
 #include "kiwi_lines.h"
+#include "kiwi_material.h"          // curve caps: patch material realization
+#include "kiwi_patchfillet.h"       // curve caps: KiwiPatch_TextureFromFace
 #include "kiwi_pick.h"
 #include "kiwi_ported.h"
 #include "kiwi_selection.h"
@@ -31,6 +33,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <vector>
+
+// Uses the parent face's texture scale instead of the editor default.
+extern void Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );   // pmesh.cpp
 
 namespace
 {
@@ -99,6 +104,19 @@ namespace
     // column's end rows slide along the axis onto the brush faces it leaves through, so its
     // ends lie flush on them (sliding along one direction onto a plane is affine, so the end
     // curve lies exactly in the face).
+    //
+    // KIWI (2026-11-01, user, of an arch cut into a wall: "the brush should probably be a flat
+    // square and there should be curved "caps" around the curve"): the hull left the wall's face
+    // ragged round the curve (its tangent facets stood off it, open to the void).  A curve whose
+    // cross-section is star-shaped about its chord midpoint (open: an arch, never dipping below
+    // its chord) or its box centre (closed: a pipe) cuts its bounding RECTANGLE instead, and each
+    // wall face it leaves through gets flat cap patches filling rectangle-minus-curve, textured
+    // as that face (KiwiPatch_TextureFromFace).  Others keep the hull, uncapped.
+    struct capPatch_t                      // cross-section plane space: w columns x 3 rows
+    {
+        int   w = 0;
+        float uv[KPATCH_MAX_WIDTH][3][2];
+    };
     struct curveTool_t
     {
         selbrush_t *node      = nullptr;
@@ -106,6 +124,11 @@ namespace
         float       axis[3]   = { 0.0f, 0.0f, 0.0f };
         bool        alongRows = true;      // ctrl[col][row]: the row index runs along the axis
         std::vector<float> trimmed;        // the new control points, 3 per (around, along)
+        bool        changed   = false;     // PlanCurveTrim: some column end moves
+        kconPlane_t pl;                    // the cross-section: origin on control (0, 0), normal = axis
+        float       lo = 0.0f, hi = 0.0f;  // the curve's extent along the axis from pl.origin
+        float       mn2[2] = { 0.0f, 0.0f }, mx2[2] = { 0.0f, 0.0f };   // its controls' bounds, plane space
+        std::vector<capPatch_t> caps;      // non-empty: the stand-in is the bounding rectangle
     };
 
     int CurveAround( const patchMesh_t *p, bool alongRows ) { return alongRows ? p->width  : p->height; }
@@ -190,7 +213,357 @@ namespace
         }
     }
 
-    // The curve's stand-in tool: its control hull, swept along its axis over its own length.
+    // The range of a quadratic span projected on one axis, folded into mn / mx.
+    void SpanRange( float p0, float p1, float p2, float *mn, float *mx )
+    {
+        float lo = fminf( p0, p2 ), hi = fmaxf( p0, p2 );
+        const float den = p0 - 2.0f * p1 + p2;
+        if ( fabsf( den ) > 1.0e-9f )
+        {
+            const float t = ( p0 - p1 ) / den;
+            if ( t > 0.0f && t < 1.0f )
+            {
+                const float v = ( 1.0f - t ) * ( 1.0f - t ) * p0 + 2.0f * t * ( 1.0f - t ) * p1 + t * t * p2;
+                lo = fminf( lo, v );
+                hi = fmaxf( hi, v );
+            }
+        }
+        *mn = fminf( *mn, lo );
+        *mx = fmaxf( *mx, hi );
+    }
+
+    // The bounding rectangle (plane space, CCW, into `box`) and the cap patches filling it round
+    // the curve, from its controls `q` (plane space).  Worked in a frame (a along e1, b along e2):
+    // the rectangle's boundary is walked from the curve's first point to its last, the way the
+    // curve turns.  Each span-end control k gets the boundary point its ray from M hits; each
+    // rectangle corner goes to the k whose point is nearest it, so between two consecutive k the
+    // boundary is one straight edge - a span maps onto it as a 3-row strip (curve, midway, edge).
+    // Corners that share a k become a fan from that control.  False: not this shape.
+    bool PlanBoxCaps( const std::vector<float> &q, const kconPlane_t &pl, std::vector<float> *box,
+                      std::vector<capPatch_t> *caps )
+    {
+        const int na = (int)( q.size() / 2 );
+        if ( na < 3 || !( na & 1 ) )
+            return false;
+        const int S = ( na - 1 ) / 2;
+        const float *A = &q[0], *B = &q[(size_t)( na - 1 ) * 2];
+        const bool closed = hypotf( B[0] - A[0], B[1] - A[1] ) < 0.05f;
+        float e1[2], e2[2];
+        if ( closed )
+        {
+            float bu[3], bv[3];                  // level / up across a wall, as bearings read
+            KiwiCon_BearingBasis( pl.normal, bu, bv );
+            e1[0] = Dot3( bu, pl.u );
+            e1[1] = Dot3( bu, pl.v );
+        }
+        else
+        {
+            e1[0] = B[0] - A[0];
+            e1[1] = B[1] - A[1];
+        }
+        const float l1 = hypotf( e1[0], e1[1] );
+        if ( !( l1 > 1.0e-4f ) )
+            return false;
+        e1[0] /= l1;
+        e1[1] /= l1;
+        e2[0] = -e1[1];
+        e2[1] = e1[0];
+        if ( !closed )
+        {
+            float c[2] = { 0.0f, 0.0f };         // toward the bulge
+            for ( int i = 0; i < na; ++i )
+            {
+                c[0] += q[(size_t)i * 2] / (float)na;
+                c[1] += q[(size_t)i * 2 + 1] / (float)na;
+            }
+            if ( ( c[0] - A[0] ) * e2[0] + ( c[1] - A[1] ) * e2[1] < 0.0f )
+            {
+                e2[0] = -e2[0];
+                e2[1] = -e2[1];
+            }
+        }
+        std::vector<float> f( q.size() );
+        for ( int i = 0; i < na; ++i )
+        {
+            f[(size_t)i * 2]     = q[(size_t)i * 2] * e1[0] + q[(size_t)i * 2 + 1] * e1[1];
+            f[(size_t)i * 2 + 1] = q[(size_t)i * 2] * e2[0] + q[(size_t)i * 2 + 1] * e2[1];
+        }
+        float mn[2] = { FLT_MAX, FLT_MAX }, mx[2] = { -FLT_MAX, -FLT_MAX };
+        for ( int s = 0; s < S; ++s )
+            for ( int k = 0; k < 2; ++k )
+                SpanRange( f[(size_t)( 4 * s ) + k], f[(size_t)( 4 * s + 2 ) + k], f[(size_t)( 4 * s + 4 ) + k], &mn[k], &mx[k] );
+        if ( !closed )
+        {
+            if ( mn[1] < f[1] - 0.05f )
+                return false;                    // dips below its chord (a horseshoe)
+            mn[1] = f[1];
+        }
+        if ( mx[0] - mn[0] < 0.5f || mx[1] - mn[1] < 0.5f )
+            return false;
+        float M[2];
+        if ( closed )
+        {
+            M[0] = ( mn[0] + mx[0] ) * 0.5f;
+            M[1] = ( mn[1] + mx[1] ) * 0.5f;
+        }
+        else
+        {
+            M[0] = ( f[0] + f[(size_t)( na - 1 ) * 2] ) * 0.5f;
+            M[1] = f[1];
+        }
+
+        // Star-shaped about M: every control turns the same way round it.
+        int   turn  = 0;
+        float sweep = 0.0f;
+        float prev  = atan2f( f[1] - M[1], f[0] - M[0] );
+        for ( int i = 1; i < na; ++i )
+        {
+            const float a = atan2f( f[(size_t)i * 2 + 1] - M[1], f[(size_t)i * 2] - M[0] );
+            float d = a - prev;
+            while ( d > (float)KIWI_PI )   d -= 2.0f * (float)KIWI_PI;
+            while ( d <= -(float)KIWI_PI ) d += 2.0f * (float)KIWI_PI;
+            const int s = d > 0.0f ? 1 : -1;
+            if ( fabsf( d ) < 1.0e-4f || ( turn && s != turn ) )
+                return false;
+            turn = s;
+            sweep += d;
+            prev = a;
+        }
+        if ( fabsf( fabsf( sweep ) - ( closed ? 2.0f : 1.0f ) * (float)KIWI_PI ) > 0.05f )
+            return false;
+
+        // The rectangle CCW in the frame, and the boundary path along the curve's turn.
+        const float C[4][2] = { { mx[0], mn[1] }, { mx[0], mx[1] }, { mn[0], mx[1] }, { mn[0], mn[1] } };
+        auto rayHit = [&]( const float *P, float out[2] ) {
+            const float d[2] = { P[0] - M[0], P[1] - M[1] };
+            float lam = FLT_MAX;
+            for ( int k = 0; k < 2; ++k )
+            {
+                if ( d[k] > 1.0e-6f )       lam = fminf( lam, ( mx[k] - M[k] ) / d[k] );
+                else if ( d[k] < -1.0e-6f ) lam = fminf( lam, ( mn[k] - M[k] ) / d[k] );
+            }
+            if ( lam == FLT_MAX )
+                lam = 0.0f;
+            out[0] = M[0] + lam * d[0];
+            out[1] = M[1] + lam * d[1];
+        };
+        std::vector<float> path;
+        auto addPt = [&]( const float *pt, bool last ) {
+            const size_t n = path.size();
+            if ( n >= 2 && hypotf( pt[0] - path[n - 2], pt[1] - path[n - 1] ) < 0.01f )
+            {
+                if ( last && n > 2 )
+                {
+                    path[n - 2] = pt[0];
+                    path[n - 1] = pt[1];
+                }
+                return;
+            }
+            path.push_back( pt[0] );
+            path.push_back( pt[1] );
+        };
+        if ( !closed )
+        {
+            if ( turn > 0 )
+                return false;                    // e2 is the bulge, so A -> B turns clockwise
+            addPt( &f[0], false );
+            for ( int c = 3; c >= 0; --c )
+                addPt( C[c], false );
+            addPt( &f[(size_t)( na - 1 ) * 2], true );
+        }
+        else
+        {
+            float start[2];
+            rayHit( &f[0], start );
+            int edge = -1;                       // C[edge] -> C[edge + 1] holds the start
+            for ( int i = 0; i < 4 && edge < 0; ++i )
+            {
+                const float *a = C[i], *b = C[( i + 1 ) & 3];
+                const float len = hypotf( b[0] - a[0], b[1] - a[1] );
+                const float u = ( ( start[0] - a[0] ) * ( b[0] - a[0] ) + ( start[1] - a[1] ) * ( b[1] - a[1] ) ) / len;
+                const float cr = ( ( start[0] - a[0] ) * ( b[1] - a[1] ) - ( start[1] - a[1] ) * ( b[0] - a[0] ) ) / len;
+                if ( fabsf( cr ) < 0.01f && u >= -0.01f && u <= len + 0.01f )
+                    edge = i;
+            }
+            if ( edge < 0 )
+                return false;
+            addPt( start, false );
+            for ( int i = 1; i <= 4; ++i )
+                addPt( C[turn > 0 ? ( edge + i ) & 3 : ( edge + 1 - i + 4 ) & 3], false );
+            addPt( start, true );
+        }
+        const int nv = (int)( path.size() / 2 );
+        std::vector<float> cum( (size_t)nv, 0.0f );
+        for ( int j = 1; j < nv; ++j )
+            cum[(size_t)j] = cum[(size_t)( j - 1 )]
+                           + hypotf( path[(size_t)j * 2] - path[(size_t)( j - 1 ) * 2], path[(size_t)j * 2 + 1] - path[(size_t)( j - 1 ) * 2 + 1] );
+        const float L = cum[(size_t)( nv - 1 )];
+        auto pathPt = [&]( float t, float out[2] ) {
+            int j = 0;
+            while ( j + 2 < nv && cum[(size_t)( j + 1 )] < t )
+                ++j;
+            const float len = cum[(size_t)( j + 1 )] - cum[(size_t)j];
+            const float u = len > 0.0f ? fminf( fmaxf( ( t - cum[(size_t)j] ) / len, 0.0f ), 1.0f ) : 0.0f;
+            out[0] = path[(size_t)j * 2] + ( path[(size_t)( j + 1 ) * 2] - path[(size_t)j * 2] ) * u;
+            out[1] = path[(size_t)j * 2 + 1] + ( path[(size_t)( j + 1 ) * 2 + 1] - path[(size_t)j * 2 + 1] ) * u;
+        };
+        // The first path position of `pt` at or after tmin (else the nearest).
+        auto paramOf = [&]( const float *pt, float tmin ) {
+            float first = -1.0f, nearT = 0.0f, nearD = FLT_MAX;
+            for ( int j = 0; j + 1 < nv; ++j )
+            {
+                const float *a = &path[(size_t)j * 2], *b = &path[(size_t)( j + 1 ) * 2];
+                const float len = cum[(size_t)( j + 1 )] - cum[(size_t)j];
+                if ( !( len > 0.0f ) )
+                    continue;
+                float u = ( ( pt[0] - a[0] ) * ( b[0] - a[0] ) + ( pt[1] - a[1] ) * ( b[1] - a[1] ) ) / len;
+                u = fminf( fmaxf( u, 0.0f ), len );
+                const float px = a[0] + ( b[0] - a[0] ) * u / len, py = a[1] + ( b[1] - a[1] ) * u / len;
+                const float d = hypotf( pt[0] - px, pt[1] - py ), t = cum[(size_t)j] + u;
+                if ( d < 0.01f && t >= tmin - 1.0e-3f && first < 0.0f )
+                    first = t;
+                if ( d < nearD )
+                {
+                    nearD = d;
+                    nearT = t;
+                }
+            }
+            const float t = first >= 0.0f ? first : nearT;
+            return fminf( fmaxf( t, tmin ), L );
+        };
+
+        // Span ends onto the boundary, then the corners onto span ends.
+        std::vector<float> t( (size_t)( S + 1 ) ), lo( (size_t)( S + 1 ) ), hi( (size_t)( S + 1 ) );
+        std::vector<char>  snapped( (size_t)( S + 1 ), 0 );
+        t[0] = 0.0f;
+        t[(size_t)S] = L;
+        for ( int k = 1; k < S; ++k )
+        {
+            float h[2];
+            rayHit( &f[(size_t)k * 4], h );
+            t[(size_t)k] = paramOf( h, t[(size_t)( k - 1 )] );
+        }
+        for ( int k = 0; k <= S; ++k )
+            lo[(size_t)k] = hi[(size_t)k] = t[(size_t)k];
+        for ( int j = 1; j + 1 < nv; ++j )
+        {
+            int best = 0;
+            for ( int k = 1; k <= S; ++k )
+                if ( fabsf( t[(size_t)k] - cum[(size_t)j] ) < fabsf( t[(size_t)best] - cum[(size_t)j] ) )
+                    best = k;
+            if ( !snapped[(size_t)best] )
+                lo[(size_t)best] = cum[(size_t)j];
+            hi[(size_t)best] = cum[(size_t)j];
+            snapped[(size_t)best] = 1;
+        }
+        lo[0] = 0.0f;
+        hi[(size_t)S] = L;
+        if ( snapped[(size_t)S] == 0 )
+            lo[(size_t)S] = L;
+        for ( int k = 1; k < S; ++k )            // free ends stay on their own straight edge
+            if ( !snapped[(size_t)k] )
+                lo[(size_t)k] = hi[(size_t)k] = fmaxf( t[(size_t)k], hi[(size_t)( k - 1 )] );
+        for ( int k = S - 1; k >= 1; --k )
+            if ( !snapped[(size_t)k] )
+                lo[(size_t)k] = hi[(size_t)k] = fminf( lo[(size_t)k], lo[(size_t)( k + 1 )] );
+
+        // The patches, in frame coordinates first.
+        auto toPlane = [&]( const float *fr, float out[2] ) {
+            out[0] = fr[0] * e1[0] + fr[1] * e2[0];
+            out[1] = fr[0] * e1[1] + fr[1] * e2[1];
+        };
+        auto finish = [&]( capPatch_t &cp, float row0[][2], float row2[][2] ) {
+            for ( int c = 0; c < cp.w; ++c )
+            {
+                const float mid[2] = { ( row0[c][0] + row2[c][0] ) * 0.5f, ( row0[c][1] + row2[c][1] ) * 0.5f };
+                toPlane( row0[c], cp.uv[c][0] );
+                toPlane( mid, cp.uv[c][1] );
+                toPlane( row2[c], cp.uv[c][2] );
+            }
+            caps->push_back( cp );
+        };
+        caps->clear();
+        float row0[KPATCH_MAX_WIDTH][2], row2[KPATCH_MAX_WIDTH][2];
+        for ( int k0 = 0; k0 < S; )
+        {
+            int k1 = k0 + 1;                     // the run ends where a fan sits
+            while ( k1 < S && hi[(size_t)k1] - lo[(size_t)k1] < 1.0e-4f )
+                ++k1;
+            capPatch_t cp;
+            cp.w = 2 * ( k1 - k0 ) + 1;
+            for ( int c = 0; c < cp.w; ++c )
+            {
+                row0[c][0] = f[(size_t)( 2 * k0 + c ) * 2];
+                row0[c][1] = f[(size_t)( 2 * k0 + c ) * 2 + 1];
+                if ( !( c & 1 ) )
+                {
+                    const int k = k0 + c / 2;
+                    pathPt( k == k0 ? hi[(size_t)k] : lo[(size_t)k], row2[c] );
+                }
+            }
+            for ( int c = 1; c < cp.w; c += 2 )
+            {
+                row2[c][0] = ( row2[c - 1][0] + row2[c + 1][0] ) * 0.5f;
+                row2[c][1] = ( row2[c - 1][1] + row2[c + 1][1] ) * 0.5f;
+            }
+            finish( cp, row0, row2 );
+            k0 = k1;
+        }
+        for ( int k = 0; k <= S; ++k )
+        {
+            if ( hi[(size_t)k] - lo[(size_t)k] < 1.0e-4f )
+                continue;
+            float vtx[8][2];
+            int nvtx = 0;
+            pathPt( lo[(size_t)k], vtx[nvtx++] );
+            for ( int j = 1; j + 1 < nv; ++j )
+                if ( cum[(size_t)j] > lo[(size_t)k] + 1.0e-4f && cum[(size_t)j] < hi[(size_t)k] - 1.0e-4f )
+                {
+                    vtx[nvtx][0] = path[(size_t)j * 2];
+                    vtx[nvtx][1] = path[(size_t)j * 2 + 1];
+                    ++nvtx;
+                }
+            pathPt( hi[(size_t)k], vtx[nvtx++] );
+            const float *apex = &f[(size_t)k * 4];
+            float area = 0.0f;
+            for ( int v = 0; v + 1 < nvtx; ++v )
+                area += ( vtx[v][0] - apex[0] ) * ( vtx[v + 1][1] - apex[1] ) - ( vtx[v][1] - apex[1] ) * ( vtx[v + 1][0] - apex[0] );
+            if ( fabsf( area ) * 0.5f < 0.5f )
+                continue;                        // the fan lies along the boundary: nothing to fill
+            capPatch_t cp;
+            cp.w = 2 * ( nvtx - 1 ) + 1;
+            for ( int c = 0; c < cp.w; ++c )
+            {
+                row0[c][0] = apex[0];
+                row0[c][1] = apex[1];
+                if ( c & 1 )
+                {
+                    row2[c][0] = ( vtx[c / 2][0] + vtx[c / 2 + 1][0] ) * 0.5f;
+                    row2[c][1] = ( vtx[c / 2][1] + vtx[c / 2 + 1][1] ) * 0.5f;
+                }
+                else
+                {
+                    row2[c][0] = vtx[c / 2][0];
+                    row2[c][1] = vtx[c / 2][1];
+                }
+            }
+            finish( cp, row0, row2 );
+        }
+
+        box->clear();
+        const bool ccw = e1[0] * e2[1] - e1[1] * e2[0] > 0.0f;
+        for ( int i = 0; i < 4; ++i )
+        {
+            float p2[2];
+            toPlane( C[ccw ? i : 3 - i], p2 );
+            box->push_back( p2[0] );
+            box->push_back( p2[1] );
+        }
+        return true;
+    }
+
+    // The curve's stand-in tool: its bounding rectangle (PlanBoxCaps) or else its control hull,
+    // swept along its axis over its own length.
     bool CurveToolPrism( selbrush_t *node, curveTool_t *out, const char **why )
     {
         const patchMesh_t *p = ( node && node->def ) ? node->def->patch : nullptr;
@@ -239,8 +612,26 @@ namespace
                     uv.push_back( q[1] );
                 }
             }
+        out->pl = pl;
+        out->lo = lo;
+        out->hi = hi;
+        for ( int k = 0; k < 2; ++k )
+        {
+            out->mn2[k] = FLT_MAX;
+            out->mx2[k] = -FLT_MAX;
+        }
+        for ( size_t i = 0; i + 1 < uv.size(); i += 2 )
+            for ( int k = 0; k < 2; ++k )
+            {
+                out->mn2[k] = fminf( out->mn2[k], uv[i + k] );
+                out->mx2[k] = fmaxf( out->mx2[k], uv[i + k] );
+            }
         std::vector<float> hull;
-        Hull2D( uv, &hull );
+        if ( !PlanBoxCaps( uv, pl, &hull, &out->caps ) )
+        {
+            out->caps.clear();
+            Hull2D( uv, &hull );
+        }
         const int n = (int)( hull.size() / 2 );
         float area = 0.0f;
         for ( int i = 0; i < n; ++i )
@@ -266,9 +657,11 @@ namespace
     }
 
     // Where the line p + s*axis is inside the convex brush; false when it never is.
-    bool ClipLine( const brush_t *def, const float p[3], const float axis[3], float *sIn, float *sOut )
+    bool ClipLine( const brush_t *def, const float p[3], const float axis[3], float *sIn, float *sOut,
+                   int *faceIn = nullptr, int *faceOut = nullptr )
     {
         float in = -FLT_MAX, out = FLT_MAX;
+        int   fIn = -1, fOut = -1;
         for ( int f = 0; f < def->faceCount; ++f )
         {
             const float *n   = def->faces[f].plane.normal;
@@ -281,27 +674,39 @@ namespace
                 continue;
             }
             const float t = num / den;
-            if ( den > 0.0f )
-                out = ( t < out ) ? t : out;
-            else
-                in = ( t > in ) ? t : in;
+            if ( den > 0.0f && t < out )
+            {
+                out  = t;
+                fOut = f;
+            }
+            else if ( den < 0.0f && t > in )
+            {
+                in  = t;
+                fIn = f;
+            }
         }
         if ( !( in < out ) )
             return false;
         *sIn  = in;
         *sOut = out;
+        if ( faceIn )
+            *faceIn = fIn;
+        if ( faceOut )
+            *faceOut = fOut;
         return true;
     }
 
     // The curve's control points with every column's ends trimmed to where it leaves the
-    // brushes; false leaves the curve alone (a column passing beside them all, or nothing to trim).
+    // brushes (`changed`: some end moves); false - a column passing beside them all - leaves the
+    // curve alone and uncapped.
     bool PlanCurveTrim( curveTool_t *ct, const std::vector<const brush_t *> &brushes )
     {
         const patchMesh_t *p = ct->node->def->patch;
         const bool rows = ct->alongRows;
         const int  na = CurveAround( p, rows ), nl = CurveAlong( p, rows );
         ct->trimmed.clear();
-        bool changed = false;
+        bool &changed = ct->changed;
+        changed = false;
         for ( int i = 0; i < na; ++i )
         {
             const float *a = CurvePt( p, rows, i, 0 );
@@ -336,7 +741,161 @@ namespace
                 ct->trimmed.insert( ct->trimmed.end(), w, w + 3 );
             }
         }
-        return changed;
+        return true;
+    }
+
+    // KIWI (2026-11-01, user: "the ceiling curve is making the faces backwards. The backwards
+    // faces should be the ones going into the brushes"): a kept curve lines the hole it cut, so it
+    // faces into its own cross-section - the opening - and its back goes into the wall.  Extrude
+    // builds an arch facing out of its solid, the other way.  True: it faces out (flip it).
+    bool CurveFacesWall( const curveTool_t &ct )
+    {
+        const patchMesh_t *p = ct.node->def->patch;
+        const int na = CurveAround( p, ct.alongRows );
+        // The cross-section's area centroid (the controls closed by their chord).
+        std::vector<float> q;
+        for ( int i = 0; i < na; ++i )
+        {
+            float uv[2];
+            KiwiCon_WorldToPlane( ct.pl, CurvePt( p, ct.alongRows, i, 0 ), uv );
+            q.push_back( uv[0] );
+            q.push_back( uv[1] );
+        }
+        float a = 0.0f, cx = 0.0f, cy = 0.0f, mx = 0.0f, my = 0.0f;
+        for ( int i = 0; i < na; ++i )
+        {
+            const int j = ( i + 1 ) % na;
+            const float cr = q[(size_t)i * 2] * q[(size_t)j * 2 + 1] - q[(size_t)j * 2] * q[(size_t)i * 2 + 1];
+            a  += cr;
+            cx += ( q[(size_t)i * 2] + q[(size_t)j * 2] ) * cr;
+            cy += ( q[(size_t)i * 2 + 1] + q[(size_t)j * 2 + 1] ) * cr;
+            mx += q[(size_t)i * 2] / (float)na;
+            my += q[(size_t)i * 2 + 1] / (float)na;
+        }
+        if ( fabsf( a ) > 1.0e-3f )
+        {
+            mx = cx / ( 3.0f * a );
+            my = cy / ( 3.0f * a );
+        }
+        // The surface normal, cross(dCol, dRow), at the middle of the control net.
+        const int c = p->width / 2, r = p->height / 2;
+        float dCol[3], dRow[3], n[3], pt[2], n2[2];
+        Sub3( p->ctrl[c + 1 < p->width ? c + 1 : c][r].xyz, p->ctrl[c > 0 ? c - 1 : c][r].xyz, dCol );
+        Sub3( p->ctrl[c][p->height - 1].xyz, p->ctrl[c][0].xyz, dRow );
+        Cross3( dCol, dRow, n );
+        KiwiCon_WorldToPlane( ct.pl, p->ctrl[c][r].xyz, pt );
+        n2[0] = Dot3( n, ct.pl.u );
+        n2[1] = Dot3( n, ct.pl.v );
+        return n2[0] * ( mx - pt[0] ) + n2[1] * ( my - pt[1] ) < 0.0f;
+    }
+
+    // The planned caps on each wall face the curve leaves through: every point slides along the
+    // axis onto where its line enters (end 0) / leaves (end 1) the cut brushes, as the curve's
+    // ends do.  An end whose wall face lies beyond the curve (a pocket, closed by the stand-in's
+    // own end face) or whose points miss the brushes gets none.  Landed in `owners[brush]`, each
+    // patch textured as the face it lies on.  Returns the count landed.
+    int LandCurveCaps( const curveTool_t &ct, const std::vector<const brush_t *> &brushes,
+                       const std::vector<entity_s *> &owners )
+    {
+        const patchMesh_t *curve = ct.node->def->patch;
+        int landed = 0;
+        for ( int end = 0; end < 2; ++end )
+        {
+            std::vector<float> xyz;              // per cap, per (col, row), 3 floats
+            int srcBrush = -1, srcFace = -1;
+            bool ok = true;
+            for ( size_t c = 0; c < ct.caps.size() && ok; ++c )
+                for ( int col = 0; col < ct.caps[c].w && ok; ++col )
+                    for ( int row = 0; row < 3 && ok; ++row )
+                    {
+                        float base[3];
+                        KiwiCon_PlaneToWorld( ct.pl, ct.caps[c].uv[col][row], base );
+                        float s = end ? -FLT_MAX : FLT_MAX;
+                        int   sb = -1, sf = -1;
+                        for ( size_t b = 0; b < brushes.size(); ++b )
+                        {
+                            float i0, o0;
+                            int   fi, fo;
+                            if ( !ClipLine( brushes[b], base, ct.axis, &i0, &o0, &fi, &fo ) )
+                                continue;
+                            if ( !end && i0 < s ) { s = i0; sb = (int)b; sf = fi; }
+                            if ( end && o0 > s )  { s = o0; sb = (int)b; sf = fo; }
+                        }
+                        if ( sb < 0 || sf < 0 )
+                            ok = false;
+                        else if ( !end && s < ct.lo - 0.05f )
+                            ok = false;
+                        else if ( end && s > ct.hi + 0.05f )
+                            ok = false;
+                        else
+                        {
+                            s = end ? fminf( s, ct.hi ) : fmaxf( s, ct.lo );
+                            float w[3];
+                            Mad3( base, ct.axis, s, w );
+                            xyz.insert( xyz.end(), w, w + 3 );
+                            if ( srcBrush < 0 )
+                            {
+                                srcBrush = sb;
+                                srcFace  = sf;
+                            }
+                        }
+                    }
+            if ( !ok || srcBrush < 0 )
+                continue;
+            const face_t &src = brushes[(size_t)srcBrush]->faces[srcFace];
+            entity_s     *owner = owners[(size_t)srcBrush];
+            float want[3];
+            Copy3( ct.axis, want );
+            if ( !end )
+                for ( int k = 0; k < 3; ++k )
+                    want[k] = -want[k];
+            size_t at = 0;
+            for ( size_t c = 0; c < ct.caps.size(); ++c )
+            {
+                patchMesh_t *p = MakeNewPatch();
+                if ( !p )
+                    return landed;
+                p->width      = ct.caps[c].w;
+                p->height     = 3;
+                p->type       = (PATCH_TYPES)( PATCH_BEVEL | PATCH_SEAM );
+                p->contents   = src.contents;
+                p->flags      = src.toolflags;     // MakeNewPatch does NOT seed this
+                p->subDivType = curve->subDivType;
+                for ( int col = 0; col < p->width; ++col )
+                    for ( int row = 0; row < 3; ++row, at += 3 )
+                        Copy3( &xyz[at], p->ctrl[col][row].xyz );
+                // Facing out of the wall: cross(dCol, dRow) summed over the net.
+                float n[3] = { 0.0f, 0.0f, 0.0f };
+                for ( int col = 0; col + 1 < p->width; ++col )
+                    for ( int row = 0; row < 2; ++row )
+                    {
+                        float a[3], b[3], x[3];
+                        Sub3( p->ctrl[col + 1][row].xyz, p->ctrl[col][row].xyz, a );
+                        Sub3( p->ctrl[col][row + 1].xyz, p->ctrl[col][row].xyz, b );
+                        Cross3( a, b, x );
+                        Add3( n, x, n );
+                    }
+                if ( Dot3( n, want ) < 0.0f )
+                    for ( int col = 0; col < p->width; ++col )
+                    {
+                        const drawVert_t v = p->ctrl[col][0];
+                        p->ctrl[col][0] = p->ctrl[col][2];
+                        p->ctrl[col][2] = v;
+                    }
+                p->texture  = *(patchMesh_material *)&src.mtldef[0].lyrMtl;
+                p->lightmap = *(patchMesh_material *)&src.mtldef[1].lyrMtl;
+                KiwiMtl_RealizePatch( p );
+                KiwiMtl_EnsurePatchChannels( p );
+                Patch_KiwiFinishNewLike( p, &src.mtldef[0].mat_texDef );
+                KiwiPatch_TextureFromFace( p, &src );
+
+                brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
+                selbrush_t *inst = Brush_AddToList( pdef, owner );
+                Brush_AddToList2( inst );
+                ++landed;
+            }
+        }
+        return landed;
     }
 
     // N-plane subtract; see kiwi_boolean.h.
@@ -1147,6 +1706,43 @@ namespace
                     tools.push_back( m_tools[i] );
                     toolDefs.push_back( m_tools[i]->def );
                 }
+            // KIWI (2026-11-01): a flat patch lying across a curve tool's end, inside its
+            // outline - the end cap of an extruded arch solid - goes with the solid it closes,
+            // as its brushes do; left standing it would hang in the opening.
+            for ( int list = 0; list < 2 && !curves.empty(); ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                {
+                    const patchMesh_t *sp = ( b->def && b->patch ) ? b->def->patch : nullptr;
+                    if ( !sp || IsTool( b ) || IsTarget( b ) )
+                        continue;
+                    bool endCap = false;
+                    for ( size_t c = 0; c < curves.size() && !endCap; ++c )
+                    {
+                        if ( curves[c].node == b )
+                            continue;
+                        for ( int end = 0; end < 2 && !endCap; ++end )
+                        {
+                            const float at = end ? curves[c].hi : curves[c].lo;
+                            endCap = true;
+                            for ( int col = 0; col < sp->width && endCap; ++col )
+                                for ( int row = 0; row < sp->height && endCap; ++row )
+                                {
+                                    const float *x = sp->ctrl[col][row].xyz;
+                                    float r[3], q[2];
+                                    Sub3( x, curves[c].pl.origin, r );
+                                    KiwiCon_WorldToPlane( curves[c].pl, x, q );
+                                    endCap = fabsf( Dot3( r, curves[c].axis ) - at ) < 0.1f
+                                          && q[0] > curves[c].mn2[0] - 0.1f && q[0] < curves[c].mx2[0] + 0.1f
+                                          && q[1] > curves[c].mn2[1] - 0.1f && q[1] < curves[c].mx2[1] + 0.1f;
+                                }
+                        }
+                    }
+                    if ( endCap )
+                        tools.push_back( b );
+                }
+            }
             if ( toolDefs.empty() )
             {
                 Sys_Printf( "Boolean: no tool solid is still there — nothing was "
@@ -1221,15 +1817,20 @@ namespace
 
             // KIWI: each curve's ends go onto the faces of the brushes it cut, planned while
             // those brushes still stand.
-            int trimmedCurves = 0;
+            int trimmedCurves = 0, curveCaps = 0;
+            std::vector<const brush_t *> cut;
+            std::vector<entity_s *>      cutOwners;
+            for ( const carve_t &cv : carves )
             {
-                std::vector<const brush_t *> cut;
-                for ( const carve_t &cv : carves )
-                    cut.push_back( cv.node->def );
-                for ( curveTool_t &ct : curves )
-                    if ( !PlanCurveTrim( &ct, cut ) )
-                        ct.trimmed.clear();
+                cut.push_back( cv.node->def );
+                cutOwners.push_back( cv.node->owner );
             }
+            for ( curveTool_t &ct : curves )
+                if ( !PlanCurveTrim( &ct, cut ) )
+                {
+                    ct.trimmed.clear();
+                    ct.caps.clear();             // it passes beside the brushes: no wall to cap
+                }
 
             // Clear typed selection before freeing nodes; keep the legacy list for undo cloning.
             Sel_Clear( KiwiSel() );
@@ -1239,7 +1840,12 @@ namespace
             // KIWI: the curves are reshaped in place, so the record covers them first.
             for ( curveTool_t &ct : curves )
             {
-                if ( ct.trimmed.empty() || !Sel_BrushLive( ct.node ) )
+                if ( !Sel_BrushLive( ct.node ) )
+                    continue;
+                // KIWI: the caps go in while the cut brushes - their faces' material - still stand.
+                if ( !ct.caps.empty() )
+                    curveCaps += LandCurveCaps( ct, cut, cutOwners );
+                if ( ct.trimmed.empty() || !ct.changed )
                     continue;
                 Undo_AddBrush( (entity_brush_s *)ct.node->def );
                 patchMesh_t *p = ct.node->def->patch;
@@ -1250,6 +1856,26 @@ namespace
                 // Patch_UpdateSelected_0's own refresh (pmesh.cpp 0x43D800); bDirty stays clear.
                 Patch_Rebuild( p, 1 );
                 ++trimmedCurves;
+            }
+
+            // KIWI: a kept curve faces into the opening it cut (CurveFacesWall); reversing one
+            // parametric direction turns it round (KiwiPrim_BuildPatchBackface).
+            int flippedCurves = 0;
+            for ( curveTool_t &ct : curves )
+            {
+                if ( !Sel_BrushLive( ct.node ) || ct.trimmed.empty() || !CurveFacesWall( ct ) )
+                    continue;                    // (empty trimmed: it passed beside the brushes)
+                Undo_AddBrush( (entity_brush_s *)ct.node->def );   // self-deduplicating
+                patchMesh_t *p = ct.node->def->patch;
+                for ( int col = 0; col < p->width; ++col )
+                    for ( int row = 0; row < p->height / 2; ++row )
+                    {
+                        const drawVert_t v = p->ctrl[col][row];
+                        p->ctrl[col][row] = p->ctrl[col][p->height - 1 - row];
+                        p->ctrl[col][p->height - 1 - row] = v;
+                    }
+                Patch_Rebuild( p, 1 );
+                ++flippedCurves;
             }
 
             // Picked tools are consumed but excluded from selected_brushes, so the
@@ -1266,6 +1892,7 @@ namespace
             }
 
             int landed = 0;
+            std::vector<brush_t *> pieces;
             for ( size_t c = 0; c < carves.size(); ++c )
             {
                 carve_t &cv = carves[c];
@@ -1276,9 +1903,60 @@ namespace
                     if ( inst->next || inst->prev )
                         Com_Error( ERR_FATAL, "Brush_AddToList: already linked" );
                     Brush_AddToList2( inst );
+                    pieces.push_back( cv.pieces[p] );
                     ++landed;
                 }
                 Brush_Free( cv.node );
+            }
+
+            // KIWI (2026-11-01, user: "the top ceiling of the arch should "match brush" with the
+            // lower walls by default"): each kept curve continues the texture of the carved face
+            // it springs from - a doorway's side wall - wrapped over (KiwiPatch_TextureFromFace).
+            // A doorway's sides may be brushes the cut never touched (a wall built round its
+            // opening): after the new pieces, every brush in the map.
+            std::vector<brush_t *> mapBrushes;
+            for ( int list = 0; list < 2 && !curves.empty(); ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                    if ( b->def && !b->def->patch && !IsTool( b ) )
+                        mapBrushes.push_back( b->def );
+            }
+            int matchedCurves = 0;
+            for ( curveTool_t &ct : curves )
+            {
+                if ( !Sel_BrushLive( ct.node ) )
+                    continue;
+                patchMesh_t  *p   = ct.node->def->patch;
+                const face_t *src = KiwiPatch_FindSourceFace( p, pieces.data(), (int)pieces.size() );
+                if ( !src )
+                    src = KiwiPatch_FindSourceFace( p, mapBrushes.data(), (int)mapBrushes.size() );
+                if ( !src )
+                    continue;
+                Undo_AddBrush( (entity_brush_s *)ct.node->def );   // self-deduplicating
+                // User: "match the ceiling to both sides of the arch": folded at the crown, and
+                // the wall it comes down onto scrolls to meet it.  New pieces are undone by this
+                // record already; an untouched brush is covered first.
+                kpatchFaceRef_t farFaces[64];
+                float scroll[2];
+                int nFar = KiwiPatch_MatchTexture( p, src, pieces.data(), (int)pieces.size(), farFaces, 64, scroll );
+                if ( nFar < 0 )
+                    continue;
+                ++matchedCurves;
+                if ( !nFar )
+                    nFar = KiwiPatch_MatchTexture( p, src, mapBrushes.data(), (int)mapBrushes.size(), farFaces, 64, scroll );
+                for ( int i = 0; i < nFar; ++i )
+                {
+                    brush_t *fb = farFaces[i].brush;
+                    if ( std::find( pieces.begin(), pieces.end(), fb ) == pieces.end() )
+                    {
+                        entity_s *owner = fb->owner;
+                        if ( owner && owner->eclass && owner->eclass->fixedsize )
+                            Undo_AddEntity( owner );
+                        Undo_AddBrush( (entity_brush_s *)fb );
+                    }
+                    KiwiPatch_ScrollFace( fb, farFaces[i].face, scroll );
+                }
             }
 
             // Free tools only after every replacement has landed; tools may share an
@@ -1294,7 +1972,9 @@ namespace
                         missed, refused );
             if ( !curves.empty() )
                 Sys_Printf( "Boolean: %i curve tool(s) kept, %i with their ends trimmed flush "
-                            "to the brush.\n", (int)curves.size(), trimmedCurves );
+                            "to the brush, %i cap patch(es) round them, %i textured on from "
+                            "the wall, %i turned to face the opening.\n", (int)curves.size(),
+                            trimmedCurves, curveCaps, matchedCurves, flippedCurves );
         }
 
         // Select live targets and tools, then delegate to CSG_Merge (csg.cpp:572).
@@ -1362,6 +2042,12 @@ namespace
             m_op    = KBOOL_DIFFERENCE;
             m_stage = KBOOL_LIVE;
         }
+        // ...and a Shift-click's further tool.  A target picked as a tool stops being a target.
+        void TestAddTool( selbrush_t *b )
+        {
+            m_targets.erase( std::remove( m_targets.begin(), m_targets.end(), b ), m_targets.end() );
+            m_tools.push_back( b );
+        }
 
     private:
         std::vector<selbrush_t *> m_targets;
@@ -1407,5 +2093,13 @@ bool KiwiBool_TestPickTool( selbrush_t *tool )
     if ( KiwiCmd_Active() != &s_boolean || !tool )
         return false;
     s_boolean.TestPickTool( tool );
+    return true;
+}
+
+bool KiwiBool_TestAddTool( selbrush_t *tool )
+{
+    if ( KiwiCmd_Active() != &s_boolean || !tool )
+        return false;
+    s_boolean.TestAddTool( tool );
     return true;
 }

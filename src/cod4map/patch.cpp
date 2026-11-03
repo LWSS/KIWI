@@ -560,7 +560,13 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
      one duplicate patch per layer wearing that material with alpha = the channel —
      so the coalescer sees exactly what a hand-duplicated CoD4 terrain gives it. */
   char kiwiLayerName[4][MAX_QPATH];
+  /* KIWI: "I need a mechanism to modify each resolution of each layer" - an optional
+     "scale <s> <t>" after the material multiplies that layer's copy of the texcoords (each
+     layer of a layered surface keeps its own UVs, Tris_SetLayeredRecordData). */
+  float kiwiLayerScale[4][2];
   memset(kiwiLayerName, 0, sizeof(kiwiLayerName));
+  for (int k = 0; k < 4; ++k)
+    kiwiLayerScale[k][0] = kiwiLayerScale[k][1] = 1.0f;
   for (;;)
   {
     char *ktok = COM_Parse(parsePtr);
@@ -578,6 +584,21 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
     {
       strncpy(kiwiLayerName[kslot], ktok, MAX_QPATH - 1);
       kiwiLayerName[kslot][MAX_QPATH - 1] = 0;
+    }
+    /* the token after a bare kiwilayer line is the next line or the grid width: a keyword */
+    if (strcmp(COM_Parse(parsePtr), "scale"))
+    {
+      Com_UngetToken();
+      continue;
+    }
+    {
+      const float s = COM_ParseFloat(parsePtr);
+      const float t = COM_ParseFloat(parsePtr);
+      if (kslot >= 0 && kslot < 4 && s > 0.0f && t > 0.0f)
+      {
+        kiwiLayerScale[kslot][0] = s;
+        kiwiLayerScale[kslot][1] = t;
+      }
     }
   }
   width = COM_ParseInt(parsePtr);
@@ -698,12 +719,40 @@ Patch_t *ParsePatch(double unused, char **parsePtr, int patchType, float *transf
           unsigned char *c = (unsigned char *)&lverts[vi].color;
           c[3] = ((unsigned char *)&g_kiwiLayerColorCopy[vi])[kslot];
           c[0] = c[1] = c[2] = 255;
+          lverts[vi].st[0] *= kiwiLayerScale[kslot][0];
+          lverts[vi].st[1] *= kiwiLayerScale[kslot][1];
         }
         layer = malloc(sizeof(Patch_t));
         if (!layer)
           Com_Error("ParsePatch: out of memory for layer patch");
         memcpy(layer, patch, sizeof(Patch_t));
         layer->material = LoadMaterial(kiwiLayerName[kslot]);
+        /* KIWI FIX: a layer must reach the coalescer as a BLEND-class material (tool class
+           0x20, l_sm_b0c0*), like the stock blend layers (ch_tile_floor05_blend, *_decal).
+           FindOrCreateCoalescedSurfProps (native 0x44EDE0) takes a coincident OPAQUE (class
+           0x10) leaf as hiding the rest of the stack and keeps that one leaf, so a layer
+           painted with a plain l_sm_r0c0* world material was dropped whole — and no
+           l_sm_r0c0*_r1c1* layered techset exists for it anyway.  Radiant writes the blend
+           twin "kiwi_blend_<name>" over the same images; compile the layer with that. */
+        if ((layer->material->toolFlagsWord & 0x70) == 0x10)
+        {
+          char twinName[MAX_QPATH];
+          char twinPath[MAX_OS_PATH];
+
+          if (Com_sprintf(twinName, sizeof(twinName), "kiwi_blend_%s", kiwiLayerName[kslot]) > 0
+            && Com_sprintf(twinPath, sizeof(twinPath), "%s/%s",
+                           g_targetPlatform->materialDirectory, twinName) > 0
+            && FS_LoadFile(twinPath, NULL) >= 0)
+          {
+            layer->material = LoadMaterial(twinName);
+          }
+          else
+          {
+            printf("WARNING: kiwilayer %d '%s' is an opaque material and '%s' is missing; "
+                   "the layer cannot blend and will be hidden by the base\n",
+                   kslot, kiwiLayerName[kslot], twinName);
+          }
+        }
         layer->vertexData = lverts;
         layer->indexData = lindices;
         layer->surfaceFlags = layer->material->contentFlags;

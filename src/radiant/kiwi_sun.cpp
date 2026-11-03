@@ -843,10 +843,112 @@ namespace
     // one undo record. Reload inactive fields so external edits and undo appear.
     float s_uiPitch    = 0.0f;
     float s_uiYaw      = 0.0f;
-    float s_uiLight    = 0.0f;
     float s_uiColor[3] = { 1.0f, 1.0f, 1.0f };
-    bool  s_uiEditing[3] = { false, false, false };   // pitch / yaw / sunlight
+    bool  s_uiEditing[2] = { false, false };          // pitch / yaw
     bool  s_uiEditingColor = false;
+
+    // KIWI (2026-11-01, user, of a too-bright map: "can you add all those settings to the sun
+    // menu, also give it sliders with sensible values (allowing any value with double click -
+    // type)"): the daylight keys both compilers read off the worldspawn (cod4map
+    // primarylights.cpp:1389-1402, cod4rad mapio.c).  A drag field with a fill bar: dragging
+    // walks the sensible range, a double-click types any value (ImGui's own drag behaviour; a
+    // SliderFloat would jump to the click and take Ctrl+click alone).  One undo record per
+    // gesture, as the fields above.
+    struct sunScalar_t
+    {
+        const char *key;
+        const char *undo;           // literal: the undo record stores the pointer
+        float       lo, hi, speed;
+        const char *fmt;
+        const char *tip;
+        float       value;
+        bool        editing;
+    };
+    sunScalar_t s_uiScalars[3] =
+    {
+        { "sunlight", "sun intensity", 0.0f, 4.0f, 0.01f, "%.2f",
+          "Sun intensity - the brightness of direct sunlight.  Most maps sit\n"
+          "around 1.0 - 1.6.  Drag, or double-click to type any value.", 0.0f, false },
+        { "diffusefraction", "sun diffuse fraction", 0.0f, 1.0f, 0.005f, "%.2f",
+          "How much of the sun becomes soft sky light (in sundiffusecolor)\n"
+          "instead of direct light: lower = stronger shadows and contrast.\n"
+          "Typical 0.2 - 0.5.  Drag, or double-click to type any value.", 0.0f, false },
+        { "ambient", "ambient light", 0.0f, 1.0f, 0.002f, "%.3f",
+          "Flat light added everywhere (in _color), even in full shadow.\n"
+          "Typical 0.05 - 0.2.  Drag, or double-click to type any value.", 0.0f, false },
+    };
+    struct sunColour_t
+    {
+        const char *key;
+        const char *undo;
+        const char *tip;
+        float       value[3];
+        bool        editing;
+    };
+    sunColour_t s_uiColours[2] =
+    {
+        { "sundiffusecolor", "sun diffuse colour",
+          "Colour of the soft sky light (diffusefraction).  Max-normalised by the\n"
+          "compilers: only the ratio between the channels matters.", { 1.0f, 1.0f, 1.0f }, false },
+        { "_color", "ambient colour",
+          "Colour of the flat ambient light.  Max-normalised by the compilers:\n"
+          "only the ratio between the channels matters.", { 1.0f, 1.0f, 1.0f }, false },
+    };
+
+    void SunScalarRow( entity_s_def *wd, sunScalar_t &s )
+    {
+        if ( wd && !s.editing )
+            s.value = Entity_GetFloatValueForKey( wd, s.key );
+        ImGui::SetNextItemWidth( KSUNUI_FIELD_W * 2.0f );
+        ImGui::DragFloat( s.key, &s.value, s.speed, s.lo, s.hi, s.fmt );
+        s.editing = ImGui::IsItemActive();
+        // The fill bar: where the value sits in the sensible range.
+        {
+            const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            const float  w = KSUNUI_FIELD_W * 2.0f;          // the frame, not the label
+            float f = ( s.value - s.lo ) / ( s.hi - s.lo );
+            f = f < 0.0f ? 0.0f : ( f > 1.0f ? 1.0f : f );
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                a, ImVec2( a.x + w * f, b.y ), ImGui::GetColorU32( ImGuiCol_SliderGrab, 0.35f ),
+                ImGui::GetStyle().FrameRounding );
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "%s", s.tip );
+        if ( ImGui::IsItemDeactivatedAfterEdit() )
+        {
+            // None of these can go below zero; above the range is the mapper's call.
+            if ( !( s.value >= 0.0f ) )
+                s.value = 0.0f;
+            char buf[48];
+            KiwiFmt_Exact( buf, sizeof( buf ), s.value, 0 );
+            WriteKey( s.key, buf, s.undo );
+        }
+    }
+
+    void SunColourRow( entity_s_def *wd, sunColour_t &c )
+    {
+        if ( wd && !c.editing )
+        {
+            float v[3] = { 1.0f, 1.0f, 1.0f };
+            if ( Entity_GetVec3ForKey( wd, v, c.key ) )
+            {
+                c.value[0] = v[0];
+                c.value[1] = v[1];
+                c.value[2] = v[2];
+            }
+        }
+        ImGui::SetNextItemWidth( KSUNUI_FIELD_W * 2.0f );
+        ImGui::ColorEdit3( c.key, c.value, ImGuiColorEditFlags_Float | ImGuiColorEditFlags_DisplayRGB );
+        c.editing = ImGui::IsItemActive();
+        if ( ImGui::IsItemDeactivatedAfterEdit() )
+        {
+            char buf[64];
+            FormatSunVec3( buf, sizeof( buf ), c.value[0], c.value[1], c.value[2] );
+            WriteKey( c.key, buf, c.undo );
+        }
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "%s", c.tip );
+    }
 
     // Frame the union of target and glyph; either alone can hide the other.
     // Camera motion plus KIWI-owned selection needs no undo bracket (kiwi_focus.h).
@@ -988,30 +1090,11 @@ void KiwiSun_Draw()
             SayRecompile();
         }
 
-        // ── the two keys a mapper reaches for next ──────────────────────────
-        // Limit this helper to aim, brightness, and colour; ambient-model keys stay
-        // in the entity window. BeginDisabled does not skip reads, so guard `wd`
-        // before Entity_Get* walks e->epairs (entity.cpp:102,111).
-        if ( wd && !s_uiEditing[2] )
-            s_uiLight = Entity_GetFloatValueForKey( wd, "sunlight" );
-
-        ImGui::SetNextItemWidth( KSUNUI_FIELD_W );
-        const bool litEnter =
-            ImGui::InputFloat( "sunlight", &s_uiLight, 0.0f, 0.0f, "%.2f",
-                               ImGuiInputTextFlags_EnterReturnsTrue );
-        s_uiEditing[2] = ImGui::IsItemActive();
-        if ( litEnter || ImGui::IsItemDeactivatedAfterEdit() )
-        {
-            // Sunlight cannot be negative; the compiler owns the ambient floor
-            // (cod4map/primarylights.cpp:1406-1410).
-            if ( !( s_uiLight >= 0.0f ) )
-                s_uiLight = 0.0f;
-            char buf[48];
-            KiwiFmt_Exact( buf, sizeof( buf ), s_uiLight, 0 );
-            WriteKey( "sunlight", buf, "sun intensity" );
-        }
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Sun intensity.  Read by both compilers at BSP + light time." );
+        // ── the daylight keys ───────────────────────────────────────────────
+        // Brightness, sky light and ambient (SunScalarRow / SunColourRow above).
+        // BeginDisabled does not skip reads, so the rows guard `wd` before Entity_Get*
+        // walks e->epairs (entity.cpp:102,111).
+        SunScalarRow( wd, s_uiScalars[0] );                 // sunlight
 
         if ( wd && !s_uiEditingColor )
         {
@@ -1040,6 +1123,12 @@ void KiwiSun_Draw()
                 "(PrimaryLight_ColorNormalize,\n"
                 "cod4map/primarylights.cpp:1393-1395), so only the RATIO between the\n"
                 "three channels matters - brightness is `sunlight` above." );
+
+        SunScalarRow( wd, s_uiScalars[1] );                 // diffusefraction
+        SunColourRow( wd, s_uiColours[0] );                 // sundiffusecolor
+        SunScalarRow( wd, s_uiScalars[2] );                 // ambient
+        SunColourRow( wd, s_uiColours[1] );                 // _color
+        ImGui::TextDisabled( "Baked at light time: rebuild with lighting to see a change." );
 
         ImGui::EndDisabled();
 

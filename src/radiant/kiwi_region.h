@@ -64,7 +64,9 @@ void KiwiRegion_ReportGaps( bool force );
 // A derived loop can combine several tessellated objects, so its cap is distinct
 // from KCON_SEGS_MAX.  128 admits two fully tessellated round boundaries and must
 // remain aligned with KEXT_MAX_PROFILE to keep every filled region extrudable.
-#define KREG_MAX_LOOP    128        // vertices per derived region loop
+// KIWI (2026-11-01): 256 - a face now keeps its splines' tessellation (8 points a span) as
+// well as its circles', where the old collinear sweep thinned splines (kiwi_region.cpp).
+#define KREG_MAX_LOOP    256        // vertices per derived region loop
 
 // Count the new-region flash in drawn frames so idle time cannot consume it unseen.
 #define KREG_FLASH_FRAMES 85        // ~1 s at the 85 fps cap (KIWI 2026-10-27; was 60 at 60, 125 at 125)

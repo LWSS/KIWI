@@ -35,8 +35,8 @@ namespace
     // shapes freeze to their current visible tessellation; the HUD warns first.
     bool Trimmable( const kconObject_t &o )
     {
-        if ( KiwiCon_HasSmooth( o ) )                    // spline spans: layout curves only
-            return false;
+        // KIWI (2026-11-01, user: "trimming wont work on this hybrid construction face"): a
+        // spline trims too, its pieces staying splines (PlanSplineTrim).
         if ( o.type == KCON_LINE || o.type == KCON_POLYLINE )
             return (int)( o.pts.size() / 3 ) >= 2;
         if ( o.type == KCON_CIRCLE || o.type == KCON_ARC || o.type == KCON_RECT )
@@ -56,10 +56,12 @@ namespace
         return o.type == KCON_CIRCLE || o.type == KCON_ARC;
     }
 
-    // Stored-point segments are user-drawn edges and bound removal. Circle/arc
+    // Stored-point segments are user-drawn edges and bound removal. Circle/arc and spline
     // segments are tessellation, so they retain arc-between-crossings behavior.
     bool StoredSegments( const kconObject_t &o )
     {
+        if ( KiwiCon_HasSmooth( o ) )
+            return false;
         return o.type == KCON_LINE || o.type == KCON_POLYLINE || o.type == KCON_RECT;
     }
 
@@ -480,7 +482,174 @@ namespace
         bool               round = false;
         kconObject_t       src;                  // the circle / arc the pieces come from
         float              angA[2] = { 0.0f, 0.0f }, angB[2] = { 0.0f, 0.0f };   // degrees
+        // KIWI (2026-11-01): a spline keeps its pieces as splines - `a` / `b` are then their
+        // control points, and these their spans' smooth flags.
+        bool               spline = false;
+        std::vector<unsigned char> smoothA, smoothB;
     };
+
+    // A spline chain's walk position at each chain point: spans walked from where
+    // KiwiCon_TessellateMixed starts plus the span parameter (control point b sits at whole b).
+    // Mirrors that tessellation: a smooth span emits `segs` points, a straight one its start.
+    struct splineWalk_t
+    {
+        int                n = 0, spans = 0, start = 0;
+        std::vector<float> w;                    // one per chain point, increasing
+    };
+
+    bool SpanSmooth( const kconObject_t &o, int s )
+    {
+        return s >= 0 && s < (int)o.smooth.size() && o.smooth[(size_t)s] != 0;
+    }
+
+    bool SplineWalk( const kconObject_t &o, const chain_t &c, splineWalk_t *sw )
+    {
+        sw->n     = (int)( o.pts.size() / 3 );
+        sw->spans = o.closed ? sw->n : sw->n - 1;
+        sw->start = 0;
+        sw->w.clear();
+        int smooth = 0;
+        for ( int s = 0; s < sw->spans; ++s )
+            if ( SpanSmooth( o, s ) )
+                ++smooth;
+        if ( sw->n < 3 || smooth == 0 )
+            return false;
+        const int tess = KiwiCon_VertCount( o );
+        int segs;
+        if ( o.closed && smooth == sw->spans )
+            segs = tess / sw->spans;
+        else
+        {
+            segs = ( tess - ( sw->spans - smooth ) - ( o.closed ? 0 : 1 ) ) / smooth;
+            if ( o.closed )
+                for ( int s = 0; s < sw->spans; ++s )
+                    if ( !SpanSmooth( o, s ) ) { sw->start = s; break; }
+        }
+        if ( segs < 1 )
+            return false;
+        for ( int step = 0; step < sw->spans; ++step )
+        {
+            const int s = ( sw->start + step ) % sw->spans;
+            if ( !SpanSmooth( o, s ) )
+                sw->w.push_back( (float)step );
+            else
+                for ( int k = 0; k < segs; ++k )
+                    sw->w.push_back( (float)step + (float)k / (float)segs );
+        }
+        sw->w.push_back( (float)sw->spans );     // the open end / the closed wrap point
+        return (int)sw->w.size() == c.Count();
+    }
+
+    // Arc length -> walk position, and back (a closed chain's walk continues past one lap).
+    float WalkAt( const chain_t &c, const splineWalk_t &sw, float s )
+    {
+        const int m = c.Count();
+        for ( int i = 0; i + 1 < m; ++i )
+        {
+            if ( s > c.cum[(size_t)i + 1] && i + 2 < m )
+                continue;
+            const float span = c.cum[(size_t)i + 1] - c.cum[(size_t)i];
+            float f = span > 1.0e-6f ? ( s - c.cum[(size_t)i] ) / span : 0.0f;
+            f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
+            return sw.w[(size_t)i] + ( sw.w[(size_t)i + 1] - sw.w[(size_t)i] ) * f;
+        }
+        return 0.0f;
+    }
+
+    float ArcAtWalk( const chain_t &c, const splineWalk_t &sw, float w )
+    {
+        float lap = 0.0f;
+        while ( w > (float)sw.spans + 1.0e-4f )
+        {
+            w -= (float)sw.spans;
+            lap += c.Total();
+        }
+        const int m = c.Count();
+        for ( int i = 0; i + 1 < m; ++i )
+        {
+            if ( w > sw.w[(size_t)i + 1] && i + 2 < m )
+                continue;
+            const float dw = sw.w[(size_t)i + 1] - sw.w[(size_t)i];
+            float f = dw > 1.0e-6f ? ( w - sw.w[(size_t)i] ) / dw : 0.0f;
+            f = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
+            return lap + c.cum[(size_t)i] + ( c.cum[(size_t)i + 1] - c.cum[(size_t)i] ) * f;
+        }
+        return lap;
+    }
+
+    // The spline piece over walk [wa, wb]: the cut points (on the chain, where the cutter
+    // crosses it), the original control points between them, and - in a smooth span cut
+    // part-way - one more point on the curve at the kept part's middle, so the re-clamped
+    // Catmull-Rom keeps the shape there.  Each span keeps its source span's smooth flag.
+    void SplinePiece( const kconObject_t &o, const chain_t &c, const splineWalk_t &sw,
+                      float wa, float wb, std::vector<float> *pts, std::vector<unsigned char> *smooth )
+    {
+        pts->clear();
+        smooth->clear();
+        const float eps = 1.0e-3f;
+        std::vector<float> W;
+        W.push_back( wa );
+        for ( int b = (int)floorf( wa ) + 1; (float)b < wb - eps; ++b )
+            if ( (float)b > wa + eps )
+                W.push_back( (float)b );
+        W.push_back( wb );
+        auto spanOf = [&]( float w ) {
+            const int step = (int)floorf( w );
+            return ( sw.start + step % sw.spans + sw.spans ) % sw.spans;
+        };
+        auto partial = [&]( float a, float b ) {
+            return b - a < 1.0f - eps && SpanSmooth( o, spanOf( 0.5f * ( a + b ) ) );
+        };
+        // The last interval first, so inserting there leaves the first one's indices alone.
+        if ( W.size() >= 3 && partial( W[W.size() - 2], W[W.size() - 1] ) )
+            W.insert( W.end() - 1, 0.5f * ( W[W.size() - 2] + W[W.size() - 1] ) );
+        if ( partial( W[0], W[1] ) )
+            W.insert( W.begin() + 1, 0.5f * ( W[0] + W[1] ) );
+        for ( size_t i = 0; i < W.size(); ++i )
+        {
+            float p[3];
+            const float r = floorf( W[i] + 0.5f );
+            if ( i > 0 && i + 1 < W.size() && fabsf( W[i] - r ) < eps )
+            {
+                const int ci = o.closed ? ( sw.start + (int)r ) % sw.n : (int)r;
+                Copy3( &o.pts[(size_t)ci * 3], p );       // an original control point, exact
+            }
+            else
+            {
+                float s = ArcAtWalk( c, sw, W[i] );
+                if ( s > c.Total() )
+                    s -= c.Total();                         // past the closed seam
+                PointAt( c, s, p );                         // a cut point, or a shape point
+            }
+            pts->insert( pts->end(), p, p + 3 );
+            if ( i > 0 )
+                smooth->push_back( SpanSmooth( o, spanOf( 0.5f * ( W[i - 1] + W[i] ) ) ) ? 1 : 0 );
+        }
+    }
+
+    // Fill plan's spline pieces from the hovered span (the complement of [lo, hi]).
+    void PlanSplineTrim( const kconObject_t &src, const chain_t &c, const hover_t &h, trimPlan_t *plan )
+    {
+        splineWalk_t sw;
+        if ( !SplineWalk( src, c, &sw ) )
+            return;                               // leaves the polyline plan
+        plan->spline = true;
+        const float wl = WalkAt( c, sw, h.lo ), wh = WalkAt( c, sw, h.hi );
+        if ( c.closed )
+        {
+            // One piece from the span's end round to its start (across the seam unless the
+            // removed span itself wraps).
+            const float wb = h.wrap ? wl : wl + (float)sw.spans;
+            if ( plan->keepA )
+                SplinePiece( src, c, sw, wh, wb, &plan->a, &plan->smoothA );
+            plan->keepB = false;
+            return;
+        }
+        if ( plan->keepA )
+            SplinePiece( src, c, sw, 0.0f, wl, &plan->a, &plan->smoothA );
+        if ( plan->keepB )
+            SplinePiece( src, c, sw, wh, (float)sw.spans, &plan->b, &plan->smoothB );
+    }
 
     // The angle (degrees, the curve's own plane) of chain parameter `s`.  A circle's or arc's
     // vertices sit at even angles with equal chords, so this is linear in s: exact at every
@@ -667,6 +836,8 @@ namespace
         plan->keepB = WorthKeeping( plan->b );
         if ( IsRound( *src ) )
             PlanRoundTrim( *src, h.object, c, h, plan );
+        else if ( KiwiCon_HasSmooth( *src ) )
+            PlanSplineTrim( *src, c, h, plan );
         return true;
     }
 
@@ -709,6 +880,8 @@ namespace
             o.plane  = plan.seedPlane;
             o.pts    = pts;
             o.closed = false;                    // a trimmed chain is never closed
+            if ( plan.spline && o.type == KCON_POLYLINE )   // KIWI (2026-11-01): still a spline
+                o.smooth = ( pass == 0 ) ? plan.smoothA : plan.smoothB;
             if ( KiwiCon_Add( o ) >= 0 )
                 ++made;
         }

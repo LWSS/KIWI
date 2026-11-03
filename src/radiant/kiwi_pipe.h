@@ -13,6 +13,16 @@
 // Sections are carried along the spine in a rotation-minimising frame, so they do not twist.
 // The command starts paused; the radius follows only a drag of its lollipop handle or a typed
 // value.  Enter / RMB / Confirm writes one undo record; the spine stays.
+//
+// KIWI (2026-11-01, user: "add a sweep command that is basically the pipe tool, but for a
+// custom construction face ... on Shift-P"): Sweep takes a construction face as the section.
+// The face is turned by the least rotation that lays it across the path's start tangent, about
+// its ANCHOR point, which then runs exactly along the path.  The anchor defaults to the path's
+// start when that lies on the face (the sweep stays as drawn), else the face's centroid; a click
+// on a marked corner / centroid picks another, [ ] steps through them.  Straight runs make one
+// brush prism per convex piece of the face; elbows and curved paths a tube of curve patches per
+// face loop, or (option) mitered brush segments along the curve.  With only the face or only
+// the path selected, the command asks for a click on the other.
 
 class KiwiEditorCommand;
 
@@ -26,3 +36,5 @@ void KiwiPipe_RegisterCommands();
 KiwiEditorCommand *KiwiPipe_CommandForId( int commandId );
 // A pipeable construction object (line, polyline, rectangle, circle, arc, spline) is selected.
 bool KiwiPipe_CanExecute();
+// A construction face or a pipeable object is selected (Sweep picks the other by clicking).
+bool KiwiSweep_CanExecute();

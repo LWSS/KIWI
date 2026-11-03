@@ -27,6 +27,7 @@
 #include "kiwi_command.h"
 #include "kiwi_selection.h"
 #include "kiwi_hover.h"
+#include "kiwi_patchfillet.h"        // KiwiPatch_FindSourceFace: "Match brush"
 #include "kiwi_ported.h"
 #include "kiwi_uv.h"                 // KiwiUv_FaceTexdef — THE per-face texdef accessor
 #include "kiwi_vec.h"
@@ -43,6 +44,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <algorithm>          // std::sort for the fold-out's edge weld
+#include <utility>            // std::pair: Match brush's plan
 #include <vector>
 
 // Ported/cross-file entry points, verified against their definitions.
@@ -57,6 +59,7 @@ extern void        TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef
 extern void        Patch_ShiftTexture( patchMesh_t *p, float s, float t );   // pmesh.cpp:3216    void Patch_ShiftTexture(patchMesh_t*,float,float)
 extern void        Patch_NaturalizeSelected( bool unk, bool cap, float x, float y ); // pmesh.cpp:2742  void Patch_NaturalizeSelected(bool,bool,float,float)
 extern void        Select_SetTexture( float *out );                          // select.cpp:1179   void Select_SetTexture(float*)
+extern int         Undo_LastUndoId( const char **operation );                // undo.cpp (KIWI): the nudge run's record
 
 namespace
 {
@@ -354,6 +357,7 @@ namespace
     void StoreTargetKeys();
     void TargetAll();
     void TargetSingle( int face, int patch );
+    face_t *FaceOf( const uvFace_t &f );
 
     void Gather()
     {
@@ -446,8 +450,36 @@ namespace
                 }
             }
         }
+        // KIWI: no face picked (object selection) - the largest face anchors, not whichever
+        // face a clip happened to leave first in the brush (a mitre end cap, say).
         if ( s_activeFace < 0 && !s_faces.empty() )
+        {
             s_activeFace = 0;
+            float best = -1.0f;
+            for ( size_t i = 0; i < s_faces.size(); ++i )
+            {
+                face_t *fd = FaceOf( s_faces[i] );
+                if ( !fd || !fd->w || fd->w->numpoints < 3 )
+                    continue;
+                float cr[3] = { 0.0f, 0.0f, 0.0f };
+                const float *p0 = fd->w->p[0];
+                for ( int k = 1; k + 1 < fd->w->numpoints; ++k )
+                {
+                    const float *p1 = fd->w->p[k], *p2 = fd->w->p[k + 1];
+                    const float u[3] = { p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2] };
+                    const float v[3] = { p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2] };
+                    cr[0] += u[1] * v[2] - u[2] * v[1];
+                    cr[1] += u[2] * v[0] - u[0] * v[2];
+                    cr[2] += u[0] * v[1] - u[1] * v[0];
+                }
+                const float area = cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2];
+                if ( area > best + KUVE_EPS )
+                {
+                    best         = area;
+                    s_activeFace = (int)i;
+                }
+            }
+        }
 
         // Rebuild index-parallel display and target arrays every frame.
         s_faceD.assign( s_faces.size(), XfIdentity() );
@@ -712,6 +744,7 @@ namespace
         int   fa, fb;
         int   a0, a1, b0, b1;
         float ta[2], tb[2];
+        float len;                          // world length of the shared stretch
     };
     // World units of collinear contact below which two edges merely touch at a corner.
     const float KUVE_CHAIN_MIN_OVERLAP  = 1.0f;
@@ -918,6 +951,11 @@ namespace
                     else              { ad.b0 = s_ce[b].i1; ad.b1 = s_ce[b].i0; }
                     ad.ta[0] = 0.0f;  ad.ta[1] = 1.0f;
                     ad.tb[0] = 0.0f;  ad.tb[1] = 1.0f;
+                    {
+                        const float *p0 = s_cf[ad.fa].wp[ad.a0], *p1 = s_cf[ad.fa].wp[ad.a1];
+                        const float d[3] = { p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2] };
+                        ad.len = sqrtf( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+                    }
                     s_ca.push_back( ad );
                 }
             i = j;
@@ -979,39 +1017,55 @@ namespace
                     ad.ta[1] = hi / la;
                     ad.tb[0] = ( lo - s[0] ) / ( s[1] - s[0] );
                     ad.tb[1] = ( hi - s[0] ) / ( s[1] - s[0] );
+                    ad.len   = hi - lo;
                     s_ca.push_back( ad );
                 }
             }
         }
 
-        // BFS from the active face, whose D remains identity.
+        // Grow from the active face, whose D remains identity.  KIWI (2026-11-01, user
+        // picture: mitred moulding whose thin top/bottom strips came off the end cap at 45
+        // degrees, "why do the 2 thin strips not just hug the bigger center piece").  A BFS
+        // folded each face through whichever shared edge it met first - for those strips
+        // the short mitre edge.  Every step now takes the LONGEST shared stretch between a
+        // placed and an unplaced face (a max spanning tree on shared length), so a strip
+        // folds along the long edge it shares with the face it runs beside.
         std::vector<char> placed( (size_t)nf, 0 );
-        std::vector<int>  queue;
         const int anchor = ( s_activeFace >= 0 && s_activeFace < nf ) ? s_activeFace : 0;
         if ( nf < 1 )
             return;
         placed[anchor]   = 1;
         s_faceD[anchor]  = XfIdentity();
-        queue.push_back( anchor );
         s_chainFolded = 1;
 
-        for ( size_t qi = 0; qi < queue.size(); ++qi )
+        for ( ;; )
         {
-            const int a = queue[qi];
+            int   bestR   = -1;
+            float bestLen = -1.0f;
             for ( size_t r = 0; r < s_ca.size(); ++r )
             {
                 const chainAdj_t &ad = s_ca[r];
+                if ( placed[ad.fa] == placed[ad.fb] )
+                    continue;
+                if ( s_cf[ad.fa].n < 3 || s_cf[ad.fb].n < 3 )
+                    continue;
+                if ( ad.len > bestLen + KUVE_WELD_EPS )
+                {
+                    bestLen = ad.len;
+                    bestR   = (int)r;
+                }
+            }
+            if ( bestR < 0 )
+                break;
+            {
+                const chainAdj_t &ad = s_ca[bestR];
                 int   fa = ad.fa, fb = ad.fb, a0 = ad.a0, a1 = ad.a1, b0 = ad.b0, b1 = ad.b1;
                 float ta[2] = { ad.ta[0], ad.ta[1] }, tb[2] = { ad.tb[0], ad.tb[1] };
-                if ( fb == a && !placed[fa] ) { fb = fa; fa = a;
-                                                const int t0 = a0, t1 = a1;
-                                                a0 = b0; a1 = b1; b0 = t0; b1 = t1;
-                                                for ( int e = 0; e < 2; ++e )
-                                                { const float t = ta[e]; ta[e] = tb[e]; tb[e] = t; } }
-                if ( fa != a || placed[fb] )
-                    continue;
-                if ( s_cf[fa].n < 3 || s_cf[fb].n < 3 )
-                    continue;
+                if ( !placed[fa] ) { fb = fa; fa = ad.fb;
+                                     const int t0 = a0, t1 = a1;
+                                     a0 = b0; a1 = b1; b0 = t0; b1 = t1;
+                                     for ( int e = 0; e < 2; ++e )
+                                     { const float t = ta[e]; ta[e] = tb[e]; tb[e] = t; } }
 
                 // The shared stretch's two ends, in each face's own ST frame.
                 float sa0[2], sa1[2], sb0[2], sb1[2];
@@ -1073,7 +1127,6 @@ namespace
                 s_faceD[fb] = D;
                 placed[fb]  = 1;
                 ++s_chainFolded;
-                queue.push_back( fb );
             }
         }
 
@@ -1555,6 +1608,131 @@ namespace
                               UvToPx( (float)i + 1.0f, (float)j + 1.0f ),
                               ImVec2( 0.0f, 0.0f ), ImVec2( 1.0f, 1.0f ),
                               KUVE_COL_TILE_TINT );
+    }
+
+    // KIWI (2026-11-01, user: "the UV editor has a bug and is mis-representing it, skewing my
+    // results"): Chain draws every face but the anchor folded or shelved - moved, turned or
+    // mirrored off its true ST - over the ONE background tiled in the anchor's frame, so what
+    // showed under a moved face was not its texture.  Each face and patch is now filled with
+    // its own material at its true ST, cut at the tile seams so every piece samples 0..1, and
+    // drawn where the display transform puts it.  `budget` caps the pieces per frame.
+    void DrawTexturedTri( ImDrawList *dl, const uvXform_t &D, const float st[3][2], int *budget )
+    {
+        float mn[2] = { st[0][0], st[0][1] }, mx[2] = { st[0][0], st[0][1] };
+        for ( int k = 1; k < 3; ++k )
+            for ( int c = 0; c < 2; ++c )
+            {
+                if ( st[k][c] < mn[c] ) mn[c] = st[k][c];
+                if ( st[k][c] > mx[c] ) mx[c] = st[k][c];
+            }
+        if ( fabsf( mn[0] ) > KUVE_UV_SANE || fabsf( mx[0] ) > KUVE_UV_SANE
+          || fabsf( mn[1] ) > KUVE_UV_SANE || fabsf( mx[1] ) > KUVE_UV_SANE )
+            return;
+        const int i0 = (int)floorf( mn[0] ), i1 = (int)ceilf( mx[0] ) - 1;
+        const int j0 = (int)floorf( mn[1] ), j1 = (int)ceilf( mx[1] ) - 1;
+        if ( (double)( i1 - i0 + 1 ) * (double)( j1 - j0 + 1 ) > (double)*budget )
+            return;
+
+        for ( int j = j0; j <= j1; ++j )
+            for ( int i = i0; i <= i1; ++i )
+            {
+                // Sutherland-Hodgman against the tile's four sides.
+                float a[10][2], b[10][2];
+                int   n = 3;
+                for ( int k = 0; k < 3; ++k ) { a[k][0] = st[k][0]; a[k][1] = st[k][1]; }
+                for ( int side = 0; side < 4 && n >= 3; ++side )
+                {
+                    const int   c    = side & 1;
+                    const float edge = ( side < 2 ) ? (float)( c ? j : i ) : (float)( c ? j + 1 : i + 1 );
+                    const float sgn  = ( side < 2 ) ? 1.0f : -1.0f;      // keep sgn*(x - edge) >= 0
+                    int m = 0;
+                    for ( int k = 0; k < n; ++k )
+                    {
+                        const float *p = a[k], *q = a[( k + 1 ) % n];
+                        const float dp = sgn * ( p[c] - edge ), dq = sgn * ( q[c] - edge );
+                        if ( dp >= 0.0f ) { b[m][0] = p[0]; b[m][1] = p[1]; ++m; }
+                        if ( ( dp >= 0.0f ) != ( dq >= 0.0f ) )
+                        {
+                            const float t = dp / ( dp - dq );
+                            b[m][0] = p[0] + ( q[0] - p[0] ) * t;
+                            b[m][1] = p[1] + ( q[1] - p[1] ) * t;
+                            ++m;
+                        }
+                    }
+                    n = m;
+                    memcpy( a, b, sizeof( float ) * 2 * (size_t)n );
+                }
+                if ( n < 3 )
+                    continue;
+                --*budget;
+                dl->PrimReserve( ( n - 2 ) * 3, n );
+                const ImDrawIdx base = (ImDrawIdx)dl->_VtxCurrentIdx;
+                for ( int k = 1; k + 1 < n; ++k )
+                {
+                    dl->PrimWriteIdx( base );
+                    dl->PrimWriteIdx( (ImDrawIdx)( base + k ) );
+                    dl->PrimWriteIdx( (ImDrawIdx)( base + k + 1 ) );
+                }
+                for ( int k = 0; k < n; ++k )
+                {
+                    float u, v;
+                    XfApply( D, a[k][0], a[k][1], &u, &v );
+                    dl->PrimWriteVtx( UvToPx( u, v ),
+                                      ImVec2( a[k][0] - (float)i, a[k][1] - (float)j ),
+                                      KUVE_COL_TILE_TINT );
+                }
+            }
+    }
+
+    void DrawTrueTextures( ImDrawList *dl )
+    {
+        int budget = KUVE_MAX_TILES;
+        float st[KUVE_MAX_WINDING][2];
+        for ( size_t i = 0; i < s_faces.size() && budget > 0; ++i )
+        {
+            MaterialDef *md = nullptr;
+            KiwiUv_FaceTexdef( s_brushes[s_faces[i].brushIdx].def, s_faces[i].faceIndex, &md );
+            IDirect3DTexture9 *tex = ActiveColorMap( md, nullptr );
+            const int n = FaceStPoints( s_faces[i], st, nullptr );
+            if ( !tex || n < 3 )
+                continue;
+            const uvXform_t D = ( i < s_faceD.size() ) ? s_faceD[i] : XfIdentity();
+            dl->PushTexture( (ImTextureID)(intptr_t)tex );
+            for ( int k = 1; k + 1 < n; ++k )
+            {
+                const float tri[3][2] = { { st[0][0], st[0][1] }, { st[k][0], st[k][1] },
+                                          { st[k + 1][0], st[k + 1][1] } };
+                DrawTexturedTri( dl, D, tri, &budget );
+            }
+            dl->PopTexture();
+        }
+
+        const int layer = ClampI( g_qeglobals.current_edit_layer, 0, 2 );
+        for ( size_t pi = 0; pi < s_patches.size() && budget > 0; ++pi )
+        {
+            patchMesh_t *p = s_brushes[s_patches[pi]].pm;
+            IDirect3DTexture9 *tex = p ? ActiveColorMap( PatchMtlDef( p ), nullptr ) : nullptr;
+            if ( !tex )
+                continue;
+            const uvXform_t D = ( pi < s_patchD.size() ) ? s_patchD[pi] : XfIdentity();
+            const int w = ClampI( p->width, 0, 16 ), h = ClampI( p->height, 0, 16 );
+            auto at = [&]( int c, int r, float *o ) {
+                o[0] = p->ctrl[c][r].texCoord.st[2 * layer];
+                o[1] = p->ctrl[c][r].texCoord.st[2 * layer + 1];
+            };
+            dl->PushTexture( (ImTextureID)(intptr_t)tex );
+            for ( int c = 0; c + 1 < w; ++c )
+                for ( int r = 0; r + 1 < h; ++r )
+                {
+                    float q[4][2];
+                    at( c, r, q[0] ); at( c + 1, r, q[1] ); at( c + 1, r + 1, q[2] ); at( c, r + 1, q[3] );
+                    const float t0[3][2] = { { q[0][0], q[0][1] }, { q[1][0], q[1][1] }, { q[2][0], q[2][1] } };
+                    const float t1[3][2] = { { q[0][0], q[0][1] }, { q[2][0], q[2][1] }, { q[3][0], q[3][1] } };
+                    DrawTexturedTri( dl, D, t0, &budget );
+                    DrawTexturedTri( dl, D, t1, &budget );
+                }
+            dl->PopTexture();
+        }
     }
 
     void DrawGrid( ImDrawList *dl )
@@ -3478,14 +3656,35 @@ namespace
         g_nUpdateBits = -1;
     }
 
+    // KIWI (2026-11-01, user: "allow arrow keys to move a selection precisely in the UV
+    // editor"): queued in repeats by KiwiUvEd_KeyDown - the key pump runs between frames - and
+    // applied after the next gather.
+    float s_nudge[2] = { 0.0f, 0.0f };
+
+    // The material on the canvas: the active face's, else the first patch's.
+    void ActiveTexSize( float *tw, float *th )
+    {
+        MaterialDef *md = nullptr;
+        if ( s_activeFace >= 0 && s_activeFace < (int)s_faces.size() )
+            KiwiUv_FaceTexdef( s_brushes[s_faces[s_activeFace].brushIdx].def,
+                               s_faces[s_activeFace].faceIndex, &md );
+        else if ( !s_patches.empty() )
+            md = PatchMtlDef( s_brushes[s_patches[0]].pm );
+        MaterialSize( md, tw, th );
+    }
+
     // One-shot transforms use the gesture arithmetic: displayed A, conjugated per shape;
     // faces use Face_MoveTexture/texturevecs_02_exact and patches use control ST. With no gesture
     // snapshot, each current shape state is td0. Faces and patches share one undo record.
-    void ApplyAffineImmediate( const uvXform_t &A, const char *undoName )
+    // `record` false: no undo record of its own - a nudge folded into its run's (MergeNudge).
+    void ApplyAffineImmediate( const uvXform_t &A, const char *undoName, bool record = true )
     {
         if ( !AnythingSelected() || XfIsIdentity( A ) )
             return;
-        UndoOpen( undoName );
+        if ( record )
+            UndoOpen( undoName );
+        else
+            KiwiUv_EndGestureBeforeApply( "UV editor" );   // as UndoOpen does before a write
 
         for ( size_t i = 0; i < s_faces.size(); ++i )
         {
@@ -3525,7 +3724,62 @@ namespace
         }
 
         RebuildAll();
-        UndoCommit();
+        if ( record )
+            UndoCommit();
+    }
+
+    // KIWI (2026-11-01, user: "moving a UV should only be 1 undo record, I guess make it write
+    // the record after 2 seconds of no moving"): a run of arrow nudges is one undo step.  Undo
+    // restores a record's saved brushes and parks what is live for redo, so a nudge of the SAME
+    // targets while the run's record is still the newest needs none of its own: undo takes the
+    // whole run back, redo puts the whole run back.  KUVE_NUDGE_RUN_SEC without a nudge, other
+    // targets, or any other record on top starts the next run.
+    int         s_nudgeUndoId = 0;           // the run's record (Undo_LastUndoId)
+    unsigned    s_nudgeSig    = 0;           // ...the targets it covers
+    double      s_nudgeLast   = -1.0e9;      // NudgeClock() of the run's latest nudge
+    float       s_nudgeRun[2] = { 0.0f, 0.0f };
+
+    unsigned NudgeSig()
+    {
+        unsigned h = 2166136261u;
+        for ( size_t i = 0; i < s_faces.size(); ++i )
+            if ( FaceIsTarget( i ) )
+            {
+                h = HashMix( h, (unsigned)(uintptr_t)s_brushes[s_faces[i].brushIdx].def );
+                h = HashMix( h, (unsigned)s_faces[i].faceIndex );
+            }
+        for ( size_t i = 0; i < s_patches.size(); ++i )
+            if ( PatchIsTarget( i ) )
+                h = HashMix( h, (unsigned)(uintptr_t)s_brushes[s_patches[i]].pm );
+        return h;
+    }
+
+    // Seconds on the system's monotonic clock.  KIWI: ImGui::GetTime() read a null context when
+    // the -kiwitest tick nudged outside an ImGui frame (uv_nudge.kt crashed some runs).
+    double NudgeClock()
+    {
+        return (double)::GetTickCount64() * 0.001;
+    }
+
+    // Apply one frame's nudge, as a new run or folded into the current one.
+    void ApplyNudge( float du, float dv )
+    {
+        const char  *op  = nullptr;
+        const int    top = Undo_LastUndoId( &op );
+        const unsigned sig = NudgeSig();
+        const double now = NudgeClock();
+        const bool   fold = s_nudgeUndoId != 0 && top == s_nudgeUndoId && op && !strcmp( op, "uv nudge" )
+                         && sig == s_nudgeSig && now - s_nudgeLast < KUVE_NUDGE_RUN_SEC;
+        ApplyAffineImmediate( XfTranslate( du, dv ), "uv nudge", !fold );
+        if ( !fold )
+        {
+            s_nudgeUndoId = Undo_LastUndoId( nullptr );
+            s_nudgeSig    = sig;
+            s_nudgeRun[0] = s_nudgeRun[1] = 0.0f;
+        }
+        s_nudgeLast = now;
+        s_nudgeRun[0] += du;
+        s_nudgeRun[1] += dv;
     }
 
     // KIWI (2026-10-21, user: "In the UV editor, add a button that randomizes the UV layout
@@ -3659,6 +3913,74 @@ namespace
         s_status[sizeof( s_status ) - 1] = '\0';
     }
 
+    // KIWI (2026-11-01, user, of an extruded arch: "the UV's are impossible to lineup on this
+    // curve/brush combo"): each targeted patch takes the texture of the brush face it continues
+    // (kiwi_patchfillet.h) - a gathered brush's face first, else any brush in the map.
+    void MatchPatchesToBrushes()
+    {
+        std::vector<brush_t *> gathered, map;
+        for ( size_t i = 0; i < s_brushes.size(); ++i )
+            if ( !s_brushes[i].pm && s_brushes[i].def
+              && std::find( gathered.begin(), gathered.end(), s_brushes[i].def ) == gathered.end() )
+                gathered.push_back( s_brushes[i].def );
+        for ( int list = 0; list < 2; ++list )
+        {
+            selbrush_t *head = list ? &selected_brushes : &active_brushes;
+            for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                if ( b->def && !b->def->patch )
+                    map.push_back( b->def );
+        }
+        std::vector<std::pair<patchMesh_t *, const face_t *>> plan;
+        int missed = 0;
+        for ( size_t i = 0; i < s_patches.size(); ++i )
+        {
+            patchMesh_t *p = s_brushes[s_patches[i]].pm;
+            if ( !p || !PatchIsTarget( i ) )
+                continue;
+            const face_t *src = KiwiPatch_FindSourceFace( p, gathered.data(), (int)gathered.size() );
+            if ( !src )
+                src = KiwiPatch_FindSourceFace( p, map.data(), (int)map.size() );
+            if ( src )
+                plan.push_back( std::make_pair( p, src ) );
+            else
+                ++missed;
+        }
+        int scrolled = 0;
+        if ( !plan.empty() )
+        {
+            UndoOpen( "uv match brush" );
+            for ( size_t i = 0; i < plan.size(); ++i )
+            {
+                // KIWI (2026-11-01, user: "match the ceiling to both sides of the arch ... for the
+                // right side, scroll the brush texture down Z"): an arch folds at its crown and
+                // the wall it comes down onto scrolls to meet it - a gathered brush's, else the map's.
+                kpatchFaceRef_t farFaces[64];
+                float scroll[2];
+                int nFar = KiwiPatch_MatchTexture( plan[i].first, plan[i].second, gathered.data(), (int)gathered.size(), farFaces, 64, scroll );
+                if ( nFar < 0 )
+                    continue;
+                if ( !nFar )
+                    nFar = KiwiPatch_MatchTexture( plan[i].first, plan[i].second, map.data(), (int)map.size(), farFaces, 64, scroll );
+                for ( int f = 0; f < nFar; ++f )
+                {
+                    entity_s *owner = farFaces[f].brush->owner;  // as KiwiCmd_UndoCoverBrush
+                    if ( owner && owner->eclass && owner->eclass->fixedsize )
+                        Undo_AddEntity( owner );
+                    Undo_AddBrush( (entity_brush_s *)farFaces[f].brush );
+                    KiwiPatch_ScrollFace( farFaces[f].brush, farFaces[f].face, scroll );
+                }
+                scrolled += nFar ? 1 : 0;
+            }
+            RebuildAll();
+            UndoCommit();
+        }
+        _snprintf( s_status, sizeof( s_status ), "%d patch%s matched to the brush%s%s",
+                   (int)plan.size(), plan.size() == 1 ? "" : "es",
+                   scrolled ? ", the far wall scrolled to meet the curve" : "",
+                   missed ? " - some touch no brush face they continue" : "" );
+        s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
     // "Texture +" (bigger = the footprint covers fewer cells) / "Texture -": the nearest
     // crisp uniform step about the grid point nearest the pivot - one GCD-run of cells, or
     // with `big` half / double the run.  Every edge that was on a grid line stays on one.
@@ -3680,18 +4002,17 @@ namespace
         else
         {
             m = big ? ( bigger ? g / 2 : g * 2 ) : ( bigger ? g - 1 : g + 1 );
-            if ( m < 1 )
-            {
-                _snprintf( s_status, sizeof( s_status ),
-                           "already the largest crisp texture on this grid (one cell per run) - "
-                           "raise grid X/Y to step finer" );
-                s_status[sizeof( s_status ) - 1] = '\0';
-                return;
-            }
-            k = (float)m / (float)g;
+            // KIWI: "when I use texture +/- on the terrain, it doesn't work. The values refuse to
+            // change." - a dense terrain texture sits at one cell per run, where Texture + used
+            // to refuse.  It halves the footprint instead (runs land on half cells).
+            k = m < 1 ? 0.5f : (float)m / (float)g;
         }
         ApplyAffineImmediate( XfAboutOrigin( k, 0.0f, 0.0f, k, anchor[0], anchor[1] ), "uv crisp scale" );
-        if ( g <= 0 )
+        if ( g > 0 && m < 1 )
+            _snprintf( s_status, sizeof( s_status ),
+                       "texture bigger (x0.5): it was one cell per run, so runs now end on half cells - "
+                       "raise grid X/Y to keep them crisp" );
+        else if ( g <= 0 )
             _snprintf( s_status, sizeof( s_status ),
                        "texture %s (x%.2f): no edge sat on a grid line, so there was nothing to keep "
                        "crisp - line an edge up with the grid first", bigger ? "bigger" : "smaller", k );
@@ -3700,6 +4021,100 @@ namespace
                        "texture %s: %d -> %d cells per run (footprint x%.4f)%s", bigger ? "bigger" : "smaller",
                        g, m, k, offGrid ? " - some vertices were off the grid and are not kept crisp" : "" );
         s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
+    // KIWI (2026-11-01, user: "make it easier to use"): Fit sizes the target set's box to
+    // one texture tile and parks its corner on a tile corner.  axis 0 = U only, 1 = V only
+    // (both uniform: the texture keeps its aspect), -1 = both axes (stretch, like Hammer).
+    void FitToTile( int axis )
+    {
+        float mn[2], mx[2];
+        if ( !TargetBoxUv( mn, mx ) )
+            return;
+        const float w = mx[0] - mn[0], h = mx[1] - mn[1];
+        if ( w < 1.0e-4f || h < 1.0e-4f )
+            return;
+        float kx = 1.0f / w, ky = 1.0f / h;
+        if ( axis == 0 ) ky = kx;
+        if ( axis == 1 ) kx = ky;
+        const uvXform_t S = XfAboutOrigin( kx, 0.0f, 0.0f, ky, mn[0], mn[1] );
+        const uvXform_t T = XfTranslate( floorf( mn[0] + 0.5f ) - mn[0], floorf( mn[1] + 0.5f ) - mn[1] );
+        ApplyAffineImmediate( XfMul( T, S ), "uv fit" );
+        _snprintf( s_status, sizeof( s_status ), "fit %s to one tile (x%.3f, x%.3f)",
+                   axis == 0 ? "width" : axis == 1 ? "height" : "both sides", kx, ky );
+        s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
+    // Turn the target set by the smallest angle that lays its longest displayed edge
+    // along U or V - one click for a strip that came out diagonal.
+    void Straighten()
+    {
+        float best = -1.0f, ang = 0.0f;
+        float poly[KUVE_MAX_WINDING][2];
+        auto consider = [&]( int n )
+        {
+            for ( int k = 0; k < n; ++k )
+            {
+                const float *p = poly[k], *q = poly[( k + 1 ) % n];
+                const float dx = q[0] - p[0], dy = q[1] - p[1];
+                const float l2 = dx * dx + dy * dy;
+                if ( l2 > best ) { best = l2; ang = atan2f( dy, dx ); }
+            }
+        };
+        for ( size_t i = 0; i < s_faces.size(); ++i )
+            if ( FaceIsTarget( i ) )
+                consider( FaceStPointsDisp( i, poly, nullptr ) );
+        for ( size_t pi = 0; pi < s_patches.size(); ++pi )
+            if ( PatchIsTarget( pi ) )
+                consider( PatchRing( pi, poly ) );
+        if ( best <= 0.0f )
+            return;
+        const float quarter = 1.57079632679f;
+        const float d = floorf( ang / quarter + 0.5f ) * quarter - ang;
+        if ( fabsf( d ) < 1.0e-5f )
+        {
+            _snprintf( s_status, sizeof( s_status ), "already straight" );
+            s_status[sizeof( s_status ) - 1] = '\0';
+            return;
+        }
+        const float c = cosf( d ), s = sinf( d );
+        ApplyAffineImmediate( XfAboutOrigin( c, -s, s, c, s_originU, s_originV ), "uv straighten" );
+        _snprintf( s_status, sizeof( s_status ), "straightened: turned %.2f deg about the pivot",
+                   d * 57.2957795f );
+        s_status[sizeof( s_status ) - 1] = '\0';
+    }
+
+    // KIWI (2026-11-01, user: "having to expand the tab to view the scaling buttons is
+    // annoying"): the toolbar flows onto as many rows as the dock's width needs instead of
+    // running off the right edge.  Flow(w) goes before each item, w = the item's width.
+    float s_flowRight = 0.0f;
+    bool  s_flowFirst = true;
+    float s_toolbarH  = 0.0f;               // last frame's toolbar height, for the footer
+
+    void FlowBegin()
+    {
+        s_flowRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        s_flowFirst = true;
+    }
+    void Flow( float w )
+    {
+        if ( !s_flowFirst
+          && ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + w <= s_flowRight )
+            ImGui::SameLine();
+        s_flowFirst = false;
+    }
+    float BtnW( const char *label )
+    {
+        return ImGui::CalcTextSize( label, nullptr, true ).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    }
+    float LabelledW( float fieldW, const char *label )   // InputX / Checkbox: box + label
+    {
+        return fieldW + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize( label, nullptr, true ).x;
+    }
+    bool FlowButton( const char *label )
+    {
+        Flow( BtnW( label ) );
+        return ImGui::Button( label );
     }
 
     void ApplyField( uvField_t field, float value, const char *undoName )
@@ -3718,8 +4133,133 @@ namespace
         const bool canAny   = AnythingSelected();
         const bool hasPatch = !s_patches.empty();
 
+        FlowBegin();
+
+        // Shape verbs first: they are what a narrow dock must never lose.
         ImGui::BeginDisabled( !canAny );
-        if ( ImGui::Button( "Reset" ) )
+        if ( FlowButton( "Fit" ) )
+            FitToTile( -1 );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Stretch the targeted shapes onto exactly one texture tile\n"
+                               "(width and height separately) with the corner on a tile corner." );
+        if ( FlowButton( "Fit W" ) )
+            FitToTile( 0 );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Scale evenly so the targeted shapes are one tile WIDE;\n"
+                               "the texture keeps its aspect.  Corner on a tile corner." );
+        if ( FlowButton( "Fit H" ) )
+            FitToTile( 1 );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Scale evenly so the targeted shapes are one tile TALL;\n"
+                               "the texture keeps its aspect.  Corner on a tile corner." );
+        if ( FlowButton( "Straighten" ) )
+            Straighten();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Turn the targeted shapes by the smallest angle that lays their\n"
+                               "longest edge along U or V, about the yellow pivot." );
+
+        // Canvas +T is down, so [[0,-1],[1,0]] maps right to down: clockwise on screen.
+        // Faces and patches use the same affine about the displayed pivot.
+        if ( FlowButton( "Flip U" ) )
+            ApplyAffineImmediate(
+                XfAboutOrigin( -1.0f, 0.0f, 0.0f, 1.0f, s_originU, s_originV ), "uv flip u" );
+        if ( FlowButton( "Flip V" ) )
+            ApplyAffineImmediate(
+                XfAboutOrigin( 1.0f, 0.0f, 0.0f, -1.0f, s_originU, s_originV ), "uv flip v" );
+        if ( FlowButton( "Rot 90 CW" ) )
+            ApplyAffineImmediate(
+                XfAboutOrigin( 0.0f, -1.0f, 1.0f, 0.0f, s_originU, s_originV ), "uv rotate 90" );
+        if ( FlowButton( "Rot 90 CCW" ) )
+            ApplyAffineImmediate(
+                XfAboutOrigin( 0.0f, 1.0f, -1.0f, 0.0f, s_originU, s_originV ), "uv rotate 90" );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Faces AND patches turn about the yellow PIVOT, through the same\n"
+                               "affine path a canvas gesture uses - so the shape turns in place\n"
+                               "instead of swinging around the texture origin.  The pivot sits\n"
+                               "at the centre of whatever is targeted until you drag it, so by\n"
+                               "default these turn the target set about its own centre." );
+        if ( FlowButton( "Texture +" ) )
+            GridStepScale( true, ImGui::GetIO().KeyShift );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Texture BIGGER on the faces, one crisp step: the shapes cover one\n"
+                               "grid-cell run less, and every edge that was on a grid line stays on\n"
+                               "one.  Scales about the grid point nearest the yellow pivot.\n"
+                               "Shift: a big step (half the cells)." );
+        if ( FlowButton( "Texture -" ) )
+            GridStepScale( false, ImGui::GetIO().KeyShift );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Texture SMALLER on the faces, one crisp step (one more grid-cell\n"
+                               "run).  Shift: a big step (double the cells)." );
+        ImGui::EndDisabled();
+
+        ImGui::BeginDisabled( !hasPatch );
+        if ( FlowButton( "Match brush" ) )
+            MatchPatchesToBrushes();
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+            ImGui::SetTooltip( "Targeted patches continue the texture of the brush they meet:\n"
+                               "a flat cap takes the coplanar brush face's exact mapping, a curve\n"
+                               "takes the face it runs out of, wrapped over the curve.  An arch\n"
+                               "between two walls folds at its crown, each half running up from\n"
+                               "its own side, and the far wall scrolls its texture to meet it." );
+
+        // KIWI (2026-09-24): crisp scaling - see GRID-LOCKED SCALE.
+        Flow( LabelledW( ImGui::GetFrameHeight(), "Crisp scale" ) );
+        ImGui::Checkbox( "Crisp scale", &s_gridLock );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Scale handles only stop at sizes that keep every edge that is on a\n"
+                               "grid line on a grid line - whole tiles, or whole grid cells when grid\n"
+                               "X/Y split the tile (set them to the texture's panels / bricks).\n"
+                               "The fixed side is pinned exactly onto its line." );
+        Flow( LabelledW( 70.0f, "grid X" ) );
+        ImGui::SetNextItemWidth( 70.0f );
+        if ( ImGui::InputInt( "grid X", &s_subX, 1, 1 ) )
+            s_subX = ClampI( s_subX, 1, 16 );
+        Flow( LabelledW( 70.0f, "grid Y" ) );
+        ImGui::SetNextItemWidth( 70.0f );
+        if ( ImGui::InputInt( "grid Y", &s_subY, 1, 1 ) )
+            s_subY = ClampI( s_subY, 1, 16 );
+
+        Flow( LabelledW( ImGui::GetFrameHeight(), "Chain" ) );
+        if ( ImGui::Checkbox( "Chain", &s_chain ) )
+            s_chainBuilt = false;                 // rebuild (or drop) on the next frame
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Fold multi-face selections out like paper angels: faces that\n"
+                               "share a world edge are unfolded along it so they stop stacking\n"
+                               "on top of each other.  DISPLAY ONLY - the STs never move.\n"
+                               "Off = true ST positions (use it to check real alignment)." );
+
+        // Fold layout is latched; only an explicit request re-solves current ST.
+        ImGui::BeginDisabled( !s_chain || s_faces.size() < 2 );
+        if ( FlowButton( "Re-fold" ) )
+        {
+            s_chainBuilt = false;
+            _snprintf( s_status, sizeof( s_status ), "re-folding the chain" );
+            s_status[sizeof( s_status ) - 1] = '\0';
+        }
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Re-solve the fold-out from the CURRENT texture coordinates.\n"
+                               "The layout is otherwise held fixed for as long as the same\n"
+                               "faces are selected, so editing UVs (a group rotate above all)\n"
+                               "never re-arranges the shapes underneath you." );
+
+        if ( FlowButton( "Frame" ) )
+            s_zoomValid = false;                  // DrawCanvas re-frames next frame
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Zoom and pan the canvas to show every shape." );
+
+        ImGui::BeginDisabled( !canAny );
+        if ( FlowButton( "Randomize" ) )
+            RandomizePlacement();
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Slide the texture to a random spot: faces whose texture already runs\n"
+                               "across a shared edge move together, so no seam breaks; separate\n"
+                               "pieces each get their own spot.  Size and rotation are kept." );
+
+        ImGui::BeginDisabled( !canAny );
+        if ( FlowButton( "Reset" ) )
         {
             if ( canFace )
                 ApplyField( UVF_RESET, 0.0f, "uv reset" );
@@ -3744,106 +4284,7 @@ namespace
                                "The face half honours the canvas target set; the patch half\n"
                                "cannot - Patch_NaturalizeSelected takes the 3D selection." );
 
-        // Canvas +T is down, so [[0,-1],[1,0]] maps right to down: clockwise on screen.
-        // Faces and patches use the same affine about the displayed pivot.
-        ImGui::SameLine();
-        ImGui::BeginDisabled( !canAny );
-        if ( ImGui::Button( "Flip U" ) )
-            ApplyAffineImmediate(
-                XfAboutOrigin( -1.0f, 0.0f, 0.0f, 1.0f, s_originU, s_originV ), "uv flip u" );
-        ImGui::SameLine();
-        if ( ImGui::Button( "Flip V" ) )
-            ApplyAffineImmediate(
-                XfAboutOrigin( 1.0f, 0.0f, 0.0f, -1.0f, s_originU, s_originV ), "uv flip v" );
-        ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        ImGui::BeginDisabled( !canAny );
-        if ( ImGui::Button( "Rot 90 CW" ) )
-            ApplyAffineImmediate(
-                XfAboutOrigin( 0.0f, -1.0f, 1.0f, 0.0f, s_originU, s_originV ), "uv rotate 90" );
-        ImGui::SameLine();
-        if ( ImGui::Button( "Rot 90 CCW" ) )
-            ApplyAffineImmediate(
-                XfAboutOrigin( 0.0f, 1.0f, -1.0f, 0.0f, s_originU, s_originV ), "uv rotate 90" );
-        ImGui::EndDisabled();
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Faces AND patches turn about the yellow PIVOT, through the same\n"
-                               "affine path a canvas gesture uses - so the shape turns in place\n"
-                               "instead of swinging around the texture origin.  The pivot sits\n"
-                               "at the centre of whatever is targeted until you drag it, so by\n"
-                               "default these turn the target set about its own centre." );
-
-        ImGui::SameLine();
-        ImGui::BeginDisabled( !canAny );
-        if ( ImGui::Button( "Randomize" ) )
-            RandomizePlacement();
-        ImGui::EndDisabled();
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Slide the texture to a random spot: faces whose texture already runs\n"
-                               "across a shared edge move together, so no seam breaks; separate\n"
-                               "pieces each get their own spot.  Size and rotation are kept." );
-
-        ImGui::SameLine();
-        if ( ImGui::Checkbox( "Chain", &s_chain ) )
-            s_chainBuilt = false;                 // rebuild (or drop) on the next frame
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Fold multi-face selections out like paper angels: faces that\n"
-                               "share a world edge are unfolded along it so they stop stacking\n"
-                               "on top of each other.  DISPLAY ONLY - the STs never move.\n"
-                               "Off = true ST positions (use it to check real alignment)." );
-
-        // Fold layout is latched; only an explicit request re-solves current ST.
-        ImGui::SameLine();
-        ImGui::BeginDisabled( !s_chain || s_faces.size() < 2 );
-        if ( ImGui::Button( "Re-fold" ) )
-        {
-            s_chainBuilt = false;
-            _snprintf( s_status, sizeof( s_status ), "re-folding the chain" );
-            s_status[sizeof( s_status ) - 1] = '\0';
-        }
-        ImGui::EndDisabled();
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Re-solve the fold-out from the CURRENT texture coordinates.\n"
-                               "The layout is otherwise held fixed for as long as the same\n"
-                               "faces are selected, so editing UVs (a group rotate above all)\n"
-                               "never re-arranges the shapes underneath you." );
-
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth( 70.0f );
-        if ( ImGui::InputInt( "grid X", &s_subX, 1, 1 ) )
-            s_subX = ClampI( s_subX, 1, 16 );
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth( 70.0f );
-        if ( ImGui::InputInt( "grid Y", &s_subY, 1, 1 ) )
-            s_subY = ClampI( s_subY, 1, 16 );
-
-        // KIWI (2026-09-24): crisp scaling - see GRID-LOCKED SCALE.
-        ImGui::SameLine();
-        ImGui::Checkbox( "Crisp scale", &s_gridLock );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Scale handles only stop at sizes that keep every edge that is on a\n"
-                               "grid line on a grid line - whole tiles, or whole grid cells when grid\n"
-                               "X/Y split the tile (set them to the texture's panels / bricks).\n"
-                               "The fixed side is pinned exactly onto its line." );
-        ImGui::SameLine();
-        ImGui::BeginDisabled( !canAny );
-        if ( ImGui::Button( "Texture +" ) )
-            GridStepScale( true, ImGui::GetIO().KeyShift );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Texture BIGGER on the faces, one crisp step: the shapes cover one\n"
-                               "grid-cell run less, and every edge that was on a grid line stays on\n"
-                               "one.  Scales about the grid point nearest the yellow pivot.\n"
-                               "Shift: a big step (half the cells)." );
-        ImGui::SameLine();
-        if ( ImGui::Button( "Texture -" ) )
-            GridStepScale( false, ImGui::GetIO().KeyShift );
-        if ( ImGui::IsItemHovered() )
-            ImGui::SetTooltip( "Texture SMALLER on the faces, one crisp step (one more grid-cell\n"
-                               "run).  Shift: a big step (double the cells)." );
-        ImGui::EndDisabled();
-
-        // Numeric row: face texdefs only.
+        // Numeric fields: face texdefs only.
         MaterialDef  *md = nullptr;
         texdef_sub_t *td = ActiveTexdef( &md );
         (void)md;                     // the fields want the texdef, not the material
@@ -3873,8 +4314,7 @@ namespace
         ImGui::BeginDisabled( td == nullptr );
         for ( int i = 0; i < 6; ++i )
         {
-            if ( i )
-                ImGui::SameLine();
+            Flow( LabelledW( 84.0f, labels[i] ) );
             ImGui::PushID( i );
             ImGui::SetNextItemWidth( 84.0f );
             const bool enter = ImGui::InputFloat( labels[i], &f[i], 0.0f, 0.0f, "%.3f",
@@ -4020,6 +4460,7 @@ namespace
 
         bool not2D = false;
         DrawBackground( dl, ActiveColorMap( bgMd, &not2D ) );
+        DrawTrueTextures( dl );         // KIWI: each shape's own texture at its true ST
         DrawGrid( dl );
         DrawWireframes( dl );
 
@@ -4086,6 +4527,7 @@ void KiwiUvEd_Draw()
         // dereferencing the previous frame's selection.
         GestureAbandon();
         s_inScope = false;
+        s_nudge[0] = s_nudge[1] = 0.0f;
         return;                              // closed: no Begin, no End, no cost
     }
 
@@ -4103,6 +4545,18 @@ void KiwiUvEd_Draw()
                  || ImGui::IsWindowHovered( ImGuiHoveredFlags_RootAndChildWindows )
                  || s_gesture != UVG_NONE;
 
+        // The arrow keys' nudge (KiwiUvEd_KeyDown); a run of them is one undo step (ApplyNudge).
+        if ( ( s_nudge[0] != 0.0f || s_nudge[1] != 0.0f ) && s_gesture == UVG_NONE && AnythingSelected() )
+        {
+            float tw, th;
+            ActiveTexSize( &tw, &th );
+            ApplyNudge( s_nudge[0], s_nudge[1] );
+            _snprintf( s_status, sizeof( s_status ), "nudged %+.4f, %+.4f repeats (%+.0f, %+.0f texels)",
+                       s_nudgeRun[0], s_nudgeRun[1], s_nudgeRun[0] * tw, s_nudgeRun[1] * th );
+            s_status[sizeof( s_status ) - 1] = '\0';
+        }
+        s_nudge[0] = s_nudge[1] = 0.0f;
+
         if ( !AnythingSelected() )
         {
             // KIWI: one centred line; the usage lives in kiwi_uveditor.h.
@@ -4118,14 +4572,20 @@ void KiwiUvEd_Draw()
         }
         else
         {
-            const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f + 12.0f;
+            // The toolbar wraps to the dock width, so the canvas leaves room for however many
+            // rows it took last frame (one frame behind on a resize).
+            const float minFooter = ImGui::GetFrameHeightWithSpacing() * 2.0f;
+            const float footer    = ( s_toolbarH > minFooter ? s_toolbarH : minFooter )
+                                  + ImGui::GetStyle().ItemSpacing.y;
             ImGui::BeginChild( "##uvcanvas", ImVec2( 0.0f, -footer ),
                                ImGuiChildFlags_Borders,
                                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse
                              | ImGuiWindowFlags_NoMove );
             DrawCanvas();
             ImGui::EndChild();
+            const float toolbarTop = ImGui::GetCursorPosY();
             DrawToolbar();
+            s_toolbarH = ImGui::GetCursorPosY() - toolbarTop;
         }
     }
     else
@@ -4134,6 +4594,34 @@ void KiwiUvEd_Draw()
         s_inScope = false;
     }
     ImGui::End();
+}
+
+bool KiwiUvEd_KeysInScope()
+{
+    return s_inScope && AnythingSelected();
+}
+
+bool KiwiUvEd_KeyDown( unsigned int vk )
+{
+    if ( vk != VK_LEFT && vk != VK_RIGHT && vk != VK_UP && vk != VK_DOWN )
+        return false;
+    if ( !KiwiUvEd_KeysInScope() || ::GetKeyState( VK_CONTROL ) < 0 || ::GetKeyState( VK_MENU ) < 0 )
+        return false;
+    if ( s_gesture != UVG_NONE )
+        return true;                         // a drag owns the shapes; the key only stays out of 3D
+    float tw, th;
+    ActiveTexSize( &tw, &th );
+    const bool  cell = ::GetKeyState( VK_SHIFT ) < 0;
+    const float du = cell ? StripeU() : 1.0f / tw;
+    const float dv = cell ? StripeV() : 1.0f / th;
+    switch ( vk )                            // canvas +T is down
+    {
+    case VK_LEFT:  s_nudge[0] -= du; break;
+    case VK_RIGHT: s_nudge[0] += du; break;
+    case VK_UP:    s_nudge[1] -= dv; break;
+    default:       s_nudge[1] += dv; break;
+    }
+    return true;
 }
 
 // Pure per-frame read used by 3D overlay passes; see the header's scope contract.
@@ -4164,6 +4652,64 @@ bool KiwiUvEd_TestAffine( float a, float b, float c, float d )
         return false;
     ApplyAffineImmediate( XfAboutOrigin( a, b, c, d, s_originU, s_originV ), "uv test affine" );
     return true;
+}
+
+// Test hook (kiwi_test "uv_nudge_probe"): one arrow nudge of the whole selection, as a frame
+// applies it - its own undo record or folded into the run's.
+bool KiwiUvEd_TestNudge( float du, float dv )
+{
+    Gather();
+    TargetAll();
+    if ( !AnythingSelected() )
+        return false;
+    ApplyNudge( du, dv );
+    return true;
+}
+
+// Test hook (kiwi_test "uv_texture"): Texture + / - of the whole selection, as the toolbar runs it.
+bool KiwiUvEd_TestGridStep( bool bigger, bool big, char *status, int statusSize )
+{
+    Gather();
+    TargetAll();
+    s_originUser = false;
+    AutoPivot();
+    if ( !AnythingSelected() )
+        return false;
+    s_status[0] = '\0';
+    GridStepScale( bigger, big );
+    _snprintf_s( status, statusSize, _TRUNCATE, "%s", s_status );
+    return true;
+}
+
+// Test hook (kiwi_test "uv_fold_probe"): the chain fold of the current selection.
+int KiwiUvEd_TestFold( kuvFoldFace_t *out, int max )
+{
+    Gather();
+    const bool chain = s_chain;
+    s_chain = true;
+    BuildChain();
+    s_chain      = chain;
+    s_chainBuilt = false;                    // the canvas re-solves its own latched layout
+    int n = 0;
+    for ( size_t i = 0; i < s_faces.size() && n < max; ++i )
+    {
+        face_t *fd = FaceOf( s_faces[i] );
+        if ( !fd )
+            continue;
+        float st[KUVE_MAX_WINDING][2];
+        const int k = FaceStPointsDisp( i, st, nullptr );
+        kuvFoldFace_t &o = out[n++];
+        o.nrm[0] = fd->plane.normal[0];
+        o.nrm[1] = fd->plane.normal[1];
+        o.nrm[2] = fd->plane.normal[2];
+        o.n = k < 32 ? k : 32;
+        for ( int p = 0; p < o.n; ++p )
+        {
+            o.st[p][0] = st[p][0];
+            o.st[p][1] = st[p][1];
+        }
+    }
+    return n;
 }
 
 // Command palette.

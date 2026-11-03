@@ -62,7 +62,8 @@
 // therefore reverses a face's true-frame rotation while preserving its on-screen motion,
 // and the conjugated pivot remains the pivot seen by the user.
 //
-// The chain is a BFS over shared world edges welded into KUVE_WELD_EPS buckets. A neighbor
+// The chain grows over shared world edges welded into KUVE_WELD_EPS buckets, always through
+// the longest shared stretch between a placed and an unplaced face (2026-11-01). A neighbor
 // is rotated to the displayed shared-edge direction, pinned at one endpoint, and reflected
 // across that edge when its centroid would overlap the placed face. Different UV edge
 // lengths are deliberately not scaled; unreachable faces and heavily overlapping patches
@@ -158,6 +159,7 @@
 #define KUVE_CYCLE_PX          4.0f     // repeat-press radius that advances the stack cycle
 #define KUVE_MARQUEE_MIN_PX    3.0f     // shorter than this and a drag counts as a CLICK
 #define KUVE_SNAP_MAX_PTS      1024     // cap on each gesture-start snap candidate set
+#define KUVE_NUDGE_RUN_SEC     2.0      // arrow nudges closer than this share one undo record
 
 // Owns its ImGui Begin/End and early-outs on the window-open flag.
 void KiwiUvEd_Draw();
@@ -165,9 +167,31 @@ void KiwiUvEd_Draw();
 // Registers the palette row; KiwiWindows_DispatchInstant owns the window toggle.
 void KiwiUvEd_RegisterCommands();
 
+// KIWI (2026-11-01, user: "allow arrow keys to move a selection precisely in the UV editor"):
+// while the window is focused or hovered with something selected, the arrow keys nudge the
+// targeted shapes one texel of the canvas material (Shift: one grid X/Y cell; one tile at grid
+// 1).  The frame's key pump asks first, after the text-field gate and before any hotkey, so
+// those keys stay out of 3D; true = consumed.  Ctrl/Alt chords are left alone.  A run of
+// nudges is one undo step (KUVE_NUDGE_RUN_SEC).
+bool KiwiUvEd_KeyDown( unsigned int vk );
+// True while the window owns those keys (the hint strip shows them).
+bool KiwiUvEd_KeysInScope();
+
 // Test hook: the Rot / Flip toolbar path ([a b; c d] about the target centre) on the
 // current selection, window open or not.  False when nothing is selected.
 bool KiwiUvEd_TestAffine( float a, float b, float c, float d );
+
+// Test hook: one arrow nudge (repeats) of the whole selection, as a frame applies it.
+bool KiwiUvEd_TestNudge( float du, float dv );
+
+// Test hook: the toolbar's Texture + (bigger) / Texture - on the whole selection, pivot at the
+// target box centre.  False when nothing is selected; `status` gets the editor's status line.
+bool KiwiUvEd_TestGridStep( bool bigger, bool big, char *status, int statusSize );
+
+// Test hook: fold the current selection with Chain on and return each gathered face's
+// world normal and displayed outline (at most 32 points), window open or not.
+struct kuvFoldFace_t { float nrm[3]; int n; float st[32][2]; };
+int KiwiUvEd_TestFold( kuvFoldFace_t *out, int max );
 
 // Scope is latched once per frame while the window is visible and focused/hovered, or while
 // a gesture is live (so leaving the window during a drag does not flicker overlays). Cam_Draw

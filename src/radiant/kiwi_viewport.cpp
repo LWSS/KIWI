@@ -1066,7 +1066,7 @@ void KiwiVP_FlyEnd()
         return;
     s_flyTestHold = false;
     EndGesture();                        // FlyRelease: unpin, raw input off, cursor back
-    KiwiCam_FlyTick( false, false, false );
+    KiwiCam_FlyTick( false, false );
     g_nUpdateBits |= 1;
 }
 
@@ -1175,9 +1175,9 @@ bool KiwiVP_CameraAbort()
 }
 
 // ─── per-tick keyboard fly (post-present) ────────────────────────────────────
-// Called after viewport dispatch. RMB look permits modified arrows and the key funnel
-// swallows them; idle hover permits bare arrows only. Navigation remains available
-// during modal commands, and GetAsyncKeyState does not dequeue command input.
+// Called after viewport dispatch. The fly keys are WASD/QE under the held mouse-forward fly
+// (the arrows no longer fly, KIWI 2026-11-01). Navigation remains available during modal
+// commands, and GetAsyncKeyState does not dequeue command input.
 void KiwiVP_CameraTick( bool cursorOver )
 {
     // Patch-vertex exit may relink active/selected lists, so update outside Cam_Draw's
@@ -1198,7 +1198,7 @@ void KiwiVP_CameraTick( bool cursorOver )
     {
         // Tick disabled arms to reset dt and clear the key-funnel ownership latch.
         KiwiVP_FlyEnd();                 // KIWI: never leave the cursor pinned
-        KiwiCam_FlyTick( false, false, false );
+        KiwiCam_FlyTick( false, false );
         return;
     }
     // KIWI (2026-10-27): the mouse-forward fly - drain the raw look, and let go if the
@@ -1216,11 +1216,9 @@ void KiwiVP_CameraTick( bool cursorOver )
     }
     const bool flying   = ( s_gesture == KG_FLYLOOK );
     const bool lookHeld = ( s_gesture == KG_LOOK || flying );
-    const bool arrows   = cursorOver && !ImGuiShell_WantsKeyboard()
-                       && s_gesture == KG_NONE;
     // WASD / QE belong to the fly only while it is held, so every hotkey stays itself the
     // rest of the time (was: hover + nothing selected, KIWI 2026-10-21).
-    KiwiCam_FlyTick( lookHeld, arrows, flying );
+    KiwiCam_FlyTick( lookHeld, flying );
 }
 
 // ─── overlay (during the ImGui frame) ────────────────────────────────────────

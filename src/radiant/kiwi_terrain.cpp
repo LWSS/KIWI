@@ -41,6 +41,7 @@
 #include "kiwi_terrain.h"
 #include "kiwi_units.h"      // KiwiUnits_Format / Units_FromDisplay
 #include "kiwi_vec.h"
+#include "kiwi_weld.h"       // Keep seams welded - the ops below close the seams they open
 #include "radiant_registry.h"
 
 #include <float.h>
@@ -62,7 +63,8 @@ extern char         Patch_RayTest( const float *org, const float *dir, patch_t *
 extern void         Patch_Paint( selbrush_t *list );                   // pmesh.cpp 0x43EB70 (clear xx22b)
 extern void         Patch_PaintMarkUndo( patchMesh_t *def );           // pmesh.cpp (Undo_AddPaintedBrush wrapper)
 extern void         Patch_PaintFinish( selbrush_t *list );             // pmesh.cpp 0x43ec10
-extern void         Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale ); // pmesh.cpp (tail)
+extern void         Patch_KiwiTextureAndBuild( patchMesh_t *p, float texScale,  // pmesh.cpp (tail)
+                                               const float *texPlane = nullptr );
 extern void         Undo_KiwiMarkCreated( brush_t *def );              // undo.cpp (KIWI tail)
 // Flatten-to-brushes and brush-face painting.
 extern void         KiwiWindows_SyncMenu();                                           // kiwi_windows.cpp
@@ -128,11 +130,22 @@ namespace
     bool  s_setHeightContain = true;    // ALL height tools: never change anything outside the ring (VertReach)
     bool  s_layerDepthEqual = true;     // paint layers draw depth-EQUAL to their own base (see StripDecalOffset)
     float s_chunkSize   = 2048.0f;   // max patch side; the expander/split chunk size
-    float s_tessCell    = 64.0f;     // Tessellate: ABSOLUTE cell size in world units (>15 cells an axis splits)
+    float s_tessCell    = 64.0f;     // Density: ABSOLUTE cell size in world units (Tessellate, new chunks)
+    // KIWI: "the 'natural' UV spread that is default when applying the texture is way too small a
+    // lot of the time. The texture repeats 10+ times in 100 inches. Looks bad, needs a way to
+    // adjust it." - terrain born on a 32-wide material was laid at 8 units a repeat and kept that
+    // density through every retexture.  The base texture's scale is a WORLD size now: the base
+    // material's natural (width x 0.25, 256 for 1024) or, ticked, a fixed size per repeat.
+    bool  s_texFixed    = false;     // terrain base texture: s_texSize instead of the natural size
+    float s_texSize     = 256.0f;    // ...world units one repeat covers along S
     bool  s_expand      = false;     // Raise: "Allow terrain creation" - lay chunks in empty lattice cells
-    float s_createZ     = 0.0f;      // creation: base height where nothing at all is under the cursor
-    int   s_createCells = 8;         // creation: cells per side of a chunk laid with no terrain in reach
-    bool  s_createOnSurfaces = true; // creation: the cursor lands on brushes/models before the base plane
+    // KIWI: "Disable 'base height' by default, allow enabling and setting it. The default
+    // behavior should be 10ft, or any terrain on the map." - unticked, creation lands at the
+    // height of the terrain nearest the cursor, or 10 ft (120 units, 1 unit = 1 inch) on a map
+    // without any.
+    const float KTER_DEFAULT_BASE_Z = 120.0f;
+    bool  s_createZOn   = false;     // creation: "Base height" ticked - s_createZ wins
+    float s_createZ     = KTER_DEFAULT_BASE_Z;   // creation: the base height while ticked
     bool  s_hideWire   = false;     // armed: hide the patch wireframe entirely (Tab toggles)
     float s_wireReach   = 1.25f;     // armed: wireframe shown within outer radius x this
     bool  s_heatmap     = true;      // armed height tools: patches wear a height gradient
@@ -189,6 +202,16 @@ namespace
     std::vector<selbrush_t *> s_targets;     // the patches one stroke touches
     std::vector<patchMesh_t *> s_dirtyDefs;  // changed this frame; rebuilt once
     bool  s_dirtyBounds = false;
+
+    // The panel's "Layers of the selected patch" rows as last drawn (KiwiTerrain_TestLayerRows).
+    struct kterRowStats_t
+    {
+        int   rows;         // rows drawn (base + layers)
+        float overflow;     // widest row's right edge past the column (<= 0 = fits)
+        float step;         // tallest row's line step
+        float line;         // one row's line step (frame height + spacing)
+    };
+    kterRowStats_t s_rowStats = { 0, 0.0f, 0.0f, 0.0f };
 
     std::map<std::string, Material *>  s_blendTwins;   // material -> preview twin (null = failed)
     std::map<std::string, std::string> s_twinErr;      // material -> why
@@ -280,8 +303,7 @@ namespace
         s_chunkSize = ClampF( s_chunkSize, 256.0f, 8192.0f );
         s_tessCell  = ClampF( s_tessCell, 4.0f, 4096.0f );
         s_createZ = ClampF( s_createZ, -65536.0f, 65536.0f );
-        if ( s_createCells < 1 )  s_createCells = 1;
-        if ( s_createCells > 15 ) s_createCells = 15;
+        s_texSize = ClampF( s_texSize, 1.0f, 65536.0f );
         s_wireReach = ClampF( s_wireReach, 1.0f, 4.0f );
     }
 
@@ -321,15 +343,23 @@ namespace
         { "ChunkSize2",       KP_FLOAT, &s_chunkSize,        2048.0f },
         { "TessCellSize",     KP_FLOAT, &s_tessCell,         64.0f },
         { "Expand",           KP_BOOL,  &s_expand,           0.0f },
-        { "CreateZ",          KP_FLOAT, &s_createZ,          0.0f },
-        { "CreateCells",      KP_INT,   &s_createCells,      8.0f },
-        { "CreateOnSurfaces", KP_BOOL,  &s_createOnSurfaces, 1.0f },
+        { "CreateZOn",        KP_BOOL,  &s_createZOn,        0.0f },
+        { "CreateZ2",         KP_FLOAT, &s_createZ,          KTER_DEFAULT_BASE_Z },
+        { "TexFixed",         KP_BOOL,  &s_texFixed,         0.0f },
+        { "TexSize",          KP_FLOAT, &s_texSize,          256.0f },
         { "WireReach",        KP_FLOAT, &s_wireReach,        1.25f },
         { "Heatmap",          KP_BOOL,  &s_heatmap,          1.0f },
         { "HeatmapAlways",    KP_BOOL,  &s_heatAlways,       0.0f },
         { "PaintBase",        KP_BOOL,  &s_paintBase,        0.0f },
         { "WeightView",       KP_BOOL,  &s_weightView,       1.0f },
     };
+
+    void ResetPref( const kterPref_t &p )
+    {
+        if ( p.kind == KP_FLOAT )     *(float *)p.value = p.def;
+        else if ( p.kind == KP_INT )  *(int *)p.value   = (int)p.def;
+        else                          *(bool *)p.value  = p.def != 0.0f;
+    }
 
     void Load()
     {
@@ -458,11 +488,44 @@ namespace
 
     bool GapCursor( const ray_t &ray, float outPoint[3] );
 
+    // The creation base height at (x, y): the ticked "Base height", else the height of the
+    // terrain control point nearest in XY anywhere on the map, else 10 ft.
+    float BaseZAt( float x, float y )
+    {
+        if ( s_createZOn )
+            return s_createZ;
+        float best = FLT_MAX, z = KTER_DEFAULT_BASE_Z;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( !PatchEligible( b ) )
+                return;
+            const float *mins = b->def->mins, *maxs = b->def->maxs;
+            const float bx = x < mins[0] ? mins[0] - x : ( x > maxs[0] ? x - maxs[0] : 0.0f );
+            const float by = y < mins[1] ? mins[1] - y : ( y > maxs[1] ? y - maxs[1] : 0.0f );
+            if ( bx * bx + by * by >= best )
+                return;
+            const patchMesh_t *def = b->patch->def;
+            for ( int i = 0; i < def->width; ++i )
+                for ( int j = 0; j < def->height; ++j )
+                {
+                    const float *q = def->ctrl[i][j].xyz;
+                    const float d2 = ( q[0] - x ) * ( q[0] - x ) + ( q[1] - y ) * ( q[1] - y );
+                    if ( d2 < best )
+                    {
+                        best = d2;
+                        z    = q[2];
+                    }
+                }
+        } );
+        return z;
+    }
+
     // Cursor resolution.  Patches first (every mode), then a GAP the terrain closes in
     // around (every mode: the ring stays at the mouse over holes and models standing in
-    // them).  With terrain creation allowed the cursor then lands on any world surface
-    // (brushes, model boxes - KiwiDrop_Trace) and finally on the horizontal base plane, so
-    // the brush works over an empty zone.
+    // them).  With terrain creation allowed the cursor then lands on the horizontal base
+    // plane (BaseZAt), so the brush works over an empty zone.
+    // KIWI: "LAnd on brushes and models is stupid, remove it." - creation no longer lands on
+    // brushes and models; only the brush-face painter traces them.
     bool ResolveCursor( const ray_t &ray, float outPoint[3] )
     {
         if ( PickPatches( ray.origin, ray.dir, true, outPoint, nullptr, &s_cursorNode ) )
@@ -480,25 +543,38 @@ namespace
             return true;
         }
         // Off the patches: the texture painter lands on brush faces when it paints them too;
-        // terrain creation lands on surfaces, then on the base plane.
+        // terrain creation lands on the base plane.
         const bool brushPaint = s_tool == KTER_TEXTURE && s_paintBrushes && !s_paintBase && s_paintMaterial[0];
-        if ( !CreationAllowed() && !brushPaint )
-            return false;
-        kiwiDropHit_t hit;
-        if ( ( brushPaint || s_createOnSurfaces ) && KiwiDrop_Trace( ray, false, &hit ) )
+        if ( brushPaint )
         {
+            kiwiDropHit_t hit;
+            if ( !KiwiDrop_Trace( ray, false, &hit ) )
+                return false;
             memcpy( outPoint, hit.point, sizeof( hit.point ) );
             s_cursorKind = KCUR_SURFACE;
             return true;
         }
-        if ( brushPaint || fabsf( ray.dir[2] ) <= 1e-6f )
+        if ( !CreationAllowed() || fabsf( ray.dir[2] ) <= 1e-6f )
             return false;
-        const float t = ( s_createZ - ray.origin[2] ) / ray.dir[2];
+        // the base height follows the terrain nearest the crossing: settle it in a few passes
+        float z = BaseZAt( ray.origin[0], ray.origin[1] );
+        for ( int iter = 0; iter < 4; ++iter )
+        {
+            const float t = ( z - ray.origin[2] ) / ray.dir[2];
+            if ( t <= 0.0f || t >= 131072.0f )
+                return false;
+            const float zNext = BaseZAt( ray.origin[0] + ray.dir[0] * t, ray.origin[1] + ray.dir[1] * t );
+            const bool settled = fabsf( zNext - z ) < 0.5f;
+            z = zNext;
+            if ( settled )
+                break;
+        }
+        const float t = ( z - ray.origin[2] ) / ray.dir[2];
         if ( t <= 0.0f || t >= 131072.0f )
             return false;
         for ( int i = 0; i < 3; ++i )
             outPoint[i] = ray.origin[i] + ray.dir[i] * t;
-        outPoint[2]  = s_createZ;
+        outPoint[2]  = z;
         s_cursorKind = KCUR_PLANE;
         return true;
     }
@@ -782,6 +858,43 @@ namespace
         return slot >= 0 && slot < KTER_SLOTS && def->kiwiLayer[slot][0] != 0;
     }
 
+    // KIWI: "the 2 different grass layers have vastly different resolutions and look bad when
+    // both combined with natural. I need a mechanism to modify each resolution of each layer" -
+    // a layer's texcoords are the base's x its slot scale (patchMesh_t.kiwiLayerScale).  One
+    // material has ONE scale map-wide, so seams between chunks never jump.
+    float SlotScale( const patchMesh_t *def, int slot, int axis )
+    {
+        const float v = def->kiwiLayerScale[slot][axis];
+        return v > 0.0f && _finite( v ) ? v : 1.0f;
+    }
+
+    void SetSlotScale( patchMesh_t *def, int slot, float s, float t )
+    {
+        def->kiwiLayerScale[slot][0] = s;
+        def->kiwiLayerScale[slot][1] = t;
+    }
+
+    // The scale the map already gives the layer `name` (the first patch carrying it), else 1 1.
+    void MapLayerScale( const char *name, float out[2] )
+    {
+        out[0] = out[1] = 1.0f;
+        bool found = false;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( found || !b->patch || !b->patch->def )
+                return;
+            const patchMesh_t *def = b->patch->def;
+            for ( int k = 0; k < KTER_SLOTS; ++k )
+                if ( SlotUsed( def, k ) && !_stricmp( def->kiwiLayer[k], name ) )
+                {
+                    out[0] = SlotScale( def, k, 0 );
+                    out[1] = SlotScale( def, k, 1 );
+                    found = true;
+                    return;
+                }
+        } );
+    }
+
     int UsedSlotCount( const patchMesh_t *def )
     {
         int n = 0;
@@ -857,11 +970,15 @@ namespace
                         c[k] = 0;
                     }
                 def->kiwiLayer[k][0] = '\0';
+                SetSlotScale( def, k, 1.0f, 1.0f );
             }
             else
             {
+                float sc[2];
+                MapLayerScale( real, sc );             // before the rename: the map's own scale for it
                 strncpy( def->kiwiLayer[k], real, 63 );
                 def->kiwiLayer[k][63] = '\0';
+                SetSlotScale( def, k, sc[0], sc[1] );
             }
         }
     }
@@ -876,9 +993,12 @@ namespace
 
     // Texture paint with a material on the brush (or "erase to base") needs no
     // selection: every eligible patch is a target.
+    // KIWI: "The texture paint and blend tools no longer function after doing this." - Blend
+    // refused without a selection while paint worked anywhere; it only touches layered patches,
+    // so it takes the same targets.
     bool PaintAnywhere()
     {
-        return s_tool == KTER_TEXTURE && ( s_paintBase || s_paintMaterial[0] != 0 );
+        return ( s_tool == KTER_TEXTURE && ( s_paintBase || s_paintMaterial[0] != 0 ) ) || s_tool == KTER_BLEND;
     }
 
     // The layer-run materials are cloned from DECAL templates (l_sm_b0c0*), whose polygon
@@ -1116,6 +1236,8 @@ namespace
             return;
         std::vector<patchMesh_t *> defs;
         TargetPatches( defs );
+        float sc[2];
+        MapLayerScale( material, sc );
         PatchEditBegin( "add terrain layer" );
         for ( size_t d = 0; d < defs.size(); ++d )
         {
@@ -1127,6 +1249,7 @@ namespace
                 SetAllWeights( def, 0u );
             strncpy( def->kiwiLayer[slot], material, 63 );
             def->kiwiLayer[slot][63] = '\0';
+            SetSlotScale( def, slot, sc[0], sc[1] );
         }
         PatchEditEnd( false );
         SetPaintMaterial( material );                      // and paint with it
@@ -1148,6 +1271,7 @@ namespace
                 continue;
             PatchEditMark( def );
             def->kiwiLayer[slot][0] = '\0';
+            SetSlotScale( def, slot, 1.0f, 1.0f );
             if ( UsedSlotCount( def ) == 0 )
                 SetAllWeights( def, 0xFFFFFFFFu );          // back to a plain patch: white
             else
@@ -1164,6 +1288,8 @@ namespace
             return;
         std::vector<patchMesh_t *> defs;
         TargetPatches( defs );
+        float sc[2];
+        MapLayerScale( material, sc );
         PatchEditBegin( "terrain layer material" );
         for ( size_t d = 0; d < defs.size(); ++d )
         {
@@ -1172,6 +1298,35 @@ namespace
             PatchEditMark( defs[d] );
             strncpy( defs[d]->kiwiLayer[slot], material, 63 );
             defs[d]->kiwiLayer[slot][63] = '\0';
+            SetSlotScale( defs[d], slot, sc[0], sc[1] );
+        }
+        PatchEditEnd( false );
+    }
+
+    // The layer `material`'s scale on EVERY terrain patch carrying it (selected or not), one
+    // undo record: the same material never reads at two densities across a seam.
+    const float KTER_LAYER_SCALE_MIN = 1.0f / 64.0f, KTER_LAYER_SCALE_MAX = 64.0f;
+    void SetLayerScaleForMaterial( const char *material, float scale )
+    {
+        if ( !material || !material[0] )
+            return;
+        scale = ClampF( scale, KTER_LAYER_SCALE_MIN, KTER_LAYER_SCALE_MAX );
+        std::vector<std::pair<patchMesh_t *, int>> hits;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( !PatchEligible( b ) )
+                return;
+            const int slot = FindSlotByName( b->patch->def, material );
+            if ( slot >= 0 && ( SlotScale( b->patch->def, slot, 0 ) != scale || SlotScale( b->patch->def, slot, 1 ) != scale ) )
+                hits.push_back( std::make_pair( b->patch->def, slot ) );
+        } );
+        if ( hits.empty() )
+            return;
+        PatchEditBegin( "terrain layer scale" );
+        for ( size_t h = 0; h < hits.size(); ++h )
+        {
+            PatchEditMark( hits[h].first );
+            SetSlotScale( hits[h].first, hits[h].second, scale, scale );
         }
         PatchEditEnd( false );
     }
@@ -2032,8 +2187,11 @@ namespace
                         // With no layers yet the colour bytes were white, not weights.
                         if ( UsedSlotCount( def ) == 0 )
                             SetAllWeights( def, 0u );
+                        float sc[2];
+                        MapLayerScale( s_paintMaterial, sc );   // the scale the map already uses for it
                         strncpy( def->kiwiLayer[slot], s_paintMaterial, 63 );
                         def->kiwiLayer[slot][63] = '\0';
+                        SetSlotScale( def, slot, sc[0], sc[1] );
                         needAdd = false;
                         ++s_layersAdded;
                     }
@@ -2163,6 +2321,7 @@ namespace
                                 ( (byte *)&B->ctrl[i][j].vert_color )[slot] = 0;
                     strncpy( B->kiwiLayer[slot], A->kiwiLayer[k], 63 );
                     B->kiwiLayer[slot][63] = '\0';
+                    SetSlotScale( B, slot, SlotScale( A, k, 0 ), SlotScale( A, k, 1 ) );
                     ++s_layersAdded;
                     NoteDirty( B, false );
                 }
@@ -2387,6 +2546,7 @@ namespace
         p->lightmap   = like->lightmap;
         p->smoothing  = like->smoothing;
         memcpy( p->kiwiLayer, like->kiwiLayer, sizeof( p->kiwiLayer ) );
+        memcpy( p->kiwiLayerScale, like->kiwiLayerScale, sizeof( p->kiwiLayerScale ) );
         return p;
     }
 
@@ -2404,6 +2564,10 @@ namespace
 
     // A pointsX x pointsY TERRAIN chunk over the rectangle, modelled on `like`: flat at
     // flatZ, or read off the surface of the SHEET `sampleFrom`.
+    // Its base texture continues `like`'s mapping (seams, Split, Tessellate keep the look); a
+    // chunk from the fresh template is laid world-planar at the terrain texture size.
+    bool PatchTexPlane( const patchMesh_t *p, float m[6] );
+    void WorldTexPlane( const patchMesh_t *p, float m[6] );
     selbrush_t *CreateChunkXY( const patchMesh_t *like, entity_s *owner,
                                float minx, float miny, float sizeX, float sizeY,
                                int pointsX, int pointsY,
@@ -2431,7 +2595,10 @@ namespace
                 cp->xyz[2] = z;
                 memcpy( &cp->vert_color, col, 4 );
             }
-        Patch_KiwiTextureAndBuild( p, g_qeglobals.random_texture_stuff[0].sampleSize );
+        float texPlane[6];
+        if ( like == s_scratchLike || !PatchTexPlane( like, texPlane ) )
+            WorldTexPlane( p, texPlane );
+        Patch_KiwiTextureAndBuild( p, g_qeglobals.random_texture_stuff[0].sampleSize, texPlane );
         return LinkPatch( p, owner );
     }
 
@@ -2448,6 +2615,7 @@ namespace
     // Join, fold duplicates) ─────────────────────────────────────────────────────
     void BeginRecord( const char *label )
     {
+        KiwiWeld_GuardBegin();              // KIWI: "make it so the terrain chunks can never form seams"
         Undo_ClearRedo();
         Undo_GeneralStart( label );
     }
@@ -2482,6 +2650,13 @@ namespace
     {
         for ( size_t i = 0; i < created.size(); ++i )
             Undo_KiwiMarkCreated( created[i]->def );
+        // KIWI: "make it so the terrain chunks can never form seams in the first place" - the new
+        // chunks' edges and their neighbours' meet again, in this record
+        std::vector<patchMesh_t *> defs;
+        for ( size_t i = 0; i < created.size(); ++i )
+            defs.push_back( created[i]->patch->def );
+        if ( !defs.empty() )
+            KiwiWeld_GuardEnd( &defs[0], (int)defs.size(), nullptr );
         Undo_End();
         for ( size_t i = 0; i < created.size(); ++i )
             Select_Brush( created[i], 0, 0, 0 );
@@ -2658,8 +2833,9 @@ namespace
 
     // The lattice a stroke lays chunks on.  Beside terrain the chunks CONTINUE its sheet
     // (anchored on its corner, sides a whole number of its cells, its materials and layers),
-    // so seams share vertices.  With nothing in reach: world-origin aligned at the chunk
-    // size, "Cells per new chunk" dense, the texture browser's current material.
+    // so seams share vertices.  With nothing in reach: world-origin aligned, the Density cell
+    // size, as many whole cells as fit the chunk size (15 at most), the texture browser's
+    // current material.
     struct kterLattice_t
     {
         const patchMesh_t *like;      // template patch; null = fresh (FreshTemplate)
@@ -2745,7 +2921,7 @@ namespace
         if ( fabsf( ray.dir[2] ) <= 1e-6f )
             return false;
         const float R = s_outer * 4.0f > 2048.0f ? s_outer * 4.0f : 2048.0f;
-        float z = s_cursorHave ? s_cursor[2] : s_createZ;
+        float z = s_cursorHave ? s_cursor[2] : BaseZAt( ray.origin[0], ray.origin[1] );
         float p[3];
         int   sides = 0;
         for ( int iter = 0; iter < 6; ++iter )
@@ -2808,6 +2984,8 @@ namespace
         p->flags      = 0;
         p->subDivType = 8;
         memset( p->kiwiLayer, 0, sizeof( p->kiwiLayer ) );
+        for ( int k = 0; k < KTER_SLOTS; ++k )
+            SetSlotScale( p, k, 1.0f, 1.0f );
         const curTexWndLayer_t *cur = g_qeglobals.random_texture_stuff;
         if ( cur[0].mtl.lyrMtl )
         {
@@ -2820,6 +2998,15 @@ namespace
             p->lightmap.radMtl = cur[1].mtl.radMtl;
         }
         return p;
+    }
+
+    // Whole cells of size `cell` in a lattice chunk: the chunk size's nearest fit, 1..15.
+    int ChunkCells( float cell )
+    {
+        int n = (int)( s_chunkSize / cell + 0.5f );
+        if ( n < 1 )  n = 1;
+        if ( n > 15 ) n = 15;
+        return n;
     }
 
     bool ResolveLattice( kterLattice_t *L )
@@ -2837,10 +3024,9 @@ namespace
             L->owner = node->owner;
             L->cellX = CellSizeAxis( L->like, 0 );
             L->cellY = CellSizeAxis( L->like, 1 );
-            L->SX = floorf( s_chunkSize / L->cellX + 0.5f ) * L->cellX;
-            L->SY = floorf( s_chunkSize / L->cellY + 0.5f ) * L->cellY;
-            if ( L->SX < L->cellX ) L->SX = L->cellX;
-            if ( L->SY < L->cellY ) L->SY = L->cellY;
+            // at most 15 cells a side (16 points): a longer chunk would coarsen its cells
+            L->SX = (float)ChunkCells( L->cellX ) * L->cellX;
+            L->SY = (float)ChunkCells( L->cellY ) * L->cellY;
             const float *bm = node->def->mins;
             L->ax = bm[0] - floorf( bm[0] / L->SX ) * L->SX;
             L->ay = bm[1] - floorf( bm[1] / L->SY ) * L->SY;
@@ -2848,13 +3034,12 @@ namespace
         }
         if ( !CreationAllowed() || !world_entity )
             return false;
-        int cells = s_createCells;
-        if ( cells < 1 )  cells = 1;
-        if ( cells > 15 ) cells = 15;
+        // KIWI: "allow terrain creation needs to respect the Density setting in overall tool and
+        // get rid of the 'cells per new chunk'" - fresh chunks are cut at the Density cell size.
         L->like  = nullptr;
         L->owner = world_entity;
-        L->SX = L->SY = s_chunkSize;
-        L->cellX = L->cellY = s_chunkSize / (float)cells;
+        L->cellX = L->cellY = s_tessCell;
+        L->SX = L->SY = (float)ChunkCells( s_tessCell ) * s_tessCell;
         L->ax = L->ay = 0.0f;
         return true;
     }
@@ -2939,8 +3124,191 @@ namespace
             out[3 + k] = (float)c[k];
     }
 
+    // KIWI: "when I create terrain in a hole, the direction is mismatched, and it leads to
+    // weird looking textures" - a fill follows its neighbour: the same grid axes, and the
+    // neighbour's texture mapping continued over it.
+    // A terrain patch's grid axes in XY: the mean step along its first (u) and second (v)
+    // control index, unit length.
+    bool PatchGridAxes( const patchMesh_t *p, float u[2], float v[2] )
+    {
+        double su[2] = { 0.0, 0.0 }, sv[2] = { 0.0, 0.0 };
+        for ( int a = 0; a < p->width; ++a )
+            for ( int b = 0; b < p->height; ++b )
+                for ( int k = 0; k < 2; ++k )
+                {
+                    if ( a + 1 < p->width )
+                        su[k] += p->ctrl[a + 1][b].xyz[k] - p->ctrl[a][b].xyz[k];
+                    if ( b + 1 < p->height )
+                        sv[k] += p->ctrl[a][b + 1].xyz[k] - p->ctrl[a][b].xyz[k];
+                }
+        const double lu = sqrt( su[0] * su[0] + su[1] * su[1] ), lv = sqrt( sv[0] * sv[0] + sv[1] * sv[1] );
+        if ( lu < 1e-6 || lv < 1e-6 )
+            return false;
+        u[0] = (float)( su[0] / lu ); u[1] = (float)( su[1] / lu );
+        v[0] = (float)( sv[0] / lv ); v[1] = (float)( sv[1] / lv );
+        return true;
+    }
+
+    // A terrain patch's layer-0 texture mapping as a plane over XY: s = m0 x + m1 y + m2,
+    // t = m3 x + m4 y + m5, least squares over its control points (exact on a flat sheet,
+    // naturalized or projected; the slope-weighted average on a sculpted one).
+    bool PatchTexPlane( const patchMesh_t *p, float m[6] )
+    {
+        const int n = p->width * p->height;
+        if ( n < 3 )
+            return false;
+        double mx = 0.0, my = 0.0, ms = 0.0, mt = 0.0;
+        for ( int a = 0; a < p->width; ++a )
+            for ( int b = 0; b < p->height; ++b )
+            {
+                const drawVert_t &c = p->ctrl[a][b];
+                mx += c.xyz[0]; my += c.xyz[1];
+                ms += c.texCoord.st[0]; mt += c.texCoord.st[1];
+            }
+        mx /= n; my /= n; ms /= n; mt /= n;
+        double xx = 0.0, xy = 0.0, yy = 0.0, xs = 0.0, ys = 0.0, xt = 0.0, yt = 0.0;
+        for ( int a = 0; a < p->width; ++a )
+            for ( int b = 0; b < p->height; ++b )
+            {
+                const drawVert_t &c = p->ctrl[a][b];
+                const double x = c.xyz[0] - mx, y = c.xyz[1] - my;
+                const double s = c.texCoord.st[0] - ms, t = c.texCoord.st[1] - mt;
+                xx += x * x; xy += x * y; yy += y * y;
+                xs += x * s; ys += y * s; xt += x * t; yt += y * t;
+            }
+        const double det = xx * yy - xy * xy;
+        if ( !( det > 1e-6 * xx * yy ) || xx <= 0.0 || yy <= 0.0 )
+            return false;                               // a sheet with no extent across one axis
+        const double a0 = ( xs * yy - ys * xy ) / det, a1 = ( ys * xx - xs * xy ) / det;
+        const double b0 = ( xt * yy - yt * xy ) / det, b1 = ( yt * xx - xt * xy ) / det;
+        m[0] = (float)a0; m[1] = (float)a1; m[2] = (float)( ms - a0 * mx - a1 * my );
+        m[3] = (float)b0; m[4] = (float)b1; m[5] = (float)( mt - b0 * mx - b1 * my );
+        return isfinite( m[2] ) && isfinite( m[5] );
+    }
+
+    // World units one repeat of the patch's base texture covers along S and T: the panel's
+    // fixed size (T keeps the material's aspect), else the material's natural size - its width
+    // x the layer-0 sample size (0.25), as Patch_Naturalize2 lays a brand-new patch.
+    void NaturalTexSize( const patchMesh_t *p, float *sizeS, float *sizeT )
+    {
+        qtexture_s *lm = MaterialDef_GetLayeredMaterial( (MaterialDef *)&p->texture );
+        const float w = lm && lm->width  > 0 ? (float)lm->width  : 512.0f;
+        const float h = lm && lm->height > 0 ? (float)lm->height : 512.0f;
+        float sample = g_qeglobals.random_texture_stuff[0].sampleSize;
+        if ( sample <= 0.0f )
+            sample = 0.25f;
+        *sizeS = w * sample;
+        *sizeT = h * sample;
+    }
+
+    void TerrainTexSize( const patchMesh_t *p, float *sizeS, float *sizeT )
+    {
+        NaturalTexSize( p, sizeS, sizeT );
+        if ( s_texFixed )
+        {
+            *sizeT = s_texSize * *sizeT / *sizeS;
+            *sizeS = s_texSize;
+        }
+    }
+
+    // The world-planar base mapping at the terrain texture size: s = x / sizeS, t = -y / sizeT
+    // (T runs down Y, as a naturalized sheet's does), so every chunk on the map lines up.
+    void WorldTexPlane( const patchMesh_t *p, float m[6] )
+    {
+        float sizeS, sizeT;
+        TerrainTexSize( p, &sizeS, &sizeT );
+        m[0] = 1.0f / sizeS; m[1] = 0.0f;           m[2] = 0.0f;
+        m[3] = 0.0f;         m[4] = -1.0f / sizeT;  m[5] = 0.0f;
+    }
+
+    // Re-lays one terrain patch's base texture world-planar, one repeat per sizeS x sizeT world
+    // units.  The caller owns the undo record and the rebuild.
+    void RelayBaseTextureAt( patchMesh_t *def, float sizeS, float sizeT )
+    {
+        for ( int i = 0; i < def->width; ++i )
+            for ( int j = 0; j < def->height; ++j )
+            {
+                drawVert_t *cp = &def->ctrl[i][j];
+                cp->texCoord.st[0] =  cp->xyz[0] / sizeS;
+                cp->texCoord.st[1] = -cp->xyz[1] / sizeT;
+            }
+    }
+
+    // ...at the terrain texture size (WorldTexPlane).
+    void RelayBaseTexture( patchMesh_t *def )
+    {
+        float sizeS, sizeT;
+        TerrainTexSize( def, &sizeS, &sizeT );
+        RelayBaseTextureAt( def, sizeS, sizeT );
+    }
+
+    // KIWI: "ok this is working, but why does the base layer not have the same settings?" - the
+    // base row's tiling: how often the base repeats per repeat at its material's natural size
+    // (1 = natural, 2 = twice as often).  Read off the patch's texture plane.
+    float BaseTiling( const patchMesh_t *def )
+    {
+        float m[6], natS, natT;
+        if ( !PatchTexPlane( def, m ) )
+            return 1.0f;
+        NaturalTexSize( def, &natS, &natT );
+        const float grad = sqrtf( m[0] * m[0] + m[1] * m[1] );   // S repeats per world unit
+        return grad > 0.0f && _finite( grad ) ? grad * natS : 1.0f;
+    }
+
+    // Every terrain patch whose base is `def`'s base material re-laid at `tiling` (seamless
+    // across chunks), one undo record.  Each painted layer's multiplier is divided by the same
+    // step, so the layers keep their look while the base alone changes size.
+    void SetBaseTilingForMaterial( const patchMesh_t *like, float tiling )
+    {
+        tiling = ClampF( tiling, KTER_LAYER_SCALE_MIN, KTER_LAYER_SCALE_MAX );
+        const qtexture_s *mtl = like->texture.radMtl;
+        std::vector<patchMesh_t *> defs;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( PatchEligible( b ) && b->patch->def->texture.radMtl == mtl )
+                defs.push_back( b->patch->def );
+        } );
+        if ( defs.empty() )
+            return;
+        PatchEditBegin( "terrain base tiling" );
+        for ( size_t d = 0; d < defs.size(); ++d )
+        {
+            patchMesh_t *def = defs[d];
+            const float step = tiling / BaseTiling( def );         // base ST grows by this
+            PatchEditMark( def );
+            float natS, natT;
+            NaturalTexSize( def, &natS, &natT );
+            RelayBaseTextureAt( def, natS / tiling, natT / tiling );
+            if ( step > 0.0f && _finite( step ) )
+                for ( int k = 0; k < KTER_SLOTS; ++k )
+                    if ( SlotUsed( def, k ) )
+                        SetSlotScale( def, k, SlotScale( def, k, 0 ) / step, SlotScale( def, k, 1 ) / step );
+        }
+        PatchEditEnd( false );
+    }
+
+    // Panel "Texture size": every selected terrain patch re-laid at the new size, one undo record.
+    void RelayTextureSelected()
+    {
+        std::vector<patchMesh_t *> defs;
+        ForEachNode( false, [&]( selbrush_t *b )
+        {
+            if ( PatchEligible( b ) )
+                defs.push_back( b->patch->def );
+        } );
+        if ( defs.empty() )
+            return;
+        PatchEditBegin( "terrain texture size" );
+        for ( size_t d = 0; d < defs.size(); ++d )
+        {
+            PatchEditMark( defs[d] );
+            RelayBaseTexture( defs[d] );
+        }
+        PatchEditEnd( false );
+    }
+
     selbrush_t *CreatePatchFromGrid( const patchMesh_t *like, entity_s *owner, const std::vector<float> &grid,
-                                     int W, int i0, int i1, int j0, int j1 )
+                                     int W, int i0, int i1, int j0, int j1, const float *texPlane )
     {
         const int nx = i1 - i0 + 1, ny = j1 - j0 + 1;
         if ( nx < 2 || ny < 2 || nx > 16 || ny > 16 )
@@ -2957,7 +3325,7 @@ namespace
                 for ( int k = 0; k < 4; ++k )
                     c[k] = layered ? (byte)(int)( ClampF( g[3 + k], 0.0f, 255.0f ) + 0.5f ) : (byte)255;
             }
-        Patch_KiwiTextureAndBuild( p, g_qeglobals.random_texture_stuff[0].sampleSize );
+        Patch_KiwiTextureAndBuild( p, g_qeglobals.random_texture_stuff[0].sampleSize, texPlane );
         return LinkPatch( p, owner );
     }
 
@@ -3358,13 +3726,55 @@ namespace
             }
         }
 
-        // 4. each piece a Coons blend of its sides, cut into patches of at most 16 x 16
+        // 4. each piece a Coons blend of its sides, cut into patches of at most 16 x 16.
+        // KIWI: "when I create terrain in a hole, the direction is mismatched" - a piece's grid
+        // starts at whichever of its four corners lines its index axes up with the neighbour's
+        // (the corners stay counter-clockwise, so the fill keeps facing up), and its texture
+        // continues the neighbour's mapping instead of starting a fresh one at that corner.
+        float likeU[2], likeV[2], texPlane[6];
+        const bool haveAxes  = PatchGridAxes( like, likeU, likeV );
+        const bool havePlane = PatchTexPlane( like, texPlane );
         int made = 0, tris = 0;
         std::vector<float> grid;
         std::vector<int> side[4];
         for ( size_t p = 0; p < F.pieces.size(); ++p )
         {
-            const int *c = &corners[p * 4];
+            int c[4] = { corners[p * 4], corners[p * 4 + 1], corners[p * 4 + 2], corners[p * 4 + 3] };
+            if ( haveAxes )
+            {
+                // the piece's own axes from corner 0: U along sides 0 and 2, V along 1 and 3
+                const float *q[4] = { &F.pts[c[0] * 7], &F.pts[c[1] * 7], &F.pts[c[2] * 7], &F.pts[c[3] * 7] };
+                float U[2], V[2];
+                for ( int k = 0; k < 2; ++k )
+                {
+                    U[k] = ( q[1][k] - q[0][k] ) + ( q[2][k] - q[3][k] );
+                    V[k] = ( q[2][k] - q[1][k] ) + ( q[3][k] - q[0][k] );
+                }
+                const float lu = sqrtf( U[0] * U[0] + U[1] * U[1] ), lv = sqrtf( V[0] * V[0] + V[1] * V[1] );
+                if ( lu > 1e-6f && lv > 1e-6f )
+                {
+                    U[0] /= lu; U[1] /= lu;
+                    V[0] /= lv; V[1] /= lv;
+                }
+                // starting at corner r turns them a quarter each: (U V) (V -U) (-U -V) (-V U)
+                const float axes[4][4] = { {  U[0],  U[1],  V[0],  V[1] }, {  V[0],  V[1], -U[0], -U[1] },
+                                           { -U[0], -U[1], -V[0], -V[1] }, { -V[0], -V[1],  U[0],  U[1] } };
+                int   bestR = 0;
+                float bestScore = -FLT_MAX;
+                for ( int r = 0; r < 4; ++r )
+                {
+                    const float score = axes[r][0] * likeU[0] + axes[r][1] * likeU[1]
+                                      + axes[r][2] * likeV[0] + axes[r][3] * likeV[1];
+                    if ( score > bestScore )
+                    {
+                        bestScore = score;
+                        bestR = r;
+                    }
+                }
+                const int was[4] = { c[0], c[1], c[2], c[3] };
+                for ( int s = 0; s < 4; ++s )
+                    c[s] = was[( s + bestR ) % 4];
+            }
             for ( int s = 0; s < 4; ++s )
                 HSide( F.pieces[p], c[s], c[( s + 1 ) % 4], side[s] );
             const int W = (int)side[0].size(), H = (int)side[1].size();
@@ -3395,7 +3805,8 @@ namespace
                 for ( int i0 = 0; i0 < W - 1; i0 += 15 )
                 {
                     selbrush_t *node = CreatePatchFromGrid( like, owner, grid, W, i0, i0 + 15 < W - 1 ? i0 + 15 : W - 1,
-                                                            j0, j0 + 15 < H - 1 ? j0 + 15 : H - 1 );
+                                                            j0, j0 + 15 < H - 1 ? j0 + 15 : H - 1,
+                                                            havePlane ? texPlane : nullptr );
                     if ( !node )
                         continue;
                     if ( s_undoOpen )
@@ -4119,7 +4530,8 @@ namespace
         if ( a->texture.radMtl != b->texture.radMtl || a->lightmap.radMtl != b->lightmap.radMtl )
             return false;
         for ( int k = 0; k < KTER_SLOTS; ++k )
-            if ( strcmp( a->kiwiLayer[k], b->kiwiLayer[k] ) != 0 )
+            if ( strcmp( a->kiwiLayer[k], b->kiwiLayer[k] ) != 0
+              || ( SlotUsed( a, k ) && ( SlotScale( a, k, 0 ) != SlotScale( b, k, 0 ) || SlotScale( a, k, 1 ) != SlotScale( b, k, 1 ) ) ) )
                 return false;
         return true;
     }
@@ -4483,6 +4895,11 @@ namespace
         RebuildAllPatchVisuals();
     }
 
+    void WeldMarkStroke( patchMesh_t *def )
+    {
+        MarkUndo( def );
+    }
+
     void EndStroke()
     {
         if ( !s_stroke )
@@ -4494,6 +4911,19 @@ namespace
             return;
         }
         FlushDirty();
+        if ( s_undoOpen )
+        {
+            // KIWI: "make it so the terrain chunks can never form seams in the first place" - the
+            // patches this stroke changed or laid (xx22b) close every seam it opened
+            std::vector<patchMesh_t *> touched;
+            ForEachNode( true, [&]( selbrush_t *b )
+            {
+                if ( NodeIsPatch( b ) && b->patch->def->xx22b )
+                    touched.push_back( b->patch->def );
+            } );
+            if ( !touched.empty() && KiwiWeld_GuardEnd( &touched[0], (int)touched.size(), WeldMarkStroke ) )
+                GraphInvalidate();
+        }
         CarryRiders();
         s_carried = 0;
         for ( size_t i = 0; i < s_riders.size(); ++i )
@@ -4666,6 +5096,101 @@ namespace
         return got;
     }
 
+    // A layer material's tiling (its slot scale, map-wide): /2, a typed value, x2 - each change
+    // one undo record.  False when no terrain carries the material yet.
+    bool LayerScaleControls( const char *material )
+    {
+        bool carried = false;
+        float cur = 1.0f;
+        ForEachNode( true, [&]( selbrush_t *b )
+        {
+            if ( carried || !PatchEligible( b ) )
+                return;
+            const int slot = FindSlotByName( b->patch->def, material );
+            if ( slot >= 0 )
+            {
+                carried = true;
+                cur = SlotScale( b->patch->def, slot, 0 );
+            }
+        } );
+        if ( !carried )
+            return false;
+        ImGui::PushID( material );
+        float want = cur;
+        if ( ImGui::SmallButton( "/2" ) )
+            want = cur * 0.5f;
+        ImGui::SameLine();
+        float typed = cur;
+        ImGui::SetNextItemWidth( 56.0f );
+        if ( ImGui::InputFloat( "##tiling", &typed, 0.0f, 0.0f, "%.3g", ImGuiInputTextFlags_EnterReturnsTrue ) && typed > 0.0f )
+            want = typed;
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Tiling of this layer: how often it repeats per repeat of the base texture\n"
+                               "(2 = twice as often, finer; 0.5 = half as often, larger). Every terrain\n"
+                               "patch carrying this material takes it, so seams match; the compile uses it." );
+        ImGui::SameLine();
+        if ( ImGui::SmallButton( "x2" ) )
+            want = cur * 2.0f;
+        ImGui::PopID();
+        if ( want != cur )
+            SetLayerScaleForMaterial( material, want );
+        return true;
+    }
+
+    // The base row's tiling (BaseTiling), laid out like a layer row's: /2, a typed value, x2.
+    void BaseTilingControls( const patchMesh_t *def )
+    {
+        const float cur = BaseTiling( def );
+        ImGui::PushID( "##basetiling" );
+        float want = cur;
+        if ( ImGui::SmallButton( "/2" ) )
+            want = cur * 0.5f;
+        ImGui::SameLine();
+        float typed = cur;
+        ImGui::SetNextItemWidth( 56.0f );
+        if ( ImGui::InputFloat( "##tiling", &typed, 0.0f, 0.0f, "%.3g", ImGuiInputTextFlags_EnterReturnsTrue ) && typed > 0.0f )
+            want = typed;
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Tiling of the base texture: how often it repeats per repeat at its natural size\n"
+                               "(1 = natural, the material's width x 0.25; 2 = twice as often). Every terrain\n"
+                               "patch with this base takes it, seamlessly; the painted layers keep their look\n"
+                               "(their tiling numbers follow, being relative to the base)." );
+        ImGui::SameLine();
+        if ( ImGui::SmallButton( "x2" ) )
+            want = cur * 2.0f;
+        ImGui::PopID();
+        if ( fabsf( want - cur ) > cur * 1e-4f )
+            SetBaseTilingForMaterial( def, want );
+    }
+
+    // Blend has no brush material: the selected patch's layers, each with its tiling.
+    void DrawLayerTilingList()
+    {
+        selbrush_t *node = FirstSelectedPatch();
+        if ( !node )
+            return;
+        const patchMesh_t *def = node->patch->def;
+        if ( !UsedSlotCount( def ) )
+            return;
+        ImGui::SeparatorText( "Layer tiling (selected patch)" );
+        ImGui::PushTextWrapPos( -1.0f );                // one line a row (see the layer rows)
+        BaseTilingControls( def );
+        ImGui::SameLine();
+        ImGui::Text( "Base  %s", BaseMaterialName( def ) );
+        for ( int k = 0; k < KTER_SLOTS; ++k )
+        {
+            if ( !SlotUsed( def, k ) )
+                continue;
+            char name[64];
+            strncpy( name, def->kiwiLayer[k], sizeof( name ) - 1 );    // the call may retile this patch
+            name[sizeof( name ) - 1] = '\0';
+            LayerScaleControls( name );
+            ImGui::SameLine();
+            ImGui::Text( "L%i  %s", k + 1, name );
+        }
+        ImGui::PopTextWrapPos();
+    }
+
     // ── the Texture paint section of the panel ───────────────────────────────
     void DrawTexturePaint( bool &changed )
     {
@@ -4705,6 +5230,13 @@ namespace
             }
             if ( ImGui::IsItemHovered() )
                 ImGui::SetTooltip( "Take the texture browser's current material." );
+            if ( !s_paintBase && s_paintMaterial[0] )
+            {
+                ImGui::TextUnformatted( "Layer tiling" );
+                ImGui::SameLine();
+                if ( !LayerScaleControls( s_paintMaterial ) )
+                    ImGui::TextDisabled( "(once painted)" );
+            }
             if ( ImGui::Checkbox( "Erase to base (paint every layer out)", &s_paintBase ) )
                 changed = true;
             ImGui::SameLine();
@@ -4736,16 +5268,64 @@ namespace
         }
         patchMesh_t *def = node->patch->def;
 
+        // KIWI: "huge gap here" - a row wider than the column wrapped its trailing status text one
+        // word per line (the panel's PushTextWrapPos).  Rows are now one fixed line that fits:
+        // tiling | radio + name (elided) | x (remove) | ! (no blend preview).  Never wrapped.
+        ImGui::PushTextWrapPos( -1.0f );
+        const float rowEnd = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        // The radio label, shortened with "..." so the row ends inside the column; `tail` = the
+        // width the controls after it need.
+        auto rowLabel = [&]( char *label, size_t size, const char *prefix, const char *name, float tail )
+        {
+            const float room = rowEnd - ImGui::GetCursorPosX() - ImGui::GetFrameHeight()
+                             - ImGui::GetStyle().ItemInnerSpacing.x - tail;
+            _snprintf( label, size, "%s%s", prefix, name );
+            label[size - 1] = '\0';
+            size_t keep = strlen( name );
+            while ( keep > 4 && ImGui::CalcTextSize( label ).x > room )
+            {
+                --keep;
+                _snprintf( label, size, "%s%.*s...", prefix, (int)keep, name );
+                label[size - 1] = '\0';
+            }
+        };
+        const float xButton = ImGui::CalcTextSize( "x" ).x + ImGui::GetStyle().FramePadding.x * 2.0f
+                            + ImGui::GetStyle().ItemSpacing.x;
+        const float bang    = ImGui::CalcTextSize( "!" ).x + ImGui::GetStyle().ItemSpacing.x;
+        // Row fit, measured for the test probe (KiwiTerrain_TestLayerRows): how far the widest row
+        // ends past the column, and the tallest row's line step.
+        const float rowEndScreen = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        s_rowStats.rows = 0;
+        s_rowStats.overflow = -FLT_MAX;
+        s_rowStats.step = 0.0f;
+        s_rowStats.line = ImGui::GetFrameHeightWithSpacing();
+        float rowTop = ImGui::GetCursorScreenPos().y;
+        auto rowDone = [&]()
+        {
+            const float right = ImGui::GetItemRectMax().x - rowEndScreen;
+            if ( right > s_rowStats.overflow )
+                s_rowStats.overflow = right;
+            const float y = ImGui::GetCursorScreenPos().y;  // the row's last item moved it to the next line
+            if ( y - rowTop > s_rowStats.step )
+                s_rowStats.step = y - rowTop;
+            rowTop = y;
+            ++s_rowStats.rows;
+        };
+
         // Base row: click = paint the base (erase layers).
         {
+            BaseTilingControls( def );
+            ImGui::SameLine();
             char label[160];
-            _snprintf( label, sizeof( label ), "Base  %s", BaseMaterialName( def ) );
-            label[sizeof( label ) - 1] = '\0';
+            rowLabel( label, sizeof( label ), "Base  ", BaseMaterialName( def ), 0.0f );
             if ( ImGui::RadioButton( label, s_paintBase ) )
             {
                 s_paintBase = true;
                 changed = true;
             }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", BaseMaterialName( def ) );
+            rowDone();
         }
         // Layer rows.
         for ( int k = 0; k < KTER_SLOTS; ++k )
@@ -4753,14 +5333,26 @@ namespace
             if ( !SlotUsed( def, k ) )
                 continue;
             ImGui::PushID( k );
-            char label[160];
-            _snprintf( label, sizeof( label ), "L%i  %s", k + 1, def->kiwiLayer[k] );
-            label[sizeof( label ) - 1] = '\0';
+            {
+                char name[64];
+                strncpy( name, def->kiwiLayer[k], sizeof( name ) - 1 );   // the call may retile this patch
+                name[sizeof( name ) - 1] = '\0';
+                LayerScaleControls( name );
+            }
+            ImGui::SameLine();
+            std::map<std::string, std::string>::iterator te = s_twinErr.find( def->kiwiLayer[k] );
+            const bool opaque = s_previewBlend && te != s_twinErr.end();
+            char prefix[8], label[160];
+            _snprintf( prefix, sizeof( prefix ), "L%i  ", k + 1 );
+            prefix[sizeof( prefix ) - 1] = '\0';
+            rowLabel( label, sizeof( label ), prefix, def->kiwiLayer[k], xButton + ( opaque ? bang : 0.0f ) );
             if ( ImGui::RadioButton( label, !s_paintBase && !_stricmp( s_paintMaterial, def->kiwiLayer[k] ) ) )
             {
                 SetPaintMaterial( def->kiwiLayer[k] );
                 changed = true;
             }
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "%s", def->kiwiLayer[k] );
             if ( AcceptMaterialDrop( dropped, sizeof( dropped ) ) )
             {
                 s_blendTwins.erase( std::string( dropped ) );
@@ -4768,30 +5360,25 @@ namespace
                 SwapLayerMaterial( def, k, dropped );
             }
             ImGui::SameLine();
-            if ( ImGui::SmallButton( "Remove" ) )
+            if ( ImGui::SmallButton( "x" ) )
             {
                 RemoveLayerSlot( def, k );
                 ImGui::PopID();
                 break;
             }
-            if ( s_previewBlend )
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Remove this layer and every weight painted with it." );
+            if ( opaque )
             {
-                std::map<std::string, std::string>::iterator te = s_twinErr.find( def->kiwiLayer[k] );
-                std::map<std::string, Material *>::iterator tw = s_blendTwins.find( def->kiwiLayer[k] );
                 ImGui::SameLine();
-                if ( te != s_twinErr.end() )
-                {
-                    ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ), "(opaque)" );
-                    if ( ImGui::IsItemHovered() )
-                        ImGui::SetTooltip( "No blend preview: %s", te->second.c_str() );
-                }
-                else if ( tw != s_blendTwins.end() && tw->second )
-                    ImGui::TextDisabled( "(blended)" );
-                else
-                    ImGui::TextDisabled( "(preview pending)" );
+                ImGui::TextColored( ImVec4( 1.0f, 0.55f, 0.3f, 1.0f ), "!" );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "No blend preview (the layer draws opaque in the camera): %s", te->second.c_str() );
             }
+            rowDone();
             ImGui::PopID();
         }
+        ImGui::PopTextWrapPos();
         ImGui::TextDisabled( "Click a row to paint with it; drop onto a row to swap its material." );
 
         // Add a layer by dragging a thumbnail out of the Textures tab.
@@ -4876,6 +5463,53 @@ void KiwiTerrain_OpenWithTool( int tool )
 bool KiwiTerrain_HideWireframe()
 {
     return s_armed && s_tool != KTER_GRASS;
+}
+
+// KIWI: "Make it so this works as a base layer approach." - the browser swapped only the base
+// material pointers (Brush_SetAllFacesMaterial, materialOnly); the layer slots and weights are
+// the terrain's own and stay.  A slot that names the new base is folded into it: painting the
+// base material is "erase to base", so that slot could never be painted again.  The base texture
+// is re-laid at the terrain texture size for the NEW material (a world size, never the density
+// the patch was born with - "The texture repeats 10+ times in 100 inches").  The apply's own undo
+// record saved the patch first, and redo takes it live, so this rides on that record.
+void KiwiTerrain_BaseRetextured( patchMesh_t *def )
+{
+    if ( !def || !( def->type & PATCH_TERRAIN ) )
+        return;
+    Load();
+    RelayBaseTexture( def );
+    const int slot = FindSlotByName( def, UnwrapTwinName( BaseMaterialName( def ) ) );
+    if ( slot >= 0 )
+    {
+        def->kiwiLayer[slot][0] = '\0';
+        SetSlotScale( def, slot, 1.0f, 1.0f );
+        if ( UsedSlotCount( def ) == 0 )
+            SetAllWeights( def, 0xFFFFFFFFu );     // no layers: the colour bytes go back to white
+        else
+            for ( int i = 0; i < def->width; ++i )
+                for ( int j = 0; j < def->height; ++j )
+                    ( (byte *)&def->ctrl[i][j].vert_color )[slot] = 0;
+        Sys_Printf( "Terrain: the new base '%s' was also a paint layer - folded into the base.\n",
+                    BaseMaterialName( def ) );
+    }
+    Patch_Rebuild( def, 0 );
+    ++def->version;
+    g_nUpdateBits = -1;
+}
+
+// The texcoord scale of VB run `run` (a layer run past the material's own `baseRuns`): its
+// slot's scale, so the editor shows each layer at the density cod4map compiles it with.
+// False for the base runs and for a layer at the base's own scale.
+bool KiwiTerrain_LayerStScale( patchMesh_t *def, int run, int baseRuns, float out[2] )
+{
+    if ( !def || run < baseRuns )
+        return false;
+    const int slot = NthUsedSlot( def, run - baseRuns );
+    if ( slot < 0 )
+        return false;
+    out[0] = SlotScale( def, slot, 0 );
+    out[1] = SlotScale( def, slot, 1 );
+    return out[0] != 1.0f || out[1] != 1.0f;
 }
 
 int KiwiTerrain_ExtraLayerCount( patchMesh_t *def )
@@ -5033,31 +5667,37 @@ void KiwiTerrain_Draw()
                                    "patch that then rises with the stroke - anywhere, no patch needed.\n"
                                    "Next to existing terrain the chunk continues its lattice, materials and\n"
                                    "layers at the neighbouring height (seams matched). With no terrain in\n"
-                                   "reach the cursor lands on brushes and models, else on the base height,\n"
-                                   "and the chunk wears the texture browser's current material.\n"
-                                   "Green squares preview the cells; a blue ring = base height, cyan = surface." );
+                                   "reach the cursor lands on the base height, the chunk is cut at the\n"
+                                   "Density cell size and wears the texture browser's current material.\n"
+                                   "Green squares preview the cells; a blue ring = base height." );
             if ( s_expand )
             {
                 ImGui::Indent();
-                changed |= UnitInputWorld( "Base height (Z)", &s_createZ, 160.0f );
+                changed |= ImGui::Checkbox( "Base height", &s_createZOn );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "Ticked: new terrain is laid at this height.\n"
+                                       "Unticked: at the height of the terrain nearest the cursor,\n"
+                                       "or 10 ft on a map without terrain." );
                 ImGui::SameLine();
-                if ( ImGui::Button( "From cursor##create" ) && s_cursorHave )
+                if ( s_createZOn )
                 {
-                    s_createZ = s_cursor[2];
-                    changed = true;
+                    changed |= UnitInputWorld( "##createz", &s_createZ, 120.0f );
+                    ImGui::SameLine();
+                    if ( ImGui::Button( "From cursor##create" ) && s_cursorHave )
+                    {
+                        s_createZ = s_cursor[2];
+                        changed = true;
+                    }
+                    if ( ImGui::IsItemHovered() )
+                        ImGui::SetTooltip( "Take the height under the hover ring (patch or plane)." );
                 }
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Take the height under the hover ring (patch, surface or plane)." );
-                ImGui::SetNextItemWidth( 160.0f );
-                changed |= ImGui::SliderInt( "Cells per new chunk", &s_createCells, 1, 15 );
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Grid density of a chunk laid with no terrain within reach\n"
-                                       "(reach = outer radius + chunk size). Chunks beside existing\n"
-                                       "terrain copy its cell size instead so the seams share points." );
-                changed |= ImGui::Checkbox( "Land on brushes and models", &s_createOnSurfaces );
-                if ( ImGui::IsItemHovered() )
-                    ImGui::SetTooltip( "Off the patches the cursor first tries the world's brushes and models;\n"
-                                       "untick to sculpt on the base height only, ignoring what is below." );
+                else
+                {
+                    char autoText[64];
+                    KiwiUnits_Format( autoText, sizeof( autoText ),
+                                      s_cursorHave ? BaseZAt( s_cursor[0], s_cursor[1] ) : KTER_DEFAULT_BASE_Z );
+                    ImGui::TextDisabled( "auto: %s", autoText );
+                }
                 ImGui::Unindent();
             }
             break;
@@ -5099,6 +5739,7 @@ void KiwiTerrain_Draw()
                                    "step, 3-4 turn a hard edge into a wide gradient." );
             ImGui::TextDisabled( "Blends every layer's weights toward their neighbours, seams included;\n"
                                  "textures that meet in steps become smooth transitions." );
+            DrawLayerTilingList();
             break;
         default:
             break;
@@ -5190,6 +5831,7 @@ void KiwiTerrain_Draw()
                                    "with no terrain in reach the lattice starts at the world origin." );
             if ( ImGui::Button( "Split oversized selected patches" ) )
                 SplitOversized();
+            KiwiWeld_DrawPanel();           // KIWI: "make it so the terrain chunks can never form seams"
             ImGui::SeparatorText( "Flatten to brushes" );
             ImGui::SetNextItemWidth( 120.0f );
             changed |= ImGui::InputFloat( "Flatness tolerance", &s_flatTol, 0.5f, 4.0f, "%.1f" );
@@ -5207,6 +5849,37 @@ void KiwiTerrain_Draw()
                                    "Patches that are not flat are kept; Set height them first to qualify.\n"
                                    "The new brushes stay SELECTED (flat highlight in the camera) - Esc to see\n"
                                    "their texture. Undoable." );
+            ImGui::SeparatorText( "Texture size" );
+            {
+                // a new value re-lays the selected terrain at once (one undo record)
+                bool relay = ImGui::Checkbox( "Fixed##texfixed", &s_texFixed );
+                if ( ImGui::IsItemHovered() )
+                    ImGui::SetTooltip( "World units one repeat of the base texture covers on new terrain, on\n"
+                                       "terrain retextured from the Textures browser, and - when changed here -\n"
+                                       "on the selected terrain. Unticked: the material's natural size (its\n"
+                                       "width x 0.25, 256 units for a 1024 texture). Seams line up across chunks." );
+                ImGui::SameLine();
+                if ( s_texFixed )
+                {
+                    relay |= UnitInputWorld( "##texsize", &s_texSize, 120.0f );
+                    ImGui::SameLine();
+                    if ( ImGui::SmallButton( "/2##tex" ) ) { s_texSize = ClampF( s_texSize * 0.5f, 1.0f, 65536.0f ); relay = true; }
+                    ImGui::SameLine();
+                    if ( ImGui::SmallButton( "x2##tex" ) ) { s_texSize = ClampF( s_texSize * 2.0f, 1.0f, 65536.0f ); relay = true; }
+                }
+                else
+                {
+                    ImGui::TextDisabled( "natural (material width x 0.25)" );
+                    ImGui::SameLine();
+                    relay |= ImGui::SmallButton( "Re-lay selected##tex" );
+                }
+                if ( relay )
+                {
+                    Sanitize();
+                    RelayTextureSelected();
+                    changed = true;
+                }
+            }
             ImGui::SeparatorText( "Density" );
             changed |= UnitInputWorld( "Cell size (absolute)", &s_tessCell, 160.0f );
             s_tessCell = ClampF( s_tessCell, 4.0f, 4096.0f );
@@ -5341,6 +6014,7 @@ static bool BeginStroke( bool shift, bool ctrl )
     s_undoOpen = true;
     Patch_Paint( &selected_brushes );
     Patch_Paint( &active_brushes );          // shared seam points may move unselected neighbours
+    KiwiWeld_GuardBegin();                   // KIWI: seams already open stay as they are (kiwi_weld.h)
     CaptureRiders();                         // "Carry objects": what rests on the targets now
 
     s_stroke    = true;
@@ -5396,7 +6070,14 @@ int KiwiTerrain_HudPrompts( const kiwiPrompt_t **out )
         HudAdd( prompts, &n, "Shift+LMB", "Smooth" );
         if ( CreationAllowed() )
         {
-            KiwiUnits_Format( baseText, sizeof( baseText ), s_createZ );
+            if ( s_createZOn )
+                KiwiUnits_Format( baseText, sizeof( baseText ), s_createZ );
+            else
+            {
+                char z[40];
+                KiwiUnits_Format( z, sizeof( z ), s_cursorHave ? BaseZAt( s_cursor[0], s_cursor[1] ) : KTER_DEFAULT_BASE_Z );
+                _snprintf_s( baseText, sizeof( baseText ), _TRUNCATE, "auto %s", z );
+            }
             HudAdd( prompts, &n, "V",    "Pick base height under cursor" );
             HudAdd( prompts, &n, "Base", baseText );
         }
@@ -5618,7 +6299,8 @@ bool KiwiTerrain_HandleKey( int vk )
         }
         if ( CreationAllowed() )
         {
-            s_createZ = s_cursor[2];
+            s_createZ   = s_cursor[2];
+            s_createZOn = true;                // a picked height is the one to use
             Save();
             char h[64];
             KiwiUnits_Format( h, sizeof( h ), s_createZ );
@@ -6126,8 +6808,18 @@ bool KiwiTerrain_TestSet( const char *key, float value )
     else if ( !_stricmp( key, "chunk" ) )       s_chunkSize = value;
     else if ( !_stricmp( key, "expand" ) )      s_expand = value != 0.0f;
     else if ( !_stricmp( key, "basez" ) )       s_createZ = value;
-    else if ( !_stricmp( key, "cells" ) )       s_createCells = (int)value;
-    else if ( !_stricmp( key, "surfaces" ) )    s_createOnSurfaces = value != 0.0f;
+    else if ( !_stricmp( key, "basezon" ) )     s_createZOn = value != 0.0f;
+    else if ( !_stricmp( key, "cell" ) )        s_tessCell = value;
+    else if ( !_stricmp( key, "texfixed" ) )    s_texFixed = value != 0.0f;
+    else if ( !_stricmp( key, "texsize" ) )     s_texSize = value;
+    else if ( !_stricmp( key, "relaytex" ) )    { Sanitize(); RelayTextureSelected(); }
+    else if ( !_stricmp( key, "defaults" ) )
+    {
+        for ( const kterPref_t &p : KTER_PREFS )
+            ResetPref( p );
+        RestripTwins();
+        HeatmapRefresh();
+    }
     else if ( !_stricmp( key, "targetz" ) )     s_targetZ = value;
     else if ( !_stricmp( key, "unselected" ) )  s_affectUnselected = value != 0.0f;
     else if ( !_stricmp( key, "carry" ) )       s_carryObjects = value != 0.0f;
@@ -6159,14 +6851,22 @@ static int CountPatches()
     return n;
 }
 
+// Control points over every patch: a sheet re-gridded in place keeps the patch count.
+static int CountPatchPoints()
+{
+    int n = 0;
+    ForEachNode( true, [&]( selbrush_t *b ) { n += b->patch ? b->patch->def->width * b->patch->def->height : 0; } );
+    return n;
+}
+
 bool KiwiTerrain_TestTessellate( float cell )
 {
     Load();
     if ( cell > 0.0f )
         s_tessCell = ClampF( cell, 4.0f, 4096.0f );
-    const int before = CountPatches();
+    const int before = CountPatches(), pointsBefore = CountPatchPoints();
     TessellateSelected();
-    return CountPatches() != before;
+    return CountPatches() != before || CountPatchPoints() != pointsBefore;
 }
 
 bool KiwiTerrain_TestSplit( float chunk )
@@ -6198,6 +6898,142 @@ void KiwiTerrain_TestArm( bool armed )
     SetArmed( armed );
 }
 
+// The terrain patch under (x, y) (a vertical ray), or null.
+static selbrush_t *TestPatchAt( float x, float y, float hit[3] )
+{
+    const float org[3] = { x, y, 65536.0f };
+    const float dir[3] = { 0.0f, 0.0f, -1.0f };
+    selbrush_t *node = nullptr;
+    return PickPatches( org, dir, true, hit, nullptr, &node ) ? node : nullptr;
+}
+
+bool KiwiTerrain_TestCellAt( float x, float y, float *outCellX, float *outCellY )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    *outCellX = CellSpan( node->patch->def, 0 );
+    *outCellY = CellSpan( node->patch->def, 1 );
+    return true;
+}
+
+bool KiwiTerrain_TestTexRepeat( float x, float y, float *outS, float *outT )
+{
+    Load();
+    float hit[3], m[6];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node || !PatchTexPlane( node->patch->def, m ) )
+        return false;
+    const float gs = sqrtf( m[0] * m[0] + m[1] * m[1] ), gt = sqrtf( m[3] * m[3] + m[4] * m[4] );
+    *outS = gs > 0.0f ? 1.0f / gs : FLT_MAX;
+    *outT = gt > 0.0f ? 1.0f / gt : FLT_MAX;
+    return true;
+}
+
+bool KiwiTerrain_TestSetLayerScale( const char *material, float scale )
+{
+    Load();
+    bool any = false;
+    ForEachNode( true, [&]( selbrush_t *b ) { any = any || ( PatchEligible( b ) && FindSlotByName( b->patch->def, material ) >= 0 ); } );
+    if ( !any )
+        return false;
+    SetLayerScaleForMaterial( material, scale );
+    return true;
+}
+
+int KiwiTerrain_TestLayerRows( float *outOverflow, float *outStep, float *outLine )
+{
+    *outOverflow = s_rowStats.overflow;
+    *outStep     = s_rowStats.step;
+    *outLine     = s_rowStats.line;
+    const int rows = s_rowStats.rows;
+    s_rowStats.rows = 0;                            // the next probe needs a fresh draw
+    return rows;
+}
+
+bool KiwiTerrain_TestSetBaseTiling( float x, float y, float tiling )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    SetBaseTilingForMaterial( node->patch->def, tiling );
+    return true;
+}
+
+bool KiwiTerrain_TestBaseTiling( float x, float y, float *outTiling )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    *outTiling = BaseTiling( node->patch->def );
+    return true;
+}
+
+bool KiwiTerrain_TestLayerScale( float x, float y, const char *material, float *outStored, float *outDrawn )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    patchMesh_t *def = node->patch->def;
+    const int slot = FindSlotByName( def, material );
+    if ( slot < 0 )
+        return false;
+    int run = 0;                                  // the slot's layer run, counted past the base runs
+    for ( int k = 0; k < slot; ++k )
+        run += SlotUsed( def, k ) ? 1 : 0;
+    float drawn[2] = { 1.0f, 1.0f };
+    KiwiTerrain_LayerStScale( def, run, 0, drawn );
+    *outStored = SlotScale( def, slot, 0 );
+    *outDrawn  = drawn[0];
+    return SlotScale( def, slot, 1 ) == *outStored && drawn[1] == drawn[0];
+}
+
+bool KiwiTerrain_TestBaseMaterial( float x, float y, char *out, int outSize )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    _snprintf_s( out, outSize, _TRUNCATE, "%s", BaseMaterialName( node->patch->def ) );
+    return true;
+}
+
+bool KiwiTerrain_TestLayerWeight( float x, float y, const char *material, int *outWeight )
+{
+    Load();
+    float hit[3];
+    selbrush_t *node = TestPatchAt( x, y, hit );
+    if ( !node )
+        return false;
+    const patchMesh_t *def = node->patch->def;
+    const int slot = FindSlotByName( def, material );
+    *outWeight = -1;
+    if ( slot < 0 )
+        return true;
+    float best = FLT_MAX;
+    for ( int i = 0; i < def->width; ++i )
+        for ( int j = 0; j < def->height; ++j )
+        {
+            const float *q = def->ctrl[i][j].xyz;
+            const float d2 = ( q[0] - x ) * ( q[0] - x ) + ( q[1] - y ) * ( q[1] - y );
+            if ( d2 < best )
+            {
+                best = d2;
+                *outWeight = ( (const byte *)&def->ctrl[i][j].vert_color )[slot];
+            }
+        }
+    return true;
+}
+
 bool KiwiTerrain_TestHeightAt( float x, float y, float *outZ )
 {
     Load();
@@ -6208,6 +7044,50 @@ bool KiwiTerrain_TestHeightAt( float x, float y, float *outZ )
         return false;
     *outZ = hit[2];
     return true;
+}
+
+// The terrain patches under (x0, y0) and (x1, y1) run the same way: grid axes within
+// ~10 degrees (index for index), and their texture planes agree - the same s/t steps per
+// unit (1%) and, at the midpoint, the same texel to within half a world unit.
+bool KiwiTerrain_TestGridMatch( float x0, float y0, float x1, float y1, char *why, int whySize )
+{
+    Load();
+    const float dir[3] = { 0.0f, 0.0f, -1.0f };
+    const float o0[3] = { x0, y0, 65536.0f }, o1[3] = { x1, y1, 65536.0f };
+    float hit[3];
+    selbrush_t *n0 = nullptr, *n1 = nullptr;
+    if ( !PickPatches( o0, dir, true, hit, nullptr, &n0 ) || !PickPatches( o1, dir, true, hit, nullptr, &n1 ) )
+    {
+        _snprintf_s( why, whySize, _TRUNCATE, "no terrain under one of the points" );
+        return false;
+    }
+    if ( n0 == n1 )
+    {
+        _snprintf_s( why, whySize, _TRUNCATE, "both points are on the same patch" );
+        return false;
+    }
+    const patchMesh_t *p0 = n0->patch->def, *p1 = n1->patch->def;
+    float u0[2], v0[2], u1[2], v1[2], m0[6], m1[6];
+    if ( !PatchGridAxes( p0, u0, v0 ) || !PatchGridAxes( p1, u1, v1 ) || !PatchTexPlane( p0, m0 ) || !PatchTexPlane( p1, m1 ) )
+    {
+        _snprintf_s( why, whySize, _TRUNCATE, "a patch has no grid axes or texture plane" );
+        return false;
+    }
+    const float du = u0[0] * u1[0] + u0[1] * u1[1], dv = v0[0] * v1[0] + v0[1] * v1[1];
+    float grad = 0.0f, gradDiff = 0.0f;
+    for ( int k = 0; k < 6; ++k )
+        if ( k != 2 && k != 5 )
+        {
+            grad     = grad > fabsf( m1[k] ) ? grad : fabsf( m1[k] );
+            gradDiff = gradDiff > fabsf( m0[k] - m1[k] ) ? gradDiff : fabsf( m0[k] - m1[k] );
+        }
+    const float mx = ( x0 + x1 ) * 0.5f, my = ( y0 + y1 ) * 0.5f;
+    const float ds = ( m0[0] - m1[0] ) * mx + ( m0[1] - m1[1] ) * my + m0[2] - m1[2];
+    const float dt = ( m0[3] - m1[3] ) * mx + ( m0[4] - m1[4] ) * my + m0[5] - m1[5];
+    const float offUnits = grad > 0.0f ? sqrtf( ds * ds + dt * dt ) / grad : FLT_MAX;
+    _snprintf_s( why, whySize, _TRUNCATE, "axes u.u=%.3f v.v=%.3f, tex step %g (diff %g), offset %.3f units",
+                 du, dv, grad, gradDiff, offUnits );
+    return du > 0.985f && dv > 0.985f && gradDiff <= grad * 0.01f && offUnits <= 0.5f;
 }
 
 // One whole stroke without a mouse: a vertical ray dropped through (x, y) is resolved

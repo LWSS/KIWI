@@ -67,3 +67,41 @@ int  KiwiPatchFillet_ContextB( int commandId );
 int KiwiFillet_CarryOnPlaneMove( const brush_t *def, int movedFace,
                                  const float planeN[3], float planeDistBefore,
                                  float travel, int *outSkipped );
+
+// KIWI (2026-11-01): a patch textured as a continuation of the brush face it meets, so curve and
+// brush read as one surface.  A flat patch takes the face that is coplanar with it, facing the
+// same way and touching it, and gets that face's own planar mapping (same texdef, same
+// projection: no seam).  A curved patch takes the face that holds a whole end column and runs on
+// from it - the curve's start tangent lies in the face, as an arch's leaves its side wall - and
+// gets that face's mapping wrapped round the curve by arc length, as a fillet's is.  Layer 0
+// only; the caller owns undo and rebuilds.  Null / false: no such face.
+struct face_t;
+struct patchMesh_t;
+const face_t *KiwiPatch_FindSourceFace( const patchMesh_t *p, brush_t *const *brushes, int count );
+bool          KiwiPatch_TextureFromFace( patchMesh_t *p, const face_t *src );
+
+// KIWI (2026-11-01, user: "match the ceiling to both sides of the arch ... match the left side
+// wall, and for the right side, scroll the brush texture down Z and get it to match that way"):
+// after a curve was wrapped from `src`, the brush faces its OTHER end runs into - the far face
+// (as KiwiPatch_FindSourceFace picks one) and every face among `brushes` that is coplanar with it
+// and carries the same mapping, i.e. that whole wall - and the scroll in repeats (s, t; whole
+// repeats dropped) that lands their mapping on the curve's there.  An unfolded wrap meets the far
+// wall upside down; KiwiPatch_MatchTexture folds it first.  0: no far face, or no single scroll
+// matches (its texture runs at another size or angle).
+struct kpatchFaceRef_t
+{
+    brush_t *brush;
+    int      face;
+};
+int  KiwiPatch_FarFaces( const patchMesh_t *p, const face_t *src, brush_t *const *brushes, int count,
+                         kpatchFaceRef_t *out, int max, float scroll[2] );
+// Scrolls one face's layer-0 texture by `scroll` repeats (its texdef shift) and rebuilds the
+// brush's windings.  The caller owns undo.
+void KiwiPatch_ScrollFace( brush_t *b, int face, const float scroll[2] );
+
+// The whole match: KiwiPatch_TextureFromFace, and for a curve that comes down onto a far wall
+// among `brushes` (an arch between two sides) the wrap folds at the crown instead - each half
+// runs up from its own side the right way up - and the far wall + its scroll come back as
+// KiwiPatch_FarFaces gives them, for the caller to cover in undo and apply.  -1: no match at all.
+int  KiwiPatch_MatchTexture( patchMesh_t *p, const face_t *src, brush_t *const *brushes, int count,
+                             kpatchFaceRef_t *out, int max, float scroll[2] );

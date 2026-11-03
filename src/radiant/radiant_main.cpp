@@ -983,6 +983,12 @@ static bool Radiant_PreTranslateMessage( MSG *pMsg )
     // below is bit-for-bit what it was.  Swallowing the WM_KEYDOWN also suppresses its WM_CHAR
     // (the pump only calls TranslateMessage when this function returns false).
     {
+        // KIWI (2026-11-01, user: "allow arrow keys to move a selection precisely in the UV
+        // editor"): the UV editor, focused or hovered, takes the arrows first - else they
+        // would also drive the 3D hotkeys bound to them.
+        extern bool KiwiUvEd_KeyDown( unsigned int vk );   // kiwi_uveditor.cpp
+        if ( pMsg->message == WM_KEYDOWN && KiwiUvEd_KeyDown( (unsigned int)pMsg->wParam ) )
+            return true;
         extern bool KiwiUX_KeyFunnel( unsigned int vk );   // kiwi_command.cpp
         if ( pMsg->message == WM_KEYDOWN && KiwiUX_KeyFunnel( (unsigned int)pMsg->wParam ) )
             return true;

@@ -24,6 +24,7 @@
 #include "kiwi_validity.h"
 #include "kiwi_vec.h"     // shared vector helpers
 
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,7 +39,10 @@ extern void         Patch_KiwiFinishNew( patchMesh_t *p );                    //
 extern void         Patch_KiwiFinishNewLike( patchMesh_t *p, const texdef_sub_t *srcTex );
 // Per-patch 0x4397B0 forwarder keeps Lmap alignment inside this undo bracket.
 extern void         Patch_KiwiLmapAlign( patchMesh_t *p );                    // pmesh.cpp
-extern void         Patch_KiwiCapAlign( patchMesh_t *p );                     // pmesh.cpp
+extern curvePatchDef_t *Patch_GenericMesh2( patchMesh_t *p, int layer, int *colMap, int *rowMap ); // pmesh.cpp 0x438b60
+extern void         Brush_SetFaceTexdefSize( const patchMesh_material *material, face_t *f,
+                                             brush_t *b );                    // brush.cpp (0x476740)
+extern void         TexMatToFakeTexCoords( MaterialDef *def, texdef_sub_t *texDef ); // materialdef.cpp:377
 
 namespace
 {
@@ -146,6 +150,124 @@ namespace
     inline float ChamferDepth( const filletUnit_t &u, float r )
     {
         return r * ( 1.0f - u.k * u.k ) / u.k;
+    }
+
+    // Arc length of one quadratic span (even, odd, even controls).
+    float QuadSpanLength( const float *p0, const float *p1, const float *p2 )
+    {
+        const int N = 8;
+        float prev[3] = { p0[0], p0[1], p0[2] }, len = 0.0f;
+        for ( int i = 1; i <= N; ++i )
+        {
+            const float t = (float)i / (float)N, s = 1.0f - t;
+            float q[3], d[3];
+            for ( int k = 0; k < 3; ++k )
+                q[k] = s * s * p0[k] + 2.0f * s * t * p1[k] + t * t * p2[k];
+            Sub3( q, prev, d );
+            len += Len3( d );
+            Copy3( q, prev );
+        }
+        return len;
+    }
+
+    // KIWI (2026-11-01, user: "the UV's on the bevel fillet here don't look right and they're
+    // really hard to match up to the rest of the shapes"): the arc was CAP-aligned - one bbox
+    // face's planar projection, so strips leaning away from it stretched and strips edge-on to
+    // it piled onto each other.  The source face's own mapping is wrapped round the arc instead,
+    // a sheet bent over the corner: the end column on the source plane takes the face's s/t,
+    // and each row runs on by arc length at the face's density, in the direction the face's
+    // texture was heading at that edge.  Layer 0 only; false leaves the patch untouched.
+    //
+    // KIWI (2026-11-01, user, of an arch cut into a wall, far side: "the textures still aren't
+    // aligned on that side"): one wrap runs one way, so it met the far side wall upside down.
+    // `fold` turns it back at the span end nearest half the arc - the crown, a keystone - so
+    // each half runs up from its own side the right way up and the far side meets it unflipped.
+    bool WrapArcST( patchMesh_t *p, const face_t *src, bool fold = false )
+    {
+        const texdef_sub_t &td = src->mtldef[0].mat_texDef;
+        if ( p->width < 3 || !( p->width & 1 ) || td.size[0] == 0.0f || td.size[1] == 0.0f )
+            return false;
+        float m[8];
+        Face_MoveTexture( td.size, src->plane.normal, m, td.shift, td.rotate, td.crossterm );
+        const float *n = src->plane.normal;
+        const float  d = src->plane.dist;
+
+        // The arc starts on whichever end column lies on the source plane.
+        const int last = p->width - 1;
+        float off0 = 0.0f, offN = 0.0f;
+        for ( int r = 0; r < p->height; ++r )
+        {
+            off0 = fmaxf( off0, fabsf( Dot3( n, p->ctrl[0][r].xyz ) - d ) );
+            offN = fmaxf( offN, fabsf( Dot3( n, p->ctrl[last][r].xyz ) - d ) );
+        }
+        const bool rev = offN < off0;
+        auto col = [&]( int i ) { return rev ? last - i : i; };
+
+        float base[16][2], rate[16][2];             // patchMesh_t::ctrl[16][16]
+        if ( p->height > 16 )
+            return false;
+        for ( int r = 0; r < p->height; ++r )
+        {
+            const float *a = p->ctrl[col( 0 )][r].xyz;
+            float on[3], t[3];
+            Mad3( a, n, d - Dot3( n, a ), on );
+            Sub3( p->ctrl[col( 1 )][r].xyz, a, t );
+            Mad3( t, n, -Dot3( t, n ), t );          // the arc's start tangent, in the plane
+            if ( !Norm3( t ) )
+                return false;
+            base[r][0] = Dot3( &m[0], on ) + m[3];
+            base[r][1] = Dot3( &m[4], on ) + m[7];
+            rate[r][0] = Dot3( &m[0], t );
+            rate[r][1] = Dot3( &m[4], t );
+        }
+        // The fold: the span end nearest half the middle row's length.
+        int foldCol = last;
+        if ( fold )
+        {
+            const int mid = p->height / 2;
+            float total = 0.0f;
+            for ( int c = 0; c + 2 < p->width; c += 2 )
+                total += QuadSpanLength( p->ctrl[col( c )][mid].xyz, p->ctrl[col( c + 1 )][mid].xyz,
+                                         p->ctrl[col( c + 2 )][mid].xyz );
+            float len = 0.0f, best = FLT_MAX;
+            for ( int c = 0; c + 2 < p->width; c += 2 )
+            {
+                len += QuadSpanLength( p->ctrl[col( c )][mid].xyz, p->ctrl[col( c + 1 )][mid].xyz,
+                                       p->ctrl[col( c + 2 )][mid].xyz );
+                if ( fabsf( len - total * 0.5f ) < best )
+                {
+                    best    = fabsf( len - total * 0.5f );
+                    foldCol = c + 2;
+                }
+            }
+        }
+        for ( int r = 0; r < p->height; ++r )
+        {
+            float len = 0.0f, foldLen = 0.0f;
+            float *a = p->ctrl[col( 0 )][r].texCoord.st;
+            a[0] = base[r][0];
+            a[1] = base[r][1];
+            for ( int c = 0; c + 2 < p->width; c += 2 )
+            {
+                len += QuadSpanLength( p->ctrl[col( c )][r].xyz, p->ctrl[col( c + 1 )][r].xyz,
+                                       p->ctrl[col( c + 2 )][r].xyz );
+                if ( c + 2 == foldCol )
+                    foldLen = len;
+                const float run = ( c + 2 <= foldCol ) ? len : 2.0f * foldLen - len;   // back down past the fold
+                float *s0 = p->ctrl[col( c )][r].texCoord.st;
+                float *h  = p->ctrl[col( c + 1 )][r].texCoord.st;
+                float *s2 = p->ctrl[col( c + 2 )][r].texCoord.st;
+                s2[0] = base[r][0] + rate[r][0] * run;
+                s2[1] = base[r][1] + rate[r][1] * run;
+                h[0] = 0.5f * ( s0[0] + s2[0] );     // linear in the span parameter
+                h[1] = 0.5f * ( s0[1] + s2[1] );
+            }
+        }
+        if ( p->curveDef )
+            free( p->curveDef );
+        p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+        ++p->version;
+        return true;
     }
 
     // Modal chamfer / patch-fillet command.
@@ -1721,16 +1843,26 @@ namespace
                 // Finish first to seed the remaining layers and stored sample size;
                 // the arc's final alignment is CAP after its symbiont is linked.
                 brush_t    *pdef = AddBrushForPatch( p, (entity_s *)owner->def );
-                // The arc uses CAP, while end caps keep Lmap. CAP must follow
-                // AddBrushForPatch because Patch_GetAxisFace reads p->pSymbiot;
-                // Lmap does not, so LandCaps may align before linking.
-                Patch_KiwiCapAlign( p );
+                // The arc wraps the source face's texture round the curve (WrapArcST);
+                // end caps keep Lmap.  If the wrap declines, the natural layout stays.
+                WrapArcST( p, src );
                 selbrush_t *inst = Brush_AddToList( pdef, owner );
                 Brush_AddToList2( inst );         // → selected_brushes, where the
                                                   // bracket TAIL will stamp it
                 ++made;
 
                 made += LandCaps( u, src, owner, rUse, refit, rail0, railN );
+
+                // KIWI (2026-11-01, user: "the underlying chamfer that's hidden under the curve
+                // can be caulked automatically"): the arc and its sealed ends enclose the chamfer
+                // face, so it never shows - caulk it (material only, as Caulk Selection does).
+                // The solid was covered by OpenUndoForBrushes, so this is in the fillet's record.
+                if ( Texture_GetHandle( "caulk" ) && u.faceIndex < u.e.def->faceCount )
+                {
+                    patchMesh_material caulk{};
+                    SetMaterial( "caulk", &caulk );
+                    Brush_SetFaceTexdefSize( &caulk, &u.e.def->faces[u.faceIndex], u.e.def );
+                }
             }
 
             // Rebuild typed selection after the solids gained faces and patches landed.
@@ -2171,4 +2303,330 @@ int KiwiFillet_CarryOnPlaneMove( const brush_t *def, int movedFace,
     if ( outSkipped )
         *outSkipped = skipped;
     return moved;
+}
+
+// ── Patch texture from a brush face ─────────────────────────────────────────────
+// KIWI (2026-11-01, user, of an extruded arch: "the UV's are impossible to lineup on this
+// curve/brush combo. There is no possible way to make the curved surfaces look natural in
+// comparison to the brush"): see kiwi_patchfillet.h.
+namespace
+{
+    const float KPT_ON_PLANE   = 0.1f;     // a control point lies on a face plane
+    const float KPT_TOUCH      = 0.5f;     // bbox slack for "touches the face"
+    const float KPT_FLAT       = 0.05f;    // control-net planarity
+    const float KPT_TANGENT_IN = 0.75f;    // |start tangent . face normal| allowed for a wrap
+
+    // The control net's area normal (Newell over every cell): the sense of cross(dCol, dRow).
+    bool PatchNetNormal( const patchMesh_t *p, float n[3] )
+    {
+        n[0] = n[1] = n[2] = 0.0f;
+        for ( int c = 0; c + 1 < p->width; ++c )
+            for ( int r = 0; r + 1 < p->height; ++r )
+            {
+                const float *q[4] = { p->ctrl[c][r].xyz, p->ctrl[c + 1][r].xyz,
+                                      p->ctrl[c + 1][r + 1].xyz, p->ctrl[c][r + 1].xyz };
+                for ( int i = 0; i < 4; ++i )
+                {
+                    const float *a = q[i], *b = q[( i + 1 ) & 3];
+                    n[0] += ( a[1] - b[1] ) * ( a[2] + b[2] );
+                    n[1] += ( a[2] - b[2] ) * ( a[0] + b[0] );
+                    n[2] += ( a[0] - b[0] ) * ( a[1] + b[1] );
+                }
+            }
+        return Norm3( n );
+    }
+
+    bool WindingBounds( const face_t &f, float mins[3], float maxs[3] )
+    {
+        const winding_t *w = f.w;
+        if ( !w || w->numpoints < 3 )
+            return false;
+        for ( int k = 0; k < 3; ++k )
+        {
+            mins[k] = FLT_MAX;
+            maxs[k] = -FLT_MAX;
+        }
+        for ( int i = 0; i < w->numpoints; ++i )
+            for ( int k = 0; k < 3; ++k )
+            {
+                mins[k] = fminf( mins[k], w->p[i][k] - KPT_TOUCH );
+                maxs[k] = fmaxf( maxs[k], w->p[i][k] + KPT_TOUCH );
+            }
+        return true;
+    }
+
+    bool InBounds( const float *pt, const float mins[3], const float maxs[3] )
+    {
+        return pt[0] >= mins[0] && pt[0] <= maxs[0] && pt[1] >= mins[1] && pt[1] <= maxs[1]
+            && pt[2] >= mins[2] && pt[2] <= maxs[2];
+    }
+
+    float PlaneOff( const face_t &f, const float *pt )
+    {
+        return fabsf( Dot3( f.plane.normal, pt ) - f.plane.dist );
+    }
+
+    // KIWI (2026-11-01, user: the far side of a cut arch's ceiling showed a "Texture offset"):
+    // a curve runs on from a face, so the face must reach back past the column, against the
+    // curve's run `t`.  Beside a cut doorway's side wall lies the hidden face of the pocket above
+    // the springing, on the same plane and holding the same column but running WITH the curve;
+    // it is not the wall the curve continues.
+    bool ReachesBack( const face_t &f, const float *col, const float t[3] )
+    {
+        for ( int i = 0; i < f.w->numpoints; ++i )
+        {
+            float d[3];
+            Sub3( f.w->p[i], col, d );
+            if ( Dot3( d, t ) < -0.5f )
+                return true;
+        }
+        return false;
+    }
+}
+
+const face_t *KiwiPatch_FindSourceFace( const patchMesh_t *p, brush_t *const *brushes, int count )
+{
+    if ( !p || p->width < 3 || p->height < 2 )
+        return nullptr;
+    float pn[3];
+    const bool haveNormal = PatchNetNormal( p, pn );
+    bool flat = haveNormal;
+    float pmins[3] = { FLT_MAX, FLT_MAX, FLT_MAX }, pmaxs[3] = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+    for ( int c = 0; c < p->width; ++c )
+        for ( int r = 0; r < p->height; ++r )
+        {
+            const float *x = p->ctrl[c][r].xyz;
+            float d[3];
+            Sub3( x, p->ctrl[0][0].xyz, d );
+            if ( haveNormal && fabsf( Dot3( d, pn ) ) > KPT_FLAT )
+                flat = false;
+            for ( int k = 0; k < 3; ++k )
+            {
+                pmins[k] = fminf( pmins[k], x[k] );
+                pmaxs[k] = fmaxf( pmaxs[k], x[k] );
+            }
+        }
+
+    const face_t *best = nullptr;
+    float bestScore = FLT_MAX;
+    for ( int b = 0; b < count; ++b )
+    {
+        const brush_t *def = brushes[b];
+        if ( !def || def->patch || !def->faces )
+            continue;
+        for ( int fi = 0; fi < def->faceCount; ++fi )
+        {
+            const face_t &f = def->faces[fi];
+            float fmins[3], fmaxs[3];
+            if ( !WindingBounds( f, fmins, fmaxs ) )
+                continue;
+            if ( flat )
+            {
+                // Coplanar, facing the same way, and touching.
+                if ( Dot3( f.plane.normal, pn ) < 0.999f || PlaneOff( f, p->ctrl[0][0].xyz ) > KPT_ON_PLANE )
+                    continue;
+                bool touch = true;
+                for ( int k = 0; k < 3 && touch; ++k )
+                    touch = pmins[k] <= fmaxs[k] && pmaxs[k] >= fmins[k];
+                if ( touch )
+                    return &f;
+                continue;
+            }
+            // A whole end column on the face, the curve leaving it along the face.
+            const int mid = p->height / 2;
+            for ( int end = 0; end < 2; ++end )
+            {
+                const int col = end ? p->width - 1 : 0, next = end ? p->width - 2 : 1;
+                bool on = true;
+                for ( int r = 0; r < p->height && on; ++r )
+                    on = PlaneOff( f, p->ctrl[col][r].xyz ) <= KPT_ON_PLANE
+                      && InBounds( p->ctrl[col][r].xyz, fmins, fmaxs );
+                if ( !on )
+                    continue;
+                float t[3];
+                Sub3( p->ctrl[next][mid].xyz, p->ctrl[col][mid].xyz, t );
+                if ( !Norm3( t ) || !ReachesBack( f, p->ctrl[col][mid].xyz, t ) )
+                    continue;
+                const float score = fabsf( Dot3( t, f.plane.normal ) );
+                if ( score < KPT_TANGENT_IN && score < bestScore )
+                {
+                    bestScore = score;
+                    best = &f;
+                }
+            }
+        }
+    }
+    return best;
+}
+
+bool KiwiPatch_TextureFromFace( patchMesh_t *p, const face_t *src )
+{
+    if ( !p || !src )
+        return false;
+    float pn[3];
+    bool flat = PatchNetNormal( p, pn ) && fabsf( Dot3( pn, src->plane.normal ) ) > 0.999f;
+    for ( int c = 0; c < p->width && flat; ++c )
+        for ( int r = 0; r < p->height && flat; ++r )
+            flat = PlaneOff( *src, p->ctrl[c][r].xyz ) <= KPT_ON_PLANE;
+    if ( !flat )
+        return WrapArcST( p, src );
+
+    // The face's own projection (Face_MoveTexture, as the brush draws it).
+    const texdef_sub_t &td = src->mtldef[0].mat_texDef;
+    float m[8];
+    Face_MoveTexture( td.size, src->plane.normal, m, td.shift, td.rotate, td.crossterm );
+    for ( int c = 0; c < p->width; ++c )
+        for ( int r = 0; r < p->height; ++r )
+        {
+            float *st = p->ctrl[c][r].texCoord.st;
+            st[0] = Dot3( &m[0], p->ctrl[c][r].xyz ) + m[3];
+            st[1] = Dot3( &m[4], p->ctrl[c][r].xyz ) + m[7];
+        }
+    if ( p->curveDef )
+        free( p->curveDef );
+    p->curveDef = Patch_GenericMesh2( p, g_qeglobals.current_edit_layer, 0, 0 );
+    ++p->version;
+    return true;
+}
+
+namespace
+{
+    // A face's layer-0 mapping (Face_MoveTexture, as the brush draws it).
+    void FaceMapping( const face_t &f, float m[8] )
+    {
+        const texdef_sub_t &td = f.mtldef[0].mat_texDef;
+        Face_MoveTexture( td.size, f.plane.normal, m, td.shift, td.rotate, td.crossterm );
+    }
+}
+
+int KiwiPatch_FarFaces( const patchMesh_t *p, const face_t *src, brush_t *const *brushes, int count,
+                        kpatchFaceRef_t *out, int max, float scroll[2] )
+{
+    if ( !p || !src || p->width < 3 || max < 1 )
+        return 0;
+    // The start column is the one WrapArcST took: the end lying on the source plane.
+    const int last = p->width - 1;
+    float off0 = 0.0f, offN = 0.0f;
+    for ( int r = 0; r < p->height; ++r )
+    {
+        off0 = fmaxf( off0, PlaneOff( *src, p->ctrl[0][r].xyz ) );
+        offN = fmaxf( offN, PlaneOff( *src, p->ctrl[last][r].xyz ) );
+    }
+    const int farCol = ( offN < off0 ) ? 0 : last, next = farCol ? last - 1 : 1, mid = p->height / 2;
+    float t[3];
+    Sub3( p->ctrl[next][mid].xyz, p->ctrl[farCol][mid].xyz, t );
+    if ( !Norm3( t ) )
+        return 0;
+
+    // The far face: holding the whole far column, the curve running into it along it.
+    brush_t *fb = nullptr;
+    int      ff = -1;
+    float    bestScore = KPT_TANGENT_IN;
+    for ( int b = 0; b < count; ++b )
+    {
+        brush_t *def = brushes[b];
+        if ( !def || def->patch || !def->faces )
+            continue;
+        for ( int fi = 0; fi < def->faceCount; ++fi )
+        {
+            const face_t &f = def->faces[fi];
+            float fmins[3], fmaxs[3];
+            if ( &f == src || !WindingBounds( f, fmins, fmaxs ) )
+                continue;
+            if ( Dot3( f.plane.normal, src->plane.normal ) > 0.9999f
+              && fabsf( f.plane.dist - src->plane.dist ) < KPT_ON_PLANE )
+                continue;                        // the source wall itself (a closed curve)
+            bool on = true;
+            for ( int r = 0; r < p->height && on; ++r )
+                on = PlaneOff( f, p->ctrl[farCol][r].xyz ) <= KPT_ON_PLANE && InBounds( p->ctrl[farCol][r].xyz, fmins, fmaxs );
+            on = on && ReachesBack( f, p->ctrl[farCol][mid].xyz, t );
+            const float score = fabsf( Dot3( t, f.plane.normal ) );
+            if ( on && score < bestScore )
+            {
+                bestScore = score;
+                fb = def;
+                ff = fi;
+            }
+        }
+    }
+    if ( !fb )
+        return 0;
+
+    // One scroll for the whole column, or none.
+    const face_t &F = fb->faces[ff];
+    float m[8], d0[2] = { 0.0f, 0.0f };
+    FaceMapping( F, m );
+    for ( int r = 0; r < p->height; ++r )
+    {
+        const float *x = p->ctrl[farCol][r].xyz, *st = p->ctrl[farCol][r].texCoord.st;
+        const float d[2] = { st[0] - ( Dot3( &m[0], x ) + m[3] ), st[1] - ( Dot3( &m[4], x ) + m[7] ) };
+        if ( !r )
+        {
+            d0[0] = d[0];
+            d0[1] = d[1];
+        }
+        else if ( fabsf( d[0] - d0[0] ) > 1.0e-3f || fabsf( d[1] - d0[1] ) > 1.0e-3f )
+            return 0;
+    }
+    scroll[0] = d0[0] - floorf( d0[0] + 0.5f );
+    scroll[1] = d0[1] - floorf( d0[1] + 0.5f );
+
+    // That wall: F's plane and facing, carrying F's mapping.
+    int n = 0;
+    for ( int b = 0; b < count && n < max; ++b )
+    {
+        brush_t *def = brushes[b];
+        if ( !def || def->patch || !def->faces )
+            continue;
+        for ( int fi = 0; fi < def->faceCount && n < max; ++fi )
+        {
+            const face_t &f = def->faces[fi];
+            if ( !f.w || Dot3( f.plane.normal, F.plane.normal ) < 0.9999f || fabsf( f.plane.dist - F.plane.dist ) > KPT_ON_PLANE )
+                continue;
+            float mf[8];
+            FaceMapping( f, mf );
+            bool same = true;
+            for ( int k = 0; k < 8 && same; ++k )
+                same = fabsf( mf[k] - m[k] ) < 1.0e-5f;
+            if ( same )
+            {
+                out[n].brush = def;
+                out[n].face  = fi;
+                ++n;
+            }
+        }
+    }
+    return n;
+}
+
+int KiwiPatch_MatchTexture( patchMesh_t *p, const face_t *src, brush_t *const *brushes, int count,
+                            kpatchFaceRef_t *out, int max, float scroll[2] )
+{
+    if ( !KiwiPatch_TextureFromFace( p, src ) )
+        return -1;
+    float pn[3];
+    bool flat = PatchNetNormal( p, pn ) && fabsf( Dot3( pn, src->plane.normal ) ) > 0.999f;
+    for ( int c = 0; c < p->width && flat; ++c )
+        for ( int r = 0; r < p->height && flat; ++r )
+            flat = PlaneOff( *src, p->ctrl[c][r].xyz ) <= KPT_ON_PLANE;
+    if ( flat )
+        return 0;                                // the face's own projection: no far end
+    if ( !KiwiPatch_FarFaces( p, src, brushes, count, out, max, scroll ) )
+        return 0;
+    WrapArcST( p, src, true );
+    return KiwiPatch_FarFaces( p, src, brushes, count, out, max, scroll );
+}
+
+void KiwiPatch_ScrollFace( brush_t *b, int face, const float scroll[2] )
+{
+    if ( !b || face < 0 || face >= b->faceCount )
+        return;
+    // Face_MoveTexture: st offset = -shift / size (a zero size reads as 128).
+    MaterialDef  *md = &b->faces[face].mtldef[0];
+    texdef_sub_t &td = md->mat_texDef;
+    for ( int k = 0; k < 2; ++k )
+        td.shift[k] -= scroll[k] * ( td.size[k] != 0.0f ? td.size[k] : 128.0f );
+    TexMatToFakeTexCoords( md, &td );
+    Brush_BuildWindings( b, 1 );
+    ++b->version;
 }

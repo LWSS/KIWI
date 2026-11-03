@@ -23,13 +23,16 @@
 #include "kiwi_pick.h"
 #include "kiwi_snap.h"
 
-// Reserved ids: 34001..34029 are instant, 34030..34069 modal, and
-// 34100..34199 the second instant block. Next free: instant 34175, modal none (block full).
-// Every id in the modal block routes through KiwiCmd_Start before instant dispatch.
+// Reserved ids: 34001..34029 are instant, 34030..34069 modal, 34100..34174 the second
+// instant block, and 34175..34184 the second modal block.  Next free: instant 34185, modal 34176.
+// Every id in either modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
 #define KIWI_CMD_MODAL_FIRST        34030
 #define KIWI_CMD_MODAL_LAST         34069
+// KIWI (2026-11-01): the first modal block is full; the second takes the instant block's free tail.
+#define KIWI_CMD_MODAL2_FIRST       34175
+#define KIWI_CMD_MODAL2_LAST        34184
 
 #define KIWI_CMD_SELMODE_POINT      34001   // §11 selection-mode chips, modern keys 1..5
 #define KIWI_CMD_SELMODE_EDGE       34002
@@ -184,10 +187,15 @@
 #define KIWI_CMD_CLEAN_PRECISION    34168   // Build > Clean Up Precision (kiwi_fragile)
 #define KIWI_CMD_WINDOW_MATPROPS    34173   // Windows > Material Properties (kiwi_matprops) - KIWI (2026-10-26, user: "material properties panel")
 #define KIWI_CMD_VIEW_BG_FPS_CAP    34174   // View > Background Frame Cap (5 fps) - KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5")
+#define KIWI_CMD_CONSTRUCT_SWEEP    34175   // MODAL: Shift+P Sweep - a construction face swept along construction (kiwi_pipe)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );
-inline bool KiwiCmd_IsModalId( int id ) { return id >= KIWI_CMD_MODAL_FIRST && id <= KIWI_CMD_MODAL_LAST; }
+inline bool KiwiCmd_IsModalId( int id )
+{
+    return ( id >= KIWI_CMD_MODAL_FIRST && id <= KIWI_CMD_MODAL_LAST )
+        || ( id >= KIWI_CMD_MODAL2_FIRST && id <= KIWI_CMD_MODAL2_LAST );
+}
 
 // Optional palette metadata keyed by existing command id.
 struct kiwiCommandInfo_t

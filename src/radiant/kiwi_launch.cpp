@@ -73,6 +73,14 @@ enum lightQuality_t
 };
 int  s_quality     = LQUALITY_EMBREE;   // KIWI (2026-10-21, user): Embree is the default
 bool s_noRelight   = true;
+// KIWI (2026-11-02, user, of blotches on a big indoor floor lit on Embree+: "Add a "Bounce
+// rays" slider to the Build panel?" - "Yes, add it"): cod4rad -Traces N, the rays each
+// lightmap sample casts to gather bounced light (cmdline.c PCL_SetLightmapSize, 16..512).
+// Too few leave low-frequency smudges; the presets use 16 (Fast) / 32 / 48 (Extra, Embree+).
+// 0 = the preset's own count (no -Traces).  -TraceFilterLinear filters what those rays hit.
+const int kTracesMin = 16, kTracesMax = 512;
+int  s_traces      = 0;
+bool s_traceFilterLinear = false;
 
 // 256 KiB retains roughly a full verbose compile (~3000 lines).
 const size_t kLogCap = 256u * 1024u;
@@ -963,6 +971,15 @@ bool StartLight( const launchPaths_t &p )
     }
     if ( s_quality == LQUALITY_FAST )  cmd += " -Fast";
     if ( s_quality == LQUALITY_EXTRA || s_quality == LQUALITY_EMBREE_PLUS ) cmd += " -Extra";
+    // After the preset: cod4rad applies options in order, and the presets set the trace count.
+    if ( s_traces >= kTracesMin )
+    {
+        char t[48];
+        _snprintf( t, sizeof( t ), " -Traces %d", s_traces > kTracesMax ? kTracesMax : s_traces );
+        t[sizeof( t ) - 1] = '\0';
+        cmd += t;
+    }
+    if ( s_traceFilterLinear ) cmd += " -TraceFilterLinear";
     if ( s_noRelight )    cmd += " -NoRelight";
     // cmdline.c:755,794-814 requires an extensionless map name last.
     cmd += " \"";
@@ -1394,6 +1411,29 @@ void DrawStageRows( bool busy )
                            "Lightmaps match Normal almost exactly.\n"
                            "Embree+: Extra quality traced with Embree; less noise on fine lightmaps.\n"
                            "Fast: fewer rays and no model shadows; visibly lower quality." );
+    ImGui::SameLine();
+    ImGui::TextUnformatted( "Bounce rays" );
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth( 120.0f );
+    if ( ImGui::SliderInt( "##traces", &s_traces, 0, kTracesMax,
+                           s_traces >= kTracesMin ? "%d" : "preset" ) )
+    {
+        // 1..15 would be refused by cod4rad: the slider's floor is the preset or 16.
+        if ( s_traces > 0 && s_traces < kTracesMin )
+            s_traces = kTracesMin;
+    }
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "-Traces: rays each lightmap sample casts to gather bounced light.\n"
+                           "Too few leave blotchy smudges on big evenly lit surfaces (floors,\n"
+                           "walls indoors).  Leftmost = the quality preset's own count\n"
+                           "(Fast 16, Normal / Embree 32, Extra / Embree+ 48).  Light time grows\n"
+                           "about in proportion; 192 - 256 smooths most interiors.\n"
+                           "Ctrl+click to type a value." );
+    ImGui::SameLine();
+    ImGui::Checkbox( "Linear filter", &s_traceFilterLinear );
+    if ( ImGui::IsItemHovered() )
+        ImGui::SetTooltip( "-TraceFilterLinear: bounce rays read the lightmap they hit with\n"
+                           "linear filtering instead of the nearest pixel - a little smoother." );
     ImGui::SameLine();
     ImGui::Checkbox( "No relight (-NoRelight)", &s_noRelight );
     ImGui::EndDisabled();

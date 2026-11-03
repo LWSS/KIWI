@@ -29,6 +29,7 @@
 #include "kiwi_terrain.h"
 #include "kiwi_transform.h"
 #include "kiwi_units.h"
+#include "kiwi_uveditor.h"    // KiwiUvEd_KeysInScope - the UV editor's arrow nudge
 #include "kiwi_viewport.h"    // KiwiVP_FlyActive - the fly's own chips
 #include "radiant_registry.h"
 
@@ -298,6 +299,15 @@ namespace
         // With nothing selected, Focus frames the visible world.
         AddVerb( chips, &n, KIWI_CMD_FOCUS_SELECTION, "Frame all" );
         AddVerb( chips, &n, KIWI_CMD_PALETTE,       "Commands" );
+        return n;
+    }
+
+    // KIWI (2026-11-01): the UV editor, focused or hovered, owns the arrow keys.
+    int BuildUvEditorPrompts( chip_t *chips )
+    {
+        int n = 0;
+        AddChip( chips, &n, "Arrows",       "Nudge UVs 1 texel" );
+        AddChip( chips, &n, "Shift+Arrows", "Nudge 1 grid cell" );
         return n;
     }
 
@@ -641,6 +651,8 @@ void KiwiHints_Draw( float imgMinX, float imgMinY, float imgW, float imgH )
     KiwiEditorCommand *cmd = KiwiCmd_Active();
     if ( KiwiVP_FlyActive() )
         nP = BuildFlyPrompts( prompts );
+    else if ( KiwiUvEd_KeysInScope() )
+        nP = BuildUvEditorPrompts( prompts );
     else if ( cmd )
     {
         // A live gesture owns the keyboard, so suppress selection verbs.
