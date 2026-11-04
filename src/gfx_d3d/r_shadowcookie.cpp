@@ -585,7 +585,11 @@ void __cdecl R_GenerateBspShadowReceivers(ShadowCookieList *shadowCookieList)
         Vec3Mad(start, 10000.0, cookie->shadowViewParms->axis[0], end);
         radius = DObjGetRadius(sceneEnt->obj);
         drawSurfs = scene.cookie[cookieIndex].drawSurfs;
-        surfaces = (GfxSurface **)&drawSurfs[128];
+        // KIWI: retail parks the GfxSurface* list in drawSurfs[128..255] (256 x 4-byte pointers).
+        // On x64 256 pointers need 256 drawsurfs, so >128 receivers ran off the end into the next
+        // cookie's planes/drawsurfs.  Use a real scratch array.
+        GfxSurface *surfaceScratch[0x100];
+        surfaces = surfaceScratch;
         cookieDrawSurfCount = R_CylinderSurfaces(
             start,
             end,
@@ -594,7 +598,7 @@ void __cdecl R_GenerateBspShadowReceivers(ShadowCookieList *shadowCookieList)
             5u,
             (int(__cdecl *)(int, void *))R_AllowBspShadowReceiver,
             &shadowReceiverCallback,
-            (GfxSurface **)&drawSurfs[128],
+            surfaces,
             0x100u);
         if (cookieDrawSurfCount)
         {

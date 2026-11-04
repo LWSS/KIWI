@@ -28,3 +28,8 @@ bool KiwiModelBrowser_InsertPrefab( const char *relativePath );
 // (origin / angles / modelscale / other keys kept; one undo record). False + `err`
 // when nothing is selected, the name is empty, or every target already uses it.
 bool KiwiModelBrowser_SwapSelected( const char *modelName, char *err, size_t errSz );
+// KIWI (2026-11-02): "Convert to Static Model" - every selected dyn_model becomes a misc_model
+// in place (model / origin / angles / modelscale / targetname kept, physics keys dropped; one
+// undo record; other selected items untouched).  Returns how many were converted.
+bool KiwiModelBrowser_CanConvertDynToStatic();
+int  KiwiModelBrowser_ConvertDynToStatic();

@@ -25,6 +25,7 @@
 #include "kiwi_hover.h"
 #include "kiwi_lines.h"
 #include "kiwi_particles.h"   // particles-only hover + the particle arrows
+#include "kiwi_fxpreview.h"   // KIWI (2026-11-02): effects playing in the camera
 #include "kiwi_ported.h"
 #include "kiwi_region.h"
 #include "kiwi_refimage.h"
@@ -715,6 +716,7 @@ void KiwiHover_DrawWorld()
         KiwiTerrain_DrawWorld();
     }
     KiwiDecal_DrawWorld();
+    KiwiFxPreview_DrawWorld();   // KIWI (2026-11-02): live FX preview (selected FX, the editor's test)
     KiwiParticles_DrawWorld();   // KIWI: particle forward arrows + the drag ghost
 
     // Fills precede line accents so borders, edges, and vertices remain on top.

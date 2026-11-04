@@ -12,8 +12,11 @@
 #include "mainfrm.h"            // camera_s (the double-click drop's centre pixel)
 
 #include <imgui/imgui.h>
+#include <imgui_internal.h>     // IsMouseDragPastThreshold (tile click vs drag, as the Models browser)
 
 #include "kiwi_particles.h"
+#include "kiwi_fxeditor.h"      // KIWI (2026-11-02): Edit opens the FX Editor
+#include "kiwi_fxpreview.h"     // KIWI (2026-11-02): camera preview of effects
 #include "kiwi_command.h"
 #include "kiwi_construct.h"     // KiwiCon_ActivePlane / KiwiCon_RayPlane (drop fallback)
 #include "kiwi_fmt.h"
@@ -62,9 +65,21 @@ namespace
     std::vector<fxRow_t>     s_rows;
     std::vector<std::string> s_folders;
     bool        s_enumerated = false;
-    char        s_filter[128] = { 0 };
-    std::string s_folder;                   // "" = all folders
-    std::string s_picked;                   // last clicked row (Replace uses it)
+
+    // KIWI (2026-11-03): the tile browser is drawn by two hosts - the FX window and the FX
+    // Editor - with one code path and a state each.
+    struct browserHost_t
+    {
+        char        filter[128] = { 0 };
+        std::string folder;                 // "" = all folders
+        std::string picked;                 // last clicked tile
+        bool        editor = false;         // a click opens the effect in the FX Editor
+    };
+    browserHost_t s_winHost;
+    browserHost_t s_edHost;
+    char        ( &s_filter )[128] = s_winHost.filter;
+    std::string &s_folder = s_winHost.folder;
+    std::string &s_picked = s_winHost.picked;  // the FX window's pick (pane, Replace)
 
     // Tooltip summaries, read from the .efx on first hover.
     struct fxInfo_t
@@ -178,6 +193,8 @@ namespace
         s_folders.assign( folders.begin(), folders.end() );
         if ( !s_folder.empty() && !folders.count( s_folder ) )
             s_folder.clear();
+        if ( !s_edHost.folder.empty() && !folders.count( s_edHost.folder ) )
+            s_edHost.folder.clear();
         s_enumerated = true;
     }
 
@@ -585,6 +602,108 @@ bool KiwiParticles_IsParticleNode( const selbrush_t *b )
     return IsFxDef( NodeDef( b ), nullptr );
 }
 
+// KIWI (2026-11-02): the FX editor / camera preview hooks - see kiwi_particles.h.
+void KiwiParticles_Collect( std::vector<kiwiFxEnt_t> &out, bool selectedOnly )
+{
+    out.clear();
+    const eclass_t *ec = FxEclass();
+    if ( !ec )
+        return;
+    std::set<const entity_s_def *> seen;
+    for ( int pass = selectedOnly ? 1 : 0; pass < 2; ++pass )
+    {
+        selbrush_t *head = pass == 0 ? &active_brushes : &selected_brushes;
+        for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+        {
+            entity_s_def *def = NodeDef( b );
+            if ( !IsFxDef( def, ec ) || ( b->owner && b->owner->prefab ) || !Pick_BrushPickable( b )
+              || !seen.insert( def ).second )
+                continue;
+            kiwiFxEnt_t e;
+            e.key = def;
+            const char *fx = ValueForKey2( def, "fx" );
+            e.fx = fx ? fx : "";
+            FxOrigin( def, e.origin );
+            FxAngles( def, e.angles );
+            e.selected = pass == 1;
+            out.push_back( e );
+        }
+    }
+}
+
+std::string KiwiParticles_SelectedEffect()
+{
+    std::vector<entity_s_def *> fx;
+    SelectedFx( fx );
+    std::string path;
+    for ( size_t i = 0; i < fx.size(); ++i )
+    {
+        const char *p = ValueForKey2( fx[i], "fx" );
+        const std::string s = p ? p : "";
+        if ( i == 0 )
+            path = s;
+        else if ( _stricmp( s.c_str(), path.c_str() ) )
+            return std::string();
+    }
+    return path;
+}
+
+bool KiwiParticles_SetSelectedEffect( const char *fx )
+{
+    std::vector<entity_s_def *> sel;
+    SelectedFx( sel );
+    if ( sel.empty() || !fx || !fx[0] )
+        return false;
+    SetOnSelected( "set particle effect", "fx", fx );
+    return true;
+}
+
+bool KiwiParticles_BrowserSet( const char *what, const char *value )
+{
+    const std::string v = value ? value : "";
+    // The FX Editor's browser: editor_pick = a tile click there (opens the effect).
+    if ( !_stricmp( what, "editor_pick" ) )
+    {
+        s_edHost.picked = v;
+        return KiwiFxEditor_Open( v.c_str() );
+    }
+    if ( !_stricmp( what, "editor_search" ) )
+    {
+        _snprintf( s_edHost.filter, sizeof( s_edHost.filter ), "%s", v.c_str() );
+        s_edHost.filter[sizeof( s_edHost.filter ) - 1] = '\0';
+        return true;
+    }
+    if ( !_stricmp( what, "editor_folder" ) )
+    {
+        s_edHost.folder = v;
+        return true;
+    }
+    if ( !_stricmp( what, "pick" ) )
+    {
+        s_picked = v;
+        KiwiFxPreview_PaneRestart();
+        return true;
+    }
+    if ( !_stricmp( what, "search" ) )
+    {
+        _snprintf( s_filter, sizeof( s_filter ), "%s", v.c_str() );
+        s_filter[sizeof( s_filter ) - 1] = '\0';
+        return true;
+    }
+    if ( !_stricmp( what, "folder" ) )
+    {
+        s_folder = v;
+        return true;
+    }
+    return false;
+}
+
+void KiwiParticles_Rescan()
+{
+    s_info.clear();
+    s_enumerated = false;
+}
+
 // ── particles-only picking ─────────────────────────────────────────────────────
 bool KiwiParticles_PickAt( int imgX, int imgY, selbrush_t **outNode, float *outDist )
 {
@@ -785,6 +904,24 @@ bool KiwiParticles_PlaceAt( const char *fx, const float origin[3], const float n
 // ── dock window ────────────────────────────────────────────────────────────────
 namespace
 {
+    int SelectedCount()
+    {
+        std::vector<entity_s_def *> fx;
+        SelectedFx( fx );
+        return (int)fx.size();
+    }
+
+    // KIWI (2026-11-02): the FX preview's test instance where a drop at the view centre would land.
+    void PreviewInFront( const char *fx )
+    {
+        camera_s *cam = Ed_Camera();
+        float origin[3], normal[3] = { 0.0f, 0.0f, 1.0f };
+        if ( !cam || !ResolvePlacement( cam->width / 2, cam->height / 2, origin, normal ) )
+            return;
+        const float up[3] = { 0.0f, 0.0f, 1.0f };
+        KiwiFxPreview_PlayTest( fx, origin, s_aim == 1 ? normal : up );
+    }
+
     void DrawSelectedSection()
     {
         std::vector<entity_s_def *> fx;
@@ -799,6 +936,16 @@ namespace
         }
         else
             ImGui::Text( "%i particles", (int)fx.size() );
+        // KIWI (2026-11-02): open the selection's effect in the FX Editor.
+        const std::string shared = KiwiParticles_SelectedEffect();
+        if ( !shared.empty() )
+        {
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "Edit" ) )
+                KiwiFxEditor_Open( shared.c_str() );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Open %s in the FX Editor.", shared.c_str() );
+        }
 
         ImGui::BeginDisabled( s_picked.empty() );
         if ( ImGui::Button( "Replace effect with picked" ) )
@@ -833,47 +980,97 @@ namespace
         ImGui::TextDisabled( "rotate (R) to aim; the arrow is the effect's forward axis" );
     }
 
-    void DrawRow( const fxRow_t &r, int index )
+    // KIWI (2026-11-02, user: "a browser like the models menu where I can easily select some
+    // and drag them into the world"): tiles like the Models browser (kiwi_modelbrowser.cpp
+    // DrawTile) showing a rendered snapshot of each effect (KiwiFxPreview_Thumb).
+    const float KFX_TILE   = 92.0f;
+    const float KFX_TILE_PAD = 6.0f;
+
+    void DrawTile( const fxRow_t &r, int index, browserHost_t &host )
     {
+        std::string &s_picked = host.picked;     // this host's pick (the window's or the editor's)
         ImGui::PushID( index );
-        const bool picked = !s_picked.empty() && !_stricmp( s_picked.c_str(), r.path.c_str() );
-        const float h = ImGui::GetTextLineHeight();
-        const bool clicked = ImGui::Selectable( "##fx", picked, ImGuiSelectableFlags_AllowDoubleClick, ImVec2( 0.0f, h ) );
-        const ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+        const float labelH = ImGui::GetTextLineHeight();
+        const ImVec2 cell( KFX_TILE, KFX_TILE + labelH + 2.0f );
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImGui::InvisibleButton( "##fxtile", cell );
         const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        const ImVec2 p1( p0.x + cell.x, p0.y + cell.y );
+        const ImVec2 boxMax( p0.x + KFX_TILE, p0.y + KFX_TILE );
+        IDirect3DTexture9 *thumb = KiwiFxPreview_Thumb( r.path.c_str(), ImGui::IsRectVisible( p0, p1 ) );
+        const bool empty = KiwiFxPreview_ThumbEmpty( r.path.c_str() );
+        const bool picked = !s_picked.empty() && !_stricmp( s_picked.c_str(), r.path.c_str() );
 
         if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
         {
             ImGui::SetDragDropPayload( KFX_PAYLOAD, r.path.c_str(), r.path.size() + 1 );
             ImGui::TextUnformatted( r.path.c_str() );
+            if ( thumb )
+                ImGui::Image( (ImTextureID)(intptr_t)thumb, ImVec2( KFX_TILE * 0.75f, KFX_TILE * 0.75f ) );
             ImGui::TextDisabled( "drop in the 3D view" );
             ImGui::EndDragDropSource();
         }
-        if ( clicked )
+        // A plain click (no drag travel) picks the tile: the FX window's pane plays it, the FX
+        // Editor opens it.
+        if ( hovered && ImGui::IsMouseReleased( ImGuiMouseButton_Left ) && !ImGui::IsMouseDragPastThreshold( ImGuiMouseButton_Left ) )
         {
+            if ( host.editor )
+                KiwiFxEditor_Open( r.path.c_str() );
+            else if ( !picked )
+                KiwiFxPreview_PaneRestart();
             s_picked = r.path;
-            if ( ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
-                QueueDrop( r.path.c_str(), -1, -1, nullptr, nullptr );
         }
+        if ( hovered && ImGui::IsMouseDoubleClicked( ImGuiMouseButton_Left ) )
+            QueueDrop( r.path.c_str(), -1, -1, nullptr, nullptr );
 
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        // A small orange diamond - the same colour as the placed entity's box.
-        const float cy = ( mn.y + mx.y ) * 0.5f, cx = mn.x + 6.0f;
-        dl->AddQuadFilled( ImVec2( cx, cy - 4.0f ), ImVec2( cx + 4.0f, cy ), ImVec2( cx, cy + 4.0f ),
-                           ImVec2( cx - 4.0f, cy ), IM_COL32( 255, 140, 26, 230 ) );
-        dl->AddText( ImVec2( mn.x + 16.0f, mn.y ), ImGui::GetColorU32( ImGuiCol_Text ), r.leaf.c_str() );
-        if ( !r.folder.empty() )
+        if ( hovered || active )
+            dl->AddRectFilled( p0, p1, ImGui::GetColorU32( ImGuiCol_FrameBgHovered ), 3.0f );
+        if ( thumb )
+            dl->AddImage( (ImTextureID)(intptr_t)thumb, ImVec2( p0.x + 2.0f, p0.y + 2.0f ), ImVec2( boxMax.x - 2.0f, boxMax.y - 2.0f ) );
+        else
         {
-            const ImVec2 ts = ImGui::CalcTextSize( r.folder.c_str() );
-            const float  x  = mx.x - ts.x - 4.0f;
-            if ( x > mn.x + 16.0f + ImGui::CalcTextSize( r.leaf.c_str() ).x + 12.0f )
-                dl->AddText( ImVec2( x, mn.y ), ImGui::GetColorU32( ImGuiCol_TextDisabled ), r.folder.c_str() );
+            dl->AddRectFilled( ImVec2( p0.x + 2.0f, p0.y + 2.0f ), ImVec2( boxMax.x - 2.0f, boxMax.y - 2.0f ), IM_COL32( 23, 26, 31, 255 ), 2.0f );
+            // Not drawable in the preview (models / lights / sounds only) or still pending.
+            const char *tag = empty ? "no preview" : "...";
+            const ImVec2 ts = ImGui::CalcTextSize( tag );
+            dl->AddText( ImVec2( ( p0.x + boxMax.x - ts.x ) * 0.5f, ( p0.y + boxMax.y - ts.y ) * 0.5f ),
+                         ImGui::GetColorU32( ImGuiCol_TextDisabled ), tag );
+        }
+        if ( picked )
+            dl->AddRect( p0, p1, ImGui::GetColorU32( ImGuiCol_ButtonActive ), 3.0f, 0, 2.0f );
+        dl->PushClipRect( ImVec2( p0.x, boxMax.y ), p1, true );
+        dl->AddText( ImVec2( p0.x + 2.0f, boxMax.y + 1.0f ),
+                     ImGui::GetColorU32( hovered || picked ? ImGuiCol_Text : ImGuiCol_TextDisabled ), r.leaf.c_str() );
+        dl->PopClipRect();
+
+        // KIWI (2026-11-02): play / edit / place from the list.
+        if ( ImGui::BeginPopupContextItem( "##fxrow" ) )
+        {
+            s_picked = r.path;
+            ImGui::TextDisabled( "%s", r.path.c_str() );
+            if ( ImGui::MenuItem( "Preview in front of camera" ) )
+                PreviewInFront( r.path.c_str() );
+            if ( ImGui::MenuItem( "Edit in FX Editor" ) )
+                KiwiFxEditor_Open( r.path.c_str() );
+            if ( ImGui::MenuItem( "Place at view centre" ) )
+                QueueDrop( r.path.c_str(), -1, -1, nullptr, nullptr );
+            ImGui::BeginDisabled( KiwiParticles_SelectedEffect().empty() && !SelectedCount() );
+            if ( ImGui::MenuItem( "Use for selected FX" ) )
+                SetOnSelected( "replace particle effect", "fx", r.path.c_str() );
+            ImGui::EndDisabled();
+            if ( ImGui::MenuItem( "Copy path" ) )
+                ImGui::SetClipboardText( r.path.c_str() );
+            ImGui::EndPopup();
         }
 
         if ( hovered && !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
         {
             const fxInfo_t &info = Info( r );
             ImGui::BeginTooltip();
+            if ( thumb )
+                ImGui::Image( (ImTextureID)(intptr_t)thumb, ImVec2( 160.0f, 160.0f ) );
             ImGui::TextUnformatted( r.path.c_str() );
             ImGui::TextDisabled( "raw/fx/%s.efx  (%.1f KB)", r.path.c_str(), (double)r.bytes / 1024.0 );
             if ( info.elements )
@@ -897,6 +1094,149 @@ namespace
         }
         ImGui::PopID();
     }
+
+    // Search box + folder combo of one browser host (no trailing SameLine).
+    void DrawBrowserFilters( browserHost_t &host )
+    {
+        ImGui::PushID( host.editor ? "edbrowse" : "winbrowse" );
+        ImGui::SetNextItemWidth( 140.0f );
+        ImGui::InputTextWithHint( "##fxsearch", "search", host.filter, sizeof( host.filter ) );
+        if ( host.filter[0] )
+        {
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "x##fxsearchclear" ) )
+                host.filter[0] = '\0';
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth( 120.0f );
+        if ( ImGui::BeginCombo( "##fxfolder", host.folder.empty() ? "All folders" : host.folder.c_str() ) )
+        {
+            if ( ImGui::Selectable( "All folders", host.folder.empty() ) )
+                host.folder.clear();
+            for ( size_t i = 0; i < s_folders.size(); ++i )
+            {
+                const char *f = s_folders[i].empty() ? "(top level)" : s_folders[i].c_str();
+                if ( ImGui::Selectable( f, !host.folder.empty() && host.folder == s_folders[i] ) )
+                    host.folder = s_folders[i];
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopID();
+    }
+
+    // The effect count and the tile grid of one host, `height` tall (ImGui child sizing:
+    // negative = the remaining height minus that much).
+    void DrawBrowserGrid( browserHost_t &host, float height )
+    {
+        std::vector<int> visible;
+        visible.reserve( s_rows.size() );
+        for ( size_t i = 0; i < s_rows.size(); ++i )
+        {
+            const fxRow_t &r = s_rows[i];
+            if ( !host.folder.empty() )
+            {
+                const std::string top = r.folder.substr( 0, r.folder.find( '/' ) );
+                if ( _stricmp( top.c_str(), host.folder.c_str() ) )
+                    continue;
+            }
+            if ( host.filter[0] && !KiwiStr_ContainsNoCase( r.path.c_str(), host.filter ) )
+                continue;
+            visible.push_back( (int)i );
+        }
+        ImGui::TextDisabled( "%i of %i effects", (int)visible.size(), (int)s_rows.size() );
+
+        ImGui::BeginChild( host.editor ? "##fxedlist" : "##fxlist", ImVec2( 0.0f, height ), ImGuiChildFlags_Borders );
+        {
+            // Rows of tiles; the clipper keeps only the visible rows (and so only their
+            // thumbnail requests) alive.
+            const float avail = ImGui::GetContentRegionAvail().x;
+            const int cols = ( std::max )( 1, (int)( ( avail + KFX_TILE_PAD ) / ( KFX_TILE + KFX_TILE_PAD ) ) );
+            const int rows = ( (int)visible.size() + cols - 1 ) / cols;
+            const float rowH = KFX_TILE + ImGui::GetTextLineHeight() + 2.0f + KFX_TILE_PAD;
+            ImGuiListClipper clipper;
+            clipper.Begin( rows, rowH );
+            ImGui::PushStyleVar( ImGuiStyleVar_ItemSpacing, ImVec2( KFX_TILE_PAD, KFX_TILE_PAD ) );
+            while ( clipper.Step() )
+                for ( int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row )
+                    for ( int c = 0; c < cols; ++c )
+                    {
+                        const int i = row * cols + c;
+                        if ( i >= (int)visible.size() )
+                            break;
+                        if ( c )
+                            ImGui::SameLine();
+                        DrawTile( s_rows[visible[i]], visible[i], host );
+                    }
+            ImGui::PopStyleVar();
+        }
+        if ( visible.empty() )
+            ImGui::TextDisabled( s_rows.empty() ? "No .efx files under raw\\fx next to the editor."
+                                                : "No effect matches the filters." );
+        ImGui::EndChild();
+    }
+
+    // The picked effect playing (iw3xo-radiant's effects browser has the same idea: the
+    // selection plays in its own view, src/ggui/effects_browser.cpp).
+    void DrawPane()
+    {
+        const float side = 150.0f;
+        if ( s_picked.empty() )
+        {
+            KiwiFxPreview_Pane( "" );
+            return;
+        }
+        IDirect3DTexture9 *tex = KiwiFxPreview_Pane( s_picked.c_str() );
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::InvisibleButton( "##fxpane", ImVec2( side, side ) );
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        if ( tex )
+            dl->AddImage( (ImTextureID)(intptr_t)tex, p, ImVec2( p.x + side, p.y + side ) );
+        else
+            dl->AddRectFilled( p, ImVec2( p.x + side, p.y + side ), IM_COL32( 23, 26, 31, 255 ) );
+        dl->AddRect( p, ImVec2( p.x + side, p.y + side ), IM_COL32( 255, 255, 255, 40 ) );
+        if ( ImGui::BeginDragDropSource( ImGuiDragDropFlags_SourceNoHoldToOpenOthers ) )
+        {
+            ImGui::SetDragDropPayload( KFX_PAYLOAD, s_picked.c_str(), s_picked.size() + 1 );
+            ImGui::TextUnformatted( s_picked.c_str() );
+            ImGui::TextDisabled( "drop in the 3D view" );
+            ImGui::EndDragDropSource();
+        }
+        if ( ImGui::IsItemHovered() && ImGui::IsMouseClicked( ImGuiMouseButton_Left ) )
+            KiwiFxPreview_PaneRestart();
+        if ( ImGui::IsItemHovered() && !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+            ImGui::SetTooltip( "Click to replay; drag into the 3D view to place." );
+
+        ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::TextUnformatted( s_picked.c_str() );
+        for ( size_t i = 0; i < s_rows.size(); ++i )
+            if ( !_stricmp( s_rows[i].path.c_str(), s_picked.c_str() ) )
+            {
+                const fxInfo_t &info = Info( s_rows[i] );
+                ImGui::TextDisabled( "%i element%s, %s", info.elements, info.elements == 1 ? "" : "s",
+                                     info.looping == 0 ? "one-shot" : info.looping == info.elements ? "looping" : "partly looping" );
+                break;
+            }
+        if ( ImGui::Button( "Place" ) )
+            QueueDrop( s_picked.c_str(), -1, -1, nullptr, nullptr );
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "At the centre of the 3D view (or drag the picture / a tile in)." );
+        ImGui::SameLine();
+        if ( ImGui::Button( "Edit" ) )
+            KiwiFxEditor_Open( s_picked.c_str() );
+        ImGui::BeginDisabled( !SelectedCount() );
+        if ( ImGui::Button( "Use for selected" ) )
+            SetOnSelected( "replace particle effect", "fx", s_picked.c_str() );
+        ImGui::EndDisabled();
+        if ( ImGui::IsItemHovered( ImGuiHoveredFlags_AllowWhenDisabled ) )
+            ImGui::SetTooltip( "Every selected FX entity plays this effect.  Undoable." );
+        if ( ImGui::SmallButton( "Preview in 3D view" ) )
+            PreviewInFront( s_picked.c_str() );
+        ImGui::SameLine();
+        if ( ImGui::SmallButton( "x##unpick" ) )
+            s_picked.clear();
+        ImGui::EndGroup();
+    }
 }
 
 void KiwiParticles_Draw()
@@ -912,33 +1252,45 @@ void KiwiParticles_Draw()
 
     if ( ImGui::Begin( KiwiWindows_Title( KIWI_WIN_PARTICLES ), open ) )
     {
-        ImGui::SetNextItemWidth( 140.0f );
-        ImGui::InputTextWithHint( "##fxsearch", "search", s_filter, sizeof( s_filter ) );
-        if ( s_filter[0] )
-        {
-            ImGui::SameLine();
-            if ( ImGui::SmallButton( "x##fxsearchclear" ) )
-                s_filter[0] = '\0';
-        }
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth( 120.0f );
-        if ( ImGui::BeginCombo( "##fxfolder", s_folder.empty() ? "All folders" : s_folder.c_str() ) )
-        {
-            if ( ImGui::Selectable( "All folders", s_folder.empty() ) )
-                s_folder.clear();
-            for ( size_t i = 0; i < s_folders.size(); ++i )
-            {
-                const char *f = s_folders[i].empty() ? "(top level)" : s_folders[i].c_str();
-                if ( ImGui::Selectable( f, !s_folder.empty() && s_folder == s_folders[i] ) )
-                    s_folder = s_folders[i];
-            }
-            ImGui::EndCombo();
-        }
+        DrawBrowserFilters( s_winHost );
         ImGui::SameLine();
         if ( ImGui::SmallButton( "Refresh" ) )
         {
             s_info.clear();
             Enumerate();
+        }
+        ImGui::SameLine();
+        if ( ImGui::SmallButton( "New" ) )
+            KiwiFxEditor_New();
+        if ( ImGui::IsItemHovered() )
+            ImGui::SetTooltip( "Create a new effect in the FX Editor." );
+
+        // KIWI (2026-11-02, user: "live preview ... when FX are selected"): what the camera plays.
+        {
+            static const char *const kModes[] = { "Off", "Selected", "All nearby" };
+            int mode = KiwiFxPreview_Mode();
+            ImGui::TextUnformatted( "Preview:" );
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth( 100.0f );
+            if ( ImGui::Combo( "##fxpreviewmode", &mode, kModes, 3 ) )
+                KiwiFxPreview_SetMode( mode );
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Effects playing in the 3D view: the selected FX, every FX within\n"
+                                   "3000 units of the camera, or none.  Sprites, tails, clouds and\n"
+                                   "runners play; models, lights, sounds, decals and trails do not." );
+            ImGui::SameLine();
+            bool paused = KiwiFxPreview_Paused();
+            if ( ImGui::Checkbox( "Pause", &paused ) )
+                KiwiFxPreview_SetPaused( paused );
+            ImGui::SameLine();
+            if ( ImGui::SmallButton( "Restart" ) )
+                KiwiFxPreview_Restart( nullptr );
+            if ( KiwiFxPreview_TestPlaying() )
+            {
+                ImGui::SameLine();
+                if ( ImGui::SmallButton( "Stop test" ) )
+                    KiwiFxPreview_StopTest();
+            }
         }
 
         ImGui::TextUnformatted( "Aim:" );
@@ -960,35 +1312,9 @@ void KiwiParticles_Draw()
 
         DrawSelectedSection();
         ImGui::Separator();
+        DrawPane();
 
-        std::vector<int> visible;
-        visible.reserve( s_rows.size() );
-        for ( size_t i = 0; i < s_rows.size(); ++i )
-        {
-            const fxRow_t &r = s_rows[i];
-            if ( !s_folder.empty() )
-            {
-                const std::string top = r.folder.substr( 0, r.folder.find( '/' ) );
-                if ( _stricmp( top.c_str(), s_folder.c_str() ) )
-                    continue;
-            }
-            if ( s_filter[0] && !KiwiStr_ContainsNoCase( r.path.c_str(), s_filter ) )
-                continue;
-            visible.push_back( (int)i );
-        }
-        ImGui::TextDisabled( "%i of %i effects", (int)visible.size(), (int)s_rows.size() );
-
-        const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f + 4.0f;
-        ImGui::BeginChild( "##fxlist", ImVec2( 0.0f, -footer ), ImGuiChildFlags_Borders );
-        ImGuiListClipper clipper;
-        clipper.Begin( (int)visible.size() );
-        while ( clipper.Step() )
-            for ( int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i )
-                DrawRow( s_rows[visible[i]], visible[i] );
-        if ( visible.empty() )
-            ImGui::TextDisabled( s_rows.empty() ? "No .efx files under raw\\fx next to the editor."
-                                                : "No effect matches the filters." );
-        ImGui::EndChild();
+        DrawBrowserGrid( s_winHost, -( ImGui::GetFrameHeightWithSpacing() * 2.0f + 4.0f ) );
 
         if ( ImGui::Button( "Write game scripts now" ) )
             KiwiParticles_ExportForMap( currentmap, false );
@@ -1002,6 +1328,26 @@ void KiwiParticles_Draw()
         ImGui::TextDisabled( "%s", s_exportStatus[0] ? s_exportStatus : "written on every map save" );
     }
     ImGui::End();
+}
+
+// KIWI (2026-11-03, user: "the FX editor needs a browser"): the same tile browser inside
+// the FX Editor; a click opens the effect there, drag / double-click still place it.
+void KiwiParticles_DrawEditorBrowser( const char *currentFx, float height )
+{
+    Load();
+    if ( !s_enumerated )
+        Enumerate();
+    if ( currentFx && currentFx[0] )
+        s_edHost.picked = currentFx;            // the open effect's tile is outlined
+    s_edHost.editor = true;
+    DrawBrowserFilters( s_edHost );
+    ImGui::SameLine();
+    if ( ImGui::SmallButton( "Refresh##fxed" ) )
+    {
+        s_info.clear();
+        Enumerate();
+    }
+    DrawBrowserGrid( s_edHost, height );
 }
 
 // ── camera drop target + world overlay ─────────────────────────────────────────
@@ -1179,4 +1525,5 @@ void KiwiParticles_ResetForNewMap()
     s_pendHave  = false;
     s_ghostHave = false;
     s_exportStatus[0] = '\0';
+    KiwiFxPreview_ResetForNewMap();   // KIWI (2026-11-02): drop the camera preview's instances
 }

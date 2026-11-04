@@ -51,6 +51,8 @@ int __cdecl XSurfaceGetNumTris(const XSurface *surface)
 #include <xanim/xmodel.h>   // XModel, XModelGetSurfaces, XModelBad
 #include <string.h>         // memcpy
 #include "r_material.h"     // Material_FromHandle — the shadow-proxy surface filter
+#include "r_state.h"        // GFXS0_BLENDOP_RGB_MASK — the shadow-caster surface filter
+#include <universal/surfaceflags.h>   // SURF_NOCASTSHADOW
 
 // KIWI: CoD4 foliage models carry a dedicated shadow-map proxy surface (techset
 // "mc_shadowcaster", materials like "mc/mtl_tree_shadow_caster") that the game
@@ -112,8 +114,52 @@ uint16_t *__cdecl R_CheckTris( const XSurface *surface, void *dstIndices, uint16
 // (sub_456850) is separate + still parked.  Consumed by the editor's misc_model vert-snap
 // (VertSnap_CollectModel) and model ray-pick (select.cpp).
 // ─────────────────────────────────────────────────────────────────────────────
+// KIWI (2026-11-04, user, of a ceiling light with an additive beam cone round its preview light:
+// "can you fix the light preview? it doesn't work"): a blended surface (additive beam, alpha
+// glow) or a nocastshadow one never shadows in game, but the preview extruded the open beam
+// cone round the light into a shadow volume and lost the whole lit pass.  Opaque = the
+// surface's first colour pass blends nothing.
+static bool Editor_XModelSurfCastsShadow( XModel *model, int lod0SurfIndex )
+{
+    if ( !model || !model->materialHandles )
+        return true;
+    Material *handle =
+        model->materialHandles[(uint16_t)model->lodInfo[0].surfIndex + lod0SurfIndex];
+    const Material *m = handle ? Material_FromHandle( handle ) : 0;
+    if ( !m )
+        return true;
+    if ( m->surfaceFlags & SURF_NOCASTSHADOW )
+        return false;
+    if ( !m->techniqueSet || !m->stateBitsTable )
+        return true;
+    static const int kColour[3] = { TECHNIQUE_UNLIT, TECHNIQUE_EMISSIVE, TECHNIQUE_LIT };
+    for ( int k = 0; k < 3; ++k )
+        if ( m->techniqueSet->techniques[kColour[k]] )
+        {
+            const unsigned bits = m->stateBitsTable[(byte)m->stateBitsEntry[kColour[k]]].loadBits[0];
+            return ( bits & GFXS0_BLENDOP_RGB_MASK ) == 0;
+        }
+    return true;
+}
+
+static int Editor_ExtractXModelGeoImpl( XModel *model, float *verts, int vertLimit,
+                                        uint16_t *indices, int indexLimit, bool castersOnly );
+
 int __cdecl Editor_ExtractXModelGeo( XModel *model, float *verts, int vertLimit,
                                      uint16_t *indices, int indexLimit )
+{
+    return Editor_ExtractXModelGeoImpl( model, verts, vertLimit, indices, indexLimit, false );
+}
+
+// The shadow-volume extraction: Editor_ExtractXModelGeo minus surfaces that cannot cast.
+int __cdecl Editor_ExtractXModelShadowGeo( XModel *model, float *verts, int vertLimit,
+                                           uint16_t *indices, int indexLimit )
+{
+    return Editor_ExtractXModelGeoImpl( model, verts, vertLimit, indices, indexLimit, true );
+}
+
+static int Editor_ExtractXModelGeoImpl( XModel *model, float *verts, int vertLimit,
+                                        uint16_t *indices, int indexLimit, bool castersOnly )
 {
     iassert( model );
     iassert( verts );
@@ -135,6 +181,8 @@ int __cdecl Editor_ExtractXModelGeo( XModel *model, float *verts, int vertLimit,
         // KIWI: shadow-map proxy surfaces are invisible geometry — never extract them
         // (see Editor_XModelSurfIsShadowProxy above).
         if ( Editor_XModelSurfIsShadowProxy( model, i ) )
+            continue;
+        if ( castersOnly && !Editor_XModelSurfCastsShadow( model, i ) )
             continue;
         XSurface *surf = &surfaces[i];
         int nv = XSurfaceGetNumVerts( surf );

@@ -114,9 +114,28 @@ extern void     XYWnd_OnLButtonDown( HWND hwnd, unsigned int nFlags, int x, int 
 extern void     XYWnd_OnMouseMove( unsigned int nFlags, int x, int y );                // xywnd.cpp
 extern void     Patch_EditPatch();                                                     // pmesh.cpp 0x441FD0
 extern void     XYWnd_OnLButtonUp( unsigned int nFlags, int x, int y );                // xywnd.cpp
+extern void ( *g_ImGuiShellAfterRender )( IDirect3DDevice9 *device );                  // imgui_shell.cpp
+extern void     ImGuiShell_FocusTab( const char *title );                              // imgui_shell.cpp:226
 
 namespace
 {
+    // KIWI (2026-11-02): "screenshot window" - saves the frame's back buffer once, right after
+    // ImGui drew the panels into it (before the present).
+    std::string s_windowShotPath;
+    bool        s_windowShotDone = false;
+
+    void WindowShotHook( IDirect3DDevice9 *device )
+    {
+        g_ImGuiShellAfterRender = nullptr;
+        IDirect3DSurface9 *rt = nullptr;
+        if ( !device || FAILED( device->GetRenderTarget( 0, &rt ) ) || !rt )
+            return;
+        const HRESULT hr = D3DXSaveSurfaceToFileA( s_windowShotPath.c_str(), D3DXIFF_PNG, rt, nullptr, nullptr );
+        rt->Release();
+        s_windowShotDone = SUCCEEDED( hr );
+        KiwiTest_LogChannel( "DATA", "screenshot window %s %s", s_windowShotPath.c_str(), s_windowShotDone ? "ok" : "FAILED" );
+    }
+
     bool ParseF( const std::string &s, float &out )
     {
         char *end = nullptr;
@@ -1096,9 +1115,28 @@ bool KiwiTestProbe_Execute( const std::vector<std::string> &w, std::string &erro
             KiwiTest_LogChannel( "DATA", "project off" );
         return true;
     }
+    if ( verb == "focus_tab" )
+    {
+        // focus_tab <window title...>   front a dock tab (ImGuiShell_FocusTab), for screenshots
+        if ( !need( 2, 8, "focus_tab <window title>" ) ) return true;
+        std::string title = w[1];
+        for ( size_t k = 2; k < w.size(); ++k )
+            title += " " + w[k];
+        ImGuiShell_FocusTab( title.c_str() );
+        KiwiTest_WaitFrames( 2 );
+        return true;
+    }
+    if ( verb == "screenshot" && w.size() == 3 && Lower( w[1] ) == "window" )
+    {
+        s_windowShotPath = w[2];
+        s_windowShotDone = false;
+        g_ImGuiShellAfterRender = WindowShotHook;
+        KiwiTest_WaitFrames( 3 );
+        return true;
+    }
     if ( verb == "screenshot" )
     {
-        if ( !need( 3, 3, "screenshot camera|xy <file.png>" ) ) return true;
+        if ( !need( 3, 3, "screenshot camera|xy|window <file.png>" ) ) return true;
         IDirect3DTexture9 *tex = RTT_GetTexture( Lower( w[1] ) == "xy" ? RTT_XY : RTT_CAMERA );
         IDirect3DSurface9 *surf = nullptr;
         if ( !tex || FAILED( tex->GetSurfaceLevel( 0, &surf ) ) || !surf )

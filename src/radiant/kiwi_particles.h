@@ -27,13 +27,16 @@
 
 #include "kiwi_pick.h"
 
+#include <string>
+#include <vector>
+
 #define KIWI_FX_CLASSNAME "kiwi_fx"
 #define KFX_PAYLOAD       "KIWI_FX"          // ImGui drag payload: the effect path
 
 struct selbrush_t;
 struct entity_s;
 
-void KiwiParticles_Draw();                   // the "Particles" dock window (KIWI_WIN_PARTICLES)
+void KiwiParticles_Draw();                   // the "FX" dock window (KIWI_WIN_PARTICLES; "Particles" until 2026-11-03)
 void KiwiParticles_RegisterCommands();
 bool KiwiParticles_DispatchInstant( unsigned int cmdId );
 bool KiwiParticles_CameraDropTarget( float imgMinX, float imgMinY );
@@ -58,3 +61,27 @@ void KiwiParticles_ExportForMap( const char *mapPath, bool fromSave );
 
 // Test DSL: place `fx` at `origin`, its forward along `normal`.  False = not placed.
 bool KiwiParticles_PlaceAt( const char *fx, const float origin[3], const float normal[3] );
+
+// KIWI (2026-11-02): the FX entities the camera preview plays (kiwi_fxpreview.cpp).
+struct kiwiFxEnt_t
+{
+    const void *key;            // stable while the entity lives (its entity record)
+    std::string fx;
+    float       origin[3];
+    float       angles[3];
+    bool        selected;
+};
+// Every visible kiwi_fx entity outside prefabs, or only the selected ones.
+void KiwiParticles_Collect( std::vector<kiwiFxEnt_t> &out, bool selectedOnly );
+// The effect path of the selected FX entities ("" when none, or when they differ).
+std::string KiwiParticles_SelectedEffect();
+// Every selected FX entity plays `fx` (one undo record); false when none is selected.
+bool KiwiParticles_SetSelectedEffect( const char *fx );
+// Re-read raw/fx (after the FX editor saves a new effect).
+void KiwiParticles_Rescan();
+// Test DSL `fx_browser pick|search|folder|editor_pick|editor_search|editor_folder <value>`:
+// the FX window's / the FX Editor's browser state (editor_pick opens the effect).
+bool KiwiParticles_BrowserSet( const char *what, const char *value );
+// KIWI (2026-11-03): the FX Editor's copy of the tile browser (same code, own filters);
+// `height` as ImGui child sizing.  A tile click opens it in the editor.
+void KiwiParticles_DrawEditorBrowser( const char *currentFx, float height );

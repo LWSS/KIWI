@@ -34,7 +34,7 @@ enum kiwiWindow_t
     KIWI_WIN_DECALS,        // "Decals"                         default ON
     KIWI_WIN_REFIMAGES,     // "Reference Images"               default ON
     // Effect files under raw/fx, placed as kiwi_fx entities (kiwi_particles.h).
-    KIWI_WIN_PARTICLES,     // "Particles"                      default ON
+    KIWI_WIN_PARTICLES,     // "FX" (titled "Particles" until 2026-11-03) default ON
     // FBX/OBJ -> xmodel importer with preview, surfaces, variants, collision
     // (kiwi_modelimport.h). Closed by default; first opens floating over the editor.
     KIWI_WIN_MODELIMPORT,   // "Model Import"                   default OFF
@@ -46,6 +46,9 @@ enum kiwiWindow_t
     // KIWI (2026-10-26, user: "material properties panel"): the Textures browser's current
     // material - surface type, bullet penetration, flag bits (kiwi_matprops.h).
     KIWI_WIN_MATPROPS,      // "Material"                       default ON
+    // KIWI (2026-11-02, user: "FX editor/creator"): edit and create raw/fx effects
+    // (kiwi_fxeditor.h). Closed by default (no layout reseed); docks into the main node when opened.
+    KIWI_WIN_FXEDITOR,      // "FX Editor"                      default OFF
     KIWI_WIN_COUNT,
 };
 

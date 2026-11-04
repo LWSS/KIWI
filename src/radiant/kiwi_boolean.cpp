@@ -934,6 +934,36 @@ namespace
         s_carveMissWhy[0]  = '\0';
     }
 
+    // KIWI (2026-11-03, user: "if you boolean using a tool that is exactly flush with the
+    // outside of the brush you're booling with, sometimes it will delete large swathes of the
+    // result and leave lots of gaps"): a tool plane lying on the piece's own face still split
+    // it, so the running remainder gained a near-duplicate face, failed the validity gate and
+    // was carried; every later front cut from it inherited that face, failed too, and was
+    // dropped as a "sliver".  A plane the piece does not reach past now carves nothing, and a
+    // refused front that is NOT thin refuses the cut instead of vanishing.
+    const float KBOOL_FLUSH_EPS = 0.1f;          // world units: "on the plane"
+
+    // How far `def` reaches outside the tool face `tf` (its outward plane); +big when the
+    // windings are missing, so the caller falls back to splitting.
+    float ReachOutside( const brush_t *def, const face_t &tf )
+    {
+        float reach = -1.0e30f;
+        bool  any = false;
+        for ( int f = 0; f < def->faceCount; ++f )
+        {
+            const winding_t *w = def->faces[f].w;
+            for ( int i = 0; w && i < w->numpoints; ++i )
+            {
+                const float s = tf.plane.normal[0] * w->p[i][0] + tf.plane.normal[1] * w->p[i][1]
+                              + tf.plane.normal[2] * w->p[i][2] - tf.plane.dist;
+                if ( s > reach )
+                    reach = s;
+                any = true;
+            }
+        }
+        return any ? reach : 1.0e30f;
+    }
+
     carveResult_t CarveByOneTool( brush_t *target, const brush_t *tool,
                                   std::vector<brush_t *> *outPieces, const char **why )
     {
@@ -952,6 +982,11 @@ namespace
         for ( int f = 0; f < tool->faceCount; ++f )
         {
             const face_t &tf = tool->faces[f];
+
+            // KIWI: nothing of the piece lies outside this plane (a flush face): no cut.
+            const float reach = ReachOutside( remainder, tf );
+            if ( reach <= KBOOL_FLUSH_EPS )
+                continue;
 
             brush_t        *front = 0, *back = 0;
             kiwiSplitHalf_t fs = KSPLIT_HALF_NONE, bs = KSPLIT_HALF_NONE;
@@ -1019,6 +1054,16 @@ namespace
                 continue;
             }
 
+            if ( fs == KSPLIT_HALF_SLIVER && reach > KSPLIT_CARRY_EXTENT )
+            {
+                // KIWI: the outside slice is thick, so the gate refused something real
+                // (a bad face, not thinness).  Dropping it would leave a gap: refuse.
+                KiwiSplit_FreeUnlandedDef( back );
+                FreeDefs( outPieces );
+                if ( ownRemainder )
+                    KiwiSplit_FreeUnlandedDef( remainder );
+                return KBOOL_REFUSED;
+            }
             if ( fs == KSPLIT_HALF_SLIVER )
             {
                 // The outside slice is below the §19 gate: it was freed by the

@@ -145,7 +145,7 @@ bool KiwiShadowCache_ModelGeo( XModel *model, const float **verts,
     // Match the direct caller's limits so cached and fallback extraction agree.
     static float          s_vbuf[0x4000 * 3];
     static unsigned short s_ibuf[0x10000];
-    const int ic = Editor_ExtractXModelGeo( model, s_vbuf, 0x4000, s_ibuf, 0x10000 );
+    const int ic = Editor_ExtractXModelShadowGeo( model, s_vbuf, 0x4000, s_ibuf, 0x10000 );
 
     if ( s_modelCount >= s_modelCap )
     {

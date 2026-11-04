@@ -414,6 +414,8 @@ extern char  Entity_HasRenderableModel( selbrush_t *b, const float *orient );   
 struct XModel;
 extern int   Editor_ExtractXModelGeo( XModel *model, float *verts, int vertLimit,
                                        uint16_t *indices, int indexLimit );          // gfx_d3d 0x4febb0
+extern int   Editor_ExtractXModelShadowGeo( XModel *model, float *verts, int vertLimit,
+                                            uint16_t *indices, int indexLimit );     // r_xsurface.cpp: casters only
 
 // 0x456930 ShadVol_Init — the silhouette facing reference (-1 = extrude FRONT-facing
 // tris), the two materials, and the static normal/colour/st arrays for every vertex
@@ -703,7 +705,7 @@ static char SunLightPreview_DrawModelShadow( selbrush_t *b, orientation_t *orien
         return (char)ShadVol_AddModelSilhouette( indexCount, cIndices, &mor,
                                                  (const byte *)cVerts, 12, light );
 
-    indexCount = Editor_ExtractXModelGeo( xm, (float *)vbuf, 0x4000,
+    indexCount = Editor_ExtractXModelShadowGeo( xm, (float *)vbuf, 0x4000,
                                           (uint16_t *)ibuf, 0x10000 );
     return (char)ShadVol_AddModelSilhouette( indexCount, (const uint16_t *)ibuf, &mor,
                                              vbuf, 12, light );

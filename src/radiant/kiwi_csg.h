@@ -31,6 +31,13 @@ struct selbrush_t;   // qe3.h:429; pointer-only below
 // The Hollow core separately skips xx5 instances.
 bool KiwiCsg_BrushUsable( const selbrush_t *b );
 
+// KIWI (2026-11-02, user: "somehow half my stairs got deleted!!!" - Auto Bool merged every
+// step inside the map's lightgrid_volume into the volume box): only brushes of one KIND
+// merge.  The kind is the brush's contents and toolFlags (detail / structural, as saved) and
+// the tool family of its faces (lightgrid, *_volume, clip, trigger, hint, skip, portal,
+// origin).  caulk and nodraw are ordinary structure.  Brush_MergeList refuses mixed kinds.
+bool KiwiCsg_SameMergeKind( const selbrush_t *a, const selbrush_t *b );
+
 // At least two baseline-eligible brushes under one owner.
 bool KiwiCsg_SelectionMergeable();
 

@@ -371,14 +371,14 @@ bool computeMikkTangents(std::vector<std::array<RawVertex, 3>>& triangles) {
 // from the pre-pass bounds, subtracted from every vertex AFTER the meters ->
 // inches conversion. Bounds, radius, box-projected UVs and collision below all
 // read the rebased positions, so everything the files carry agrees with the shift.
+// Appends one or more surfaces to `outputs` (see the weld at the end).
 bool prepareSurface(const MaterialTriangles& source, double tileSize,
-                    const Vec3& originOffsetInches, PreparedSurface& output,
+                    const Vec3& originOffsetInches, std::vector<PreparedSurface>& outputs,
                     Bounds& modelBounds, double& radius,
                     size_t& degenerateSkips, std::string& error) {
-    output.materialName = source.materialName;
-    output.surfaceFlags = source.collisionSurfaceFlags >= 0
-                              ? source.collisionSurfaceFlags
-                              : kCollisionSurfaceFlagsDefault;
+    const int32_t surfaceFlags = source.collisionSurfaceFlags >= 0
+                                     ? source.collisionSurfaceFlags
+                                     : kCollisionSurfaceFlagsDefault;
     if (source.triangles.size() > kMaxSurfaceElements) {
         error = "material '" + source.materialName + "' has " +
                 std::to_string(source.triangles.size()) +
@@ -386,15 +386,16 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
         return false;
     }
 
-    output.indices.reserve(source.triangles.size() * 3u);
-    output.collision.reserve(source.triangles.size());
     std::unordered_map<VertexKey, uint16_t, VertexKeyHash> vertexMap;
     vertexMap.reserve(std::min<size_t>(source.triangles.size() * 3u,
                                        kMaxSurfaceElements));
     // Triangles that survive the checks, corners in stored (clockwise) order.
     // Their tangent frames come from MikkTSpace after the loop, then they weld.
+    // keptCollision[i] is kept[i]'s collision triangle.
     std::vector<std::array<RawVertex, 3>> kept;
+    std::vector<CollisionTriangle> keptCollision;
     kept.reserve(source.triangles.size());
+    keptCollision.reserve(source.triangles.size());
 
     for (size_t triangleIndex = 0; triangleIndex < source.triangles.size();
          ++triangleIndex) {
@@ -540,7 +541,6 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
 
         kept.push_back(cornerRaw);
         for (size_t corner = 0; corner < 3; ++corner) {
-            output.bounds.add(positions[corner]);
             modelBounds.add(positions[corner]);
             radius = std::max(radius, length(positions[corner]));
         }
@@ -573,7 +573,7 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
         collision.plane = {plane3[0], plane3[1], plane3[2], planeDist};
         collision.svec = {s3[0], s3[1], s3[2], sOrigin};
         collision.tvec = {t3[0], t3[1], t3[2], tOrigin};
-        output.collision.push_back(collision);
+        keptCollision.push_back(collision);
     }
 
     if (kept.empty()) {
@@ -594,27 +594,42 @@ bool prepareSurface(const MaterialTriangles& source, double tileSize,
     // Weld on the full vertex, tangent frame included: MikkTSpace gives every
     // corner with equal position/normal/uv the same frame unless it must split
     // it (mirrored UVs), so this keeps the old vertex counts.
-    for (const std::array<RawVertex, 3>& triangle : kept) {
-        for (const RawVertex& raw : triangle) {
-            VertexKey key = makeVertexKey(raw);
-            auto found = vertexMap.find(key);
-            if (found == vertexMap.end()) {
-                if (output.vertices.size() >= kMaxVerticesPerSurface) {
-                    // The vertex-aware chunker upstream keeps every surface's
-                    // welded vertex count under kMaxVerticesPerSurface, so this
-                    // is a defensive guard that should be unreachable.
-                    error = "material '" + source.materialName + "' exceeded " +
-                            std::to_string(kMaxVerticesPerSurface) +
-                            " welded vertices in one split surface after "
-                            "vertex-aware splitting (internal invariant)";
-                    return false;
-                }
-                uint16_t index = static_cast<uint16_t>(output.vertices.size());
-                output.vertices.push_back(raw);
-                found = vertexMap.emplace(key, index).first;
-            }
-            output.indices.push_back(found->second);
+    // KIWI (2026-11-03, kiwi_railgate: "exceeded 10000 welded vertices in one split
+    // surface ... (internal invariant)"): those mirrored-UV splits are invisible to the
+    // chunker's position/normal/uv estimate, so a chunk it sized under the cap can weld
+    // over it here.  The surface now splits on this exact count instead of failing.
+    PreparedSurface* output = nullptr;
+    for (size_t triangleIndex = 0; triangleIndex < kept.size(); ++triangleIndex) {
+        const std::array<RawVertex, 3>& triangle = kept[triangleIndex];
+        std::array<VertexKey, 3> keys;
+        size_t newVerts = 0;
+        for (size_t corner = 0; corner < 3; ++corner) {
+            keys[corner] = makeVertexKey(triangle[corner]);
+            bool repeat = false;
+            for (size_t earlier = 0; earlier < corner; ++earlier)
+                repeat = repeat || keys[earlier] == keys[corner];
+            if (!repeat && vertexMap.find(keys[corner]) == vertexMap.end())
+                ++newVerts;
         }
+        if (!output || output->vertices.size() + newVerts > kMaxVerticesPerSurface) {
+            outputs.emplace_back();
+            output = &outputs.back();
+            output->materialName = source.materialName;
+            output->surfaceFlags = surfaceFlags;
+            vertexMap.clear();
+        }
+        for (size_t corner = 0; corner < 3; ++corner) {
+            const RawVertex& raw = triangle[corner];
+            auto found = vertexMap.find(keys[corner]);
+            if (found == vertexMap.end()) {
+                uint16_t index = static_cast<uint16_t>(output->vertices.size());
+                output->vertices.push_back(raw);
+                found = vertexMap.emplace(keys[corner], index).first;
+            }
+            output->indices.push_back(found->second);
+            output->bounds.add(Vec3{raw.position[0], raw.position[1], raw.position[2]});
+        }
+        output->collision.push_back(keptCollision[triangleIndex]);
     }
     return true;
 }
@@ -912,10 +927,10 @@ BakeResult WriteRawXModelV25(const BakeRequest& request) {
         // ~1 vertex per triangle, which holds for clean unwraps but not for a
         // seam-heavy tool export (InstaMAT hard-surface-axial can weld barely
         // better than 3 verts/triangle) — such a surface would blow the engine
-        // per-surface vertex limit. The key mirrors prepareSurface's weld
-        // (position/normal/uv) at double precision, which distinguishes at
-        // least as finely as the file's float32 weld, so this estimate never
-        // undercounts and the hard cap in prepareSurface stays a dead guard.
+        // per-surface vertex limit. The key is position/normal/uv at double
+        // precision. KIWI: prepareSurface's weld also keys on the MikkTSpace
+        // frame, which mirrored UVs split, so this is only an estimate and
+        // prepareSurface splits again on the exact count.
         struct ChunkKey {
             std::array<double, 8> v{};
             bool operator==(const ChunkKey& other) const { return v == other.v; }
@@ -1043,19 +1058,29 @@ BakeResult WriteRawXModelV25(const BakeRequest& request) {
             PreparedLod& lod = lods[lodIndex];
             lod.distance = request.lods[lodIndex].distance;
             lod.filename = lodFilename(modelName, lodIndex, lods.size());
-            lod.surfaces.resize(groupedLods[lodIndex].size());
+            lod.surfaces.reserve(groupedLods[lodIndex].size());
             for (size_t surfaceIndex = 0;
                  surfaceIndex < groupedLods[lodIndex].size(); ++surfaceIndex) {
                 std::string prepareError;
+                const size_t firstNew = lod.surfaces.size();
                 if (!prepareSurface(groupedLods[lodIndex][surfaceIndex],
                                     request.uvTileSizeInches, originOffsetInches,
-                                    lod.surfaces[surfaceIndex], lod.bounds, lod.radius,
+                                    lod.surfaces, lod.bounds, lod.radius,
                                     degenerateSkips, prepareError)) {
                     return failure("LOD" + std::to_string(lodIndex) + ": " +
                                    std::move(prepareError));
                 }
-                totalVertices += lod.surfaces[surfaceIndex].vertices.size();
-                totalTriangles += lod.surfaces[surfaceIndex].collision.size();
+                for (size_t added = firstNew; added < lod.surfaces.size(); ++added) {
+                    totalVertices += lod.surfaces[added].vertices.size();
+                    totalTriangles += lod.surfaces[added].collision.size();
+                }
+            }
+            // KIWI: prepareSurface's own split can add surfaces past the chunker's count.
+            if (lod.surfaces.size() > kMaxSurfaces) {
+                return failure("LOD" + std::to_string(lodIndex) +
+                               " needs more than 255 split material "
+                               "surfaces; simplify the mesh or its "
+                               "UV unwrap");
             }
             totalSurfaces += lod.surfaces.size();
             radius = std::max(radius, lod.radius);

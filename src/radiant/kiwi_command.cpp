@@ -59,6 +59,7 @@
 #include "kiwi_entbrowser.h"
 #include "kiwi_modelbrowser.h"          // KIWI: the Models window + deferred drop
 #include "kiwi_particles.h"             // KIWI: the Particles window, deferred drop
+#include "kiwi_fxeditor.h"              // KIWI (2026-11-02): the FX Editor window
 #include "kiwi_modelimport.h"           // KIWI: the Model Import window
 // KIWI GLASS
 #include "kiwi_glass.h"
@@ -458,6 +459,8 @@ namespace
         { 33220, { "CSG: Auto Caulk",           "Modeling",  0, KiwiCsg_CanAutoCaulk } },
         { KIWI_CMD_MIRROR, { "Mirror",          "Duplicate", 0, KiwiDupe_CanMirrorTool } },
         { KIWI_CMD_PHYS_DROP, { "Physics Drop", "Transform", 0, KiwiPhysDrop_CanExecute } },
+        { KIWI_CMD_DYN_TO_STATIC, { "Convert to Static Model (dyn_model to misc_model)", "Gameplay", 0,
+                                    KiwiModelBrowser_CanConvertDynToStatic } },   // KIWI (2026-11-02)
         { 33041, { "Surface Inspector",         "Textures",  0, nullptr           } },
         { 33092, { "Patch Inspector",           "Patch",     0, nullptr           } },
         { 33104, { "View Filters",              "View",      0, nullptr           } },
@@ -480,7 +483,7 @@ namespace
         { KIWI_CMD_VIEW_SHOW_FACING, { "Show Facing Arrows",  "View", 0, nullptr    } },   // KIWI: selected-entity facing overlay
         { KIWI_CMD_SELMODE_MODELS,   { "Select Mode: Models only", "Selection", SEL_MASK_OBJECT, nullptr } },
         { KIWI_CMD_SELMODE_PARTICLES, { "Select Mode: Particles only", "Selection", SEL_MASK_OBJECT, nullptr } },   // KIWI: Object sub-mode
-        { KIWI_CMD_WINDOW_PARTICLES, { "Particles",               "Windows",   0, nullptr } },
+        { KIWI_CMD_WINDOW_PARTICLES, { "FX (effects browser)",    "Windows",   0, nullptr } },   // KIWI (2026-11-03): was "Particles"
         { KIWI_CMD_WINDOW_MODELIMPORT, { "Model Import (FBX/OBJ to xmodel)", "Windows", 0, nullptr } },
         // KIWI GLASS
         { KIWI_CMD_GLASS_MAKE,       { "Make Breakable Glass",    "Gameplay",  SEL_MASK_EVERYTHING, KiwiGlass_CanMake } },
@@ -489,6 +492,7 @@ namespace
         { KIWI_CMD_WINDOW_GLASS,     { "Glass",                   "Windows",   0, nullptr } },
         // KIWI END
         { KIWI_CMD_WINDOW_MATPROPS,  { "Material Properties",     "Windows",   0, nullptr } },   // KIWI (2026-10-26, user: "material properties panel")
+        { KIWI_CMD_WINDOW_FXEDITOR,  { "FX Editor",               "Windows",   0, nullptr } },   // KIWI (2026-11-02, user: "FX editor/creator")
         { KIWI_CMD_WINDOWS_RESET_LAYOUT, { "Reset Layout",        "Windows",   0, nullptr } },
         { KIWI_CMD_PARTICLE_EXPORT,  { "Write Particle Scripts (createfx)", "Build", 0, nullptr } },
         { KIWI_CMD_CLEAN_PRECISION,  { "Clean Up Precision (square near-axial faces, flatten near-flat patches)", "Build", 0, nullptr } },
@@ -777,6 +781,7 @@ void KiwiCmd_RegisterCommands()
     KiwiEntBrowser_RegisterCommands();
     KiwiModelBrowser_RegisterCommands(); // KIWI      — the Models window toggle
     KiwiParticles_RegisterCommands();    // KIWI      — the Particles window, script export
+    KiwiFxEditor_RegisterCommands();     // KIWI (2026-11-02) — the FX Editor window toggle
     KiwiModelImport_RegisterCommands();  // KIWI      — the Model Import window toggle
     // KIWI GLASS
     KiwiGlass_RegisterCommands();

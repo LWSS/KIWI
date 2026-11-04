@@ -440,7 +440,9 @@ namespace
         return merges;
     }
 
-    // The brushes of the selection, by owning entity; only owners with 2+ count.
+    // The brushes of the selection, by owning entity and brush kind (kiwi_csg.h); only
+    // groups with 2+ count.  KIWI (2026-11-02): the kind split keeps a lightgrid_volume or
+    // clip from swallowing the detail brushes inside it.
     void MergeableGroups( std::vector<std::vector<selbrush_t *> > &groups, std::vector<selbrush_t *> &rest )
     {
         std::vector<const entity_s *> owners;
@@ -454,7 +456,7 @@ namespace
                 continue;
             }
             size_t i = 0;
-            while ( i < owners.size() && owners[i] != o )
+            while ( i < owners.size() && ( owners[i] != o || !KiwiCsg_SameMergeKind( all[i][0], b ) ) )
                 ++i;
             if ( i == owners.size() )
             {
@@ -472,7 +474,7 @@ namespace
         }
     }
 
-    void RunAutoBoolOnSelection();
+    void RunAutoBoolOnSelection( bool ownUndo );
 
     // KIWI (2026-10-21, user: "when a large amount of mixed objects are selected, the auto bool
     // option is greyed out and unavailable. Have it function with just the brushes from the
@@ -490,17 +492,21 @@ namespace
         }
         if ( groups.size() == 1 && rest.empty() )
         {
-            RunAutoBoolOnSelection();                    // the plain case, exactly as before
+            RunAutoBoolOnSelection( true );              // the plain case, exactly as before
             return;
         }
 
+        // KIWI (2026-11-02): one undo step for the whole run - the bracket opens on the full
+        // pick, so the per-group runs inside it record nothing of their own.
+        Sel_Clear( KiwiSel() );
+        KiwiCmd_UndoBegin( "auto bool" );
         std::vector<selbrush_t *> results;
         for ( size_t g = 0; g < groups.size(); ++g )
         {
             Select_Deselect( 1 );
             for ( size_t i = 0; i < groups[g].size(); ++i )
                 Select_Brush( groups[g][i], 0, 0, 0 );
-            RunAutoBoolOnSelection();
+            RunAutoBoolOnSelection( false );
             for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )
                 results.push_back( b );
         }
@@ -509,15 +515,17 @@ namespace
             Select_Brush( results[i], 0, 0, 0 );
         for ( size_t i = 0; i < rest.size(); ++i )
             Select_Brush( rest[i], 0, 0, 0 );
+        KiwiCmd_UndoCommit();
         Sel_InvalidateFromLegacy();
         g_nUpdateBits = -1;
-        Sys_Printf( "Auto-bool: ran on the brushes of %i owner%s; %i other object%s left as they were%s.\n",
+        Sys_Printf( "Auto-bool: ran on %i group%s of brushes (one per entity and brush kind); "
+                    "%i other object%s left as they were.\n",
                     (int)groups.size(), groups.size() == 1 ? "" : "s", (int)rest.size(),
-                    rest.size() == 1 ? "" : "s",
-                    groups.size() > 1 ? " (one undo step per owner)" : "" );
+                    rest.size() == 1 ? "" : "s" );
     }
 
-    void RunAutoBoolOnSelection()
+    // ownUndo = false: the caller holds the undo bracket (RunAutoBool's multi-group run).
+    void RunAutoBoolOnSelection( bool ownUndo )
     {
         // Validate the complete candidate set before mutation.
         std::vector<selbrush_t *> set;
@@ -560,7 +568,8 @@ namespace
         // One bracket clones every original selected def. Intermediates exist only
         // inside it; final results remain selected for Undo_EndBrushList. The literal
         // is required because Undo_GeneralStart stores the pointer.
-        KiwiCmd_UndoBegin( "auto bool" );
+        if ( ownUndo )
+            KiwiCmd_UndoBegin( "auto bool" );
 
         // KIWI: stacked exact copies go first; no merge can absorb them.
         const int dupes = DropDuplicates( set );
@@ -582,7 +591,8 @@ namespace
         if ( dupes )
             Sys_Printf( "Auto-bool: removed %i exact duplicate brush(es).\n", dupes );
 
-        KiwiCmd_UndoCommit();
+        if ( ownUndo )
+            KiwiCmd_UndoCommit();
 
         int after = 0;
         for ( selbrush_t *b = selected_brushes.next; b != &selected_brushes; b = b->next )

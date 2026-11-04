@@ -55,12 +55,15 @@ namespace
         { "Inspector",        "Inspector", "&Inspector",             KIWI_CMD_WINDOW_INSPECTOR, 1 },
         { "Decals",           "Decals",  "&Decals",                 KIWI_CMD_WINDOW_DECALS,  1 },
         { "Reference Images", "RefImages", "&Reference Images",     KIWI_CMD_WINDOW_REFIMAGES, 1 },
-        { "Particles",        "Particles", "&Particles (effects)",  KIWI_CMD_WINDOW_PARTICLES, 1 },
+        // KIWI (2026-11-03): titled "FX" (was "Particles"); the ini key stays "Particles" so the
+        // open state carries over, and imgui_shell.cpp DockIniMigrateTitles keeps its dock place.
+        { "FX",               "Particles", "&FX (effects browser)", KIWI_CMD_WINDOW_PARTICLES, 1 },
         { "Model Import",     "ModelImport", "&Model Import (FBX/OBJ)", KIWI_CMD_WINDOW_MODELIMPORT, 0 },
         // KIWI GLASS
         { "Glass",            "Glass",   "&Glass (breakable glass sets)", KIWI_CMD_WINDOW_GLASS, 0 },
         // KIWI END
         { "Material",         "Material", "&Material Properties",   KIWI_CMD_WINDOW_MATPROPS, 1 },  // KIWI (2026-10-26, user: "material properties panel")
+        { "FX Editor",        "FxEditor", "&FX Editor (effects)",   KIWI_CMD_WINDOW_FXEDITOR, 0 },  // KIWI (2026-11-02, user: "FX editor/creator")
     };
 
     // Older profiles are reseeded once so visibility defaults match the rebuilt dock layout.

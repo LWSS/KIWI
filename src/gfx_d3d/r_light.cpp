@@ -290,7 +290,11 @@ void __cdecl R_GetBspOmniLightSurfs(const GfxLight *light, int lightIndex, GfxBs
     maxs[1] = light->origin[1] + light->radius;
     maxs[2] = light->origin[2] + light->radius;
     drawSurfs = scene.visLight[lightIndex].drawSurfs;
-    surfaces[0] = (GfxSurface **)&drawSurfs[512];
+    // KIWI: retail parks the GfxSurface* list in drawSurfs[512..1023] (1024 x 4-byte pointers
+    // = 512 drawsurfs).  On x64 1024 pointers need all 1024 drawsurfs, so >512 lit surfaces ran
+    // off the end into the next visLight / visLightShadow.  Use a real scratch array.
+    GfxSurface *surfaceScratch[0x400];
+    surfaces[0] = surfaceScratch;
     bspLightCallback.surfaceVisData = surfaceVisData;
     bspLightCallback.position[0] = light->origin[0];
     bspLightCallback.position[1] = light->origin[1];
@@ -369,9 +373,11 @@ void __cdecl R_GetBspSpotLightSurfs(const GfxLight *light, int lightIndex, GfxBs
     maxs[2] = light->origin[2] + light->radius;
 
     drawSurfs[0] = scene.visLight[lightIndex].drawSurfs;
-    surfaces[0] = (GfxSurface **)&drawSurfs[0][512];
     drawSurfs[1] = scene.visLightShadow[lightIndex].drawSurfs;
-    surfaces[1] = (GfxSurface **)&drawSurfs[1][512];
+    // KIWI: see R_GetBspOmniLightSurfs - drawSurfs[512..] only fits 1024 pointers on x86.
+    GfxSurface *surfaceScratch[2][0x400];
+    surfaces[0] = surfaceScratch[0];
+    surfaces[1] = surfaceScratch[1];
     bspLightCallback.surfaceVisData = surfaceVisData;
     R_CalcSpotLightPlanes(light, bspLightCallback.planes);
     R_BoxSurfaces(mins, maxs, allowSurf_1, &bspLightCallback, surfaces, 0x400u, surfCounts, 2u);
@@ -707,12 +713,19 @@ void __cdecl R_GetStaticModelLightSurfs(const GfxLight **visibleLights, int visi
                     drawSurf = material->info.drawSurf;
                     //HIDWORD(drawSurf.packed) = ((staticModelId.surfType & 0xF) << 18) | HIDWORD(drawSurf.packed) & 0xFFC3FFFF;
                     drawSurf.fields.surfType = staticModelId.surfType;
-                    if (!R_AllocDrawSurf(&surfData.delayedCmdBuf, drawSurf, &surfData.drawSurfList, 3u))
+                    // KIWI: retail reserves 3u = count + 32-bit XSurface* + list(1).  On x64 the
+                    // pointer is two uints, so R_AddDelayedStaticModelDrawSurf writes 4.  With 3u,
+                    // a chunk holding exactly 4 free uints passes the check, the write uses all 4,
+                    // and R_EndCmdBuf puts the 0 terminator one past the chunk (in another cmdbuf's
+                    // chunk) and wraps primDrawSurfSize to 0xFFFFFFFF.  The list loses its terminator
+                    // and R_GetNextStaticModelSurf reads foreign data as count/XSurface* (dlight
+                    // crash, xsurf = 0xFFFFFFFFFFFFFFFB).  Size it like the camera path does.
+                    if (!R_AllocDrawSurf(&surfData.delayedCmdBuf, drawSurf, &surfData.drawSurfList, ((1 + 1) >> 1) + 1 + sizeof(XSurface *) / sizeof(uint)))
                         break;
                     R_AddDelayedStaticModelDrawSurf(&surfData.delayedCmdBuf, &surfaces[surfaceIndex], (uint8_t*)list, 1u);
                     if (light->type == GFX_LIGHT_TYPE_SPOT && r_spotLightShadows->current.enabled && r_spotLightSModelShadows->current.enabled)
                     {
-                        if (!R_AllocDrawSurf(&shadowSurfData.delayedCmdBuf, drawSurf, &shadowSurfData.drawSurfList, 3u))
+                        if (!R_AllocDrawSurf(&shadowSurfData.delayedCmdBuf, drawSurf, &shadowSurfData.drawSurfList, ((1 + 1) >> 1) + 1 + sizeof(XSurface *) / sizeof(uint)))
                             break;
                         R_AddDelayedStaticModelDrawSurf(
                             &shadowSurfData.delayedCmdBuf,

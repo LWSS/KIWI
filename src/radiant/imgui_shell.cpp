@@ -15,6 +15,8 @@
 #include "kiwi_entbrowser.h"       // KIWI-UX ROUND AU: the entity browser + camera drop target
 #include "kiwi_modelbrowser.h"     // KIWI-UX: the Models tab + camera drop target
 #include "kiwi_particles.h"        // KIWI: the Particles tab + camera drop target
+#include "kiwi_fxeditor.h"         // KIWI (2026-11-02): the FX Editor window
+#include "kiwi_fxpreview.h"        // KIWI (2026-11-02): the FX browser tick
 #include "kiwi_modelimport.h"      // KIWI: the Model Import window + its preview RT
 // KIWI GLASS
 #include "kiwi_glass.h"
@@ -128,6 +130,55 @@ static void DockIniRetireOlder()
             Sys_Printf( "Dock layout: could not remove superseded %s\n", old );
     }
     (void)removed;                       // nothing is printed when nothing was there
+}
+
+// KIWI (2026-11-03, user: rename the Particles tab to "FX" and keep its dock position):
+// a dock window's place lives in the ini under its TITLE ("[Window][Particles]" with its
+// DockId and tab order) and its node's "Selected=" holds the window's tab id.  A renamed
+// window would lose both and land at the dock root, so before ImGui first reads the ini
+// the old section header and hash are rewritten to the new title, once (a file that
+// already has the new section is left alone).  No layout-version bump: every other
+// window keeps its saved place too.
+static void DockIniMigrateTitles()
+{
+    static const char *const kRenames[][2] = { { "Particles", "FX" } };
+    const char *path = DockIniPath();
+    FILE *f = fopen( path, "rb" );
+    if ( !f )
+        return;
+    std::string text;
+    char buf[8192];
+    size_t n;
+    while ( ( n = fread( buf, 1, sizeof( buf ), f ) ) > 0 )
+        text.append( buf, n );
+    fclose( f );
+    bool changed = false;
+    for ( size_t r = 0; r < sizeof( kRenames ) / sizeof( kRenames[0] ); ++r )
+    {
+        const std::string from = std::string( "[Window][" ) + kRenames[r][0] + "]";
+        const std::string to   = std::string( "[Window][" ) + kRenames[r][1] + "]";
+        const size_t at = text.find( from );
+        if ( at == std::string::npos || text.find( to ) != std::string::npos )
+            continue;
+        text.replace( at, from.size(), to );
+        // The tab id is window->GetID("#TAB"): "#TAB" hashed with the window id as seed.
+        char oldId[32], newId[32];
+        _snprintf( oldId, sizeof( oldId ), "Selected=0x%08X", ImHashStr( "#TAB", 0, ImHashStr( kRenames[r][0] ) ) );
+        _snprintf( newId, sizeof( newId ), "Selected=0x%08X", ImHashStr( "#TAB", 0, ImHashStr( kRenames[r][1] ) ) );
+        for ( size_t p = text.find( oldId ); p != std::string::npos; p = text.find( oldId, p + 1 ) )
+            text.replace( p, strlen( oldId ), newId );
+        changed = true;
+        Sys_Printf( "Dock layout: the \"%s\" tab is now \"%s\" (kept its place).\n", kRenames[r][0], kRenames[r][1] );
+    }
+    if ( !changed )
+        return;
+    const std::string tmp = std::string( path ) + ".kiwitmp";
+    f = fopen( tmp.c_str(), "wb" );
+    if ( !f )
+        return;
+    const bool ok = fwrite( text.data(), 1, text.size(), f ) == text.size();
+    if ( fclose( f ) != 0 || !ok || !::MoveFileExA( tmp.c_str(), path, MOVEFILE_REPLACE_EXISTING ) )
+        ::DeleteFileA( tmp.c_str() );
 }
 
 static bool ImGuiShell_Enabled()
@@ -258,6 +309,9 @@ extern void TexWnd_RenderToRT( int w, int h );   // texwnd.cpp
 static int s_cellW[RTT_COUNT] = { 0, 0, 0, 0 };
 static int s_cellH[RTT_COUNT] = { 0, 0, 0, 0 };
 static IDirect3DDevice9 *s_device = nullptr;   // stashed for the opaque-image draw callback
+// KIWI (2026-11-02): test probe hook, run once after the panels are drawn into the frame's
+// back buffer and before the present ("screenshot window", kiwi_testprobe.cpp).
+void ( *g_ImGuiShellAfterRender )( IDirect3DDevice9 *device ) = nullptr;
 
 // ── Viewport input dispatch ──────────────────────────────────────────────────────
 // The viewport image is an ImGui item; when hovered (or during a drag this viewport
@@ -1581,6 +1635,11 @@ void ImGuiShell_RenderViewportsToRT()
         PROF_SCOPED( "EntThumb tick" );
         KiwiEntThumb_Tick();
     }
+    // KIWI (2026-11-02): the FX browser's tiles and its playing pane, same RT and terms.
+    {
+        PROF_SCOPED( "FX browser tick" );
+        KiwiFxPreview_ThumbTick();
+    }
     // KIWI (2026-10-01): the Model Import window's 3D view, on the same terms as the
     // thumbnails: behind both gates above, its own standalone RT slot, and an early
     // return unless the window showed the view last frame and something changed.
@@ -1736,7 +1795,7 @@ static void ImGuiShell_BuildDefaultDockLayout( ImGuiID dockId )
     // exactly what makes them tabs of one another — no extra split.
     ImGui::DockBuilderDockWindow( "Entities",         rightBottom );
     ImGui::DockBuilderDockWindow( "Models",           rightBottom ); // KIWI-UX
-    ImGui::DockBuilderDockWindow( "Particles",        rightBottom ); // KIWI: effects browser (layout 18)
+    ImGui::DockBuilderDockWindow( "FX",               rightBottom ); // KIWI: effects browser (layout 18; "Particles" until 2026-11-03)
 
     // ── KIWI-UX (ROUND AZ, ITEM 3): the SKY tab, third of the same node ──────
     // USER DIRECTIVE, verbatim: "Make this a separate tab like the entity tab."
@@ -1868,7 +1927,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         // kiwi_dock<n>.ini beside it is spent — drop them.  Deliberately NOT done on
         // the first-run path: there the migration has not happened yet.
         if ( !s_dockLayoutPending )
+        {
             DockIniRetireOlder();
+            DockIniMigrateTitles();     // KIWI (2026-11-03): renamed tabs keep their place
+        }
         ImGui::StyleColorsDark();
         // When windows can be their own OS windows, square corners + opaque bg (rounded
         // corners would leave transparent gaps at the OS-window edges).
@@ -2078,6 +2140,10 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         KiwiParticles_Draw();    // KIWI: the Particles tab (drag source, like Models)
     }
     {
+        PROF_SCOPED( "UI: fx editor" );
+        KiwiFxEditor_Draw();     // KIWI (2026-11-02): the FX Editor (edits feed the camera preview)
+    }
+    {
         PROF_SCOPED( "UI: model import" );
         KiwiModelImport_Draw();  // KIWI: FBX/OBJ -> xmodel importer (its preview renders in RenderViewportsToRT)
     }
@@ -2201,6 +2267,8 @@ void ImGuiShell_DrawOverlay( IDirect3DDevice9 *device, HWND activeHwnd )
         RB_GpuProf_ZoneBegin( "ImGui" );    // runs inside the backend, before EndScene
         ImGui_ImplDX9_RenderDrawData( ImGui::GetDrawData() );   // main viewport (this surface)
         RB_GpuProf_ZoneEnd( "ImGui" );
+        if ( g_ImGuiShellAfterRender )      // KIWI: test probe "screenshot window"
+            g_ImGuiShellAfterRender( device );
     }
     s_frameRendered = true;   // gates ImGuiShell_RenderPlatformWindows (see below)
     // The extra platform windows (popped-out panels) are NOT rendered here — each does its

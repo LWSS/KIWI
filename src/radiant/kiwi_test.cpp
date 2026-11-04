@@ -9,6 +9,9 @@
 #include "kiwi_command.h"
 #include "kiwi_modelbrowser.h"
 #include "kiwi_particles.h"     // particle_place / particle_export verbs (test mode)
+#include "kiwi_efx.h"           // KIWI (2026-11-02): fx_roundtrip
+#include "kiwi_fxeditor.h"      // KIWI (2026-11-02): fxedit verbs
+#include "kiwi_fxpreview.h"     // KIWI (2026-11-02): fx_preview_* verbs
 #include "kiwi_droptrace.h"
 #include "kiwi_pick.h"
 #include "kiwi_ux.h"
@@ -1206,6 +1209,18 @@ static void ExecuteExpect( const ScriptLine &line )
         ExpectResult( line, ( w[2] == "1" ) == can, can ? "1" : "0", w[2] );
         return;
     }
+    if ( subject == "dyn_can_static" )
+    {
+        // KIWI (2026-11-02): the "Convert to Static Model" palette predicate.
+        if ( w.size() != 3 || ( w[2] != "0" && w[2] != "1" ) )
+        {
+            ScriptError( line, "expect dyn_can_static requires 0 or 1" );
+            return;
+        }
+        const bool can = KiwiModelBrowser_CanConvertDynToStatic();
+        ExpectResult( line, ( w[2] == "1" ) == can, can ? "1" : "0", w[2] );
+        return;
+    }
     // KIWI END
     if ( subject == "regions_selected" )
     {
@@ -1846,6 +1861,118 @@ static void ExecuteLine( const ScriptLine &line )
         }
         if ( !restored ) { ScriptError( line, "undo did not restore the box and the untrimmed curve (%d brushes %d patches)", counts.brushes, counts.patches ); return; }
         LogFormat( "CURVE-BOOL", "box carved around the curve, curve ends flush at y 0 / 64, undo restores both" );
+        return;
+    }
+    if ( command == "flush_bool_probe" )
+    {
+        // KIWI (2026-11-03, user: "if you boolean using a tool that is exactly flush with the
+        // outside of the brush you're booling with, sometimes it will delete large swathes of the
+        // result and leave lots of gaps"): a 128-unit cube turned about z, cut by tools whose
+        // faces lie exactly on its side, its top, or both.  The pieces must hold the cube's volume
+        // minus the cut, every time.
+        auto brushVolume = []( const brush_t *def ) {
+            double v = 0.0;
+            for ( int f = 0; f < def->faceCount; ++f )
+            {
+                const winding_t *w = def->faces[f].w;
+                for ( int i = 1; w && i + 1 < w->numpoints; ++i )
+                {
+                    float a[3], b[3], c[3];
+                    Sub3( w->p[i], w->p[0], a );
+                    Sub3( w->p[i + 1], w->p[0], b );
+                    Cross3( a, b, c );
+                    v += 0.5 * sqrt( (double)Dot3( c, c ) ) * def->faces[f].plane.dist / 3.0;
+                }
+            }
+            return v;
+        };
+        // Fuzzed: a box on a randomly tilted construction plane, and a tool drawn on the same
+        // plane sharing one, two or three of its faces (each tool face computed on its own, as
+        // a drawn tool's are).  Deterministic seed.
+        unsigned seed = 0x5eed1234u;
+        auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return (float)( seed >> 8 ) / 16777216.0f; };
+        const int kCases = 300;
+        int lost = 0, refused = 0;
+        char firstBad[256] = { 0 };
+        for ( int c = 0; c < kCases; ++c )
+        {
+            Map_New();
+            float n[3] = { rnd() * 2.0f - 1.0f, rnd() * 2.0f - 1.0f, rnd() * 2.0f - 1.0f };
+            if ( c % 4 == 0 ) { n[0] = 0.0f; n[1] = 0.0f; n[2] = 1.0f; }    // some upright, turned about z
+            const float len = sqrtf( Dot3( n, n ) );
+            if ( !( len > 0.1f ) ) continue;
+            for ( int k = 0; k < 3; ++k ) n[k] /= len;
+            const float hint[3] = { rnd() * 2.0f - 1.0f, rnd() * 2.0f - 1.0f, rnd() * 2.0f - 1.0f };
+            const float origin[3] = { rnd() * 1024.0f - 512.0f, rnd() * 1024.0f - 512.0f, rnd() * 1024.0f - 512.0f };
+            kconPlane_t pl;
+            if ( !KiwiCon_MakePlane( origin, n, hint, &pl ) ) continue;
+
+            const float W = 32.0f + floorf( rnd() * 14.0f ) * 16.0f, D = 32.0f + floorf( rnd() * 14.0f ) * 16.0f;
+            const float H = 32.0f + floorf( rnd() * 14.0f ) * 16.0f;
+            // Flush on each of the six sides at random (bits: u 0, u max, v 0, v max, bottom,
+            // top) - a doorway is flush front, back and floor - never all six.
+            int flush = 1 + (int)( rnd() * 62.0f );
+            // A drawn tool snapped onto a face is flush to float noise, not bit for bit.
+            const auto span = [&rnd]( float size, bool lo, bool hi, float *a, float *b ) {
+                *a = lo ? ( rnd() - 0.5f ) * 0.04f : 8.0f + floorf( rnd() * ( size * 0.5f - 8.0f ) / 8.0f ) * 8.0f;
+                *b = hi ? size + ( rnd() - 0.5f ) * 0.04f : size - 8.0f - floorf( rnd() * ( size * 0.5f - 8.0f ) / 8.0f ) * 8.0f;
+                if ( *b - *a < 8.0f ) *b = *a + 8.0f;
+            };
+            float u0, u1, v0, v1, h0, h1;
+            span( W, ( flush & 1 ) != 0, ( flush & 2 ) != 0, &u0, &u1 );
+            span( D, ( flush & 4 ) != 0, ( flush & 8 ) != 0, &v0, &v1 );
+            span( H, ( flush & 16 ) != 0, ( flush & 32 ) != 0, &h0, &h1 );
+            const float box[8] = { 0, 0, W, 0, W, D, 0, D };
+            const float cut[8] = { u0, v0, u1, v0, u1, v1, u0, v1 };
+            const auto clip = []( float a, float b, float size ) {
+                return (double)( ( b < size ? b : size ) - ( a > 0.0f ? a : 0.0f ) );
+            };
+            const double expected = (double)W * D * H - clip( u0, u1, W ) * clip( v0, v1, D ) * clip( h0, h1, H );
+            // A sub-unit sliver left between a not-quite-flush tool face and the box may go.
+            const double slack = 0.001 * expected + 0.03 * 2.0 * ( (double)W * D + (double)W * H + (double)D * H );
+
+            const char *why = "unknown";
+            brush_t *toolDef = KiwiExtrude_BuildPrismDef( pl, cut, 4, h0, h1, &why );
+            if ( !toolDef ) continue;
+            KiwiValid_Rebuild( toolDef );
+            selbrush_t *tool = KiwiExtrude_LandDef( toolDef );
+            Select_Deselect( 1 );
+            brush_t *target = KiwiExtrude_BuildPrismDef( pl, box, 4, 0.0f, H, &why );
+            if ( !target ) continue;
+            KiwiValid_Rebuild( target );
+            KiwiExtrude_LandDef( target );
+
+            if ( !KiwiCmd_Start( KIWI_CMD_BOOLEAN ) || !KiwiBool_TestPickTool( tool ) )
+            { ScriptError( line, "boolean did not start (case %d)", c ); return; }
+            KiwiCmd_Commit();
+
+            double total = 0.0;
+            int pieces = 0;
+            for ( int list = 0; list < 2; ++list )
+            {
+                selbrush_t *head = list ? &selected_brushes : &active_brushes;
+                for ( selbrush_t *b = head->next; b && b != head; b = b->next )
+                    if ( b != tool && b->def && !b->def->patch )
+                    {
+                        total += brushVolume( b->def );
+                        ++pieces;
+                    }
+            }
+            const double whole = (double)W * D * H;
+            if ( fabs( total - whole ) < whole * 0.0005 && pieces == 1 )
+                ++refused;                                   // nothing cut: visible, not a gap
+            else if ( fabs( total - expected ) > slack )
+            {
+                if ( !lost )
+                    _snprintf( firstBad, sizeof( firstBad ), "case %d (flush %d, %gx%gx%g): %d pieces hold %.0f, expected %.0f",
+                               c, flush, W, D, H, pieces, total, expected );
+                ++lost;
+            }
+        }
+        firstBad[sizeof( firstBad ) - 1] = '\0';
+        if ( lost || refused )
+        { ScriptError( line, "%d of %d flush cuts lost volume, %d were refused; first: %s", lost, kCases, refused, firstBad ); return; }
+        LogFormat( "FLUSH-BOOL", "%d fuzzed flush cuts kept the box minus the cut", kCases );
         return;
     }
     if ( command == "arch_cut_probe" || command == "patch_match_probe" || command == "arch_tools_probe" )
@@ -2752,8 +2879,8 @@ static void ExecuteLine( const ScriptLine &line )
             ++onScreen;
             if ( KiwiScene_BrushRetained( b, KS_WINDOW_MAIN ) ) ++retained;
             if ( !Cam_SceneDrewBrush( b ) )
-            { ScriptError( line, "model_drawn: %s at %.1f %.1f %.1f is on screen (%.0f %.0f px) but culled",
-                           ValueForKey2( b->owner, "model" ), origin[0], origin[1], origin[2], sx, sy ); return; }
+            { ScriptError( line, "model_drawn: the model at %.1f %.1f %.1f is on screen (%.0f %.0f px) but culled",
+                           origin[0], origin[1], origin[2], sx, sy ); return; }
         }
         if ( !retained ) ScriptError( line, "model_drawn: no retained model on screen (%d on screen)", onScreen );
         else LogFormat( "MODEL-DRAWN", "%d models on screen, %d retained, all drawn", onScreen, retained );
@@ -2785,6 +2912,23 @@ static void ExecuteLine( const ScriptLine &line )
             ScriptError( line, "model_swap failed: %s", err[0] ? err : "usage: model_swap <xmodel>" );
         return;
     }
+    if ( command == "dyn_to_static" )
+    {
+        // KIWI (2026-11-02): "Convert to Static Model" on the current selection.
+        // dyn_to_static [n]   (n = how many dyn_models must convert; default: at least one)
+        int want = -1;
+        if ( w.size() > 2 || ( w.size() == 2 && ( !ParseInt( w[1], want ) || want < 0 ) ) )
+        {
+            ScriptError( line, "usage: dyn_to_static [count]" );
+            return;
+        }
+        const int got = KiwiModelBrowser_ConvertDynToStatic();
+        if ( want >= 0 )
+            ExpectResult( line, got == want, std::to_string( got ), std::to_string( want ) );
+        else if ( got == 0 )
+            ScriptError( line, "dyn_to_static: no dyn_model is selected" );
+        return;
+    }
     if ( command == "particle_place" )
     {
         // KIWI (2026-09-24): the Particles tab's drop, headless.
@@ -2803,6 +2947,90 @@ static void ExecuteLine( const ScriptLine &line )
     {
         // Write maps/createfx/<map>_fx.gsc + maps/mp/<map>_fx.gsc now (normally on save).
         KiwiParticles_ExportForMap( currentmap, false );
+        return;
+    }
+    // KIWI (2026-11-02): FX editor / preview verbs.
+    if ( command == "fx_roundtrip" )
+    {
+        // fx_roundtrip <fx>    load -> write -> parse -> write must be stable
+        if ( w.size() != 2 ) { ScriptError( line, "usage: fx_roundtrip <fx>" ); return; }
+        kefxDoc_t a, b;
+        std::string err;
+        if ( !KiwiEfx_Load( w[1].c_str(), a, err ) ) { ScriptError( line, "fx_roundtrip: %s", err.c_str() ); return; }
+        const std::string t1 = KiwiEfx_Write( a );
+        if ( !KiwiEfx_Parse( t1.c_str(), b, err ) ) { ScriptError( line, "fx_roundtrip: rewrite does not parse: %s", err.c_str() ); return; }
+        if ( KiwiEfx_Write( b ) != t1 ) { ScriptError( line, "fx_roundtrip: %s changes on a second write", w[1].c_str() ); return; }
+        LogFormat( "FX", "roundtrip %s: %i element(s)", w[1].c_str(), (int)a.elems.size() );
+        return;
+    }
+    if ( command == "fx_preview_mode" )
+    {
+        // fx_preview_mode off|selected|all
+        const int mode = w.size() == 2 ? ( w[1] == "off" ? KFXP_OFF : w[1] == "all" ? KFXP_ALL : w[1] == "selected" ? KFXP_SELECTED : -1 ) : -1;
+        if ( mode < 0 ) { ScriptError( line, "usage: fx_preview_mode off|selected|all" ); return; }
+        KiwiFxPreview_SetMode( mode );
+        return;
+    }
+    if ( command == "fx_preview_test" )
+    {
+        // fx_preview_test <fx> x y z    the editor's test instance, forward = up
+        if ( w.size() != 5 ) { ScriptError( line, "usage: fx_preview_test <fx> x y z" ); return; }
+        const float o[3] = { (float)atof( w[2].c_str() ), (float)atof( w[3].c_str() ), (float)atof( w[4].c_str() ) };
+        const float up[3] = { 0.0f, 0.0f, 1.0f };
+        KiwiFxPreview_PlayTest( w[1].c_str(), o, up );
+        return;
+    }
+    if ( command == "fx_preview_step" )
+    {
+        // fx_preview_step <msec>   advance every playing effect (no drawing)
+        if ( w.size() != 2 ) { ScriptError( line, "usage: fx_preview_step <msec>" ); return; }
+        KiwiFxPreview_Step( atoi( w[1].c_str() ) );
+        LogFormat( "FX", "preview: %i instance(s), %i particle(s)", KiwiFxPreview_ActiveInstances(), KiwiFxPreview_LiveParticles() );
+        return;
+    }
+    if ( command == "fx_browser" )
+    {
+        // fx_browser pick|search|folder [value]   (the Particles window's tile browser)
+        if ( w.size() < 2 || !KiwiParticles_BrowserSet( w[1].c_str(), w.size() > 2 ? w[2].c_str() : "" ) )
+            ScriptError( line, "usage: fx_browser pick|search|folder [value]" );
+        return;
+    }
+    if ( command == "fx_preview_info" )
+    {
+        // fx_preview_info <fx>   counts, last frame's quads, materials / techsets / UNLIT
+        LogFormat( "FX", "%s", KiwiFxPreview_Describe( w.size() > 1 ? w[1].c_str() : "" ).c_str() );
+        return;
+    }
+    if ( command == "fx_preview_expect" )
+    {
+        // fx_preview_expect <instances> <minParticles> [maxParticles]
+        if ( w.size() != 3 && w.size() != 4 ) { ScriptError( line, "usage: fx_preview_expect <instances> <min> [max]" ); return; }
+        const int inst = KiwiFxPreview_ActiveInstances(), parts = KiwiFxPreview_LiveParticles();
+        const int wantInst = atoi( w[1].c_str() ), lo = atoi( w[2].c_str() ), hi = w.size() == 4 ? atoi( w[3].c_str() ) : 1 << 30;
+        if ( inst != wantInst || parts < lo || parts > hi )
+            ScriptError( line, "fx preview: %i instance(s) / %i particle(s), expected %i / %i..%i", inst, parts, wantInst, lo, hi );
+        return;
+    }
+    if ( command == "fxedit" )
+    {
+        // fxedit <verb> ...   (kiwi_fxeditor.cpp KiwiFxEditor_TestVerb)
+        std::string out, err;
+        if ( !KiwiFxEditor_TestVerb( w, out, err ) )
+            ScriptError( line, "fxedit: %s", err.c_str() );
+        else if ( !out.empty() && out.size() < 200 )
+            LogFormat( "FX", "fxedit %s: %s", w.size() > 1 ? w[1].c_str() : "", out.c_str() );
+        return;
+    }
+    if ( command == "fxedit_expect" )
+    {
+        // fxedit_expect <verb> <value>   e.g. fxedit_expect count 2 / fxedit_expect dirty 0
+        if ( w.size() != 3 ) { ScriptError( line, "usage: fxedit_expect <verb> <value>" ); return; }
+        std::vector<std::string> q;
+        q.push_back( "fxedit" );
+        q.push_back( w[1] );
+        std::string out, err;
+        if ( !KiwiFxEditor_TestVerb( q, out, err ) || out != w[2] )
+            ScriptError( line, "fxedit %s = '%s', expected '%s' %s", w[1].c_str(), out.c_str(), w[2].c_str(), err.c_str() );
         return;
     }
     // KIWI GLASS

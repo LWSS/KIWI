@@ -1281,6 +1281,66 @@ namespace
         Sys_Printf( "Models browser: physPreset '%s' on %i model(s).\n", preset.c_str(), n );
     }
 
+    // ── dyn_model -> misc_model  (KIWI 2026-11-02, user: "add a button to convert a dynmodel
+    //    (or multiple) to a static model") ──
+    // Re-classed IN PLACE: SetKeyValue("classname") runs MapLoad_ParsePrefab (fixed-size ->
+    // fixed-size swaps the eclass, EntityAssignModel rebuilds) and marks the walk cache
+    // structural, so the scene, outliner and instance cache follow.  The entity keeps its
+    // model / origin / angles / modelscale / targetname / spawnflags and its selection; only
+    // the keys nothing but a dyn_model reads go.  Other selected items are left alone.
+    const char *const kDynOnlyKeys[] = { "type", "physPreset", "health", "destroyEfx", "destroyPieces" };
+
+    bool IsDynModel( const entity_s_def *def )
+    {
+        return def && def->eclass && def->eclass->name && !_stricmp( def->eclass->name, "dyn_model" );
+    }
+
+    int SelectedDynModels( std::vector<entity_s_def *> *out )
+    {
+        std::vector<entity_s_def *> seen;
+        for ( selbrush_t *b = selected_brushes.next; b && b != &selected_brushes; b = b->next )
+        {
+            entity_s_def *def = b->owner ? (entity_s_def *)b->owner->def : nullptr;
+            if ( IsDynModel( def ) && std::find( seen.begin(), seen.end(), def ) == seen.end() )
+                seen.push_back( def );
+        }
+        if ( out )
+            *out = seen;
+        return (int)seen.size();
+    }
+
+    int ConvertSelectedDynToStatic()
+    {
+        std::vector<entity_s_def *> defs;
+        if ( SelectedDynModels( &defs ) == 0 )
+        {
+            Sys_Printf( "Convert to static model: no dyn_model is selected.\n" );
+            return 0;
+        }
+        Undo_ClearRedo();
+        Undo_GeneralStart( "convert dyn_model to static" );
+        for ( size_t i = 0; i < defs.size(); ++i )
+        {
+            Undo_AddEntity_W( (entity_s *)defs[i] );
+            // DeleteKey matches case-sensitively; drop whatever spelling the map used.
+            std::vector<std::string> drop;
+            for ( const epair_t *ep = defs[i]->epairs; ep; ep = ep->next )
+                for ( const char *key : kDynOnlyKeys )
+                    if ( ep->key && !_stricmp( ep->key, key ) )
+                        drop.push_back( ep->key );
+            for ( const std::string &key : drop )
+                DeleteKey( &defs[i]->epairs, key.c_str() );
+            SetKeyValue( defs[i], "classname", "misc_model" );
+        }
+        Undo_End();
+        MarkMapModified();
+        Sel_InvalidateFromLegacy();
+        g_nUpdateBits = -1;
+        Sys_Printf( "Convert to static model: %i dyn_model%s now misc_model%s.\n", (int)defs.size(),
+                    defs.size() == 1 ? "" : "s", defs.size() == 1 ? "" : "s" );
+        return (int)defs.size();
+    }
+
     // ── player collision hulls: collmaps\<model>.map, model space, edges cached ──
     struct hullEdges_t
     {
@@ -1789,6 +1849,23 @@ namespace
             ImGui::TextDisabled( "dyn_model: knocked around by bullets and explosions; players walk through it" );
         }
 
+        // KIWI (2026-11-02): dyn_model -> misc_model, every selected dyn_model in one undo step.
+        if ( const int dynCount = SelectedDynModels( nullptr ) )
+        {
+            char label[64];
+            _snprintf( label, sizeof( label ), dynCount == 1 ? "Convert to static model###dyn2static"
+                                                            : "Convert %i to static models###dyn2static", dynCount );
+            label[sizeof( label ) - 1] = '\0';
+            if ( ImGui::SmallButton( label ) )
+                ConvertSelectedDynToStatic();
+            if ( ImGui::IsItemHovered() )
+                ImGui::SetTooltip( "Make the selected dyn_model%s misc_model%s: baked into the map as static\n"
+                                   "geometry, no physics. Model, origin, angles, scale and targetname stay;\n"
+                                   "type / physPreset / health / destroyEfx / destroyPieces are removed.\n"
+                                   "Other selected objects are not changed. Undoable.",
+                                   dynCount == 1 ? "" : "s", dynCount == 1 ? "" : "s" );
+        }
+
         if ( !ShowHitboxes() )
             return;
         ImGui::TextDisabled( "hitboxes:" );
@@ -2198,6 +2275,18 @@ void KiwiModelBrowser_RegisterCommands()
     KiwiThumbCache_Init();
     Radiant_RegisterCommand( "KiwiWindowModels", 0, 0, KIWI_CMD_WINDOW_MODELS );
     Radiant_RegisterCommand( "KiwiInsertPrefab", 0, 0, KIWI_CMD_PREFAB_INSERT );
+    Radiant_RegisterCommand( "KiwiDynToStatic", 0, 0, KIWI_CMD_DYN_TO_STATIC );   // KIWI (2026-11-02)
+}
+
+// KIWI (2026-11-02): "Convert to Static Model" (palette predicate / test DSL entry).
+bool KiwiModelBrowser_CanConvertDynToStatic()
+{
+    return SelectedDynModels( nullptr ) > 0;
+}
+
+int KiwiModelBrowser_ConvertDynToStatic()
+{
+    return ConvertSelectedDynToStatic();
 }
 
 namespace
@@ -2298,6 +2387,11 @@ bool KiwiModelBrowser_DispatchInstant( unsigned int cmdId )
             else
                 Sys_Printf( "Insert Prefab: place the prefab and its dependencies inside %s first.\n", root.c_str() );
         }
+        return true;
+    }
+    if ( cmdId == (unsigned int)KIWI_CMD_DYN_TO_STATIC )      // KIWI (2026-11-02)
+    {
+        ConvertSelectedDynToStatic();
         return true;
     }
     if ( cmdId != (unsigned int)KIWI_CMD_MODEL_DROP )

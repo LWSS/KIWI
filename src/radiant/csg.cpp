@@ -666,6 +666,16 @@ selbrush_t *Brush_MergeList( selbrush_t *brushList )
     if ( !brushList )
         return nullptr;
 
+    // KIWI: one kind only - a step inside a lightgrid_volume is "covered" by the volume box,
+    // so the union test alone merged it away (kiwi_csg.h).
+    for ( selbrush_t *n = brushList->next; n; n = n->next )
+        if ( !KiwiCsg_SameMergeKind( brushList, n ) )
+        {
+            s_kmGaps.clear();
+            s_kmNoHull = true;
+            return nullptr;
+        }
+
     // KIWI: the convex-union test above replaces the ported phase 1 / phase 2 picks.
     std::vector<face_t *> hullFaces;
     if ( !KmConvexUnion( brushList, &hullFaces ) )
@@ -736,6 +746,11 @@ int CSG_Merge()
 
         if ( bOwnerDef != ownerDef0 )
             return Sys_Printf( "Cannot add brushes from different entities.\n" );
+
+        // KIWI: Brush_MergeList refuses mixed kinds; say why here.
+        if ( !KiwiCsg_SameMergeKind( sel, b ) )
+            return Sys_Printf( "Cannot merge brushes of different kinds (tool volume, clip, trigger, "
+                               "detail vs structural...).\n" );
     }
 
     // Remove each selected node from the display list and push it onto a NULL-terminated

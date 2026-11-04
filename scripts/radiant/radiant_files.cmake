@@ -379,6 +379,12 @@ set(RADIANT_SRCS
     "${SRC_DIR}/radiant/kiwi_modelbrowser.cpp"
     "${SRC_DIR}/radiant/kiwi_particles.h"    # KIWI (2026-09-24): effects browser, kiwi_fx drop, mode 7, createfx export
     "${SRC_DIR}/radiant/kiwi_particles.cpp"
+    "${SRC_DIR}/radiant/kiwi_efx.h"          # KIWI (2026-11-02): .efx documents (parse / write, stock iwfx format)
+    "${SRC_DIR}/radiant/kiwi_efx.cpp"
+    "${SRC_DIR}/radiant/kiwi_fxpreview.h"    # KIWI (2026-11-02): live FX preview in the camera
+    "${SRC_DIR}/radiant/kiwi_fxpreview.cpp"
+    "${SRC_DIR}/radiant/kiwi_fxeditor.h"     # KIWI (2026-11-02): the FX Editor window
+    "${SRC_DIR}/radiant/kiwi_fxeditor.cpp"
     "${SRC_DIR}/radiant/kiwi_fragile.h"      # KIWI (2026-10-04): flashing cod4map "fragile corner" spots
     "${SRC_DIR}/radiant/kiwi_fragile.cpp"
     "${SRC_DIR}/radiant/kiwi_floatsnap.h"    # KIWI (2026-10-05): the one noise-only half-grid snap

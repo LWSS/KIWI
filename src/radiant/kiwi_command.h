@@ -24,7 +24,7 @@
 #include "kiwi_snap.h"
 
 // Reserved ids: 34001..34029 are instant, 34030..34069 modal, 34100..34174 the second
-// instant block, and 34175..34184 the second modal block.  Next free: instant 34185, modal 34176.
+// instant block, and 34175..34184 the second modal block.  Next free: instant 34187, modal 34176.
 // Every id in either modal block routes through KiwiCmd_Start before instant dispatch.
 #define KIWI_CMD_FIRST              34000
 #define KIWI_CMD_LAST               34199
@@ -188,6 +188,8 @@
 #define KIWI_CMD_WINDOW_MATPROPS    34173   // Windows > Material Properties (kiwi_matprops) - KIWI (2026-10-26, user: "material properties panel")
 #define KIWI_CMD_VIEW_BG_FPS_CAP    34174   // View > Background Frame Cap (5 fps) - KIWI (2026-10-27, user: "when the window is not in focus, reduce fps cap to 5")
 #define KIWI_CMD_CONSTRUCT_SWEEP    34175   // MODAL: Shift+P Sweep - a construction face swept along construction (kiwi_pipe)
+#define KIWI_CMD_WINDOW_FXEDITOR    34185   // Windows > FX Editor (kiwi_fxeditor) - KIWI (2026-11-02, user: "FX editor/creator")
+#define KIWI_CMD_DYN_TO_STATIC      34186   // "Convert to Static Model" (selected dyn_models -> misc_model, kiwi_modelbrowser) - KIWI (2026-11-02)
 
 // Shared with mainfrm's dispatch gate so range changes have one definition.
 bool KiwiCmd_IsKiwiId ( int id );

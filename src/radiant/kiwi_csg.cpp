@@ -15,6 +15,7 @@
 #include "kiwi_command.h"                      // KIWI_CMD_AUTO_BOOL
 #include "kiwi_pick.h"                         // Pick_WorldToImage (failure hint)
 #include "kiwi_ported.h"
+#include "kiwi_str.h"                          // KiwiStr_ContainsNoCase
 
 #include <math.h>
 #include <vector>
@@ -38,6 +39,39 @@ namespace
 
     // Baseline patch/fixed-owner gate shared by the CSG-family tools.
     inline bool CsgUsable( const selbrush_t *b ) { return KiwiCsg_BrushUsable( b ); }
+
+    // Tool families that make a brush a different kind of solid (kiwi_csg.h).
+    const char *const KCSG_KIND_NAMES[] = {
+        "lightgrid", "volume", "clip", "trigger", "hint", "skip", "portal", "origin",
+    };
+
+    unsigned ToolKindBits( const brush_t *def )
+    {
+        unsigned bits = 0;
+        for ( int f = 0; f < def->faceCount; ++f )
+        {
+            MaterialDef *md = const_cast<MaterialDef *>( &def->faces[f].mtldef[0] );
+            if ( ( md->lyrMtl != 0 ) + ( md->radMtl != 0 ) != 1 )
+                continue;                       // a half-built face has no name to read
+            const char *name = (const char *)Materialdef_GetName( md );
+            for ( size_t i = 0; name && i < sizeof( KCSG_KIND_NAMES ) / sizeof( KCSG_KIND_NAMES[0] ); ++i )
+                if ( KiwiStr_ContainsNoCase( name, KCSG_KIND_NAMES[i] ) )
+                    bits |= 1u << i;
+        }
+        return bits;
+    }
+}
+
+bool KiwiCsg_SameMergeKind( const selbrush_t *a, const selbrush_t *b )
+{
+    const brush_t *da = a ? a->def : 0;
+    const brush_t *db = b ? b->def : 0;
+    if ( !da || !db || !da->faces || !db->faces || da->faceCount < 1 || db->faceCount < 1 )
+        return false;
+    // Brush_Write saves face 0's contents and toolFlags as the brush's own.
+    return da->faces[0].contents == db->faces[0].contents
+        && da->faces[0].toolflags == db->faces[0].toolflags
+        && ToolKindBits( da ) == ToolKindBits( db );
 }
 
 bool KiwiCsg_BrushUsable( const selbrush_t *b )

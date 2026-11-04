@@ -3090,7 +3090,8 @@ void KiwiOutliner_Draw()
                     _snprintf( label, sizeof( label ), "Groups (%i)", r.count );
                     break;
                 case KOUT_SECTION_PARTICLES:
-                    _snprintf( label, sizeof( label ), "Particles (%i)", r.count );
+                    // KIWI (2026-11-02, user: "FX should be in their own section in the outliner")
+                    _snprintf( label, sizeof( label ), "FX (%i)", r.count );
                     break;
                 // KIWI GLASS
                 case KOUT_SECTION_GLASS:
@@ -3109,7 +3110,7 @@ void KiwiOutliner_Draw()
                                r.ugType == KOUT_SECTION_BRUSHES   ? "Brushes"
                              : r.ugType == KOUT_SECTION_MODELS    ? "Models"
                              : r.ugType == KOUT_SECTION_LIGHTS    ? "Lights"
-                             : r.ugType == KOUT_SECTION_PARTICLES ? "Particles"
+                             : r.ugType == KOUT_SECTION_PARTICLES ? "FX"           // KIWI (2026-11-02)
                              // KIWI GLASS
                              : r.ugType == KOUT_SECTION_GLASS     ? "Glass"
                              // KIWI END
